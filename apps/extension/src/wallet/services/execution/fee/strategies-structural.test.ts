@@ -20,9 +20,12 @@ import type { TxSimulationResult } from "@aztec/stdlib/tx"
 import { FpcType } from "@/wallet/services/fpc/service"
 import type { FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { FeeJuiceStrategy } from "./fee-juice-strategy"
+import { FeeJuiceWithClaimStrategy } from "./fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fpc-strategy"
 import { EmbeddedStrategy } from "./embedded-strategy"
 import type { Action } from "../spec"
+
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 const PRIORITY = new GasFees(7n, 8n)
 
@@ -79,6 +82,7 @@ function makeDeps(built = makeBuilt()) {
 function makeCtx(overrides: Partial<FeeStrategyContext["op"]> = {}): FeeStrategyContext {
 	return {
 		op: { networkId: "net-1", accountAddress: "0xacc", actions: [] as Action[], ...overrides },
+		fence: { ...FENCE },
 		feeSettings: { paymentMethod: { kind: "fj" } },
 		gasPadding: 1,
 		deps: undefined as never, // strategies receive deps via ctor, not ctx
@@ -97,6 +101,53 @@ function shape(txRequest: { txContext: { gasSettings: GasSettings } }) {
 	}
 }
 
+describe("every strategy builds under the context's fence", () => {
+	const sponsored = { type: FpcType.DefaultSponsoredFpc, isProtocol: true }
+	const fpcImpl = (infoData: unknown) => ({
+		infoData,
+		getTotalGas: () => new Gas(1_000, 2_000),
+		getTeardownGas: () => new Gas(100, 200),
+		getFeePayload: () => [],
+	})
+	const cases: Array<{ name: string; fpc?: unknown; run: (deps: FeeStrategyDeps, ctx: FeeStrategyContext) => Promise<unknown> }> = [
+		{ name: "fj", run: (deps, ctx) => new FeeJuiceStrategy(deps).buildAndEstimate(ctx) },
+		{
+			name: "fjwc",
+			run: (deps, ctx) => {
+				ctx.feeSettings = { paymentMethod: { kind: "fjwc", claimAmount: "1", claimSecret: "0x01", messageLeafIndex: "0" } } as never
+				return new FeeJuiceWithClaimStrategy(deps).buildAndEstimate(ctx)
+			},
+		},
+		{
+			name: "embedded",
+			run: (deps, ctx) => {
+				ctx.op.fee = { embeddedFeePayment: "fpc" } as never
+				return new EmbeddedStrategy(deps).buildAndEstimate(ctx)
+			},
+		},
+		{
+			name: "fpc two-pass",
+			fpc: fpcImpl({ type: FpcType.PrivateFpc, isProtocol: true }),
+			run: (deps, ctx) => new FpcStrategy(deps).buildAndEstimate(ctx),
+		},
+		{
+			name: "fpc sponsored fast path",
+			fpc: fpcImpl(sponsored),
+			run: (deps, ctx) => new FpcStrategy(deps).buildAndEstimate(ctx),
+		},
+	]
+
+	test.each(cases)("$name passes ctx.fence to every build", async ({ fpc, run }) => {
+		const { deps, buildStandard } = makeDeps()
+		;(deps.fpcService.getFpcImpl as ReturnType<typeof vi.fn>).mockResolvedValue(fpc)
+		const ctx = makeCtx()
+		if (fpc) ctx.feeSettings = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } }
+		await run(deps, ctx)
+		expect(buildStandard.mock.calls.length).toBeGreaterThan(0)
+		for (const call of buildStandard.mock.calls as unknown[][]) expect(call[1]).toBe(ctx.fence)
+	})
+})
+
 describe("FeeJuiceStrategy structural parity", () => {
 	test("passthrough identities + finalized sentinel shape + payment method", async () => {
 		const { deps, buildStandard, simulateTxTask, built } = makeDeps()
@@ -113,7 +164,7 @@ describe("FeeJuiceStrategy structural parity", () => {
 		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 
 		expect(buildStandard).toHaveBeenCalledTimes(1)
-		expect((buildStandard.mock.calls[0] as unknown[])[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect((buildStandard.mock.calls[0] as unknown[])[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 		expect(simulateTxTask).toHaveBeenCalledTimes(1)
 		// Sim opts: scopes = [account.address] exactly.
 		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
@@ -196,8 +247,8 @@ describe("FpcStrategy structural parity (two-pass choreography — byte-parity c
 
 		// Two-pass: first PREEXISTING_FEE_JUICE, then EXTERNAL.
 		expect(buildStandard).toHaveBeenCalledTimes(2)
-		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(buildStandard.mock.calls[0]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[2]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 		// Result carries the SECOND pass's identities.
 		expect(result.txRequest).toBe(builtB.txRequest)
 		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
@@ -255,7 +306,7 @@ describe("FpcStrategy canonical-Sponsored fast path (single-pass)", () => {
 		const result = await new FpcStrategy(deps).buildAndEstimate(ctx)
 
 		expect(buildStandard).toHaveBeenCalledTimes(1)
-		expect((buildStandard.mock.calls[0] as unknown[])[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect((buildStandard.mock.calls[0] as unknown[])[2]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 		expect(simulateTxTask).toHaveBeenCalledTimes(1)
 		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 
@@ -403,8 +454,8 @@ describe("FeeJuiceStrategy folded (probed) runs", () => {
 		const result = await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
 
 		expect(buildStandard).toHaveBeenCalledTimes(2)
-		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[0]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 		expect(simulateTxTask).toHaveBeenCalledTimes(2)
 		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual({
 			simulatePublic: true,
@@ -650,8 +701,8 @@ describe("FpcStrategy folded (probed) runs — discovery collapses into the firs
 		// Two-pass choreography: PREEXISTING (payload-free, stubbed) → EXTERNAL
 		// (payload-inclusive, VALIDATED).
 		expect(buildStandard).toHaveBeenCalledTimes(2)
-		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(buildStandard.mock.calls[0]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[2]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 		expect(simulateTxTask).toHaveBeenCalledTimes(2)
 		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual(stubbedOpts(builtA.account.address))
 		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual(validatedOpts(builtB.account.address))
@@ -731,9 +782,9 @@ describe("FpcStrategy folded (probed) runs — discovery collapses into the firs
 		expect(buildStandard).toHaveBeenCalledTimes(3)
 		// Build 1 = P1 stub; build 2 = init-wrap validated PREEXISTING sizing
 		// (carries the discovered witness); build 3 = P2 EXTERNAL.
-		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[2]?.[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(buildStandard.mock.calls[0]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[2]?.[2]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 		expect(simulateTxTask).toHaveBeenCalledTimes(3)
 		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual(stubbedOpts(builtA.account.address))
 		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual(validatedOpts(builtB.account.address))
@@ -765,8 +816,8 @@ describe("FeeJuiceStrategy folded + INIT-WRAPPED with discovery", () => {
 		await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
 
 		expect(buildStandard).toHaveBeenCalledTimes(2)
-		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[0]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[2]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 		expect(simulateTxTask).toHaveBeenCalledTimes(2)
 		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
 			simulatePublic: true,

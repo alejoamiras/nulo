@@ -77,6 +77,15 @@ export const SESSION_STORAGE_ROOT = "nulo:core:session"
  */
 export const SESSION_TTL_ALARM_NAME = "nulo:core:session:ttl"
 
+/** The most an expired session can be held open for approved sends, capped again by its TTL. */
+const MAX_EXPIRY_DEFERRAL_MS = 10 * 60_000
+
+/** How far one deferral moves the deadline, capped again by the TTL. */
+const EXPIRY_DEFERRAL_STEP_MS = 60_000
+
+/** The deadline and TTL revision a snapshot-based write was decided on. */
+type CommitExpectation = { lockedAt: number | undefined; configRev: number }
+
 /** Callback the facade passes to `restore()` so SessionManager can fetch
  *  the profile named in the persisted session without reaching into
  *  `ProfileRepository` directly — keeps the dependency arrow one-way
@@ -135,6 +144,14 @@ export class SessionManager {
 	 *  committed (safe to delete whatever the row holds — the current
 	 *  session's record or a failed open's debris). */
 	private sessionGeneration = 0
+	/** Last serial handed to a published session. Only ever incremented — a rolled-back publication
+	 *  burns its serial — so a serial names exactly one session for the worker's lifetime. */
+	private lastSerial = 0
+	/** Bumped by every TTL change, so an expiry decision taken under the previous TTL stands down. */
+	private configRev = 0
+	/** Whether an expired session still has approved sends to finish. Late-bound by the execution
+	 *  layer, which this layer cannot import. */
+	private shouldDeferExpiry?: (profileId: string) => Promise<boolean>
 
 	/**
 	 * @param config      Reactive config — SessionManager subscribes to
@@ -192,19 +209,35 @@ export class SessionManager {
 	 *  is async. Making this sync would require a fire-and-forget
 	 *  close, which drifts persisted-state from in-memory-state. */
 	public async getActive(): Promise<ActiveSession | undefined> {
-		if (!this.activeSession) {
+		const active = this.activeSession
+		if (!active) {
 			return undefined
 		}
-		if (this.isExpired(this.activeSession.session)) {
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
-			// Pass the OBSERVED session: this close runs off the facade lock
-			// (getActive is reached both inside and outside it), and a
-			// concurrent open may have replaced the session by the time the
-			// close's head runs — the identity guard stands it down.
-			await this.close(this.activeSession)
-			return undefined
+		// A pending decision is joined even once its deferral has moved the deadline in memory: a
+		// writer that went ahead could land between that write failing and the close it causes.
+		if (!active.expiryDecision && !this.isExpired(active.session)) {
+			return active
 		}
-		return this.activeSession
+		this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
+		// Decide on the OBSERVED session: this runs off the facade lock (getActive is reached both
+		// inside and outside it), and a concurrent open may replace the session meanwhile.
+		await this.expireOrDefer(active)
+		// A decision leaves the session open only with a deadline it moved or found moved, so the
+		// session is read again rather than reported locked.
+		return this.activeSession === active ? this.getActive() : undefined
+	}
+
+	/** Registers the check an expired session consults before it closes. While the check answers
+	 *  true the deadline moves a step at a time, up to `min(TTL, 10 min)` past the first deferred
+	 *  deadline of that session. */
+	public setExpiryDeferral(predicate: (profileId: string) => Promise<boolean>): void {
+		this.shouldDeferExpiry = predicate
+	}
+
+	/** Serial of the in-memory session, or `undefined` when none is published. Synchronous, lock-free
+	 *  and without the lazy expiry close, so it can share a tick with the call it guards. */
+	public peekLiveSerial(): number | undefined {
+		return this.activeSession?.serial
 	}
 
 	/** Returns the master secret for the given profile id. Throws
@@ -295,7 +328,13 @@ export class SessionManager {
 				// Wipe a replaced session's DEK before dropping the reference
 				// (close/replace/expiry discipline); store a COPY of the caller-owned dek.
 				zeroize(this.activeSession?.dek)
-				this.activeSession = { profile, session, secret, dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined }
+				this.activeSession = {
+					profile,
+					session,
+					secret,
+					dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined,
+					serial: ++this.lastSerial,
+				}
 				this.onChange(this.toInfo(profile))
 				try {
 					await this.session.set(session)
@@ -421,28 +460,15 @@ export class SessionManager {
 	 *  the UI already has the correct active-profile info. */
 	public async refresh(): Promise<void> {
 		try {
+			// `getActive` joins a pending expiry decision, so a refresh applies after it, never under it.
 			const session = await this.getActive()
 			if (session) {
-				const since = Date.now()
-				session.session.since = since
-				session.session.lockedAt = this.sessionTtl > 0 ? since + this.sessionTtl : undefined
-				// Artifact section: serialized so a concurrent close cannot
-				// interleave between the row write and the alarm swap (a
-				// re-persist landing after a close's delete would resurrect
-				// the row). The identity re-check stands down if the session
-				// was closed/replaced while we queued.
-				await this.artifactLock.withLock(async () => {
-					if (this.activeSession !== session) {
-						return
-					}
-					await this.session.set(session.session)
-					// Cancel + recreate the alarm against the new `lockedAt`.
-					// The previous alarm's `scheduledTime` no longer matches
-					// the persisted `lockedAt`, so the gate in `onAlarmFired`
-					// would ignore a late-firing stale delivery anyway — but
-					// cancelling avoids the spurious fire entirely.
-					await this.clearLockAlarm()
-					await this.scheduleLockAlarm(session.session.lockedAt)
+				await this.commitSession(session, {
+					mutate: ({ session: row }) => {
+						const since = Date.now()
+						row.since = since
+						row.lockedAt = this.sessionTtl > 0 ? since + this.sessionTtl : undefined
+					},
 				})
 			}
 		} catch (error) {
@@ -480,9 +506,12 @@ export class SessionManager {
 					// Persisting a fresh storage snapshot instead (`{...persisted}`)
 					// would be the lost-update vector against a serialized writer.
 					if (active.session.bearer || active.session.passhash) {
-						active.session.bearer = undefined
-						active.session.passhash = undefined
-						await this.session.set(active.session)
+						await this.commitSession(active, {
+							mutate: ({ session: row }) => {
+								row.bearer = undefined
+								row.passhash = undefined
+							},
+						})
 					}
 					return
 				}
@@ -624,7 +653,7 @@ export class SessionManager {
 				zeroize(masterCopy)
 			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
-			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)) }
+			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)), serial: ++this.lastSerial }
 			// Re-schedule the alarm against the persisted `lockedAt`. If
 			// `lockedAt` is absent (older records), fall back to
 			// `since + sessionTtl`.
@@ -744,6 +773,8 @@ export class SessionManager {
 	 * Errors are logged + swallowed; never escape the void IIFE.
 	 */
 	private async applyTtlChange(newTtl: number): Promise<void> {
+		// Before the first await, so an expiry decision that read the previous TTL sees the change.
+		this.configRev++
 		try {
 			// Serialize the writeback + close against the facade-locked session
 			// writers (refresh/open/unlock) AND the TTL alarm close, via the
@@ -759,27 +790,7 @@ export class SessionManager {
 				// changed the active session (e.g. bumped `since`, or closed it)
 				// while we waited for the lock.
 				const active = this.activeSession
-				if (!active) return
-				if (newTtl === 0) {
-					// `lockedAt: undefined` is dropped by JSON.stringify on
-					// persist, matching the no-TTL write in `open()`.
-					active.session.lockedAt = undefined
-					await this.session.set(active.session)
-					await this.clearLockAlarm()
-					return
-				}
-				const newLockedAt = active.session.since + newTtl
-				if (newLockedAt <= Date.now()) {
-					// New TTL has already elapsed since `since` — lock now,
-					// don't schedule an already-overdue alarm.
-					this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL shortened past elapsed window; locking immediately")
-					await this.close()
-					return
-				}
-				active.session.lockedAt = newLockedAt
-				await this.session.set(active.session)
-				await this.clearLockAlarm()
-				await this.scheduleLockAlarm(newLockedAt)
+				if (active) await this.applyTtl(active, newTtl)
 			})
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", error)
@@ -824,9 +835,108 @@ export class SessionManager {
 				)
 				return
 			}
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired; locking")
-			await this.close()
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired")
+			await this.expireOrDefer(active)
 		})
+	}
+
+	/**
+	 * The only writer of a live session's row. Under the artifact lock, and only while `session` is
+	 * still the active one, it applies `mutate` to the row as it is now, persists it, and re-arms the
+	 * alarm when `lockedAt` moved. A writer that decided on a snapshot passes `expect` and stands down
+	 * when the deadline or the TTL changed after it looked; every other writer always applies.
+	 */
+	private async commitSession(
+		session: ActiveSession,
+		{ mutate, expect }: { mutate: (session: ActiveSession) => void; expect?: CommitExpectation },
+	): Promise<void> {
+		await this.artifactLock.withLock(async () => {
+			if (this.activeSession !== session) return
+			if (expect && (session.session.lockedAt !== expect.lockedAt || this.configRev !== expect.configRev)) return
+			const lockedAt = session.session.lockedAt
+			mutate(session)
+			await this.session.set(session.session)
+			if (session.session.lockedAt !== lockedAt) {
+				await this.clearLockAlarm()
+				await this.scheduleLockAlarm(session.session.lockedAt)
+			}
+		})
+	}
+
+	/** One decision per expired session, joined by the alarm and every lazy `getActive`, so the
+	 *  deferral check runs once and at most one extension or close follows. */
+	private expireOrDefer(session: ActiveSession): Promise<void> {
+		session.expiryDecision ??= this.decideExpiry(session)
+			.catch((error) => this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to decide session expiry", error))
+			.finally(() => {
+				session.expiryDecision = undefined
+			})
+		return session.expiryDecision
+	}
+
+	/**
+	 * Extend an expired session by one step while approved sends are in flight and its budget lasts;
+	 * otherwise close it. The deadline and the TTL revision are read before the check is awaited: a
+	 * deadline moved meanwhile stands the decision down, and a TTL changed meanwhile is applied here,
+	 * because its writer may be queued behind the facade lock this decision's caller holds. A failed
+	 * write closes the session, since nothing re-arms the alarm that fired. The budget anchors on the
+	 * first deferred deadline and nothing refills it.
+	 */
+	private async decideExpiry(session: ActiveSession): Promise<void> {
+		const lockedAt = session.session.lockedAt
+		const configRev = this.configRev
+		const budgetEnd = session.deferBudgetEnd ?? this.deriveLockedAt(session.session) + Math.min(this.sessionTtl, MAX_EXPIRY_DEFERRAL_MS)
+		const step = Math.min(EXPIRY_DEFERRAL_STEP_MS, this.sessionTtl)
+		const hasWork = await this.hasWorkToFinish(session)
+		if (session.session.lockedAt !== lockedAt) return
+		try {
+			if (this.configRev !== configRev) {
+				await this.applyTtl(session, this.sessionTtl, { lockedAt, configRev: this.configRev })
+				return
+			}
+			const now = Date.now()
+			if (hasWork && now < budgetEnd) {
+				await this.commitSession(session, {
+					expect: { lockedAt, configRev },
+					mutate: (current) => {
+						current.deferBudgetEnd ??= budgetEnd
+						current.session.lockedAt = Math.min(now + step, budgetEnd)
+					},
+				})
+				return
+			}
+		} catch (error) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist an expiry decision; locking", error)
+		}
+		await this.close(session)
+	}
+
+	/** Applies `ttl` to a live session: a `ttl` already elapsed since `since` closes it rather than
+	 *  arming an overdue alarm; otherwise its deadline becomes `since + ttl`, or none for 0. */
+	private async applyTtl(session: ActiveSession, ttl: number, expect?: CommitExpectation): Promise<void> {
+		if (ttl !== 0 && session.session.since + ttl <= Date.now()) {
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL already elapsed; locking immediately")
+			await this.close(session)
+			return
+		}
+		await this.commitSession(session, {
+			expect,
+			mutate: ({ session: row }) => {
+				// `lockedAt: undefined` is dropped by JSON.stringify on persist, matching the no-TTL write in `open()`.
+				row.lockedAt = ttl === 0 ? undefined : row.since + ttl
+			},
+		})
+	}
+
+	/** The deferral check's answer; no check registered, or a check that throws, answers false. */
+	private async hasWorkToFinish(session: ActiveSession): Promise<boolean> {
+		if (!this.shouldDeferExpiry) return false
+		try {
+			return await this.shouldDeferExpiry(session.session.profile)
+		} catch (error) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Expiry deferral check failed; locking", error)
+			return false
+		}
 	}
 
 	/**

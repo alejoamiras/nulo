@@ -12,6 +12,10 @@
  * FRESH-build path is NOT covered here; it's the heavy boundary deferred to the
  * rollout — see lessons/phase-2.md.
  *
+ * The session cases run the same graph under a ProfileService fake whose
+ * `setActive` starts a new session, as a lock, a switch or a re-unlock does:
+ * dApp sends park at their slot-key lookup, transfers at the proof gate.
+ *
  * FAKE_IPXE_BUNDLE_MARKER — the fakes live in this `*.test.ts`, so they are
  * never in the production bundle (Phase-2 gate greps `dist/` for this marker;
  * it must be absent).
@@ -19,13 +23,14 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
@@ -45,6 +50,10 @@ import { EmbeddedStrategy } from "./fee/embedded-strategy"
 import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
 import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fee/fpc-strategy"
+import type { OperationEstimateReuse } from "./operation-estimate-reuse"
+import { fingerprintOperation } from "./operation-fingerprint"
+import type { OperationPlanner } from "./operation-planner"
+import type { PreviewSnapshots } from "./preview-snapshots"
 import {
 	fingerprintBaseFee,
 	fingerprintFeeSettings,
@@ -97,7 +106,8 @@ async function makeHarness() {
 	// cancel checkpoint must drop the proof BEFORE `toTx`, so `toTx` proves submission.
 	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }))
 	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
-	const fakeIPXE = { proveTx: vi.fn(async () => ({ toTx })) } as unknown as ReturnType<PxeServiceClient["getPXE"]>
+	const proveTx = vi.fn(async () => ({ toTx }))
+	const fakeIPXE = { proveTx } as unknown as ReturnType<PxeServiceClient["getPXE"]>
 	const fakePxeClient = { getPXE: () => fakeIPXE, onProvePhase: { add: () => {} } } as unknown as PxeServiceClient
 
 	const logger = new LoggerStore(new ConfigStore())
@@ -112,6 +122,27 @@ async function makeHarness() {
 		journalId = rec.id
 	})
 	journal.onOperationUpdated.add((rec) => stages.push(rec.progress.stage))
+	/** Parks the first journal write that stores a record matching `match`, until released. */
+	const parkJournalWrite = (match: (record: { progress: { stage: string } }) => boolean) => {
+		let release: () => void = () => {}
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let parked = false
+		const area = api.storage.local
+		const write = area.set.bind(area)
+		vi.spyOn(area, "set").mockImplementation(async (entries) => {
+			const hit = Object.entries(entries).some(
+				([key, value]) => key.startsWith("nulo:journal@") && typeof value === "string" && match(JSON.parse(value)),
+			)
+			if (hit && !parked) {
+				parked = true
+				await gate
+			}
+			return write(entries)
+		})
+		return { isParked: () => parked, release: () => release() }
+	}
 
 	const collection = new ServiceCollection()
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
@@ -120,20 +151,55 @@ async function makeHarness() {
 	// Real handler so the facade's profile-switch invalidation (D12) is both
 	// subscribable by the service and firable by tests.
 	const profileChanged = new EventHandler<unknown>()
+	// The published session. Every `setActive` starts a new one with a fresh serial, as a lock, a
+	// switch or a re-unlock does; `fireChanged` is separate so a checkpoint case can run without
+	// the change subscribers.
+	let lastSerial = 1
+	let live: { profileId: string; serial: number } | undefined = { profileId: "p1", serial: lastSerial }
+	const captureExecutionFence = async (): Promise<ExecutionFence> => {
+		if (!live) throw new Error("Wallet locked")
+		return { profileId: live.profileId, epoch: deletionState.capture(live.profileId), session: live.serial }
+	}
+	const session = {
+		setActive: (profileId: string | undefined) => {
+			lastSerial += 1
+			live = profileId ? { profileId, serial: lastSerial } : undefined
+		},
+		fireChanged: () => profileChanged.invoke(live ? { id: live.profileId } : undefined),
+	}
+	let expiryDeferral: ((profileId: string) => Promise<boolean>) | undefined
 	collection.add(
 		svc(ProfileService.name, {
-			getActiveProfile: async () => ({ id: "p1" }),
+			getActiveProfile: async () => (live ? { id: live.profileId } : undefined),
 			// The journal's create fence checks membership here — the fake must
 			// list the profile the flow files under or every create is refused.
-			getProfiles: async () => [{ id: "p1" }],
+			getProfiles: async () => [{ id: "p1" }, { id: "p2" }],
 			getDeletionState: () => deletionState,
-			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			captureExecutionFence,
+			assertFence: async (fence: ExecutionFence) => {
+				if (live?.serial !== fence.session || live.profileId !== fence.profileId) throw new SessionEndedError()
+				deletionState.assertCurrent(fence.profileId, fence.epoch)
+			},
+			isFenceLive: (fence: ExecutionFence) =>
+				live?.serial === fence.session &&
+				live.profileId === fence.profileId &&
+				deletionState.isCurrent(fence.profileId, fence.epoch),
+			peekLiveSerial: () => live?.serial,
+			setExpiryDeferral: (predicate: (profileId: string) => Promise<boolean>) => {
+				expiryDeferral = predicate
+			},
 			onActiveProfileChanged: profileChanged,
 		}),
 	)
 	const getNetwork = vi.fn(async () => NETWORK)
 	collection.add(svc(NetworkService.name, { getNetwork, getNode: async () => fakeNode }))
-	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
+	// The profiles that hold ACCOUNT; a lookup under any other profile misses.
+	const accountOwners = new Set(["p1"])
+	const getAccountContract = vi.fn(async (profileId: string) => {
+		if (!accountOwners.has(profileId)) throw new Error(`no such account under ${profileId}`)
+		return { address: ACCOUNT }
+	})
+	collection.add(svc(AccountService.name, { getAccountContract }))
 	collection.add(
 		svc(TransactionService.name, {
 			getPendingForAccount: () => [],
@@ -185,7 +251,16 @@ async function makeHarness() {
 		primaryEndpointId: "ep1",
 		primaryEndpointUrl: "http://fake",
 		pendingHashes: [],
-		txRequest: { txContext: { gasSettings: { teardownGas: new Gas(1, 1) } } } as never,
+		txRequest: {
+			txContext: {
+				gasSettings: {
+					teardownGas: new Gas(1, 1),
+					gasLimits: { daGas: 100, l2Gas: 200 },
+					teardownGasLimits: { daGas: 10, l2Gas: 20 },
+					maxFeesPerGas: { feePerDaGas: 2n, feePerL2Gas: 3n },
+				},
+			},
+		} as never,
 		nonce: { toString: () => "0" },
 		feePaymentMethod: "EXTERNAL" as never,
 		token: { contract: "0xtok", name: "Tok", symbol: "TOK", decimals: 18 },
@@ -206,10 +281,19 @@ async function makeHarness() {
 		sendTx,
 		toTx,
 		getJournalId: () => journalId,
-		profileChanged,
+		captureExecutionFence,
+		session,
 		getNetwork,
+		accountOwners,
+		getAccountContract,
+		proveTx,
+		parkJournalWrite,
+		lane: (service as unknown as { lane: ExecutionLane }).lane,
+		expiryDeferral: () => expiryDeferral,
 	}
 }
+
+type Harness = Awaited<ReturnType<typeof makeHarness>>
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
 	const deadline = Date.now() + timeoutMs
@@ -267,7 +351,8 @@ describe("ExecutionService composition — cancel-mid-prove (in-process, no sand
 // per-(profile, chain) execution mutex, so a transfer never contends this slot.
 describe("ExecutionService composition — cancel during queued-wait (in-process)", () => {
 	test("cancel a queued dapp-send waiting on the held slot → cancelled, never advances, slot not wedged", async () => {
-		const { service, journal } = await makeHarness()
+		const { service, journal, captureExecutionFence } = await makeHarness()
+		const fence = await captureExecutionFence()
 		// executeOperations takes the dapp LocalTxOrigin object; the journal record's
 		// `origin` is the OperationOrigin string enum ("dapp"). Different types.
 		const origin = { type: OriginType.DAPP, name: "test-dapp" } as never
@@ -294,7 +379,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 
 		// Occupy the (p1, net1) execution slot directly — same primitive a live
 		// dapp-send holds while in flight. Job 2 must wait behind this.
-		const held = await lane.acquireSlot(NETWORK.id, undefined)
+		const held = await lane.acquireSlot(NETWORK.id, undefined, fence)
 
 		// Job 2 (dapp-send) with the queued record → acquireSlot pre-registers its
 		// controller under queuedId, then WAITS on the held slot. The minimal op
@@ -309,7 +394,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		} as never
 		// executeOperations catches JobCancelledSentinel internally (classifyOperationCatch)
 		// and RETURNS a results array — it never throws here, so no .catch is needed.
-		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId })
+		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId }, undefined, fence)
 
 		// Wait until job2 has pre-registered its controller and is parked on the slot.
 		await waitFor(() => controllers.has(queuedId))
@@ -332,7 +417,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		// The slot is NOT wedged: after releasing the holder, a fresh acquire grants
 		// promptly (would hang past the test timeout if job2's abort corrupted the FIFO).
 		held.release()
-		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
+		const held2 = await lane.acquireSlot(NETWORK.id, undefined, fence)
 		held2.release()
 	}, 15_000)
 
@@ -342,7 +427,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 	// slot bucket. The DappSendExecutor unit test injects hooks directly, so it
 	// can't catch a dropped forward at either ExecutionService hop.
 	test("send_transaction forwards hooks.originKey through executeOperations → executeSendTransaction → DappSendExecutor", async () => {
-		const { service } = await makeHarness()
+		const { service, captureExecutionFence } = await makeHarness()
 		const dse = (service as unknown as { dappSendExecutor: { executeSendTransaction: (...a: unknown[]) => Promise<string> } })
 			.dappSendExecutor
 		const spy = vi.spyOn(dse, "executeSendTransaction").mockResolvedValue("0xhash")
@@ -355,11 +440,436 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 			actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
 		} as never
 		const origin = { type: OriginType.DAPP, name: "dapp" } as never
-		await service.executeOperations([sendTxOp], origin, undefined, { originKey: "https://dapp.example" } as never)
+		await service.executeOperations(
+			[sendTxOp],
+			origin,
+			undefined,
+			{ originKey: "https://dapp.example" } as never,
+			undefined,
+			await captureExecutionFence(),
+		)
 
 		// 5th positional arg of DappSendExecutor.executeSendTransaction is `hooks`.
 		const hooks = spy.mock.calls[0]?.[4] as { originKey?: string } | undefined
 		expect(hooks?.originKey).toBe("https://dapp.example")
+	}, 15_000)
+})
+
+const DAPP_ORIGIN = { type: OriginType.DAPP, name: "dapp" } as never
+const dappSend = () =>
+	({
+		kind: "aztec_sendTx",
+		networkId: NETWORK.id,
+		accountAddress: ACCOUNT.toString(),
+		feeSettings: { paymentMethod: { kind: "fpc" } },
+	}) as never
+const transfer = (h: Harness, estimateId: string | undefined = h.estimateId) =>
+	h.service
+		.executeTransfer(
+			h.req.networkId,
+			h.req.accountAddress,
+			h.req.tokenId,
+			h.req.transferType,
+			h.req.recipientAddress,
+			h.req.amount,
+			h.req.feeSettings,
+			estimateId,
+		)
+		.catch((error: unknown) => error)
+
+/** Parks the next `getNetwork`: the slot-key lookup a dApp send awaits before its claim. */
+function parkNextNetworkLookup(h: Harness) {
+	let release: () => void = () => {}
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	let entered = false
+	h.getNetwork.mockImplementationOnce(async () => {
+		entered = true
+		await gate
+		return NETWORK
+	})
+	return { isEntered: () => entered, release: () => release() }
+}
+
+async function expectEndedUnder(h: Harness, journalId: string, profileId: string) {
+	const record = await h.journal.getOperation(journalId)
+	expect(record?.progress.stage).toBe("failed")
+	expect(record?.error?.kind).toBe("session_ended")
+	expect(record?.profileId).toBe(profileId)
+}
+
+describe("ExecutionService composition — work runs only while the session that authorized it lives", () => {
+	test.each([
+		{ label: "a switch to another profile", next: "p2" },
+		{ label: "a lock", next: undefined },
+	])(
+		"a dApp send parked at its slot-key lookup, then $label: refused, failed/session_ended under p1, never proved",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const fence = await h.captureExecutionFence()
+			const lookup = parkNextNetworkLookup(h)
+			const run = h.service.executeOperations([dappSend()], DAPP_ORIGIN, undefined, undefined, undefined, fence)
+			await waitFor(lookup.isEntered)
+			h.session.setActive(next)
+			lookup.release()
+
+			expect(await run).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+			await expectEndedUnder(h, h.getJournalId(), "p1")
+			expect(h.proveTx).not.toHaveBeenCalled()
+		},
+		15_000,
+	)
+
+	test.each([
+		{ label: "a switch to another profile", next: "p2" },
+		{ label: "a lock", next: undefined },
+		{ label: "a re-unlock of the same profile", next: "p1" },
+	])(
+		"a transfer parked at prove, then $label: proved but never sent, failed/session_ended under p1",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const run = transfer(h)
+			await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+			h.session.setActive(next)
+			h.ctrl.release()
+
+			expect(await run).toBeInstanceOf(SessionEndedError)
+			expect(h.proveTx).toHaveBeenCalledTimes(1)
+			expect(h.toTx).not.toHaveBeenCalled()
+			expect(h.sendTx).not.toHaveBeenCalled()
+			await expectEndedUnder(h, h.getJournalId(), "p1")
+		},
+		15_000,
+	)
+
+	test("a transfer parked at prove while the next profile holds the same address: the fence stops it, not a lookup miss", async () => {
+		const h = await makeHarness()
+		h.accountOwners.add("p2")
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		h.session.setActive("p2")
+		h.ctrl.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(h.sendTx).not.toHaveBeenCalled()
+		expect(h.getAccountContract.mock.calls.map(([profileId]) => profileId)).toEqual(["p1"])
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+	}, 15_000)
+
+	test("a transfer parked inside its account lookup, then a re-unlock of the same profile: refused before proving", async () => {
+		const h = await makeHarness()
+		let release: () => void = () => {}
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let entered = false
+		h.getAccountContract.mockImplementationOnce(async () => {
+			entered = true
+			await gate
+			return { address: ACCOUNT }
+		})
+		const run = transfer(h)
+		await waitFor(() => entered)
+		h.session.setActive("p1")
+		release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+	}, 15_000)
+
+	test("a UI send with no fence captures one at entry, and a switch while it waits refuses it the same way", async () => {
+		const h = await makeHarness()
+		const lookup = parkNextNetworkLookup(h)
+		const uiSend = {
+			kind: "send_transaction",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [],
+		} as never
+		const run = h.service.executeSendTransaction(uiSend, { type: OriginType.UI }).catch((error: unknown) => error)
+		await waitFor(lookup.isEntered)
+		h.session.setActive("p2")
+		lookup.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.proveTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("an operation estimate stashed under p1 and confirmed under p2 is refused before any build", async () => {
+		const h = await makeHarness()
+		const feeSettings = { paymentMethod: { kind: "fj" } } as unknown as FeeSettings
+		const op = {
+			kind: "aztec_sendTx",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings,
+			exec: { calls: [] },
+			opts: { from: ACCOUNT },
+		}
+		const internals = h.service as unknown as {
+			planner: OperationPlanner
+			operationEstimateReuse: OperationEstimateReuse
+			previewSnapshots: PreviewSnapshots
+		}
+		const { actions, feeOptions } = await internals.planner.processAztecJsPayload(op.exec as never, op.opts as never)
+		const fingerprint = fingerprintOperation({
+			networkId: op.networkId,
+			accountAddress: op.accountAddress,
+			executionMode: "standard",
+			from: ACCOUNT.toString(),
+			actions,
+			fee: feeOptions,
+			feeSettings,
+		})
+		internals.operationEstimateReuse.stash("est-op", { fingerprint, profileId: "p1", builtAt: Date.now() } as never)
+		internals.previewSnapshots.stash("est-op", { interactionId: "i-1", index: 0, fingerprint, discoveredHashes: [] })
+
+		h.session.setActive("p2")
+		const approval = { interactionId: "i-1", index: 0, estimateId: "est-op", previewId: "est-op" }
+		const fence = await h.captureExecutionFence()
+		const results = await h.service.executeOperations([op as never], DAPP_ORIGIN, undefined, undefined, [approval], fence)
+
+		expect(results).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+		expect(h.getAccountContract).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p2")
+	}, 15_000)
+
+	test("a transfer estimate stashed under p1 and confirmed under p2 is refused before any build", async () => {
+		const h = await makeHarness()
+		h.session.setActive("p2")
+
+		expect(await transfer(h)).toBeInstanceOf(SessionEndedError)
+		expect(h.getAccountContract).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p2")
+	}, 15_000)
+
+	test("a silent send whose record is already pending is failed at the slot, not stranded, and holds nothing", async () => {
+		const h = await makeHarness()
+		const fence = await h.captureExecutionFence()
+		const queued = await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		})
+		await h.journal.transitionOperation(queued.id, { stage: "pending" })
+		h.session.setActive(undefined)
+		h.getNetwork.mockClear()
+
+		const results = await h.service.executeOperations(
+			[dappSend()],
+			DAPP_ORIGIN,
+			undefined,
+			{ queuedJournalId: queued.id },
+			undefined,
+			fence,
+		)
+
+		expect(results).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+		await expectEndedUnder(h, queued.id, "p1")
+		expect(h.getNetwork).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		h.session.setActive("p1")
+		const granted = await Promise.race([
+			h.lane.acquireSlot(NETWORK.id, undefined, await h.captureExecutionFence()),
+			new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000)),
+		])
+		expect(granted).not.toBeNull()
+		granted?.release()
+	}, 15_000)
+
+	test("a cancel holding the journal lock when the send reaches `submitting` commits first; the send stops at its cancel check", async () => {
+		const h = await makeHarness()
+		const cancelWrite = h.parkJournalWrite((record) => record.progress.stage === "cancelled")
+		const transitions = vi.spyOn(h.journal, "transitionOperation")
+		h.toTx.mockImplementationOnce(async () => {
+			void h.service.cancelJob(h.getJournalId())
+			await waitFor(cancelWrite.isParked)
+			return { getTxHash: () => ({ toString: () => "0xhash" }) }
+		})
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		// The `submitting` transition is queued behind the parked cancel on the transition lock.
+		await waitFor(() => transitions.mock.calls.some(([, progress]) => progress.stage === "submitting"))
+		cancelWrite.release()
+
+		expect(await run).toBeInstanceOf(JobCancelledError)
+		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("cancelled")
+		expect(h.stages).not.toContain("submitting")
+		expect(h.proveTx).toHaveBeenCalledTimes(1)
+		expect(h.sendTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("a session that ends while `node.sendTx` is pending does not undo the send: the record succeeds", async () => {
+		const h = await makeHarness()
+		let finishSend: () => void = () => {}
+		h.sendTx.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishSend = resolve
+				}),
+		)
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		await waitFor(() => h.sendTx.mock.calls.length === 1)
+		h.session.setActive(undefined)
+		finishSend()
+
+		expect(await run).toBe("0xhash")
+		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("succeeded")
+		expect(h.proveTx).toHaveBeenCalledTimes(1)
+	}, 15_000)
+})
+
+const stageOf = async (h: Harness, journalId: string) => (await h.journal.getOperation(journalId))?.progress.stage
+
+describe("ExecutionService composition — a session change sweeps the work of the session that ended", () => {
+	test.each([
+		{ label: "A switch to another profile", next: "p2" },
+		{ label: "A lock", next: undefined },
+	])(
+		"$label cancels a transfer parked at prove before the proof returns; it is never sent",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const run = transfer(h)
+			await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+			h.session.setActive(next)
+			h.session.fireChanged()
+			await waitFor(() => h.stages.includes("cancelled"))
+
+			h.ctrl.release()
+			expect(await run).toBeInstanceOf(JobCancelledError)
+			expect(await stageOf(h, h.getJournalId())).toBe("cancelled")
+			expect(h.toTx).not.toHaveBeenCalled()
+			expect(h.sendTx).not.toHaveBeenCalled()
+		},
+		15_000,
+	)
+
+	test("a record at `submitting` is left alone: the send completes and the record succeeds", async () => {
+		const h = await makeHarness()
+		let finishSend: () => void = () => {}
+		h.sendTx.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishSend = resolve
+				}),
+		)
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		await waitFor(() => h.sendTx.mock.calls.length === 1)
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		await sweep.mock.results[0]?.value
+		expect(await stageOf(h, h.getJournalId())).toBe("submitting")
+		finishSend()
+
+		expect(await run).toBe("0xhash")
+		expect(await stageOf(h, h.getJournalId())).toBe("succeeded")
+	}, 15_000)
+
+	test("a sweep started by a lock spares a job registered by a session that opens before the sweep reaches it", async () => {
+		const h = await makeHarness()
+		const nextJob = await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-2",
+			initialStage: { stage: "queued" },
+		})
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		const cancelWrite = h.parkJournalWrite((record) => record.progress.stage === "cancelled")
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		expect(sweep).toHaveBeenCalledTimes(1)
+		// The handler has returned; the sweep is still awaiting the old job's cancel.
+		await waitFor(cancelWrite.isParked)
+
+		h.session.setActive("p1")
+		const nextController = new AbortController()
+		const { session } = await h.captureExecutionFence()
+		expect(h.lane.registerInFlight(nextJob.id, session, nextController)).toEqual({ live: true })
+		cancelWrite.release()
+		await sweep.mock.results[0]?.value
+
+		expect(await stageOf(h, h.getJournalId())).toBe("cancelled")
+		expect(await stageOf(h, nextJob.id)).toBe("queued")
+		expect(nextController.signal.aborted).toBe(false)
+		h.ctrl.release()
+		expect(await run).toBeInstanceOf(JobCancelledError)
+	}, 15_000)
+
+	test("a transfer that registers after the sweep ran is refused at registration: failed/session_ended, never proved", async () => {
+		const h = await makeHarness()
+		// A transfer's first journal write is its create, which precedes its registration.
+		const create = h.parkJournalWrite(() => true)
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		const run = transfer(h)
+		await waitFor(create.isParked)
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		await sweep.mock.results[0]?.value
+		create.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.ctrl.entered).toBe(false)
+		expect(h.proveTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("a journal failure during the sweep is logged and settles quietly; the send still stops at its authorization check", async () => {
+		const h = await makeHarness()
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		vi.spyOn(h.journal, "transitionIfStage").mockRejectedValueOnce(new Error("storage down"))
+		const logError = vi.spyOn(h.service as unknown as { logError: (...args: unknown[]) => void }, "logError")
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		h.session.setActive("p2")
+		h.session.fireChanged()
+		await expect(sweep.mock.results[0]?.value).resolves.toBeUndefined()
+		expect(logError).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ journalId: h.getJournalId() }))
+
+		h.ctrl.release()
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.sendTx).not.toHaveBeenCalled()
+	}, 15_000)
+})
+
+describe("ExecutionService composition — the auto-lock deferral", () => {
+	test("init registers it over the real journal: an approved send defers its own profile's lock until it settles", async () => {
+		const h = await makeHarness()
+		const shouldDefer = h.expiryDeferral()
+		await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		})
+		expect(await shouldDefer?.("p1")).toBe(false)
+
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		expect(await shouldDefer?.("p1")).toBe(true)
+		expect(await shouldDefer?.("p2")).toBe(false)
+
+		h.ctrl.release()
+		expect(await run).toBe("0xhash")
+		expect(await shouldDefer?.("p1")).toBe(false)
 	}, 15_000)
 })
 
@@ -375,7 +885,7 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		const afterPrime = h.getNetwork.mock.calls.length
 		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).not.toBeNull()
 
-		h.profileChanged.invoke(undefined)
+		h.session.fireChanged()
 
 		// Evicted outright — the new profile must not see the old profile's
 		// figures even dimmed. (Stale-marked entries would still peek here.)
@@ -407,7 +917,7 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		// Yield until the compute reaches the deferred dependency.
 		for (let i = 0; i < 50 && !releaseNet; i++) await new Promise((r) => setTimeout(r, 0))
 		if (!releaseNet) throw new Error("compute never reached its second getNetwork call")
-		h.profileChanged.invoke(undefined) // switch lands while the compute is parked
+		h.session.fireChanged() // switch lands while the compute is parked
 		releaseNet()
 		await inFlight // the pre-switch caller still receives its value
 

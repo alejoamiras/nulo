@@ -12,9 +12,12 @@ import { encodeArguments, FunctionSelector, FunctionType } from "@aztec/stdlib/a
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { HashedValues } from "@aztec/stdlib/tx"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { getAuthRegistryAddress, getSetAuthorizedFn } from "@/wallet/utils/auth-registry"
 import { TxRequestBuilder } from "./tx-request-builder"
+
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 const ACCOUNT_ADDR = AztecAddress.fromBigIntUnsafe(0xacc7n)
 const CONTRACT = AztecAddress.fromBigIntUnsafe(0xc0den).toString()
@@ -62,7 +65,11 @@ function makeHarness() {
 	const artifact = { functions: [FN], nonDispatchPublicFunctions: [] }
 	const deps = {
 		pxeService: { getPXE: vi.fn(() => ({ fake: "pxe" })) },
-		profileService: { getActiveProfile: vi.fn(async () => ({ id: "p1", name: "P", type: "password" })) },
+		profileService: {
+			assertFence: vi.fn(async () => {}),
+			isFenceLive: vi.fn(() => true),
+			getActiveProfile: vi.fn(async () => ({ id: "p-active", name: "P", type: "password" })),
+		},
 		networkService: {
 			getNetwork: vi.fn(async () => {
 				calls.push("getNetwork")
@@ -117,6 +124,7 @@ function makeHarness() {
 function build(h: Harness, actions: unknown[], gasSettings?: unknown) {
 	return h.builder.buildStandard(
 		{ networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), actions: actions as never },
+		FENCE,
 		{ fake: "feeMethod" } as never,
 		undefined,
 		gasSettings as never,
@@ -128,11 +136,43 @@ beforeEach(() => {
 	h = makeHarness()
 })
 
+describe("account resolution", () => {
+	test.each([
+		{ entry: "buildStandard", run: (h: Harness) => build(h, []) },
+		{
+			entry: "buildNoFrom",
+			run: (h: Harness) =>
+				h.builder.buildNoFrom(
+					{ networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [] }, opts: {} } as never,
+					FENCE,
+				),
+		},
+	])("$entry: a session that ends while the account resolves throws before the account is used", async ({ run }) => {
+		h.deps.accountService.getAccountContract.mockImplementationOnce(async () => {
+			h.deps.profileService.isFenceLive.mockReturnValue(false)
+			return h.account
+		})
+		await expect(run(h)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(h.deps.profileService.isFenceLive).toHaveBeenCalledWith(FENCE)
+		expect(h.calls).toEqual(["getNetwork"])
+	})
+})
+
 describe("buildStandard pins", () => {
-	test("locked wallet throws the frozen string before anything else", async () => {
-		h.deps.profileService.getActiveProfile.mockResolvedValueOnce(undefined as never)
-		await expect(build(h, [])).rejects.toThrowError("Wallet locked")
+	test("an ended session throws SessionEndedError before anything else", async () => {
+		h.deps.profileService.assertFence.mockRejectedValueOnce(new SessionEndedError())
+		await expect(build(h, [])).rejects.toBeInstanceOf(SessionEndedError)
+		expect(h.deps.networkService.getNetwork).not.toHaveBeenCalled()
+		expect(h.deps.accountService.getAccountContract).not.toHaveBeenCalled()
+		expect(h.deps.pxeService.getPXE).not.toHaveBeenCalled()
 		expect(h.deps.resolver.resolveInstances).not.toHaveBeenCalled()
+	})
+
+	test("the account is resolved for the fence's profile, never the active one", async () => {
+		await build(h, [])
+		expect(h.deps.profileService.assertFence).toHaveBeenCalledWith(FENCE)
+		expect(h.deps.accountService.getAccountContract).toHaveBeenCalledWith("p1", 31337, ACCOUNT_ADDR.toString())
+		expect(h.deps.profileService.getActiveProfile).not.toHaveBeenCalled()
 	})
 
 	test("drift assert runs BEFORE any resolver work, and a drifted node rejects", async () => {
@@ -321,9 +361,23 @@ describe("buildNoFrom pins", () => {
 			}),
 		} as never)
 		const op = { networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [] }, opts: {} }
-		await expect(h.builder.buildNoFrom(op as never)).rejects.toThrowError(/Chain identity mismatch/)
+		await expect(h.builder.buildNoFrom(op as never, FENCE)).rejects.toThrowError(/Chain identity mismatch/)
 		expect(h.calls).toEqual(["getNetwork", "getNodeInfo"])
 		expect(h.account.ensureRegistered).not.toHaveBeenCalled()
 		expect(h.deps.resolver.resolveInstances).not.toHaveBeenCalled()
+	})
+
+	test("an ended session throws SessionEndedError before any lookup; a live one resolves the fence's account", async () => {
+		const op = { networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [] }, opts: {} }
+		h.deps.profileService.assertFence.mockRejectedValueOnce(new SessionEndedError())
+		await expect(h.builder.buildNoFrom(op as never, FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(h.calls).toEqual([])
+		expect(h.deps.pxeService.getPXE).not.toHaveBeenCalled()
+		expect(h.deps.accountService.getAccountContract).not.toHaveBeenCalled()
+
+		// Past the fence, the build stops at the single-call rule — after the account lookup.
+		await expect(h.builder.buildNoFrom(op as never, FENCE)).rejects.toThrowError(/exactly 1 call/)
+		expect(h.deps.accountService.getAccountContract).toHaveBeenCalledWith("p1", 31337, ACCOUNT_ADDR.toString())
+		expect(h.deps.profileService.getActiveProfile).not.toHaveBeenCalled()
 	})
 })

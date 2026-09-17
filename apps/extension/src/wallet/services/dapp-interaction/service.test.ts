@@ -34,7 +34,7 @@ type Internals = {
 	profileService: {
 		refreshSession: () => Promise<void>
 		getActiveProfile: () => Promise<{ id: string } | undefined>
-		captureExecutionFence: () => Promise<{ profileId: string; epoch: number }>
+		captureExecutionFence: () => Promise<{ profileId: string; epoch: number; session: number }>
 	}
 	executionService: { executeOperations: (...args: unknown[]) => Promise<unknown> }
 	dappSessionService: { tryGetDappSession: (id: string) => Promise<{ profileId: string } | undefined> }
@@ -61,7 +61,7 @@ function makeService(overrides: {
 		captureExecutionFence: async () => {
 			const p = await internals.profileService.getActiveProfile()
 			if (!p) throw new Error("Wallet locked")
-			return { profileId: p.id, epoch: 0 }
+			return { profileId: p.id, epoch: 0, session: 1 }
 		},
 	}
 	internals.executionService = { executeOperations: overrides.executeOperations ?? (async () => []) }
@@ -145,7 +145,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		await flush()
 
 		expect(executeOperations).toHaveBeenCalledTimes(1)
-		expect(observedFence).toEqual({ profileId: "p1", epoch: 0 })
+		expect(observedFence).toEqual({ profileId: "p1", epoch: 0, session: 1 })
 	})
 
 	test("executeAndResolve aborts when the session ROW is gone — delete+re-import cannot ride an old approval", async () => {
@@ -229,6 +229,29 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 
 		await expect(internals.silentInteraction(payload)).rejects.toThrow("Wallet locked")
 		expect(executeOperations).not.toHaveBeenCalled()
+	})
+
+	test("silentInteraction dispatches under the fence it compared, even when the session re-unlocks before the dispatch", async () => {
+		let live = 1
+		// The execution side of the contract: a fence from an ended session fails its send.
+		const executeOperations = vi.fn(async (...args: unknown[]) =>
+			(args[5] as { session: number }).session === live ? [{ status: "ok" }] : [{ status: "failed", code: "SESSION_ENDED" }],
+		)
+		const { internals } = makeService({ executeOperations })
+		const capture = vi.fn(async () => ({ profileId: "p1", epoch: 0, session: live }))
+		internals.profileService.captureExecutionFence = capture
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+
+		expect(await internals.silentInteraction(payload)).toEqual([{ status: "ok" }])
+
+		capture.mockClear()
+		// A lock and a same-profile unlock land after the compare, before the dispatch.
+		internals.profileService.refreshSession = vi.fn(async () => {
+			live = 2
+		})
+		expect(await internals.silentInteraction(payload)).toEqual([{ status: "failed", code: "SESSION_ENDED" }])
+		expect(capture).toHaveBeenCalledTimes(1)
+		expect((executeOperations.mock.calls[1] as unknown[])[5]).toEqual({ profileId: "p1", epoch: 0, session: 1 })
 	})
 
 	test("approveInteraction without hooks does not throw", async () => {

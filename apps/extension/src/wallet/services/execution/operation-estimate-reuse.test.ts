@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { GasFees } from "@aztec/stdlib/gas"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import type { Action } from "@nulo/wallet-bridge"
 import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
 import { OperationEstimateReuse, type OperationEstimateReuseDeps, type OperationEstimateReuseEntry } from "./operation-estimate-reuse"
@@ -11,6 +12,7 @@ vi.mock("@nulo/bridge-core/fee-juice", async (importOriginal) => {
 })
 
 const CALL: Action = { kind: "call", contract: "0xtoken", method: "transfer", args: ["0xme", "0xyou", 5] }
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 function makeInput(overrides: Partial<OperationFingerprintInput> = {}): OperationFingerprintInput {
 	return {
@@ -55,7 +57,6 @@ function makeEntry(overrides: Partial<OperationEstimateReuseEntry> = {}): Operat
 
 function makeReuse(depOverrides: Partial<OperationEstimateReuseDeps> = {}) {
 	const deps: OperationEstimateReuseDeps = {
-		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
 		getNetwork: vi.fn(
 			async () =>
 				({
@@ -86,9 +87,9 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 		const { reuse } = makeReuse()
 		const entry = makeEntry()
 		reuse.stash("id-1", entry)
-		expect(await reuse.tryConsume("id-1", makeInput())).toBe(entry)
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBe(entry)
 		// SINGLE-SHOT: a second consume of the same id misses.
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("a requested self-pay and a picker-chosen Fee Juice build of the same actions never consume each other", async () => {
@@ -98,42 +99,45 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 		const picked = makeInput({ fee: { gasPadding: 1 }, feeSettings: feeJuice })
 		reuse.stash("self", makeEntry({ fingerprint: fingerprintOperation(selfPay)!, feeSettings: feeJuice }))
 		reuse.stash("picked", makeEntry({ fingerprint: fingerprintOperation(picked)!, feeSettings: feeJuice }))
-		expect(await reuse.tryConsume("self", picked)).toBeUndefined()
-		expect(await reuse.tryConsume("picked", selfPay)).toBeUndefined()
+		expect(await reuse.tryConsume("self", picked, FENCE)).toBeUndefined()
+		expect(await reuse.tryConsume("picked", selfPay, FENCE)).toBeUndefined()
 		// Single-shot: the misses above consumed both slots; the same shape, re-stashed, comes back.
 		reuse.stash("self-again", makeEntry({ fingerprint: fingerprintOperation(selfPay)!, feeSettings: feeJuice }))
-		expect(await reuse.tryConsume("self-again", selfPay)).toBeDefined()
+		expect(await reuse.tryConsume("self-again", selfPay, FENCE)).toBeDefined()
 	})
 
 	test("unknown id misses", async () => {
 		const { reuse } = makeReuse()
-		expect(await reuse.tryConsume("nope", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("nope", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("TTL: an expired entry misses", async () => {
 		const { reuse } = makeReuse()
 		reuse.stash("id-1", makeEntry({ builtAt: Date.now() - ESTIMATE_REUSE_TTL_MS - 1 }))
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("fingerprint drift: any input change misses (amount-style arg drift)", async () => {
 		const { reuse } = makeReuse()
 		reuse.stash("id-1", makeEntry())
 		const drifted = makeInput({ actions: [{ ...CALL, args: ["0xme", "0xyou", 6] } as Action] })
-		expect(await reuse.tryConsume("id-1", drifted)).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", drifted, FENCE)).toBeUndefined()
 	})
 
 	test("non-fingerprintable consume input misses (never a false hit)", async () => {
 		const { reuse } = makeReuse()
 		reuse.stash("id-1", makeEntry())
 		const exotic = makeInput({ actions: [{ kind: "call", contract: "0xc", method: "m", args: [() => 1] } as unknown as Action] })
-		expect(await reuse.tryConsume("id-1", exotic)).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", exotic, FENCE)).toBeUndefined()
 	})
 
-	test("profile drift misses", async () => {
-		const { reuse } = makeReuse({ getActiveProfile: vi.fn(async () => ({ id: "OTHER" })) })
-		reuse.stash("id-1", makeEntry())
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+	test("an entry stashed under another profile than the fence's throws SessionEndedError, before the rest of the ladder", async () => {
+		const { reuse, deps } = makeReuse()
+		reuse.stash("id-1", makeEntry({ profileId: "OTHER" }))
+		await expect(reuse.tryConsume("id-1", makeInput(), FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(deps.getNetwork).not.toHaveBeenCalled()
+		// Single-shot still holds: the refused entry is gone.
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("endpoint drift misses (id or url)", async () => {
@@ -143,7 +147,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			),
 		})
 		reuse.stash("id-1", makeEntry())
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("SAME-BATCH pending drift: op #1 broadcasting between estimate and confirm of op #2 misses", async () => {
@@ -152,7 +156,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			getPendingForAccount: vi.fn(() => [{ hash: "0xpending" }, { hash: "0xop1-just-broadcast" }]),
 		})
 		reuse.stash("id-2", makeEntry())
-		expect(await reuse.tryConsume("id-2", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-2", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("CHAIN-IDENTITY drift: the composite assert throwing fails closed to a miss", async () => {
@@ -162,7 +166,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			}),
 		})
 		reuse.stash("id-1", makeEntry())
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("CHAIN-IDENTITY drift: an XOR-composite collision misses on the exact pair", async () => {
@@ -172,7 +176,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			getLiveChainIdentity: vi.fn(async () => ({ l1ChainId: 2, rollupVersion: 7 })),
 		})
 		reuse.stash("id-1", makeEntry({ chainIdentity: { l1ChainId: 1, rollupVersion: 4 } }))
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("FPC-IDENTITY drift: an in-place row address edit misses", async () => {
@@ -180,7 +184,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			getFpcInfo: vi.fn(async () => ({ ...FPC_SNAPSHOT, address: "0xEVIL" }) as never),
 		})
 		reuse.stash("id-1", makeEntry())
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("FPC row unavailable (deleted) misses instead of throwing", async () => {
@@ -190,7 +194,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			}),
 		})
 		reuse.stash("id-1", makeEntry())
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("fj entries carry no fpcIdentity and skip the FPC step", async () => {
@@ -200,20 +204,20 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 			"id-1",
 			makeEntry({ fpcIdentity: undefined, fingerprint: fingerprintOperation(fjInput)!, feeSettings: fjInput.feeSettings }),
 		)
-		expect(await reuse.tryConsume("id-1", fjInput)).toBeDefined()
+		expect(await reuse.tryConsume("id-1", fjInput, FENCE)).toBeDefined()
 		expect(deps.getFpcInfo).not.toHaveBeenCalled()
 	})
 
 	test("base-fee drift misses (predicted-worst product changed)", async () => {
 		const { reuse } = makeReuse()
 		reuse.stash("id-1", makeEntry({ baseFeeFingerprint: "999:999" }))
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 
 	test("evict drops a stashed entry", async () => {
 		const { reuse } = makeReuse()
 		reuse.stash("id-1", makeEntry())
 		reuse.evict("id-1")
-		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+		expect(await reuse.tryConsume("id-1", makeInput(), FENCE)).toBeUndefined()
 	})
 })

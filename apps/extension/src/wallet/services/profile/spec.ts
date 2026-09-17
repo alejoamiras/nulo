@@ -150,6 +150,13 @@ export type ActiveSession = {
 	 *  per-account, and NO silent-restore bearer is persisted (the next SW wake forces a password
 	 *  unlock, re-surfacing the state). Zeroized on close/replace/expiry. */
 	dek?: ImportedKeysDek
+	/** Allocated when the session is published by an unlock or a restore; never reused, so it names
+	 *  this session and no later one of the same profile. */
+	serial: number
+	/** The latest deadline expiry deferral may reach for this session, fixed by its first deferral. */
+	deferBudgetEnd?: number
+	/** The pending decision on this session's expiry, joined by every path that observes it. */
+	expiryDecision?: Promise<void>
 }
 
 export type Methods = {

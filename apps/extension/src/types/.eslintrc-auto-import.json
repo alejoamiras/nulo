@@ -246,6 +246,7 @@
     "initTransactionService": true,
     "inject": true,
     "isAmountAboveDustThreshold": true,
+    "isApprovedSendInFlight": true,
     "isBackgroundConnected": true,
     "isForeignProfile": true,
     "isHiddenHolding": true,

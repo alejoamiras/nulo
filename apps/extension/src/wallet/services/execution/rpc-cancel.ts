@@ -39,6 +39,7 @@ import {
 	DuplicateInitializationError,
 	JobCancelledError,
 	PxeStaleAnchorError,
+	SessionEndedError,
 } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
@@ -84,7 +85,10 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 	// detail-dependent classes lose their details through this message-only
 	// channel.
 	const ridesCodeChannel =
-		error instanceof DuplicateInitializationError || error instanceof PxeStaleAnchorError || error instanceof ContractNotRegisteredError
+		error instanceof DuplicateInitializationError ||
+		error instanceof PxeStaleAnchorError ||
+		error instanceof ContractNotRegisteredError ||
+		error instanceof SessionEndedError
 	return {
 		status: "failed",
 		error: errorMessage(error),

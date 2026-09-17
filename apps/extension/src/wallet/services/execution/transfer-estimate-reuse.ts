@@ -4,16 +4,17 @@
  *
  * Extracted verbatim from the execution facade. The validation ladder in
  * `tryConsume` is the contract: ANY drift between estimate time and
- * confirm time (inputs, profile, endpoint, base fee, pending set, TTL)
- * rejects reuse and the caller falls back to a full rebuild. Rejection
- * order and the byte-stable fingerprint formats are pinned by the
+ * confirm time (inputs, endpoint, base fee, pending set, TTL) rejects
+ * reuse and the caller falls back to a full rebuild. A profile other than
+ * the executing fence's is not drift but a session that ended: it throws,
+ * so no rebuild ever runs under whichever profile is active instead.
+ * Rejection order and the byte-stable fingerprint formats are pinned by the
  * colocated tests — both are load-bearing (entries store fingerprints
  * computed at estimate time and compare against freshly-derived ones).
  *
  * Dependencies are injected as lazy lookups so the rejection ladder
  * keeps its laziness: branches that reject early never touch the later
- * dependencies (profile lookup happens only after input checks pass,
- * node lookup only after endpoint checks pass, etc.).
+ * dependencies (node lookup only after endpoint checks pass, etc.).
  */
 
 import { GasFees } from "@aztec/stdlib/gas"
@@ -21,7 +22,9 @@ import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
@@ -82,10 +85,7 @@ export type TransferEstimateReuseEntry = {
 	readonly recipientAddress: string
 	readonly amount: bigint
 	readonly feeSettingsHash: string
-	/** Profile id at estimate time. Used for cleaner reject diagnostics
-	 *  (codex audit NICE-TO-HAVE #2) — drift already fails closed via
-	 *  `getNetwork` / `getAccountContract` profile-scoping, but rejecting
-	 *  early avoids confusing errors deeper in the reuse path. */
+	/** Profile id at estimate time; consume refuses any other fence. */
 	readonly profileId: string
 	/** Validation snapshot — what was true at estimate time. */
 	readonly baseFeeFingerprint: string
@@ -118,7 +118,6 @@ export type TransferEstimateReuseEntry = {
 /** Lazy dependency lookups — injected so the rejection ladder's laziness
  *  survives extraction (early rejects never touch later deps). */
 export interface TransferEstimateReuseDeps {
-	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<MinFeeNode>
 	getPendingForAccount(account: string): { hash: string }[]
@@ -146,8 +145,14 @@ export class TransferEstimateReuse {
 	 *  byte-for-byte, (c) the SW's current view of base fee + primary
 	 *  endpoint matches the snapshot, and (d) the entry is fresh (TTL).
 	 *  Any mismatch ⇒ delete + return undefined; caller falls back to a
-	 *  full rebuild. Single-shot: the entry is consumed on first lookup. */
-	public async tryConsume(estimateId: string, inputs: TransferRequest): Promise<TransferEstimateReuseEntry | undefined> {
+	 *  full rebuild — except an entry stashed under another profile than
+	 *  `fence`'s, which throws {@link SessionEndedError}. Single-shot: the
+	 *  entry is consumed on first lookup. */
+	public async tryConsume(
+		estimateId: string,
+		inputs: TransferRequest,
+		fence: ExecutionFence,
+	): Promise<TransferEstimateReuseEntry | undefined> {
 		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined
 
@@ -169,14 +174,7 @@ export class TransferEstimateReuse {
 			return this.reject(estimateId, "input drift")
 		}
 
-		// Active-profile drift. `getNetwork` and `getAccountContract` already
-		// fail closed for cross-profile leakage, but rejecting reuse here
-		// avoids confusing downstream errors when the user swapped profiles
-		// between estimate and confirm.
-		const profile = await this.deps.getActiveProfile()
-		if (!profile || profile.id !== entry.profileId) {
-			return this.reject(estimateId, "profile drift")
-		}
+		if (entry.profileId !== fence.profileId) throw new SessionEndedError()
 
 		// Endpoint identity: the primary can change at runtime.
 		const network = await this.deps.getNetwork(inputs.networkId)

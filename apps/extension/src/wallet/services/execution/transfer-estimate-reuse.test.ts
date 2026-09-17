@@ -6,6 +6,7 @@
  */
 
 import { GasFees } from "@aztec/stdlib/gas"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { describe, expect, test } from "vitest"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
@@ -20,6 +21,7 @@ import {
 } from "./transfer-estimate-reuse"
 
 const FEE_SETTINGS: FeeSettings = { paymentMethod: { kind: "fj" } }
+const FENCE = { profileId: "profile-1", epoch: 0, session: 1 }
 
 const INPUTS = {
 	networkId: "net-1",
@@ -67,7 +69,6 @@ function makeEntry(overrides: Partial<TransferEstimateReuseEntry> = {}): Transfe
 function makeReuse(
 	overrides: {
 		entry?: Partial<TransferEstimateReuseEntry>
-		profile?: { id: string } | undefined
 		network?: Partial<Network>
 		getCurrentMinFees?: () => Promise<GasFees>
 		getPredictedMinFees?: () => Promise<GasFees[]>
@@ -76,7 +77,6 @@ function makeReuse(
 ) {
 	const entry = makeEntry(overrides.entry)
 	const deps: TransferEstimateReuseDeps = {
-		getActiveProfile: async () => ("profile" in overrides ? overrides.profile : { id: "profile-1" }),
 		getNetwork: async () =>
 			(overrides.network ?? {
 				chainId: 0,
@@ -117,52 +117,48 @@ describe("fingerprint byte-stability (cache-compare contract)", () => {
 describe("tryConsume: every observable exit", () => {
 	test("happy path returns the entry", async () => {
 		const { reuse, entry } = makeReuse()
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBe(entry)
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBe(entry)
 	})
 
 	test("unknown estimateId → undefined", async () => {
 		const { reuse } = makeReuse()
-		expect(await reuse.tryConsume("nope", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("nope", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("single-shot: second consume of the same id → undefined", async () => {
 		const { reuse } = makeReuse()
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeDefined()
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeDefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("TTL stale → undefined", async () => {
 		const { reuse } = makeReuse({ entry: { builtAt: Date.now() - ESTIMATE_REUSE_TTL_MS - 1 } })
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("input drift (recipient) → undefined", async () => {
 		const { reuse } = makeReuse({ entry: { recipientAddress: "0xother" } })
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("fee-settings drift (different payment method hash) → undefined", async () => {
 		const { reuse } = makeReuse({
 			entry: { feeSettingsHash: fingerprintFeeSettings({ paymentMethod: { kind: "fpc", fpcId: "x" } }) },
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
-	test("profile drift (different active profile) → undefined", async () => {
-		const { reuse } = makeReuse({ profile: { id: "profile-2" } })
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
-	})
-
-	test("no active profile → undefined", async () => {
-		const { reuse } = makeReuse({ profile: undefined })
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+	test("profile drift (entry under another profile than the fence's) → SessionEndedError, never a miss to rebuild on", async () => {
+		const { reuse } = makeReuse({ entry: { profileId: "profile-2" } })
+		await expect(reuse.tryConsume("est-1", INPUTS, FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("no primary endpoint on the network → undefined", async () => {
 		const { reuse } = makeReuse({
 			network: { chainId: 0, primaryEndpointId: "ep-gone", endpoints: [PRIMARY_ENDPOINT] } as Partial<Network>,
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("primary endpoint URL changed → undefined", async () => {
@@ -173,14 +169,14 @@ describe("tryConsume: every observable exit", () => {
 				endpoints: [{ id: PRIMARY_ENDPOINT.id, rpcUrl: "http://localhost:9999" }],
 			} as Partial<Network>,
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("base fee drift → undefined", async () => {
 		const { reuse } = makeReuse({
 			getCurrentMinFees: async () => new GasFees(51n, 100n),
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("predicted-worst (not current-min) is the consume-time basis", async () => {
@@ -190,7 +186,7 @@ describe("tryConsume: every observable exit", () => {
 		const { reuse } = makeReuse({
 			getPredictedMinFees: async () => [new GasFees(55n, 110n), new GasFees(60n, 120n)],
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("predicted-worst entry matches when the prediction is stable", async () => {
@@ -198,7 +194,7 @@ describe("tryConsume: every observable exit", () => {
 			entry: { baseFeeFingerprint: "120:240" },
 			getPredictedMinFees: async () => [new GasFees(55n, 110n), new GasFees(60n, 120n)],
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBe(entry)
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBe(entry)
 	})
 
 	test("base fee fetch failure → undefined (conservative)", async () => {
@@ -207,12 +203,12 @@ describe("tryConsume: every observable exit", () => {
 				throw new Error("node down")
 			},
 		})
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 
 	test("pending-tx set changed → undefined", async () => {
 		const { reuse } = makeReuse({ pending: [{ hash: "0xnew" }] })
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeUndefined()
 	})
 })
 
@@ -223,9 +219,9 @@ describe("stash: opportunistic TTL sweep", () => {
 		reuse.stash("est-stale", stale)
 		// Writing a THIRD entry sweeps est-stale (past TTL) but not est-1.
 		reuse.stash("est-2", makeEntry())
-		expect(await reuse.tryConsume("est-stale", INPUTS)).toBeUndefined()
-		expect(await reuse.tryConsume("est-1", INPUTS)).toBeDefined()
-		expect(await reuse.tryConsume("est-2", INPUTS)).toBeDefined()
+		expect(await reuse.tryConsume("est-stale", INPUTS, FENCE)).toBeUndefined()
+		expect(await reuse.tryConsume("est-1", INPUTS, FENCE)).toBeDefined()
+		expect(await reuse.tryConsume("est-2", INPUTS, FENCE)).toBeDefined()
 	})
 
 	test("(N-15) a consumed entry carries the build's initializesAccount provenance verbatim", async () => {
@@ -233,7 +229,7 @@ describe("stash: opportunistic TTL sweep", () => {
 		// must see the same provenance a fresh build would — a cache hit that
 		// dropped the flag would silently downgrade a real init race to generic.
 		const { reuse } = makeReuse({ entry: { initializesAccount: true } })
-		const consumed = await reuse.tryConsume("est-1", INPUTS)
+		const consumed = await reuse.tryConsume("est-1", INPUTS, FENCE)
 		expect(consumed?.initializesAccount).toBe(true)
 	})
 })

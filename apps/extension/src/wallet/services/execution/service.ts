@@ -23,6 +23,7 @@ import { FpcService, FpcType } from "@/wallet/services/fpc/service"
 import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, TxStatus } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
+import { isApprovedSendInFlight } from "@/utils/in-flight-send"
 import { DAPP_INTERACTION_SERVICE_NAME, type ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
@@ -96,6 +97,10 @@ export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient =>
 
 /** A popup decodes one approval window at a time; anything past this is not a display request. */
 const MAX_DISPLAY_CALLS = 64
+
+/** The operations that run under the authorizing session's fence. The wallet-sdk dispatcher sends
+ *  a dApp's reads, registrations, simulations and silent authwits with none, and those never read one. */
+const FENCED_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set(["send_transaction", "aztec_sendTx", "register_token"])
 
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -218,6 +223,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 		this.feeStrategies = buildFeeStrategies(feeDeps)
 		this.wireCacheInvalidation()
+		// Every session open and close fires this inside the session transition, so the sweep is
+		// started here and never awaited; it logs its own failures.
+		this.profileService.onActiveProfileChanged.add(() => void this.lane.abandonDeadSessions())
+		this.profileService.setExpiryDeferral((profileId) => this.hasApprovedSendsInFlight(profileId))
+	}
+
+	/** Whether `profileId` has a send the user approved that has not been broadcast yet. */
+	private async hasApprovedSendsInFlight(profileId: string): Promise<boolean> {
+		const operations = await this.operationJournal.getOperations({ profileId })
+		return operations.some(isApprovedSendInFlight)
 	}
 
 	/** Wiring only — every lambda reads `this.*` lazily at call time, so
@@ -243,14 +258,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
 		this.estimateReuse = new TransferEstimateReuse({
-			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			logDebug: (msg) => this.logDebug(msg),
 		})
 		this.operationEstimateReuse = new OperationEstimateReuse({
-			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
 			getLiveChainIdentity: async (network) => {
@@ -285,6 +298,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			captureProfileEpoch: (profileId) => this.profileService.getDeletionState().capture(profileId),
+			assertFence: (fence) => this.profileService.assertFence(fence),
+			peekLiveSerial: () => this.profileService.peekLiveSerial(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logInfo: (msg, ...rest) => this.logInfo(msg, ...rest),
@@ -296,17 +311,21 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			estimateReuse: this.estimateReuse,
 			coordinator: this.coordinator,
 			lane: {
-				registerController: (journalId, controller) => this.lane.registerController(journalId, controller),
+				registerInFlight: (journalId, serial, controller) => this.lane.registerInFlight(journalId, serial, controller),
 				deleteController: (journalId) => this.lane.deleteController(journalId),
 			},
 			getActiveProfile: () => this.profileService.getActiveProfile(),
+			captureExecutionFence: () => this.captureFence(),
+			assertFence: (fence) => this.profileService.assertFence(fence),
+			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
-			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildAndEstimate: (op, feeSettings, fence, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal),
 			createJournalOperation: (input) => this.operationJournal.createOperation(input),
 			transitionJournal: (journalId, progress, error) => this.operationJournal.transitionOperation(journalId, progress, error),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
@@ -328,13 +347,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private wireDappSendAndViewExecutors(): void {
 		const estimateWithDiscovery = new DiscoveryAwareEstimator({
 			authwit: this.authwit,
-			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
-				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
-			buildAndEstimateFolded: (op, feeSettings, probe, parentTask, signal) =>
-				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal, probe),
-			buildForDiscovery: async (op, method) => {
+			buildAndEstimateValidated: (op, feeSettings, fence, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal),
+			buildAndEstimateFolded: (op, feeSettings, fence, probe, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal, probe),
+			buildForDiscovery: async (op, method, fence) => {
 				const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
 					op as SendTransactionOperation,
+					fence,
 					method,
 				)
 				return { txRequest, node, pxe, account, network }
@@ -348,6 +368,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			operationEstimateReuse: this.operationEstimateReuse,
 			previewSnapshots: this.previewSnapshots,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
+			captureExecutionFence: () => this.captureFence(),
+			assertFence: (fence) => this.profileService.assertFence(fence),
+			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
@@ -355,18 +378,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			getFpcInfo: (fpcId) => this.fpcService.getFpc(fpcId),
 			lane: {
-				registerController: (journalId, controller) => this.lane.registerController(journalId, controller),
 				deleteController: (journalId) => this.lane.deleteController(journalId),
-				acquireSlot: (networkId, queuedJournalId, onEnqueued, originKey) =>
-					this.lane.acquireSlot(networkId, queuedJournalId, onEnqueued, originKey),
+				acquireSlot: (networkId, queuedJournalId, fence, onEnqueued, originKey) =>
+					this.lane.acquireSlot(networkId, queuedJournalId, fence, onEnqueued, originKey),
 				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController, fence) =>
 					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController, fence),
 				beginJournal: (networkId, accountAddress, origin, calls, fence) =>
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
-			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
-				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildAndEstimateValidated: (op, feeSettings, fence, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
@@ -413,11 +435,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
 	}
 
-	/** Capture the {profileId, epoch} fence at execution AUTHORIZATION (before the
+	/** Capture the {profileId, epoch, session} fence at execution AUTHORIZATION (before the
 	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
-	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
+	 *  was deleted meanwhile. Delegates to ProfileService so the active-read +
 	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
-	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
+	 *  requireActiveProfile + capture here would leave a TOCTOU. */
 	private async captureFence(): Promise<ExecutionFence> {
 		return this.profileService.captureExecutionFence()
 	}
@@ -605,18 +627,23 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		 *  estimate/preview ids the popup handed back. Never part of the shared
 		 *  `Operation` wire shape — a dApp cannot reach this parameter. */
 		approvals?: readonly (OperationApprovalEnvelope | undefined)[],
-		/** TRUSTED-INTERNAL parameter (like `estimateIds`): the deletion fence
-		 *  captured at the dApp interaction's session re-validation — the
-		 *  authorization moment. Ops whose commit asserts an entry capture
-		 *  (register_token) consume it so a delete + same-id re-import parked
-		 *  anywhere between approval and commit fails closed. NOT structurally
-		 *  unreachable over the wire (RPC dispatch forwards extra positional
-		 *  params) — the boundary is same-extension sender authentication, so
-		 *  only popup/SW code can supply it; dApps route through the
-		 *  wallet-bridge dispatcher, which never forwards it. */
+		/** TRUSTED-INTERNAL parameter (like `estimateIds`): the fence captured
+		 *  at the dApp interaction's session re-validation — the authorization
+		 *  moment. Every send and token commit runs under it, so a lock, a
+		 *  switch, a re-unlock or a delete + same-id re-import parked anywhere
+		 *  between approval and commit fails closed. Required for a DAPP-origin
+		 *  send or token commit: without it the dispatch would capture whatever
+		 *  session is live when the op finally runs. NOT structurally unreachable over the wire (RPC
+		 *  dispatch forwards extra positional params) — the boundary is
+		 *  same-extension sender authentication, so only popup/SW code can
+		 *  supply it; dApps route through the wallet-bridge dispatcher, which
+		 *  never forwards it. */
 		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
+		if (origin.type === OriginType.DAPP && !authorizedFence && operations.some((op) => FENCED_OPERATION_KINDS.has(op.kind))) {
+			throw new Error("a dApp send requires the fence of the session that authorized it")
+		}
 		const results: OperationResult[] = []
 		let operationIndex = -1
 		for (const operation of operations) {
@@ -658,10 +685,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	/** Per-operation dispatch — one contiguous awaited region (every arm was
-	 *  already awaited at this position in the pre-split loop). The deletion
-	 *  fence for `aztec_sendTx` is captured INSIDE its arm, not at the batch
-	 *  top: read-only ops must not trip the unlock check, and the capture still
-	 *  precedes the prove (D13). */
+	 *  already awaited at this position in the pre-split loop). Without an
+	 *  `authorizedFence` (UI origin) the send arms capture INSIDE the arm, not
+	 *  at the batch top: read-only ops must not trip the unlock check, and the
+	 *  capture still precedes the prove. */
 	private async dispatchOperation(
 		operation: Operation,
 		origin: LocalTxOrigin,
@@ -684,7 +711,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				// B-02: forward hooks so the slot buckets per-origin (grantPublicAuthwit
 				// carries { originKey }); without it hostile-dApp grants + UI auth ops
 				// collapse into one __no_origin__ capacity bucket, losing fairness.
-				return this.executeSendTransaction(operation, origin, operationTask, hooks)
+				const fence = authorizedFence ?? (await this.captureFence())
+				return this.executeSendTransaction(operation, origin, operationTask, hooks, fence)
 			}
 			case "simulate_transaction": {
 				return this.viewExecutor.executeSimulateTransaction(operation)
@@ -725,10 +753,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			}
 			case "aztec_sendTx": {
 				// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
-				// Capture the deletion fence HERE (a send op that writes a tx),
-				// not at the batch top — read-only ops must not trip the
-				// unlock check, and this is still before the prove (D13).
-				const fence = await this.captureFence()
+				const fence = authorizedFence ?? (await this.captureFence())
 				return this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence, approval)
 			}
 			case "aztec_createAuthWit": {
@@ -837,15 +862,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		await this.tokenService.addTokenAuthorized(fence, fence.profileId, op.networkId, op.accountAddress, ti, opContext)
 	}
 
+	/** `fence` absent ⇒ captured now, which is right only for a caller that
+	 *  awaited nothing between the user's action and this call. */
 	public async executeSendTransaction(
 		op: SendTransactionOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
+		fence?: ExecutionFence,
 	): Promise<string> {
 		await this.ensureInitialized()
-		const fence = await this.captureFence()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence, hooks)
+		const authorized = fence ?? (await this.captureFence())
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, authorized, hooks)
 	}
 
 	/**
@@ -1010,6 +1038,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			fee?: FeeOptions
 		},
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 		probe?: DiscoveryProbe,
@@ -1027,6 +1056,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 		const ctx: FeeStrategyContext = {
 			op,
+			fence,
 			feeSettings,
 			feeMultiplier,
 			gasPadding,

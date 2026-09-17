@@ -15,8 +15,9 @@
  *
  * ## Error contract (frozen by call site)
  *
- * Every throw is preserved verbatim from the original:
- *   - `"Wallet locked"` — no active profile
+ * The throws callers depend on:
+ *   - `SessionEndedError` — the fence's session has ended (lock, expiry,
+ *     another profile, a re-unlock); a begun deletion throws its epoch error
  *   - `"Contract not found"` / `"Contract artifact not found"` /
  *     `"Method not found"` — per-action resolution failures
  *   - `"Invalid authwit content kind"` — unrecognized authwit `content.kind`
@@ -54,14 +55,15 @@ import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtim
 import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { ProfileService } from "@/wallet/services/profile/service"
-import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
+import { fenceChecks } from "./execution-coordinator"
 import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
@@ -112,11 +114,13 @@ export class TxRequestBuilder {
 		private readonly logger: ILogger,
 	) {}
 
-	/** Standard Nulo path: wallet-lock check, resolve contracts, process
-	 *  every action (authwit / call / capsule / extraArgs), build via the
-	 *  account contract's entrypoint. */
+	/** Standard Nulo path: fence check, resolve contracts, process every
+	 *  action (authwit / call / capsule / extraArgs), build via the account
+	 *  contract's entrypoint. The account is the fence's profile's, never the
+	 *  active one's. */
 	public async buildStandard(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
+		fence: ExecutionFence,
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		parentTask?: WrappedTask,
 		gasSettings?: PartialGasSettingsRPC,
@@ -125,7 +129,7 @@ export class TxRequestBuilder {
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
 		try {
-			const ctx = await this.resolveBuildContext(op)
+			const ctx = await this.resolveBuildContext(op, fence)
 			const { account, nodeInfo, instances, artifacts } = ctx
 			const collected = newCollectedActions()
 
@@ -205,15 +209,18 @@ export class TxRequestBuilder {
 		}
 	}
 
-	/** Build prelude: profile → network → account → node → PXE, then the live
+	/** Build prelude: fence → network → account → node → PXE, then the live
 	 *  chain-identity assert, then contract resolution + registration. The
 	 *  drift assert runs BEFORE any resolver/registration/action work — a
 	 *  malicious or drifted RPC endpoint must be rejected before it can shape
-	 *  the signing context (F-012 / Phase 5). */
-	private async resolveBuildContext(op: { networkId: string; accountAddress: string; actions: Action[] }): Promise<BuildContext> {
-		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+	 *  the signing context. */
+	private async resolveBuildContext(
+		op: { networkId: string; accountAddress: string; actions: Action[] },
+		fence: ExecutionFence,
+	): Promise<BuildContext> {
+		await this.profileService.assertFence(fence)
 		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
+		const account = await this.resolveAccount(fence, network.chainId, op.accountAddress)
 		const node = await this.networkService.getNode(network.chainId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
@@ -227,6 +234,15 @@ export class TxRequestBuilder {
 			onRegister: () => this.log("Register contract"),
 		})
 		return { network, account, node, pxe, nodeInfo, instances, artifacts }
+	}
+
+	/** Account lookups read the keys of whichever session is live when they run, so the fence is
+	 *  checked again once the lookup returns: a lock and re-unlock of the same profile meanwhile
+	 *  would otherwise hand this build the next session's keys. */
+	private async resolveAccount(fence: ExecutionFence, chainId: number, accountAddress: string): Promise<IAccountContract> {
+		const account = await this.accountService.getAccountContract(fence.profileId, chainId, accountAddress)
+		fenceChecks(this.profileService, fence).assertLive()
+		return account
 	}
 
 	/** The genuinely-awaited authwit hash computations, deduplicated across the
@@ -363,18 +379,18 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
+	public async buildNoFrom(op: AztecSendTxOperation, fence: ExecutionFence, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
 		try {
 			this.log(`buildNoFrom: starting, accountAddress=${op.accountAddress}, networkId=${op.networkId}`)
-			const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+			await this.profileService.assertFence(fence)
 
 			const network = await this.networkService.getNetwork(op.networkId)
 			const node = await this.networkService.getNode(network.chainId)
 			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
+			const account = await this.resolveAccount(fence, network.chainId, op.accountAddress)
 			this.log(`buildNoFrom: account resolved, address=${account.address.toString()}`)
 
 			// Same order as `resolveBuildContext`: refuse a drifted endpoint before any PXE

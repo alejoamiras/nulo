@@ -19,6 +19,8 @@ import { OriginType } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor } from "./dapp-send-executor"
 import { ExecutionLane } from "./execution-lane"
 
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
+
 // ── cancelJob: transition-first, abort-second contract ─────────────────
 
 describe("cancelJob: journal-first ordering contract", () => {
@@ -31,6 +33,8 @@ describe("cancelJob: journal-first ordering contract", () => {
 			} as never,
 			getActiveProfile: async () => ({ id: "p1" }) as never,
 			getNetwork: async () => ({}) as never,
+			assertFence: async () => {},
+			peekLiveSerial: () => FENCE.session,
 			logDebug: () => {},
 			logInfo: () => {},
 			logError: () => {},
@@ -44,11 +48,11 @@ describe("cancelJob: journal-first ordering contract", () => {
 			transitions.push([id, patch])
 			return {}
 		})
-		lane.registerController("job-1", controller)
+		lane.registerInFlight("job-1", FENCE.session, controller)
 		await lane.cancelJob("job-1")
 		expect(transitions).toEqual([["job-1", { stage: "cancelled" }]])
 		expect(controller.signal.aborted).toBe(true)
-		const registry = (lane as unknown as { activeControllers: Map<string, AbortController> }).activeControllers
+		const registry = (lane as unknown as { activeControllers: Map<string, unknown> }).activeControllers
 		expect(registry.size).toBe(0)
 	})
 
@@ -57,10 +61,10 @@ describe("cancelJob: journal-first ordering contract", () => {
 		const lane = makeLane(async () => {
 			throw new Error("illegal transition: succeeded → cancelled")
 		})
-		lane.registerController("job-1", controller)
+		lane.registerInFlight("job-1", FENCE.session, controller)
 		await lane.cancelJob("job-1")
 		expect(controller.signal.aborted).toBe(false)
-		const registry = (lane as unknown as { activeControllers: Map<string, AbortController> }).activeControllers
+		const registry = (lane as unknown as { activeControllers: Map<string, unknown> }).activeControllers
 		expect(registry.size).toBe(1)
 	})
 })
@@ -104,7 +108,6 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			txBuilder: {} as never,
 			coordinator: { proveAndSend } as never,
 			lane: {
-				registerController: vi.fn(),
 				deleteController: vi.fn(),
 				acquireSlot: acquireSlot as never,
 				claimOrCreateJournal: claimOrCreateJournal as never,
@@ -127,6 +130,9 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
 			previewSnapshots: { stash: vi.fn(), evict: vi.fn(), take: vi.fn(() => ({ kind: "missing" })) } as never,
 			getActiveProfile: vi.fn(async () => ({ id: "p1" })) as never,
+			captureExecutionFence: vi.fn(async () => FENCE),
+			assertFence: vi.fn(async () => {}),
+			isFenceLive: vi.fn(() => true),
 			getNetwork: vi.fn() as never,
 			getNode: vi.fn() as never,
 			getPXE: vi.fn() as never,
@@ -145,6 +151,8 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 				feeSettings: { paymentMethod: { kind: "fj" } },
 			} as never,
 			{ type: OriginType.DAPP, name: "test" } as never,
+			undefined,
+			FENCE,
 		)
 
 		// Let the slot be acquired + prove entered, then confirm the slot is STILL

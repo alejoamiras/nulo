@@ -13,6 +13,7 @@ import {
 	ProfileIdConflictError,
 	RecoveryModeError,
 	RestoreTornError,
+	SessionEndedError,
 } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
@@ -520,8 +521,43 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!session || this.deletionState.isReserved(session.profile.id)) {
 				throw new Error("Wallet locked")
 			}
-			return { profileId: session.profile.id, epoch: this.deletionState.capture(session.profile.id) }
+			return { profileId: session.profile.id, epoch: this.deletionState.capture(session.profile.id), session: session.serial }
 		})
+	}
+
+	/** Throws {@link SessionEndedError} unless the session `fence` was captured under is still the
+	 *  live one, then the deletion-epoch error if a delete of its profile has begun. Reads the session
+	 *  manager under the facade lock — never through `getActiveProfile`, which takes the same lock. */
+	public async assertFence(fence: ExecutionFence): Promise<void> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			const session = await this.sessionManager.getActive()
+			if (session?.serial !== fence.session || session.profile.id !== fence.profileId) {
+				throw new SessionEndedError()
+			}
+			this.deletionState.assertCurrent(fence.profileId, fence.epoch)
+		})
+	}
+
+	/** {@link assertFence}'s question answered synchronously from memory — no lock, no lazy expiry
+	 *  close, no await — so a caller can act on the answer in the same tick. A begun deletion also
+	 *  answers `false`: its session stays open until the tombstone is written. */
+	public isFenceLive(fence: ExecutionFence): boolean {
+		return (
+			this.sessionManager.peekLiveSerial() === fence.session &&
+			this.sessionManager.isActive(fence.profileId) &&
+			this.deletionState.isCurrent(fence.profileId, fence.epoch)
+		)
+	}
+
+	/** The live session's serial, synchronously; `undefined` when locked. */
+	public peekLiveSerial(): number | undefined {
+		return this.sessionManager.peekLiveSerial()
+	}
+
+	/** Registers the check an expired session consults before it auto-locks; in-process only. */
+	public setExpiryDeferral(predicate: (profileId: string) => Promise<boolean>): void {
+		this.sessionManager.setExpiryDeferral(predicate)
 	}
 
 	public async getProfiles(): Promise<ProfileInfo[]> {

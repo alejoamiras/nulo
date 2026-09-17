@@ -120,6 +120,7 @@ declare global {
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
   const isAmountAboveDustThreshold: typeof import('../utils/incoming-dust').isAmountAboveDustThreshold
+  const isApprovedSendInFlight: typeof import('../utils/in-flight-send').isApprovedSendInFlight
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
   const isForeignProfile: typeof import('../utils/activity-rows').isForeignProfile
   const isHiddenHolding: typeof import('../utils/token-fold').isHiddenHolding
@@ -549,6 +550,7 @@ declare module 'vue' {
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly isAmountAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isAmountAboveDustThreshold']>
+    readonly isApprovedSendInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['isApprovedSendInFlight']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
     readonly isForeignProfile: UnwrapRef<typeof import('../utils/activity-rows')['isForeignProfile']>
     readonly isHiddenHolding: UnwrapRef<typeof import('../utils/token-fold')['isHiddenHolding']>

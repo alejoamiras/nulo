@@ -9,6 +9,7 @@ const OPERATION = { kind: "aztec_sendTx", networkId: "net-1", accountAddress: "0
 // inertness pins below keep their meaning unchanged.
 const FEE_SETTINGS = { paymentMethod: { kind: "fjwc" } } as never
 const BUILT = { txRequest: { marker: "req" }, nonce: { toString: () => "1" } } as never
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 function makeEstimator(discovered: unknown[] = []) {
 	const authwit = { discoverPrivateAuthwits: vi.fn(async () => ({ actions: discovered, discovered: [] })) }
@@ -28,14 +29,16 @@ describe("DiscoveryAwareEstimator (inert extraction pins)", () => {
 	test("no effects: discovery once with a CLONED op, then ONE validated build with the original action set", async () => {
 		const { estimator, authwit, buildAndEstimateValidated, buildForDiscovery } = makeEstimator()
 		const actions = [CALL]
-		const { built, discoveredActions } = await estimator.estimate(OPERATION, actions, undefined, FEE_SETTINGS)
+		const { built, discoveredActions } = await estimator.estimate(OPERATION, actions, undefined, FEE_SETTINGS, FENCE)
 
 		expect(built).toBe(BUILT)
 		expect(discoveredActions).toEqual([])
 		expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
-		// The discoverer receives the injected discovery build callback — the
-		// same seam the inline shape always fed it.
-		expect((authwit.discoverPrivateAuthwits.mock.calls[0] as unknown[])[1]).toBe(buildForDiscovery)
+		// The discoverer's build callback is the injected discovery build, run
+		// under the estimate's fence.
+		const discoveryBuild = (authwit.discoverPrivateAuthwits.mock.calls[0] as unknown[])[1] as (op: unknown, method: unknown) => unknown
+		await discoveryBuild(OPERATION, "method")
+		expect(buildForDiscovery).toHaveBeenCalledWith(OPERATION, "method", FENCE)
 		// Cloned, never the caller's array.
 		const discoveredOp = (authwit.discoverPrivateAuthwits.mock.calls[0] as unknown[])[0] as { actions: Action[] }
 		expect(discoveredOp.actions).not.toBe(actions)
@@ -51,7 +54,7 @@ describe("DiscoveryAwareEstimator (inert extraction pins)", () => {
 		const extra = { kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xm" } }
 		const { estimator, buildAndEstimateValidated } = makeEstimator([extra])
 		const actions = [CALL]
-		const { discoveredActions } = await estimator.estimate(OPERATION, actions, undefined, FEE_SETTINGS)
+		const { discoveredActions } = await estimator.estimate(OPERATION, actions, undefined, FEE_SETTINGS, FENCE)
 
 		expect(discoveredActions).toEqual([extra])
 		expect(actions).toHaveLength(1)
@@ -62,7 +65,7 @@ describe("DiscoveryAwareEstimator (inert extraction pins)", () => {
 	test("detectedFee folds into the built op exactly as the inline shape did", async () => {
 		const { estimator, buildAndEstimateValidated } = makeEstimator()
 		const fee = { gasPadding: 1.07 }
-		await estimator.estimate(OPERATION, [CALL], fee as never, FEE_SETTINGS)
+		await estimator.estimate(OPERATION, [CALL], fee as never, FEE_SETTINGS, FENCE)
 		const builtOp = (buildAndEstimateValidated.mock.calls[0] as unknown[])[0] as { fee?: unknown }
 		expect(builtOp.fee).toBe(fee)
 	})
@@ -83,20 +86,21 @@ describe("DiscoveryAwareEstimator (inert extraction pins)", () => {
 			buildForDiscovery: (async () => ({})) as never,
 		})
 
-		await expect(estimator.estimate(OPERATION, [CALL], undefined, FEE_SETTINGS, undefined, controller.signal)).rejects.toThrow(
+		await expect(estimator.estimate(OPERATION, [CALL], undefined, FEE_SETTINGS, FENCE, undefined, controller.signal)).rejects.toThrow(
 			JobCancelledSentinel,
 		)
 		expect(buildAndEstimateValidated).not.toHaveBeenCalled()
 	})
 
-	test("signal + parentTask forwarded into the validated pipeline", async () => {
+	test("fence + signal + parentTask forwarded into the validated pipeline", async () => {
 		const { estimator, buildAndEstimateValidated } = makeEstimator()
 		const controller = new AbortController()
 		const parentTask = { marker: "task" } as never
-		await estimator.estimate(OPERATION, [CALL], undefined, FEE_SETTINGS, parentTask, controller.signal)
+		await estimator.estimate(OPERATION, [CALL], undefined, FEE_SETTINGS, FENCE, parentTask, controller.signal)
 		const call = buildAndEstimateValidated.mock.calls[0] as unknown[]
-		expect(call[2]).toBe(parentTask)
-		expect(call[3]).toBe(controller.signal)
+		expect(call[2]).toBe(FENCE)
+		expect(call[3]).toBe(parentTask)
+		expect(call[4]).toBe(controller.signal)
 	})
 })
 
@@ -117,6 +121,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 			[CALL],
 			undefined,
 			FPC_SETTINGS,
+			FENCE,
 			parentTask,
 			controller.signal,
 		)
@@ -127,11 +132,12 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 		expect(buildAndEstimateValidated).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 		const call = buildAndEstimateFolded.mock.calls[0] as unknown[]
-		// A per-estimate CollectingDiscoveryProbe rides in position 2; task +
+		// The fence, then a per-estimate CollectingDiscoveryProbe; task +
 		// signal keep flowing.
-		expect(typeof (call[2] as { extractEffects: unknown }).extractEffects).toBe("function")
-		expect(call[3]).toBe(parentTask)
-		expect(call[4]).toBe(controller.signal)
+		expect(call[2]).toBe(FENCE)
+		expect(typeof (call[3] as { extractEffects: unknown }).extractEffects).toBe("function")
+		expect(call[4]).toBe(parentTask)
+		expect(call[5]).toBe(controller.signal)
 		// Cloned op, never the caller's array; detectedFee absent stays absent.
 		const op = call[0] as { actions: Action[]; fee?: unknown }
 		expect(op.actions).toEqual([CALL])
@@ -142,12 +148,12 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 		const extra = { kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xm" } }
 		const { estimator, buildAndEstimateFolded } = makeEstimator()
 		buildAndEstimateFolded.mockImplementation((async (...args: unknown[]) => {
-			const probe = args[2] as { collected: unknown[] }
+			const probe = args[3] as { collected: unknown[] }
 			probe.collected.push(extra)
 			return BUILT
 		}) as never)
 
-		const { discoveredActions } = await estimator.estimate(OPERATION, [CALL], undefined, FPC_SETTINGS)
+		const { discoveredActions } = await estimator.estimate(OPERATION, [CALL], undefined, FPC_SETTINGS, FENCE)
 
 		expect(discoveredActions).toEqual([extra])
 	})
@@ -155,7 +161,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 	test("detectedFee folds into the folded op exactly like the classic path", async () => {
 		const { estimator, buildAndEstimateFolded } = makeEstimator()
 		const fee = { gasPadding: 1.07 }
-		await estimator.estimate(OPERATION, [CALL], fee as never, FPC_SETTINGS)
+		await estimator.estimate(OPERATION, [CALL], fee as never, FPC_SETTINGS, FENCE)
 		const op = (buildAndEstimateFolded.mock.calls[0] as unknown[])[0] as { fee?: unknown }
 		expect(op.fee).toBe(fee)
 	})
@@ -163,7 +169,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 	test("F-4: a pre-attached add_private_authwit forces the CLASSIC choreography (no fold, any content kind)", async () => {
 		const { estimator, authwit, buildAndEstimateValidated, buildAndEstimateFolded } = makeEstimator()
 
-		const { built } = await estimator.estimate(OPERATION, [CALL, PRE_ATTACHED_AUTHWIT], undefined, FPC_SETTINGS)
+		const { built } = await estimator.estimate(OPERATION, [CALL, PRE_ATTACHED_AUTHWIT], undefined, FPC_SETTINGS, FENCE)
 
 		expect(built).toBe(BUILT)
 		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
@@ -178,7 +184,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 			content: { kind: "message_hash", messageHash: "0xsupplied" },
 		} as never
 
-		await estimator.estimate(OPERATION, [CALL, preAttached], undefined, FPC_SETTINGS)
+		await estimator.estimate(OPERATION, [CALL, preAttached], undefined, FPC_SETTINGS, FENCE)
 
 		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
 		expect(buildAndEstimateValidated).toHaveBeenCalledTimes(1)
@@ -187,7 +193,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 	test("fj payment folds too (probed pipeline, no standalone discovery)", async () => {
 		const { estimator, authwit, buildAndEstimateValidated, buildAndEstimateFolded } = makeEstimator()
 
-		await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind: "fj" } } as never)
+		await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind: "fj" } } as never, FENCE)
 
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
@@ -198,7 +204,7 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 		for (const kind of ["fjwc", "embedded"] as const) {
 			const { estimator, authwit, buildAndEstimateValidated, buildAndEstimateFolded } = makeEstimator()
 
-			await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind } } as never)
+			await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind } } as never, FENCE)
 
 			expect(buildAndEstimateFolded).not.toHaveBeenCalled()
 			expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)

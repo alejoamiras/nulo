@@ -38,10 +38,11 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { Tx, TxExecutionRequest, TxHash, TxProvingResult, TxSimulationResult } from "@aztec/stdlib/tx"
 import z from "zod"
 import { type ILogger, LogLevel } from "@/wallet/logger"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import type { ProveBackend } from "@nulo/wallet-core/jobs"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 import type { LastProveOutcome, ProveOutcomeHint, ProvePhaseName } from "./models"
@@ -111,6 +112,12 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	/** Cancel checkpoint — throws (JobCancelledSentinel) when the op's
 	 *  controller aborted. Checked before prove, before toTx, before send. */
 	checkCancelled: () => void
+	/** Throws unless the session that authorized the op is still live. Awaited
+	 *  once the proof exists, before any of it is turned into a tx. */
+	assertAuthorization: () => Promise<void>
+	/** The same question answered synchronously, in the tick that issues
+	 *  `node.sendTx` — no session end can land between the answer and the send. */
+	assertLive: () => void
 	/** Journal binding. Success-path stages only — failure transitions
 	 *  stay in the caller's catch (per-path failure shaping is preserved
 	 *  divergent by design). */
@@ -128,6 +135,19 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	 *  classification — without it, an ordinary double-spend would be
 	 *  mislabeled "account initialized elsewhere". */
 	initializesAccount?: boolean
+}
+
+/** The fence's two checks, shaped for {@link ProveAndSendContext}. */
+export function fenceChecks(
+	profile: { assertFence(fence: ExecutionFence): Promise<void>; isFenceLive(fence: ExecutionFence): boolean },
+	fence: ExecutionFence,
+): Pick<ProveAndSendContext, "assertAuthorization" | "assertLive"> {
+	return {
+		assertAuthorization: () => profile.assertFence(fence),
+		assertLive: () => {
+			if (!profile.isFenceLive(fence)) throw new SessionEndedError()
+		},
+	}
 }
 
 /** The send-time validator text for a nullifier-tree membership collision —
@@ -256,11 +276,19 @@ export class ExecutionCoordinator {
 	/** Wrap `node.sendTx` in a TaskService step. When `initializesAccount` is
 	 *  true, an existing-nullifier rejection is re-thrown as the typed
 	 *  {@link DuplicateInitializationError} BEFORE `task.fail`, so the task
-	 *  carries the honest copy instead of the raw validator text. */
-	public async sendTxTask(node: AztecNode, tx: Tx, parentTask?: WrappedTask, initializesAccount?: boolean): Promise<void> {
+	 *  carries the honest copy instead of the raw validator text. `assertLive`
+	 *  runs as the statement before the send: nothing may be awaited between. */
+	public async sendTxTask(
+		node: AztecNode,
+		tx: Tx,
+		assertLive: () => void,
+		parentTask?: WrappedTask,
+		initializesAccount?: boolean,
+	): Promise<void> {
 		const step = new StepContent("Sending transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
 		try {
+			assertLive()
 			await node.sendTx(tx)
 			task.complete()
 		} catch (error) {
@@ -279,14 +307,16 @@ export class ExecutionCoordinator {
 	 *  callers keep their own catch/finally (failure shaping diverges
 	 *  per-path and is preserved verbatim) and their slot/claim handling.
 	 *
-	 *  Sequence (frozen — extracted byte-for-byte from the four send
-	 *  paths):
+	 *  Sequence (frozen):
 	 *    checkCancelled → journal(proving) → prove → checkCancelled →
-	 *    [offchain hook] → toTx → journal(submitting) → checkCancelled →
-	 *    send → record → journal(succeeded)
+	 *    assertAuthorization → [offchain hook] → toTx → journal(submitting) →
+	 *    checkCancelled → assertLive + send → record → journal(succeeded)
 	 *
 	 *  A cancel between prove and send drops the proof artifact silently —
-	 *  that is the contract `cancel-mid-prove` pins end-to-end. */
+	 *  that is the contract `cancel-mid-prove` pins end-to-end. The
+	 *  cancellation checks and the session checks answer different questions:
+	 *  a cancel can land while the session stays open, and a session can end
+	 *  with no cancel, so neither replaces the other. */
 	public async proveAndSend<TOffchain = unknown>(
 		ctx: ProveAndSendContext<TOffchain>,
 	): Promise<{ txHash: TxHash; offchainOutput?: TOffchain }> {
@@ -296,12 +326,13 @@ export class ExecutionCoordinator {
 		// Key checkpoint: if cancel fired during prove, this prevents
 		// submission. The proof artifact is dropped silently when this throws.
 		ctx.checkCancelled()
+		await ctx.assertAuthorization()
 		const offchainOutput = ctx.wantOffchainOutput?.(provedTx)
 		const tx = await provedTx.toTx()
 		const txHash = tx.getTxHash()
 		await ctx.markJournal({ stage: "submitting", txHash: txHash.toString() })
 		ctx.checkCancelled()
-		await this.sendTxTask(ctx.node, tx, ctx.parentTask, ctx.initializesAccount)
+		await this.sendTxTask(ctx.node, tx, ctx.assertLive, ctx.parentTask, ctx.initializesAccount)
 		await ctx.recordTransaction(txHash.toString())
 		await ctx.markJournal({ stage: "succeeded", txHash: txHash.toString() })
 		return { txHash, offchainOutput }

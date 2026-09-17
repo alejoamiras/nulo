@@ -24,7 +24,12 @@ export class FeeJuiceStrategy implements FeeStrategy {
 	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
-			let built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+			let built = await this.deps.txBuilder.buildStandard(
+				ctx.op,
+				ctx.fence,
+				AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+				task,
+			)
 			suggestGasLimits(built.txRequest, ctx.op.fee)
 			let simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, probedFirstSimOpts(ctx.probe, built), task)
 			let discovered: Action[] = []
@@ -36,7 +41,12 @@ export class FeeJuiceStrategy implements FeeStrategy {
 				if (discovered.length || isInitWrapped(built)) {
 					if (discovered.length) ctx.op.actions.push(...discovered)
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
-					built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+					built = await this.deps.txBuilder.buildStandard(
+						ctx.op,
+						ctx.fence,
+						AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+						task,
+					)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
 					simulatedTx = await this.deps.simulateTxTask(
 						built.pxe,

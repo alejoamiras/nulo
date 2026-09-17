@@ -10,6 +10,7 @@
  * mined→confirm / dropped→remove transitions, the per-scope ceiling, the tuple scoping).
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
@@ -20,7 +21,7 @@ import type { AuthwitContent } from "@/wallet/services/execution/spec"
 import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
-import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
 import { TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { svc } from "../composition-harness"
@@ -131,6 +132,7 @@ async function makeHarness(opts: { node?: unknown; activeProfile?: { id: string 
 	const deletionState = new ProfileDeletionState()
 	const txUpdated = new EventHandler<unknown>()
 	let active: { id: string } | undefined = "activeProfile" in opts ? opts.activeProfile : { id: "p1" }
+	let session = 1
 	const network = {
 		id: "net-1",
 		profileId: "p1",
@@ -142,10 +144,17 @@ async function makeHarness(opts: { node?: unknown; activeProfile?: { id: string 
 	}
 	const nodeForUrl = vi.fn(async (_url: string) => opts.node)
 	const services = new ServiceCollection()
-	services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => deletionState, getActiveProfile: async () => active }))
+	const captureExecutionFence = vi.fn(async (): Promise<ExecutionFence> => {
+		if (!active) throw new Error("Wallet locked")
+		return { profileId: active.id, epoch: deletionState.capture(active.id), session }
+	})
+	services.add(
+		svc(PROFILE_SERVICE_NAME, { getDeletionState: () => deletionState, getActiveProfile: async () => active, captureExecutionFence }),
+	)
+	const getNetwork = vi.fn(async () => network)
 	services.add(
 		svc(NETWORK_SERVICE_NAME, {
-			getNetwork: async () => network,
+			getNetwork,
 			// The node is resolved by the network's OWN endpoint, never the active profile's chain.
 			getNodeForUrl: nodeForUrl,
 			getNode: async () => {
@@ -155,15 +164,82 @@ async function makeHarness(opts: { node?: unknown; activeProfile?: { id: string 
 		}),
 	)
 	services.add(svc(ACCOUNT_SERVICE_NAME, { registerAccountPurgeSubscriber: () => {} }))
-	services.add(svc(EXECUTION_SERVICE_NAME, {}))
+	// The execution side of the contract: a send under an ended session is refused before it runs.
+	const executeSendTransaction = vi.fn(async (...args: unknown[]) => {
+		if ((args[4] as ExecutionFence).session !== session) throw new SessionEndedError()
+		return "0xtx"
+	})
+	services.add(svc(EXECUTION_SERVICE_NAME, { executeSendTransaction }))
 	services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: txUpdated }))
 	const task = () => ({ complete() {}, fail() {}, startSubtask: task })
 	services.add(svc(TASK_SERVICE_NAME, { startNewTask: task }))
 	const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
 	services.add(service)
 	await services.start()
-	return { api, deletionState, service, txUpdated, nodeForUrl, setActive: (p: { id: string } | undefined) => (active = p) }
+	return {
+		api,
+		deletionState,
+		service,
+		txUpdated,
+		nodeForUrl,
+		captureExecutionFence,
+		getNetwork,
+		executeSendTransaction,
+		setActive: (p: { id: string } | undefined) => (active = p),
+		/** A lock followed by an unlock of the same profile: a new session. */
+		reunlock: () => {
+			session += 1
+		},
+	}
 }
+
+describe("AuthRegistryService sends run under the session the user acted in", () => {
+	const FEE = { paymentMethod: { kind: "fj" } } as never
+
+	test("revoke and the registry toggle capture before their first read, and send under that capture", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		h.executeSendTransaction.mockRejectedValue(new Error("stop after send"))
+		h.captureExecutionFence.mockClear()
+		h.getNetwork.mockClear()
+
+		await expect(h.service.revokeAuthwits("net-1", A, [1], FEE)).rejects.toThrow("stop after send")
+		await expect(h.service.setRegistryEnabled("net-1", A, false, FEE)).rejects.toThrow("stop after send")
+
+		const captures = h.captureExecutionFence.mock
+		for (const i of [0, 1]) {
+			expect(captures.invocationCallOrder[i]).toBeLessThan(h.getNetwork.mock.invocationCallOrder[i] as number)
+			expect(h.executeSendTransaction.mock.calls[i]?.[4]).toBe(await captures.results[i]?.value)
+		}
+	})
+
+	test("a session that ends and re-unlocks while the authwit read is parked is refused at the send, never re-captured", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		const storage = (h.service as unknown as { authwits: { get: (key: string) => Promise<unknown> } }).authwits
+		const read = storage.get.bind(storage)
+		let releaseRead: () => void = () => {}
+		let parked = false
+		vi.spyOn(storage, "get").mockImplementationOnce(async (key: string) => {
+			parked = true
+			await new Promise<void>((resolve) => {
+				releaseRead = resolve
+			})
+			return read(key)
+		})
+		h.captureExecutionFence.mockClear()
+
+		const revoke = h.service.revokeAuthwits("net-1", A, [1], FEE)
+		await vi.waitFor(() => expect(parked).toBe(true))
+		h.reunlock()
+		releaseRead()
+
+		await expect(revoke).rejects.toBeInstanceOf(SessionEndedError)
+		expect(h.captureExecutionFence).toHaveBeenCalledTimes(1)
+		expect(h.executeSendTransaction).toHaveBeenCalledTimes(1)
+		expect(h.executeSendTransaction.mock.calls[0]?.[4]).toMatchObject({ session: 1 })
+	})
+})
 
 describe("AuthRegistryService.reconcileFromTx — scoped by the tx's provenance; dropped is non-destructive", () => {
 	let h: Awaited<ReturnType<typeof makeHarness>>

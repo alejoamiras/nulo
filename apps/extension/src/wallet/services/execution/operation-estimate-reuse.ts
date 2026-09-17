@@ -29,8 +29,10 @@ import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { Network } from "@/wallet/services/network/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
 import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
@@ -85,7 +87,6 @@ export type OperationEstimateReuseEntry = {
 }
 
 export interface OperationEstimateReuseDeps {
-	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<MinFeeNode>
 	/** Live-chain re-assert for the reused request: runs the composite
@@ -116,10 +117,15 @@ export class OperationEstimateReuse {
 	/**
 	 * Pop a cached estimate when every ladder step passes. Single-shot: the
 	 * entry is deleted up front (ids are SW-minted UUIDs — unguessable), so a
-	 * failed validation still consumes the slot and the caller rebuilds.
+	 * failed validation still consumes the slot and the caller rebuilds. An
+	 * entry stashed under another profile than `fence`'s throws
+	 * {@link SessionEndedError} instead: that caller must not rebuild.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 21 — the ordered single-shot validation ladder is the reuse-authorization checklist
-	public async tryConsume(estimateId: string, input: OperationFingerprintInput): Promise<OperationEstimateReuseEntry | undefined> {
+	public async tryConsume(
+		estimateId: string,
+		input: OperationFingerprintInput,
+		fence: ExecutionFence,
+	): Promise<OperationEstimateReuseEntry | undefined> {
 		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined
 
@@ -130,10 +136,7 @@ export class OperationEstimateReuse {
 		if (fingerprint === null || fingerprint !== entry.fingerprint) {
 			return this.reject("operation fingerprint drift")
 		}
-		const profile = await this.deps.getActiveProfile()
-		if (!profile || profile.id !== entry.profileId) {
-			return this.reject("active profile changed")
-		}
+		if (entry.profileId !== fence.profileId) throw new SessionEndedError()
 		const network = await this.deps.getNetwork(entry.networkId)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary || primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
@@ -151,23 +154,8 @@ export class OperationEstimateReuse {
 		} catch (error) {
 			return this.reject(`chain identity drift: ${getErrorMessage(error)}`)
 		}
-		if (entry.fpcIdentity) {
-			let fresh: FpcInfo
-			try {
-				fresh = await this.deps.getFpcInfo(entry.fpcIdentity.id)
-			} catch (error) {
-				return this.reject(`fpc row unavailable: ${getErrorMessage(error)}`)
-			}
-			const snap = entry.fpcIdentity
-			if (
-				fresh.type !== snap.type ||
-				fresh.address !== snap.address ||
-				fresh.chainId !== snap.chainId ||
-				(fresh.isProtocol ?? false) !== snap.isProtocol
-			) {
-				return this.reject("fpc identity drift")
-			}
-		}
+		const fpcDrift = entry.fpcIdentity ? await this.fpcIdentityDrift(entry.fpcIdentity) : undefined
+		if (fpcDrift) return this.reject(fpcDrift)
 		const node = await this.deps.getNode(network.chainId)
 		const multiplier = entry.feeSettings.priorityLevel ? PRIORITY_MULTIPLIERS[entry.feeSettings.priorityLevel] : DEFAULT_FEE_MULTIPLIER
 		const current = (await predictedWorstMinFees(node)).mul(multiplier)
@@ -175,6 +163,22 @@ export class OperationEstimateReuse {
 			return this.reject("base fee drift")
 		}
 		return entry
+	}
+
+	/** Why the FPC row no longer matches the snapshot the estimate was built against, if it does not. */
+	private async fpcIdentityDrift(snap: FpcIdentitySnapshot): Promise<string | undefined> {
+		let fresh: FpcInfo
+		try {
+			fresh = await this.deps.getFpcInfo(snap.id)
+		} catch (error) {
+			return `fpc row unavailable: ${getErrorMessage(error)}`
+		}
+		const drifted =
+			fresh.type !== snap.type ||
+			fresh.address !== snap.address ||
+			fresh.chainId !== snap.chainId ||
+			(fresh.isProtocol ?? false) !== snap.isProtocol
+		return drifted ? "fpc identity drift" : undefined
 	}
 
 	private reject(reason: string): undefined {

@@ -22,8 +22,9 @@
  */
 
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { WrappedTask } from "@/wallet/services/task/service"
-import type { AuthwitDiscoverer } from "./authwit-discoverer"
+import type { AuthwitDiscoverer, BuildTxRequestFn } from "./authwit-discoverer"
 import { CollectingDiscoveryProbe } from "./discovery-probe"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import type { Action, AddPrivateAuthwitAction, FeeOptions, FeeSettings, Operation, SendTransactionOperation } from "./spec"
@@ -42,6 +43,7 @@ export interface DiscoveryAwareEstimatorDeps {
 	buildAndEstimateValidated(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<FeeEstimate>
@@ -51,13 +53,18 @@ export interface DiscoveryAwareEstimatorDeps {
 	buildAndEstimateFolded(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		probe: DiscoveryProbe,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<FeeEstimate>
-	/** Discovery's throwaway build — same callback shape the discoverer has
-	 *  always been fed (hardcoded PREEXISTING_FEE_JUICE inside). */
-	buildForDiscovery: Parameters<AuthwitDiscoverer["discoverPrivateAuthwits"]>[1]
+	/** Discovery's throwaway build (hardcoded PREEXISTING_FEE_JUICE inside),
+	 *  run under the same fence as the estimate it serves. */
+	buildForDiscovery(
+		op: Parameters<BuildTxRequestFn>[0],
+		paymentMethod: Parameters<BuildTxRequestFn>[1],
+		fence: ExecutionFence,
+	): ReturnType<BuildTxRequestFn>
 }
 
 export interface DiscoveryEstimateResult {
@@ -95,6 +102,7 @@ export class DiscoveryAwareEstimator {
 		actions: readonly Action[],
 		detectedFee: FeeOptions | undefined,
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<DiscoveryEstimateResult> {
@@ -107,13 +115,13 @@ export class DiscoveryAwareEstimator {
 				actions: [...actions],
 				...(detectedFee ? { fee: detectedFee } : {}),
 			} as SendTransactionOperation
-			const built = await this.deps.buildAndEstimateFolded(op, feeSettings, probe, parentTask, signal)
+			const built = await this.deps.buildAndEstimateFolded(op, feeSettings, fence, probe, parentTask, signal)
 			return { built, discoveredActions: [...probe.collected], discovered: [...probe.discovered] }
 		}
 
 		const { actions: discoveredActions, discovered } = await this.deps.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
-			this.deps.buildForDiscovery,
+			(op, method) => this.deps.buildForDiscovery(op, method, fence),
 		)
 		// Stage boundary preserved from the inline shape: a cancel landing
 		// during discovery must not start the sizing pipeline.
@@ -124,7 +132,7 @@ export class DiscoveryAwareEstimator {
 			actions: finalActions,
 			...(detectedFee ? { fee: detectedFee } : {}),
 		} as SendTransactionOperation
-		const built = await this.deps.buildAndEstimateValidated(op, feeSettings, parentTask, signal)
+		const built = await this.deps.buildAndEstimateValidated(op, feeSettings, fence, parentTask, signal)
 		return { built, discoveredActions, discovered }
 	}
 }
