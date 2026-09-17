@@ -23,12 +23,15 @@ import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicT
 import type { IncomingPollGate } from "@/e2e/incoming-poll-gate"
 import { IncomingTransferRepository } from "./repository"
 import { PublicEventIndexer, type PublicEventReader, type PublicScanResult } from "./public-event-indexer"
-import type { ScanOutcome } from "./scan-health"
+import { ScanEpisodeStore, scanEpisodeKey, scanEpisodeNetworkPrefix } from "./scan-episodes"
+import { isScanSuccess, type ScanOutcome } from "./scan-health"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
 	type Events,
 	type IncomingBalanceOutboxRow,
 	type IncomingPublicEventRecord,
+	type IncomingSyncHealth,
+	type IncomingSyncHealthChanged,
 	type IncomingTransferPending,
 	type IncomingTransferRecord,
 	type IncomingTrustRecord,
@@ -119,6 +122,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		"getIncomingTransferById",
 		"getReceiptFee",
 		"getTrustState",
+		"getIncomingSyncHealth",
+		"retryIncomingScan",
 		"setTrustAllow",
 		"setTrustReject",
 		"clearProfile",
@@ -150,6 +155,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public readonly onIncomingTransferDeleted = new EventHandler<IncomingTransferRecord>()
 	public readonly onIncomingTransferPending = new EventHandler<IncomingTransferPending>()
 	public readonly onIncomingTrustChanged = new EventHandler<IncomingTrustRecord>()
+	public readonly onIncomingSyncHealthChanged = new EventHandler<IncomingSyncHealthChanged>()
 
 	private readonly repo: IncomingTransferRepository
 	private profileService: ProfileService = null!
@@ -181,6 +187,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	/** D2 class-gate verdict cached by the FINALIZED tip — one `getContract` per finalized advance,
 	 *  not per tick. Keyed `${profileId}|${networkId}|${contract}`; `unresolved` is never cached. */
 	private readonly classGateCache = new Map<string, { finalizedTip: number; checkpointHash: string; status: PublicTokenClassStatus }>()
+	/** Failure episodes of the public scan; session-backed so an alarm-woken worker keeps the streak. */
+	private readonly episodes: ScanEpisodeStore
+	/** Last health announced per `${profileId}|${networkId}|`, so the event fires on change only. */
+	private readonly announcedHealth = new Map<string, { profileId: string; networkId: string; stalled: boolean }>()
 	private pxeService: PxeServiceClient = null!
 	private indexer: PublicEventIndexer = null!
 	/** Single global lock serializing every writer on this service's storage
@@ -226,6 +236,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.injectedPublicReader = publicReader
 		this.serviceLock = new Lock(INCOMING_TRANSFER_SERVICE_NAME, logger)
 		this.incomingPollGate = incomingPollGate
+		this.episodes = new ScanEpisodeStore(browserApi.storage.session, (error) => this.logDebug("scan episode persistence failed", error))
 	}
 
 	/** Run `fn` inside the service lock. `isCurrent` reports whether this
@@ -308,6 +319,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.networkService.registerChainPurgeSubscriber(async (profileId, _chainId, networkId) => {
 			await this.clearChain(profileId, networkId)
 		})
+
+		// Before the schedulers: their immediate first poll reads the backoff gate.
+		await this.episodes.hydrate(Date.now())
 
 		// Hydrate schedulers from any tokens already in storage. Without
 		// this, a SW restart would wait for the next onTokenAdded event
@@ -625,6 +639,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// The fee cache is keyed by networkId (not profileId), so a profile's networkIds aren't
 			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
 			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
+			this.dropEpisodes((key) => key.startsWith(`${profileId}|`))
 			this.feeCache.clear()
 			try {
 				await this.repo.clearProfile(profileId)
@@ -654,6 +669,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const evict = () => {
 				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
 			}
+			const episodePrefix = scanEpisodeNetworkPrefix(profileId, networkId)
+			this.dropEpisodes((key) => key.startsWith(episodePrefix))
 			evict()
 			try {
 				await this.repo.clearChain(profileId, networkId)
@@ -760,6 +777,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			this.watchedContracts.set(this.schedulerKey(d.networkId, d.accountAddress), d.contracts)
 			this.startScheduler(d.profileId, d.networkId, d.accountAddress)
 		}
+		// Episodes follow the scheduler set: a same-profile rebuild keeps its streaks, a lock or profile
+		// switch (an empty or foreign set) ends them, so an unlock always starts a fresh episode.
+		const live = new Set(publicDescriptors.map((d) => scanEpisodeKey(d.profileId, d.networkId, d.contract)))
+		this.dropEpisodes((key) => !live.has(key))
 		for (const d of publicDescriptors) {
 			this.startPublicScheduler(d.profileId, d.networkId, d.contract)
 		}
@@ -819,20 +840,78 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.publicWatched.delete(key)
 	}
 
-	/** Single-flight public poll for one `(networkId, contract)` stream. */
+	/** Single-flight public poll for one `(networkId, contract)` stream. A contract in backoff skips
+	 *  the scan but still re-evaluates health: the flip to stalled comes from time passing, not from
+	 *  an attempt. */
 	private async pollPublic(key: string): Promise<void> {
 		if (this.publicPolling.has(key)) return
+		const target = this.publicWatched.get(key)
+		if (!target) return
 		this.publicPolling.add(key)
 		try {
-			const target = this.publicWatched.get(key)
-			if (!target) return
-			await this.scanPublicContract(target.profileId, target.networkId, target.contract)
+			const episodeKey = scanEpisodeKey(target.profileId, target.networkId, target.contract)
+			if (!this.episodes.isBackingOff(episodeKey, Date.now())) await this.scanAndRecord(target, episodeKey)
+			this.announceHealth(target.profileId, target.networkId)
 			await this.drainBalanceOutbox()
 		} catch (error) {
 			this.logWarn(`Public scan failed for ${key}`, error)
 		} finally {
 			this.publicPolling.delete(key)
 		}
+	}
+
+	/** Run one scan tick and fold its outcome into the contract's episode. The write is fenced by the
+	 *  epoch captured BEFORE the scan, inside the service lock, so an outcome that lands after a
+	 *  lock / purge / profile switch cannot recreate the episode that transition cleared. */
+	private async scanAndRecord(target: { profileId: string; networkId: string; contract: string }, episodeKey: string): Promise<void> {
+		const epochAtStart = this.serviceEpoch
+		const outcome = await this.scanPublicContract(target.profileId, target.networkId, target.contract).catch((error): ScanOutcome => {
+			this.logDebug("public scan tick threw", { contract: target.contract }, error)
+			return "failed"
+		})
+		// The steady state — healthy, and nothing to clear — takes no lock.
+		if (isScanSuccess(outcome) && !this.episodes.has(episodeKey)) return
+		await this.withServiceLock(async () => {
+			if (this.serviceEpoch !== epochAtStart) return
+			this.episodes.record(episodeKey, outcome, Date.now())
+		})
+	}
+
+	/** Emit `onIncomingSyncHealthChanged` when the network's health differs from the last announced
+	 *  one; the single `warn` of a failing scan is the transition into stalled. */
+	private announceHealth(profileId: string, networkId: string): void {
+		const prefix = scanEpisodeNetworkPrefix(profileId, networkId)
+		const { stalled } = this.episodes.health(prefix, Date.now())
+		if ((this.announcedHealth.get(prefix)?.stalled ?? false) === stalled) return
+		if (stalled) this.announcedHealth.set(prefix, { profileId, networkId, stalled })
+		else this.announcedHealth.delete(prefix)
+		if (stalled) this.logWarn("incoming public scan stalled", { networkId })
+		this.emit("onIncomingSyncHealthChanged", { profileId, networkId })
+	}
+
+	/** Drop the episodes `matches` selects, then re-announce every network that was stalled. */
+	private dropEpisodes(matches: (key: string) => boolean): void {
+		this.episodes.deleteWhere(matches)
+		for (const { profileId, networkId } of [...this.announcedHealth.values()]) this.announceHealth(profileId, networkId)
+	}
+
+	public async getIncomingSyncHealth(networkId: string): Promise<IncomingSyncHealth> {
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile || typeof networkId !== "string") return { stalled: false, since: null }
+		return this.episodes.health(scanEpisodeNetworkPrefix(profile.id, networkId), Date.now())
+	}
+
+	public async retryIncomingScan(networkId: string): Promise<void> {
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile || typeof networkId !== "string") return
+		this.episodes.clearRetryGate(scanEpisodeNetworkPrefix(profile.id, networkId))
+		const polls: Promise<void>[] = []
+		for (const [key, target] of this.publicWatched) {
+			if (target.profileId === profile.id && target.networkId === networkId) polls.push(this.pollPublic(key))
+		}
+		await Promise.all(polls)
 	}
 
 	private onTokenAdded = async (token: TokenInfo): Promise<void> => {
@@ -876,10 +955,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!network) return
 
 		await this.withServiceLock(async () => {
-			// Bump the epoch FIRST — before the scheduler teardown / sync-state eviction / any await — so an
-			// in-flight off-lock scan holding the old epoch can't emit a sync state (or otherwise write) that
-			// repopulates rows for the token we're deleting. (A late bump left a window: stopPublicScheduler
-			// deletes the sync-state entry, then an old scan re-adds it before the bump.)
+			// Bump the epoch FIRST — before the scheduler teardown / episode eviction / any await — so an
+			// in-flight off-lock scan holding the old epoch can't write rows or a failure episode for the
+			// token we're deleting.
 			this.bumpServiceEpoch()
 			// Scheduler teardown + row mutations both inside the lock so a
 			// concurrent scan can't slip a row in between teardown + wipe.
@@ -890,6 +968,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			this.stopPublicScheduler(network.id, token.contract)
 			await this.repo.deleteCursor(profileId, network.id, token.contract)
 			this.classGateCache.delete(`${profileId}|${network.id}|${token.contract}`)
+			const episodeKey = scanEpisodeKey(profileId, network.id, token.contract)
+			this.dropEpisodes((key) => key === episodeKey)
 			await this.wipeContractRecordsLocked(profileId, network.id, token.contract)
 		})
 	}
@@ -1374,7 +1454,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (cursor.lastSyncedBlockHash) {
 			await this.beginReconciliation(target.profileId, target.networkId, target.contract, target.chainId, cursor, tips, epochAtStart)
 		} else {
-			this.logWarn(`public forward scan failed (no anchor) for ${target.contract}`, err)
+			this.logDebug("public forward scan failed (no anchor)", { contract: target.contract }, err)
 		}
 		return "failed"
 	}
@@ -1385,13 +1465,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			network = await this.networkService.getNetwork(networkId)
 		} catch (error) {
-			this.logWarn("scanPublicContract: network resolve failed", error)
+			this.logDebug("public scan: network resolve failed", { networkId }, error)
 			return undefined
 		}
 		try {
 			return { network, tips: await this.indexer.getTips(networkId) }
 		} catch (error) {
-			this.logWarn(`public tips failed for ${contract}`, error)
+			this.logDebug("public scan: tips failed", { contract }, error)
 			return undefined
 		}
 	}

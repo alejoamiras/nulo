@@ -27,6 +27,11 @@ import { z } from "zod"
 
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
+/** `since` is when the oldest stalled contract started failing; `null` while healthy. */
+export type IncomingSyncHealth = { stalled: boolean; since: number | null }
+
+export type IncomingSyncHealthChanged = { profileId: string; networkId: string }
+
 import { type PublicEventCursor, PublicEventCursorSchema } from "@nulo/aztec-runtime/pxe/public-events"
 export type { PublicEventCursor }
 
@@ -288,6 +293,8 @@ export type Events = {
 	 *  contract per pending cycle. */
 	onIncomingTransferPending: IncomingTransferPending
 	onIncomingTrustChanged: IncomingTrustRecord
+	/** Invalidation only: the health of `(profileId, networkId)` changed — refetch it. */
+	onIncomingSyncHealthChanged: IncomingSyncHealthChanged
 }
 
 export type Methods = {
@@ -315,6 +322,11 @@ export type Methods = {
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState
+	/** Whether the active profile's public scan on `networkId` has been failing repeatedly for long
+	 *  enough that older incoming transfers may be missing. Healthy for an unknown network. */
+	getIncomingSyncHealth(networkId: string): IncomingSyncHealth
+	/** Let the network's backed-off scans run now and wait for them. Never resets a failure streak. */
+	retryIncomingScan(networkId: string): void
 	/** User accepted the first-receive prompt: `pending → trusted`. Flips
 	 *  all hidden records for this contract to visible; emits
 	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract

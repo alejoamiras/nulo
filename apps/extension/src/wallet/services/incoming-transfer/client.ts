@@ -5,6 +5,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
 	type Events,
+	type IncomingSyncHealthChanged,
 	type IncomingTransferPending,
 	type IncomingTransferRecord,
 	type IncomingTrustRecord,
@@ -24,6 +25,7 @@ export class IncomingTransferServiceClient extends ServiceClient<Methods, Events
 	public readonly onIncomingTransferDeleted = new EventHandler<IncomingTransferRecord>()
 	public readonly onIncomingTransferPending = new EventHandler<IncomingTransferPending>()
 	public readonly onIncomingTrustChanged = new EventHandler<IncomingTrustRecord>()
+	public readonly onIncomingSyncHealthChanged = new EventHandler<IncomingSyncHealthChanged>()
 
 	public constructor(name?: string) {
 		super(INCOMING_TRANSFER_SERVICE_NAME, documentLogger(), name)
@@ -36,6 +38,8 @@ definePassthroughsExhaustive<Methods>()(IncomingTransferServiceClient.prototype,
 	"getIncomingTransferById",
 	"getReceiptFee",
 	"getTrustState",
+	"getIncomingSyncHealth",
+	"retryIncomingScan",
 	"setTrustAllow",
 	"setTrustReject",
 	"clearProfile",

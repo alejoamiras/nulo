@@ -25,7 +25,7 @@ import { flushPromises } from "@vue/test-utils"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 // Static (module-scope) import: pays Vite's cold transform of this service +
 // its inlined @nulo/* graph during the file's import phase, NOT inside the first
@@ -37,6 +37,7 @@ import { PublicScanCursorSchema, noteRecordId } from "./spec"
 import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 import { TaskStatus } from "@/wallet/services/task/spec"
 import type { PublicEventReader } from "./public-event-indexer"
+import { SCAN_EPISODES_KEY } from "./scan-episodes"
 import type { ScanOutcome } from "./scan-health"
 import type {
 	PublicScanTips,
@@ -350,6 +351,7 @@ async function bootService(
 		price?: ReturnType<typeof makePriceStub>
 		publicReader?: PublicEventReader
 	} = {},
+	opts: { keepStorage?: boolean } = {},
 ) {
 	const fixture = {
 		profile: stubs.profile ?? makeProfileStub(),
@@ -368,7 +370,8 @@ async function bootService(
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
 	// the scan path via the public surface or via direct method calls.
 	const browserApi = new FakeBrowserApi()
-	browserApi.reset()
+	// `keepStorage` models a service-worker restart: a new service graph over the same storage areas.
+	if (!opts.keepStorage) browserApi.reset()
 	const service = new IncomingTransferService(logger, browserApi, 1_000_000, stubs.publicReader)
 	const collection = new ServiceCollection()
 	for (const stub of Object.values(fixture)) collection.add(stub as never)
@@ -2632,8 +2635,9 @@ async function bootPublic(
 	reader: PublicEventReader,
 	state: ReturnType<typeof makePublicReader>["state"],
 	stubs: Parameters<typeof bootService>[0] = {},
+	opts: Parameters<typeof bootService>[1] = {},
 ) {
-	const booted = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), ...stubs, publicReader: reader })
+	const booted = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), ...stubs, publicReader: reader }, opts)
 	await flushPromises()
 	cursors.clear()
 	outbox.clear()
@@ -4214,5 +4218,264 @@ describe("IncomingTransferService — seam pins (D4 order, trust order, fresh is
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+describe("IncomingTransferService — public-scan health (episodes, backoff, retry)", () => {
+	const MIN = 60_000
+	const T0 = 50_000 * MIN
+	const KEY = `p1|n1|${tokenA.contract}`
+	type Health = { stalled: boolean; since: number | null }
+	type HealthSurface = {
+		pollPublic: (key: string) => Promise<void>
+		hydrateSchedulers: () => Promise<void>
+		getIncomingSyncHealth: (networkId: string) => Promise<Health>
+		retryIncomingScan: (networkId: string) => Promise<void>
+		onIncomingSyncHealthChanged: { add: (h: (e: { profileId: string; networkId: string }) => void) => void }
+		episodes: { settled: () => Promise<void>; has: (key: string) => boolean }
+	}
+	const surface = (service: unknown) => service as HealthSurface
+	const poll = (service: unknown) => surface(service).pollPublic(`n1|${tokenA.contract}`)
+	const storedEpisodes = async (service: unknown) => {
+		await surface(service).episodes.settled()
+		return (await new FakeBrowserApi().storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY] as
+			| Record<string, { failures: number; failingSince: number; nextAttemptAt: number }>
+			| undefined
+	}
+	const nodeDown = (reader: PublicEventReader) => {
+		reader.getScanTips = async () => {
+			throw new Error("node down")
+		}
+	}
+	const captureHealthEvents = (service: unknown) => {
+		const events: { profileId: string; networkId: string }[] = []
+		surface(service).onIncomingSyncHealthChanged.add((e) => events.push(e))
+		return events
+	}
+	/** Two failed ticks, the second one past the first backoff gate. Leaves the clock at `T0 + 31 s`. */
+	const failTwice = async (service: unknown) => {
+		await poll(service)
+		vi.setSystemTime(T0 + 31_000)
+		await poll(service)
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(T0)
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("node down for an hour, wallet unlocked → stalled after ten minutes, announced once; recovery clears and announces once", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const events = captureHealthEvents(service)
+		const healthyTips = reader.getScanTips
+		nodeDown(reader)
+
+		await failTwice(service)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+
+		for (let minute = 2; minute <= 60; minute++) {
+			vi.setSystemTime(T0 + minute * MIN)
+			await poll(service)
+			if (minute === 10) expect(events).toEqual([])
+		}
+		expect(events).toEqual([{ profileId: "p1", networkId: "n1" }])
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+
+		reader.getScanTips = healthyTips
+		vi.setSystemTime(T0 + 66 * MIN) // past the 5 min backoff cap
+		await poll(service)
+		await poll(service)
+		expect(events).toHaveLength(2)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("a tick inside the backoff window does not touch the node", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+
+		await poll(service) // failure 1 → gate at T0 + 30 s
+		vi.setSystemTime(T0 + 29_000)
+		await poll(service)
+		expect(tips).toHaveBeenCalledTimes(1)
+
+		vi.setSystemTime(T0 + 30_000)
+		await poll(service)
+		expect(tips).toHaveBeenCalledTimes(2)
+	})
+
+	test("unlock after eight hours, then two failures → NOT stalled: a lock ends every episode", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		nodeDown(reader)
+		await failTwice(service)
+
+		profile.getActiveProfile.mockResolvedValue(null)
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(await storedEpisodes(service)).toBeUndefined()
+
+		vi.setSystemTime(T0 + 8 * 60 * MIN)
+		profile.getActiveProfile.mockResolvedValue({ id: "p1" })
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises() // the rebuilt scheduler's immediate poll is failure 1
+		vi.setSystemTime(T0 + 8 * 60 * MIN + 31_000)
+		await poll(service)
+
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 2, failingSince: T0 + 8 * 60 * MIN } })
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+	})
+
+	test("a worker restart mid-episode keeps failingSince, hydrated before the first poll", async () => {
+		const first = makePublicReader()
+		const { service } = await bootPublic(first.reader, first.state)
+		nodeDown(first.reader)
+		await failTwice(service)
+		await surface(service).episodes.settled()
+
+		vi.setSystemTime(T0 + 11 * MIN)
+		const second = makePublicReader()
+		nodeDown(second.reader)
+		const restarted = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: second.reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+
+		expect(await surface(restarted.service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+		expect(await storedEpisodes(restarted.service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("a restart during an active backoff keeps the gate: the boot poll does not touch the node", async () => {
+		const gate = T0 + 100_000
+		await new FakeBrowserApi().storage.session.set({
+			[SCAN_EPISODES_KEY]: { [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } },
+		})
+		const { reader } = makePublicReader()
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		const { service } = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+
+		expect(tips).not.toHaveBeenCalled()
+		expect(await storedEpisodes(service)).toEqual({ [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } })
+	})
+
+	test("a same-profile scheduler rebuild keeps the episode; a profile switch ends it", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		nodeDown(reader)
+		await failTwice(service)
+
+		await surface(service).hydrateSchedulers()
+		await flushPromises()
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failingSince: T0 } })
+
+		profile.getActiveProfile.mockResolvedValue({ id: "p2" })
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+	})
+
+	test("an outcome that lands after a lock cannot recreate the episode the lock ended", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		let failTips: (error: Error) => void = () => {}
+		reader.getScanTips = () =>
+			new Promise((_resolve, reject) => {
+				failTips = reject
+			})
+
+		const inFlight = poll(service)
+		await flushPromises()
+		profile.getActiveProfile.mockResolvedValue(null)
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		failTips(new Error("node down"))
+		await inFlight
+
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test.each([
+		["clearProfile", (service: IncomingTransferService) => service.clearProfile("p1")],
+		["clearChain", (service: IncomingTransferService) => service.clearChain("p1", "n1")],
+	])("%s ends the scope's episodes even though the token set still lists the contract", async (_label, clear) => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		tips.mockClear()
+		await clear(service)
+		await flushPromises()
+
+		// The rebuild's immediate poll ran (the old gate is gone) and opened a FRESH one-failure episode.
+		expect(tips).toHaveBeenCalledTimes(1)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 1, failingSince: T0 + 31_000 } })
+	})
+
+	test("deleting the token ends its episode", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA])
+		const { service } = await bootPublic(reader, state, { token })
+		nodeDown(reader)
+		await failTwice(service)
+
+		await token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" } as never)
+		await flushPromises()
+
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("Retry runs the backed-off scan now and keeps the streak", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service) // gate now at T0 + 31 s + 60 s
+
+		await surface(service).retryIncomingScan("n1")
+
+		expect(tips).toHaveBeenCalledTimes(3)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("Retry and the health read ignore a network that is not the active profile's, and a non-string id", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		await surface(service).retryIncomingScan("n2")
+		await surface(service).retryIncomingScan(7 as never)
+
+		expect(tips).toHaveBeenCalledTimes(2)
+		expect(await surface(service).getIncomingSyncHealth(7 as never)).toEqual({ stalled: false, since: null })
+	})
+
+	test("an ineligible (non-standard) token is never counted", async () => {
+		const { reader, state } = makePublicReader({ classStatus: "non-standard" })
+		const { service } = await bootPublic(reader, state)
+		for (let minute = 0; minute <= 30; minute += 5) {
+			vi.setSystemTime(T0 + minute * MIN)
+			await poll(service)
+		}
+		expect(await storedEpisodes(service)).toBeUndefined()
 	})
 })
