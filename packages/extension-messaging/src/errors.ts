@@ -58,7 +58,7 @@ export class RpcTimeoutError extends WalletError {
 /**
  * Raised client-side when an RPC request cannot be sent because the
  * underlying chrome.runtime.Port is unavailable — either it disconnected
- * between the connect-loop exit and the postMessage, or postMessage itself
+ * between the open and the postMessage, or postMessage itself
  * threw because the port was already torn down. Distinct from
  * `RpcTimeoutError`: the request never made it onto the wire.
  *
@@ -71,6 +71,24 @@ export class RpcDisconnectedError extends WalletError {
 
 	public constructor(message: string, details?: unknown) {
 		super(RpcDisconnectedError.CODE, message, details, "RpcDisconnectedError")
+	}
+}
+
+/**
+ * Raised client-side when `chrome.runtime.connect` throws synchronously — the extension context is
+ * gone (an update or reload orphaned the page) or the id is wrong. Treated as permanent: nothing
+ * retries, unlike `RpcDisconnectedError`, which callers read as "the worker went away, wait for it".
+ * Client-local; never crosses the wire.
+ *
+ * Chrome's reason is folded into the message because the log projection keeps only an error's
+ * `name` and `message`.
+ */
+export class RpcConnectError extends WalletError {
+	public static readonly CODE = "RPC_CONNECT_FAILED"
+
+	public constructor(service: string, cause: unknown) {
+		const reason = cause instanceof Error ? cause.message : String(cause)
+		super(RpcConnectError.CODE, `Cannot open a port to '${service}': ${reason}`, { service }, "RpcConnectError")
 	}
 }
 

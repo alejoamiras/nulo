@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: v3 — codex round 2 APPROVE (six Low wording findings folded); awaiting owner approval
+status: APPROVED 2026-09-17 (owner set the /goal seed) — implementing; codex r1 reject folded, r2 approve
 baseline: 771c2a16 (dev, after #613)
 worktree: .claude/worktrees/port-client-connect · branch worktree-port-client-connect
 ---
@@ -352,7 +352,7 @@ sharded network + CI.)
 
 ## Phases
 
-### Phase 1 — terminal connect (messaging package)
+### Phase 1 — terminal connect (messaging package) ✓
 
 1. `RpcConnectError` in `errors.ts` (+ its `CODE` in the exported list, if one exists).
 2. Rewrite `client.ts` per the Architecture section; delete `sleep` import and `Connecting`.
@@ -493,7 +493,7 @@ Phase 3.
 
 Artifact: https://claude.ai/artifact/F9F7aKvqon8Skw9jAVRejd — source `implementations-plan/port-client-connect/eli5.html` (republish the same path to update).
 
-## Seeds (DRAFT until approval)
+## Seeds (final — the owner set the `/goal` seed unchanged, 2026-09-17)
 
 `/goal` — recommended (completion is transcript-observable):
 

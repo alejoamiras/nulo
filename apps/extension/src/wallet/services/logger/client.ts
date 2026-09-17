@@ -38,15 +38,20 @@ let shared: LoggerServiceClient | undefined
 
 /**
  * This document's logger, tagging its lines `context`. Every view shares one client whose port
- * the first line opens and Chrome closes with the document; callers never disconnect it. The
- * request promise is returned (a rejected line still reaches the page's unhandled-rejection
- * handler) but no caller is expected to await it.
+ * the first line opens and Chrome closes with the document; callers never disconnect it.
+ *
+ * A failed line never becomes an unhandled rejection: the pages' rejection handlers log through
+ * this same logger, so on a page whose port cannot open each failure would log the next one, for
+ * the life of the page. The request promise itself is returned, so a caller that awaits a line
+ * still sees it reject.
  */
 export function documentLogger(context?: DocumentLogContext): ILogger {
 	return {
 		log(source, level, ...data) {
 			shared ??= new LoggerServiceClient()
-			return shared.log(context, source, level, ...data)
+			const line = shared.log(context, source, level, ...data)
+			line.catch(() => {})
+			return line
 		},
 	}
 }
