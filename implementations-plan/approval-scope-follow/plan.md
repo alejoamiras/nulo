@@ -761,7 +761,7 @@ axis, and the banner text uses the rows' current names (a renamed row reads by i
 - Pass: all exit 0, complexity ratchet included.
 - Layers: typecheck · lint · unit
 
-### Phase 2 — the banner
+### Phase 2 — the banner ✓
 
 `data-testid="execute-scope-banner"` + `data-state`; the action carries
 `data-testid="execute-scope-action-btn"`. `followDeclined`. Component tests for every state, both

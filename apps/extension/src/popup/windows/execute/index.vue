@@ -16,6 +16,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 /** Local utilities */
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
+import { resolveOperationScope, scopeBannerCopy, scopeBannerState } from "./scope-mismatch"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
 import { authwitDisplayCall, displayCallsOf, pendingAuthwitDecodes, undecodedAll } from "./display-calls"
@@ -543,6 +544,23 @@ const reject = async () => {
 
 const signerAccounts = computed(() => uniqueSignerAccounts(operations.value))
 const signerNetworks = computed(() => uniqueSignerNetworks(operations.value))
+
+// Where the payload runs against where the wallet is looking. Window-local: the decline lives and
+// dies with this window, and the active rows arrive asynchronously, so nothing renders until both
+// are known.
+const followDeclined = ref(false)
+const scopeView = computed(() =>
+	resolveOperationScope(operations.value, { networkId: appStore.network?.id, accountAddress: appStore.account?.address }),
+)
+const scopeBanner = computed(() => {
+	const view = scopeView.value
+	const state = scopeBannerState(view, followDeclined.value)
+	if (!view || !state || !appStore.account || !appStore.network) return undefined
+	return { state, ...scopeBannerCopy(state, view, { account: appStore.account, network: appStore.network }) }
+})
+const toggleFollow = () => {
+	followDeclined.value = !followDeclined.value
+}
 // Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
 // with no chosen fee can't execute yet. Gating the Confirm button's disabled state
 // on it (not just approve()'s guard) makes the button authoritative — a click while
@@ -583,6 +601,19 @@ onUnmounted(disposeWindow)
 			/>
 
 			<Flex direction="column" gap="16" :class="$style.sections">
+				<Banner
+					v-if="scopeBanner"
+					data-testid="execute-scope-banner"
+					:data-state="scopeBanner.state"
+					variant="info"
+					direction="vertical"
+					wide
+					:action="scopeBanner.action ? { name: scopeBanner.action, callback: toggleFollow, testId: 'execute-scope-action-btn' } : undefined"
+				>
+					<template #title>{{ scopeBanner.title }}</template>
+					<template #description>{{ scopeBanner.body }}</template>
+				</Banner>
+
 				<Flex v-if="operations.length" direction="column" gap="10" wide>
 					<Flex wide justify="between" align="center">
 						<SectionLabel label="Requested operations" :count="operations.length" />
