@@ -16,9 +16,9 @@
 
 import { describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "../errors"
+import { RpcConnectError, RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "../errors"
 import { MessageType, type ResponseMessage } from "../messages"
-import { capturePortMessage, emitPortDisconnect, emitPortMessage, silentLogger } from "../testing/transport-harness"
+import { capturePortMessage, emitPortDisconnect, emitPortMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
 import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "./client"
 
 const SERVICE = "test-svc"
@@ -98,6 +98,15 @@ function responseMessage(requestId: number, result?: unknown, error?: string, er
 		},
 	} as ResponseMessage<TestMethods>
 }
+
+const connectMock = () => chrome.runtime.connect as unknown as ReturnType<typeof vi.fn>
+
+/** What Chrome throws from `runtime.connect` on a page orphaned by an extension update or reload. */
+const contextInvalidated = () => {
+	throw new Error("Extension context invalidated.")
+}
+
+const failedOpenLines = (calls: unknown[][]) => calls.filter((line) => line[2] === "Failed to connect")
 
 /** Grab the requestId of the most recent request sent on SERVICE. */
 function lastRequestId(): number {
@@ -553,5 +562,87 @@ describe("port onDisconnect → reconnect", () => {
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
 		expect((client as any).pendingCount).toBe(0)
+	})
+
+	test("a replacement open that throws still rejects in-flight requests cleanly, and a later request reopens", async () => {
+		vi.useFakeTimers()
+		try {
+			const client = newClient()
+			await client.connect()
+			const inflight = client.echo("inflight").catch((e: unknown) => e)
+
+			connectMock().mockImplementationOnce(contextInvalidated)
+			emitPortDisconnect(SERVICE)
+
+			expect(((await inflight) as Error).message).toBe("Client disconnected")
+			expect(vi.getTimerCount()).toBe(0)
+
+			const afterReopen = client.echo("after")
+			emitPortMessage(SERVICE, responseMessage(lastRequestId(), "ok-again"))
+			await expect(afterReopen).resolves.toBe("ok-again")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+// ── Failed open ────────────────────────────────────────────────────────
+// `chrome.runtime.connect` throws synchronously when the page's extension context is gone. The
+// client used to retry that every second forever; a failed open now ends with the request.
+
+describe("connect failure is terminal", () => {
+	test("the request rejects at once with RpcConnectError: no retry, no timer, no pending entry, one log line", async () => {
+		vi.useFakeTimers()
+		try {
+			connectMock().mockImplementation(contextInvalidated)
+			const { logger, calls } = makeSpyLogger()
+			const client = new TestClient(logger)
+
+			// Awaited with no timer advance: only an immediate rejection can settle this.
+			const err = await client.echo("x").catch((e: unknown) => e)
+
+			expect(err).toBeInstanceOf(RpcConnectError)
+			expect((err as Error).message).toContain("Extension context invalidated.")
+			// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+			expect((client as any).pendingCount).toBe(0)
+			expect(vi.getTimerCount()).toBe(0)
+
+			await vi.advanceTimersByTimeAsync(5_000)
+			expect(connectMock()).toHaveBeenCalledTimes(1)
+			expect(failedOpenLines(calls)).toHaveLength(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("connect() resolves on a failed open and logs it once, with Chrome's reason", async () => {
+		connectMock().mockImplementation(contextInvalidated)
+		const { logger, calls } = makeSpyLogger()
+
+		await expect(new TestClient(logger).connect()).resolves.toBeUndefined()
+
+		const lines = failedOpenLines(calls)
+		expect(lines).toHaveLength(1)
+		expect((lines[0][3] as Error).message).toContain("Extension context invalidated.")
+	})
+
+	test("connect() resolves even when the throw is not a failed open", async () => {
+		const logger = {
+			log: (...line: unknown[]) => {
+				if (line[2] === "Connected") throw new Error("logger down")
+			},
+		}
+
+		await expect(new TestClient(logger).connect()).resolves.toBeUndefined()
+	})
+
+	test("a failed open does not wedge the client: the next request opens a port", async () => {
+		connectMock().mockImplementationOnce(contextInvalidated)
+		const client = newClient()
+		await expect(client.echo("first")).rejects.toBeInstanceOf(RpcConnectError)
+
+		const second = client.echo("second")
+		emitPortMessage(SERVICE, responseMessage(lastRequestId(), "ok"))
+		await expect(second).resolves.toBe("ok")
 	})
 })

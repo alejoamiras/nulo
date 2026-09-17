@@ -49,13 +49,9 @@ for (const [method, level] of consoleMethods) {
 // catch unhandled errors
 self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	try {
-		// Known-benign cascade: when the SW port closes, every pending
-		// background-port RPC rejects with "Client disconnected". Most
-		// are fire-and-forget callers (the document logger, from the
-		// console-sniffer above) that don't attach .catch handlers, so
-		// each rejection fires here. That's expected unwind, not failure
-		// — demote to Debug + one summary line so the activity log isn't
-		// flooded with 14× identical errors per SW boot.
+		// Known-benign cascade: when the SW port closes, every pending background-port RPC rejects
+		// with "Client disconnected", and the un-awaited ones land here. Expected unwind, not
+		// failure — demoted to Debug so a SW restart does not flood the activity log.
 		if (isClientDisconnectRejection(e.reason)) {
 			// Only preventDefault() keeps DevTools from printing the rejection; the demotion never did.
 			e.preventDefault()

@@ -1,9 +1,9 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { sleep } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta } from "../core/base-client"
 import { summarizeMessage } from "../core/envelope-summary"
+import { RpcConnectError } from "../errors"
 import { MessageType, type EventMessage, type ResponseMessage } from "../messages"
 
 /** Default upper bound on any RPC request. Individual calls can override.
@@ -42,25 +42,38 @@ export abstract class ServiceClient<
 		super(service, logger, name, { defaultTimeoutMs: options?.requestTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS, warnAfterMs: WARN_AFTER_MS })
 	}
 
-	public async connect() {
-		if (this.state !== ClientState.Disconnected) {
-			return
+	/**
+	 * Opens the port if it is closed. Never rejects — most callers do not await this: a failed open
+	 * is logged where it happens and reported by the request that needs the port.
+	 */
+	public async connect(): Promise<void> {
+		try {
+			this.openPort()
+		} catch {}
+	}
+
+	/**
+	 * Opens the port synchronously or throws `RpcConnectError`. A synchronous throw from
+	 * `chrome.runtime.connect` is treated as permanent — the known ones are (the extension context is
+	 * gone) — so nothing retries: an asleep worker never throws, it is woken, and a missing peer
+	 * surfaces later as `onDisconnect`.
+	 */
+	private openPort(): void {
+		if (this.state !== ClientState.Disconnected) return
+		let port: chrome.runtime.Port
+		try {
+			port = chrome.runtime.connect(undefined, { name: this.service })
+		} catch (cause) {
+			const error = new RpcConnectError(this.service, cause)
+			this.logError("Failed to connect", error)
+			throw error
 		}
-		this.state = ClientState.Connecting
-		while (this.state === ClientState.Connecting) {
-			try {
-				this.port = chrome.runtime.connect(undefined, { name: this.service })
-				this.port.onDisconnect.addListener(this.onDisconnect)
-				this.port.onMessage.addListener(this.onMessage)
-				this.state = ClientState.Connected
-				this.logDebug("Connected")
-				this.onConnected.invoke()
-				return
-			} catch (error) {
-				this.logError("Failed to connect", error)
-				await sleep(1000)
-			}
-		}
+		this.port = port
+		port.onDisconnect.addListener(this.onDisconnect)
+		port.onMessage.addListener(this.onMessage)
+		this.state = ClientState.Connected
+		this.logDebug("Connected")
+		this.onConnected.invoke()
 	}
 
 	public disconnect() {
@@ -79,7 +92,7 @@ export abstract class ServiceClient<
 
 	private readonly onDisconnect = () => {
 		this.disconnect()
-		this.connect()
+		void this.connect()
 	}
 
 	private readonly onMessage = (message: ResponseMessage<TRequests> | EventMessage<TEvents>) => {
@@ -97,26 +110,10 @@ export abstract class ServiceClient<
 
 	// ── Transport hooks ─────────────────────────────────────────────────
 
-	protected ensureTransportReady(): void | Promise<void> {
-		// `connect()` runs synchronously in the common case — `chrome.runtime.connect`
-		// returns a Port immediately; the only `await` inside `connect()` is the
-		// retry-after-failure path. So kick it off and, if it brought us to
-		// Connected without suspending, return void so the request runs straight
-		// through to the synchronous Port send with no intervening microtask
-		// (preserving the Port transport's long-standing synchronous-send timing).
-		if (this.state === ClientState.Disconnected) void this.connect()
-		if (this.state === ClientState.Connected) return
-		return this.waitForConnection()
-	}
-
-	private async waitForConnection(): Promise<void> {
-		while (this.state !== ClientState.Connected) {
-			if (this.state === ClientState.Disconnected) {
-				void this.connect()
-				continue
-			}
-			await sleep(300)
-		}
+	/** Synchronous by design: returning void keeps the request running straight through to the Port
+	 *  send with no intervening microtask. A failed open throws and rejects that request. */
+	protected ensureTransportReady(): void {
+		this.openPort()
 	}
 
 	protected sendEnvelope(content: unknown): void {
@@ -149,7 +146,6 @@ export abstract class ServiceClient<
 }
 
 enum ClientState {
-	Connecting,
 	Connected,
 	Disconnecting,
 	Disconnected,
