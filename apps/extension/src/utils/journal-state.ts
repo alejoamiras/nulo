@@ -1,41 +1,8 @@
 /**
- * Journal record → terminal-state display mapping (Phase 2 follow-up).
- *
- * Pure function — no Vue, no chrome.*, no service clients. Used by
- * `RecentActivityView` and the Archives page (`activity.vue`) to render
- * `TransactionTerminalCard` for journal records that ended without
- * producing an on-chain transaction.
- *
- * Why a separate util:
- *   - On-chain settled transactions get their visual state from
- *     `TransactionCard` (driven by `TransactionService` + chain status).
- *   - Journal records that terminated WITHOUT broadcasting (cancel pre-
- *     submit, SW-restart-killed, prover error, network failure pre-broadcast)
- *     have no TransactionService entry. Their terminal state is the
- *     `progress.stage === "cancelled"` or `error.kind` value carried in
- *     the journal record itself.
- *
- * 9 `JobError.kind` variants collapse into 3 user-facing visual states.
- * UX-locked by the user (2026-05-13):
- *
- *   - **Cancelled** (neutral gray, `circle-minus`)
- *       Maps from: `progress.stage === "cancelled"` OR `error.kind === "user_rejected"`.
- *       Tone: "you did this on purpose".
- *
- *   - **Interrupted** (amber, `refresh-cw`)
- *       Maps from: `error.kind ∈ { sw_restart_post_prove, stale_on_resume,
- *       stuck_proving }`. Tone: "recoverable — try again". The Phase 2
- *       reaper emits these when a SW restart leaves the prove pipeline
- *       in an unrecoverable state (no requestId to deliver the result back
- *       to in the new SW instance), or when a prove exceeds its 35-min
- *       sanity ceiling.
- *
- *   - **Failed** (red, `close-circle`)
- *       Catch-all for everything else: real failures the user can't recover
- *       from automatically (`network`, `simulation`, `prover`, `popup_bound`),
- *       plus the per-flow tags `transfer` / `dapp_execute` that
- *       `ExecutionService.normalizeError` emits as kind on uncategorized
- *       failures, plus any future / unknown kind.
+ * Display for journal records that ended without an on-chain transaction. Those have no
+ * `TransactionService` entry, so their terminal state comes from the record's own stage and
+ * `error.kind`; settled transactions render through `TransactionCard` instead. The three visual
+ * states (cancelled, interrupted, failed) are owner-locked.
  */
 
 import type { JobErrorKind } from "@nulo/wallet-core/jobs"
@@ -346,8 +313,8 @@ function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): J
 	const token = op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
 
 	// Pre-v7 records lacking `amountRaw` would have `balanceFormatted(undefined, …)`
-	// silently render "0", surfacing as a fake "0 USDC" ghost on the card
-	// (codex audit catch). Only emit amount when both pieces are present.
+	// silently render "0", surfacing as a fake "0 USDC" ghost on the card.
+	// Only emit amount when both pieces are present.
 	let amount: string | null = null
 	let amountSymbol: string | null = null
 	if (op.amountRaw && token) {

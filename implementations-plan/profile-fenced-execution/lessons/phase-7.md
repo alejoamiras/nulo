@@ -156,3 +156,29 @@ out or rejects locks without a handle, even when the handle read had succeeded, 
 replacement-session protection does not cover that path. It added that the client's no-replay
 behaviour supports the restart reasoning for pending requests but does not guarantee delivery of a
 lock through a worker crash. Verdict line: "No new material findings."
+
+## Cross-arc pass
+
+A fresh codex session (GPT-6 Astra, `high`, static review only) read the combined diff
+`c543c18d..HEAD`, the plan and every lessons file, and looked at the seams between the arcs.
+
+### Round 1 — approve, no material findings; four comment findings
+
+Verdict line: "Approve — no new material cross-arc defects found." It confirmed: the popup count and
+the worker's deferral share `isApprovedSendInFlight` (the sweep's extra `queued` stage is
+intentional); the sweep persists `cancelled` before it aborts; serials, the account-lookup rechecks
+and the broadcast check keep a successor session from authorizing work; a lock handle protects a
+replacement session, the unbound lock after the budget excepted; the deferral read bypasses the
+journal's RPC gate, so it takes no lock cycle; the three network e2e carry real proving-stage and
+timing preconditions. On the phase-6 limitation it found nothing inside this plan's surfaces that
+makes it worse, and called the workaround (close and reopen the popup) accurate.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | The `PRE_SUBMIT_STAGES` comment says the broadcast is issued from `submitting`; the journal write precedes the cancellation check and the fence check | Accepted. The comment now names the stages the sweep cancels and why `submitting` is left to the fence check before `node.sendTx`: a sent transaction must never read `cancelled` |
+| 2 | The `utils/in-flight-send.ts` header says a send follows whichever profile becomes active and that cancelling always clears the guard | Not changed here. The header predates this plan and states the rationale of the account/network Send freeze, a hard limit of this plan owned by the parked approval-scope-follow plan. Its first claim still holds for the switches the freeze blocks (an account or network switch does not end a session, so the fence does not see it); its second is the stale-tracker limitation already in the plan's Known limitations. Recorded as a follow-up for that plan and in the PR body |
+| 3 | The `hasApprovedSendsInFlight` docblock repeats its name and omits why it reads the journal in-process | Accepted, verified: `getActiveProfile` runs under the facade lock and reaches `expireOrDefer`, so the gated RPC read (which asks for the active profile) would wait on a lock the caller holds. The docblock now states that |
+| 4 | Provenance and duplicated explanations in `claim-helper.ts`, `mark-failed-unless-cancelled.ts`, `journal-state.ts` | Accepted. Review and phase references removed (two more of the same in `claim-helper.ts` and `journal-state.ts`); the claim decision tree now matches the code (`pending` registers only); the synchronous-passthrough paragraph is one sentence; the header table with obsolete icon names is gone |
+
+Gate: `bunx biome check` on the five files exit 0; `bun --bun vitest run src/wallet/services/execution
+src/utils` exit 0 (92 files, 1321 tests). Comment-only change.

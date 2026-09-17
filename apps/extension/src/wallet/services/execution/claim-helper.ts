@@ -1,30 +1,13 @@
 /**
- * Standalone helper for claiming a pre-allocated queued journal record vs
- * creating a fresh one. Extracted from `ExecutionService` for unit-testability —
- * the original method had too many `this.*` dependencies to test in isolation.
+ * Claims the queued journal row a dApp send was filed under, or creates one.
  *
- * Decision tree (proven correct via codex rounds 3-5):
+ *   - no `queuedJournalId`, or the row was reaped → create a fresh row
+ *   - row at `queued`                              → claim it (queued → pending)
+ *   - row at `pending` (silent-path pre-claim)     → register only
+ *   - any other stage                              → throw `JobCancelledSentinel` (EIP-1193 4001)
  *
- *   - no `queuedJournalId`                     → create new (legacy path)
- *   - `journal.getOperation(id)` returns null   → create new (reaper deleted it)
- *   - record stage === "queued"                  → claim (queued → pending).
- *                                                  Controller registered
- *                                                  IMMEDIATELY after the stage
- *                                                  write — no await between
- *                                                  transition and `set()`.
- *   - record stage IS NOT "queued"               → throw `JobCancelledSentinel`.
- *                                                  Reuses the existing
- *                                                  cancelled-pipeline that
- *                                                  surfaces as EIP-1193 4001.
- *
- * Journal-storage failures (write error inside `transitionOperation`) RE-THROW
- * the original error so the caller's `executeOperations` classifies as a
- * failed operation, NOT as cancelled (codex R5).
- *
- * The journal-layer mutex on `transitionOperation` serializes claim against
- * `cancelJob`. If cancel wins the mutex first, our claim fails — we re-read
- * to disambiguate cancellation from storage error and throw the appropriate
- * sentinel.
+ * The journal's transition lock serializes the claim against `cancelJob`; a failed claim is
+ * re-read, so a cancel that won surfaces as cancelled and a storage error rethrows as a failure.
  */
 
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
@@ -95,13 +78,9 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 
 	let record = await operationJournal.getOperation(queuedJournalId).catch(() => null)
 	if (!record) {
-		// Record was reaped (boot sweep or staleness GC). Best-effort
-		// fallback — create new in-flight record so execution proceeds.
-		// A pre-acquire controller registered under the now-gone queuedJournalId
-		// is orphaned; drop it so `activeControllers` doesn't leak (v3 — codex
-		// final-pass edge). cancelJob(queuedJournalId) couldn't have fired (the
-		// record is gone, so its journal transition would have thrown), so the
-		// orphan never aborted.
+		// Reaped (boot sweep or staleness GC). A pre-acquire controller under the gone id is dropped
+		// so it does not leak; no cancel could have aborted it, since a cancel transitions the row before
+		// it aborts.
 		if (reuseController) deps.deleteController(queuedJournalId)
 		logger?.debug(`Queued record ${queuedJournalId} not found; creating new in-flight record`)
 		return createAndRegisterFresh(deps, input)
