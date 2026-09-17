@@ -182,15 +182,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  `to` fans out client-side. Keyed `${networkId}|${contract}`. */
 	private readonly publicSchedulers = new Map<string, ReturnType<typeof setInterval>>()
 	private readonly publicPolling = new Set<string>()
-	/** `${networkId}|${contract}` → the scan target (profile bound at hydration). */
-	private readonly publicWatched = new Map<string, { profileId: string; networkId: string; contract: string }>()
+	/** `${networkId}|${contract}` → the scan target (profile and epoch bound at installation). */
+	private readonly publicWatched = new Map<string, { profileId: string; networkId: string; contract: string; epoch: number }>()
 	/** D2 class-gate verdict cached by the FINALIZED tip — one `getContract` per finalized advance,
 	 *  not per tick. Keyed `${profileId}|${networkId}|${contract}`; `unresolved` is never cached. */
 	private readonly classGateCache = new Map<string, { finalizedTip: number; checkpointHash: string; status: PublicTokenClassStatus }>()
 	/** Failure episodes of the public scan; session-backed so an alarm-woken worker keeps the streak. */
 	private readonly episodes: ScanEpisodeStore
-	/** Last health announced per `${profileId}|${networkId}|`, so the event fires on change only. */
-	private readonly announcedHealth = new Map<string, { profileId: string; networkId: string; stalled: boolean }>()
 	private pxeService: PxeServiceClient = null!
 	private indexer: PublicEventIndexer = null!
 	/** Single global lock serializing every writer on this service's storage
@@ -399,6 +397,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			}
 			// Invalidate any in-flight scan whose PXE snapshot predates this wipe.
 			this.bumpServiceEpoch()
+			this.restampPublicTargets()
 		})
 	}
 
@@ -823,12 +822,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	/** Start the public-event scheduler for `(networkId, contract)` (idempotent). */
 	private startPublicScheduler(profileId: string, networkId: string, contract: string): void {
 		const key = this.publicSchedulerKey(networkId, contract)
-		this.publicWatched.set(key, { profileId, networkId, contract })
+		this.publicWatched.set(key, { profileId, networkId, contract, epoch: this.serviceEpoch })
 		if (this.publicSchedulers.has(key)) return
 		this.startPollScheduler(this.publicSchedulers, key, () => this.pollPublic(key), {
 			tick: "Public poll failed",
 			initial: "Initial public poll failed",
 		})
+	}
+
+	/** A bump that keeps the scheduler set — it only invalidates in-flight scans — carries the installed
+	 *  targets into the new epoch, or every later poll of a still-valid stream would be refused. */
+	private restampPublicTargets(): void {
+		for (const target of this.publicWatched.values()) target.epoch = this.serviceEpoch
 	}
 
 	/** Tear down the public-event scheduler for `(networkId, contract)`. */
@@ -840,18 +845,24 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.publicWatched.delete(key)
 	}
 
-	/** Single-flight public poll for one `(networkId, contract)` stream. A contract in backoff skips
-	 *  the scan but still re-evaluates health: the flip to stalled comes from time passing, not from
-	 *  an attempt. */
+	/** Single-flight public poll for one `(networkId, contract)` stream. Every caller — the interval,
+	 *  the install kick, a user Retry — is fenced to the epoch its target was installed in: between a
+	 *  rebuild's bump and its commit the old targets are still listed, and a scan started then would
+	 *  capture the NEW epoch and write old-scope cursors and episodes under it. A contract in backoff
+	 *  skips the scan; health is announced before AND after, because the flip to stalled comes from
+	 *  time passing and a recovery must be measured against what a reader could already have seen. */
 	private async pollPublic(key: string): Promise<void> {
 		if (this.publicPolling.has(key)) return
 		const target = this.publicWatched.get(key)
-		if (!target) return
+		if (!target || target.epoch !== this.serviceEpoch) return
 		this.publicPolling.add(key)
 		try {
 			const episodeKey = scanEpisodeKey(target.profileId, target.networkId, target.contract)
-			if (!this.episodes.isBackingOff(episodeKey, Date.now())) await this.scanAndRecord(target, episodeKey)
 			this.announceHealth(target.profileId, target.networkId)
+			if (!this.episodes.isBackingOff(episodeKey, Date.now())) {
+				await this.scanAndRecord(target, episodeKey)
+				this.announceHealth(target.profileId, target.networkId)
+			}
 			await this.drainBalanceOutbox()
 		} catch (error) {
 			this.logWarn(`Public scan failed for ${key}`, error)
@@ -878,27 +889,32 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	/** Emit `onIncomingSyncHealthChanged` when the network's health differs from the last announced
-	 *  one; the single `warn` of a failing scan is the transition into stalled. */
+	 *  one. What was announced is persisted with the episodes, so the single `warn` of a failing scan —
+	 *  the transition into stalled — is once per stall, not once per worker wake. */
 	private announceHealth(profileId: string, networkId: string): void {
 		const prefix = scanEpisodeNetworkPrefix(profileId, networkId)
 		const { stalled } = this.episodes.health(prefix, Date.now())
-		if ((this.announcedHealth.get(prefix)?.stalled ?? false) === stalled) return
-		if (stalled) this.announcedHealth.set(prefix, { profileId, networkId, stalled })
-		else this.announcedHealth.delete(prefix)
+		if (!this.episodes.setAnnounced(prefix, stalled)) return
 		if (stalled) this.logWarn("incoming public scan stalled", { networkId })
 		this.emit("onIncomingSyncHealthChanged", { profileId, networkId })
 	}
 
-	/** Drop the episodes `matches` selects, then re-announce every network that was stalled. */
+	/** Drop the episodes `matches` selects, then take back every announced stall that no longer holds. */
 	private dropEpisodes(matches: (key: string) => boolean): void {
 		this.episodes.deleteWhere(matches)
-		for (const { profileId, networkId } of [...this.announcedHealth.values()]) this.announceHealth(profileId, networkId)
+		for (const prefix of this.episodes.announcedPrefixes()) {
+			const [profileId, networkId] = prefix.split("|")
+			this.announceHealth(profileId, networkId)
+		}
 	}
 
 	public async getIncomingSyncHealth(networkId: string): Promise<IncomingSyncHealth> {
 		await this.ensureInitialized()
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile || typeof networkId !== "string") return { stalled: false, since: null }
+		// A reader is an observer like any other: what it is about to see becomes the announced baseline,
+		// or a recovery that follows a stall only this read saw would be announced to nobody.
+		this.announceHealth(profile.id, networkId)
 		return this.episodes.health(scanEpisodeNetworkPrefix(profile.id, networkId), Date.now())
 	}
 
@@ -959,6 +975,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// in-flight off-lock scan holding the old epoch can't write rows or a failure episode for the
 			// token we're deleting.
 			this.bumpServiceEpoch()
+			this.restampPublicTargets()
 			// Scheduler teardown + row mutations both inside the lock so a
 			// concurrent scan can't slip a row in between teardown + wipe.
 			await this.detachTokenSchedulersLocked(profileId, network, token.contract)
@@ -1522,8 +1539,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// Nothing new (empty EOF) OR a dropped/suspect page — advance the finalized rewind floor, but
 			// only as far as we CONTIGUOUSLY scanned (a dropped page scanned nothing, so the floor stays
 			// at the cursor — codex R5 A1). No records are touched.
-			await this.persistCursorLocked(profileId, networkId, contract, { ...cursor, lastScanFinalized: watermark }, epochAtStart)
-			return result.dropped ? "no-progress" : "idle-at-tip"
+			const committed = await this.persistCursorLocked(
+				profileId,
+				networkId,
+				contract,
+				{ ...cursor, lastScanFinalized: watermark },
+				epochAtStart,
+			)
+			return committed && !result.dropped ? "idle-at-tip" : "no-progress"
 		}
 
 		const recipients = await this.recipientsFor(profileId, chainId)
@@ -1549,7 +1572,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				},
 				epochAtStart,
 			)
-			return committed ? "progress" : "no-progress"
+			return this.forwardOutcome(committed, result)
 		}
 
 		// Records to write → persist `pendingPage` BEFORE the writes (D3 crash window). Its fork anchor
@@ -1580,7 +1603,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			},
 			epochAtStart,
 		)
-		return committed ? "progress" : "no-progress"
+		return this.forwardOutcome(committed, result)
+	}
+
+	/** A forward pass that advanced the cursor. The valid pages are committed either way; the TICK is
+	 *  a success only if no page of it was dropped — a node that serves one good page and one bad page
+	 *  forever must still surface as failing. */
+	private forwardOutcome(committed: boolean, result: PublicScanResult): ScanOutcome {
+		return committed && !result.dropped ? "progress" : "no-progress"
 	}
 
 	/** The finalized rewind floor to persist: `min(finalized, the highest block CONTIGUOUSLY scanned
@@ -1740,8 +1770,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return committed ? "progress" : "no-progress"
 		}
 
-		await this.finishReconciliation(profileId, networkId, contract, marker, seen, result.scannedThrough, epochAtStart)
-		return "progress"
+		const finished = await this.finishReconciliation(profileId, networkId, contract, marker, seen, result.scannedThrough, epochAtStart)
+		return finished ? "progress" : "no-progress"
 	}
 
 	/** Close out a fully-scanned reconciliation (D6): delete orphan receipts (stored blockHash ≠
@@ -1755,7 +1785,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		seen: Array<[number, string]>,
 		reconciledThrough: PublicEventCursor | null,
 		epochAtStart: number,
-	): Promise<void> {
+	): Promise<boolean> {
 		const canonicalByHeight = new Map<number, string>()
 		for (const [height, hash] of seen) canonicalByHeight.set(height, hash)
 
@@ -1775,27 +1805,26 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// Clear the marker + advance the anchor to `upperBoundHash` so the next forward scan doesn't
 		// re-throw on a stale referenceBlock (which would loop reconciliation).
 		const cursorRow = await this.repo.getCursor(profileId, networkId, contract)
-		if (cursorRow) {
-			// If the cursor sits ABOVE the reconciled checkpoint (a rollback stranded it) and reconcile
-			// found nothing to resume from, reset it to `null` so the next forward scan re-covers from
-			// `startBlock` as the checkpoint re-advances — otherwise it would forever query the empty
-			// `(oldCursor, newCheckpoint]` backwards range and the deleted rollback rows never re-index
-			// (codex R6). A full re-scan is heavy but rollbacks are rare + commits are idempotent.
-			const strandedAboveCheckpoint = cursorRow.cursor !== null && cursorRow.cursor.blockNumber > marker.upperBound
-			const nextCursor = reconciledThrough ?? (strandedAboveCheckpoint ? null : cursorRow.cursor)
-			await this.persistCursorLocked(
-				profileId,
-				networkId,
-				contract,
-				{
-					...cursorRow,
-					reconciling: undefined,
-					cursor: nextCursor,
-					lastSyncedBlockHash: marker.upperBoundHash,
-				},
-				epochAtStart,
-			)
-		}
+		if (!cursorRow) return false
+		// If the cursor sits ABOVE the reconciled checkpoint (a rollback stranded it) and reconcile
+		// found nothing to resume from, reset it to `null` so the next forward scan re-covers from
+		// `startBlock` as the checkpoint re-advances — otherwise it would forever query the empty
+		// `(oldCursor, newCheckpoint]` backwards range and the deleted rollback rows never re-index
+		// (codex R6). A full re-scan is heavy but rollbacks are rare + commits are idempotent.
+		const strandedAboveCheckpoint = cursorRow.cursor !== null && cursorRow.cursor.blockNumber > marker.upperBound
+		const nextCursor = reconciledThrough ?? (strandedAboveCheckpoint ? null : cursorRow.cursor)
+		return this.persistCursorLocked(
+			profileId,
+			networkId,
+			contract,
+			{
+				...cursorRow,
+				reconciling: undefined,
+				cursor: nextCursor,
+				lastSyncedBlockHash: marker.upperBoundHash,
+			},
+			epochAtStart,
+		)
 	}
 
 	/**

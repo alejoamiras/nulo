@@ -754,8 +754,10 @@ watch(
 	{ flush: "sync" },
 )
 
+// Token mode is part of the scope: leaving it changes neither profile nor network, yet the account feed
+// it reveals has never fetched its health.
 watch(
-	() => `${appStore.profile?.id ?? ""}|${appStore.network?.id ?? ""}`,
+	() => `${props.token ? "token" : "account"}|${appStore.profile?.id ?? ""}|${appStore.network?.id ?? ""}`,
 	() => void syncHealth.refresh(),
 )
 

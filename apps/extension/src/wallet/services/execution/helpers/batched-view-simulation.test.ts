@@ -317,6 +317,38 @@ describe("batchedViewSimulation", () => {
 		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(13n)
 	})
 
+	test("several private calls, each with nested sub-calls → every slot holds its OWN return, in input order", async () => {
+		const deps = makeDeps({ functions: { name_priv: { kind: FunctionType.PRIVATE }, symbol_priv: { kind: FunctionType.PRIVATE } } })
+		// A flattening reader would fold a call's sub-call returns (9n, 8n) into its own.
+		const withChild = (own: bigint, child: bigint) => ({ values: [new Fr(own)], nested: [{ values: [new Fr(child)], nested: [] }] })
+		vi.mocked(deps.pxe.simulateTx).mockResolvedValue({
+			getPublicReturnValues: () => [],
+			getPrivateReturnValues: () => ({ nested: [withChild(1n, 9n), withChild(2n, 8n), withChild(3n, 7n)] }),
+		} as never)
+		const calls: CallAction[] = [
+			{ kind: "call", contract: CONTRACT_A, method: "name_priv", args: [] },
+			{ kind: "call", contract: CONTRACT_A, method: "symbol_priv", args: [] },
+			{ kind: "call", contract: CONTRACT_B, method: "name_priv", args: [] },
+		]
+
+		const result = await batchedViewSimulation(calls, deps)
+
+		expect(result.encoded.map((values) => values.map((v) => v.toBigInt()))).toEqual([[1n], [2n], [3n]])
+	})
+
+	test.each([
+		["private", FunctionType.PRIVATE],
+		["public", FunctionType.PUBLIC],
+	])("a %s result with fewer returns than calls rejects instead of leaving a slot empty", async (_label, kind) => {
+		const deps = makeDeps({ functions: { getter: { kind } }, privateReturns: [[new Fr(1n)]], publicReturns: [[new Fr(1n)]] })
+		const calls: CallAction[] = [
+			{ kind: "call", contract: CONTRACT_A, method: "getter", args: [] },
+			{ kind: "call", contract: CONTRACT_A, method: "getter", args: [] },
+		]
+
+		await expect(batchedViewSimulation(calls, deps)).rejects.toThrow()
+	})
+
 	test("mixed utility + public → utility launched + 1 simulateTx, results in input order", async () => {
 		const deps = makeDeps({
 			functions: {

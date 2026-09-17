@@ -1,6 +1,13 @@
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { SCAN_EPISODES_KEY, ScanEpisodeStore, parseStoredEpisode, scanEpisodeKey, scanEpisodeNetworkPrefix } from "./scan-episodes"
+import {
+	FAILURES_CAP,
+	SCAN_EPISODES_KEY,
+	ScanEpisodeStore,
+	parseStoredEpisode,
+	scanEpisodeKey,
+	scanEpisodeNetworkPrefix,
+} from "./scan-episodes"
 import { BACKOFF_CAP_MS } from "./scan-health"
 
 const MIN = 60_000
@@ -9,7 +16,13 @@ const KEY = scanEpisodeKey("p1", "n1", "0xc")
 const N1 = scanEpisodeNetworkPrefix("p1", "n1")
 
 let api: FakeBrowserApi
-const stored = async () => (await api.storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY]
+const storedBlob = async () =>
+	(await api.storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY] as
+		| { episodes: Record<string, unknown>; announced: string[] }
+		| undefined
+const stored = async () => (await storedBlob())?.episodes
+const seed = (episodes: Record<string, unknown>, announced: string[] = []) =>
+	api.storage.session.set({ [SCAN_EPISODES_KEY]: { episodes, announced } })
 const makeStore = (onError = vi.fn()) => new ScanEpisodeStore(api.storage.session, onError)
 
 beforeEach(() => {
@@ -86,7 +99,7 @@ describe("ScanEpisodeStore", () => {
 
 	test("hydrate keeps valid entries, drops hostile ones, and ignores a blob that is not a plain object", async () => {
 		const good = { failures: 2, failingSince: NOW - MIN, nextAttemptAt: 0 }
-		await api.storage.session.set({ [SCAN_EPISODES_KEY]: { [KEY]: good, "p1|n1|0xbad": { failures: "many" } } })
+		await seed({ [KEY]: good, "p1|n1|0xbad": { failures: "many" } })
 		const store = makeStore()
 		await store.hydrate(NOW)
 		expect(store.has(KEY)).toBe(true)
@@ -96,6 +109,60 @@ describe("ScanEpisodeStore", () => {
 		const other = makeStore()
 		await other.hydrate(NOW)
 		expect(other.has(KEY)).toBe(false)
+	})
+
+	test("a clamped gate is written back: workers that restart faster than the clamp still reach it", async () => {
+		await seed({ [KEY]: { failures: 4, failingSince: NOW - 20 * MIN, nextAttemptAt: NOW + 1_000 * MIN } })
+
+		// No mutation between restarts: only hydrate's own repair can carry the clamp forward.
+		for (const at of [NOW, NOW + MIN, NOW + 2 * MIN]) {
+			const worker = makeStore()
+			await worker.hydrate(at)
+			await worker.settled()
+			expect(worker.isBackingOff(KEY, at)).toBe(true)
+		}
+		expect(await stored()).toMatchObject({ [KEY]: { nextAttemptAt: NOW + BACKOFF_CAP_MS } })
+
+		const late = makeStore()
+		await late.hydrate(NOW + BACKOFF_CAP_MS)
+		expect(late.isBackingOff(KEY, NOW + BACKOFF_CAP_MS)).toBe(false)
+	})
+
+	test("a stored count at the integer ceiling saturates: the backoff survives the next failure and a restart", async () => {
+		await seed({ [KEY]: { failures: Number.MAX_SAFE_INTEGER, failingSince: NOW - MIN, nextAttemptAt: 0 } })
+		const store = makeStore()
+		await store.hydrate(NOW)
+
+		store.record(KEY, "failed", NOW)
+		await store.settled()
+		expect(store.isBackingOff(KEY, NOW + BACKOFF_CAP_MS - 1)).toBe(true)
+		expect(await stored()).toMatchObject({ [KEY]: { failures: FAILURES_CAP } })
+
+		const restarted = makeStore()
+		await restarted.hydrate(NOW + 1)
+		expect(restarted.has(KEY)).toBe(true)
+	})
+
+	test("what was announced survives a restart, and only while its network still has an episode", async () => {
+		const first = makeStore()
+		first.record(KEY, "failed", NOW)
+		expect(first.setAnnounced(N1, true)).toBe(true)
+		expect(first.setAnnounced(N1, true)).toBe(false)
+		await first.settled()
+		expect((await storedBlob())?.announced).toEqual([N1])
+
+		const restarted = makeStore()
+		await restarted.hydrate(NOW + MIN)
+		expect(restarted.setAnnounced(N1, true)).toBe(false)
+		expect(restarted.announcedPrefixes()).toEqual([N1])
+
+		// An announced prefix whose episodes are gone is a stale claim: dropped, and the blob repaired.
+		await seed({}, [N1])
+		const orphaned = makeStore()
+		await orphaned.hydrate(NOW + MIN)
+		await orphaned.settled()
+		expect(orphaned.announcedPrefixes()).toEqual([])
+		expect(await storedBlob()).toBeUndefined()
 	})
 
 	test("health: stalled needs two failures and more than ten minutes; since is the oldest stalled start", () => {

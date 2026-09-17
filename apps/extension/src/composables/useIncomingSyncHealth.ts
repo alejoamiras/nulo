@@ -48,6 +48,7 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 
 	let disposed = false
 	let generation = 0
+	let retryGeneration = 0
 	let shownScope = ""
 	let shownAt = 0
 	let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -59,12 +60,15 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 		hideTimer = undefined
 	}
 
-	/** Another scope's notice is never shown under this one, not even for its minimum display. */
+	/** Nothing of another scope carries over: not its notice, not even for the minimum display, and not
+	 *  its pending Retry, which would leave this scope's button disabled by a request it never made. */
 	const enterScope = (key: string) => {
 		if (key === shownScope) return
 		shownScope = key
 		cancelHide()
 		stalled.value = false
+		retryGeneration += 1
+		retrying.value = false
 	}
 
 	const apply = (isStalled: boolean) => {
@@ -108,14 +112,18 @@ export function useIncomingSyncHealth(deps: UseIncomingSyncHealthDeps): UseIncom
 	const retry = async () => {
 		const scope = deps.getScope()
 		if (!scope || retrying.value) return
+		enterScope(scopeKeyOf(scope))
+		const current = ++retryGeneration
 		retrying.value = true
 		try {
 			await deps.client.retryIncomingScan(scope.networkId)
 		} catch {
 			// Unreachable worker: the refetch below shows whatever is true now.
 		}
+		// A retry that outlived its scope owns neither the flag nor the next fetch.
+		if (disposed || current !== retryGeneration) return
 		retrying.value = false
-		if (!disposed) await refresh()
+		await refresh()
 	}
 
 	deps.client.onIncomingSyncHealthChanged.add(onChanged)

@@ -648,4 +648,16 @@ describe("RecentActivityView — stalled incoming scan line", () => {
 		expect(H.getIncomingSyncHealth).not.toHaveBeenCalled()
 		expect(line(w).exists()).toBe(false)
 	})
+
+	test("leaving token mode on the same profile + network reads the account feed's health", async () => {
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+		const w = mountFeed({ token: { contract: "0xtok", symbol: "TOK" } })
+		await flushPromises()
+
+		await w.setProps({ token: undefined })
+		await flushPromises()
+
+		expect(H.getIncomingSyncHealth).toHaveBeenCalledWith("net-1")
+		expect(line(w).exists()).toBe(true)
+	})
 })

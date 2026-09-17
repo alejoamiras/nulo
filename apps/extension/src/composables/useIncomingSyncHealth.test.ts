@@ -192,6 +192,28 @@ describe("useIncomingSyncHealth", () => {
 		expect(client.getIncomingSyncHealth).toHaveBeenCalledTimes(2)
 	})
 
+	test("a scope change releases the Retry button, and the old scope's late retry cannot take the new one's flag", async () => {
+		const { client, health, setScope } = setup(STALLED)
+		await health.refresh()
+		const finish: Array<() => void> = []
+		client.retryIncomingScan.mockImplementation(() => new Promise<undefined>((resolve) => finish.push(() => resolve(undefined))))
+
+		const oldRetry = health.retry()
+		setScope({ profileId: "p1", networkId: "n2" })
+		await health.refresh()
+		expect(health.retrying.value).toBe(false)
+
+		const newRetry = health.retry()
+		expect(client.retryIncomingScan).toHaveBeenLastCalledWith("n2")
+		finish[0]()
+		await oldRetry
+		expect(health.retrying.value).toBe(true)
+
+		finish[1]()
+		await newRetry
+		expect(health.retrying.value).toBe(false)
+	})
+
 	test("dispose unsubscribes, cancels the pending hide and ignores an in-flight answer", async () => {
 		const { client, health, answer } = setup(STALLED)
 		await health.refresh()

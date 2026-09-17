@@ -3841,6 +3841,34 @@ describe("IncomingTransferService — public-scan tick outcomes", () => {
 		expect(cursorFor()).toMatchObject({ cursor: at(10), lastScanFinalized: 5 })
 	})
 
+	test("a valid page followed by a dropped one → no-progress, though the valid prefix is committed", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push({ events: [], scannedThrough: at(20), hasMore: true, dropped: false }, pubDroppedPage())
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.cursor).toEqual(at(20))
+	})
+
+	test("a commit the epoch fence rejects is never a success: EOF → no-progress, reconciliation end → no-progress", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const eofAfterBump = () => {
+			;(service as unknown as { bumpServiceEpoch: () => void }).bumpServiceEpoch()
+			return probeAck()
+		}
+
+		seedCursor({ cursor: at(10) })
+		state.responses.push(eofAfterBump)
+		expect(await scanPublic(service)).toBe("no-progress")
+
+		const reconciling = { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] }
+		seedCursor({ ...anchored, reconciling })
+		state.responses.push(eofAfterBump)
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.reconciling).toEqual(reconciling)
+	})
+
 	test("a non-advancing (hostile) page → no-progress, never a false idle-at-tip", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
@@ -4238,10 +4266,14 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 	const poll = (service: unknown) => surface(service).pollPublic(`n1|${tokenA.contract}`)
 	const storedEpisodes = async (service: unknown) => {
 		await surface(service).episodes.settled()
-		return (await new FakeBrowserApi().storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY] as
-			| Record<string, { failures: number; failingSince: number; nextAttemptAt: number }>
-			| undefined
+		return (
+			(await new FakeBrowserApi().storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY] as
+				| { episodes: Record<string, { failures: number; failingSince: number; nextAttemptAt: number }> }
+				| undefined
+		)?.episodes
 	}
+	const seedEpisodes = (episodes: Record<string, unknown>, announced: string[] = []) =>
+		new FakeBrowserApi().storage.session.set({ [SCAN_EPISODES_KEY]: { episodes, announced } })
 	const nodeDown = (reader: PublicEventReader) => {
 		reader.getScanTips = async () => {
 			throw new Error("node down")
@@ -4355,9 +4387,7 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 
 	test("a restart during an active backoff keeps the gate: the boot poll does not touch the node", async () => {
 		const gate = T0 + 100_000
-		await new FakeBrowserApi().storage.session.set({
-			[SCAN_EPISODES_KEY]: { [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } },
-		})
+		await seedEpisodes({ [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } })
 		const { reader } = makePublicReader()
 		const tips = vi.fn().mockRejectedValue(new Error("node down"))
 		reader.getScanTips = tips
@@ -4467,6 +4497,94 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 
 		expect(tips).toHaveBeenCalledTimes(2)
 		expect(await surface(service).getIncomingSyncHealth(7 as never)).toEqual({ stalled: false, since: null })
+	})
+
+	test("a Retry that lands between a profile switch's epoch bump and its commit scans nothing", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const token = makeTokenStub([tokenA])
+		const { service } = await bootPublic(reader, state, { profile, token })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+		tips.mockClear()
+
+		// The rebuild parks on its descriptors: epoch already bumped, p1's targets still installed.
+		let releaseTokens: () => void = () => {}
+		token.getTokensRaw.mockImplementationOnce(() => new Promise((resolve) => (releaseTokens = () => resolve([]))))
+		profile.getActiveProfile.mockResolvedValueOnce({ id: "p2" })
+		const switching = profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		await surface(service).retryIncomingScan("n1") // still reads p1: it captured its profile before the switch
+		expect(tips).not.toHaveBeenCalled()
+
+		releaseTokens()
+		await switching
+		await flushPromises()
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("deleting one token keeps Retry working for the ones that stay", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA, tokenB])
+		const { service } = await bootPublic(reader, state, { token })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		await token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+		await flushPromises()
+		tips.mockClear()
+		await surface(service).retryIncomingScan("n1")
+
+		expect(tips).toHaveBeenCalledTimes(1)
+	})
+
+	test("a stall a reader saw while the recovering scan was still running is taken back with an event", async () => {
+		await seedEpisodes({ [KEY]: { failures: 3, failingSince: T0 - 25 * MIN, nextAttemptAt: 0 } })
+		const { reader } = makePublicReader()
+		const healthyTips = reader.getScanTips
+		let releaseTips: () => void = () => {}
+		reader.getScanTips = async (networkId) => {
+			await new Promise<void>((resolve) => {
+				releaseTips = resolve
+			})
+			return healthyTips(networkId)
+		}
+		const { service } = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+		const events = captureHealthEvents(service)
+
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 - 25 * MIN })
+		releaseTips()
+		await flushPromises()
+
+		expect(events).toEqual([{ profileId: "p1", networkId: "n1" }])
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+	})
+
+	test("one stall warns once, however many times the worker restarts during it", async () => {
+		const warn = vi.spyOn(IncomingTransferService.prototype as unknown as { logWarn: (message: string) => void }, "logWarn")
+		await seedEpisodes({ [KEY]: { failures: 6, failingSince: T0 - 25 * MIN, nextAttemptAt: T0 + 4 * MIN } })
+
+		for (let wake = 0; wake < 3; wake++) {
+			vi.setSystemTime(T0 + wake * 30_000)
+			const { reader } = makePublicReader()
+			const { service } = await bootService(
+				{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+				{ keepStorage: true },
+			)
+			await flushPromises()
+			await surface(service).episodes.settled()
+		}
+
+		expect(warn.mock.calls.filter(([message]) => message === "incoming public scan stalled")).toHaveLength(1)
+		warn.mockRestore()
 	})
 
 	test("an ineligible (non-standard) token is never counted", async () => {
