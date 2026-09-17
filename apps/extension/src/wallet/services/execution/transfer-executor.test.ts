@@ -164,18 +164,33 @@ describe("TransferExecutor.execute", () => {
 		expect(txCallArgs[4]).toBe("99")
 	})
 
-	test("journal creation failing: no journal, no controller, flow still completes", async () => {
-		const { executor, deps, task } = makeHarness({
+	test("journal creation throwing: the transfer is refused before any build", async () => {
+		const { executor, deps, task, proveAndSend } = makeHarness({
 			createJournalOperation: vi.fn(async () => {
 				throw new Error("journal write failed")
 			}),
 		})
-		const result = await executor.execute(makeReq(), undefined, FENCE)
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow("journal write failed")
 
-		expect(result).toBe("0xhash")
 		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
 		expect(deps.transitionJournal).not.toHaveBeenCalled()
-		expect(task.complete).toHaveBeenCalledTimes(1)
+		expect(task.complete).not.toHaveBeenCalled()
+		expect(task.fail).toHaveBeenCalledTimes(1)
+	})
+
+	test("a journal record with no id: the transfer is refused before any build", async () => {
+		const { executor, deps, task, proveAndSend } = makeHarness({
+			createJournalOperation: vi.fn(async () => ({}) as never),
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow(/could not be recorded/)
+
+		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.transitionJournal).not.toHaveBeenCalled()
+		expect(task.fail).toHaveBeenCalledTimes(1)
 	})
 
 	test("build failure: journal → failed with normalized error, task.fail, controller cleanup", async () => {
@@ -303,23 +318,6 @@ describe("TransferExecutor: the authorizing session", () => {
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
 		expect(proveAndSend).not.toHaveBeenCalled()
 		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
-	})
-
-	test("without a journal the transfer runs uncancellable, and a session end still stops it at the build's assert", async () => {
-		const { executor, deps, task, proveAndSend } = makeHarness({
-			createJournalOperation: vi.fn(async () => {
-				throw new Error("journal write failed")
-			}),
-			buildAndEstimate: vi.fn(async () => {
-				throw new SessionEndedError()
-			}),
-		})
-		await expect(executor.execute(makeReq(), undefined, fence)).rejects.toBeInstanceOf(SessionEndedError)
-
-		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
-		expect(proveAndSend).not.toHaveBeenCalled()
-		expect(deps.transitionJournal).not.toHaveBeenCalled()
-		expect(task.fail).toHaveBeenCalledWith(expect.any(SessionEndedError))
 	})
 
 	test("estimateFee builds under the fence captured at its entry; a locked wallet plans nothing", async () => {

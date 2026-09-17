@@ -31,7 +31,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
 import { EstimateCancelRegistry } from "./estimate-cancel-registry"
-import { ContractNotRegisteredError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { ContractNotRegisteredError, JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
@@ -100,7 +100,12 @@ const MAX_DISPLAY_CALLS = 64
 
 /** The operations that run under the authorizing session's fence. The wallet-sdk dispatcher sends
  *  a dApp's reads, registrations, simulations and silent authwits with none, and those never read one. */
-const FENCED_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set(["send_transaction", "aztec_sendTx", "register_token"])
+const FENCED_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set([
+	"send_transaction",
+	"aztec_sendTx",
+	"register_token",
+	"aztec_createAuthWit",
+])
 
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -758,7 +763,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				return this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence, approval)
 			}
 			case "aztec_createAuthWit": {
-				return this.executeAztecCreateAuthWit(operation)
+				return this.executeAztecCreateAuthWit(operation, authorizedFence)
 			}
 			default: {
 				throw new Error("Invalid operation")
@@ -951,10 +956,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
-		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation, authorizedFence?: ExecutionFence): Promise<AuthWitness> {
+		// UI-origin authwits capture their own fence; a dApp-origin one arrives already fenced
+		// (aztec_createAuthWit is a fenced kind — refused at the batch entry without one). The
+		// account is resolved from the fence's profile, which fails closed on a locked profile
+		// (getSecret throws), never from the current active profile.
+		const fence = authorizedFence ?? (await this.captureFence())
 		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress.toString())
+		const account = await this.accountService.getAccountContract(fence.profileId, network.chainId, op.accountAddress.toString())
 
 		const node = await this.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
@@ -1020,9 +1029,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			messageHash = await Fr.schema.parseAsync(op.messageHashOrIntent)
 		}
 
+		await this.assertAuthWitFenceLive(fence)
 		const authWitness = await account.createAuthWit(messageHash)
 
 		return authWitness
+	}
+
+	/** The fence gate before an authwit sign, the same shape as the statement before node.sendTx:
+	 *  the awaited assert (deletion included) releases the facade lock, so a queued lock could take
+	 *  it in the gap while the account handle already holds derived key material — the synchronous
+	 *  isFenceLive is the last thing before the irreversible sign. */
+	private async assertAuthWitFenceLive(fence: ExecutionFence): Promise<void> {
+		await this.profileService.assertFence(fence)
+		if (!this.profileService.isFenceLive(fence)) throw new SessionEndedError()
 	}
 
 	// internals

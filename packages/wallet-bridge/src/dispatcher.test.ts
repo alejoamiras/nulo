@@ -136,6 +136,7 @@ const ctx = {
 	profileId: "test-profile",
 	origin: "https://test.example",
 	sessionId: "test-session-id",
+	fence: { profileId: "test-profile", epoch: 0, session: 1 },
 }
 
 describe("dispatcher.requestCapabilities reject persistence", () => {
@@ -1019,20 +1020,22 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 	]
 	const exec = { calls: [] }
 
-	function makeAccountOpDispatcher(): { dispatcher: WalletSdkDispatcher; ops: Operation[] } {
+	function makeAccountOpDispatcher(): { dispatcher: WalletSdkDispatcher; ops: Operation[]; fences: unknown[] } {
 		const session = makeSession({ capabilityGrants: grants as never, accounts: ["aztec:0:0xaaa", "aztec:0:0xbbb"] })
 		const { writer } = makeSessionWriter(session)
 		const ops: Operation[] = []
+		const fences: unknown[] = []
 		const execution: IExecutionRunner = {
-			executeOperations: async (batch: Operation[]) => {
+			executeOperations: async (batch: Operation[], _origin, _parentOrHooks, _hooks, _approvals, authorizedFence) => {
 				ops.push(...batch)
+				fences.push(authorizedFence)
 				return [{ status: "ok", result: "0xr" }] as OperationResult[]
 			},
 		}
 		const interaction: IDappInteractionRunner = { execute: async () => [] as never, requestCapabilities: async () => ({}) as never }
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
 		const account: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => accounts }
-		return { dispatcher: new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger), ops }
+		return { dispatcher: new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger), ops, fences }
 	}
 
 	function accountAndFrom(op: Operation | undefined): { accountAddress?: string; from?: unknown } {
@@ -1092,6 +1095,24 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 		const { dispatcher, ops } = makeAccountOpDispatcher()
 		await dispatcher.dispatch("createAuthWit", ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }], ctx)
 		expect(accountAndFrom(ops[0]).accountAddress).toBe("0xbbb")
+	})
+
+	test("createAuthWit (covered) forwards the session fence to executeOperations", async () => {
+		const { dispatcher, fences } = makeAccountOpDispatcher()
+		await dispatcher.dispatch("createAuthWit", ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }], ctx)
+		expect(fences[0]).toBe(ctx.fence)
+	})
+
+	test("createAuthWit (covered) is refused without the session's own fence", async () => {
+		const { dispatcher, ops } = makeAccountOpDispatcher()
+		const authwit = ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }]
+		await expect(dispatcher.dispatch("createAuthWit", authwit, { ...ctx, fence: undefined })).rejects.toThrow(
+			"createAuthWit requires the fence of the session that authorized it",
+		)
+		await expect(
+			dispatcher.dispatch("createAuthWit", authwit, { ...ctx, fence: { profileId: "other", epoch: 0, session: 1 } }),
+		).rejects.toThrow("createAuthWit requires the fence of the session that authorized it")
+		expect(ops).toHaveLength(0)
 	})
 })
 

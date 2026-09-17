@@ -988,6 +988,14 @@ export class WalletSdkDispatcher {
 		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
 
 		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+			// A silently-signed authwit runs under the session's admission fence, like a send:
+			// createAuthWit derives key material for the resolved account, so a lock, switch,
+			// re-unlock or same-id re-import parked before the sign must fail closed. The wire
+			// handler always sets ctx.fence; a missing or foreign-profile fence is refused here,
+			// and the runner rechecks it (aztec_createAuthWit is a fenced kind).
+			if (!ctx.fence || ctx.fence.profileId !== ctx.profileId) {
+				throw new Error("createAuthWit requires the fence of the session that authorized it")
+			}
 			const operation: AztecCreateAuthWitOperation = {
 				kind: "aztec_createAuthWit",
 				networkId: network.id,
@@ -995,7 +1003,7 @@ export class WalletSdkDispatcher {
 				messageHashOrIntent,
 			}
 			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
-			const results = await this.executionService.executeOperations([operation], origin)
+			const results = await this.executionService.executeOperations([operation], origin, undefined, undefined, undefined, ctx.fence)
 			return this.unwrapResult(results[0])
 		}
 

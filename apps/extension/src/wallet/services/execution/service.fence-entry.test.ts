@@ -43,7 +43,7 @@ function makeFacade() {
 }
 
 describe("ExecutionService: a send runs under the fence its caller authorized", () => {
-	test.each(["send_transaction", "aztec_sendTx", "register_token"])(
+	test.each(["send_transaction", "aztec_sendTx", "register_token", "aztec_createAuthWit"])(
 		"executeOperations: a dApp batch holding a %s without a fence throws before any task, capture or dispatch",
 		async (kind) => {
 			const { facade, captureExecutionFence, executeSendTransaction, startNewTask } = makeFacade()
@@ -60,18 +60,29 @@ describe("ExecutionService: a send runs under the fence its caller authorized", 
 		},
 	)
 
-	test("executeOperations: the wallet-sdk dispatcher's fence-less reads, registrations and silent authwits run", async () => {
+	test("executeOperations: the wallet-sdk dispatcher's fence-less reads and registrations run", async () => {
 		const { facade, captureExecutionFence } = makeFacade()
 		const dispatchOperation = vi.fn(async () => "done")
 		Object.assign(facade, { dispatchOperation })
 		const batch = [
 			{ kind: "aztec_registerContract", networkId: "net-1" },
 			{ kind: "aztec_simulateTx", networkId: "net-1", accountAddress: "0xacct" },
-			{ kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct" },
 		] as never
 		const done = { status: "ok", result: "done" }
-		expect(await facade.executeOperations(batch, DAPP)).toEqual([done, done, done])
-		expect(dispatchOperation).toHaveBeenCalledTimes(3)
+		expect(await facade.executeOperations(batch, DAPP)).toEqual([done, done])
+		expect(dispatchOperation).toHaveBeenCalledTimes(2)
+		expect(captureExecutionFence).not.toHaveBeenCalled()
+	})
+
+	test("executeOperations: a dApp createAuthWit dispatches under its forwarded fence, never a capture", async () => {
+		const { facade, captureExecutionFence } = makeFacade()
+		const executeAztecCreateAuthWit = vi.fn(async () => "0xwit")
+		Object.assign(facade, { executeAztecCreateAuthWit })
+		const authwit = { kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct" } as never
+		expect(await facade.executeOperations([authwit], DAPP, undefined, undefined, undefined, FENCE)).toEqual([
+			{ status: "ok", result: "0xwit" },
+		])
+		expect(executeAztecCreateAuthWit).toHaveBeenCalledWith(authwit, FENCE)
 		expect(captureExecutionFence).not.toHaveBeenCalled()
 	})
 
