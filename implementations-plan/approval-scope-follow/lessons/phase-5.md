@@ -55,6 +55,14 @@ Quoted: "**Approve — no new material findings (high confidence).**" Holds: the
 
 Loop converged in 2 rounds (under the 3-round hard stop).
 
-## Copy note (Ask 3)
+### Round 3 (resumed, on `55233ca7` — the signed-off copy wired in) → **approve**
 
-The refusal ships no new user-visible copy: `send.vue` shows its existing fixed toast ("Simulation failed, transaction not sent") on any `executeTransfer` rejection and never renders the error text. Ask 3's proposed copy would refine that toast and still needs the owner's sign-off, which is why the execution PR is **not opened** by this session (plan.md §Copy carries no sign-off quote).
+Quoted: "**Approve — no new material findings (high confidence).**" Holds: existing `WalletError` identity and details survive the wrap, other faults are logged and replaced by the constant detail-free refusal (their message and stack never enter the popup payload); the new error originates only in the popup transfer executor and neither the operation-result code allowlist nor the wallet-sdk error mapper exposes `OPERATION_NOT_RECORDED` to a dApp; the inline `try/catch` adds no settlement hop; on refusal the task fails, missing-id journal updates no-op and no controller was registered. One factual correction taken: the journal service's epoch/network guards throw plain `Error`, so a begun-deletion refusal is wrapped too — the "nothing was sent" copy stays accurate for it.
+
+Loop converged at the 3-round hard stop's edge: rounds 1–2 on the fixes, round 3 re-opened only for the copy wiring.
+
+## Copy (Ask 3) — signed off and wired
+
+The owner asked when the toast appears, was shown the trigger, the UX and the exact string against today's generic toast, and answered **"that proposal is perfect."** (2026-09-17, quoted in plan.md §Copy). Wired in `55233ca7`: typed `OperationNotRecordedError`, `popup/utils/transfer-failure-copy.ts`, `send.vue` renders the label.
+
+**Attempt log.** The first cut wrapped the journal create in an awaited private helper. `transfer-executor.cancel-window.pins.test.ts` reddened (`registerInFlight` not yet called one microtask after the create resolved): the helper added a settlement hop between the row becoming visible and its cancel controller registering. Inlined the `try/catch`; `audit:vue` exit 0 (6274 tests). Same family of mistake as round 1's P1 — **in this executor, an awaited helper is never a free refactor.**
