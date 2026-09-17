@@ -3,13 +3,11 @@ import { consoleMethods, LogLevel } from "@nulo/wallet-core/logger"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-const log = vi.hoisted(() => vi.fn())
-vi.mock("@/wallet/services/logger/client", () => ({
-	LoggerServiceClient: class {
-		public readonly log = log
-		constructor(public readonly tag: string) {}
-	},
-}))
+const { log, documentLogger } = vi.hoisted(() => {
+	const log = vi.fn()
+	return { log, documentLogger: vi.fn(() => ({ log })) }
+})
+vi.mock("@/wallet/services/logger/client", () => ({ documentLogger }))
 
 import { installConsoleForwarding } from "./console-forwarding"
 
@@ -27,8 +25,8 @@ afterEach(() => {
 
 describe("installConsoleForwarding", () => {
 	test("hooks all six console methods to the ui source at their mapped levels, under the client tag", () => {
-		const client = installConsoleForwarding("popup") as unknown as { tag: string }
-		expect(client.tag).toBe("popup")
+		installConsoleForwarding("popup")
+		expect(documentLogger).toHaveBeenCalledWith("popup")
 		const hooks = self as unknown as Hooks
 		for (const [method, level] of consoleMethods) {
 			log.mockClear()

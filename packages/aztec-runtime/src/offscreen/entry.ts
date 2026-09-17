@@ -3,9 +3,8 @@
  *
  * Chrome-agnostic: this file starts the PXE service inside whatever
  * environment the embedder provides. The extension's offscreen shell
- * (`extension/src/offscreen/index.ts`) constructs the concrete
- * `ProfileServiceClient` / `LoggerServiceClient` and passes them in as
- * structural `IProfileReader` / `ILogger`.
+ * (`extension/src/offscreen/index.ts`) passes in its concrete profile
+ * client and document logger as structural `IProfileReader` / `ILogger`.
  *
  * The SW↔offscreen READY handshake (`chrome.runtime.sendMessage`) is
  * deliberately NOT done here — it stays in the extension's shell so this

@@ -446,6 +446,7 @@ beforeEach(() => {
 	networkClient.probeNodeStatus.mockReset().mockResolvedValue(NodeStatus.Active)
 	networkClient.disconnect.mockReset()
 	accountClient.restore.mockReset()
+	accountClient.reconcileImportedAccounts.mockReset().mockResolvedValue([])
 	accountClient.disconnect.mockReset()
 	tokenClient.restore.mockReset().mockResolvedValue([])
 	tokenClient.disconnect.mockReset()
@@ -492,6 +493,46 @@ describe("useFullBackupImport — isAllowedToImportBackup", () => {
 		const c = useFullBackupImport(opts)
 		c.selectedBackup.value = { name: "x.json", backup: {}, type: "plain", profileType: "passkey" }
 		expect(c.isAllowedToImportBackup.value).toBe(true)
+	})
+})
+
+describe("useFullBackupImport — the reconcile call's account client", () => {
+	async function startImport() {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		return c
+	}
+
+	it("is closed again only after reconcileImportedAccounts resolves", async () => {
+		let release!: () => void
+		accountClient.reconcileImportedAccounts.mockReturnValue(new Promise<never[]>((resolve) => (release = () => resolve([]))))
+		const c = await startImport()
+
+		const run = c.restoreBackup()
+		await vi.waitFor(() => expect(accountClient.reconcileImportedAccounts).toHaveBeenCalled())
+		// The accounts stage closed it once; the reconcile call reconnected it and still holds it.
+		expect(accountClient.disconnect).toHaveBeenCalledTimes(1)
+
+		release()
+		await run
+		expect(accountClient.disconnect).toHaveBeenCalledTimes(2)
+		expect(c.restoreStatus.value).toBe("finished")
+	})
+
+	it("is closed again when reconcileImportedAccounts rejects, and the import still fails", async () => {
+		accountClient.reconcileImportedAccounts.mockRejectedValue(new Error("reconcile failed"))
+		const c = await startImport()
+
+		await c.restoreBackup()
+
+		expect(accountClient.disconnect).toHaveBeenCalledTimes(2)
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(c.restoreStatus.value).not.toBe("finished")
 	})
 })
 

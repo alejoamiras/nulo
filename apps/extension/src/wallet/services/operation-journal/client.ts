@@ -2,7 +2,7 @@ import { ServiceClient } from "@nulo/extension-messaging/background"
 import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceSpec } from "@/wallet/base"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import {
 	type Events,
 	type Methods,
@@ -20,7 +20,7 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 	public readonly onOperationDeleted = new EventHandler<OperationRecord>()
 
 	public constructor(name?: string) {
-		super(OPERATION_JOURNAL_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(OPERATION_JOURNAL_SERVICE_NAME, documentLogger(), name)
 	}
 
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {

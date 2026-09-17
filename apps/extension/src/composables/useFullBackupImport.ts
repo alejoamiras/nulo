@@ -523,9 +523,14 @@ async function executeRestore(
 	// reconcile/purge failure escapes to the outer catch, which (pre-finalize) rolls the
 	// created profile back — the import must not commit with orphaned balance rows. Inside
 	// the call, registered dependents (token balances) are purged BEFORE the Account rows.
-	// NOTE the client was disconnected by the accounts stage; the call-level transport
-	// reconnects — historical behavior, preserved verbatim.
-	const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
+	// The accounts stage closed this client; the call reconnects it, and nothing uses it after,
+	// so it is closed again once the call settles — including on the failure path above.
+	let droppedImported: Awaited<ReturnType<typeof accountService.reconcileImportedAccounts>>
+	try {
+		droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
+	} finally {
+		accountService.disconnect()
+	}
 	if (droppedImported.length > 0) {
 		// Scope COUNT only — the tuples carry on-chain account addresses.
 		console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row`)

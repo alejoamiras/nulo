@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type Events, type Methods, TRANSACTION_SERVICE_NAME, type Tx } from "./spec"
 
@@ -17,7 +17,7 @@ export class TransactionServiceClient extends ServiceClient<Methods, Events> imp
 	public readonly onTransactionDeleted = new EventHandler<Tx>()
 
 	public constructor(name?: string) {
-		super(TRANSACTION_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(TRANSACTION_SERVICE_NAME, documentLogger(), name)
 	}
 
 	/** Tx rows' own profileId is optional and backup-controlled, so restore

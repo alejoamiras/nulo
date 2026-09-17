@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type Events, type Methods, TOKEN_BALANCE_SERVICE_NAME, type TokenBalanceInfo } from "./spec"
 
@@ -17,7 +17,7 @@ export class TokenBalanceServiceClient extends ServiceClient<Methods, Events> im
 	public readonly onTokenBalanceDeleted = new EventHandler<TokenBalanceInfo>()
 
 	public constructor(name?: string) {
-		super(TOKEN_BALANCE_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(TOKEN_BALANCE_SERVICE_NAME, documentLogger(), name)
 	}
 
 	/** Balance rows carry no profileId, so restore requires the authoritative

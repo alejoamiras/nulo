@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logger Port Leak Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Schibsted+Grotesk:wght@600;700&display=swap">
+<style>
+:root {
+	--ground: #f3f5f4;
+	--surface: #ffffff;
+	--ink: #151b1a;
+	--muted: #56625f;
+	--rule: #d5dcda;
+	--accent: #2346a8;
+	--accent-tint: #e4eafa;
+	--leak: #b04a1a;
+	--leak-tint: #f6e6dc;
+	--fixed: #2a7449;
+	--fixed-tint: #dff0e5;
+	--warn: #8a5a00;
+	--warn-tint: #f6ecd6;
+	--code-bg: #ebefee;
+	--display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+	--body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+	--mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--ground: #0f1413;
+		--surface: #161d1c;
+		--ink: #e3eae8;
+		--muted: #98a6a2;
+		--rule: #28322f;
+		--accent: #93aeff;
+		--accent-tint: #1c2640;
+		--leak: #e8946a;
+		--leak-tint: #3a241a;
+		--fixed: #7dcb9b;
+		--fixed-tint: #173024;
+		--warn: #e3b865;
+		--warn-tint: #33280f;
+		--code-bg: #121918;
+	}
+}
+:root[data-theme="dark"] {
+	--ground: #0f1413;
+	--surface: #161d1c;
+	--ink: #e3eae8;
+	--muted: #98a6a2;
+	--rule: #28322f;
+	--accent: #93aeff;
+	--accent-tint: #1c2640;
+	--leak: #e8946a;
+	--leak-tint: #3a241a;
+	--fixed: #7dcb9b;
+	--fixed-tint: #173024;
+	--warn: #e3b865;
+	--warn-tint: #33280f;
+	--code-bg: #121918;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+	margin: 0;
+	padding: 0 16px;
+	background: var(--ground);
+	color: var(--ink);
+	font: 400 17px/1.6 var(--body);
+}
+.page { max-width: 46rem; margin: 0 auto; padding-block: 3rem 4rem; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.1rem, 6vw, 2.9rem); line-height: 1.08; letter-spacing: -0.015em; font-weight: 700; }
+h2 { font-size: 1.45rem; line-height: 1.25; font-weight: 700; }
+h3 { font-size: 1.08rem; line-height: 1.3; font-weight: 600; }
+p { margin: 0; max-width: 65ch; }
+a { color: var(--accent); }
+code { font-family: var(--mono); font-size: 0.88em; background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.eyebrow, .label {
+	font-family: var(--mono);
+	font-size: 0.75rem;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+.masthead { display: grid; gap: 1rem; }
+.lede { font-size: 1.08rem; }
+.facts {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+	gap: 0.75rem 1.5rem;
+	margin: 0.5rem 0 0;
+	padding: 1rem 0 0;
+	border-top: 1px solid var(--rule);
+}
+.facts div { display: grid; gap: 0.15rem; }
+.facts dt { margin: 0; }
+.facts dd { margin: 0; font-weight: 500; }
+
+section { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--rule); display: grid; gap: 1rem; }
+
+/* Where ports pile up */
+.ports { margin: 0.5rem 0 0; display: grid; gap: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+.ports-head, .ports-row {
+	display: grid;
+	grid-template-columns: minmax(9rem, 1.3fr) minmax(8rem, 1.4fr) minmax(5.5rem, 0.7fr);
+	gap: 1rem;
+	align-items: center;
+	padding: 0.7rem 1rem;
+}
+.ports-head { border-bottom: 1px solid var(--rule); }
+.ports-row + .ports-row { border-top: 1px solid var(--rule); }
+.ports-row .trigger { font-weight: 500; }
+.ports-row .trigger small { display: block; font-weight: 400; color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+.dots { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--leak); }
+.dot.maybe { background: transparent; border: 2px solid var(--leak); }
+.count { font-family: var(--mono); font-size: 0.85rem; color: var(--leak); margin-left: 0.35rem; font-variant-numeric: tabular-nums; }
+.after { font-family: var(--mono); font-size: 0.85rem; color: var(--fixed); background: var(--fixed-tint); border-radius: 999px; padding: 0.1rem 0.6rem; justify-self: start; white-space: nowrap; }
+.ports figcaption { padding: 0.7rem 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.88rem; }
+.ports-row.conditional .trigger::after { content: "if A3"; margin-left: 0.5rem; font-family: var(--mono); font-size: 0.7rem; color: var(--warn); background: var(--warn-tint); border-radius: 999px; padding: 0.05rem 0.45rem; vertical-align: 0.1em; }
+
+/* Phases */
+.phases { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.25rem; counter-reset: phase; }
+.phases li { display: grid; grid-template-columns: 2.25rem 1fr; gap: 0 0.75rem; counter-increment: phase; }
+.phases li::before {
+	content: counter(phase);
+	font-family: var(--mono);
+	font-weight: 500;
+	width: 2rem; height: 2rem;
+	display: grid; place-items: center;
+	border: 1px solid var(--rule);
+	border-radius: 50%;
+	background: var(--surface);
+	grid-row: span 3;
+}
+.phases li > * + * { margin-top: 0.35rem; }
+.proof { color: var(--muted); font-size: 0.93rem; }
+.proof b { color: var(--ink); font-weight: 500; }
+.tag { font-family: var(--mono); font-size: 0.7rem; color: var(--warn); background: var(--warn-tint); border-radius: 999px; padding: 0.08rem 0.5rem; vertical-align: 0.15em; margin-left: 0.4rem; white-space: nowrap; }
+.then { color: var(--muted); font-size: 0.93rem; }
+
+/* Background */
+.qa { display: grid; gap: 1.1rem; }
+.qa div { display: grid; gap: 0.3rem; }
+
+/* Reviews */
+.verdicts { display: grid; gap: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+.verdict { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.35rem 1rem; padding: 0.9rem 1rem; }
+.verdict + .verdict { border-top: 1px solid var(--rule); }
+.verdict h3 { font-size: 1rem; }
+.verdict p { grid-column: 1 / -1; color: var(--muted); font-size: 0.93rem; }
+.pill { font-family: var(--mono); font-size: 0.74rem; border-radius: 999px; padding: 0.12rem 0.6rem; white-space: nowrap; align-self: start; }
+.pill.cond { color: var(--warn); background: var(--warn-tint); }
+.pill.ok { color: var(--fixed); background: var(--fixed-tint); }
+.pill.wait { color: var(--muted); background: var(--code-bg); }
+.disputed { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.4rem; }
+
+/* Decisions */
+.asks { display: grid; gap: 1rem; }
+.ask { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; display: grid; gap: 0.5rem; }
+.ask header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.6rem; }
+.ask .id { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+.rec { justify-self: start; font-size: 0.88rem; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0.2rem 0.55rem; }
+
+.approval { background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 1.25rem; margin-top: 2rem; }
+.approval ul, .plain { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.45rem; }
+
+/* Tier */
+.rubric { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.rubric th, .rubric td { text-align: left; padding: 0.5rem 0.75rem 0.5rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.rubric th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+.rubric td:nth-child(2) { font-family: var(--mono); font-size: 0.85rem; white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+
+/* Seeds */
+.warning { color: var(--warn); font-weight: 600; }
+.seed { display: grid; gap: 0.5rem; }
+.seed header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.seed pre {
+	margin: 0;
+	background: var(--code-bg);
+	border: 1px solid var(--rule);
+	border-radius: 6px;
+	padding: 0.9rem 1rem;
+	font: 400 0.8rem/1.55 var(--mono);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	overflow-x: auto;
+}
+.seed.recommended pre { border-color: var(--accent); }
+button.copy {
+	font: 500 0.8rem var(--body);
+	color: var(--accent);
+	background: var(--surface);
+	border: 1px solid var(--rule);
+	border-radius: 4px;
+	padding: 0.25rem 0.7rem;
+	cursor: pointer;
+}
+button.copy:hover { border-color: var(--accent); }
+footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 560px) {
+	body { font-size: 16px; }
+	.ports-head { display: none; }
+	.ports-row { grid-template-columns: 1fr auto; gap: 0.4rem 0.75rem; }
+	.ports-row .trigger { grid-column: 1 / -1; }
+	.verdict { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+	* { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<header class="masthead">
+	<p class="eyebrow">Plan · owned-client-teardown · blueprint mid · draft v4</p>
+	<h1>Logger Port Leak Plan</h1>
+	<p class="lede">Every wallet screen talks to the extension's background worker over long-lived connections called ports. Each service client on a screen quietly opens its own port just for log lines, and nothing ever closes it. A side panel or full-screen tab that stays open collects one more logging port per client every time you open a page, unlock, switch profile or import a backup. The fix: each page gets one shared logger that every client borrows, so a page holds one logging port however long it lives. Nothing is closed early because nothing is closed at all. A test counts the ports before and after; the smoke suite and the PR’s CI confirm nothing else moved.</p>
+	<dl class="facts">
+		<div><dt class="label">Delivery</dt><dd>One PR into dev</dd></div>
+		<div><dt class="label">Phases</dt><dd>4 (Phase 3 needs your A3)</dd></div>
+		<div><dt class="label">Reviews</dt><dd>5 rounds folded; Codex closure check: approve</dd></div>
+		<div><dt class="label">Your decisions</dt><dd>A1–A5 answered; verdict pending</dd></div>
+	</dl>
+</header>
+
+<section id="leak" aria-labelledby="leak-title">
+	<h2 id="leak-title">Where the ports pile up</h2>
+	<p>A popup that closes after a few seconds frees everything. The side panel, the full-screen tab, the onboarding tab and the log viewer stay open, and that is where logging ports accumulate. Counts per event, taken from the code:</p>
+	<figure class="ports">
+		<div class="ports-head" aria-hidden="true"><span class="label">Event</span><span class="label">Ports left open today</span><span class="label">After</span></div>
+		<div class="ports-row">
+			<span class="trigger">Open a page<small>every visit, per client on it</small></span>
+			<span class="dots" aria-label="one port per client per visit"><span class="dot"></span><span class="count">×&nbsp;clients</span></span>
+			<span class="after">0 new</span>
+		</div>
+		<div class="ports-row">
+			<span class="trigger">Unlock<small>3 rebuilt clients + 1 balance refresh</small></span>
+			<span class="dots" aria-label="4 ports"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="count">+4</span></span>
+			<span class="after">0 new</span>
+		</div>
+		<div class="ports-row">
+			<span class="trigger">Switch profile<small>network, account and transaction clients rebuilt</small></span>
+			<span class="dots" aria-label="3 ports"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="count">+3</span></span>
+			<span class="after">0 new</span>
+		</div>
+		<div class="ports-row">
+			<span class="trigger">Import a backup<small>one client per restored data kind</small></span>
+			<span class="dots" aria-label="6 to 8 ports"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot maybe"></span><span class="dot maybe"></span><span class="count">+6–8</span></span>
+			<span class="after">0 new</span>
+		</div>
+		<div class="ports-row conditional">
+			<span class="trigger">Account client left connected<small>on unlock, profile creation and backup import</small></span>
+			<span class="dots" aria-label="1 port per event"><span class="dot"></span><span class="count">+1 each</span></span>
+			<span class="after">0 new</span>
+		</div>
+		<figcaption>Filled dots: ports that stay open until the page closes. Hollow: depends on the backup's contents. After the fix a page holds one logging port, shared by its console and all its clients.</figcaption>
+	</figure>
+</section>
+
+<section id="phases" aria-labelledby="phases-title">
+	<h2 id="phases-title">The four phases</h2>
+	<ol class="phases">
+		<li>
+			<h3>Prove the leak</h3>
+			<p>Write a test that counts open logging ports while real wallet clients connect and disconnect, expecting one port. On today’s code it fails — five clients leave five ports, fifty connect-and-disconnect cycles leave fifty — and that failing run is saved as the proof. The test stays uncommitted until the fix lands beside it.</p>
+			<p class="proof"><b>Proves itself by:</b> the new test failing on exactly the port counts and nothing else, lint passing, and the saved red run.</p>
+		</li>
+		<li>
+			<h3>One logger per page</h3>
+			<p>Every client borrows its page's shared logger instead of building one. The logger class is hidden, so no code can build a private one again: TypeScript files get a type error, plain JavaScript components fail the build. Unit tests get a silent logger, so a shared one can’t carry state from one test into the next — which also retires a quiet bug where any test that connected two clients left a retry loop ticking every second. The port test goes green.</p>
+			<p class="proof"><b>Proves itself by:</b> typecheck, every unit test, lint and the production build passing; the test showing one port — opened once, never closed, carrying every page’s tag — where it showed five and fifty; and a one-off look inside the built extension confirming the logger code ships exactly once.</p>
+		</li>
+		<li>
+			<h3>Account clients <span class="tag">A3: fold in</span></h3>
+			<p>Three places abandon a connected account client. Unlock and profile creation will keep the client the wallet just set up instead of replacing it; backup import will close its client when it's done.</p>
+			<p class="proof"><b>Proves itself by:</b> three new tests, each seen failing before its fix — including one that checks the import closes its client only after its last call finishes — plus typecheck and lint.</p>
+		</li>
+		<li>
+			<h3>End-to-end check</h3>
+			<p>Run the smoke suite locally: it drives the real popup in a real Chrome, and every console line and every client’s “Connected” goes through the shared logger, so a share that breaks a page shows up there (a wrong tag or a silently dropped line would not — that is what the port test is for). The network suite runs on the PR, where CI already executes exactly the partition the earlier draft wanted to replay by hand — and this change touches no network path. If you want a local network pass anyway (A5), it runs CI’s five shards one after another, alone, and checks after each one that everything it started is gone before the next begins.</p>
+			<p class="proof"><b>Proves itself by:</b> smoke green on the candidate commit (a red is re-run, then compared against dev before it counts as pre-existing); if A5 says yes, every shard green or a recorded local exception, and no leftover sandbox processes or Chrome windows.</p>
+		</li>
+	</ol>
+	<p class="then">Then: Codex reviews the whole change in rounds until it finds nothing material, the PR opens, and CI — including the job that uses real proving — goes green. Merging stays your call.</p>
+</section>
+
+<section id="context" aria-labelledby="context-title">
+	<h2 id="context-title">Background you need</h2>
+	<div class="qa">
+		<div>
+			<h3>Why borrow a logger instead of closing it?</h3>
+			<p>The other design had each client close its own logger on disconnect. Both reviewers rejected it: disconnecting is also the first step of reconnecting after the background worker restarts, the client logs "Disconnected" after closing (which reopens the logger), and log lines still in flight get rejected. A page-wide logger sidesteps all of it — nothing is closed early because nothing is closed.</p>
+		</div>
+		<div>
+			<h3>What does a leaked port cost?</h3>
+			<p>A little memory and a listener pair on both the page and the background worker. A handful is nothing; a side panel or onboarding tab left open all day keeps adding them and never gives any back. Popups close within seconds and Chrome frees their ports, so this is real but not urgent.</p>
+		</div>
+		<div>
+			<h3>What stays the same</h3>
+			<p>Log lines keep their tags, so the log viewer and its CSV export look identical. Secrets are still scrubbed before a line leaves the page. The background worker still checks who is connecting. No new permissions, message types or dependencies.</p>
+		</div>
+		<div>
+			<h3>What gets slightly worse</h3>
+			<p>If a page's shared logging port stops answering without closing, every log line on that page times out instead of one client's. Log calls are never waited on, so the wallet's real requests are unaffected; a port that actually closes reconnects on its own, as today.</p>
+		</div>
+	</div>
+</section>
+
+<section id="decisions" aria-labelledby="decisions-title">
+	<h2 id="decisions-title">Your decisions</h2>
+	<div class="asks">
+		<article class="ask">
+			<header><span class="id">A1</span><h3>Two nearby cleanups stay out</h3></header>
+			<p>Every request sends two debug log lines that the background throws away when debug mode is off; skipping them at the source is a separate change. So is merging the test helpers for fake ports — two exist today, and the port-counting test adds a third, because the existing two are built to refuse a second port of the same name, the opposite of what a leak proof has to count.</p>
+			<p class="rec">Your answer: follow-ups</p>
+		</article>
+		<article class="ask">
+			<header><span class="id">A2</span><h3>Real proving only in CI</h3></header>
+			<p>Three network tests need real zero-knowledge proving. Locally the suite runs with proving off, as CI's main pool does; those three run only in CI's canary job, which must itself pass on the PR — not just be skipped under a green summary — before this counts as done. Nothing here touches proving.</p>
+			<p class="rec">Your answer: yes</p>
+		</article>
+		<article class="ask">
+			<header><span class="id">A3</span><h3>Fix the account clients in the same PR?</h3></header>
+			<p>The Claude reviewer found three spots — unlock, profile creation, backup import — that abandon a connected account client and leak the same way. They sit outside "inner clients", so they're your call: fold them in as Phase 3 (three small edits, each with a test) or leave them for later. Leaving them means the PR can't claim unlock and import stop leaking.</p>
+			<p class="rec">Your answer: fold in</p>
+		</article>
+		<article class="ask">
+			<header><span class="id">A4</span><h3>Logging failures behave as they do today</h3></header>
+			<p>When a log line fails, the page logs that failure through the same logger, which can chain while the background worker is unreachable, and each waiting line keeps retrying its connection. That's today's behavior; this change doesn't cause it and trims the retry loops to one per page.</p>
+			<p class="rec">Your answer: accept</p>
+		</article>
+		<article class="ask">
+			<header><span class="id">A5</span><h3>Run the network suite locally before the PR?</h3></header>
+			<p>You asked at the start for a local network run split into shards. The Claude reviewer pushed back and this draft follows it: the PR's required CI job runs exactly that partition, with no retries, on the same commit; this change touches no network path; and your own notes say the network suite falls over when runs share the machine, so the only safe local pass is the slow one. Options: <b>none</b> (smoke locally, CI decides) or <b>one pool pass</b> (CI's five shards one after another, alone, roughly an hour and a half).</p>
+			<p class="rec">Your answer: none</p>
+		</article>
+	</div>
+
+	<div class="approval">
+		<h2>To approve</h2>
+		<ul>
+			<li><b>Scope:</b> the logger fix, plus the account clients if A3 says fold in. Out: the A1 follow-ups and any change to the shared messaging library.</li>
+			<li><b>Tier:</b> mid (rubric below).</li>
+			<li><b>Validation:</b> typecheck, unit tests, lint and build on every code phase; smoke locally before the PR; the PR's CI for the network suite (plus one sequential local pool pass if A5 says so).</li>
+			<li><b>Delivery:</b> one PR into dev, opened only after the Codex review loop settles.</li>
+			<li><b>Hardening:</b> no <code>/harden</code> pass — no security boundary moves.</li>
+			<li>A1–A5 are answered above. Reply with <b>approve</b>, <b>conditional approve</b> (with conditions) or <b>reject</b> (with blocking findings).</li>
+		</ul>
+	</div>
+</section>
+
+<section id="reviews" aria-labelledby="reviews-title">
+	<h2 id="reviews-title">What the reviewers said</h2>
+	<div class="verdicts">
+		<div class="verdict">
+			<h3>Codex · GPT-6 Astra · draft v1</h3>
+			<span class="pill cond">Conditional approve</span>
+			<p>Picked the borrow design. Conditions: keep tests from sharing a stale logger, make the port-count proof check delivery and not just counts, and fix how the local e2e runs are split and cleaned up.</p>
+		</div>
+		<div class="verdict">
+			<h3>Claude · Opus 5 · draft v1</h3>
+			<span class="pill cond">Conditional approve</span>
+			<p>Picked the borrow design. Conditions: split local e2e runs like CI, surface the account-client leaks as a decision, stop claiming TypeScript alone guards plain JavaScript components, and make the proof test safe. (Fable 5.1 hit its usage limit, so Opus 5 filled this seat.)</p>
+		</div>
+		<div class="verdict">
+			<h3>Codex · fresh session · draft v2 + decision log</h3>
+			<span class="pill cond">Conditional approve</span>
+			<p>Agreed with the design. Conditions: the post-run cleanup check could pass without checking anything (the runner deletes its process list on exit), two parallel lanes could still collide on ports, a red test could be excused too easily, tests could share a stale logger, and the port test couldn't catch a client closing the shared logger and quietly reopening it.</p>
+		</div>
+		<div class="verdict">
+			<h3>Claude · Fable 5.1 · draft v3</h3>
+			<span class="pill cond">Conditional approve</span>
+			<p>Approved the fix itself; said the plan was three times heavier than the change. Four changes, all applied: one shared logger per page instead of one per tag, so a page holds one port; no throwaway "pin the bug" tests; the third fake-port test helper named as such; and the local network replay cut to smoke plus CI, with a single sequential pass as your A5 — which also settles the scheduling disagreement from the previous round in Codex's favour. It also spotted that the silent test logger retires a pre-existing every-second retry loop in unit tests.</p>
+		</div>
+		<div class="verdict" id="fresh-verdict">
+			<h3>Codex · fresh session · draft v4</h3>
+			<span class="pill cond">Conditional approve</span>
+			<p>Agreed with all four changes and found no failure a local network run would catch that CI's own run wouldn't. Conditions, all folded in: the port test needed a real way to watch a log line get rejected (the test runner's fake browser never raises the event the plan relied on); the redaction test must answer its fake requests so nothing is left holding a timer; the optional local network pass must check clean-up after every shard, not once at the end — the same hole the earlier round had closed; and the plan's claim about what the smoke suite can see was overstated.</p>
+		</div>
+		<div class="verdict">
+			<h3>Codex · same session, after the fixes · closure check</h3>
+			<span class="pill ok">Approve</span>
+			<p>Confirmed its conditions are met for the scope you chose (A1–A5 answered). One last note on the unused local-pass script — it could have mistaken an older run's process list for the current one — fixed the same day.</p>
+		</div>
+	</div>
+	<p>Draft v4 logs 33 decisions. No disagreement between the reviewers is left open; A5 is the one place where the plan revises an answer you gave at the start.</p>
+</section>
+
+<section id="tier" aria-labelledby="tier-title">
+	<h2 id="tier-title">Why "mid"</h2>
+	<p>None of the six risk dimensions is high, so the rubric lands on mid — the default, and the tier you asked for.</p>
+	<div class="table-wrap">
+		<table class="rubric">
+			<thead><tr><th scope="col">Dimension</th><th scope="col">Rating</th><th scope="col">Why</th></tr></thead>
+			<tbody>
+				<tr><td>Novelty</td><td>low</td><td>Reuses the per-page shared-client pattern the wallet already has for its profile and contact clients.</td></tr>
+				<tr><td>Blast radius</td><td>moderate</td><td>Every page's clients change, but mechanically, behind unit tests, the smoke suite and CI's network suite.</td></tr>
+				<tr><td>Irreversibility</td><td>low</td><td>A normal revertable PR; no stored data changes.</td></tr>
+				<tr><td>Migration cost</td><td>none</td><td>No storage or wire format change.</td></tr>
+				<tr><td>External coupling</td><td>low</td><td>Only Chrome's documented port lifetime.</td></tr>
+				<tr><td>Security sensitivity</td><td>low</td><td>Logging path and scrubbing unchanged; no permissions.</td></tr>
+			</tbody>
+		</table>
+	</div>
+</section>
+
+<section id="seeds" aria-labelledby="seeds-title">
+	<h2 id="seeds-title">Implementation seeds (final — A3 fold in, A5 none)</h2>
+	<p>Paste one into a session inside this plan's worktree (<code>agent-worktree resume owned-client-teardown</code>), started in the permission mode you want so nothing stalls on a prompt. <code>/goal</code> keeps working until its condition holds and survives a resume; <code>/loop</code> fires on a fixed interval.</p>
+	<p class="warning">Use exactly one per session — they don't compose; setting one replaces the other.</p>
+
+	<div class="seed recommended">
+		<header><h3>Recommended for this plan: /goal</h3><button class="copy" type="button" data-copy="seed-goal">Copy</button></header>
+		<pre id="seed-goal">/goal All phases marked ✓ in implementations-plan/owned-client-teardown/plan.md (the phase headers in the file, not the chat or the task list; all four phases including Phase 3 — the owner chose A3 = fold in — and Phase 4 as smoke only, the owner having chosen A5 = none), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/owned-client-teardown/lessons/phase-N.md`; plan.md says `code_review: off`, so `/code-review` was NOT run; the codex fix loop converged over the whole diff from c543c18d, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; exactly one PR into dev exists for branch worktree-owned-client-teardown, created only after the loop converged (`gh pr view` output in the transcript), and `gh pr checks` shows every required check green with the Run / canary / real-proving job itself passed; `bun run test:all` and `bun run lint` both report exit 0 in the transcript.</pre>
+	</div>
+
+	<div class="seed">
+		<header><h3>Alternative: /loop</h3><button class="copy" type="button" data-copy="seed-loop">Copy</button></header>
+		<pre id="seed-loop">/loop 15m Drive implementations-plan/owned-client-teardown forward. Never idle waiting for my input. Each firing:
+1. Reality check: read plan.md and lessons/ (authoritative, not the chat); rebuild the task list from plan.md if empty; `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`.
+2. Waiting on CI or a Phase 4 run is fine — confirm it progresses (tmux session alive, its log growing; `gh run watch` up to 10 minutes); use the wait to review the diff. One e2e run at a time, and never codex, audit:vue, a full unit suite or a build beside it.
+3. No task in hand? Take the next pending step from plan.md. After each meaningful edit run `bun run lint` and the touched test file; commit (signed) — except Phase 1's red proof test, which stays uncommitted until Phase 2 commits it with the fix. Push the branch only after `bun run test:all` and `bun run lint` pass.
+4. Stuck, or facing a decision you'd bring to me? Consult `/codex` at high (run-codex.sh inside tmux) until you reach a defensible decision; log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to dev or main, never publish, never expand scope, never kill processes outside this plan's ownership records.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue on the agreed path.
+6. Phase green = its validation gate in plan.md passes. Paste the result, mark ✓ in plan.md, write the lessons entry, print `LESSONS_FILE=implementations-plan/owned-client-teardown/lessons/phase-N.md`, run `agent-worktree status owned-client-teardown "phase N green: &lt;next&gt;"`, advance.
+7. All phases ✓? `code_review` is off — skip /code-review. Run the codex loop per plan.md's Post-implementation section (whole diff from c543c18d, adversarial ask, no-over-engineering + comment-quality rules, resume until a round yields nothing material; still churning after 3 rounds → surface and stop). Re-validate if runtime code changed. Then `gh pr create` per the Delivery section and `gh pr checks --watch` until every required check is green and the canary job itself passed (re-run a flake; fix breakage). Write the wrap-up: what shipped, every decision codex and I debated with ELI5 context, open items. Surface and stop.</pre>
+	</div>
+</section>
+
+<footer>
+	<p>Full detail lives in the repo, not on this page: <code>implementations-plan/owned-client-teardown/plan.md</code> (architecture, assumptions, decision log), <code>recon.md</code>, <code>audit-codex.md</code>, <code>audit-fable.md</code>. Base commit c543c18d on dev.</p>
+</footer>
+
+</main>
+<script>
+for (const button of document.querySelectorAll("button.copy")) {
+	button.addEventListener("click", async () => {
+		const source = document.getElementById(button.dataset.copy)
+		if (!source) return
+		try {
+			await navigator.clipboard.writeText(source.textContent)
+			button.textContent = "Copied"
+		} catch {
+			const range = document.createRange()
+			range.selectNodeContents(source)
+			const selection = window.getSelection()
+			selection.removeAllRanges()
+			selection.addRange(range)
+			button.textContent = "Selected — press Ctrl+C"
+		}
+		setTimeout(() => { button.textContent = "Copy" }, 2000)
+	})
+}
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type AuthwitRegistryScope, type Events, type Methods } from "./spec"
 
@@ -18,7 +18,7 @@ export class AuthRegistryServiceClient extends ServiceClient<Methods, Events> im
 	public readonly onRegistryDisabled = new EventHandler<AuthwitRegistryScope>()
 
 	public constructor(name?: string) {
-		super(AUTH_REGISTRY_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(AUTH_REGISTRY_SERVICE_NAME, documentLogger(), name)
 	}
 
 	/** Restore forces every row's profileId to the authoritative created-profile id (a backup's

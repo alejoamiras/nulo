@@ -25,7 +25,9 @@ export async function activateCreatedProfile(profile: { id: string }, deps: { ap
 		await sleep(100)
 	}
 
-	managers.account = new AccountServiceClient()
+	// Keep an existing client: replacing it abandoned a connected port, and disconnecting it would
+	// reject the calls of any flow still holding it.
+	managers.account ??= new AccountServiceClient()
 
 	appStore.profile = profile as AppStore["profile"]
 	await setLastActiveProfileId(profile.id)

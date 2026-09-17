@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
@@ -28,7 +28,7 @@ export class IncomingTransferServiceClient extends ServiceClient<Methods, Events
 	public readonly onIncomingSyncStateChanged = new EventHandler<IncomingSyncStateChanged>()
 
 	public constructor(name?: string) {
-		super(INCOMING_TRANSFER_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(INCOMING_TRANSFER_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's

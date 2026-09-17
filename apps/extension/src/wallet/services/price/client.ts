@@ -1,6 +1,6 @@
 import type { ServiceSpec } from "@/wallet/base"
 import { ServiceClient } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { PRICE_SERVICE_NAME, type Events, type Methods, type PriceState } from "./spec"
 
@@ -12,7 +12,7 @@ export class PriceServiceClient extends ServiceClient<Methods, Events> implement
 	public readonly onQuotesUpdated = new EventHandler<PriceState>()
 
 	public constructor(name?: string) {
-		super(PRICE_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(PRICE_SERVICE_NAME, documentLogger(), name)
 	}
 
 	public getQuotes(): Promise<PriceState> {

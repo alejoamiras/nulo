@@ -1,7 +1,7 @@
 import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT, PRESTO_REQUIRED, PRESTO_REQUIRED_BUILD_STAMP } from "@/presto/config"
 import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
 import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
@@ -38,7 +38,7 @@ if (myInstanceToken !== null) {
 }
 
 // catch console
-const logger = new LoggerServiceClient("offscreen")
+const logger = documentLogger("offscreen")
 for (const [method, level] of consoleMethods) {
 	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
 	;(self as any)[`nuloOn${method}`] = (...args: any[]) => {
@@ -51,7 +51,7 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	try {
 		// Known-benign cascade: when the SW port closes, every pending
 		// background-port RPC rejects with "Client disconnected". Most
-		// are fire-and-forget callers (LoggerServiceClient.log from the
+		// are fire-and-forget callers (the document logger, from the
 		// console-sniffer above) that don't attach .catch handlers, so
 		// each rejection fires here. That's expected unwind, not failure
 		// — demote to Debug + one summary line so the activity log isn't
@@ -99,7 +99,7 @@ const t0 = Date.now()
 const provePhases = createProvePhaseSink()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
-	logger: new LoggerServiceClient(),
+	logger: documentLogger(),
 	// E2E_PROVERLESS builds the proverless PXE (proverEnabled:false, no
 	// PrestoProver) — referenced only in this flag-gated branch so DCE
 	// strips it from prod. The controllable barrier lives SW-side (the
