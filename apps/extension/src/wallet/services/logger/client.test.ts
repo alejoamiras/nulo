@@ -67,9 +67,6 @@ describe("documentLogger — redaction before the wire", () => {
 
 		logger.log("ui", LogLevel.Error, new Error(`failed for https://rpc.example.com/v2/${SECRET}`))
 
-		// Asserted POSITIVELY on the transformed value. A `not.toContain` check would pass against
-		// an untrimmed client too, because `JSON.stringify(new Error(...))` is natively `{}` — the
-		// secret would be absent from the serialization while still sitting on the wire object.
 		expect(sent[4]).toEqual({ name: "Error", message: "failed for https://rpc.example.com" })
 		expect(sent[4]).not.toBeInstanceOf(Error)
 	})
