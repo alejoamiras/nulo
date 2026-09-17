@@ -18,6 +18,7 @@ describe("PortRegistry — the guarantees port-client tests lean on", () => {
 		b.onDisconnect.addListener(onB)
 
 		registry.remoteClose(a)
+		registry.remoteClose(a)
 		expect(onA).toHaveBeenCalledTimes(1)
 		expect(onB).not.toHaveBeenCalled()
 		expect([...(registry.live.get(NAME) ?? [])]).toEqual([b])
@@ -29,6 +30,14 @@ describe("PortRegistry — the guarantees port-client tests lean on", () => {
 		expect(onB).toHaveBeenCalledTimes(1)
 		expect(registry.opened.get(NAME)).toHaveLength(3)
 		expect(registry.live.get(NAME)?.size).toBe(1)
+
+		// Chrome never tells the end that closed the port.
+		const [survivor] = [...(registry.live.get(NAME) ?? [])]
+		const onSurvivor = vi.fn()
+		survivor.onDisconnect.addListener(onSurvivor)
+		survivor.disconnect()
+		registry.remoteClose(survivor)
+		expect(onSurvivor).not.toHaveBeenCalled()
 	})
 
 	test("a port closed after posting is never answered, and refuses further sends", async () => {

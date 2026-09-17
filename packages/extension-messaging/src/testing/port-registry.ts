@@ -108,6 +108,7 @@ export class PortRegistry {
 
 	/** A service-worker restart, as the page sees it: the port closes and its `onDisconnect` fires. */
 	public remoteClose(port: FakePort): void {
+		if (port.closed) return
 		port.closed = true
 		this.live.get(port.name)?.delete(port)
 		for (const listener of [...port.disconnectListeners]) listener()

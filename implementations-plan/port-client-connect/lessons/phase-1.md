@@ -11,7 +11,7 @@
 - Tests: three in `connect failure is terminal`, one added to `port onDisconnect → reconnect`, and
   `console-forwarding.containment.test.ts`.
 
-## Deviation from the plan's snippet
+## Deviation from the plan's snippet (reverted post-implementation — see `post-impl.md` R1)
 
 `connect()` swallows only `RpcConnectError` and rethrows anything else. `openPort()` also invokes
 `onConnected` listeners; the old loop caught a throwing listener and *retried the open every second*,

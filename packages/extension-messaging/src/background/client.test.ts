@@ -626,6 +626,16 @@ describe("connect failure is terminal", () => {
 		expect((lines[0][3] as Error).message).toContain("Extension context invalidated.")
 	})
 
+	test("connect() resolves even when the throw is not a failed open", async () => {
+		const logger = {
+			log: (...line: unknown[]) => {
+				if (line[2] === "Connected") throw new Error("logger down")
+			},
+		}
+
+		await expect(new TestClient(logger).connect()).resolves.toBeUndefined()
+	})
+
 	test("a failed open does not wedge the client: the next request opens a port", async () => {
 		connectMock().mockImplementationOnce(contextInvalidated)
 		const client = newClient()

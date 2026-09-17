@@ -43,14 +43,14 @@ export abstract class ServiceClient<
 	}
 
 	/**
-	 * Opens the port if it is closed. Never rejects for a failed open: most callers do not await
-	 * this, so the failure is logged where it happens and reported by the request that needs the port.
+	 * Opens the port if it is closed. Never rejects — most callers do not await this: a failed open
+	 * is logged where it happens and reported by the request that needs the port.
 	 */
 	public async connect(): Promise<void> {
 		try {
 			this.openPort()
-		} catch (error) {
-			if (!(error instanceof RpcConnectError)) throw error
+		} catch {
+			// Logged at the open.
 		}
 	}
 
