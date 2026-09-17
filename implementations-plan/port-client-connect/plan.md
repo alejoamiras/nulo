@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: APPROVED 2026-09-17 (owner set the /goal seed) — implementing; codex r1 reject folded, r2 approve
+status: IMPLEMENTED 2026-09-17 — phases 1–4 green, codex post-impl loop converged in two rounds; PR into dev open, merge is the owner's call
 baseline: 771c2a16 (dev, after #613)
 worktree: .claude/worktrees/port-client-connect · branch worktree-port-client-connect
 ---
@@ -401,7 +401,7 @@ Layers: lint/typecheck, unit.
 (this run also re-executes the messaging tests under the extension setup — the double-run in F8).
 Layers: lint/typecheck, unit + component.
 
-### Phase 4 — docs + browser validation
+### Phase 4 — docs + browser validation ✓
 
 1. README rows and the invariant paragraph; `index.md`; the old plan's status line.
 2. Local smoke: `cd apps/extension && bun run test:e2e` (alone — it pkills the dist's Chromes).
