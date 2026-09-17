@@ -40,3 +40,23 @@ Fixes committed as `00815a70`; gate re-run: 16 files / 155 tests, typecheck + li
 ### Round 2 (resumed, on `00815a70`) → **approve**
 
 Quoted: "**Approve — no new material findings.** Confidence: high from static review." Holds: the live-row read runs inside the lock with the fence checked right after; `getActiveNetwork()` throws when locked (its `requireActiveProfile`), so `null` means an absent or foreign pointer and mapping it to `undefined` correctly establishes the row first; the toggle guard covers the approval and the awaited follow; the revised refresh test invalidates during the suspended refresh. Correction taken: no popup subscribes to `onActiveNetworkChanged` (plan Fact 4) — the live-read rationale is persistence and node churn, not popup side effects.
+
+
+## Cross-arc pass (GPT-6 Astra, `high`, static) — session `01a0b06e-…`, on the rebased stack (dev `771c2a16`)
+
+### Round 1 (on `29ed658b`/rebased) → conditional approve
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | MEDIUM — the follow used plain `refreshInFlight()`, which does NOT take arc 1's settle re-read; an empty snapshot returning after a popup-send event populated the window's cache could erase the event and admit the follow. A new consumer of the documented tracker race | yes (impl verified; interleaving inferred) | **Adopted**: the follow's dep is now `refreshInFlight({ invalidate: true })`. Window test pins the `{ invalidate: true }` call. |
+| 2 | MEDIUM — after the one `hasInFlightSend` check, the follow awaits the live-row read, the network write and the storage barrier; a popup send arriving during those waits was ignored (only lifecycle changes were rechecked) | yes (impl verified; interleaving inferred) | **Adopted**: `followUnderLock` computes `live = () => stillOurs() && !hasInFlightSend()`, re-asks it before the network write, and folds it into the account write's `unless`. Three core regressions (send begins during the row read / the network write / the facade barrier). |
+| 3 | LOW — the `refreshInFlight` dep doc ("fails closed until it has answered") misstated the plain-refresh contract, and the wiring did not document that the guard filters by THIS window's account/network, not a global popup-transfer lock | yes | **Adopted**: both dep docs reworded; plan.md exact-sequence + "refreshInFlight first" bullet updated. |
+| 4 | LOW — comment density: duplicated store-mutation rationale at the call site; `scope-mismatch.ts` copy doc narrated the implementation; the two e2e headers carried scenario summaries | yes | **Adopted** all: call-site note removed (kept on `createScopeFollow`), copy doc trimmed to the naming constraint, e2e headers trimmed to the fresh-popup/no-propagation explanation. |
+
+Held (codex's own list): arc 2 touches none of arc 1's files; the narrowed predicate and the wide lock count stay distinct; the test layers have distinct purposes; the follow's own lifecycle fence means clearing the popup's cache never authorizes a pending window follow. Codex corrected one premise of mine (the execute realm CAN run `resetInFlight` since it shares `app.vue`); immaterial here (the window has no lock screen, and the follow's generation invalidates on `isLogined → false`).
+
+Fixes committed as `b2ce424a`; gate re-run: 15 files / 149 tests, typecheck + lint exit 0.
+
+### Round 2 (resumed, on `b2ce424a`) → **approve**
+
+Quoted: "**Approve — no new material findings.** Confidence: high from static review of `b2ce424a`." Holds: journal callbacks cannot interrupt synchronous JS, so `live()` has no check/write race (the network call dispatches synchronously through the port after the read; the account predicate runs after the barrier immediately before `set`); the invalidating refresh closes this realm's guard, invalidates older reads, settles contested snapshots, and touches neither the scope pointers nor the popup's tracker; the three regressions cover all three await windows.
