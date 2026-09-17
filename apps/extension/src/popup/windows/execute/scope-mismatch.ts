@@ -82,9 +82,7 @@ export interface ScopeBannerCopy {
 
 const NO_WATCH = "This still executes — you just won't see it in your balances or activity."
 
-/** The owner-approved copy per state. Names are the rows' own, so a rename reads back as the
- *  user's label. Without a follow account the chain states name chains only; a read-only payload
- *  drops "so you can watch the transaction". */
+/** Names are the rows' own `name`, so a user's rename reads back as their own label. */
 export function scopeBannerCopy(state: ScopeBannerState, view: ScopeView, active: { account: Account; network: Network }): ScopeBannerCopy {
 	const watch = view.readOnly ? "" : ", so you can watch the transaction"
 	const opAccount = view.followAccount?.name

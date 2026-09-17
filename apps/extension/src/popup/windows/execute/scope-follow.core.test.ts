@@ -126,6 +126,35 @@ describe("createScopeFollow — what it writes, in which order, under which lock
 		expect(deps.writeActiveAccount).not.toHaveBeenCalled()
 	})
 
+	test("a wallet send that begins during the network read skips both writes", async () => {
+		let sending = false
+		deps.hasInFlightSend = () => sending
+		const read = deferred<string>()
+		deps.getActiveNetworkId = vi.fn(() => read.promise)
+		const follow = createScopeFollow(deps)
+		const pending = follow.follow(view(), false, follow.capture())
+		await vi.waitFor(() => expect(deps.getActiveNetworkId).toHaveBeenCalled())
+		sending = true // the guard was clear after the refresh; a send arrives while we read the row
+		read.resolve(TESTNET.id)
+		await pending
+		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
+		expect(deps.writeActiveAccount).not.toHaveBeenCalled()
+	})
+
+	test("a wallet send that begins during the network write skips the account write", async () => {
+		let sending = false
+		deps.hasInFlightSend = () => sending
+		const network = deferred<void>()
+		deps.setActiveNetwork = vi.fn(() => network.promise)
+		const follow = createScopeFollow(deps)
+		const pending = follow.follow(view(), false, follow.capture())
+		await vi.waitFor(() => expect(deps.setActiveNetwork).toHaveBeenCalled())
+		sending = true
+		network.resolve()
+		await pending
+		expect(deps.writeActiveAccount).not.toHaveBeenCalled()
+	})
+
 	test("same row: only the account pointer moves", async () => {
 		activeNetworkId = LOCAL.id
 		const follow = createScopeFollow(deps)
@@ -230,6 +259,24 @@ describe("createScopeFollow — the lifecycle fence", () => {
 		const pending = follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
 		await vi.waitFor(() => expect(storage.get).toHaveBeenCalled())
 		follow.invalidate()
+		gate.release()
+		await pending
+		expect(storage.set).not.toHaveBeenCalled()
+	})
+
+	test("a wallet send that begins while the write is suspended inside the facade writes nothing", async () => {
+		const storage = installChromeStorage({})
+		let sending = false
+		deps.hasInFlightSend = () => sending
+		deps.writeActiveAccount = vi.fn((address: string, unless: () => boolean) =>
+			storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
+		)
+		activeNetworkId = LOCAL.id
+		const follow = createScopeFollow(deps)
+		const gate = storage.deferNextGet()
+		const pending = follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
+		await vi.waitFor(() => expect(storage.get).toHaveBeenCalled())
+		sending = true // a send races into the guard while the barrier holds the write
 		gate.release()
 		await pending
 		expect(storage.set).not.toHaveBeenCalled()

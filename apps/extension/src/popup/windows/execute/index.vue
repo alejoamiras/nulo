@@ -567,10 +567,9 @@ const toggleFollow = () => {
 	if (isLoading.value) return
 	followDeclined.value = !followDeclined.value
 }
-// The durable pointers, never this realm's store: the window is closing, and the shell's network
-// watcher would otherwise wake and stamp the account pointer with whatever it resolves first.
 const scopeFollow = createScopeFollow({
-	refreshInFlight: () => appStore.refreshInFlight(),
+	// Invalidating: the guard is read right after, so it must not answer from a snapshot an event overtook.
+	refreshInFlight: () => appStore.refreshInFlight({ invalidate: true }),
 	hasInFlightSend: () => appStore.hasInFlightSend,
 	getActiveNetworkId: async () => (await requireNetwork().getActiveNetwork())?.id,
 	setActiveNetwork: (networkId) => requireNetwork().setActiveNetwork(networkId),

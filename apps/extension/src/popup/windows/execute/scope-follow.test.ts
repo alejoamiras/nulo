@@ -306,7 +306,8 @@ describe("execute window — the follow after Confirm", () => {
 		await vm().approve()
 		expect(approveInteractionMock).toHaveBeenCalledTimes(1)
 		expect(locksRequestMock).toHaveBeenCalledWith("nulo:scope-follow", expect.any(Function))
-		expect(appStoreMock.refreshInFlight).toHaveBeenCalledTimes(1)
+		// The guard is read right after, so the follow's re-read must invalidate the cache.
+		expect(appStoreMock.refreshInFlight).toHaveBeenCalledWith({ invalidate: true })
 		expect(setActiveNetworkMock).toHaveBeenCalledWith(LOCAL.id)
 		expect(accountWrites()).toEqual([MAIN.address])
 		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)

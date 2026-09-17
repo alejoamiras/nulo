@@ -71,11 +71,6 @@ async function waitForNewDappExecuteWorked(page: Page, knownIds: string[]): Prom
 }
 
 /**
- * Two granted accounts on one session: the wallet looks at A, the dApp sends as B. The execute
- * window names the mismatch as an account one. Confirming moves the wallet to B; declining first
- * leaves it on A; and a follow that finds the scope-follow lock held by another extension page
- * waits behind it without holding the approval, then completes on release.
- *
  * Post-confirm assertions read storage or a freshly opened popup — the wallet has no cross-window
  * propagation, so a popup that is open through Confirm keeps its old scope by design.
  */

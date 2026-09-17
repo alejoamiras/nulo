@@ -25,11 +25,6 @@ async function readActiveNetworkId(page: Page): Promise<string> {
 }
 
 /**
- * A dApp connected on Local Network sends while the wallet looks at Testnet. The execute window
- * names the mismatch as a chain one, and confirming moves the wallet's durable pointers — the
- * active network row and the active account — to where the transaction ran, so the next popup
- * opens on Local Network as the signer and shows the transaction, with no manual switching.
- *
  * Every post-confirm assertion reads storage or a freshly opened popup: the wallet has no
  * cross-window propagation, and the popup that did the switching is closed before Confirm, the
  * way the approval window taking focus closes the browser-action popup.

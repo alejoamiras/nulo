@@ -297,14 +297,20 @@ followScope(view)                       [isolated try/catch, never rethrows]
      return when   !stillOurs()          ← the approval resolved into a different lifecycle
   1. return when   no follow | followDeclined
   2. await navigator.locks.request("nulo:scope-follow", async () => {
-       await appStore.refreshInFlight()  ← the guard fails CLOSED while the journal is unread
-       return when   !stillOurs() || appStore.hasInFlightSend
-  3.   chain axis:   await requireNetwork().setActiveNetwork(view.network.id)
+       await appStore.refreshInFlight({ invalidate: true })  ← settle re-read: the guard fails
+                                          CLOSED and cannot answer from a snapshot an event overtook
+       live = () => stillOurs() && !appStore.hasInFlightSend  ← a send can BEGIN during any await
+                                          below; the subscription keeps it live, so re-ask each write
+       return when   !live()
+       activeId = await requireNetwork().getActiveNetwork()?.id   ← the LIVE row under the lock
+       return when   !live()
+  3.   chain axis:   when activeId !== view.network.id
+                     await requireNetwork().setActiveNetwork(view.network.id)
                      └─ on throw: return — the account pointer is NOT written
-       return when   !stillOurs()
+       return when   !live()
   4.   account axis: when followAccount && followAccount.visible
                      await storageLocalSet({ "nulo:ui:activeAccount": followAccount.address },
-                                           { unless: () => !stillOurs() })
+                                           { unless: () => !live() })
                      ← the facade checks `unless` AFTER its own barrier, immediately before
                        `chrome.storage.local.set`; a lifecycle bump during the barrier wait skips
                        the write. What no fence can retract: a write already dispatched to Chrome.
@@ -336,11 +342,16 @@ Why each line is the way it is:
   approval windows confirming together serialize into two whole pairs instead of interleaving. First
   use in the codebase (Fact 23); no polyfill — every supported Chrome ships it.
 
-- **`refreshInFlight()` first.** `hasInFlightSend` is `!ready || …` (`app.store.ts:168-176`). In
-  the execute realm `useProfileBootstrap` sets `appStore.profile`, whose `immediate` watcher
-  (`:184-191`) connects and reads, so the tracker is usually warm by Confirm — but "usually" is
-  timing, and a cold read answers `true` and silently suppresses the follow. The explicit refresh
-  makes the answer fresh by construction rather than by boot order.
+- **`refreshInFlight({ invalidate: true })` first.** `hasInFlightSend` is `!ready || …`
+  (`app.store.ts:168-176`). In the execute realm `useProfileBootstrap` sets `appStore.profile`,
+  whose `immediate` watcher (`:184-191`) connects and reads, so the tracker is usually warm by
+  Confirm — but "usually" is timing, and a cold read answers `true` and silently suppresses the
+  follow. The invalidating refresh makes the answer fresh by construction rather than by boot order,
+  and takes arc 1's settle path so an empty snapshot an event overtook cannot admit the follow
+  (codex cross-arc #1). The guard filters the shared journal by THIS window's account and network —
+  it is not a global popup-transfer lock; a send on the window's own scope closes it, and because a
+  send can begin during any later await, the guard is re-asked before the network write and folded
+  into the account write's `unless` (codex cross-arc #2).
 - **Network first.** A failed network write can never leave a lone account write behind.
 - **`requireNetwork()`**, the realm-shared client — the window's own `NetworkServiceClient` is
   disconnected in `init()`'s `finally`.

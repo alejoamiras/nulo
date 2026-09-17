@@ -5,8 +5,9 @@ import type { ScopeView } from "./scope-mismatch"
 export const SCOPE_FOLLOW_LOCK = "nulo:scope-follow"
 
 export interface ScopeFollowDeps {
-	/** The tracker's re-read; the guard fails closed until it has answered. */
+	/** The tracker's invalidating re-read; the guard read right after must reflect the settled journal. */
 	refreshInFlight: () => Promise<void>
+	/** Filters the shared journal to THIS window's account and network — not a global popup-send lock. */
 	hasInFlightSend: () => boolean
 	/** The live row, read under the lock: a follow that ran before this one may have moved it. */
 	getActiveNetworkId: () => Promise<string | undefined>
@@ -51,13 +52,16 @@ export function createScopeFollow(deps: ScopeFollowDeps) {
 
 	const followUnderLock = async (view: ScopeView, stillOurs: () => boolean): Promise<void> => {
 		await deps.refreshInFlight()
-		if (!stillOurs() || deps.hasInFlightSend()) return
+		// A wallet send can begin during any await below; the subscription keeps the guard live, so
+		// re-ask it at each write, not just after the refresh.
+		const live = () => stillOurs() && !deps.hasInFlightSend()
+		if (!live()) return
 		const activeNetworkId = await deps.getActiveNetworkId()
-		if (!stillOurs()) return
+		if (!live()) return
 		// Network first: a failed network write must never leave a lone account write behind.
 		if (activeNetworkId !== view.network.id) await deps.setActiveNetwork(view.network.id)
-		if (!stillOurs() || !view.followAccount) return
-		await deps.writeActiveAccount(view.followAccount.address, () => !stillOurs())
+		if (!live() || !view.followAccount) return
+		await deps.writeActiveAccount(view.followAccount.address, () => !live())
 	}
 
 	return { invalidate, capture, follow }
