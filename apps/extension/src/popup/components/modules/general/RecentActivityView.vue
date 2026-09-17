@@ -31,6 +31,7 @@ import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMat
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
+import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
 
 /** Store */
@@ -243,6 +244,16 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
 })
+/** Account mode only: whether the active network's incoming scan has stalled. Same client as the
+ *  receipts above — the parent owns its connect/disconnect. */
+const syncHealth = useIncomingSyncHealth({
+	client: incomingTransferService,
+	getScope: () =>
+		!props.token && appStore.profile?.id && appStore.network?.id
+			? { profileId: appStore.profile.id, networkId: appStore.network.id }
+			: undefined,
+})
+const showStalledLine = computed(() => !props.token && syncHealth.stalled.value)
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
 	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
@@ -743,6 +754,11 @@ watch(
 	{ flush: "sync" },
 )
 
+watch(
+	() => `${appStore.profile?.id ?? ""}|${appStore.network?.id ?? ""}`,
+	() => void syncHealth.refresh(),
+)
+
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
  *  captured-account guards at the STATE level (a render filter alone can mask a
  *  containment gap). Placed after the declarations it references (temporal dead
@@ -767,6 +783,7 @@ onMounted(async () => {
 	} catch {
 		// Non-fatal; the widget will still render outgoing rows.
 	}
+	void syncHealth.refresh()
 
 	// Snapshot the active account's executingTask (captured-account guarded).
 	await loadExecutingTaskSnapshot()
@@ -787,12 +804,13 @@ onBeforeUnmount(() => {
 	incomingPrices.dispose()
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
+	syncHealth.dispose()
 })
 </script>
 
 <template>
 	<Flex
-		v-if="executingTask || showJournalAwaiting || showFallbackAwaiting || recentActivityRows.length"
+		v-if="executingTask || showJournalAwaiting || showFallbackAwaiting || recentActivityRows.length || showStalledLine"
 		:key="token ? 'token' : 'account'"
 		direction="column"
 		gap="16"
@@ -803,6 +821,20 @@ onBeforeUnmount(() => {
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
 			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
 		</Flex>
+
+		<div v-if="showStalledLine" :class="$style.stalled_line" data-testid="incoming-sync-stalled">
+			<span>Older incoming transfers may be missing</span>
+			<span aria-hidden="true">·</span>
+			<button
+				type="button"
+				:class="$style.stalled_retry"
+				:disabled="syncHealth.retrying.value"
+				data-testid="incoming-sync-retry"
+				@click="syncHealth.retry()"
+			>
+				Retry
+			</button>
+		</div>
 
 		<div :class="$style.list">
 			<!-- One awaiting card per in-flight journal op, oldest-first by
@@ -899,6 +931,45 @@ onBeforeUnmount(() => {
 
 	&:hover {
 		color: var(--nulo-accent);
+	}
+}
+
+.stalled_line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+
+	padding: 8px 12px;
+	border: 1px dashed var(--nulo-border);
+
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--nulo-outline);
+}
+
+.stalled_retry {
+	padding: 0;
+	border: 0;
+	background: none;
+
+	font: inherit;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+	cursor: pointer;
+
+	transition: color 0.2s var(--bezier);
+
+	&:hover:not(:disabled),
+	&:focus-visible {
+		color: var(--nulo-accent);
+	}
+
+	&:disabled {
+		cursor: default;
+		opacity: 0.5;
 	}
 }
 

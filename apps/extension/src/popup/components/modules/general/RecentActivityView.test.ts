@@ -47,6 +47,8 @@ const H = vi.hoisted(() => {
 		getTasks: vi.fn(),
 		getTokens: vi.fn(),
 		getIncomingTransfers: vi.fn(),
+		getIncomingSyncHealth: vi.fn(),
+		retryIncomingScan: vi.fn(),
 		incomingConnect: vi.fn(),
 		configConnect: vi.fn(),
 		// event emitters (the mocked clients don't fire them; tests emit explicitly)
@@ -58,6 +60,7 @@ const H = vi.hoisted(() => {
 		incomingUpdated: makeEvent(),
 		incomingDeleted: makeEvent(),
 		incomingConnected: makeEvent(),
+		incomingHealthChanged: makeEvent(),
 		configUpdate: makeEvent(),
 		taskCreated: makeEvent(),
 		taskUpdated: makeEvent(),
@@ -78,8 +81,11 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 			onIncomingTransferAdded: H.incomingAdded,
 			onIncomingTransferUpdated: H.incomingUpdated,
 			onIncomingTransferDeleted: H.incomingDeleted,
+			onIncomingSyncHealthChanged: H.incomingHealthChanged,
 			onConnected: H.incomingConnected,
 			getIncomingTransfers: H.getIncomingTransfers,
+			getIncomingSyncHealth: H.getIncomingSyncHealth,
+			retryIncomingScan: H.retryIncomingScan,
 		}
 	}),
 }))
@@ -226,6 +232,8 @@ beforeEach(() => {
 	H.getTasks.mockReset().mockResolvedValue([])
 	H.getTokens.mockReset().mockResolvedValue([])
 	H.getIncomingTransfers.mockReset().mockResolvedValue([])
+	H.getIncomingSyncHealth.mockReset().mockResolvedValue({ stalled: false, since: null })
+	H.retryIncomingScan.mockReset().mockResolvedValue(undefined)
 	H.incomingConnect.mockReset().mockResolvedValue(undefined)
 	H.configConnect.mockReset().mockResolvedValue(undefined)
 	for (const ev of [
@@ -237,6 +245,7 @@ beforeEach(() => {
 		H.incomingUpdated,
 		H.incomingDeleted,
 		H.incomingConnected,
+		H.incomingHealthChanged,
 		H.configUpdate,
 		H.taskCreated,
 		H.taskUpdated,
@@ -571,5 +580,72 @@ describe("RecentActivityView — one feed block for token and account views", ()
 		await flushPromises()
 		expect(root(w).exists()).toBe(true)
 		expect(root(w).element).not.toBe(before)
+	})
+})
+
+describe("RecentActivityView — stalled incoming scan line", () => {
+	const mountFeed = (props: Record<string, unknown> = {}) => mount(RecentActivityView, { shallow: true, props })
+	const line = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='incoming-sync-stalled']")
+	const retry = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='incoming-sync-retry']")
+
+	test("a healthy scan shows no line, and an empty account feed still renders nothing", async () => {
+		const w = mountFeed()
+		await flushPromises()
+		expect(H.getIncomingSyncHealth).toHaveBeenCalledWith("net-1")
+		expect(line(w).exists()).toBe(false)
+		expect(w.find("[data-testid='activity-feed-root']").exists()).toBe(false)
+	})
+
+	test("a stalled scan renders the line with its copy — and the section with it, even with no rows", async () => {
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+		const w = mountFeed()
+		await flushPromises()
+		expect(w.find("[data-testid='activity-feed-root']").exists()).toBe(true)
+		expect(line(w).text()).toContain("Older incoming transfers may be missing")
+		expect(retry(w).text()).toBe("Retry")
+	})
+
+	test("Retry asks the worker to scan the active network, then the line follows the fresh health", async () => {
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+		const w = mountFeed()
+		await flushPromises()
+
+		await retry(w).trigger("click")
+		await flushPromises()
+
+		expect(H.retryIncomingScan).toHaveBeenCalledWith("net-1")
+		expect(H.getIncomingSyncHealth).toHaveBeenCalledTimes(2)
+	})
+
+	test("the health event for this profile + network refetches; the line appears without a remount", async () => {
+		const w = mountFeed()
+		await flushPromises()
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+
+		H.incomingHealthChanged.emit({ profileId: "p1", networkId: "net-1" })
+		await flushPromises()
+
+		expect(line(w).exists()).toBe(true)
+	})
+
+	test("a network switch drops the line at once and reads the new network's health", async () => {
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+		const w = mountFeed()
+		await flushPromises()
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: false, since: null })
+
+		H.store.current.network = { id: "net-2", chainId: 2 }
+		await flushPromises()
+
+		expect(H.getIncomingSyncHealth).toHaveBeenLastCalledWith("net-2")
+		expect(line(w).exists()).toBe(false)
+	})
+
+	test("a token feed never asks and never shows the line", async () => {
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+		const w = mountFeed({ token: { contract: "0xtok", symbol: "TOK" } })
+		await flushPromises()
+		expect(H.getIncomingSyncHealth).not.toHaveBeenCalled()
+		expect(line(w).exists()).toBe(false)
 	})
 })
