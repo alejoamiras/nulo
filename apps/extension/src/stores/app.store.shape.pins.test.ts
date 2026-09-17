@@ -12,6 +12,7 @@ import { nextTick } from "vue"
 
 const journalCtor = vi.fn()
 const listenerAdds: string[] = []
+const journalRows = vi.hoisted(() => ({ ops: [] as unknown[] }))
 vi.mock("@/wallet/services/operation-journal/client", () => ({
 	OperationJournalServiceClient: vi.fn(function () {
 		journalCtor()
@@ -26,7 +27,7 @@ vi.mock("@/wallet/services/operation-journal/client", () => ({
 			onOperationDeleted: handler("deleted"),
 			onConnected: handler("connected"),
 			connect: vi.fn(async () => {}),
-			getOperations: vi.fn(async () => []),
+			getOperations: vi.fn(async () => journalRows.ops),
 		}
 	}),
 }))
@@ -54,7 +55,7 @@ const STATE_KEYS = [
 	"defaultExplorer",
 	"loggerWindowId",
 ]
-const GETTER_KEYS = ["isRegistered", "hasInFlightSend", "activeScope", "transactions", "awaitingTransactions"]
+const GETTER_KEYS = ["isRegistered", "hasInFlightSend", "approvedSendsInFlight", "activeScope", "transactions", "awaitingTransactions"]
 const ACTION_KEYS = [
 	"loadOnboardingCompleted",
 	"setOnboardingCompleted",
@@ -103,6 +104,7 @@ const RETURN_ORDER = [
 	"transactions",
 	"activeScope",
 	"hasInFlightSend",
+	"approvedSendsInFlight",
 	"refreshInFlight",
 	"commitScopeChange",
 	"withScopeChangeAllowed",
@@ -124,6 +126,7 @@ beforeEach(() => {
 	setActivePinia(createPinia())
 	journalCtor.mockClear()
 	listenerAdds.length = 0
+	journalRows.ops = []
 	vi.stubGlobal("managers", { transaction: { getTransactions: vi.fn(async () => []) } })
 	// biome-ignore lint/suspicious/noExplicitAny: chrome stub assignment
 	;(chrome.storage as any).local = { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) }
@@ -190,5 +193,25 @@ describe("useAppStore — in-flight tracker resources", () => {
 		store.account = { address: "0xacc" } as never
 		// flush: "sync" — the scope swap happens in the same tick as the last assignment.
 		expect(activateSpy).toHaveBeenLastCalledWith({ profileId: "p1", networkId: "net-1", chainId: 1, accountAddress: "0xacc" })
+	})
+})
+
+describe("useAppStore — approvedSendsInFlight", () => {
+	test("counts the active profile's approved sends on every account from the journal read, and follows a profile change", async () => {
+		const sendAt = (profileId: string, stage: string, accountAddress = "0xa") => ({
+			kind: "transfer",
+			profileId,
+			accountAddress,
+			networkId: "n1",
+			progress: { stage },
+		})
+		journalRows.ops = [sendAt("p1", "pending"), sendAt("p1", "proving", "0xb"), sendAt("p1", "queued"), sendAt("p1", "submitting")]
+		const store = useAppStore()
+		store.profile = { id: "p1" } as never
+		await vi.waitFor(() => expect(store.approvedSendsInFlight).toBe(2))
+
+		journalRows.ops = [sendAt("p2", "proving")]
+		store.profile = { id: "p2" } as never
+		await vi.waitFor(() => expect(store.approvedSendsInFlight).toBe(1))
 	})
 })

@@ -939,7 +939,7 @@ starts with TTL 0 and is later given a TTL gets a non-zero budget); **restored s
 - `bun run typecheck:all && bun run lint`
 - Pass: all exit 0. Layers: typecheck · lint · unit
 
-### Phase 5 — the lock dialog and the card copy
+### Phase 5 — the lock dialog and the card copy ✓
 
 `approvedSendsInFlight(ops, profileId)` in `utils/in-flight-send.ts` + the store computed;
 `Header.vue`: `await refreshInFlight()`, then count 0 → `lockActiveProfile()` as today; else

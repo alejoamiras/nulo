@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
-import { hasInFlightSend, isInFlightSend } from "./in-flight-send"
+import { approvedSendsInFlight, hasInFlightSend, isInFlightSend } from "./in-flight-send"
 
 const op = (over: Partial<OperationRecord> & { stage?: string } = {}): OperationRecord => {
 	const { stage = "pending", ...rest } = over
@@ -57,5 +57,28 @@ describe("hasInFlightSend", () => {
 	test("one in-flight send among finished ones still blocks", () => {
 		const ops = [op({ stage: "succeeded" }), op({ stage: "queued" }), op({ stage: "failed" })]
 		expect(hasInFlightSend(ops, VIEWING)).toBe(true)
+	})
+})
+
+describe("approvedSendsInFlight", () => {
+	test("counts the profile's sends past approval and before submitting, on every account", () => {
+		const ops = [
+			op({ stage: "pending" }),
+			op({ stage: "simulating", accountAddress: "0xb" }),
+			op({ stage: "proving", kind: "dapp_execute" as never, accountAddress: "0xc", networkId: "n2" }),
+		]
+		expect(approvedSendsInFlight(ops, "p1")).toBe(3)
+	})
+
+	test("a queued request, a send at submitting, a finished send, a token import and another profile's send do not count", () => {
+		const ops = [
+			op({ stage: "queued" }),
+			op({ stage: "submitting" }),
+			op({ stage: "succeeded" }),
+			op({ stage: "proving", kind: "token_import" as never }),
+			op({ stage: "proving", profileId: "p2" }),
+		]
+		expect(approvedSendsInFlight(ops, "p1")).toBe(0)
+		expect(approvedSendsInFlight([op({ stage: "proving" })], undefined)).toBe(0)
 	})
 })

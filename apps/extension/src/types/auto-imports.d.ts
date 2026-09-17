@@ -46,6 +46,7 @@ declare global {
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
   const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
   const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
+  const approvedSendsInFlight: typeof import('../utils/in-flight-send').approvedSendsInFlight
   const assembleFullBackup: typeof import('../utils/full-backup-helpers').assembleFullBackup
   const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
   const awaitProfileActivation: typeof import('../composables/unlockWait').awaitProfileActivation
@@ -476,6 +477,7 @@ declare module 'vue' {
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
     readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
     readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>
+    readonly approvedSendsInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['approvedSendsInFlight']>
     readonly assembleFullBackup: UnwrapRef<typeof import('../utils/full-backup-helpers')['assembleFullBackup']>
     readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
     readonly awaitProfileActivation: UnwrapRef<typeof import('../composables/unlockWait')['awaitProfileActivation']>

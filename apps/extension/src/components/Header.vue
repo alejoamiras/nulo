@@ -21,10 +21,28 @@ const popupStore = usePopupStore()
 const route = useRoute()
 const router = useRouter()
 
-const handleLockWallet = () => {
+const lockWallet = () => {
 	if (!appStore.isLogined) return
 	appStore.isLogined = false
 	managers.profile.lockActiveProfile()
+}
+
+// Locking cancels the sends still running, so it asks first when a fresh journal read finds any.
+const handleLockWallet = async () => {
+	if (!appStore.isLogined) return
+	await appStore.refreshInFlight()
+	const running = appStore.approvedSendsInFlight
+	if (running === 0) return lockWallet()
+	cacheStore.confirm.pre_title = "Running transactions"
+	cacheStore.confirm.title = "Lock wallet?"
+	cacheStore.confirm.description =
+		running === 1
+			? "1 transaction is still running. Locking cancels it."
+			: `${running} transactions are still running. Locking cancels them.`
+	cacheStore.confirm.confirm_text = "Lock anyway"
+	cacheStore.confirm.confirm_color = "red"
+	cacheStore.confirm.callback = lockWallet
+	popupStore.open("confirm")
 }
 
 const logViewerService = new LogViewerServiceClient()

@@ -137,6 +137,16 @@ describe("journalTerminalDisplay — Failed state (catch-all + per-kind subtitle
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized — retry after sync")
 	})
 
+	test("error.kind === 'session_ended' → 'Stopped — wallet was locked'", () => {
+		const op = recordWith({ error: { kind: "session_ended", message: "...", normalizedRaw: null } })
+		expect(journalTerminalDisplay(op)).toEqual({
+			state: "failed",
+			subtitle: "Stopped — wallet was locked",
+			icon: "close-circle",
+			color: "red",
+		})
+	})
+
 	test("error.kind === 'transfer' (executeTransfer catch-all) → generic 'Transaction failed'", () => {
 		const op = recordWith({ kind: "transfer", error: { kind: "transfer", message: "...", normalizedRaw: null } })
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Transaction failed")

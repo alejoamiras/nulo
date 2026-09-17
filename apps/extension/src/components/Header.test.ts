@@ -1,8 +1,8 @@
 /**
- * Narrow integration test for the header's avatar/name/address split — deliberately NOT a full
- * Header suite (L4+ convention: e2e owns the header). It pins the one wiring the copy-helper unit
- * test cannot see: the address button hands the FULL active address (not the truncated display
- * text) to the clipboard, and both switcher affordances open the accounts popup.
+ * Narrow integration test for the header — deliberately NOT a full Header suite (L4+ convention:
+ * e2e owns the header). It pins the wiring unit tests cannot see: the address button hands the FULL
+ * active address (not the truncated display text) to the clipboard, both switcher affordances open
+ * the accounts popup, and the lock button decides between locking and asking on a fresh count.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
@@ -10,7 +10,10 @@ import { flushPromises, mount } from "@vue/test-utils"
 const H = vi.hoisted(() => ({
 	openPopup: vi.fn(),
 	openToast: vi.fn(),
+	lockActiveProfile: vi.fn(),
 	noopEvent: { add: vi.fn(), remove: vi.fn() },
+	app: {} as Record<string, unknown>,
+	cache: {} as { confirm: Record<string, unknown> } & Record<string, unknown>,
 }))
 
 const FULL_ADDRESS = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -37,19 +40,9 @@ vi.mock("@/wallet/services/task/client", () => ({
 	}),
 }))
 vi.mock("@/wallet/config", () => ({ defaultConfig: () => ({ indicateFailures: false, showNode: false }) }))
-vi.mock("@/utils/core", () => ({ managers: { profile: { lockActiveProfile: vi.fn() } } }))
-vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({
-		isLogined: true,
-		_isHomeScreenOpened: false,
-		account: { name: "Primary Account", address: FULL_ADDRESS },
-		network: { name: "Alpha V5" },
-		networkStatus: "Active",
-	}),
-}))
-vi.mock("@/stores/cache.store", () => ({
-	useCacheStore: () => ({ failureLog: null, activeTasksCount: null }),
-}))
+vi.mock("@/utils/core", () => ({ managers: { profile: { lockActiveProfile: H.lockActiveProfile } } }))
+vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.app }))
+vi.mock("@/stores/cache.store", () => ({ useCacheStore: () => H.cache }))
 vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ open: H.openPopup }) }))
 vi.mock("vue-router", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("vue-router")>()
@@ -73,6 +66,17 @@ beforeEach(() => {
 	vi.stubGlobal("useToast", () => ({ openToast: H.openToast }))
 	H.openPopup.mockClear()
 	H.openToast.mockClear()
+	H.lockActiveProfile.mockClear()
+	H.app = {
+		isLogined: true,
+		_isHomeScreenOpened: false,
+		account: { name: "Primary Account", address: FULL_ADDRESS },
+		network: { name: "Alpha V5" },
+		networkStatus: "Active",
+		approvedSendsInFlight: 0,
+		refreshInFlight: vi.fn(async () => {}),
+	}
+	H.cache = { failureLog: null, activeTasksCount: null, confirm: {} }
 })
 
 describe("Header — avatar/name/address split", () => {
@@ -97,5 +101,48 @@ describe("Header — avatar/name/address split", () => {
 		expect(H.openPopup).toHaveBeenCalledWith("accounts")
 		await w.find('[data-testid="account-selector"]').trigger("click")
 		expect(H.openPopup).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("Header — lock", () => {
+	async function clickLock() {
+		const w = mountHeader()
+		await w.find('[data-testid="header-lock"]').trigger("click")
+		await flushPromises()
+	}
+
+	test("nothing running after a fresh journal read: it locks at once", async () => {
+		await clickLock()
+		expect(H.app.refreshInFlight).toHaveBeenCalledTimes(1)
+		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		expect(H.app.isLogined).toBe(false)
+		expect(H.openPopup).not.toHaveBeenCalled()
+	})
+
+	test.each([
+		{ running: 1, description: "1 transaction is still running. Locking cancels it." },
+		{ running: 3, description: "3 transactions are still running. Locking cancels them." },
+	])("$running running: it asks, and locks only when the dialog confirms", async ({ running, description }) => {
+		// The count before the read is 0, so asking proves the decision waited for the read.
+		H.app.refreshInFlight = vi.fn(async () => {
+			H.app.approvedSendsInFlight = running
+		})
+		await clickLock()
+
+		expect(H.openPopup).toHaveBeenCalledWith("confirm")
+		expect(H.cache.confirm).toMatchObject({
+			pre_title: "Running transactions",
+			title: "Lock wallet?",
+			description,
+			confirm_text: "Lock anyway",
+			confirm_color: "red",
+		})
+		expect(H.lockActiveProfile).not.toHaveBeenCalled()
+		expect(H.app.isLogined).toBe(true)
+
+		const confirm = H.cache.confirm.callback as () => void
+		confirm()
+		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		expect(H.app.isLogined).toBe(false)
 	})
 })

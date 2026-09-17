@@ -29,10 +29,16 @@ export function isInFlightSend(op: Pick<OperationRecord, "kind" | "progress">): 
 }
 
 /** True when `op` is a send that has started executing and has not reached `submitting`: the
- *  stages that hold an expiring session open. `queued` is excluded, approved or not, so a waiting
- *  request cannot keep the wallet unlocked. */
+ *  stages that hold an expiring session open and that the lock dialog counts. `queued` is excluded,
+ *  approved or not, so a waiting request can neither keep the wallet unlocked nor make a lock ask. */
 export function isApprovedSendInFlight(op: Pick<OperationRecord, "kind" | "progress">): boolean {
 	return SENDING_KINDS.has(op.kind) && APPROVED_UNBROADCAST_STAGES.has(op.progress?.stage)
+}
+
+/** How many approved sends `profileId` has running, on any account: a lock cancels all of them. */
+export function approvedSendsInFlight(ops: readonly OperationRecord[], profileId: string | undefined): number {
+	if (!profileId) return 0
+	return ops.filter((op) => op.profileId === profileId && isApprovedSendInFlight(op)).length
 }
 
 /** The scope a block applies to — the one the user is looking at. */
