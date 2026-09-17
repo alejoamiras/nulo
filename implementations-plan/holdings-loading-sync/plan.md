@@ -209,7 +209,7 @@ Arc 1 boundary → quality loop → `gh stack add`.
 - Tests: node down 1 h unlocked ⇒ stalled after 10 min; unlock after 8 h + two failures ⇒ NOT stalled; SW restart mid-episode keeps `failingSince` (hydrated before the first poll); same-profile rebuild keeps, profile switch clears; a late outcome after lock/purge cannot recreate an episode; hostile stored episode values are repaired or dropped; a restart during an active backoff keeps the streak and the (future) `nextAttemptAt`; two profiles sharing a network do not cross-talk; Retry keeps the count; success clears and emits once.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/incoming-transfer` — exit 0.
 
-**Phase 8 — one metadata read.** Verify I1.
+**Phase 8 ✓ — one metadata read.** Verify I1.
 - Tests: one read issued; fallbacks/decoding/validation unchanged; slow-arm path.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/token src/wallet/services/execution` — exit 0.
 

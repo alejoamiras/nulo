@@ -17,13 +17,14 @@ import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { canonicalNumericStorageId, purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
-import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
+import { ContractResolver, ensureRegistered } from "@/wallet/services/execution/contract-resolver"
+import { batchedViewSimulation } from "@/wallet/services/execution/helpers/batched-view-simulation"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
-import { simulate } from "@/wallet/utils/fn"
+import { buildViewCall, type ViewFn } from "@/wallet/utils/fn"
 import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed, findSeed } from "./default-tokens"
 import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
@@ -103,6 +104,8 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private accounts: AccountService = null!
 	private tasks: TaskService = null!
 	private journal: OperationJournalService = null!
+	/** Stateless; the execution service owns another. Depending on that service for it would be a cycle. */
+	private readonly contractResolver: ContractResolver
 
 	public constructor(
 		logger: ILogger,
@@ -113,6 +116,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		super(TOKEN_SERVICE_NAME, logger)
 		this.browserApi = browserApi
 		this.seederOverrides = seederOverrides
+		this.contractResolver = new ContractResolver(logger)
 		this.tokens = new EntityStorage<Token>(TOKEN_STORAGE_ROOT, browserApi.storage.local, (raw) => TokenSchema.parse(raw))
 	}
 
@@ -738,20 +742,24 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, ti.getDecimalsFn.name, ti.getDecimalsFn.impl)
 			: undefined
 
+		// ONE batched read for whichever getters the interface has: three sequential simulations each
+		// paid a node round-trip and a turn in the PXE's serial queue, on the path a fresh wallet waits on.
+		const fns = [getNameFn, getSymbolFn, getDecimalsFn].filter((fn) => fn !== undefined)
+		const calls = await Promise.all(fns.map((fn) => buildViewCall(ti.contract, fn, fn.buildArgs())))
+		const { encoded } = await batchedViewSimulation(calls, {
+			pxe,
+			node,
+			network,
+			account,
+			contractResolver: this.contractResolver,
+			logger: this.logger,
+		})
+		const read = (fn: ViewFn): unknown => fn.unpackResult(encoded[fns.indexOf(fn)])
+
 		return [
-			getNameFn
-				? ((await simulate(node, pxe, network, account, ti.contract, getNameFn, getNameFn.buildArgs())) as string)
-				: ti.contract === feeJuiceAddress
-					? feeJuiceName
-					: "<name>",
-			getSymbolFn
-				? ((await simulate(node, pxe, network, account, ti.contract, getSymbolFn, getSymbolFn.buildArgs())) as string)
-				: ti.contract === feeJuiceAddress
-					? feeJuiceSymbol
-					: "<symbol>",
-			getDecimalsFn
-				? ((await simulate(node, pxe, network, account, ti.contract, getDecimalsFn, getDecimalsFn.buildArgs())) as number)
-				: 0,
+			getNameFn ? (read(getNameFn) as string) : ti.contract === feeJuiceAddress ? feeJuiceName : "<name>",
+			getSymbolFn ? (read(getSymbolFn) as string) : ti.contract === feeJuiceAddress ? feeJuiceSymbol : "<symbol>",
+			getDecimalsFn ? (read(getDecimalsFn) as number) : 0,
 		]
 	}
 

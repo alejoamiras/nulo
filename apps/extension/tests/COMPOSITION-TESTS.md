@@ -53,7 +53,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 |---|---|---|
 | `DappSessionService` lifecycle | ✅ yes | Pure storage + profile scoping. No PXE, no bb. The cleanest. |
 | `TokenService.parseTokenInterface` | ✅ yes | Shallow PXE (registry reads) + bb-FREE candidate extraction (filters `artifact.functions` by name). |
-| `TokenService.addToken` / `fetchTokenMetadata` | ❌ no → e2e | Calls `simulate(...)` (D2) + selector derivation (D6). Same service, deep path. |
+| `TokenService.addToken` / `fetchTokenMetadata` | ❌ no → e2e | Runs a batched view simulation (D2) + selector derivation (D6). Same service, deep path. |
 | `FpcService` (all of it) | ❌ no → e2e | **The pure counter-example.** Shallow PXE *surface*, BUT every interesting path (`getFpcs` discovery, `addFpc`, update/delete) routes through `getOrComputeProtocolAddresses` → `getContractInstanceFromInstantiationParams` → poseidon/bb (D6). The bb-free remainder (a chainless list, a guard-clause throw) was too thin to be worth a composition test — so Fpc has NONE; it lives entirely in Extension network e2e. Its value here is the lesson, not a test. |
 | `ExecutionService.executeTransfer` cancel | ✅ via reuse fast-path | The shallow path (seeded prepared tx) is testable; the fresh-build (`buildStandard`) is the "second wallet" the spike avoided (D3). |
 
