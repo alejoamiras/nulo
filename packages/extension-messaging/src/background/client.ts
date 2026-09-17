@@ -49,9 +49,7 @@ export abstract class ServiceClient<
 	public async connect(): Promise<void> {
 		try {
 			this.openPort()
-		} catch {
-			// Logged at the open.
-		}
+		} catch {}
 	}
 
 	/**
