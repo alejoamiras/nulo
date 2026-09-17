@@ -95,3 +95,15 @@ Hard stop reached at three rounds with a condition outstanding; the condition wa
 > "Approve. The retry-cap defect is closed: invalidating reads publish only when the event revision remains unchanged, with generation/profile checks intact. The regression covers three overtaken reads followed by an uncontested fourth. No remaining conditions."
 
 Loop shape for the record: one fresh pass plus four resumes, two beyond the three-round guideline — the extra passes verified a single finding refined twice (the `submitting` ordering, then the retry cap), not new topics; surfaced to the owner.
+
+## Post-review: the lock-screen pick gets its e2e (owner request, 2026-09-17)
+
+`apps/extension/tests/e2e/network/profile-switch-sweeps-transfer.test.ts` carried a workaround for the
+bug this arc fixes: after the lock it reopened the popup, because the locked popup's picker refused on
+its cached in-flight rows. The reopen is removed — profile B is now picked in the SAME popup that
+locked with A's transfer parked at `proving`. A storage-seeded smoke variant was considered and
+dropped: the proof gate already parks a real popup send deterministically, and a seeded row with no
+live controller would exercise a state production never reaches.
+
+Gate: `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/profile-switch-sweeps-transfer.test.ts`
+→ 1 passed, exit 0 (94 s). The same-profile unlock leg stays unit-covered (`app.store.in-flight.test.ts`).
