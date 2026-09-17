@@ -227,3 +227,51 @@ button is not literally red: `confirm_color: "red"` only selects the destructive
 destructive dialog in the wallet, this one included, uses the accent fill. That was already true
 of the approved render, so nothing changed there. The screenshots, with the approved render beside
 them, are a private artifact linked from the arc 2 PR: https://claude.ai/artifact/EMFM5h5zd2Ani6rQmab2KM
+
+## The network suite caught a regression after the PRs opened
+
+**Symptom.** On both PRs (#610, #611) the full network suite failed in six shards: `selfpay-phase`,
+`batch-mixed`, `batch-partial-failure`, `data-addressBook`, `meta-batch`,
+`wallet-locked-mid-session`, `meta-getChainInfo`, `sim-from-selfpay`, `concurrency-rapid-fire`,
+`contracts-getMetadata`, `contracts-register`. Every one saw the dApp envelope "The wallet could not
+process the request." on a call that opens no popup. `selfpay-phase` failed the same way locally, so
+it was not a flake. The `Address already in use` line in the node's startup log is also in green
+runs and is unrelated.
+
+**Cause.** Arc 1 made `executeOperations` throw for every DAPP-origin batch without
+`authorizedFence`. `packages/wallet-bridge/src/dispatcher.ts` calls `executeOperations([operation],
+origin)` with a DAPP origin and no fence for every dispatcher-direct method (`dispatch()`'s generic
+path for network-only and account operations, and `handleCreateAuthWit`'s covered branch), and the
+extension hands the dispatcher the real service. So getChainInfo, getAddressBook, contract
+metadata, registerSender, registerContract, simulateTx, executeUtility, profileTx, silent
+authwits and batches of them all failed. The plan's Fact 2 counted the two dApp entries in
+`DappInteractionService`; the caller search behind it, and every review, read `apps/extension/src`
+only. No unit or composition test drives the dispatcher against the real service, and the three
+new e2e only send.
+
+**Lesson.** A guard added to a shared service entry needs its callers searched across every
+workspace package, not just the app that owns the service. When an entry contract changes, run the
+whole network suite (sharded) before the PRs open: it is the only layer that composes the
+wallet-bridge dispatcher with the real execution service.
+
+**Fix** (`fix(execution): require the authorizing fence only for dapp sends`, on arc 1). The check
+now throws only for a batch holding a `send_transaction`, `aztec_sendTx` or `register_token`, the
+three dispatch arms that read the fence, and still before any task or dispatch. This deviates from
+the plan's wording ("throws on DAPP origin without one") but keeps its reason: a send entry that
+forgets the fence still fails closed. Tests in `service.fence-entry.test.ts`: each fenced kind,
+placed after a read in the batch, throws before any task, capture or dispatch; a fence-less DAPP
+batch of `aztec_registerContract`, `aztec_simulateTx` and `aztec_createAuthWit` runs. Mutations,
+each failing a test: the old unconditional check; `register_token` dropped from the set; only the
+first operation checked. Gate on arc 1: `bun --bun vitest run src/wallet/services/execution
+src/wallet/services/dapp-interaction src/wallet/services/wallet-sdk` exit 0 (68 files, 860 tests);
+extension typecheck exit 0; network e2e, alone at retry 0: `batch-mixed` exit 0, `selfpay-phase`
+exit 0.
+
+**Review.** A fresh codex session (GPT-6 Astra, `high`, static) on the fix: "Approve — high
+confidence for the send/token fence fix" and "No new material findings." It confirmed the set is
+exactly the arms that read the fence, that a fenced operation anywhere in a batch rejects the whole
+batch, that dApp-controlled strings cannot change an operation's `kind`, and that no production
+send reaches `executeOperations` without a fence. It qualified one inference, recorded here as a
+follow-up outside this plan: `aztec_createAuthWit` does not read the fence and signs after awaited
+work, so authwit signing, popup-approved or silent, is not bound to a session serial. That predates
+this change, and putting authwits in the set would only bring the dispatcher failure back.
