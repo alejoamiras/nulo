@@ -234,7 +234,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.injectedPublicReader = publicReader
 		this.serviceLock = new Lock(INCOMING_TRANSFER_SERVICE_NAME, logger)
 		this.incomingPollGate = incomingPollGate
-		this.episodes = new ScanEpisodeStore(browserApi.storage.session, (error) => this.logDebug("scan episode persistence failed", error))
+		this.episodes = new ScanEpisodeStore(browserApi.storage.session, (error) =>
+			this.logDebug("scan episode persistence failed", { error }),
+		)
 	}
 
 	/** Run `fn` inside the service lock. `isCurrent` reports whether this
@@ -871,7 +873,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private async scanAndRecord(target: { profileId: string; networkId: string; contract: string }, episodeKey: string): Promise<void> {
 		const epochAtStart = this.serviceEpoch
 		const outcome = await this.scanPublicContract(target.profileId, target.networkId, target.contract).catch((error): ScanOutcome => {
-			this.logDebug("public scan tick threw", { contract: target.contract }, error)
+			this.logDebug("public scan tick threw", { contract: target.contract, error })
 			return "failed"
 		})
 		// The steady state — healthy, and nothing to clear — takes no lock.
@@ -993,7 +995,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			await this.hydrateSchedulers()
 		} catch (error) {
-			this.logWarn("scheduler rebuild after a delete failed", error)
+			this.logWarn("scheduler rebuild after a delete failed", { error })
 		}
 	}
 
