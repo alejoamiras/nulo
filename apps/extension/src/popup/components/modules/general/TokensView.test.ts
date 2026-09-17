@@ -1,14 +1,11 @@
 /**
- * TokensView §3 sync-state wiring + async-ordering guards (codex round 5 recommendation).
+ * TokensView: the section refresh dot, Home order and cap, and the loading contract — the empty
+ * state is a claim ("you have no tokens") that only two LOADED snapshots (balances + seed status)
+ * may make; until then the list shows named placeholders or, after a short delay, anonymous rows.
  *
- * Deterministic deferred-promise tests for the three races the guards close:
- *  1. a live event must win over a getSyncState snapshot that resolves LATER (stale),
- *  2. an A→B→A scope cycle must invalidate the old-scope snapshot (bare network equality isn't enough),
- *  3. baseline: a live `backfilling` event threads the `backfilling` prop into the token's card.
- *
- * Mounted shallow so `TokenCard` is a stub whose `backfilling` prop we read directly.
+ * Mounted shallow so `TokenCard` / `TokenSeedRow` are stubs whose props are read directly.
  */
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
@@ -31,9 +28,7 @@ const H = vi.hoisted(() => {
 		getTasks: vi.fn(),
 		getOperations: vi.fn(),
 		getTokenBalances: vi.fn(),
-		getSyncState: vi.fn(),
-		syncChanged: makeEvent(),
-		incomingConnected: makeEvent(),
+		balanceConnected: makeEvent(),
 		balanceAdded: makeEvent(),
 		balanceUpdated: makeEvent(),
 		balanceDeleted: makeEvent(),
@@ -68,6 +63,7 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 	TokenBalanceServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
+			onConnected: H.balanceConnected,
 			onTokenBalanceAdded: H.balanceAdded,
 			onTokenBalanceUpdated: H.balanceUpdated,
 			onTokenBalanceDeleted: H.balanceDeleted,
@@ -88,24 +84,6 @@ vi.mock("@/wallet/services/operation-journal/client", () => ({
 		}
 	}),
 }))
-vi.mock("@/wallet/services/incoming-transfer/client", async () => {
-	// The view imports the REAL threshold constant from this module (the client re-exports spec);
-	// pull it from the unmocked spec so the gate under test uses production policy, not a copy.
-	const spec = await vi.importActual<typeof import("@/wallet/services/incoming-transfer/spec")>(
-		"@/wallet/services/incoming-transfer/spec",
-	)
-	return {
-		BACKFILL_INDICATOR_THRESHOLD_BLOCKS: spec.BACKFILL_INDICATOR_THRESHOLD_BLOCKS,
-		IncomingTransferServiceClient: vi.fn(function () {
-			return {
-				disconnect: vi.fn(),
-				onIncomingSyncStateChanged: H.syncChanged,
-				onConnected: H.incomingConnected,
-				getSyncState: H.getSyncState,
-			}
-		}),
-	}
-})
 // The view orders rows by price: `usePrices` calls `refreshIfStale()` at construction, so the
 // client must answer. Tests seed `H.quotes` to price a token.
 vi.mock("@/wallet/services/price/client", () => ({
@@ -127,8 +105,8 @@ vi.mock("vue-router", async (importOriginal) => {
 })
 
 import { CHAIN_IDS } from "@/utils/chain-ids"
-import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS } from "@/wallet/services/incoming-transfer/spec"
 import TokenCard from "./TokenCard.vue"
+import TokenSeedRow from "./TokenSeedRow.vue"
 import TokensView from "./TokensView.vue"
 
 // The pinned-token composable reads storage at mount and subscribes to onChanged.
@@ -170,66 +148,20 @@ const namedRow = (id: number, symbol: string, over: Partial<{ chainId: number; c
 const cardSymbols = (wrapper: ReturnType<typeof mount>) =>
 	wrapper.findAllComponents(TokenCard).map((c) => (c.props("tokenBalance") as { token: { symbol: string } }).token.symbol)
 
-const cardBackfilling = (wrapper: ReturnType<typeof mount>, contract = CONTRACT): boolean | undefined => {
-	const card = wrapper
-		.findAllComponents(TokenCard)
-		.find((c) => (c.props("tokenBalance") as { token?: { contract?: string } } | undefined)?.token?.contract === contract)
-	return card?.props("backfilling") as boolean | undefined
+/** Shared mount-time answers: one loaded token row, nothing in flight. */
+function resetHarness() {
+	// `useTicker` is an auto-imported custom composable (only the token-import retention filter uses it)
+	// — not injected into the test transform, so stub it. Per test: the shared setup unstubs globals.
+	vi.stubGlobal("useTicker", () => ({ value: Date.now() }))
+	H.store.current = createAppStoreHarness()
+	H.quotes.current = {}
+	H.getTasks.mockReset().mockResolvedValue([])
+	H.getOperations.mockReset().mockResolvedValue([])
+	H.getTokenBalances.mockReset().mockResolvedValue([balanceRow()])
 }
 
-describe("TokensView — §3 sync-state guards", () => {
-	beforeEach(() => {
-		// `useTicker` is an auto-imported custom composable (only the token-import retention filter uses it,
-		// which stays empty here) — not injected into the test transform, so stub it. In beforeEach because
-		// the shared setup unstubs globals between tests.
-		vi.stubGlobal("useTicker", () => ({ value: Date.now() }))
-		H.store.current = createAppStoreHarness()
-		H.quotes.current = {}
-		H.getTasks.mockResolvedValue([])
-		H.getOperations.mockResolvedValue([])
-		H.getTokenBalances.mockResolvedValue([balanceRow()])
-		H.getSyncState.mockResolvedValue({ state: "caught-up", blocksBehind: 0 })
-	})
-
-	test("a live `backfilling` event ABOVE the threshold threads the prop into the token's card", async () => {
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises()
-		expect(cardBackfilling(wrapper)).toBe(false)
-
-		H.syncChanged.emit({
-			networkId: "net-1",
-			contract: CONTRACT,
-			state: "backfilling",
-			blocksBehind: BACKFILL_INDICATOR_THRESHOLD_BLOCKS,
-		})
-		await nextTick()
-		expect(cardBackfilling(wrapper)).toBe(true)
-	})
-
-	test("backfilling BELOW the threshold stays quiet — routine catch-ups never show the dot", async () => {
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises()
-
-		H.syncChanged.emit({
-			networkId: "net-1",
-			contract: CONTRACT,
-			state: "backfilling",
-			blocksBehind: BACKFILL_INDICATOR_THRESHOLD_BLOCKS - 1,
-		})
-		await nextTick()
-		expect(cardBackfilling(wrapper)).toBe(false)
-	})
-
-	test("hostile lag values (non-integer, negative, non-finite) degrade to 'no dot', never a poisoned gate", async () => {
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises()
-
-		for (const blocksBehind of [Number.NaN, -5, 3.5, Number.POSITIVE_INFINITY, 2 ** 53, undefined]) {
-			H.syncChanged.emit({ networkId: "net-1", contract: CONTRACT, state: "backfilling", blocksBehind })
-			await nextTick()
-			expect(cardBackfilling(wrapper), `blocksBehind=${blocksBehind}`).toBe(false)
-		}
-	})
+describe("TokensView — section refresh dot", () => {
+	beforeEach(resetHarness)
 
 	const balanceTask = (id: string, tbId: number, finishedAt: number | null = null) => ({
 		id,
@@ -305,52 +237,6 @@ describe("TokensView — §3 sync-state guards", () => {
 		await flushPromises()
 		expect(sectionDot(wrapper)).toBe(false)
 	})
-
-	test("caught-up never shows the dot regardless of reported lag", async () => {
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises()
-
-		H.syncChanged.emit({ networkId: "net-1", contract: CONTRACT, state: "caught-up", blocksBehind: 10_000 })
-		await nextTick()
-		expect(cardBackfilling(wrapper)).toBe(false)
-	})
-
-	test("a live event WINS over a getSyncState snapshot that resolves later (no stale clobber)", async () => {
-		// The mount seed's getSyncState is deferred — it will resolve AFTER a live event supersedes it.
-		const d = deferred<{ state: string; blocksBehind: number }>()
-		H.getSyncState.mockReturnValueOnce(d.promise)
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises() // balances fetched, seed's getSyncState in flight (pending)
-
-		H.syncChanged.emit({ networkId: "net-1", contract: CONTRACT, state: "backfilling", blocksBehind: 100 }) // live truth
-		await nextTick()
-		expect(cardBackfilling(wrapper)).toBe(true)
-
-		d.resolve({ state: "caught-up", blocksBehind: 0 }) // the STALE snapshot resolves — must NOT overwrite the newer live value
-		await flushPromises()
-		expect(cardBackfilling(wrapper)).toBe(true)
-	})
-
-	test("an A→B→A scope cycle drops the old-scope snapshot (network equality alone is insufficient)", async () => {
-		const dA = deferred<{ state: string; blocksBehind: number }>()
-		H.getSyncState.mockReturnValueOnce(dA.promise) // net-1 seed snapshot — resolves after the cycle
-		const wrapper = mount(TokensView, { shallow: true })
-		await flushPromises()
-
-		// A → B (network switch): the watcher bumps scopeGen synchronously + resets the map.
-		H.getSyncState.mockResolvedValue({ state: "caught-up", blocksBehind: 0 })
-		H.store.current.network = { id: "net-2", chainId: 2 }
-		await flushPromises()
-		// B → A (switch back): scopeGen advances again.
-		H.store.current.network = { id: "net-1", chainId: 1 }
-		await flushPromises()
-
-		// The original net-1 snapshot finally resolves with a (now-stale) value — must be discarded because
-		// scopeGen changed since it was requested, even though we're back on net-1.
-		dA.resolve({ state: "backfilling", blocksBehind: 100 })
-		await flushPromises()
-		expect(cardBackfilling(wrapper)).toBe(false) // stayed at the fresh scope's caught-up, not clobbered
-	})
 })
 
 describe("TokensView — Home order and cap", () => {
@@ -359,13 +245,8 @@ describe("TokensView — Home order and cap", () => {
 	const MAINNET = CHAIN_IDS.MAINNET
 
 	beforeEach(() => {
-		vi.stubGlobal("useTicker", () => ({ value: Date.now() }))
-		H.store.current = createAppStoreHarness()
+		resetHarness()
 		H.store.current.network = { id: "net-main", chainId: MAINNET }
-		H.quotes.current = {}
-		H.getTasks.mockResolvedValue([])
-		H.getOperations.mockResolvedValue([])
-		H.getSyncState.mockResolvedValue({ state: "caught-up", blocksBehind: 0 })
 	})
 
 	test("a priced token ranks first; unpriced held tokens follow by name; an empty row is last", async () => {
@@ -466,6 +347,8 @@ describe("TokensView — Home order and cap", () => {
 		H.store.current.network = { id: "net-main", chainId: MAINNET }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
+		// The rejection armed the timed retry; unmounting cancels it before it can reach another test.
+		wrapper.unmount()
 	})
 
 	test("an unmount during the scope watcher's task snapshot stops the balance fetch that would reconnect", async () => {
@@ -500,5 +383,166 @@ describe("TokensView — Home order and cap", () => {
 		expect(cards).toHaveLength(3)
 		expect(cards.map((c) => c.find('[data-testid="token-symbol"]').attributes("data-symbol"))).toEqual(["GOOD", "DECIMALS", "FRACTION"])
 		expect(cards.filter((c) => c.find("[data-malformed]").exists())).toHaveLength(2)
+	})
+})
+
+describe("TokensView — loading, placeholders and the empty state", () => {
+	const SEED_CONTRACT = "0xSeedAAAA"
+	const seedEntry = (status = "pending", contract = SEED_CONTRACT) => ({
+		chainId: 1,
+		contract,
+		symbol: "cUSDC",
+		displayName: "Clean USDC",
+		status,
+	})
+	const emptyState = (w: ReturnType<typeof mount>) => w.find('[data-testid="tokens-empty-import-link"]').exists()
+	const ghostRows = (w: ReturnType<typeof mount>) => w.findAll('[data-testid="tokens-skeleton-row"]').length
+	const seedRows = (w: ReturnType<typeof mount>) =>
+		w.findAllComponents(TokenSeedRow).map((c) => (c.props("entry") as { contract: string }).contract)
+	let wrapper: ReturnType<typeof mount>
+
+	beforeEach(() => {
+		resetHarness()
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+	})
+	afterEach(() => {
+		wrapper?.unmount()
+		vi.useRealTimers()
+	})
+
+	test("the empty state needs BOTH snapshots loaded — whichever lands first, it waits for the other", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: false } })
+		await flushPromises()
+		expect(emptyState(wrapper)).toBe(false)
+		await wrapper.setProps({ seedReady: true })
+		expect(emptyState(wrapper)).toBe(true)
+
+		// The other order: seed status first, balances still in flight.
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		const second = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: true } })
+		await flushPromises()
+		expect(emptyState(second)).toBe(false)
+		pending.resolve([])
+		await flushPromises()
+		expect(emptyState(second)).toBe(true)
+		second.unmount()
+	})
+
+	test("anonymous rows appear only after 300 ms of a blank wait, and leave when anything real shows", async () => {
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: false } })
+		await flushPromises()
+		expect(ghostRows(wrapper)).toBe(0)
+		await vi.advanceTimersByTimeAsync(299)
+		expect(ghostRows(wrapper)).toBe(0)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(ghostRows(wrapper)).toBe(2)
+		expect(emptyState(wrapper)).toBe(false)
+
+		await wrapper.setProps({ seedEntries: [seedEntry()], seedReady: true })
+		expect(ghostRows(wrapper)).toBe(0)
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
+	})
+
+	test("a rejected balances fetch is never an empty list: rows keep waiting, the timed retry recovers", async () => {
+		H.getTokenBalances.mockRejectedValueOnce(new Error("port closed")).mockResolvedValue([balanceRow()])
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [], seedReady: true } })
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(300)
+		expect(emptyState(wrapper)).toBe(false)
+		expect(ghostRows(wrapper)).toBe(2)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(cardSymbols(wrapper)).toEqual(["TKA"])
+		expect(ghostRows(wrapper)).toBe(0)
+	})
+
+	test("a reconnect recovers a rejected fetch, and keeps the rows already shown while it refetches", async () => {
+		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
+		wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		H.balanceConnected.emit() // the mount's own connect
+		H.getTokenBalances.mockResolvedValue([balanceRow()])
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["TKA"])
+
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["TKA"])
+		expect(emptyState(wrapper)).toBe(false)
+	})
+
+	test("an event landing during an in-flight snapshot makes it refetch instead of overwriting the event", async () => {
+		const stale = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValueOnce(stale.promise).mockResolvedValue([balanceRow(), { ...balanceRow("0xtokenB"), id: 2 }])
+		wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		H.balanceAdded.emit({ ...balanceRow("0xtokenB"), id: 2 })
+		stale.resolve([balanceRow()]) // answered BEFORE the add: applying it would drop the new row
+		await flushPromises()
+		expect(wrapper.findAllComponents(TokenCard)).toHaveLength(2)
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(2)
+	})
+
+	test("a placeholder yields to its real row and to its import row — matched by contract, any case", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		wrapper = mount(TokensView, {
+			shallow: true,
+			props: { seedEntries: [seedEntry("seeding"), seedEntry("pending", "0xSeedBBBB")], seedReady: true },
+			global: { stubs: { SectionLabel: false } },
+		})
+		await flushPromises()
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT, "0xSeedBBBB"])
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("2")
+
+		H.journalAdded.emit({
+			id: "op-seed",
+			kind: "token_import",
+			profileId: "p1",
+			accountAddress: H.store.current.account?.address,
+			contractAddress: "0xseedbbbb",
+			terminalAt: null,
+			progress: { stage: "pending" },
+		})
+		H.balanceAdded.emit(balanceRow(SEED_CONTRACT.toLowerCase()))
+		await nextTick()
+		expect(seedRows(wrapper)).toEqual([])
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("1")
+	})
+
+	test("another chain's seed entries are not shown; a retry bubbles up with its entry", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		const failed = seedEntry("failed")
+		wrapper = mount(TokensView, {
+			shallow: true,
+			props: { seedEntries: [failed, { ...seedEntry("pending", "0xForeign"), chainId: 99 }], seedReady: true },
+		})
+		await flushPromises()
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
+
+		wrapper.findComponent(TokenSeedRow).vm.$emit("retry")
+		expect(wrapper.emitted("retry-seed")).toEqual([[failed]])
+	})
+
+	test("a scope change goes back to waiting: no empty state until the new scope's snapshot loads", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(emptyState(wrapper)).toBe(true)
+
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		H.store.current.network = { id: "net-2", chainId: 2 }
+		await flushPromises()
+		expect(emptyState(wrapper)).toBe(false)
+		pending.resolve([])
+		await flushPromises()
+		expect(emptyState(wrapper)).toBe(true)
 	})
 })

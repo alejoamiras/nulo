@@ -29,8 +29,6 @@ const props = defineProps({
 	/** Fresh USD rate per row for the dust fold; absent → the fold hides empties only. */
 	usdRateOf: { type: Function as PropType<RowFn<number | undefined>>, default: () => () => undefined },
 	dustThresholdUsd: { type: Number, default: 0 },
-	/** Per-row catching-up flag from the page, when it tracks sync state. */
-	backfilling: { type: Function as PropType<RowFn<boolean>>, default: () => () => false },
 })
 
 const query = ref("")
@@ -104,9 +102,9 @@ const toggleSort = () => {
 		<Flex direction="column" :class="$style.list">
 			<ListStatusMessage v-if="noResults" variant="no-results" testid="holdings-no-results" />
 			<template v-else>
-				<TokenCard v-for="tb in partition.pinned" :key="tb.id" :tokenBalance="tb" :backfilling="backfilling(tb)" />
+				<TokenCard v-for="tb in partition.pinned" :key="tb.id" :tokenBalance="tb" />
 				<div v-if="showDivider" :class="$style.divider" data-testid="token-list-divider" />
-				<TokenCard v-for="tb in partition.rest" :key="tb.id" :tokenBalance="tb" :backfilling="backfilling(tb)" />
+				<TokenCard v-for="tb in partition.rest" :key="tb.id" :tokenBalance="tb" />
 				<button
 					v-if="label"
 					type="button"
@@ -119,7 +117,7 @@ const toggleSort = () => {
 					<span :class="$style.fold_action">{{ showHidden ? "hide" : "show" }}</span>
 				</button>
 				<template v-if="showHidden">
-					<TokenCard v-for="tb in partition.hidden" :key="tb.id" :tokenBalance="tb" :backfilling="backfilling(tb)" />
+					<TokenCard v-for="tb in partition.hidden" :key="tb.id" :tokenBalance="tb" />
 				</template>
 			</template>
 		</Flex>

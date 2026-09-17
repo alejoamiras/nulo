@@ -355,7 +355,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 * Repair the two windows an MV3 worker death can leave inside
 	 * `createTokenBalanceHoldingLock`: no row at all (died before `repo.set`), and
 	 * a row that was never projected (died before `enqueue`, leaving the card
-	 * showing "Loading balance…" with nothing queued to finish it).
+	 * showing its loading skeleton with nothing queued to finish it).
 	 *
 	 * Creates missing pairs, re-queues never-projected rows, and deletes only
 	 * PROVABLY-stale rows: this profile, a live token at the id, identity
