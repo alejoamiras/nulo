@@ -89,3 +89,9 @@ Hard stop reached at three rounds with a condition outstanding; the condition wa
 | # | Finding | Verified | Disposition |
 |---|---|---|---|
 | 1 | MEDIUM — the three-read cap still publishes a contested snapshot on the third read | yes | **Adopted**: cap removed — the invalidating read repeats until a read sees no event land during it (each pass is one round trip, so only a journal busier than the read keeps it looping); regression "keeps reading while events keep overtaking it" (three overtaken reads, the fourth uncontested; restoring the cap fails it) |
+
+### Final confirmation (on `ab3624f8`) → **approve**
+
+> "Approve. The retry-cap defect is closed: invalidating reads publish only when the event revision remains unchanged, with generation/profile checks intact. The regression covers three overtaken reads followed by an uncontested fourth. No remaining conditions."
+
+Loop shape for the record: one fresh pass plus four resumes, two beyond the three-round guideline — the extra passes verified a single finding refined twice (the `submitting` ordering, then the retry cap), not new topics; surfaced to the owner.
