@@ -7,7 +7,7 @@
  * Scope is deliberately narrow: this composable owns the "profile is now active"
  * sequence and nothing else. Routing decisions, reconnect watchers, manager
  * teardown on unmount — all stay in the calling shell. Trying to encompass the
- * entire popup bootstrap here produces a leaky abstraction (Codex v2 critique).
+ * entire popup bootstrap here produces a leaky abstraction.
  */
 
 import { managers, initTransactionService } from "@/utils/core"

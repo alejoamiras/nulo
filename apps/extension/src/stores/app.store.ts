@@ -146,10 +146,12 @@ interface InFlightState {
 	/** One client for the whole app; components read `hasInFlightSend`. */
 	journal: OperationJournalServiceClient
 	connected: boolean
-	/** Bumped when the cache is discarded (a lock, an unlock). A read captures it when issued and,
-	 *  finishing under a newer one, writes nothing — success or error — so an answer from before
-	 *  the lock cannot put cancelled rows back, and one from during it cannot blank the unlock's. */
+	/** Bumped when the cache is discarded (a lock, an unlock); a read finishing under an older
+	 *  one writes nothing, success or error. */
 	generation: number
+	/** Set by the lock's reset, cleared by the unlock's read: a journal event from before the
+	 *  lock, delivered after it, would refill the emptied cache. */
+	suspended: boolean
 }
 
 /**
@@ -161,11 +163,9 @@ interface InFlightState {
  * One subscription, refreshed whenever the profile changes or the service
  * reconnects, and closed until it has an answer.
  *
- * The rows are a cache of the journal, and nothing but a profile change
- * refreshes them on its own: a lock cancels every send but changes no profile,
- * and the cancel events never reach the locked popup, so the lock and unlock
- * paths discard the cache explicitly — `resetInFlight` and the invalidating
- * refresh — or the stale rows would refuse every scope change until reopen.
+ * A lock cancels the running sends but changes no profile, and its cancel
+ * events never reach the locked popup, so the lock and unlock paths discard
+ * the cache explicitly (`resetInFlight`, the invalidating refresh).
  */
 function createInFlightTracker(scope: ScopeRefs) {
 	const state: InFlightState = {
@@ -174,6 +174,7 @@ function createInFlightTracker(scope: ScopeRefs) {
 		journal: new OperationJournalServiceClient(),
 		connected: false,
 		generation: 0,
+		suspended: false,
 	}
 	const { profile, account, network } = scope
 
@@ -195,15 +196,17 @@ function createInFlightTracker(scope: ScopeRefs) {
 	const refreshInFlight = (options?: { invalidate?: boolean }) => {
 		if (options?.invalidate) {
 			state.generation++
+			state.suspended = false
 			state.ready.value = false
 		}
 		return refreshInFlightOps(state, profile)
 	}
 
-	/** A locked popup has nothing in flight to protect — the lock cancelled it — so the cache
-	 *  empties and stays READY: closed would refuse the lock screen's profile picker. */
+	/** A locked popup has nothing in flight to protect, so the cache empties and stays READY:
+	 *  closed would refuse the lock screen's profile picker. */
 	const resetInFlight = () => {
 		state.generation++
+		state.suspended = true
 		state.ops.value = []
 		state.ready.value = true
 	}
@@ -259,10 +262,8 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 	}
 	const generation = state.generation
 	const answer = (rows: OperationRecord[]) => {
-		// Discard a response the cache has moved past: for a profile that is no
-		// longer current (a slow read for the previous one landing late would
-		// replace the live profile's operations and let a switch through
-		// mid-send), or from before a lock or unlock discarded the rows.
+		// A slow read for a previous profile landing late would replace the live
+		// profile's operations and let a switch through mid-send.
 		if (state.generation !== generation || profile.value?.id !== profileId) return
 		state.ops.value = rows
 		state.ready.value = true
@@ -270,11 +271,13 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 	if (!state.connected) {
 		state.connected = true
 		const upsertInFlight = (op: OperationRecord) => {
+			if (state.suspended) return
 			const idx = state.ops.value.findIndex((row) => row.id === op.id)
 			if (idx === -1) state.ops.value.push(op)
 			else state.ops.value.splice(idx, 1, op)
 		}
 		const dropInFlight = (op: OperationRecord) => {
+			if (state.suspended) return
 			state.ops.value = state.ops.value.filter((row) => row.id !== op.id)
 		}
 		state.journal.onOperationAdded.add(upsertInFlight)
@@ -326,7 +329,7 @@ interface AccountActionDeps extends ScopeRefs {
  * loser's account after the winner's — and instead of poisoning the global
  * `nulo:ui:activeAccount` key, which survives into the next bootstrap.
  * The epoch is the load-bearing half: scope IDs alone are ABA-unsafe (an
- * A→B→A flip makes the parked run's capture match again — codex audit); any
+ * A→B→A flip makes the parked run's capture match again); any
  * LATER entry into this action supersedes every parked one. The id checks
  * still catch a flip whose own activation hasn't re-entered this action yet.
  * `commitScopeChange` cannot express either: it guards in-flight SENDS,

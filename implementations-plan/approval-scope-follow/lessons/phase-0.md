@@ -53,3 +53,16 @@
 - `bun run typecheck` → exit 0. `bun run lint` → exit 0 after replacing eight `void (store.x = …)`
   test commits (`noAssignInExpressions` warnings) with block-bodied helpers.
 - No edits under `execution/`.
+
+## Arc 1 codex loop (GPT-6 Astra, `high`, static) — session `01a0b008-…`
+
+### Round 1 → conditional approve
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | MEDIUM (inferred) — a pre-lock `onOperationAdded/Updated` carrying a popup send, delivered after `resetInFlight()`, refills the cache; the generation gates RPC answers only | plausible: the journal and profile events travel on separate ports, no ordering barrier | **Adopted**: `state.suspended` — set by `resetInFlight()`, cleared by the invalidating refresh; the three listeners return while it is set. Test delivers a captured `onOperationUpdated` callback after the reset (ignored) and after the unlock read (applied). Mutation (drop the check) fails it. |
+| 2 | LOW — the dApp-send "admits three switches" test moved the viewed scope off the record after the first commit | yes | **Adopted**: each switch from a fresh store |
+| 3 | LOW — the rejecting-late-read test proved readiness only (rows were empty) | yes | **Adopted**: seeded with a popup send; asserts `approvedSendsInFlight === 1` after the rejection |
+| 4 | LOW — comments: tracker header overstated ("nothing but a profile change" — reconnects refresh too); app.vue "cancelled every send" (not `submitting`); guard header "a scope change cannot reach them" (a profile change ends the session and the send fails closed); duplicated generation explanation; the `(Codex v2 critique)` / `codex audit` review references in two touched headers | yes | **Adopted** all; the helper doc on `parkNextRead` dropped |
+
+Held: the narrowing itself (popup transfers journal `origin: "popup"`; lane/queued sends `"dapp"`), the generation across reset/unlock, realm separation, `readsFor("p1") === 2`.

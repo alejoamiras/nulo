@@ -12,12 +12,15 @@ import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 
 import { useAppStore } from "./app.store"
 
-const { mockGetOperations } = vi.hoisted(() => ({ mockGetOperations: vi.fn() }))
+const { mockGetOperations, journalEvents } = vi.hoisted(() => ({
+	mockGetOperations: vi.fn(),
+	journalEvents: { added: [] as ((op: unknown) => void)[], updated: [] as ((op: unknown) => void)[] },
+}))
 
 vi.mock("@/wallet/services/operation-journal/client", () => ({
 	OperationJournalServiceClient: class {
-		onOperationAdded = { add: () => {} }
-		onOperationUpdated = { add: () => {} }
+		onOperationAdded = { add: (fn: (op: unknown) => void) => journalEvents.added.push(fn) }
+		onOperationUpdated = { add: (fn: (op: unknown) => void) => journalEvents.updated.push(fn) }
 		onOperationDeleted = { add: () => {} }
 		onConnected = { add: () => {} }
 		connect = async () => {}
@@ -41,7 +44,6 @@ const send = (origin: "popup" | "dapp", stage = "proving"): OperationRecord =>
 /** Macrotask flush — lets watchers and settled reads land. */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-/** Park the next journal read; the returned handles settle it. */
 const parkNextRead = () => {
 	let resolve!: (rows: OperationRecord[]) => void
 	let reject!: (error: unknown) => void
@@ -65,11 +67,18 @@ const pickProfile = (store: ReturnType<typeof useAppStore>) => () => {
 	store.profile = { id: "p2" } as never
 }
 
+/** Deliver a journal event the way the port would, to every listener the tracker registered. */
+const emitUpdated = (op: OperationRecord) => {
+	for (const fn of journalEvents.updated) fn(op)
+}
+
 const readsFor = (profileId: string) => mockGetOperations.mock.calls.filter(([query]) => query?.profileId === profileId).length
 
 beforeEach(() => {
 	setActivePinia(createPinia())
 	mockGetOperations.mockReset()
+	journalEvents.added.length = 0
+	journalEvents.updated.length = 0
 	vi.stubGlobal("managers", { transaction: { getTransactions: vi.fn() } })
 	// biome-ignore lint/suspicious/noExplicitAny: chrome stub assignment
 	;(chrome.storage as any).local = { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) }
@@ -90,14 +99,16 @@ async function viewing(rows: OperationRecord[]) {
 
 describe("commitScopeChange against a send held at proving", () => {
 	test("a dApp's send in the viewed scope admits an account, a network and a profile switch", async () => {
-		const store = await viewing([send("dapp")])
-		mockGetOperations.mockResolvedValue([send("dapp")])
-		expect(store.hasInFlightSend).toBe(false)
-
-		expect(await store.commitScopeChange(pickAccount(store))).toBe(true)
-		expect(await store.commitScopeChange(pickNetwork(store))).toBe(true)
-		expect(await store.commitScopeChange(pickProfile(store))).toBe(true)
-		expect(store.profile?.id).toBe("p2")
+		// Each switch from its own store: the first admitted commit moves the viewed scope off the
+		// record, so a shared store would admit the rest for the wrong reason.
+		for (const pick of [pickAccount, pickNetwork, pickProfile]) {
+			setActivePinia(createPinia())
+			mockGetOperations.mockReset()
+			const store = await viewing([send("dapp")])
+			mockGetOperations.mockResolvedValue([send("dapp")])
+			expect(store.hasInFlightSend).toBe(false)
+			expect(await store.commitScopeChange(pick(store))).toBe(true)
+		}
 	})
 
 	test("the popup's own send in the viewed scope refuses each, without asking the journal again", async () => {
@@ -185,7 +196,7 @@ describe("late reads", () => {
 	})
 
 	test("a late read that rejects changes neither the rows nor the readiness", async () => {
-		const store = await viewing([])
+		const store = await viewing([send("popup")])
 		const stale = parkNextRead()
 		const pendingStale = store.refreshInFlight()
 		const fresh = parkNextRead()
@@ -194,10 +205,26 @@ describe("late reads", () => {
 
 		stale.reject(new Error("worker restarting"))
 		await pendingStale
+		expect(store.approvedSendsInFlight).toBe(1) // the rows were not blanked by the failure fallback
 		expect(store.hasInFlightSend).toBe(true) // still closed: the stale failure did not call it answered
 
 		fresh.resolve([])
 		await pendingFresh
 		expect(store.hasInFlightSend).toBe(false)
+		expect(store.approvedSendsInFlight).toBe(0)
+	})
+
+	test("a journal event from before the lock, delivered after it, does not refill the cache", async () => {
+		const store = await viewing([send("popup")])
+		store.resetInFlight()
+
+		emitUpdated(send("popup"))
+		expect(store.hasInFlightSend).toBe(false)
+		expect(store.approvedSendsInFlight).toBe(0)
+
+		mockGetOperations.mockResolvedValueOnce([])
+		await store.refreshInFlight({ invalidate: true })
+		emitUpdated(send("popup"))
+		expect(store.hasInFlightSend).toBe(true) // events count again once the unlock has re-read
 	})
 })
