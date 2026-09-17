@@ -201,7 +201,7 @@ Arc 1 boundary → quality loop → `gh stack add`.
 
 ### Arc 2 — scan health, seeding speed
 
-**Phase 6 — outcomes + deletion.** Delete the sync-state API and the four `emitSyncStateIfChanged` call sites FIRST (frees the line budget), then `scanPublicContract` returns `ScanOutcome`; extract `handleScanFailure`; `scan-health.ts`.
+**Phase 6 ✓ — outcomes + deletion.** Delete the sync-state API and the four `emitSyncStateIfChanged` call sites FIRST (frees the line budget), then `scanPublicContract` returns `ScanOutcome`; extract `handleScanFailure`; `scan-health.ts`.
 - Tests: each early-return and throw path maps to the right outcome (`unresolved` gate ⇒ `failed`, `non-standard` ⇒ `ineligible`); dropped page ⇒ `no-progress`; many pages inside ONE block ⇒ `progress` every tick; a multi-tick reconciliation ⇒ `progress` per step; reconciliation still begins on any anchored throw and the scan recovers to `idle-at-tip` after a transient anchored failure; pending-page marker preserved on failure; coverage never advances on failure. "§3 Catching up" describe replaced. The deletion commit removes declarations, client exports, implementation and obsolete tests together and passes on its own; coverage data the outcome needs stays.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/incoming-transfer src/popup` — exit 0.
 
