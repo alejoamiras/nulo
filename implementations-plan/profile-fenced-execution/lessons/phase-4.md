@@ -206,3 +206,15 @@ now joins.
 Gate: `bun --bun vitest run src/wallet src/utils src/stores` exit 0 (237 files passed, 2 skipped;
 3336 tests passed); `bun run typecheck:all` exit 0; `bun run lint` exit 0 (30 warnings,
 pre-existing; complexity-baseline check OK).
+
+### Round 3 — approve: converged
+
+Codex accepted the rejection of round-2 finding A on its merits: the retry restores access to the
+same store with identical key material and the same incarnation, creates no new authorization and
+cannot broadcast, and codex found no harm beyond the PXE computation already accepted for a proof
+in flight. It added that the scope argument alone would not have excused a security defect. It
+confirmed the pending-decision join: the predicate reads the journal directly, `commitSession`,
+`applyTtl` and `close` never read back through `getActive`, a joined read re-checks identity after
+the decision clears, and the synchronous checks (`peekLiveSerial`, `isFenceLive`,
+`isRecoveryMode`) are unchanged. It called the TTL-writer variant a conservative close after a
+persistence failure. Verdict line: "No new material findings."
