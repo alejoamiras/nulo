@@ -11,6 +11,7 @@ import {
 } from "@aztec/stdlib/contract"
 import z from "zod"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import type { Network } from "@/wallet/services/network/spec"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
@@ -99,7 +100,8 @@ export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient =>
 const MAX_DISPLAY_CALLS = 64
 
 /** The operations that run under the authorizing session's fence. The wallet-sdk dispatcher sends
- *  a dApp's reads, registrations, simulations and silent authwits with none, and those never read one. */
+ *  a dApp's reads, registrations and simulations with none, and those never read one; its
+ *  silently-covered authwit arrives under the wire handler's admission fence. */
 const FENCED_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set([
 	"send_transaction",
 	"aztec_sendTx",
@@ -643,7 +645,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		 *  dispatch forwards extra positional params) — the boundary is
 		 *  same-extension sender authentication, so only popup/SW code can
 		 *  supply it; dApps route through the wallet-bridge dispatcher, which
-		 *  never forwards it. */
+		 *  forwards only the wire handler's own admission fence, never a value
+		 *  from the dApp's arguments. */
 		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
@@ -964,7 +967,20 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const fence = authorizedFence ?? (await this.captureFence())
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(fence.profileId, network.chainId, op.accountAddress.toString())
+		const messageHash = await this.resolveAuthWitMessageHash(op, network)
 
+		// The same shape as the statement before node.sendTx: the awaited assert (deletion included)
+		// releases the facade lock, so a queued lock could take it in the gap while this account
+		// handle already holds derived key material. The synchronous isFenceLive is the last
+		// statement before the irreversible sign — no await, not even a helper call, between them.
+		await this.profileService.assertFence(fence)
+		if (!this.profileService.isFenceLive(fence)) throw new SessionEndedError()
+		return account.createAuthWit(messageHash)
+	}
+
+	/** The hash an authwit signs over, bound to the live node's chain identity and, for a call
+	 *  intent, to the selector's real ABI function rather than the dApp's claimed name. */
+	private async resolveAuthWitMessageHash(op: AztecCreateAuthWitOperation, network: Network): Promise<Fr> {
 		const node = await this.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
 		// F-012 / A-01 V-01: createAuthWit derives chain identity from the live
@@ -975,7 +991,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			version: new Fr(nodeInfo.rollupVersion),
 		}
 
-		let messageHash: Fr
 		if (typeof op.messageHashOrIntent === "object" && "caller" in op.messageHashOrIntent) {
 			const { caller, call } = op.messageHashOrIntent
 			// Bind the dApp-supplied name to the selector's real ABI function before
@@ -1016,32 +1031,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					authwitFn.returnTypes,
 				),
 			}
-			messageHash = await computeAuthWitMessageHash(intentAction, metadata)
-		} else if (typeof op.messageHashOrIntent === "object" && "consumer" in op.messageHashOrIntent) {
+			return computeAuthWitMessageHash(intentAction, metadata)
+		}
+		if (typeof op.messageHashOrIntent === "object" && "consumer" in op.messageHashOrIntent) {
 			const { consumer, innerHash } = op.messageHashOrIntent
 			const intentHash: IntentInnerHash = {
 				consumer: await AztecAddress.schema.parseAsync(consumer),
 				innerHash: await Fr.schema.parseAsync(innerHash),
 			}
-			messageHash = await computeAuthWitMessageHash(intentHash, metadata)
-		} else {
-			// Raw Fr message hash (pre-computed by wallet-sdk)
-			messageHash = await Fr.schema.parseAsync(op.messageHashOrIntent)
+			return computeAuthWitMessageHash(intentHash, metadata)
 		}
-
-		await this.assertAuthWitFenceLive(fence)
-		const authWitness = await account.createAuthWit(messageHash)
-
-		return authWitness
-	}
-
-	/** The fence gate before an authwit sign, the same shape as the statement before node.sendTx:
-	 *  the awaited assert (deletion included) releases the facade lock, so a queued lock could take
-	 *  it in the gap while the account handle already holds derived key material — the synchronous
-	 *  isFenceLive is the last thing before the irreversible sign. */
-	private async assertAuthWitFenceLive(fence: ExecutionFence): Promise<void> {
-		await this.profileService.assertFence(fence)
-		if (!this.profileService.isFenceLive(fence)) throw new SessionEndedError()
+		// Raw Fr message hash (pre-computed by wallet-sdk)
+		return Fr.schema.parseAsync(op.messageHashOrIntent)
 	}
 
 	// internals
