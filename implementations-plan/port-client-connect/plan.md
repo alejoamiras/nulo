@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: IMPLEMENTED 2026-09-17 — phases 1–4 green, codex post-impl loop converged in two rounds; PR into dev open, merge is the owner's call
+status: MERGED 2026-09-17 — #618 squash-merged to dev (141d4b64); phases 1–4 green, codex post-impl loop converged in two rounds
 baseline: 771c2a16 (dev, after #613)
 worktree: .claude/worktrees/port-client-connect · branch worktree-port-client-connect
 ---

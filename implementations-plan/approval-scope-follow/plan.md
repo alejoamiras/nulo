@@ -10,7 +10,7 @@ eli5_url: https://claude.ai/artifact/9hbMQqUuJuhmWVzmBgWfYv   # rev 6 republish 
 code_review: off      # owner's standing directive — the codex fix loop is the review
 harden: not scheduled # Phase 0 touches a guard; its own tests + the codex loop cover it
 revision: 6           # rev 1 rejected (codex); rev 2 cond. approved (fable); rev 3 cond. approved (codex r2); rev 4 rejected (codex r3, fresh); rev 5 rejected (codex r4, fresh); rev 6 drafted 2026-09-17 after the prerequisite merged; see §Decision ledger
-status: approved      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) signed off 2026-09-17 ("that proposal is perfect.")
+status: MERGED 2026-09-17 — #614, #615 (popup fix, scope banner) and #617 (execution, 30010f60) squash-merged to dev      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) signed off 2026-09-17 ("that proposal is perfect.")
 ```
 
 ## Summary
