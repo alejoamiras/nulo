@@ -1,5 +1,4 @@
-import { MessageType } from "@nulo/extension-messaging/messages"
-import { unwrapParams } from "@nulo/extension-messaging/utils"
+import { connectStub, PortRegistry } from "@nulo/extension-messaging/testing"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { _resetDocumentLoggerForTests, documentLogger } from "./client"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -16,41 +15,25 @@ vi.unmock("@/wallet/services/logger/client")
 
 const SECRET = "correct-horse-battery-staple"
 
-type Listener = (message: unknown) => void
-let settled: Promise<unknown>[] = []
+let registry: PortRegistry
 
 beforeEach(() => {
 	_resetDocumentLoggerForTests()
-	settled = []
+	registry = new PortRegistry({ answer: "microtask" })
+	;(chrome.runtime.connect as ReturnType<typeof vi.fn>).mockImplementation(connectStub(registry))
 })
 afterEach(async () => {
 	// Every line is answered on a microtask; wait for it so no request keeps a timer.
-	await Promise.all(settled)
+	await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 /**
- * Capture what reaches the wire — `[method, context, source, level, ...data]` as posted after
- * `jsonSanitize` — from a port that answers each request. The logger client is private to its
- * module, so the transport is observed at `chrome.runtime.connect`.
+ * What reaches the wire — `[method, context, source, level, ...data]` as posted after
+ * `jsonSanitize`. The logger client is private to its module, so the transport is observed at
+ * `chrome.runtime.connect`.
  */
-function captureWire(context: "popup" | "offscreen"): { logger: ILogger; sent: unknown[] } {
-	const sent: unknown[] = []
-	const listeners = new Set<Listener>()
-	;(chrome.runtime.connect as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-		onMessage: { addListener: (l: Listener) => listeners.add(l), removeListener: (l: Listener) => listeners.delete(l) },
-		onDisconnect: { addListener: () => {}, removeListener: () => {} },
-		disconnect: () => {},
-		postMessage: (message: { content: { requestId: number; method: string; params: unknown[] } }) => {
-			sent.push(message.content.method, ...unwrapParams(message.content.params))
-			const response = { type: MessageType.Response, content: { requestId: message.content.requestId, result: undefined } }
-			settled.push(
-				Promise.resolve().then(() => {
-					for (const listener of listeners) listener(response)
-				}),
-			)
-		},
-	}))
-	return { logger: documentLogger(context), sent }
+function captureWire(context: "popup" | "offscreen"): { logger: ILogger; sent: () => unknown[] } {
+	return { logger: documentLogger(context), sent: () => registry.posted.flatMap((p) => [p.method, ...p.params]) }
 }
 
 describe("documentLogger — redaction before the wire", () => {
@@ -59,7 +42,7 @@ describe("documentLogger — redaction before the wire", () => {
 
 		logger.log("ui", LogLevel.Error, { password: SECRET })
 
-		expect(JSON.stringify(sent)).not.toContain(SECRET)
+		expect(JSON.stringify(sent())).not.toContain(SECRET)
 	})
 
 	test("projects an Error before jsonSanitize can flatten it into a stack-carrying object", () => {
@@ -67,8 +50,8 @@ describe("documentLogger — redaction before the wire", () => {
 
 		logger.log("ui", LogLevel.Error, new Error(`failed for https://rpc.example.com/v2/${SECRET}`))
 
-		expect(sent[4]).toEqual({ name: "Error", message: "failed for https://rpc.example.com" })
-		expect(sent[4]).not.toBeInstanceOf(Error)
+		expect(sent()[4]).toEqual({ name: "Error", message: "failed for https://rpc.example.com" })
+		expect(sent()[4]).not.toBeInstanceOf(Error)
 	})
 
 	test("summarises a typed array instead of shipping its bytes", () => {
@@ -76,7 +59,7 @@ describe("documentLogger — redaction before the wire", () => {
 
 		logger.log("ui", LogLevel.Error, { key: new Uint8Array([1, 2, 3, 4]) })
 
-		const wire = JSON.stringify(sent)
+		const wire = JSON.stringify(sent())
 		expect(wire).toContain("Uint8Array(4)")
 		// The generic walk would have serialized it as {"0":1,"1":2,…}.
 		expect(wire).not.toContain('"0":1')
@@ -96,8 +79,8 @@ describe("documentLogger — redaction before the wire", () => {
 			content: { amount: SECRET },
 		})
 
-		expect(JSON.stringify(sent)).not.toContain(SECRET)
-		expect(sent[4]).toMatchObject({ note: "UintNote", rawContentLen: 1, contentKeys: 1 })
+		expect(JSON.stringify(sent())).not.toContain(SECRET)
+		expect(sent()[4]).toMatchObject({ note: "UintNote", rawContentLen: 1, contentKeys: 1 })
 	})
 
 	test("still forwards the routing arguments unchanged", () => {
@@ -105,10 +88,10 @@ describe("documentLogger — redaction before the wire", () => {
 
 		logger.log("pxe", LogLevel.Warn, "plain message")
 
-		expect(sent[0]).toBe("log")
-		expect(sent[1]).toBe("offscreen")
-		expect(sent[2]).toBe("pxe")
-		expect(sent[3]).toBe(LogLevel.Warn)
-		expect(sent[4]).toBe("plain message")
+		expect(sent()[0]).toBe("log")
+		expect(sent()[1]).toBe("offscreen")
+		expect(sent()[2]).toBe("pxe")
+		expect(sent()[3]).toBe(LogLevel.Warn)
+		expect(sent()[4]).toBe("plain message")
 	})
 })

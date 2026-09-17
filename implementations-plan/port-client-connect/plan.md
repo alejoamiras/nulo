@@ -391,7 +391,7 @@ unit.
 → exit 0, every existing harness consumer green (`client.test.ts`, `hardening.test.ts`, `service.test.ts`).
 Layers: lint/typecheck, unit.
 
-### Phase 3 — extension consumers
+### Phase 3 — extension consumers ✓
 
 1. `tests/vitest.setup.ts` on the registry; `emitPortDisconnect` exported.
 2. `client.ports.test.ts` imports the shared fake; local classes deleted.
