@@ -10,7 +10,8 @@
 		"./errors": "./src/errors.ts",
 		"./messages": "./src/messages.ts",
 		"./utils": "./src/utils.ts",
-		"./zod": "./src/zod-helpers.ts"
+		"./zod": "./src/zod-helpers.ts",
+		"./testing": "./src/testing/index.ts"
 	},
 	"scripts": {
 		"test": "bun --bun vitest run --passWithNoTests",
