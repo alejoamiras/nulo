@@ -142,3 +142,17 @@ Gate: `bun --bun vitest run src/components src/wallet/services/profile src/store
 5 infos, all pre-existing; complexity-baseline check OK). Network e2e, solo at retry 0: `lock-cancels-dapp-send` exit 0 (23 s), `auto-lock-defers-while-proving`
 exit 0 (49 s), `profile-switch-sweeps-transfer` exit 0 (92 s), and `session-profileSwitch` exit 0 (11 s),
 which also locks through the header.
+
+### Round 3 — approve: converged
+
+Codex checked the round-2 fixes: the RPC wiring (spec, the service's allowlist, the exhaustive
+client passthrough list, the optional argument surviving serialization); the handle telling apart
+a same-profile re-unlock, a profile switch and a session restored by another worker; the refusal
+taken under the facade lock with no suspension before the close; cleanup, read-back and the lock
+announcement still reached with no live session (passkey and strict-password restarts included);
+abandonment without restart on delivered changes and disconnects; one 3 s budget covering both
+reads; and the tests. It restated the one exception as a trade-off already chosen: a read that times
+out or rejects locks without a handle, even when the handle read had succeeded, so the
+replacement-session protection does not cover that path. It added that the client's no-replay
+behaviour supports the restart reasoning for pending requests but does not guarantee delivery of a
+lock through a worker crash. Verdict line: "No new material findings."
