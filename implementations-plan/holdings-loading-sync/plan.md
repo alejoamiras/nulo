@@ -194,7 +194,7 @@ All gates run from the repo root. "Fast layers" = `bun run lint && bun run typec
 - Tests: zero rows with a seeding entry; row at `updatedAt === 0`; failed/rejected seed does not hold; cap releases to the known aggregate; a rejection BEFORE the cap keeps the skeleton; a rejected OR still-unanswered snapshot after the cap renders `—`, never `$0.00`; a successfully loaded empty list renders `$0.00`; token-detail hero untouched.
 - Gate: fast layers + `bun run --cwd apps/extension test src/popup/components/modules/general/BalanceView` — exit 0.
 
-**Phase 5 — e2e + docs.** `default-token-seeding.test.ts`: `token-seed-row[data-symbol="TST"]` visible before `tokens-card`; `tokens-empty-import-link` never appears in between. Verify I4. `ARCHITECTURE.md`: seeding paragraph corrected to the truth as of this arc (three metadata simulations) + seed status. Screenshots.
+**Phase 5 ✓ — e2e + docs.** `default-token-seeding.test.ts`: `token-seed-row[data-symbol="TST"]` visible before `tokens-card`; `tokens-empty-import-link` never appears in between. Verify I4. `ARCHITECTURE.md`: seeding paragraph corrected to the truth as of this arc (three metadata simulations) + seed status. Screenshots.
 - Gate: `bun run audit:vue` exit 0; `bun run test:e2e` green; `bun run e2e:agent` complete network suite green (retry-0; a genuine flake is re-run, never waived). Layers: all, incl. live sandbox.
 
 Arc 1 boundary → quality loop → `gh stack add`.

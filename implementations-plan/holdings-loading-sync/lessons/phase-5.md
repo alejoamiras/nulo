@@ -73,3 +73,33 @@ ten minutes without a balance row and still finds no empty state.
 **Lesson:** when a reviewer rejects a timer twice, check whether the timer is protecting a real case. It
 was protecting a fault path (a row that never comes) at the price of lying on the common slow path.
 
+
+### Confirming pass (same session) — converged
+After the timer was deleted codex re-read the diff:
+
+> approve — no new material findings … The held finding is resolved — high confidence … Arc 1's review
+> has converged based on the supplied code and reported validation.
+
+## Screenshots (`screenshots/`)
+- `a1-home-seeding.png` — Home right after sign-up: cUSDC "Clean USDC" and USDC "USD Coin" as placeholder
+  rows with skeleton amounts, no empty state. Captured by taking the worker offline over CDP so the
+  seeding state holds still.
+- `a4-seed-failed.png` — "Couldn't set up" + RETRY; `a4-seed-rejected.png` — "Couldn't verify", no button.
+  Both by rewriting the seed marker. Gotchas: ValueStorage stores the marker as a JSON STRING (a raw
+  object write is ignored), and vitest's default retries overwrite a screenshot — capture with `retry: 0`.
+
+## Environment notes
+- The playground "fails to start" on this host: vite's `host: "localhost"` binds `[::1]` only, the e2e
+  setup's probe resolves IPv4 only. Env-only workaround, no repo change:
+  `NODE_OPTIONS=--dns-result-order=ipv4first`.
+- `e2e:agent` builds `dist/chrome` itself — nothing else may build in the worktree while it runs.
+- The harness killed the first complete network run on a system-wide low-memory signal after 26 spec
+  files (no kernel OOM, no orphans). The other 62 ran as a second segment on the same commit and build.
+
+## Gate (as written in plan.md) — on `2f41831d`
+- `bun run audit:vue` — exit 0 (504 files, 6178 tests, then build)
+- `bun run test:e2e` (armed build) — exit 0 (32 files passed, 1 skipped; 123 tests)
+- `bun run e2e:agent`, complete network suite, proverless — 86 spec files passed, 0 failed, 0 retried;
+  2 skipped by their own env gates (`_probe-warmup-effect`, `tx-sendTx-delegated-authwit`). Segment 1:
+  26 files passed before the kill; segment 2: `exit 0`, 60 passed | 2 skipped (62).
+- Not run locally: the prover-ON canary (CI's `canary` shard owns it).
