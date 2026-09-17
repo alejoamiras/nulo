@@ -57,18 +57,25 @@ const deferred = <T>() => {
 	return { promise, resolve, reject }
 }
 
+const TESTNET = { id: "net-testnet", name: "Testnet", chainId: 2 } as unknown as Network
+
 let log: string[]
 let deps: ScopeFollowDeps & { setActiveNetwork: ReturnType<typeof vi.fn>; writeActiveAccount: ReturnType<typeof vi.fn> }
+/** The durable network row the fake `setActiveNetwork` moves; the wallet starts on Testnet. */
+let activeNetworkId: string
 
 beforeEach(() => {
 	log = []
+	activeNetworkId = TESTNET.id
 	installFakeLocks(log)
 	deps = {
 		refreshInFlight: vi.fn(async () => {
 			log.push("refresh")
 		}),
 		hasInFlightSend: () => false,
+		getActiveNetworkId: async () => activeNetworkId,
 		setActiveNetwork: vi.fn(async (id: string) => {
+			activeNetworkId = id
 			log.push(`network:${id}`)
 		}),
 		writeActiveAccount: vi.fn(async (address: string) => {
@@ -120,10 +127,25 @@ describe("createScopeFollow — what it writes, in which order, under which lock
 	})
 
 	test("same row: only the account pointer moves", async () => {
+		activeNetworkId = LOCAL.id
 		const follow = createScopeFollow(deps)
 		await follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
 		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
 		expect(deps.writeActiveAccount).toHaveBeenCalledWith("0xmain", expect.any(Function))
+	})
+
+	test("the row is decided under the lock from the live pointer, not from the view", async () => {
+		// Resolved while the wallet was on the row; an earlier follow moved it before this one ran.
+		const follow = createScopeFollow(deps)
+		await follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
+		expect(log).toEqual([`lock:${SCOPE_FOLLOW_LOCK}`, "refresh", "network:net-local", "account:0xmain", `unlock:${SCOPE_FOLLOW_LOCK}`])
+
+		// And the reverse: the view saw a mismatch the earlier follow has since resolved.
+		log.length = 0
+		deps.setActiveNetwork.mockClear()
+		await follow.follow(view({ networkMismatch: true }), false, follow.capture())
+		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
+		expect(log).toEqual([`lock:${SCOPE_FOLLOW_LOCK}`, "refresh", "account:0xmain", `unlock:${SCOPE_FOLLOW_LOCK}`])
 	})
 
 	test("no follow account (a hidden or shared signer): the network moves, the account does not", async () => {
@@ -166,8 +188,21 @@ describe("createScopeFollow — the lifecycle fence", () => {
 		deps.refreshInFlight = vi.fn(() => refresh.promise)
 		const follow = createScopeFollow(deps)
 		const pending = follow.follow(view(), false, follow.capture())
+		await vi.waitFor(() => expect(deps.refreshInFlight).toHaveBeenCalled())
 		follow.invalidate()
 		refresh.resolve()
+		await pending
+		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
+	})
+
+	test("a change landing during the row read aborts before the network write", async () => {
+		const read = deferred<string>()
+		deps.getActiveNetworkId = vi.fn(() => read.promise)
+		const follow = createScopeFollow(deps)
+		const pending = follow.follow(view(), false, follow.capture())
+		await vi.waitFor(() => expect(deps.getActiveNetworkId).toHaveBeenCalled())
+		follow.invalidate()
+		read.resolve(TESTNET.id)
 		await pending
 		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
 	})
@@ -189,6 +224,7 @@ describe("createScopeFollow — the lifecycle fence", () => {
 		deps.writeActiveAccount = vi.fn((address: string, unless: () => boolean) =>
 			storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
 		)
+		activeNetworkId = LOCAL.id
 		const follow = createScopeFollow(deps)
 		const gate = storage.deferNextGet() // the facade's migration barrier, suspended
 		const pending = follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
@@ -204,8 +240,10 @@ describe("createScopeFollow — the lifecycle fence", () => {
 		deps.writeActiveAccount = vi.fn((address: string, unless: () => boolean) =>
 			storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
 		)
+		activeNetworkId = LOCAL.id
 		const follow = createScopeFollow(deps)
 		await follow.follow(view({ networkMismatch: false, accountMismatch: true }), false, follow.capture())
+		expect(deps.setActiveNetwork).not.toHaveBeenCalled()
 		expect(storage.data["nulo:ui:activeAccount"]).toBe("0xmain")
 	})
 })
@@ -229,6 +267,33 @@ describe("createScopeFollow — two follows at once", () => {
 			`lock:${SCOPE_FOLLOW_LOCK}`,
 			"refresh",
 			"network:net-other",
+			"account:0xsavings",
+			`unlock:${SCOPE_FOLLOW_LOCK}`,
+		])
+	})
+
+	test("a chain follow, then an account follow resolved on the old row: the second re-establishes its row", async () => {
+		const SAVINGS = { address: "0xsavings", name: "Savings", visible: true } as unknown as Account
+		const chain = createScopeFollow(deps)
+		const account = createScopeFollow(deps)
+		// Both windows resolved their views while the wallet was on Testnet.
+		await Promise.all([
+			chain.follow(view(), false, chain.capture()),
+			account.follow(
+				view({ network: TESTNET, networkMismatch: false, followAccount: SAVINGS, accountMismatch: true }),
+				false,
+				account.capture(),
+			),
+		])
+		expect(log).toEqual([
+			`lock:${SCOPE_FOLLOW_LOCK}`,
+			"refresh",
+			"network:net-local",
+			"account:0xmain",
+			`unlock:${SCOPE_FOLLOW_LOCK}`,
+			`lock:${SCOPE_FOLLOW_LOCK}`,
+			"refresh",
+			"network:net-testnet",
 			"account:0xsavings",
 			`unlock:${SCOPE_FOLLOW_LOCK}`,
 		])

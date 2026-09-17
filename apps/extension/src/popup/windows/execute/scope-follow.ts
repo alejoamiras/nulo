@@ -8,6 +8,8 @@ export interface ScopeFollowDeps {
 	/** The tracker's re-read; the guard fails closed until it has answered. */
 	refreshInFlight: () => Promise<void>
 	hasInFlightSend: () => boolean
+	/** The live row, read under the lock: a follow that ran before this one may have moved it. */
+	getActiveNetworkId: () => Promise<string | undefined>
 	setActiveNetwork: (networkId: string) => Promise<unknown>
 	/** The durable pointer write; `unless` runs inside the facade, right before the write. */
 	writeActiveAccount: (address: string, unless: () => boolean) => Promise<unknown>
@@ -43,15 +45,17 @@ export function createScopeFollow(deps: ScopeFollowDeps) {
 		try {
 			await navigator.locks.request(SCOPE_FOLLOW_LOCK, () => followUnderLock(view, stillOurs))
 		} catch {
-			// Nothing to repair: the next popup open converges on whatever was written.
+			// A failure can leave the pair half-written; a rollback could overwrite a newer selection.
 		}
 	}
 
 	const followUnderLock = async (view: ScopeView, stillOurs: () => boolean): Promise<void> => {
 		await deps.refreshInFlight()
 		if (!stillOurs() || deps.hasInFlightSend()) return
+		const activeNetworkId = await deps.getActiveNetworkId()
+		if (!stillOurs()) return
 		// Network first: a failed network write must never leave a lone account write behind.
-		if (view.networkMismatch) await deps.setActiveNetwork(view.network.id)
+		if (activeNetworkId !== view.network.id) await deps.setActiveNetwork(view.network.id)
 		if (!stillOurs() || !view.followAccount) return
 		await deps.writeActiveAccount(view.followAccount.address, () => !stillOurs())
 	}

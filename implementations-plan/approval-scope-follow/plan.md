@@ -116,10 +116,15 @@ which rev 6 absorbs alongside the codex round-4 findings:
   documented rather than exercised.
 - **Persistence failures are indeterminate and there is no rollback.** `setActiveNetwork` persists
   before it refreshes the node handle and emits, so an RPC rejection can arrive after the durable
-  write landed; the account write can likewise fail after the network write succeeded. Either way
-  the account pointer is left as it was and the next open shows the new chain with the remembered
-  account — degraded, not corrupt, self-correcting on the next switch. A blind rollback could
-  overwrite a newer selection, so none is attempted.
+  write landed; the account write can likewise fail after the network write succeeded. The account
+  pointer is then left as it was: a network failure before the durable write leaves the old chain;
+  one after it leaves the new chain with the remembered account, which the next open keeps if it
+  exists there and otherwise replaces with that chain's first account (`setupActiveAccountRun`) —
+  degraded, not corrupt, self-correcting on the next switch. A blind rollback could overwrite a
+  newer selection, so none is attempted. The network write itself is decided under the lock from
+  the live row, not from the view the window resolved earlier: a follow that ran first may have
+  moved the wallet, and an account written under another follow's chain is exactly the mixed pair
+  the lock exists to prevent (codex arc 2 #1).
 - **`origin === "popup"` means the popup Send, not "every wallet-initiated send".** The lane journals
   the wallet's own auth-registry revoke/enable sends as `origin: "dapp"` (`execution-lane.ts`);
   Phase 0 releases their freeze too. Safe for account/network (they carry explicit identifiers); the

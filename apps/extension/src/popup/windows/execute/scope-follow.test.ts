@@ -39,6 +39,7 @@ const rejectViaInteractionServiceMock = vi.fn()
 const onActiveProfileChangedAddMock = vi.fn()
 const windowsRemoveMock = vi.fn()
 const setActiveNetworkMock = vi.fn(async () => undefined)
+const getActiveNetworkMock = vi.fn(async () => appStoreMock.network)
 const storageSetMock = vi.fn(async (_items: Record<string, unknown>) => undefined)
 /** A fake Web Lock: runs the callback at once (jsdom has none). */
 const locksRequestMock = vi.fn((_name: string, callback: () => Promise<unknown>) => callback())
@@ -77,7 +78,7 @@ vi.mock("@/composables/toast", () => ({
 	TOAST_DURATION: { SHORT: 2000, LONG: 5000 },
 }))
 vi.mock("@/utils/core", () => ({
-	requireNetwork: () => ({ setActiveNetwork: setActiveNetworkMock }),
+	requireNetwork: () => ({ setActiveNetwork: setActiveNetworkMock, getActiveNetwork: getActiveNetworkMock }),
 }))
 vi.mock("@/wallet/services/profile/client", () => ({
 	ProfileServiceClient: vi.fn(function () {
@@ -318,6 +319,21 @@ describe("execute window — the follow after Confirm", () => {
 		await open([sendFrom(MAIN.address)])
 		await vm().approve()
 		expect(setActiveNetworkMock).not.toHaveBeenCalled()
+		expect(accountWrites()).toEqual([MAIN.address])
+	})
+
+	test("the banner action is inert once Confirm is in flight: the copy cannot promise a decline the follow will not honour", async () => {
+		let settleApproval!: () => void
+		approveInteractionMock.mockImplementationOnce(
+			() => new Promise<undefined>((resolve) => (settleApproval = () => resolve(undefined))),
+		)
+		await open([sendFrom(MAIN.address)])
+		const approving = vm().approve()
+		await flushPromises()
+		await action().trigger("click")
+		expect(banner().attributes("data-state")).toBe("account")
+		settleApproval()
+		await approving
 		expect(accountWrites()).toEqual([MAIN.address])
 	})
 

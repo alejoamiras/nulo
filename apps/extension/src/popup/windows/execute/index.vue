@@ -551,9 +551,7 @@ const reject = async () => {
 const signerAccounts = computed(() => uniqueSignerAccounts(operations.value))
 const signerNetworks = computed(() => uniqueSignerNetworks(operations.value))
 
-// Where the payload runs against where the wallet is looking. Window-local: the decline lives and
-// dies with this window, and the active rows arrive asynchronously, so nothing renders until both
-// are known.
+// Where the payload runs against where the wallet is looking; nothing renders until the active rows arrive.
 const followDeclined = ref(false)
 const scopeView = computed(() =>
 	resolveOperationScope(operations.value, { networkId: appStore.network?.id, accountAddress: appStore.account?.address }),
@@ -565,6 +563,8 @@ const scopeBanner = computed(() => {
 	return { state, ...scopeBannerCopy(state, view, { account: appStore.account, network: appStore.network }) }
 })
 const toggleFollow = () => {
+	// Confirm captured the choice; a click while the follow waits behind the lock would flip the copy only.
+	if (isLoading.value) return
 	followDeclined.value = !followDeclined.value
 }
 // The durable pointers, never this realm's store: the window is closing, and the shell's network
@@ -572,6 +572,7 @@ const toggleFollow = () => {
 const scopeFollow = createScopeFollow({
 	refreshInFlight: () => appStore.refreshInFlight(),
 	hasInFlightSend: () => appStore.hasInFlightSend,
+	getActiveNetworkId: async () => (await requireNetwork().getActiveNetwork())?.id,
 	setActiveNetwork: (networkId) => requireNetwork().setActiveNetwork(networkId),
 	writeActiveAccount: (address, unless) => storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
 })

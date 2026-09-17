@@ -17,7 +17,7 @@ export interface ScopeView {
 	signers: Account[]
 	/** The account the wallet moves to after Confirm: the single signer, else the single account
 	 *  that actually sends. Absent when several accounts send (each operation signs for itself)
-	 *  and when the account is hidden (a hidden account is never named or aimed at). */
+	 *  and when the account is hidden (a hidden account is never followed). */
 	followAccount?: Account
 	/** `followAccount` exists, differs from the active account, and the row already matches. */
 	accountMismatch: boolean
@@ -65,7 +65,6 @@ function singleSendingSigner(operations: readonly ScopeOperation[]): Account | u
 	return senders.size === 1 ? [...senders.values()][0] : undefined
 }
 
-/** The banner's state for a view, or `undefined` for no banner. */
 export function scopeBannerState(view: ScopeView | undefined, declined: boolean): ScopeBannerState | undefined {
 	if (!view) return undefined
 	if (view.networkMismatch) return declined ? "chain-declined" : "chain"
