@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + messaging-lifecycle mapper), default
-status: APPROVED 2026-09-17 (owner set the /goal seed) — implementing; five review rounds folded, codex closure check approve
+status: MERGED to dev 2026-09-17 as #613 (squash 771c2a16); five review rounds folded, codex closure check approve, codex post-impl loop converged in two rounds
 worktree: .claude/worktrees/owned-client-teardown (branch worktree-owned-client-teardown, from origin/dev @ c543c18d)
 eli5: https://claude.ai/artifact/QnnvndhFVNppQxMt38tWGc (source implementations-plan/owned-client-teardown/eli5.html)
 ---
