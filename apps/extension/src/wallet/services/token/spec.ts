@@ -136,6 +136,24 @@ export type TokenInterface = {
 	isComplete: boolean
 }
 
+/**
+ * Where a default token that is NOT yet a token row stands. `failed` spent its
+ * attempts for this extension version and can be retried by the user; `rejected`
+ * failed a pin or a metadata bound and cannot.
+ */
+export type SeedStatus = "pending" | "seeding" | "failed" | "rejected"
+
+/** One not-yet-seeded default. `symbol` and `displayName` are compiled-in literals, never chain data. */
+export type SeedStatusEntry = {
+	chainId: number
+	contract: string
+	symbol: string
+	displayName: string
+	status: SeedStatus
+}
+
+export type SeedScope = { profileId: string; chainId: number }
+
 export type Methods = {
 	/**
 	 * Returns a list of tokens.
@@ -211,6 +229,28 @@ export type Methods = {
 		accountAddress: string,
 		contract: string,
 	): { name: string; symbol: string; decimals: number; interface: TokenInterface }
+
+	/**
+	 * Default tokens of the active profile + network that are not token rows yet.
+	 * A pure read: it never starts or retries seeding. Seeded and user-deleted
+	 * defaults are omitted.
+	 */
+	getSeedStatus(): SeedStatusEntry[]
+
+	/**
+	 * Starts a seed pass when a default is still `pending` and nothing is working
+	 * on it — the recovery for a service worker that died mid-seeding. Acts at most
+	 * once per service-worker lifetime per (profile, chain); returns without
+	 * waiting for the pass.
+	 */
+	ensureSeeding(): void
+
+	/**
+	 * Gives a `failed` default a fresh round of attempts. Resolves `false` — and
+	 * changes nothing — for any other status, a contract outside the active
+	 * network's seed list, or a retry already accepted for the same default.
+	 */
+	retrySeed(chainId: number, contract: string): boolean
 }
 
 /**
@@ -228,4 +268,6 @@ export type Events = {
 	onTokenUpdated: TokenInfo
 	/** Emitted when an existing token is deleted */
 	onTokenDeleted: TokenDeleted
+	/** A default's status changed in this scope. An invalidation: consumers refetch `getSeedStatus`. */
+	onSeedStatusChanged: SeedScope
 }

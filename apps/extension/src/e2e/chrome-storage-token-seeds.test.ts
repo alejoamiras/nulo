@@ -57,12 +57,13 @@ describe("ChromeStorageTokenSeeds", () => {
 		expect(await new ChromeStorageTokenSeeds().get()).toEqual([])
 	})
 
-	test("one valid sandbox entry → returned with the symbol pinned here, not read from storage", async () => {
+	test("one valid sandbox entry → returned with the symbol and label pinned here, not read from storage", async () => {
 		// A writer that tries to choose the expected symbol must not be able to:
-		// it is the one pin the fixture already knows.
-		write([{ ...valid, expectedSymbol: "NOT-TST" }])
+		// it is the one pin the fixture already knows. The label is rendered by the
+		// popup before the chain answers, so storage must not be able to supply it either.
+		write([{ ...valid, expectedSymbol: "NOT-TST", displayName: "<img src=x>" }])
 		expect(await new ChromeStorageTokenSeeds().get()).toEqual([
-			{ chainId: 0, contract: CONTRACT, expectedClassId: CLASS_ID, expectedSymbol: "TST" },
+			{ chainId: 0, contract: CONTRACT, expectedClassId: CLASS_ID, expectedSymbol: "TST", displayName: "TestToken" },
 		])
 	})
 

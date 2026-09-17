@@ -15,6 +15,7 @@ export const TOKEN_SEEDS_KEY = "nulo:e2e:token-seeds"
  * genuinely cannot know before the per-run deploy.
  */
 const SANDBOX_SYMBOL = "TST"
+const SANDBOX_DISPLAY_NAME = "TestToken"
 
 /** Sandbox chain id. A seed for any other chain is rejected outright — an
  *  armed build must never be able to inject against a real network. */
@@ -58,6 +59,7 @@ export class ChromeStorageTokenSeeds {
 				contract: entry.contract,
 				expectedClassId: entry.expectedClassId,
 				expectedSymbol: SANDBOX_SYMBOL,
+				displayName: SANDBOX_DISPLAY_NAME,
 			},
 		]
 	}
