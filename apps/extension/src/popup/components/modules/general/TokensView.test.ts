@@ -444,6 +444,10 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 		await flushPromises()
 		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
 		expect(emptyState(wrapper)).toBe(false)
+		// However long the row takes — or if it never comes — the list does not turn into "no tokens".
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
+		expect(emptyState(wrapper)).toBe(false)
 
 		H.balanceAdded.emit(namedRow(1, "cUSDC", { chainId: 1, contract: SEED_CONTRACT.toLowerCase() }))
 		await flushPromises()

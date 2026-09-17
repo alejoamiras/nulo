@@ -11,11 +11,6 @@ export type SnapshotState = "loading" | "loaded" | "unavailable"
 /** A rejected fetch is retried once on a timer; after that only a reconnect or an event retries. */
 export const SEED_STATUS_RETRY_MS = 2_000
 
-/** How long a `seeded` default stays listed, from when this scope first sees it seeded, for its
- *  balance row to show up. Consumers drop it sooner by matching the row's contract, so the cap only
- *  bounds a row that never comes — it is not what decides that a list is empty. */
-export const SEED_HANDOFF_MS = 5_000
-
 type Subscribable<T> = Pick<EventHandler<T>, "add" | "remove">
 
 export interface UseSeedStatusDeps {
@@ -43,43 +38,14 @@ export interface UseSeedStatus {
 
 const scopeKeyOf = (scope: SeedScope | undefined) => (scope ? `${scope.profileId}|${scope.chainId}` : "")
 
-/** One `SEED_HANDOFF_MS` window per `seeded` default; `onExpire` fires when one closes. A default
- *  seen unseeded again (a chain purge) gets a fresh window the next time it is seeded. */
-function createHandoffWindow(onExpire: () => void) {
-	const open = new Map<string, ReturnType<typeof setTimeout>>()
-	const closed = new Set<string>()
-	const forget = (key: string) => {
-		clearTimeout(open.get(key))
-		open.delete(key)
-		closed.delete(key)
-	}
-	const admit = (entries: SeedStatusEntry[]) => {
-		for (const entry of entries) {
-			const key = entry.contract.toLowerCase()
-			if (entry.status !== "seeded") forget(key)
-			else if (!open.has(key) && !closed.has(key)) {
-				const timer = setTimeout(() => {
-					open.delete(key)
-					closed.add(key)
-					onExpire()
-				}, SEED_HANDOFF_MS)
-				open.set(key, timer)
-			}
-		}
-	}
-	const visible = (entries: SeedStatusEntry[]) =>
-		entries.filter((entry) => entry.status !== "seeded" || !closed.has(entry.contract.toLowerCase()))
-	const reset = () => {
-		for (const key of [...open.keys(), ...closed]) forget(key)
-	}
-	return { admit, visible, reset }
-}
-
 /**
- * The active scope's default tokens that still need attention. The status RPC is a pure read,
- * so nothing here can start seeding by reading; the one deliberate kick is `ensureSeeding`, issued
- * once per scope and again after every reconnect — a reconnect means the service worker restarted,
- * and its once-per-lifetime latch with it.
+ * The active scope's default tokens the user has not deleted. A `seeded` one is listed for good:
+ * its balance row is created after the token row, by another service, and only a consumer that
+ * holds the balance rows can tell whether it has landed — so consumers match by contract, and
+ * nothing here ever times a default out of the list. The status RPC is a pure read, so nothing
+ * here can start seeding by reading; the one deliberate kick is `ensureSeeding`, issued once per
+ * scope and again after every reconnect — a reconnect means the service worker restarted, and its
+ * once-per-lifetime latch with it.
  */
 export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 	const entries = ref<SeedStatusEntry[]>([])
@@ -103,16 +69,11 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		deps.client.ensureSeeding().catch(() => undefined)
 	}
 
-	const handoff = createHandoffWindow(() => {
-		entries.value = handoff.visible(entries.value)
-	})
-
 	/** Another scope's rows are never shown under this one, not even while its own are loading. */
 	const enterScope = (scope: SeedScope | undefined) => {
 		const key = scopeKeyOf(scope)
 		if (key === shownScope) return
 		shownScope = key
-		handoff.reset()
 		entries.value = []
 		state.value = scope ? "loading" : "loaded"
 		if (scope) kick()
@@ -138,8 +99,7 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		// profile says nothing about this one, least of all "no defaults" — and the worker catching
 		// up announces nothing on a chain without defaults, so this one keeps asking.
 		if (scopeKeyOf(next.scope) !== scopeKeyOf(scope)) return onRejected(true)
-		handoff.admit(next.entries)
-		entries.value = handoff.visible(next.entries)
+		entries.value = next.entries
 		state.value = "loaded"
 	}
 
@@ -172,7 +132,6 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		disposed = true
 		generation += 1
 		clearRetry()
-		handoff.reset()
 		deps.client.onSeedStatusChanged.remove(onChanged)
 		deps.client.onConnected.remove(onConnected)
 	}

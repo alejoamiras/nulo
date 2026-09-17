@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises } from "@vue/test-utils"
 import type { SeedScope, SeedStatusEntry, SeedStatusSnapshot } from "@/wallet/services/token/spec"
-import { SEED_HANDOFF_MS, SEED_STATUS_RETRY_MS, type UseSeedStatus, useSeedStatus } from "./useSeedStatus"
+import { SEED_STATUS_RETRY_MS, type UseSeedStatus, useSeedStatus } from "./useSeedStatus"
 
 function makeEvent<T>() {
 	const handlers = new Set<(x: T) => void>()
@@ -140,38 +140,14 @@ describe("useSeedStatus", () => {
 		expect(seed.entries.value).toEqual([entry("failed")])
 	})
 
-	test("a seeded default stays listed for the handoff window — also one first seen already seeded — then leaves", async () => {
+	test("a seeded default is listed for good: whether its balance row landed is the consumer's call, never a timer's", async () => {
 		const { seed, client } = harness()
 		client.getSeedStatus.mockResolvedValue(snap([entry("seeded")]))
 		await seed.refresh()
-		expect(seed.entries.value).toEqual([entry("seeded")])
-
-		// A refetch inside the window neither drops it nor restarts its clock.
-		await vi.advanceTimersByTimeAsync(SEED_HANDOFF_MS - 1)
+		await vi.advanceTimersByTimeAsync(600_000)
 		await seed.refresh()
 		expect(seed.entries.value).toEqual([entry("seeded")])
-		await vi.advanceTimersByTimeAsync(1)
-		expect(seed.entries.value).toEqual([])
-		await seed.refresh()
-		expect(seed.entries.value).toEqual([])
 		expect(seed.ready.value).toBe(true)
-	})
-
-	test("a default seen unseeded again gets a fresh window; other statuses are never windowed", async () => {
-		const { seed, client } = harness()
-		client.getSeedStatus.mockResolvedValue(snap([entry("seeded")]))
-		await seed.refresh()
-		await vi.advanceTimersByTimeAsync(SEED_HANDOFF_MS)
-		expect(seed.entries.value).toEqual([])
-
-		client.getSeedStatus.mockResolvedValue(snap([entry("failed")]))
-		await seed.refresh()
-		await vi.advanceTimersByTimeAsync(SEED_HANDOFF_MS)
-		expect(seed.entries.value).toEqual([entry("failed")])
-
-		client.getSeedStatus.mockResolvedValue(snap([entry("seeded")]))
-		await seed.refresh()
-		expect(seed.entries.value).toEqual([entry("seeded")])
 	})
 
 	test("an answer for another PROFILE is no answer: never loaded-and-empty, and it keeps asking until the worker catches up", async () => {
@@ -216,21 +192,6 @@ describe("useSeedStatus", () => {
 		pending.resolve(snap([entry("pending", 2)], { profileId: "p1", chainId: 2 }))
 		await refetch
 		expect(seed.entries.value).toEqual([entry("pending", 2)])
-	})
-
-	test("a scope change closes the old scope's windows: coming back, a seeded default gets a full one again", async () => {
-		const { seed, client, scope } = harness()
-		client.getSeedStatus.mockResolvedValue(snap([entry("seeded")]))
-		await seed.refresh()
-		await vi.advanceTimersByTimeAsync(SEED_HANDOFF_MS)
-		expect(seed.entries.value).toEqual([])
-
-		scope.current = { profileId: "p1", chainId: 2 }
-		client.getSeedStatus.mockResolvedValueOnce(snap([], { profileId: "p1", chainId: 2 }))
-		await seed.refresh()
-		scope.current = { profileId: "p1", chainId: 1 }
-		await seed.refresh()
-		expect(seed.entries.value).toEqual([entry("seeded")])
 	})
 
 	test("a reconnect re-issues the kick and refetches; the first connect is the mount's own", async () => {

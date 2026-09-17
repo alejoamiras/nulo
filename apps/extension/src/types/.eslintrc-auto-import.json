@@ -125,7 +125,6 @@
     "RestoredNetwork": true,
     "RowClass": true,
     "RunFence": true,
-    "SEED_HANDOFF_MS": true,
     "SEED_STATUS_RETRY_MS": true,
     "ShallowRef": true,
     "SliceRestoreClient": true,

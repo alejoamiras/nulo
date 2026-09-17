@@ -54,4 +54,22 @@ repo, so each round pastes the diff and the key files inline.
 | 3 | A profile mismatch could stay `unavailable` forever on a chain without defaults (no event, no reconnect) | **Valid as a robustness gap**; reachability is low — Home needs an unlocked profile, and the popup's profile is hydrated FROM the worker after unlock | a mismatch keeps polling every 2 s until the worker catches up; a rejected fetch stays one-shot |
 | 4 | `useSeedStatus` over the 80-line budget | Moot after #1 | the window lives in `createHandoffWindow`; `bun run lint` exit 0 |
 | 5 | A regex cannot make `Error.name` a category | **Valid** | allowlist of five names, everything else `unknown`; the test uses an alphabetic payload |
+| — | *(superseded in round 3: the `SEED_HANDOFF_MS` window described in row 1 was removed)* | | |
 | 8 | The unpinned link is "runtime startup → `armPostStartWork` once profile/network are available" | **Answered** | `startRuntime` calls `armPostStartWork` unconditionally right after `services.start()` (`wallet/runtime.ts`). If that lands before the session restore, `resume()` arms nothing — and the activation trigger that follows runs a pass whose `finally` re-arms from the marker. New seeder test pins exactly that order |
+
+### Round 3 (same session) — "no new material findings"; verdict still `reject` on ONE held point
+Codex confirmed the worker-side `seeded` change, the mount fence, the category allowlist, the mismatch
+polling and the startup ordering, and held round 2's #1: the 5 s window still let the list settle as
+empty (and the hero print `$0.00` before its own 12 s cap) when a seeded default's balance row was late
+or never came — "a later event repairs the display; it does not make the intervening assertion correct".
+
+**Accepted — and its fix was less code than my defence of the timer.** `createHandoffWindow` and
+`SEED_HANDOFF_MS` are deleted: a `seeded` default is listed for good, and only the consumer holding the
+balance rows decides that it has landed (by contract). The one visible cost is deliberate: if the balance
+service never creates the row, Home keeps one skeleton row for that default instead of claiming "no
+tokens"; the hero is bounded by its own 12 s cap. Pinned by a composed `TokensView` test that advances
+ten minutes without a balance row and still finds no empty state.
+
+**Lesson:** when a reviewer rejects a timer twice, check whether the timer is protecting a real case. It
+was protecting a fault path (a row that never comes) at the price of lying on the common slow path.
+
