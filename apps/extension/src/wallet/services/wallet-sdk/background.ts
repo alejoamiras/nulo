@@ -48,7 +48,6 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import { TokenService } from "@/wallet/services/token/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
@@ -1033,7 +1032,10 @@ async function handleWalletMessage(
 	let entryEpoch: number | undefined
 
 	try {
-		const profile = await requireActiveProfile(profileService, "Wallet is locked")
+		// The admission moment: capture the execution fence (profile + deletion epoch +
+		// live session serial) that every fenced op this message dispatches runs under, in
+		// place of a bare active-profile read. Throws when locked, same as before.
+		const fence = await profileService.captureExecutionFence()
 		entryEpoch = preEntryEpoch
 
 		// Identity guard: the channel serves ONLY the profile that established
@@ -1046,7 +1048,7 @@ async function handleWalletMessage(
 		const mayProceed = await enforceSessionProfileBinding({
 			sessionId: session.sessionId,
 			origin: session.origin,
-			activeProfileId: profile.id,
+			activeProfileId: fence.profileId,
 			sessionProfiles,
 			respond: () => {
 				response.error = SESSION_INVALID_ERROR
@@ -1067,9 +1069,10 @@ async function handleWalletMessage(
 
 		const ctx: SessionContext = {
 			chainId: chainInfoToChainId(session),
-			profileId: profile.id,
+			profileId: fence.profileId,
 			origin: session.origin,
 			sessionId: session.sessionId,
+			fence,
 		}
 
 		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so

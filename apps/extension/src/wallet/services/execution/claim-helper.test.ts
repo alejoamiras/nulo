@@ -387,12 +387,11 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.get("match-id")).toBe(result.controller)
 	})
 
-	test("createFreshRecord returning undefined → no controller registered", async () => {
-		const { deps, activeControllers, createFreshRecord } = makeDeps()
+	test("createFreshRecord returning undefined → refuses, registers no controller", async () => {
+		const { deps, activeControllers, createFreshRecord, registerInFlight } = makeDeps()
 		createFreshRecord.mockResolvedValueOnce(undefined)
-		const result = await claimOrCreateDappExecuteJournal(deps, INPUT_NO_QUEUED)
-		expect(result.journalId).toBeUndefined()
-		expect(result.controller).toBeUndefined()
+		await expect(claimOrCreateDappExecuteJournal(deps, INPUT_NO_QUEUED)).rejects.toThrow(/could not be recorded/)
+		expect(registerInFlight).not.toHaveBeenCalled()
 		expect(activeControllers.size).toBe(0)
 	})
 

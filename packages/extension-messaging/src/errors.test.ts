@@ -12,6 +12,7 @@ import {
 	isReceiverGoneRejection,
 	RECEIVER_GONE_MESSAGE,
 	JobCancelledError,
+	OperationNotRecordedError,
 	ProfileIdConflictError,
 	PxeStaleAnchorError,
 	PxeStoreKeyMissingError,
@@ -213,9 +214,15 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 			code: ContractNotRegisteredError.CODE,
 		},
 		{ err: new SessionEndedError(), ctor: SessionEndedError, name: "SessionEndedError", code: SessionEndedError.CODE },
+		{
+			err: new OperationNotRecordedError(),
+			ctor: OperationNotRecordedError,
+			name: "OperationNotRecordedError",
+			code: OperationNotRecordedError.CODE,
+		},
 	]
 
-	test("all 15 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 16 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -224,7 +231,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 14 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 15 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())

@@ -25,6 +25,7 @@ import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type { AccessLevel, DappPermissions, IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import type { LocalTxOrigin } from "./transaction-origin"
+import type { ExecutionFence } from "./types"
 
 export interface INetworkReader {
 	/** Profile-ANCHORED network read (the extension's lock-free
@@ -80,6 +81,11 @@ export interface IExecutionRunner {
 		origin: LocalTxOrigin,
 		parentTaskOrHooks?: unknown,
 		hooks?: IExecutionHooks,
+		/** Popup approval envelopes on the concrete runner; the dispatcher passes `undefined`. */
+		approvals?: unknown,
+		/** The admission-time fence forwarded for a fenced dApp op (e.g. a silently-covered
+		 *  createAuthWit). Without it a DAPP-origin fenced op is refused at the runner's entry. */
+		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]>
 }
 

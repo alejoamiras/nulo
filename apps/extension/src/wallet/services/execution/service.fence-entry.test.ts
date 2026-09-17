@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, test, vi } from "vitest"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { type LocalTxOrigin, OriginType } from "@/wallet/services/transaction/spec"
 import { ExecutionService } from "./service"
 
@@ -43,7 +44,7 @@ function makeFacade() {
 }
 
 describe("ExecutionService: a send runs under the fence its caller authorized", () => {
-	test.each(["send_transaction", "aztec_sendTx", "register_token"])(
+	test.each(["send_transaction", "aztec_sendTx", "register_token", "aztec_createAuthWit"])(
 		"executeOperations: a dApp batch holding a %s without a fence throws before any task, capture or dispatch",
 		async (kind) => {
 			const { facade, captureExecutionFence, executeSendTransaction, startNewTask } = makeFacade()
@@ -60,18 +61,29 @@ describe("ExecutionService: a send runs under the fence its caller authorized", 
 		},
 	)
 
-	test("executeOperations: the wallet-sdk dispatcher's fence-less reads, registrations and silent authwits run", async () => {
+	test("executeOperations: the wallet-sdk dispatcher's fence-less reads and registrations run", async () => {
 		const { facade, captureExecutionFence } = makeFacade()
 		const dispatchOperation = vi.fn(async () => "done")
 		Object.assign(facade, { dispatchOperation })
 		const batch = [
 			{ kind: "aztec_registerContract", networkId: "net-1" },
 			{ kind: "aztec_simulateTx", networkId: "net-1", accountAddress: "0xacct" },
-			{ kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct" },
 		] as never
 		const done = { status: "ok", result: "done" }
-		expect(await facade.executeOperations(batch, DAPP)).toEqual([done, done, done])
-		expect(dispatchOperation).toHaveBeenCalledTimes(3)
+		expect(await facade.executeOperations(batch, DAPP)).toEqual([done, done])
+		expect(dispatchOperation).toHaveBeenCalledTimes(2)
+		expect(captureExecutionFence).not.toHaveBeenCalled()
+	})
+
+	test("executeOperations: a dApp createAuthWit dispatches under its forwarded fence, never a capture", async () => {
+		const { facade, captureExecutionFence } = makeFacade()
+		const executeAztecCreateAuthWit = vi.fn(async () => "0xwit")
+		Object.assign(facade, { executeAztecCreateAuthWit })
+		const authwit = { kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct" } as never
+		expect(await facade.executeOperations([authwit], DAPP, undefined, undefined, undefined, FENCE)).toEqual([
+			{ status: "ok", result: "0xwit" },
+		])
+		expect(executeAztecCreateAuthWit).toHaveBeenCalledWith(authwit, FENCE)
 		expect(captureExecutionFence).not.toHaveBeenCalled()
 	})
 
@@ -98,6 +110,59 @@ describe("ExecutionService: a send runs under the fence its caller authorized", 
 		await fenced.facade.executeSendTransaction(SEND_OP, UI, undefined, undefined, FENCE)
 		expect(fenced.captureExecutionFence).not.toHaveBeenCalled()
 		expect(fenced.sentUnder()).toBe(FENCE)
+	})
+})
+
+/** The real authwit arm on a bare prototype; the hash resolution is stubbed so only the account
+ *  lookup, the fence gate and the sign remain. */
+function makeAuthWitFacade() {
+	const createAuthWit = vi.fn(async () => "0xwit")
+	const getAccountContract = vi.fn(async () => ({ createAuthWit }))
+	const assertFence = vi.fn(async () => {})
+	const isFenceLive = vi.fn(() => true)
+	const captureExecutionFence = vi.fn(async () => LIVE)
+	const facade = Object.assign(Object.create(ExecutionService.prototype), {
+		networkService: { getNetwork: async () => ({ id: "net-1", chainId: 7 }) },
+		accountService: { getAccountContract },
+		profileService: { assertFence, isFenceLive, captureExecutionFence },
+		resolveAuthWitMessageHash: async () => "0xhash",
+	}) as ExecutionService
+	return { facade, createAuthWit, getAccountContract, assertFence, isFenceLive, captureExecutionFence }
+}
+
+const AUTHWIT_OP = { kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct", messageHashOrIntent: "0x01" } as never
+
+describe("ExecutionService.executeAztecCreateAuthWit: the sign runs under the fence", () => {
+	test("resolves the account from the fence's profile and signs once both checks pass", async () => {
+		const { facade, createAuthWit, getAccountContract, assertFence, isFenceLive, captureExecutionFence } = makeAuthWitFacade()
+		expect(await facade.executeAztecCreateAuthWit(AUTHWIT_OP, FENCE)).toBe("0xwit")
+		expect(getAccountContract).toHaveBeenCalledWith("p1", 7, "0xacct")
+		expect(captureExecutionFence).not.toHaveBeenCalled()
+		expect(assertFence).toHaveBeenCalledWith(FENCE)
+		expect(isFenceLive).toHaveBeenCalledWith(FENCE)
+		expect(createAuthWit).toHaveBeenCalledTimes(1)
+	})
+
+	test("a session end caught by the awaited assert never signs", async () => {
+		const { facade, createAuthWit, assertFence } = makeAuthWitFacade()
+		assertFence.mockRejectedValueOnce(new SessionEndedError())
+		await expect(facade.executeAztecCreateAuthWit(AUTHWIT_OP, FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(createAuthWit).not.toHaveBeenCalled()
+	})
+
+	test("a session end landing after the assert released the lock is caught by the synchronous check", async () => {
+		const { facade, createAuthWit, assertFence, isFenceLive } = makeAuthWitFacade()
+		isFenceLive.mockReturnValueOnce(false)
+		await expect(facade.executeAztecCreateAuthWit(AUTHWIT_OP, FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(assertFence).toHaveBeenCalledTimes(1)
+		expect(createAuthWit).not.toHaveBeenCalled()
+	})
+
+	test("a UI-origin authwit with no fence captures its own", async () => {
+		const { facade, assertFence, captureExecutionFence } = makeAuthWitFacade()
+		await facade.executeAztecCreateAuthWit(AUTHWIT_OP)
+		expect(captureExecutionFence).toHaveBeenCalledTimes(1)
+		expect(assertFence).toHaveBeenCalledWith(LIVE)
 	})
 })
 

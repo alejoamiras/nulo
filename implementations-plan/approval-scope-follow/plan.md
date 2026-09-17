@@ -10,7 +10,7 @@ eli5_url: https://claude.ai/artifact/9hbMQqUuJuhmWVzmBgWfYv   # rev 6 republish 
 code_review: off      # owner's standing directive — the codex fix loop is the review
 harden: not scheduled # Phase 0 touches a guard; its own tests + the codex loop cover it
 revision: 6           # rev 1 rejected (codex); rev 2 cond. approved (fable); rev 3 cond. approved (codex r2); rev 4 rejected (codex r3, fresh); rev 5 rejected (codex r4, fresh); rev 6 drafted 2026-09-17 after the prerequisite merged; see §Decision ledger
-status: approved      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) still open — blocks the execution PR only
+status: approved      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) signed off 2026-09-17 ("that proposal is perfect.")
 ```
 
 ## Summary
@@ -203,6 +203,19 @@ banner names the chain only (a hidden account is never named or aimed at).
 When there is no follow account, `chain` names chains only. When no operation sends (`readOnly`), the
 trailing "so you can watch the transaction" is dropped (ledger D3). Names are the rows' own
 `Network.name` / `Account.name` — a user's rename reads back as their own label.
+
+### Copy — Send-screen refusal toast (owner-approved 2026-09-17)
+
+Surface: the Send flow's failure toast (red, warning icon, long duration), shown on Home after the
+popup leaves Send, when the wallet refuses a transfer because its journal record could not be
+created. Nothing was simulated, proved or sent.
+
+> **"Couldn't start this transaction. Nothing was sent — try again."**
+
+Sign-off: the owner asked "When is that toast going to appear? remind me of the UX please.", was
+shown the trigger, the three-step UX and this exact string against today's generic "Simulation
+failed, transaction not sent", and answered **"that proposal is perfect."** (2026-09-17). Every
+other `executeTransfer` failure keeps the generic toast.
 
 ## Architecture & Implementation
 
@@ -705,8 +718,9 @@ One remains, non-blocking for approval and blocking for the execution PR:
 
 3. **The Send screen's refusal copy** (Phase 5, `UI impact`). When the wallet cannot record a
    transfer before starting it, the Send screen shows a toast and nothing is sent. Proposed:
-   **"Couldn't start this transaction. Nothing was sent — try again."** Sign-off is recorded here
-   and quoted in the execution PR before it opens. The dApp side needs no copy: the dApp receives
+   **"Couldn't start this transaction. Nothing was sent — try again."** **Signed off 2026-09-17**
+   — the owner, on this toast and this string: "that proposal is perfect." (quoted in full under
+   §Copy and in the execution PR). The dApp side needs no copy: the dApp receives
    the standard failure envelope.
 
 ## Phases
@@ -865,9 +879,16 @@ already open** (§Known limitations).
 - Pass: both green at retry 0; triage flake-vs-break per the e2e README, never neutralize. Run solo.
 - Layers: e2e against the live sandbox
 
-### Phase 5 — authwits under the fence, and no unregistered sends
+### Phase 5 — authwits under the fence, and no unregistered sends ✓
 
-Two independent fixes in the execution layer, shipped as one unstacked PR (D7).
+Two independent fixes in the execution layer, shipped as one unstacked PR (D7). Delivered on
+`worktree-approval-scope-follow-execution` (`e8d98d3b`, `01502d7e`); `lessons/phase-5.md` carries
+the gate output and the arc's review loop. One deviation from the plan below: the node read, the
+chain rebind and the message-hash resolution moved verbatim into a private
+`resolveAuthWitMessageHash(op, network)` so the arm stays under the cognitive-complexity budget
+with the fence gate **inlined** — a first cut extracted the gate into an async helper instead, and
+the codex loop caught that awaiting it reopened the very microtask gap the synchronous check
+closes. The gate is two statements followed directly by `account.createAuthWit`, nothing between.
 
 **A. Authwits under the fence.** Three parts, as §Security lays out. **(1) Entry capture**: the wire handler in
 `wallet-sdk/background.ts` replaces its entry `requireActiveProfile` read with
@@ -903,13 +924,18 @@ simulations still run); a session end after the capture (the fake's `assertFence
 `assertFence` and the signing statement (the fake's `isFenceLive` returns `false` after
 `assertFence` resolved) rejects the same way. `dispatcher.test.ts`: the covered branch forwards
 `ctx.fence`; a missing or foreign-profile fence is refused before `executeOperations` is called;
-the uncovered branch (popup) is unchanged. `background.test.ts` (or its wire-handler test): the
-fence is captured before the awaited resolution — a handler parked in `resolveNetworkAndAccount`
-across a same-profile lock-and-unlock forwards the **entry** fence, and the arm then rejects with
-`SessionEndedError` instead of signing under the new session (codex r5 #1's scenario, pinned).
-Mutations, each failing a test: drop `assertFence`; drop the `isFenceLive` statement; resolve the
-account from the active profile instead of the fence; capture in the arm instead of at entry;
-remove `aztec_createAuthWit` from `FENCED_OPERATION_KINDS`.
+the uncovered branch (popup) is unchanged. **As delivered**, the wire-handler unit test was not
+written: `handleWalletMessage` is module-private with no mock-friendly seam, and exporting it for a
+test alone is a production change for test convenience. The entry capture is pinned instead by the
+`batch-mixed` network e2e (a real covered authwit through the real wire handler → dispatcher → arm;
+without the entry capture `ctx.fence` is undefined and the covered branch refuses, so the e2e reds)
+together with the dispatcher tests, which require a production-supplied `ctx.fence`. Codex r5 #1's
+lock-and-unlock scenario is covered at the arm by a bare-prototype test (`service.fence-entry.test.ts`):
+`isFenceLive` returning `false` after `assertFence` resolved rejects `SessionEndedError` with
+`createAuthWit` uncalled. Mutations, each failing a test: drop `assertFence`; drop the `isFenceLive`
+statement; resolve the account from the active profile instead of the fence; capture in the arm
+instead of at entry (reds the e2e and the covered-authwit dispatcher tests); remove
+`aztec_createAuthWit` from `FENCED_OPERATION_KINDS`.
 
 **B. No unregistered sends** (Fact 32; the prerequisite's follow-up, D7). A send whose journal
 record cannot be created is refused before any build, instead of running with no activity card and
@@ -928,7 +954,13 @@ no controller.
   `claim-helper.test.ts` / `dapp-send-executor.test.ts` — a failing `createFreshRecord` rejects
   before any build, the slot is released and the envelope is failed. Mutation, each failing a
   test: restore either fall-through.
-- `UI impact`: Send screen, failure toast only, copy per Ask 3; no layout or row change.
+- `UI impact`: Send screen, failure toast only, copy per Ask 3; no layout or row change. **As
+  delivered**: the refusal is a typed `OperationNotRecordedError` (`extension-messaging/errors`,
+  constant message, no details, round-trips the port RPC); `popup/utils/transfer-failure-copy.ts`
+  maps it to the signed-off string and everything else to the existing generic toast, and
+  `send.vue` renders that label. A storage fault is wrapped into the typed refusal (and logged);
+  a typed wallet error from journal creation, such as a session end, keeps its own class. The
+  dApp claim still throws a plain error: the dApp gets the standard failure envelope.
 
 **Validation gate**
 - `cd apps/extension && bun --bun vitest run src/wallet/services/execution src/wallet/services/dapp-interaction src/wallet/services/wallet-sdk`
@@ -939,7 +971,7 @@ no controller.
 - Pass: all exit 0.
 - Layers: typecheck · lint · unit · e2e
 
-### Phase 6 — close out
+### Phase 6 — close out ✓
 
 Regression sweep, not a feature gate — but required before the PR.
 

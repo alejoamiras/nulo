@@ -151,7 +151,10 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 async function createAndRegisterFresh(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
 	const { networkId, accountAddress, origin, calls } = input
 	const id = await deps.createFreshRecord(networkId, accountAddress, origin, calls)
-	if (!id) return { journalId: undefined, controller: undefined }
+	// Fail closed: an unrecorded send would run uncancellable and leave no activity trail. The
+	// caller's slot scaffold catches this, releases the slot and both controller keys, and
+	// yields the failed envelope.
+	if (!id) throw new Error("dApp send refused: the operation could not be recorded")
 	const controller = new AbortController()
 	if (!deps.registerInFlight(id, input.session, controller).live) return refuseEndedSession(deps, id)
 	return { journalId: id, controller }

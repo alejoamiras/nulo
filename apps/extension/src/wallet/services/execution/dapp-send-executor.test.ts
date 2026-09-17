@@ -290,6 +290,23 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 	})
+
+	test("claim refusal (no journal record): slot released, no send, error rethrown", async () => {
+		const { executor, deps, releaseSlot, proveAndSend } = makeHarness()
+		deps.lane.claimOrCreateJournal = vi.fn(async () => {
+			throw new Error("dApp send refused: the operation could not be recorded")
+		})
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [],
+		} as never
+		await expect(executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)).rejects.toThrow(/could not be recorded/)
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", () => {

@@ -21,7 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { SessionEndedError } from "@nulo/extension-messaging/errors"
+import { OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -106,7 +106,10 @@ export class TransferExecutor {
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
-		const { journalId, controller, live } = await this.createTransferJournal(req, fence)
+		// Hoisted so catch (mark failed) + finally (controller cleanup) see them even when the
+		// journal-create refusal below throws before they are assigned.
+		let journalId: string | undefined
+		let controller: AbortController | undefined
 		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
 			if (!journalId) return
 			try {
@@ -124,7 +127,11 @@ export class TransferExecutor {
 		}
 
 		try {
-			if (!live) throw new SessionEndedError()
+			// Fail closed here, inside the try: a transfer with no durable record never runs.
+			const created = await this.createTransferJournal(req, fence)
+			journalId = created.journalId
+			controller = created.controller
+			if (!created.live) throw new SessionEndedError()
 			// Try the cached-estimate fast path first. Falls back to a fresh
 			// build if the snapshot has drifted (base fee, primary endpoint,
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
@@ -214,8 +221,10 @@ export class TransferExecutor {
 	/** Durable record of the in-flight operation. Survives SW restart and popup
 	 *  close/reopen so consumers can recover a consistent view of "what is this
 	 *  tx doing right now". FSM: pending → simulating → proving → submitting →
-	 *  succeeded | failed | cancelled. Creation is best-effort — a journal
-	 *  failure logs and returns an empty result, never blocks the transfer.
+	 *  succeeded | failed | cancelled. Creation fails closed — a create error or
+	 *  a record with no id throws, so an unrecorded transfer never runs (its
+	 *  cancel path and activity trail would both be lost). Called inside the
+	 *  build's try, so the throw fails the header task like any build error.
 	 *  This helper OWNS the full `await create → new AbortController →
 	 *  registerInFlight` span: the controller must be registered in the SAME
 	 *  continuation that sees the durable row, so `cancelJob(journalId)` can
@@ -227,7 +236,10 @@ export class TransferExecutor {
 	private async createTransferJournal(
 		req: TransferRequest,
 		fence: ExecutionFence,
-	): Promise<{ journalId: string | undefined; controller: AbortController | undefined; live: boolean }> {
+	): Promise<{ journalId: string; controller: AbortController | undefined; live: boolean }> {
+		// Inline, not a helper: an awaited wrapper would add a settlement hop between the row
+		// becoming visible and the controller registering. A storage fault becomes the typed
+		// refusal the Send screen words; a typed wallet error (a session end) keeps its class.
 		let journalOp: OperationRecord | undefined
 		try {
 			journalOp = await this.deps.createJournalOperation({
@@ -250,10 +262,12 @@ export class TransferExecutor {
 				transferType: req.transferType,
 			})
 		} catch (error) {
+			if (error instanceof WalletError) throw error
 			this.deps.logError("Failed to create journal operation", error)
+			throw new OperationNotRecordedError()
 		}
 		const journalId = journalOp?.id
-		if (!journalId) return { journalId: undefined, controller: undefined, live: true }
+		if (!journalId) throw new OperationNotRecordedError()
 		const controller = new AbortController()
 		if (!this.deps.lane.registerInFlight(journalId, fence.session, controller).live) {
 			return { journalId, controller: undefined, live: false }
