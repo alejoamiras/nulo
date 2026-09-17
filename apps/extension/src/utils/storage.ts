@@ -70,9 +70,16 @@ export async function storageLocalGet(keys?: string | string[] | null): Promise<
 	return chrome.storage.local.get(keys ?? undefined)
 }
 
-export async function storageLocalSet(items: Record<string, unknown>): Promise<void> {
+/**
+ * Writes `items` once no migration is running. `unless` is consulted after that wait, immediately
+ * before the write, so a caller whose reason to write can lapse during the wait (a lock, a profile
+ * switch) hands in the check instead of running it too early; `false` means the write was skipped.
+ */
+export async function storageLocalSet(items: Record<string, unknown>, options?: { unless?: () => boolean }): Promise<boolean> {
 	await migrationIdle()
-	return chrome.storage.local.set(items)
+	if (options?.unless?.()) return false
+	await chrome.storage.local.set(items)
+	return true
 }
 
 export async function storageLocalRemove(keys: string | string[]): Promise<void> {

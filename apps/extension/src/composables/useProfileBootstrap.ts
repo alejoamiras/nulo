@@ -7,7 +7,7 @@
  * Scope is deliberately narrow: this composable owns the "profile is now active"
  * sequence and nothing else. Routing decisions, reconnect watchers, manager
  * teardown on unmount — all stay in the calling shell. Trying to encompass the
- * entire popup bootstrap here produces a leaky abstraction (Codex v2 critique).
+ * entire popup bootstrap here produces a leaky abstraction.
  */
 
 import { managers, initTransactionService } from "@/utils/core"
@@ -168,6 +168,9 @@ export function useProfileBootstrap() {
 		// observes the completed lock rather than the stale pre-lock session.
 		const stillActive = (await managers.profile.getActiveProfile())?.id === profile.id
 		if (stillActive) {
+			// Unlocking the same profile changes no profile id, so nothing else
+			// re-reads the in-flight rows the lock emptied.
+			void appStore.refreshInFlight({ invalidate: true })
 			appStore.isLogined = true
 		}
 		return stillActive
@@ -192,6 +195,7 @@ export function useProfileBootstrap() {
 		// session was cleared/switched mid-hydrate. isSessionChecked is set either way
 		// (the session WAS checked); a stale isLogined=true is the only harmful write.
 		if ((await managers.profile.getActiveProfile())?.id === activeProfile.id) {
+			void appStore.refreshInFlight({ invalidate: true })
 			appStore.isLogined = true
 		}
 		appStore.isSessionChecked = true

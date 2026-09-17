@@ -178,6 +178,9 @@ const enterLockedState = (profiles) => {
 	// it in memory. Switching profiles runs through lock/unlock, which means a
 	// switch deliberately starts cold rather than repainting from cache.
 	appStore.clearActivity()
+	// The lock cancels the running sends, but the cancel events do not reach
+	// this popup; left in place, the rows would refuse every pick on the lock screen.
+	appStore.resetInFlight()
 	appStore.profiles = profiles
 	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
 }

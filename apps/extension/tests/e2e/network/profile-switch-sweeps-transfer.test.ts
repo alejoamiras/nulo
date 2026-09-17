@@ -75,7 +75,6 @@ test.skipIf(!hasConfig)(
 			() => false,
 		)
 		let send: SendRecordView
-		let reopened: Page
 		try {
 			send = await waitForSendRecord(page, (r) => r.kind === "transfer" && r.stage === "proving", 180_000)
 			expect(send.profileId).toBe(profileA)
@@ -83,11 +82,9 @@ test.skipIf(!hasConfig)(
 				description: "1 transaction is still running. Locking cancels it.",
 			})
 			await waitForSendRecord(page, (r) => r.id === send.id && r.stage === "cancelled", 30_000)
-			// The journal tells a popup about records only while a session is open, and the lock
-			// cancels after the session closed: this popup still counts the send as in flight, and its
-			// picker refuses on that cached count before reading the journal. A reopened popup reads it.
-			reopened = await openPopup(tokenReadyExtension)
-			await unlockProfile(reopened, profileB, PROFILE_B_PASSWORD)
+			// The same popup, on purpose: the lock's cancel never reaches a locked popup, so a picker
+			// that still trusted the rows cached before the lock would refuse this pick.
+			await unlockProfile(page, profileB, PROFILE_B_PASSWORD)
 			const gateHoldsUntil = (send.enteredProveAt ?? Number.NaN) + PROOF_GATE_HOLD_MS
 			expect(Date.now(), "B must be unlocked while the proof gate still holds A's send").toBeLessThan(gateHoldsUntil)
 		} finally {
@@ -95,13 +92,13 @@ test.skipIf(!hasConfig)(
 		}
 
 		// Switching back takes far longer than a released proverless proof needs to reach the network.
-		await lockWallet(reopened)
-		await unlockProfile(reopened, profileA, TEST_PASSWORD)
-		const records = await readSendRecords(reopened)
+		await lockWallet(page)
+		await unlockProfile(page, profileA, TEST_PASSWORD)
+		const records = await readSendRecords(page)
 		expect(records.find((r) => r.id === send.id)?.stage).toBe("cancelled")
 		expect(records.filter((r) => r.profileId === profileB)).toEqual([])
-		await reopened.waitForSelector('[data-testid="tx-terminal-card"]', { visible: true, timeout: 30_000 })
-		expect(await reopened.evaluate(() => document.querySelectorAll('[data-testid="tx-card"]').length)).toBe(0)
+		await page.waitForSelector('[data-testid="tx-terminal-card"]', { visible: true, timeout: 30_000 })
+		expect(await page.evaluate(() => document.querySelectorAll('[data-testid="tx-card"]').length)).toBe(0)
 		expect(await submitted, "the Send flow must never report the transfer as submitted").toBe(false)
 	},
 )

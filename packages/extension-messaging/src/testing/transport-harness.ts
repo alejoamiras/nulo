@@ -15,7 +15,8 @@
  * the fake-browser default.
  *
  * Directions covered:
- *   - CLIENT (popup ↔ SW Port): `capturePortMessage` / `emitPortMessage`.
+ *   - CLIENT (popup ↔ SW Port): `capturePortMessage` / `emitPortMessage` /
+ *     `emitPortDisconnect`, over the shared `PortRegistry` (`./port-registry`).
  *   - CLIENT (SW ↔ offscreen sendMessage): `captureMessage` / `emitMessage`.
  *   - SERVICE (Port server): `connectServiceClient` fires `onConnect`.
  *   - SERVICE (offscreen): registers on the shared `onMessage`; drive it with
@@ -25,96 +26,23 @@
 import type { ILogger, LogLevel } from "@nulo/wallet-core/logger"
 import { createListenerBag } from "@nulo/wallet-core/testing"
 import { afterEach, beforeEach, type Mock, vi } from "vitest"
+import { connectStub, PortRegistry } from "./port-registry"
 
 type Fn = (...args: unknown[]) => void
 
 // ── Background CLIENT side (chrome.runtime.connect → Port) ──────────────
-const portMessageListeners = new Map<string, Fn[]>()
-const portDisconnectListeners = new Map<string, Fn[]>()
-const sendPortMessageMocks = new Map<string, Mock<Fn>>()
+let ports = new PortRegistry()
 
-/** Invoke the client's port.onMessage listeners for `service` — simulates the
- *  server replying without a real port broker. */
-export const emitPortMessage = (service: string, message: unknown) => {
-	const listeners = portMessageListeners.get(service)
-	if (listeners) {
-		for (const listener of [...listeners]) listener(message)
-	}
-}
+/** Hand `message` to the client's port for `service` — simulates the server replying. */
+export const emitPortMessage = (service: string, message: unknown) => ports.deliver(service, message)
 
-/** Fire the client's port.onDisconnect listeners for `service` — simulates the
- *  service worker dying while the popup is open (the live-reconnect path). The
- *  port's `disconnect()` clears this service's broker state, so the client's
- *  reconnect can re-mock a fresh port. */
-export const emitPortDisconnect = (service: string) => {
-	const listeners = portDisconnectListeners.get(service)
-	if (listeners) {
-		for (const listener of [...listeners]) listener()
-	}
-}
+/** Close `service`'s port from the far end — the service worker dying while the popup is open
+ *  (the live-reconnect path). */
+export const emitPortDisconnect = (service: string) => ports.closeAll(service)
 
-/** The `vi.fn` backing the client's `port.postMessage` for `service` — i.e.
- *  what the client just sent. Throws if no client has connected yet. */
-export const capturePortMessage = (service: string) => {
-	const fnMock = sendPortMessageMocks.get(service)
-	if (!fnMock) throw new Error(`Port for '${service}' hasn't been mocked`)
-	return fnMock
-}
-
-const mockClientPort = (service: string) => {
-	if (sendPortMessageMocks.has(service)) {
-		throw new Error(`Port for '${service}' has already been mocked`)
-	}
-	const postMessageMock = vi.fn()
-	sendPortMessageMocks.set(service, postMessageMock)
-	return {
-		// Tear down this service's broker state so a subsequent connect() can
-		// re-mock a fresh port (the reconnect path). Real Chrome ports are
-		// single-use; the client makes a new one on reconnect.
-		disconnect: vi.fn(() => {
-			sendPortMessageMocks.delete(service)
-			portMessageListeners.delete(service)
-			portDisconnectListeners.delete(service)
-		}),
-		onMessage: {
-			addListener: (listener: Fn) => {
-				let listeners = portMessageListeners.get(service)
-				if (!listeners) {
-					listeners = []
-					portMessageListeners.set(service, listeners)
-				}
-				listeners.push(listener)
-			},
-			removeListener: (listener: Fn) => {
-				const listeners = portMessageListeners.get(service)
-				if (listeners) {
-					for (let i = listeners.length - 1; i >= 0; i--) {
-						if (listeners[i] === listener) listeners.splice(i, 1)
-					}
-				}
-			},
-		},
-		onDisconnect: {
-			addListener: (listener: Fn) => {
-				let listeners = portDisconnectListeners.get(service)
-				if (!listeners) {
-					listeners = []
-					portDisconnectListeners.set(service, listeners)
-				}
-				listeners.push(listener)
-			},
-			removeListener: (listener: Fn) => {
-				const listeners = portDisconnectListeners.get(service)
-				if (listeners) {
-					for (let i = listeners.length - 1; i >= 0; i--) {
-						if (listeners[i] === listener) listeners.splice(i, 1)
-					}
-				}
-			},
-		},
-		postMessage: postMessageMock,
-	}
-}
+/** The `vi.fn` the client's `port.postMessage` for `service` sends through — i.e. what the
+ *  client just sent. Throws if no client has connected yet. */
+export const capturePortMessage = (service: string) => ports.sendMock(service)
 
 // ── Background SERVICE side (chrome.runtime.onConnect) ──────────────────
 const connectListeners = createListenerBag<(port: unknown) => void>()
@@ -198,10 +126,11 @@ beforeEach(() => {
 	// fire-and-forget `.catch()` calls (keepalive, emit) don't trip on
 	// `undefined.catch`. Tests override per-call with mockRejectedValueOnce.
 	sendMessageMock.mockResolvedValue(undefined)
+	ports = new PortRegistry()
 	vi.stubGlobal("chrome", {
 		storage: {},
 		runtime: {
-			connect: vi.fn().mockImplementation((_: unknown, { name }: { name: string }) => mockClientPort(name)),
+			connect: vi.fn().mockImplementation(connectStub(ports)),
 			getContexts: vi.fn(),
 			getURL: vi.fn(),
 			onConnect: { addListener: connectListeners.add, removeListener: connectListeners.removeAll },
@@ -214,9 +143,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllGlobals()
 	vi.clearAllMocks()
-	portMessageListeners.clear()
-	portDisconnectListeners.clear()
-	sendPortMessageMocks.clear()
 	messageListeners.items.splice(0)
 	connectListeners.items.splice(0)
 	sendMessageMock.mockReset()
