@@ -16,7 +16,7 @@ export const PROOF_GATE_KEY = "nulo:e2e:proof-gate"
  * via THIS loud log + resolve, not the generic vitest timeout. STUB tests
  * set a per-test `{ timeout }` above this value.
  */
-const SAFETY_TIMEOUT_MS = 20_000
+export const SAFETY_TIMEOUT_MS = 20_000
 
 /**
  * The e2e proof gate, backed by `chrome.storage.session`.

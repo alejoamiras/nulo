@@ -1,10 +1,12 @@
 /**
- * Auto-lock waits while an approved send is still proving, then locks once the send is done.
+ * Auto-lock waits while an approved send is still proving, and still locks once the send is done.
  *
  * The proof gate parks a popup Send at `proving`, and an 8 s TTL expires while the proof is held.
  * The session must stay open with its deadline moved forward and its `since` untouched, which is a
  * deferral and not a refresh. Once the gate is released the send succeeds, and the wallet locks at
- * a following deadline.
+ * a following deadline. With an 8 s TTL one deferral step spends the whole budget, so that lock
+ * cannot tell a finished send from a spent budget; the composition test of the deferral check
+ * pins that the check turns false once the send settles.
  *
  * A deliberate departure from `account-switch-live-session`, where the send finishes because nothing
  * ends the session: here the session does end, and it waits only for approved work still running.
@@ -22,14 +24,12 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import { peekSession, readSessionRow, refreshBalances, sendTransfer, setSessionTtlMs, waitForLockScreen } from "../fixtures/helpers"
 import { type SendRecordView, waitForSendRecord } from "../fixtures/journal"
-import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
+import { PROOF_GATE_HOLD_MS, holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 const TTL_MS = 8_000
-/** The proof gate releases itself 20 s after it starts holding; this keeps a 2 s margin. */
-const GATE_HOLD_MS = 18_000
 const LOCK_AFTER_SEND_MS = 30_000
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)))
@@ -53,7 +53,7 @@ test.skipIf(!hasConfig)(
 			// Only now: every popup navigation refreshes the session, and the Send form takes longer
 			// than an 8 s TTL between its entry and its submit.
 			const row0 = await setSessionTtlMs(page, TTL_MS)
-			const gateReleasesAt = (send.enteredProveAt ?? Number.NaN) + GATE_HOLD_MS
+			const gateReleasesAt = (send.enteredProveAt ?? Number.NaN) + PROOF_GATE_HOLD_MS
 			const checkAt = row0.lockedAt + 1_000
 			expect(checkAt, "the deadline must pass while the proof gate still holds").toBeLessThanOrEqual(gateReleasesAt)
 			await sleep(checkAt - Date.now())
@@ -72,7 +72,7 @@ test.skipIf(!hasConfig)(
 		await waitForSendRecord(page, (r) => r.id === send.id && r.stage === "succeeded", 60_000)
 		const sendDoneAt = Date.now()
 		while ((await peekSession(page)) !== undefined) {
-			expect(Date.now() - sendDoneAt, "the wallet must lock once no approved send is running").toBeLessThan(LOCK_AFTER_SEND_MS)
+			expect(Date.now() - sendDoneAt, "the wallet must lock after the send").toBeLessThan(LOCK_AFTER_SEND_MS)
 			await sleep(2_000)
 		}
 		await waitForLockScreen(page, LOCK_AFTER_SEND_MS)

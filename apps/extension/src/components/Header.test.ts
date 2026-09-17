@@ -9,9 +9,11 @@ import { flushPromises, mount } from "@vue/test-utils"
 
 const H = vi.hoisted(() => ({
 	openPopup: vi.fn(),
+	closePopup: vi.fn(),
 	openToast: vi.fn(),
 	lockActiveProfile: vi.fn(),
 	noopEvent: { add: vi.fn(), remove: vi.fn() },
+	sessionListeners: new Set<() => void>(),
 	app: {} as Record<string, unknown>,
 	cache: {} as { confirm: Record<string, unknown> } & Record<string, unknown>,
 }))
@@ -40,10 +42,20 @@ vi.mock("@/wallet/services/task/client", () => ({
 	}),
 }))
 vi.mock("@/wallet/config", () => ({ defaultConfig: () => ({ indicateFailures: false, showNode: false }) }))
-vi.mock("@/utils/core", () => ({ managers: { profile: { lockActiveProfile: H.lockActiveProfile } } }))
+vi.mock("@/utils/core", () => ({
+	managers: {
+		profile: {
+			lockActiveProfile: H.lockActiveProfile,
+			onActiveProfileChanged: {
+				add: (fn: () => void) => H.sessionListeners.add(fn),
+				remove: (fn: () => void) => H.sessionListeners.delete(fn),
+			},
+		},
+	},
+}))
 vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.app }))
 vi.mock("@/stores/cache.store", () => ({ useCacheStore: () => H.cache }))
-vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ open: H.openPopup }) }))
+vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ open: H.openPopup, close: H.closePopup }) }))
 vi.mock("vue-router", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("vue-router")>()
 	return { ...mod, useRoute: () => ({ name: "popup-general", meta: {} }), useRouter: () => ({ push: vi.fn() }) }
@@ -65,7 +77,9 @@ function mountHeader() {
 beforeEach(() => {
 	vi.stubGlobal("useToast", () => ({ openToast: H.openToast }))
 	H.openPopup.mockClear()
+	H.closePopup.mockClear()
 	H.openToast.mockClear()
+	H.sessionListeners.clear()
 	H.lockActiveProfile.mockClear()
 	H.app = {
 		isLogined: true,
@@ -144,5 +158,60 @@ describe("Header — lock", () => {
 		confirm()
 		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
 		expect(H.app.isLogined).toBe(false)
+	})
+
+	test("a journal read that outlasts the budget locks without asking, and its late answer changes nothing", async () => {
+		vi.useFakeTimers()
+		try {
+			// Events had counted a send before the click; an unanswered read must not ask on that count.
+			H.app.approvedSendsInFlight = 1
+			let answer: () => void = () => {}
+			H.app.refreshInFlight = vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						answer = () => {
+							H.app.approvedSendsInFlight = 1
+							resolve()
+						}
+					}),
+			)
+			await clickLock()
+			expect(H.lockActiveProfile).not.toHaveBeenCalled()
+
+			await vi.advanceTimersByTimeAsync(3_000)
+			expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+
+			answer()
+			await flushPromises()
+			expect(H.openPopup).not.toHaveBeenCalled()
+			expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a session change closes the lock dialog it raised", async () => {
+		H.app.refreshInFlight = vi.fn(async () => {
+			H.app.approvedSendsInFlight = 1
+		})
+		await clickLock()
+		expect(H.openPopup).toHaveBeenCalledWith("confirm")
+
+		for (const listener of H.sessionListeners) listener()
+		expect(H.closePopup).toHaveBeenCalledWith("confirm")
+		expect(H.lockActiveProfile).not.toHaveBeenCalled()
+	})
+
+	test("a session change during the read discards its count and decides again on a fresh read", async () => {
+		const counts = [2, 0]
+		H.app.refreshInFlight = vi.fn(async () => {
+			if (counts.length === 2) for (const listener of H.sessionListeners) listener()
+			H.app.approvedSendsInFlight = counts.shift()
+		})
+		await clickLock()
+
+		expect(H.app.refreshInFlight).toHaveBeenCalledTimes(2)
+		expect(H.openPopup).not.toHaveBeenCalled()
+		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
 	})
 })

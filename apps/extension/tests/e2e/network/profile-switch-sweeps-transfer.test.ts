@@ -29,7 +29,7 @@ import {
 	sendTransfer,
 } from "../fixtures/helpers"
 import { type SendRecordView, readSendRecords, waitForSendRecord } from "../fixtures/journal"
-import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
+import { PROOF_GATE_HOLD_MS, holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -88,6 +88,8 @@ test.skipIf(!hasConfig)(
 			// picker refuses on that cached count before reading the journal. A reopened popup reads it.
 			reopened = await openPopup(tokenReadyExtension)
 			await unlockProfile(reopened, profileB, PROFILE_B_PASSWORD)
+			const gateHoldsUntil = (send.enteredProveAt ?? Number.NaN) + PROOF_GATE_HOLD_MS
+			expect(Date.now(), "B must be unlocked while the proof gate still holds A's send").toBeLessThan(gateHoldsUntil)
 		} finally {
 			await releaseProofGate(page)
 		}

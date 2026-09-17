@@ -27,11 +27,35 @@ const lockWallet = () => {
 	managers.profile.lockActiveProfile()
 }
 
-// Locking cancels the sends still running, so it asks first when a fresh journal read finds any.
+/** Locking is a security action: a journal that answers late or never makes it lock without asking. */
+const IN_FLIGHT_READ_BUDGET_MS = 3_000
+
+const readInFlightWithinBudget = () => {
+	let timer
+	const expired = new Promise((resolve) => {
+		timer = setTimeout(() => resolve(false), IN_FLIGHT_READ_BUDGET_MS)
+	})
+	const answered = appStore.refreshInFlight().then(
+		() => true,
+		() => false,
+	)
+	return Promise.race([answered, expired]).finally(() => clearTimeout(timer))
+}
+
+// A count read, or a dialog raised, before a session change describes a session that is gone.
+let sessionChanges = 0
+const onSessionChanged = () => {
+	sessionChanges++
+	if (cacheStore.confirm.callback === lockWallet) popupStore.close("confirm")
+}
+managers.profile.onActiveProfileChanged.add(onSessionChanged)
+
 const handleLockWallet = async () => {
 	if (!appStore.isLogined) return
-	await appStore.refreshInFlight()
-	const running = appStore.approvedSendsInFlight
+	const changesBefore = sessionChanges
+	const answered = await readInFlightWithinBudget()
+	if (sessionChanges !== changesBefore) return handleLockWallet()
+	const running = answered ? appStore.approvedSendsInFlight : 0
 	if (running === 0) return lockWallet()
 	cacheStore.confirm.pre_title = "Running transactions"
 	cacheStore.confirm.title = "Lock wallet?"
@@ -227,6 +251,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+	managers.profile.onActiveProfileChanged.remove(onSessionChanged)
 	configService.disconnect()
 	logViewerService.disconnect()
 	taskService.disconnect()

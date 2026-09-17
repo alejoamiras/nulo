@@ -358,11 +358,21 @@ export type SessionRow = { profile: string; since: number; lockedAt?: number }
 
 /** The persisted session row, or `undefined` while the wallet is locked. */
 export async function readSessionRow(page: Page): Promise<SessionRow | undefined> {
-	const raw = await page.evaluate(async () => (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"])
-	if (typeof raw !== "string") return undefined
-	// Projected so the row's restore secret never reaches an assertion message.
-	const { profile, since, lockedAt } = JSON.parse(raw) as SessionRow
-	return { profile, since, lockedAt }
+	// Parsed and projected in the page, so the row's restore secret never leaves it, not even in an error.
+	return page.evaluate(async () => {
+		const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+		if (typeof raw !== "string") return undefined
+		type Row = { profile?: unknown; since?: unknown; lockedAt?: unknown } | null
+		const row = ((): Row => {
+			try {
+				return JSON.parse(raw)
+			} catch {
+				return null
+			}
+		})()
+		if (typeof row?.profile !== "string" || typeof row.since !== "number") throw new Error("readSessionRow: unreadable session row")
+		return { profile: row.profile, since: row.since, lockedAt: typeof row.lockedAt === "number" ? row.lockedAt : undefined }
+	})
 }
 
 /** Poll the session row until `predicate` accepts it. */
@@ -380,19 +390,28 @@ export async function waitForSessionRow(page: Page, predicate: (row: SessionRow)
 
 /** Call one background service method over a port of its own, as the popup's clients do. Unlike a
  *  popup interaction, it navigates nowhere, so it never refreshes the session. */
-async function callService<T>(page: Page, service: string, method: string, params: unknown[] = []): Promise<T> {
+async function callService<T>(page: Page, service: string, method: string, params: unknown[] = [], timeoutMs = 15_000): Promise<T> {
 	const envelope = { type: MessageType.Request, content: { requestId: 1, method, params: wrapParams(params) } }
 	return (await page.evaluate(
-		(name: string, request: typeof envelope, responseType: number) =>
+		(name: string, request: typeof envelope, responseType: number, waitMs: number) =>
 			new Promise((resolve, reject) => {
 				const port = chrome.runtime.connect({ name })
-				port.onDisconnect.addListener(() => reject(new Error(`${name}.${request.content.method}: port closed before a response`)))
+				const fail = (reason: string) => {
+					clearTimeout(timer)
+					reject(new Error(`${name}.${request.content.method}: ${reason}`))
+				}
+				const timer = setTimeout(() => {
+					port.disconnect()
+					fail(`no response within ${waitMs}ms`)
+				}, waitMs)
+				port.onDisconnect.addListener(() => fail("port closed before a response"))
 				port.onMessage.addListener(
 					(message: { type?: number; content?: { requestId?: number; result?: unknown; error?: string } }) => {
 						if (message?.type !== responseType || message.content?.requestId !== request.content.requestId) return
 						port.disconnect()
-						if (message.content.error === undefined) resolve(message.content.result)
-						else reject(new Error(`${name}.${request.content.method}: ${message.content.error}`))
+						if (message.content.error !== undefined) return fail(message.content.error)
+						clearTimeout(timer)
+						resolve(message.content.result)
 					},
 				)
 				port.postMessage(request)
@@ -400,6 +419,7 @@ async function callService<T>(page: Page, service: string, method: string, param
 		service,
 		envelope,
 		MessageType.Response,
+		timeoutMs,
 	)) as T
 }
 

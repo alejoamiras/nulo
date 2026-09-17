@@ -21,7 +21,7 @@ import { ensureUnlocked, lockThroughConfirmDialog } from "../fixtures/helpers"
 import { type SendRecordView, readSendRecords, waitForSendRecord } from "../fixtures/journal"
 import { setPgInput, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
-import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
+import { PROOF_GATE_HOLD_MS, holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -60,6 +60,8 @@ test.skipIf(!hasConfig)(
 				confirm: "Lock anyway",
 			})
 			await waitForSendRecord(wallet, (r) => r.id === send.id && r.stage === "cancelled", 30_000)
+			const gateHoldsUntil = (send.enteredProveAt ?? Number.NaN) + PROOF_GATE_HOLD_MS
+			expect(Date.now(), "the lock must cancel the send while the proof gate still holds it").toBeLessThan(gateHoldsUntil)
 		} finally {
 			await releaseProofGate(wallet)
 		}

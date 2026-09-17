@@ -60,8 +60,8 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 	})
 }
 
-/** A send's record: its owner and how far it got. `enteredProveAt` is when it entered `proving`,
- *  which is also when a held proof gate starts its own release timer. */
+/** A send's record: its owner and how far it got. `enteredProveAt` is stamped just before a held
+ *  proof gate starts its release timer, so it is a lower bound on that start. */
 export type SendRecordView = { id: string; kind: "transfer" | "dapp_execute"; profileId: string; stage: string; enteredProveAt?: number }
 
 /** Snapshot every send record, popup (`transfer`) and dApp (`dapp_execute`), of every profile. */
