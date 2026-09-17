@@ -65,9 +65,11 @@ type SeedPassContext = {
 	guardsHold: () => Promise<boolean>
 }
 
-/** Status of one default, or `undefined` once it is settled (seeded or user-deleted). */
+/** Status of one default, or `undefined` for one the user deleted. `seeded` stays listed: the
+ *  token row exists, but its balance rows are created afterwards by another service. */
 export function deriveSeedStatus(entry: SeedMarkerEntry, version: string, inFlight: boolean): SeedStatus | undefined {
-	if (entry.outcome !== undefined) return undefined
+	if (entry.outcome === "deleted") return undefined
+	if (entry.outcome === "seeded") return "seeded"
 	if (entry.rejectedAtVersion === version) return "rejected"
 	// Before `failed`: the capping attempt records the cap BEFORE it runs.
 	if (inFlight) return "seeding"
@@ -712,7 +714,9 @@ function continuationDelay(attempts: number): number {
 	return SEED_CONTINUATION_DELAYS_MS[Math.min(attempts, SEED_CONTINUATION_DELAYS_MS.length) - 1] ?? MAX_CONTINUATION_DELAY_MS
 }
 
-/** An error's class name when it looks like one; `name` is writable, so anything else is "unknown". */
+/** `Error.name` is writable, so only names from this list reach a log line. */
+const ERROR_CATEGORIES: ReadonlySet<string> = new Set(["Error", "TypeError", "RangeError", "AbortError", "TimeoutError"])
+
 function errorCategory(err: unknown): string {
-	return err instanceof Error && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : "unknown"
+	return err instanceof Error && ERROR_CATEGORIES.has(err.name) ? err.name : "unknown"
 }

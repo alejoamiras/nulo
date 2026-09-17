@@ -16,7 +16,8 @@ const props = defineProps({
 })
 const emit = defineEmits(["retry"])
 
-const isWorking = computed(() => props.entry.status === "pending" || props.entry.status === "seeding")
+// `seeded` reaches this row only while its balance row is still on its way.
+const isWorking = computed(() => ["pending", "seeding", "seeded"].includes(props.entry.status))
 const isFailed = computed(() => props.entry.status === "failed")
 const reason = computed(() => (isFailed.value ? "Couldn't set up" : "Couldn't verify"))
 </script>

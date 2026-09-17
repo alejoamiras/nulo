@@ -376,6 +376,7 @@ describe("TokensView — Home order and cap", () => {
 		tasksPending.resolve([])
 		await flushPromises()
 		expect(H.getTokenBalances).not.toHaveBeenCalled()
+		expect(H.getOperations).not.toHaveBeenCalled()
 	})
 
 	test("a profile-only switch (same address, same network) is a new scope: the other profile's rows go at once", async () => {
@@ -435,6 +436,19 @@ describe("TokensView — loading, placeholders and the empty state", () => {
 	afterEach(() => {
 		wrapper?.unmount()
 		vi.useRealTimers()
+	})
+
+	test("a SEEDED default with no balance row yet still stands in the list — no empty state — until its row lands", async () => {
+		H.getTokenBalances.mockResolvedValue([])
+		wrapper = mount(TokensView, { shallow: true, props: { seedEntries: [seedEntry("seeded")], seedReady: true } })
+		await flushPromises()
+		expect(seedRows(wrapper)).toEqual([SEED_CONTRACT])
+		expect(emptyState(wrapper)).toBe(false)
+
+		H.balanceAdded.emit(namedRow(1, "cUSDC", { chainId: 1, contract: SEED_CONTRACT.toLowerCase() }))
+		await flushPromises()
+		expect(seedRows(wrapper)).toEqual([])
+		expect(cardSymbols(wrapper)).toEqual(["cUSDC"])
 	})
 
 	test("the empty state needs BOTH snapshots loaded — whichever lands first, it waits for the other", async () => {

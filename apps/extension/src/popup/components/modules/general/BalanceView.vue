@@ -133,6 +133,8 @@ const markDirty = () => {
 	fetchDirty = true
 }
 
+/** `seeded` counts: its balance row is created after the token row and may not have landed. */
+const WORKING_SEED = new Set(["pending", "seeding", "seeded"])
 /** The total is still moving: a snapshot is missing, a row has never been projected, or a default
  *  token is on its way in. Showing a figure now would show one that is about to change. */
 const isTotalUnsettled = computed(() => {
@@ -140,9 +142,7 @@ const isTotalUnsettled = computed(() => {
 	if (tokenBalances.value.some((tb) => tb.updatedAt === 0 && !tb.syncFailure)) return true
 	// A default whose row has landed is that row's business now, whatever the seed list still says.
 	const landed = new Set(tokenBalances.value.map((tb) => tb.token?.contract?.toLowerCase()))
-	return props.seedEntries.some(
-		(entry) => (entry.status === "pending" || entry.status === "seeding") && !landed.has(entry.contract.toLowerCase()),
-	)
+	return props.seedEntries.some((entry) => WORKING_SEED.has(entry.status) && !landed.has(entry.contract.toLowerCase()))
 })
 /** A skeleton that never resolves is worse than a partial figure: after the cap the hero says what
  *  it knows. One cap per scope — a row that starts syncing later does not re-hide a shown total. */

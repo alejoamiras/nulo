@@ -443,6 +443,14 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 		expect(isSkeleton(wrapper)).toBe(true)
 	})
 
+	test("a SEEDED default whose balance row has not landed yet holds the figure: that row is about to change it", async () => {
+		seedRows = []
+		const { wrapper } = await mountView({ seedEntries: [seedEntry("seeded")], seedReady: true })
+		expect(isSkeleton(wrapper)).toBe(true)
+		await wrapper.setProps({ seedEntries: [] })
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
 	test("a default still listed as seeding stops holding the figure once its own row has landed", async () => {
 		const { wrapper } = await mountView({
 			seedEntries: [{ ...seedEntry("seeding"), contract: "0xUNMAPPED" }],

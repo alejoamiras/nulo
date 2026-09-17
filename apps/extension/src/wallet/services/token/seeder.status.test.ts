@@ -51,16 +51,17 @@ describe("seed status — derivation", () => {
 		expect(deriveSeedStatus({ attempts: SEED_ATTEMPT_CAP, cappedAtVersion: "0.9.0" }, VERSION, false)).toBe("pending")
 		expect(deriveSeedStatus({ attempts: 1, rejectedAtVersion: VERSION }, VERSION, true)).toBe("rejected")
 		expect(deriveSeedStatus({ attempts: 1, rejectedAtVersion: "0.9.0" }, VERSION, false)).toBe("pending")
-		expect(deriveSeedStatus({ attempts: 1, outcome: "seeded" }, VERSION, false)).toBeUndefined()
+		expect(deriveSeedStatus({ attempts: 1, outcome: "seeded" }, VERSION, false)).toBe("seeded")
 		expect(deriveSeedStatus({ attempts: 0, outcome: "deleted" }, VERSION, false)).toBeUndefined()
 	})
 
-	test("getStatus carries the compiled-in literals and omits settled defaults", async () => {
+	test("getStatus carries the compiled-in literals; a seeded default stays listed, a deleted one does not", async () => {
 		const { seeder } = makeSeeder()
-		expect(await entriesOf(seeder)).toEqual([
-			{ chainId: CHAIN_ID, contract: CONTRACT, symbol: "cUSD", displayName: "Compressed USD", status: "pending" },
-		])
+		const literals = { chainId: CHAIN_ID, contract: CONTRACT, symbol: "cUSD", displayName: "Compressed USD" }
+		expect(await entriesOf(seeder)).toEqual([{ ...literals, status: "pending" }])
 		await seeder.run()
+		expect(await entriesOf(seeder)).toEqual([{ ...literals, status: "seeded" }])
+		await seeder.markDeletedByUser("p1", CHAIN_ID, CONTRACT)
 		expect(await entriesOf(seeder)).toEqual([])
 	})
 
@@ -199,10 +200,29 @@ describe("continuation — a failed attempt retries by itself", () => {
 		expect((await readMarker())[KEY]).toMatchObject({ attempts: 1, nextAttemptAt: expect.any(Number) })
 	})
 
+	test("a resume that lands before the session is restored arms nothing; the activation trigger that follows does", async () => {
+		fakeClock()
+		const dead = makeSeeder({ preview: rpcDown() })
+		await dead.seeder.run()
+		dead.seeder.dispose()
+
+		let profile: { id: string } | undefined
+		const fresh = makeSeeder({ preview: rpcDown(), getActiveProfile: vi.fn(async () => profile) })
+		await fresh.seeder.resume()
+		expect(vi.getTimerCount()).toBe(0)
+
+		profile = { id: "p1" }
+		await fresh.seeder.run()
+		expect(fresh.deps.preview).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(fresh.deps.preview).toHaveBeenCalledTimes(1)
+	})
+
 	test("a pass that throws before recording an attempt waits a minute, not a second, and logs a bounded category", async () => {
 		fakeClock()
 		const fault = new Error("row 0xabc balance 123")
-		fault.name = "payload: 0xabc"
+		// Alphabetic on purpose: only a known name may reach the log, not any name that looks like one.
+		fault.name = "PrivateRecoveryMaterial"
 		const isTokenPresent = vi.fn(async (): Promise<boolean> => {
 			throw fault
 		})

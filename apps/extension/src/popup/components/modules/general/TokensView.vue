@@ -258,6 +258,7 @@ async function fetchTokenImports() {
 // time it resolves. This closes the A→B→A cycle where an old scope's in-flight snapshot would otherwise
 // pass a bare equality check after the user switched back.
 let scopeGen = 0
+let isUnmounted = false
 
 function refreshBalances() {
 	for (const tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(tb.id)
@@ -363,15 +364,18 @@ onMounted(async () => {
 	const gen = scopeGen
 	// A rejected task snapshot only costs the refresh dot; it must not strand the balances behind it.
 	await fetchTasks().catch(() => undefined)
+	// An unmount during an await leaves disconnected clients: a request here would reconnect one
+	// (and a rejected balance fetch would leave a retry timer behind).
+	if (isUnmounted) return
 	// Seed in-flight + recently-terminal token-import journal records so
 	// the row is visible even if the user opened the popup after submission.
 	await fetchTokenImports()
-	// An unmount or a scope change during the awaits owns the balances now; fetching here would
-	// reconnect a disconnected client and could leave a retry timer behind.
+	// A scope change meanwhile fetches the balances itself; the imports above are not scoped.
 	if (scopeGen !== gen) return
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {
+	isUnmounted = true
 	scopeGen++
 	clearTimeout(ghostTimer)
 	clearTimeout(balancesRetryTimer)
