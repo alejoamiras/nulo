@@ -685,7 +685,7 @@ One remains, non-blocking for approval and blocking for the execution PR:
 
 ## Phases
 
-### Phase 0 — narrow the freeze to wallet sends
+### Phase 0 — narrow the freeze to wallet sends ✓
 
 `isInFlightSend` requires `op.origin === "popup"` **alongside** `SENDING_KINDS` (kind is what the
 operation does, origin is who started it; dropping `dapp_execute` from the kinds would substitute

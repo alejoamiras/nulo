@@ -1,15 +1,18 @@
 /**
- * Whether a send is currently in flight.
+ * Whether the wallet's own send is in flight.
  *
- * A send reads the active profile and account while it builds and proves. If
- * the user could switch mid-flight, the work already under way would finish
- * against whatever became active — building, and signing, as the wrong account.
- * Rather than detect that drift and unwind it, the switch is blocked for the
- * few seconds a send is in flight, so the ground cannot move underneath it.
+ * A popup transfer snapshots the popup's active account and network into its
+ * arguments when the user presses Send, so the only thing that can move the
+ * ground under it is that same popup changing scope. The guard holds the scope
+ * still until the send is broadcast or terminal.
  *
- * The user is never stuck: cancelling the send terminalizes its record, which
- * clears the guard. Locking the wallet is deliberately NOT blocked — it is a
- * security action and must always work.
+ * dApp sends are not counted. They carry their own account and network and are
+ * bound to the session that authorized them, so a scope change cannot reach
+ * them — and counting them would hand any connected site a hold on the user's
+ * switching for the life of its transaction.
+ *
+ * Cancelling a send terminalizes its record, which clears the guard. Locking
+ * the wallet is never blocked — it is a security action and must always work.
  */
 
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
@@ -23,14 +26,15 @@ const APPROVED_UNBROADCAST_STAGES: ReadonlySet<string> = new Set(["pending", "si
 /** Operation kinds that actually send a transaction. */
 const SENDING_KINDS: ReadonlySet<string> = new Set(["transfer", "dapp_execute"])
 
-/** True when `op` is a send that has not reached a terminal stage. */
-export function isInFlightSend(op: Pick<OperationRecord, "kind" | "progress">): boolean {
-	return SENDING_KINDS.has(op.kind) && IN_FLIGHT_STAGES.has(op.progress?.stage)
+/** True when `op` is a send the popup started that has not reached a terminal stage. */
+export function isInFlightSend(op: Pick<OperationRecord, "kind" | "origin" | "progress">): boolean {
+	return SENDING_KINDS.has(op.kind) && op.origin === "popup" && IN_FLIGHT_STAGES.has(op.progress?.stage)
 }
 
-/** True when `op` is a send that has started executing and has not reached `submitting`: the
- *  stages that hold an expiring session open and that the lock dialog counts. `queued` is excluded,
- *  approved or not, so a waiting request can neither keep the wallet unlocked nor make a lock ask. */
+/** True when `op` is a send, from any origin, that has started executing and has not reached
+ *  `submitting`: the stages that hold an expiring session open and that the lock dialog counts,
+ *  since a lock cancels dApp sends too. `queued` is excluded, approved or not, so a waiting request
+ *  can neither keep the wallet unlocked nor make a lock ask. */
 export function isApprovedSendInFlight(op: Pick<OperationRecord, "kind" | "progress">): boolean {
 	return SENDING_KINDS.has(op.kind) && APPROVED_UNBROADCAST_STAGES.has(op.progress?.stage)
 }
@@ -49,14 +53,12 @@ export interface InFlightScope {
 }
 
 /**
- * True when the CURRENTLY VIEWED account has a send in flight.
+ * True when the CURRENTLY VIEWED account has a popup send in flight.
  *
  * Scoped to the account and network on screen, not merely the profile, because
  * the block must line up with the cancel affordance: in-flight cards render for
  * the active account + network, so a profile-wide block could refuse the switch
- * over a record the user cannot see — and therefore cannot cancel. A dApp can
- * journal a queued send before any approval, so that gap would hand any
- * connected site an indefinite hold on account switching.
+ * over a record the user cannot see — and therefore cannot cancel.
  *
  * Records that name no account (legacy) are ignored rather than treated as
  * blocking, for the same reason: nothing renders for them.

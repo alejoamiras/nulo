@@ -90,6 +90,7 @@ export const useAppStore = defineStore("app", () => {
 		hasInFlightSend: inFlight.hasInFlightSend,
 		approvedSendsInFlight: inFlight.approvedSendsInFlight,
 		refreshInFlight: inFlight.refreshInFlight,
+		resetInFlight: inFlight.resetInFlight,
 		commitScopeChange: inFlight.commitScopeChange,
 		/** @deprecated Prefer `commitScopeChange`; an async apply reopens the race. */
 		withScopeChangeAllowed: inFlight.commitScopeChange,
@@ -145,6 +146,10 @@ interface InFlightState {
 	/** One client for the whole app; components read `hasInFlightSend`. */
 	journal: OperationJournalServiceClient
 	connected: boolean
+	/** Bumped when the cache is discarded (a lock, an unlock). A read captures it when issued and,
+	 *  finishing under a newer one, writes nothing — success or error — so an answer from before
+	 *  the lock cannot put cancelled rows back, and one from during it cannot blank the unlock's. */
+	generation: number
 }
 
 /**
@@ -155,6 +160,12 @@ interface InFlightState {
  * then never look again — which fails OPEN exactly when a send is running.
  * One subscription, refreshed whenever the profile changes or the service
  * reconnects, and closed until it has an answer.
+ *
+ * The rows are a cache of the journal, and nothing but a profile change
+ * refreshes them on its own: a lock cancels every send but changes no profile,
+ * and the cancel events never reach the locked popup, so the lock and unlock
+ * paths discard the cache explicitly — `resetInFlight` and the invalidating
+ * refresh — or the stale rows would refuse every scope change until reopen.
  */
 function createInFlightTracker(scope: ScopeRefs) {
 	const state: InFlightState = {
@@ -162,6 +173,7 @@ function createInFlightTracker(scope: ScopeRefs) {
 		ready: ref(false),
 		journal: new OperationJournalServiceClient(),
 		connected: false,
+		generation: 0,
 	}
 	const { profile, account, network } = scope
 
@@ -178,7 +190,23 @@ function createInFlightTracker(scope: ScopeRefs) {
 	/** Approved sends running on any account of the profile: what a lock would cancel. */
 	const approvedSendsInFlight = computed(() => countApprovedSendsInFlight(state.ops.value, profile.value?.id))
 
-	const refreshInFlight = () => refreshInFlightOps(state, profile)
+	/** Re-read the journal. With `invalidate`, the cache is stale: the guard closes until this
+	 *  read answers, and reads already in flight write nothing. */
+	const refreshInFlight = (options?: { invalidate?: boolean }) => {
+		if (options?.invalidate) {
+			state.generation++
+			state.ready.value = false
+		}
+		return refreshInFlightOps(state, profile)
+	}
+
+	/** A locked popup has nothing in flight to protect — the lock cancelled it — so the cache
+	 *  empties and stays READY: closed would refuse the lock screen's profile picker. */
+	const resetInFlight = () => {
+		state.generation++
+		state.ops.value = []
+		state.ready.value = true
+	}
 
 	// The answer belongs to a profile, so it is invalid the moment that changes.
 	watch(
@@ -218,7 +246,7 @@ function createInFlightTracker(scope: ScopeRefs) {
 		return true
 	}
 
-	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, commitScopeChange }
+	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, resetInFlight, commitScopeChange }
 }
 
 async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo | undefined>): Promise<void> {
@@ -228,6 +256,16 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 		// No profile means nothing can be in flight for one, so this IS an answer.
 		state.ready.value = true
 		return
+	}
+	const generation = state.generation
+	const answer = (rows: OperationRecord[]) => {
+		// Discard a response the cache has moved past: for a profile that is no
+		// longer current (a slow read for the previous one landing late would
+		// replace the live profile's operations and let a switch through
+		// mid-send), or from before a lock or unlock discarded the rows.
+		if (state.generation !== generation || profile.value?.id !== profileId) return
+		state.ops.value = rows
+		state.ready.value = true
 	}
 	if (!state.connected) {
 		state.connected = true
@@ -247,30 +285,20 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 		try {
 			await state.journal.connect()
 		} catch {
-			state.ops.value = []
-			state.ready.value = true
+			answer([])
 			return
 		}
 	}
-	let rows: OperationRecord[]
 	try {
-		rows = await state.journal.getOperations({ profileId })
+		answer(await state.journal.getOperations({ profileId }))
 	} catch {
 		// A journal read can fail transiently (service worker restarting). Not
 		// being able to ask must not make every scope change throw — the caller
 		// would surface that as an outright failure to switch. Treat it as "no
 		// sends known", which is what the pre-guard behavior was; the executor
 		// still binds its own account explicitly.
-		state.ops.value = []
-		state.ready.value = true
-		return
+		answer([])
 	}
-	// Discard a response for a profile that is no longer current: a slow read
-	// for the previous one landing late would replace the live profile's
-	// operations and let a switch through mid-send.
-	if (profile.value?.id !== profileId) return
-	state.ops.value = rows
-	state.ready.value = true
 }
 
 // ---------------------------------------------------------------------------------------------
