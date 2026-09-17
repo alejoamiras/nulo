@@ -87,4 +87,23 @@ describe("migration-aware storage facade", () => {
 		await p
 		expect(done).toBe(true)
 	})
+
+	test("a guarded write consults `unless` AFTER the barrier, right before writing", async () => {
+		const s = installChromeStorage({})
+		let lapsed = false
+		const gate = s.deferNextGet() // the barrier's own read, suspended
+		const p = storageLocalSet({ "nulo:ui:pref": 1 }, { unless: () => lapsed })
+		lapsed = true // the reason to write goes away while the facade waits
+		gate.release()
+		expect(await p).toBe(false)
+		expect(s.set).not.toHaveBeenCalled()
+	})
+
+	test("a guarded write whose predicate stays false writes and reports true; the plain call is unchanged", async () => {
+		const s = installChromeStorage({})
+		expect(await storageLocalSet({ "nulo:ui:pref": 1 }, { unless: () => false })).toBe(true)
+		expect(s.data["nulo:ui:pref"]).toBe(1)
+		expect(await storageLocalSet({ "nulo:ui:pref": 2 })).toBe(true)
+		expect(s.data["nulo:ui:pref"]).toBe(2)
+	})
 })

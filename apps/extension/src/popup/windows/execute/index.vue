@@ -17,6 +17,9 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { resolveOperationScope, scopeBannerCopy, scopeBannerState } from "./scope-mismatch"
+import { createScopeFollow } from "./scope-follow"
+import { requireNetwork } from "@/utils/core"
+import { storageLocalSet } from "@/utils/storage"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
 import { authwitDisplayCall, displayCallsOf, pendingAuthwitDecodes, undecodedAll } from "./display-calls"
@@ -510,7 +513,10 @@ const approve = async () => {
 				previewId: estimate?.previewId ?? authwitPreviews.value[index]?.previewId,
 			}
 		})
+		const stillOurs = scopeFollow.capture()
 		await interactionService.approveInteraction(requestId.value!, deltas)
+		// Never throws, so a failed follow cannot turn the approval into an error below.
+		await scopeFollow.follow(scopeView.value, followDeclined.value, stillOurs)
 		closeWindow(true)
 	} catch (error) {
 		// The execution path never took ownership — re-arm so a later
@@ -561,6 +567,14 @@ const scopeBanner = computed(() => {
 const toggleFollow = () => {
 	followDeclined.value = !followDeclined.value
 }
+// The durable pointers, never this realm's store: the window is closing, and the shell's network
+// watcher would otherwise wake and stamp the account pointer with whatever it resolves first.
+const scopeFollow = createScopeFollow({
+	refreshInFlight: () => appStore.refreshInFlight(),
+	hasInFlightSend: () => appStore.hasInFlightSend,
+	setActiveNetwork: (networkId) => requireNetwork().setActiveNetwork(networkId),
+	writeActiveAccount: (address, unless) => storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
+})
 // Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
 // with no chosen fee can't execute yet. Gating the Confirm button's disabled state
 // on it (not just approve()'s guard) makes the button authoritative — a click while
@@ -579,13 +593,28 @@ const showJson = () => {
 }
 
 const profileService = new ProfileServiceClient()
-profileService.onActiveProfileChanged.add(onActiveProfileChanged)
+// Synchronous on the event and on the store flip: the follow re-checks between its awaits, and a
+// bump that waited for the scheduler could land after the write it was meant to stop.
+profileService.onActiveProfileChanged.add((changed?: ProfileInfo) => {
+	scopeFollow.invalidate()
+	onActiveProfileChanged(changed)
+})
+watch(
+	() => appStore.isLogined,
+	(loggedIn) => {
+		if (!loggedIn) scopeFollow.invalidate()
+	},
+	{ flush: "sync" },
+)
 
 watch([feeEstimates, authwitPreviews], decodeDiscoveredAuthwits, { deep: true })
 
 onMounted(startWindow)
 
-onUnmounted(disposeWindow)
+onUnmounted(() => {
+	scopeFollow.invalidate()
+	disposeWindow()
+})
 </script>
 
 <template>

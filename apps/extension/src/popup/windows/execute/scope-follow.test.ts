@@ -39,6 +39,9 @@ const rejectViaInteractionServiceMock = vi.fn()
 const onActiveProfileChangedAddMock = vi.fn()
 const windowsRemoveMock = vi.fn()
 const setActiveNetworkMock = vi.fn(async () => undefined)
+const storageSetMock = vi.fn(async (_items: Record<string, unknown>) => undefined)
+/** A fake Web Lock: runs the callback at once (jsdom has none). */
+const locksRequestMock = vi.fn((_name: string, callback: () => Promise<unknown>) => callback())
 
 vi.mock("@/composables/useDappInteractionPayload", () => ({
 	useDappInteractionPayload: vi.fn(() => ({
@@ -172,11 +175,12 @@ import Execute from "./index.vue"
 
 let w: ReturnType<typeof mount> | undefined
 
+/** A send whose fee the dApp pays, so Confirm needs no fee pick. */
 const sendFrom = (address: string) => ({
-	kind: "aztec_sendTx",
+	kind: "send_transaction",
 	account: `aztec:1:${address}`,
-	exec: {},
-	opts: { from: address, fee: { embeddedFeePayment: true } },
+	calls: [],
+	fee: { embeddedFeePayment: {} },
 })
 const readFrom = (address: string) => ({ kind: "simulate_utility", account: `aztec:1:${address}`, calls: [] })
 
@@ -191,7 +195,12 @@ const open = async (operations: unknown[]) => {
 	;(globalThis as any).chrome = {
 		windows: { getCurrent: (_o: unknown, cb: (x: { id?: number }) => void) => cb({ id: 1 }), remove: windowsRemoveMock },
 		runtime: { getURL: (p: string) => `chrome-extension://test/${p}` },
+		storage: {
+			local: { get: vi.fn(async () => ({})), set: storageSetMock },
+			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+		},
 	}
+	Object.defineProperty(navigator, "locks", { value: { request: locksRequestMock }, configurable: true })
 	w = mount(Execute, { global: { stubs: STUBS } })
 	await flushPromises()
 	return w
@@ -199,6 +208,9 @@ const open = async (operations: unknown[]) => {
 const banner = () => w!.find('[data-testid="execute-scope-banner"]')
 const bannerText = () => ({ title: w!.find('[data-testid="banner-title"]').text(), body: w!.find('[data-testid="banner-desc"]').text() })
 const action = () => w!.find('[data-testid="execute-scope-action-btn"]')
+type ExecVm = { approve: () => Promise<void>; reject: () => Promise<void>; processingError?: { title: string } }
+const vm = () => w!.vm as unknown as ExecVm
+const accountWrites = () => storageSetMock.mock.calls.map(([items]) => items["nulo:ui:activeAccount"])
 
 beforeEach(() => {
 	opsNetwork = TESTNET
@@ -207,6 +219,7 @@ beforeEach(() => {
 afterEach(() => {
 	w?.unmount()
 	w = undefined
+	Reflect.deleteProperty(navigator, "locks")
 	requestIdMock = ref(undefined)
 	dappMock = ref(null)
 	payloadMock = ref(null)
@@ -282,5 +295,88 @@ describe("execute window — the scope banner", () => {
 		appStoreMock.account = SAVINGS
 		await flushPromises()
 		expect(banner().attributes("data-state")).toBe("account")
+	})
+})
+
+describe("execute window — the follow after Confirm", () => {
+	test("a confirmed chain mismatch moves the network row, then the account pointer, inside the lock, and closes the window", async () => {
+		opsNetwork = LOCAL
+		await open([sendFrom(MAIN.address)])
+		await vm().approve()
+		expect(approveInteractionMock).toHaveBeenCalledTimes(1)
+		expect(locksRequestMock).toHaveBeenCalledWith("nulo:scope-follow", expect.any(Function))
+		expect(appStoreMock.refreshInFlight).toHaveBeenCalledTimes(1)
+		expect(setActiveNetworkMock).toHaveBeenCalledWith(LOCAL.id)
+		expect(accountWrites()).toEqual([MAIN.address])
+		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)
+		// The durable pointers moved; this realm's store did not.
+		expect(appStoreMock.network).toEqual(TESTNET)
+		expect(appStoreMock.account).toEqual(SAVINGS)
+	})
+
+	test("a confirmed account mismatch writes the pointer only", async () => {
+		await open([sendFrom(MAIN.address)])
+		await vm().approve()
+		expect(setActiveNetworkMock).not.toHaveBeenCalled()
+		expect(accountWrites()).toEqual([MAIN.address])
+	})
+
+	test("declined, rejected, or a failed approval: nothing moves", async () => {
+		await open([sendFrom(MAIN.address)])
+		await action().trigger("click")
+		await vm().approve()
+		expect(approveInteractionMock).toHaveBeenCalledTimes(1)
+		expect(accountWrites()).toEqual([])
+		w!.unmount()
+
+		await open([sendFrom(MAIN.address)])
+		await vm().reject()
+		expect(accountWrites()).toEqual([])
+		w!.unmount()
+
+		approveInteractionMock.mockRejectedValueOnce(new Error("execution refused"))
+		await open([sendFrom(MAIN.address)])
+		await vm().approve()
+		expect(vm().processingError?.title).toBe("Processing error.")
+		expect(accountWrites()).toEqual([])
+	})
+
+	test("a follow that throws still reports a successful approval and still closes the window", async () => {
+		opsNetwork = LOCAL
+		setActiveNetworkMock.mockRejectedValueOnce(new Error("persist failed"))
+		await open([sendFrom(MAIN.address)])
+		await vm().approve()
+		expect(vm().processingError).toBeUndefined()
+		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)
+		expect(accountWrites()).toEqual([]) // the account never moves without the network
+	})
+
+	test("a lock that lands while the approval is in flight aborts the whole follow", async () => {
+		let settleApproval!: () => void
+		approveInteractionMock.mockImplementationOnce(
+			() => new Promise<undefined>((resolve) => (settleApproval = () => resolve(undefined))),
+		)
+		await open([sendFrom(MAIN.address)])
+		const approving = vm().approve()
+		await flushPromises()
+		appStoreMock.isLogined = false
+		settleApproval()
+		await approving
+		expect(accountWrites()).toEqual([])
+	})
+
+	test("a profile change that lands while the approval is in flight aborts the whole follow", async () => {
+		let settleApproval!: () => void
+		approveInteractionMock.mockImplementationOnce(
+			() => new Promise<undefined>((resolve) => (settleApproval = () => resolve(undefined))),
+		)
+		await open([sendFrom(MAIN.address)])
+		const onProfileChanged = onActiveProfileChangedAddMock.mock.calls[0][0] as (p?: { id: string }) => void
+		const approving = vm().approve()
+		await flushPromises()
+		onProfileChanged(undefined)
+		settleApproval()
+		await approving
+		expect(accountWrites()).toEqual([])
 	})
 })

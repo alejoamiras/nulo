@@ -774,7 +774,7 @@ toggle directions, no banner while the active scope is unresolved, and no state 
 - Pass: §Copy verbatim per state; frozen-oracle pins in `index.test.ts` green.
 - Layers: typecheck · lint · unit/component
 
-### Phase 3 — the follow
+### Phase 3 — the follow ✓
 
 **Validation gate**
 - `cd apps/extension && bun --bun vitest run src/popup/windows/execute`
