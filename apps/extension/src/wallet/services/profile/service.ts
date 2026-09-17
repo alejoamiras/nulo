@@ -507,13 +507,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
-	/** Capture the {profileId, epoch} execution fence ATOMICALLY under the facade
-	 *  lock (D13). The active-session read, the reserved-id check, and the epoch
+	/** Capture the {profileId, epoch, session} execution fence ATOMICALLY under the
+	 *  facade lock. The active-session read, the reserved-id check, and the epoch
 	 *  read MUST be one critical section — `deleteProfile`'s phase 1 (beginDeletion
 	 *  + reserve) runs under the SAME lock, so this either captures the pre-delete
 	 *  epoch (then the later addTransaction assert fails) or sees the id already
 	 *  reserved and rejects. Composing getActiveProfile + capture across separate
-	 *  lock acquisitions would let a delete slip between them (codex TOCTOU). */
+	 *  lock acquisitions would let a delete slip between them. */
 	public async captureExecutionFence(): Promise<ExecutionFence> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {

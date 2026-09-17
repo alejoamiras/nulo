@@ -39,11 +39,11 @@ export const PXE_ANCHOR_SYNC_WORKAROUND_MS = 5_000
  *  Only for a wallet with no approved send running: with one running, the
  *  button asks first, and the test drives that dialog itself.
  *
- *  Click is async-fire-and-forget: the handler sets `appStore.isLogined =
- *  false` then kicks off `managers.profile.lockActiveProfile()` (RPC). An
+ *  The handler awaits one journal read, then sets `appStore.isLogined = false`
+ *  and fires `managers.profile.lockActiveProfile()` without awaiting it; an
  *  app.vue watcher reacts to the isLogined change and pushes the router.
  *  Under vitest worker pressure the SW round-trip can take 5-10s before
- *  the navigation lands; 20s timeout is generous enough to absorb that. */
+ *  the navigation lands. */
 export async function lockWallet(page: Page): Promise<void> {
 	// Wait for the lock control to be mounted BEFORE clicking — a bare
 	// `querySelector(...)?.click()` silently no-ops if the header hasn't

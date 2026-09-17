@@ -998,7 +998,7 @@ session end does not):
 - `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/lock-cancels-dapp-send.test.ts` (and the other two, one at a time)
 - Pass: all three green at retry 0, run solo; flake vs break per the e2e README. Layers: e2e (live sandbox)
 
-### Phase 7 — close out
+### Phase 7 — close out ✓
 
 `execution/README.md` "Authorization fence" section (what it binds, the serial, where it is
 asserted, the synchronous broadcast check after the cancellation check, the registry and its
