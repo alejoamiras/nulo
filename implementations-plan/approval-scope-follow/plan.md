@@ -746,7 +746,7 @@ about the lock dialog (that is `Header.vue`'s concern) and no workflow reference
 - Pass: all exit 0, no edits under `execution/`; every existing store/guard test still green.
 - Layers: typecheck · lint · unit
 
-### Phase 1 — the resolvers
+### Phase 1 — the resolvers ✓
 
 New `execute/scope-mismatch.ts` + exhaustive tests: every row of the state table, the single-send-like
 rule, **two send-like signers on two accounts → no follow account (including when the second

@@ -11,7 +11,7 @@ export interface OperationLike {
  * list. Anti-phishing: identity strip MUST reflect the REAL signers
  * derived from the payload, not the popup's active account.
  */
-export function uniqueSignerAccounts(operations: OperationLike[]): Account[] {
+export function uniqueSignerAccounts(operations: readonly OperationLike[]): Account[] {
 	const seen = new Set<string>()
 	const out: Account[] = []
 	for (const op of operations) {
