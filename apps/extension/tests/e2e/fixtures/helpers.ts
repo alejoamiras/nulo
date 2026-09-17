@@ -1236,6 +1236,31 @@ export async function waitForTxConfirmation(
 	}
 }
 
+/** Wait for the settled `tx-card` carrying `hash` in the feed the page is showing. The hash is
+ *  the one the dApp received back, so it keys the card exactly; the compare ignores case because
+ *  the two sides may print it differently. */
+export async function waitForTxCardByHash(page: Page, hash: string, timeout = 60_000): Promise<void> {
+	await page.waitForFunction(
+		(want: string) =>
+			[...document.querySelectorAll('[data-testid="tx-card"]')].some(
+				(card) => (card.getAttribute("data-tx-hash") ?? "").toLowerCase() === want,
+			),
+		{ timeout, polling: 250 },
+		hash.toLowerCase(),
+	)
+}
+
+/** Whether a settled `tx-card` carrying `hash` is present right now. */
+export async function hasTxCardByHash(page: Page, hash: string): Promise<boolean> {
+	return page.evaluate(
+		(want: string) =>
+			[...document.querySelectorAll('[data-testid="tx-card"]')].some(
+				(card) => (card.getAttribute("data-tx-hash") ?? "").toLowerCase() === want,
+			),
+		hash.toLowerCase(),
+	)
+}
+
 // ── Fee Method ────────────────────────────────────────────────────────
 
 /** The three selectable fee methods (`send-fee-method-{subtitle}` testids);

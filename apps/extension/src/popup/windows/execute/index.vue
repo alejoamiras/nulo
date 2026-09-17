@@ -16,6 +16,10 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 /** Local utilities */
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
+import { resolveOperationScope, scopeBannerCopy, scopeBannerState } from "./scope-mismatch"
+import { createScopeFollow } from "./scope-follow"
+import { requireNetwork } from "@/utils/core"
+import { storageLocalSet } from "@/utils/storage"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
 import { authwitDisplayCall, displayCallsOf, pendingAuthwitDecodes, undecodedAll } from "./display-calls"
@@ -509,7 +513,10 @@ const approve = async () => {
 				previewId: estimate?.previewId ?? authwitPreviews.value[index]?.previewId,
 			}
 		})
+		const stillOurs = scopeFollow.capture()
 		await interactionService.approveInteraction(requestId.value!, deltas)
+		// Never throws, so a failed follow cannot turn the approval into an error below.
+		await scopeFollow.follow(scopeView.value, followDeclined.value, stillOurs)
 		closeWindow(true)
 	} catch (error) {
 		// The execution path never took ownership — re-arm so a later
@@ -543,6 +550,31 @@ const reject = async () => {
 
 const signerAccounts = computed(() => uniqueSignerAccounts(operations.value))
 const signerNetworks = computed(() => uniqueSignerNetworks(operations.value))
+
+// Where the payload runs against where the wallet is looking; nothing renders until the active rows arrive.
+const followDeclined = ref(false)
+const scopeView = computed(() =>
+	resolveOperationScope(operations.value, { networkId: appStore.network?.id, accountAddress: appStore.account?.address }),
+)
+const scopeBanner = computed(() => {
+	const view = scopeView.value
+	const state = scopeBannerState(view, followDeclined.value)
+	if (!view || !state || !appStore.account || !appStore.network) return undefined
+	return { state, ...scopeBannerCopy(state, view, { account: appStore.account, network: appStore.network }) }
+})
+const toggleFollow = () => {
+	// Confirm captured the choice; a click while the follow waits behind the lock would flip the copy only.
+	if (isLoading.value) return
+	followDeclined.value = !followDeclined.value
+}
+const scopeFollow = createScopeFollow({
+	// Invalidating: the guard is read right after, so it must not answer from a snapshot an event overtook.
+	refreshInFlight: () => appStore.refreshInFlight({ invalidate: true }),
+	hasInFlightSend: () => appStore.hasInFlightSend,
+	getActiveNetworkId: async () => (await requireNetwork().getActiveNetwork())?.id,
+	setActiveNetwork: (networkId) => requireNetwork().setActiveNetwork(networkId),
+	writeActiveAccount: (address, unless) => storageLocalSet({ "nulo:ui:activeAccount": address }, { unless }),
+})
 // Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
 // with no chosen fee can't execute yet. Gating the Confirm button's disabled state
 // on it (not just approve()'s guard) makes the button authoritative — a click while
@@ -561,13 +593,28 @@ const showJson = () => {
 }
 
 const profileService = new ProfileServiceClient()
-profileService.onActiveProfileChanged.add(onActiveProfileChanged)
+// Synchronous on the event and on the store flip: the follow re-checks between its awaits, and a
+// bump that waited for the scheduler could land after the write it was meant to stop.
+profileService.onActiveProfileChanged.add((changed?: ProfileInfo) => {
+	scopeFollow.invalidate()
+	onActiveProfileChanged(changed)
+})
+watch(
+	() => appStore.isLogined,
+	(loggedIn) => {
+		if (!loggedIn) scopeFollow.invalidate()
+	},
+	{ flush: "sync" },
+)
 
 watch([feeEstimates, authwitPreviews], decodeDiscoveredAuthwits, { deep: true })
 
 onMounted(startWindow)
 
-onUnmounted(disposeWindow)
+onUnmounted(() => {
+	scopeFollow.invalidate()
+	disposeWindow()
+})
 </script>
 
 <template>
@@ -583,6 +630,19 @@ onUnmounted(disposeWindow)
 			/>
 
 			<Flex direction="column" gap="16" :class="$style.sections">
+				<Banner
+					v-if="scopeBanner"
+					data-testid="execute-scope-banner"
+					:data-state="scopeBanner.state"
+					variant="info"
+					direction="vertical"
+					wide
+					:action="scopeBanner.action ? { name: scopeBanner.action, callback: toggleFollow, testId: 'execute-scope-action-btn' } : undefined"
+				>
+					<template #title>{{ scopeBanner.title }}</template>
+					<template #description>{{ scopeBanner.body }}</template>
+				</Banner>
+
 				<Flex v-if="operations.length" direction="column" gap="10" wide>
 					<Flex wide justify="between" align="center">
 						<SectionLabel label="Requested operations" :count="operations.length" />

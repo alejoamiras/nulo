@@ -116,10 +116,15 @@ which rev 6 absorbs alongside the codex round-4 findings:
   documented rather than exercised.
 - **Persistence failures are indeterminate and there is no rollback.** `setActiveNetwork` persists
   before it refreshes the node handle and emits, so an RPC rejection can arrive after the durable
-  write landed; the account write can likewise fail after the network write succeeded. Either way
-  the account pointer is left as it was and the next open shows the new chain with the remembered
-  account — degraded, not corrupt, self-correcting on the next switch. A blind rollback could
-  overwrite a newer selection, so none is attempted.
+  write landed; the account write can likewise fail after the network write succeeded. The account
+  pointer is then left as it was: a network failure before the durable write leaves the old chain;
+  one after it leaves the new chain with the remembered account, which the next open keeps if it
+  exists there and otherwise replaces with that chain's first account (`setupActiveAccountRun`) —
+  degraded, not corrupt, self-correcting on the next switch. A blind rollback could overwrite a
+  newer selection, so none is attempted. The network write itself is decided under the lock from
+  the live row, not from the view the window resolved earlier: a follow that ran first may have
+  moved the wallet, and an account written under another follow's chain is exactly the mixed pair
+  the lock exists to prevent (codex arc 2 #1).
 - **`origin === "popup"` means the popup Send, not "every wallet-initiated send".** The lane journals
   the wallet's own auth-registry revoke/enable sends as `origin: "dapp"` (`execution-lane.ts`);
   Phase 0 releases their freeze too. Safe for account/network (they carry explicit identifiers); the
@@ -292,14 +297,20 @@ followScope(view)                       [isolated try/catch, never rethrows]
      return when   !stillOurs()          ← the approval resolved into a different lifecycle
   1. return when   no follow | followDeclined
   2. await navigator.locks.request("nulo:scope-follow", async () => {
-       await appStore.refreshInFlight()  ← the guard fails CLOSED while the journal is unread
-       return when   !stillOurs() || appStore.hasInFlightSend
-  3.   chain axis:   await requireNetwork().setActiveNetwork(view.network.id)
+       await appStore.refreshInFlight({ invalidate: true })  ← settle re-read: the guard fails
+                                          CLOSED and cannot answer from a snapshot an event overtook
+       live = () => stillOurs() && !appStore.hasInFlightSend  ← a send can BEGIN during any await
+                                          below; the subscription keeps it live, so re-ask each write
+       return when   !live()
+       activeId = await requireNetwork().getActiveNetwork()?.id   ← the LIVE row under the lock
+       return when   !live()
+  3.   chain axis:   when activeId !== view.network.id
+                     await requireNetwork().setActiveNetwork(view.network.id)
                      └─ on throw: return — the account pointer is NOT written
-       return when   !stillOurs()
+       return when   !live()
   4.   account axis: when followAccount && followAccount.visible
                      await storageLocalSet({ "nulo:ui:activeAccount": followAccount.address },
-                                           { unless: () => !stillOurs() })
+                                           { unless: () => !live() })
                      ← the facade checks `unless` AFTER its own barrier, immediately before
                        `chrome.storage.local.set`; a lifecycle bump during the barrier wait skips
                        the write. What no fence can retract: a write already dispatched to Chrome.
@@ -331,11 +342,16 @@ Why each line is the way it is:
   approval windows confirming together serialize into two whole pairs instead of interleaving. First
   use in the codebase (Fact 23); no polyfill — every supported Chrome ships it.
 
-- **`refreshInFlight()` first.** `hasInFlightSend` is `!ready || …` (`app.store.ts:168-176`). In
-  the execute realm `useProfileBootstrap` sets `appStore.profile`, whose `immediate` watcher
-  (`:184-191`) connects and reads, so the tracker is usually warm by Confirm — but "usually" is
-  timing, and a cold read answers `true` and silently suppresses the follow. The explicit refresh
-  makes the answer fresh by construction rather than by boot order.
+- **`refreshInFlight({ invalidate: true })` first.** `hasInFlightSend` is `!ready || …`
+  (`app.store.ts:168-176`). In the execute realm `useProfileBootstrap` sets `appStore.profile`,
+  whose `immediate` watcher (`:184-191`) connects and reads, so the tracker is usually warm by
+  Confirm — but "usually" is timing, and a cold read answers `true` and silently suppresses the
+  follow. The invalidating refresh makes the answer fresh by construction rather than by boot order,
+  and takes arc 1's settle path so an empty snapshot an event overtook cannot admit the follow
+  (codex cross-arc #1). The guard filters the shared journal by THIS window's account and network —
+  it is not a global popup-transfer lock; a send on the window's own scope closes it, and because a
+  send can begin during any later await, the guard is re-asked before the network write and folded
+  into the account write's `unless` (codex cross-arc #2).
 - **Network first.** A failed network write can never leave a lone account write behind.
 - **`requireNetwork()`**, the realm-shared client — the window's own `NetworkServiceClient` is
   disconnected in `init()`'s `finally`.
@@ -746,7 +762,7 @@ about the lock dialog (that is `Header.vue`'s concern) and no workflow reference
 - Pass: all exit 0, no edits under `execution/`; every existing store/guard test still green.
 - Layers: typecheck · lint · unit
 
-### Phase 1 — the resolvers
+### Phase 1 — the resolvers ✓
 
 New `execute/scope-mismatch.ts` + exhaustive tests: every row of the state table, the single-send-like
 rule, **two send-like signers on two accounts → no follow account (including when the second
@@ -761,7 +777,7 @@ axis, and the banner text uses the rows' current names (a renamed row reads by i
 - Pass: all exit 0, complexity ratchet included.
 - Layers: typecheck · lint · unit
 
-### Phase 2 — the banner
+### Phase 2 — the banner ✓
 
 `data-testid="execute-scope-banner"` + `data-state`; the action carries
 `data-testid="execute-scope-action-btn"`. `followDeclined`. Component tests for every state, both
@@ -774,7 +790,7 @@ toggle directions, no banner while the active scope is unresolved, and no state 
 - Pass: §Copy verbatim per state; frozen-oracle pins in `index.test.ts` green.
 - Layers: typecheck · lint · unit/component
 
-### Phase 3 — the follow
+### Phase 3 — the follow ✓
 
 **Validation gate**
 - `cd apps/extension && bun --bun vitest run src/popup/windows/execute`
@@ -811,7 +827,7 @@ toggle directions, no banner while the active scope is unresolved, and no state 
 - `cd <worktree root> && bun run typecheck && bun run lint`
 - Layers: typecheck · lint · unit/component
 
-### Phase 4 — e2e
+### Phase 4 — e2e ✓
 
 `waitForTxCardByHash` in `fixtures/helpers.ts`, then two network tests. **Every post-confirm
 assertion is against `chrome.storage.local` and/or a freshly-opened popup, never a page that was
