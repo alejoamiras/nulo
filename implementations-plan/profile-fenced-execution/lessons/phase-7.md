@@ -282,3 +282,12 @@ every arc 2 commit unchanged. `Header.vue`'s lock and `getSessionHandle` dispatc
 correction is valid. The README said the dispatcher's calls "carry no fence and read none", but a
 standard `simulateTx` and a `profileTx` capture their own fence at dispatch (`view-executor.ts`).
 The sentence now says those calls omit `authorizedFence` and their dispatch arms never consume it.
+
+Round 3 on `0ae42cad`: "Approve — the correction is accurate (high confidence)." and "No new material
+findings."
+
+**Gates on the rebased stack**, each run alone. The network e2e at retry 0 ran on `c208ae47`, whose
+code `0ae42cad` keeps unchanged: `lock-cancels-dapp-send` exit 0 (22 s),
+`auto-lock-defers-while-proving` exit 0 (50 s), `profile-switch-sweeps-transfer` exit 0 (92 s),
+`selfpay-phase` exit 0 (180 s). `bun run audit:vue` on `0ae42cad` exit 0: every workspace
+typechecks, lint checks 2064 files, 503 test files / 6254 tests pass, and the build succeeds.
