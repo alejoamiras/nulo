@@ -83,3 +83,9 @@ Held: `suspended` stays set across a lock-screen profile pick (a pick is not an 
 | 1 | MEDIUM (inferred) — premise "nothing is in flight at unlock" is false: the sweep excludes `submitting` (`execution-lane.ts:61-64`), so the NEW unlock read can snapshot a `submitting` transfer, the transfer ends and its event lands first, the older snapshot then restores it and the cached short-circuit refuses for good. Before this arc a same-profile unlock issued no read. | yes — the sweep's stage list and the same-port ordering both check out | **Adopted**: `state.revision` counts applied events; the invalidating refresh (`settle`) re-reads when the revision moved during its read (≤ 3 reads). Regression test "the unlock read re-reads when an event overtook its snapshot" (disabling the re-read fails it); "a plain refresh publishes its snapshot even when an event landed meanwhile" pins that the other refreshes are unchanged. Known-limitations text corrected. |
 
 Hard stop reached at three rounds with a condition outstanding; the condition was implemented as prescribed and one verification-only resume asked codex to confirm it (below). Surfaced to the owner in the session report.
+
+### Verification resume (on `0adc1ca3`) → conditional approve
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | MEDIUM — the three-read cap still publishes a contested snapshot on the third read | yes | **Adopted**: cap removed — the invalidating read repeats until a read sees no event land during it (each pass is one round trip, so only a journal busier than the read keeps it looping); regression "keeps reading while events keep overtaking it" (three overtaken reads, the fourth uncontested; restoring the cap fails it) |

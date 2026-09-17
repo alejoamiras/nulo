@@ -228,6 +228,22 @@ describe("late reads", () => {
 		expect(readsFor("p1")).toBe(3) // boot, the overtaken read, the re-read
 	})
 
+	test("the unlock read keeps reading while events keep overtaking it, and publishes only an uncontested answer", async () => {
+		const store = await viewing([send("popup", "submitting")])
+		store.resetInFlight()
+		const reads = [parkNextRead(), parkNextRead(), parkNextRead()]
+		mockGetOperations.mockResolvedValueOnce([send("popup", "succeeded")]) // the fourth read, uncontested
+		const unlocked = store.refreshInFlight({ invalidate: true })
+		for (const read of reads) {
+			emitUpdated(send("popup", "succeeded"))
+			read.resolve([send("popup", "submitting")])
+			await flush()
+		}
+		await unlocked
+		expect(store.hasInFlightSend).toBe(false)
+		expect(readsFor("p1")).toBe(5) // boot, three overtaken reads, the uncontested one
+	})
+
 	test("a plain refresh publishes its snapshot even when an event landed meanwhile", async () => {
 		const store = await viewing([])
 		const read = parkNextRead()

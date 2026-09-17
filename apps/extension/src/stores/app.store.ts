@@ -283,12 +283,12 @@ async function refreshInFlightOps(
 			return
 		}
 	}
-	// Three reads bound the work under a busy journal; a send emits a handful of events in total.
-	for (let attempt = 0; ; attempt++) {
+	// Each pass is one round trip, so a journal busier than the read is the only way to loop.
+	for (;;) {
 		const revision = state.revision
 		const rows = await readInFlightRows(state, profileId)
 		if (!current()) return
-		if (options?.settle && state.revision !== revision && attempt < 2) continue
+		if (options?.settle && state.revision !== revision) continue
 		publishInFlight(state, rows)
 		return
 	}
