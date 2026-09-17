@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: DRAFT v2 — codex round 1 (reject: A1) folded; round 2 pending
+status: v3 — codex round 2 APPROVE (six Low wording findings folded); awaiting owner approval
 baseline: 771c2a16 (dev, after #613)
 worktree: .claude/worktrees/port-client-connect · branch worktree-port-client-connect
 ---
@@ -17,9 +17,10 @@ worktree: .claude/worktrees/port-client-connect · branch worktree-port-client-c
 `chrome.runtime.connect` in a `while (Connecting)` loop that catches any throw, logs an error and sleeps
 1 s before trying again — forever. The loop rests on a false premise: in MV3 `chrome.runtime.connect`
 never throws because the service worker is asleep (it returns a Port and wakes the worker; a dead peer
-surfaces later as `onDisconnect`, which the client already handles by reconnecting). The only synchronous
-throws are permanent — "Extension context invalidated" after an update or reload, or a bad extension id.
-So the loop never rescues anything; on an invalidated page it spins forever, emitting
+surfaces later as `onDisconnect`, which the client already handles by reconnecting). The synchronous
+throws that are known are permanent — "Extension context invalidated" after an update or reload, or a bad
+extension id — and Chrome documents no transient one (F3). So the loop rescues nothing anyone has
+observed; on an invalidated page it spins forever, emitting
 `logError("Failed to connect")` once a second, and `waitForConnection()` polls state every 300 ms while a
 caller's request waits out its full timeout with no cause. In unit tests the same loop is what the
 `vitest.setup.ts` throw-on-second-port guard trips into: a retry timer that ticks for the rest of the file
@@ -27,8 +28,8 @@ caller's request waits out its full timeout with no cause. In unit tests the sam
 
 There is a second loop hiding behind the first (codex A1). `documentLogger().log()` returns its request
 promise unhandled; the popup's and offscreen's `onunhandledrejection` handlers log the rejection through
-that same logger. On an invalidated page every log line's request rejects — today after its 30 s deadline
-— and the handler logs the rejection, which rejects, which the handler logs. A 30 s cadence made it
+that same logger. On an invalidated page every log line's request rejects — today after its 60 s request deadline
+— and the handler logs the rejection, which rejects, which the handler logs. That cadence made it
 invisible. Make the failure immediate without containing it and the cadence becomes one task per
 iteration: a busy loop for the life of the page.
 
@@ -113,7 +114,7 @@ private readonly onDisconnect = () => { this.disconnect(); void this.connect() }
 - `waitForConnection`, `sleep` import and the `Connecting` state are deleted. `ensureTransportReady`
   narrows to `void`; the base's contract (`void | Promise<void>`) is unchanged for the offscreen client.
 - `disconnect()` is unchanged. `Disconnecting` stays as the transient guard it is today. A request issued
-  re-entrantly while `Disconnecting` (only reachable from a rejection callback inside `disconnect()`) now
+  while `Disconnecting` (re-entrant only, e.g. a synchronous `onTerminal` override during settlement) now
   sends against a cleared port and settles `send_failed` instead of awaiting the poll; no production
   caller does this (codex B4).
 - The log line is emitted at the open, so a failure on the request path (`ensureTransportReady`) is
@@ -232,7 +233,7 @@ fires `onDisconnected`) → `connect()` → `openPort()` → `Connected`, `onCon
 | `packages/extension-messaging/src/background/client.ts` | delete loop, poll, `Connecting`, `sleep` import; add `openPort`; `connect` never rejects |
 | `packages/extension-messaging/src/errors.ts` | `RpcConnectError` |
 | `packages/extension-messaging/src/background/client.test.ts` | new describe "connect failure is terminal" (3 tests); the reconnect describe gains a throwing-replacement case |
-| `apps/extension/src/wallet/services/logger/client.ts` | containment `catch` on the returned line |
+| `apps/extension/src/wallet/services/logger/client.ts` | containment `catch` on the returned line; the TSDoc that promises delivery to the unhandled-rejection handler is rewritten to the new contract |
 | `apps/extension/src/wallet/logger/console-forwarding.containment.test.ts` (new) | the A1 regression: real logger, throwing connect, forwarding installed — the loop does not start |
 | `packages/extension-messaging/src/testing/port-registry.ts` (new) + `port-registry.test.ts` (new) + `index.ts` (new) | the shared fake + 2 contract tests + barrel |
 | `packages/extension-messaging/package.json` | `./testing` export |
@@ -252,7 +253,7 @@ fires `onDisconnected`) → `connect()` → `openPort()` → `Connected`, `onCon
 - **A sticky `Failed` state** (fail once, reject every later request without touching Chrome). Rejected:
   a fourth state and a recovery question ("who resets it?") to save one synchronous call per request on a
   page that is already dead.
-- **Bounded backoff** (3 attempts). Rejected: there is no transient case for a synchronous throw to
+- **Bounded backoff** (3 attempts). Rejected: no transient case for a synchronous throw is known to
   recover from; a retry only delays the honest answer.
 - **A `connect_failed` `RequestTerminalStatus`** with `onTerminal` reporting. Deferred: readiness-phase
   failures (this one and the existing deadline timeout) reject before a pending entry exists and are
@@ -264,7 +265,7 @@ fires `onDisconnected`) → `connect()` → `openPort()` → `Connected`, `onCon
 - **Migrating only the extension consumers** and leaving `transport-harness.ts`. Rejected by the owner
   (Phase 0): one fake, every consumer.
 - **Containing logger rejections by swallowing them** (return the caught promise). Rejected: an explicit
-  awaiter (S3 in the ports test, the redaction tests' `settled`) must still observe the rejection;
+  awaiter (S3 in the ports test) must still observe the rejection;
   observing a branch (`line.catch(() => {})`) marks the original handled without changing what it
   returns.
 - **Fixing the loop in the two `onunhandledrejection` handlers** (skip logging when the reason is an
@@ -276,9 +277,9 @@ fires `onDisconnected`) → `connect()` → `openPort()` → `Connected`, `onCon
 - Threat surface: none new on the wire. `RpcConnectError` is client-local and never serialized; its
   message folds in Chrome's own reason ("Extension context invalidated.") and reaches the log through
   `trim()`'s error projection (name + message, URL-scrubbed). No payload.
-- Denial of usefulness, two loops: an invalidated popup today runs a 1 s error-log loop AND a 30 s
+- Denial of usefulness, two loops: an invalidated popup today runs a 1 s error-log loop AND a 60 s
   logger-rejection loop (`documentLogger` → `onunhandledrejection` → `documentLogger`). Removing the
-  first without containing the second would turn a 30 s cadence into a busy loop (codex A1). Both are
+  first without containing the second would turn that cadence into a busy loop (codex A1). Both are
   closed here: no timer, and no rejection reaches the handler.
 - Sender authentication, envelope validation and the request deadline (B-15) are untouched; the only
   code path added is one that fails faster.
@@ -365,8 +366,8 @@ sharded network + CI.)
    - the reconnect describe gains: `emitPortDisconnect` while the replacement open throws → in-flight
      requests still reject `"Client disconnected"`, no timer remains, a later request reopens
      successfully.
-5. `console-forwarding.containment.test.ts` (unmocks the logger client, uses the shared registry once
-   Phase 3 lands — until then a throwing `chrome.runtime.connect`): install forwarding, log one line via
+5. `console-forwarding.containment.test.ts` (unmocks the logger client; keeps a **throwing**
+   `chrome.runtime.connect` override — the point is a failed open): install forwarding, log one line via
    the real `documentLogger`, drain a macrotask → `chrome.runtime.connect` was attempted exactly once,
    no `unhandledrejection` fired (vitest fails the run on one regardless), and awaiting the returned line
    still rejects with `RpcConnectError`.
@@ -394,7 +395,7 @@ Layers: lint/typecheck, unit.
 
 1. `tests/vitest.setup.ts` on the registry; `emitPortDisconnect` exported.
 2. `client.ports.test.ts` imports the shared fake; local classes deleted.
-3. `logger/client.test.ts`'s `captureWire` and the containment test on the shared fake.
+3. `logger/client.test.ts`'s `captureWire` on the shared fake. The containment test keeps its **throwing** `chrome.runtime.connect` override — the registry's `connectStub` always opens a port, so migrating it would stop exercising a failed open (codex r2).
 
 **Validation gate** — `bun run lint && bun run typecheck && bun --cwd apps/extension test` → exit 0
 (this run also re-executes the messaging tests under the extension setup — the double-run in F8).
@@ -461,7 +462,7 @@ Transcripts in `audit-codex.md`. GPT-6 Astra at `high`, read-only sandbox.
 
 | # | Finding | Outcome |
 |---|---|---|
-| A1 High | `documentLogger().log` returns an unhandled promise; both `onunhandledrejection` handlers log through the same logger → an immediate rejection loops per task. The plan's "cannot recurse" claim was wrong (it only covered synchronous recursion). | **adopted** — containment `catch` at the logger boundary (G5); regression test (Phase 1.5); reverses #613 D30. Verified: the loop exists today at the 30 s deadline cadence. |
+| A1 High | `documentLogger().log` returns an unhandled promise; both `onunhandledrejection` handlers log through the same logger → an immediate rejection loops per task. The plan's "cannot recurse" claim was wrong (it only covered synchronous recursion). | **adopted** — containment `catch` at the logger boundary (G5); regression test (Phase 1.5); reverses #613 D30. Verified: the loop exists today at the request-deadline cadence (established statically). |
 | A2 Low | F3 overstated Chrome's contract as a guarantee. | **adopted** — F3 reworded: fail-fast is the chosen policy; the client is not terminal, only the request. |
 | B1 Low | The README fix would still conflate the disconnect `Error` with `RpcDisconnectedError`. | **adopted** — three contracts documented separately (F10). |
 | B2 Low | Recon counted a prose `.connect()`; `logger/client.test.ts` holds a fourth inline port fake. | **adopted** — 27 / 8 / 19; the fourth fake migrates (G4). |
@@ -474,7 +475,23 @@ Transcripts in `audit-codex.md`. GPT-6 Astra at `high`, read-only sandbox.
 | D1 High | No test for A1. | **adopted** — the containment test. |
 | D2 Med | Strengthen the existing cases; fold the Phase 2 cases into two. | **adopted**. |
 
-Nothing rejected. Round 2 (resumed session) reviews plan v2.
+Nothing rejected.
+
+### Round 2 — plan v2 (resumed session): `approve`
+
+A1 and C1 confirmed closed; the strengthened tests distinguish fixed from broken code (the containment
+test's ordering — attach the rejection assertion only **after** the macrotask drain — is what isolates
+containment). Six Low findings, all adopted: policy wording made consistent (Summary, Trade-offs); the
+request deadline is 60 s (`DEFAULT_RPC_TIMEOUT_MS`), not 30 s, and the loop cadence is a static
+conclusion, not a measurement; `settled` in the redaction test is not a logger awaiter (S3 is the
+evidence); the `Disconnecting` re-entrancy is via a synchronous `onTerminal` override, not a rejection
+callback; the `documentLogger` TSDoc that promises delivery to the unhandled-rejection handler is
+rewritten with the containment; the containment test keeps its throwing `chrome.runtime.connect` after
+Phase 3.
+
+## ELI5
+
+Artifact: https://claude.ai/artifact/F9F7aKvqon8Skw9jAVRejd — source `implementations-plan/port-client-connect/eli5.html` (republish the same path to update).
 
 ## Seeds (DRAFT until approval)
 

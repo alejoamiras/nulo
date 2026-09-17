@@ -108,3 +108,46 @@ The three Phase 1 cases are distinct. Phase 2’s independence and remote-close 
 ## E. Verdict
 
 reject (with blocking findings: A1 — immediate logger-RPC rejection creates an unbounded unhandled-rejection feedback loop, and the plan omits containment and regression coverage)
+## Round 2 — plan v2 (`e40cce80`), resumed session
+
+Prompt: re-review v2 against every round-1 finding; four targeted checks (A1 closure, C1 closure, test discrimination, self-consistency). Verbatim response:
+
+## A. Adversarial / security
+
+No remaining A1 blocker found. **Confidence: high.** The catch at `plan.md:154` handles the original rejection; its empty callback produces a fulfilled branch. Returning `line` preserves rejection for explicit awaiters, including S3 (`apps/extension/src/wallet/services/logger/client.ports.test.ts:191–196`).
+
+Both handlers discard the logger’s returned promise without creating another rejecting branch (`apps/extension/src/wallet/logger/console-forwarding.ts:21`; `apps/extension/src/offscreen/index.ts:62,65`). Their feedback paths therefore stop. An external awaiter could create its own unhandled rejection, but the handler’s resulting log line is contained.
+
+## B. Assumption attack
+
+- **Low; confidence: high — The permanent-failure guarantee remains elsewhere.** `implementations-plan/port-client-connect/plan.md:20–22,255–256` still asserts all synchronous failures are permanent/no transient case exists, contradicting revised F3 at `:300–305`. Apply the policy wording consistently.
+
+- **Low; confidence: high — The existing deadline is 60 seconds, not 30.** Correct `plan.md:30–31,279–281,464`. `LoggerServiceClient` supplies no timeout override (`apps/extension/src/wallet/services/logger/client.ts:15–16`); its inherited default is `60_000` (`packages/extension-messaging/src/background/client.ts:16,42`). Also avoid presenting a precise loop cadence as measured evidence; this review has only established the feedback path statically.
+
+- **Low; confidence: high — `settled` is not an explicit logger awaiter.** The claim at `plan.md:267` is incorrect. That array contains promises scheduling fake responses, not promises returned by `logger.log()` (`apps/extension/src/wallet/services/logger/client.test.ts:46–50`). S3 supplies the actual rejection-preservation evidence.
+
+- **Low; confidence: high — The reentrancy explanation names the wrong mechanism.** `plan.md:116` says a rejection callback runs inside `disconnect()`. Promise rejection handlers run later. A synchronous overridden `onTerminal` hook could reenter during settlement (`packages/extension-messaging/src/core/base-client.ts:274–275`). Remove the unsupported “only reachable” explanation.
+
+## C. Implementation critique
+
+No remaining C1 defect found for the intended Chrome-error path. **Confidence: high.** `openPort()` logs once before throwing (`plan.md:93–96`); public `connect()` adds no second log (`:81–82`). Folding the cause’s message into the wrapper preserves Chrome’s reason through the name/message projection (`:134`; `apps/extension/src/wallet/logger/utils.ts:169–174`). Original cause identity and stack are discarded, but neither is required by G1.
+
+**Low; confidence: high — Update the existing logger contract comment alongside containment.** The current comment explicitly promises delivery to the unhandled-rejection handler (`apps/extension/src/wallet/services/logger/client.ts:42–43`). The file map currently mentions only adding the catch (`plan.md:235`).
+
+## D. Test plan
+
+The strengthened Phase 1 assertions distinguish the intended implementation from today’s retrying code. The request cannot reject before timer advancement today; the new logging assertion also catches v1’s missing request-path log (`plan.md:359–367`).
+
+The containment test’s **specified ordering matters** (`plan.md:368–372`):
+
+- Today, its first-macrotask checks can pass while the logger request remains pending. The final rejection assertion fails or times out; that alone does not isolate containment.
+- With v1’s immediate rejection, leaving the promise unobserved until after the macrotask should fail through Vitest’s unhandled-error reporting.
+- With v2, the boundary handles it, and the later explicit await still rejects.
+
+Do not attach the test’s rejection assertion before the macrotask: that would mask missing containment. These are static conclusions; no tests were run.
+
+**Low; confidence: high — Preserve failure injection during Phase 3.** `plan.md:368–369,397` ambiguously replaces the throwing stub with the shared registry, whose `connectStub` always opens a port (`:187–188`). Keep the throwing override after migration; otherwise the test no longer exercises a failed open.
+
+## E. Verdict
+
+approve

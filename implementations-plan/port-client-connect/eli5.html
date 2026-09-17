@@ -48,9 +48,9 @@
 </style>
 <main>
   <section>
-    <p class="eyebrow">Blueprint · light · draft for approval</p>
+    <p class="eyebrow">Blueprint · light · codex approved · your call</p>
     <h1>When the wallet's inner phone line is dead, say so at once</h1>
-    <p class="lede">Every popup screen talks to the wallet's background process over a small private phone line (a "port"). If the extension gets updated or reloaded while a screen is open, that line can't be opened any more — and today the screen keeps redialling once a second, forever, writing an error into the log each time, while whatever the user asked for just hangs until it times out. This plan makes a dead line fail once, immediately, with a clear reason. It also tidies the three pretend phone lines our tests use into one honest one.</p>
+    <p class="lede">Every popup screen talks to the wallet's background process over a small private phone line (a "port"). If the extension gets updated or reloaded while a screen is open, that line can't be opened any more — and today the screen keeps redialling once a second, forever, writing an error into the log each time, while whatever the user asked for just hangs until it times out. This plan makes a dead line fail once, immediately, with a clear reason — and closes a second, quieter loop the review found underneath it. It also tidies the four pretend phone lines our tests use into one honest one.</p>
   </section>
 
   <section>
@@ -69,7 +69,8 @@
   <section>
     <h2>Human context</h2>
     <p>The redial loop was written to cover a case that doesn't exist: Chrome never refuses to open the line because the background process is asleep — it opens it and wakes the process. The only time opening fails is when the page itself has been orphaned by an extension update or reload, which is permanent for that page. Retrying can't help; it only hides the answer. If the background process dies <em>after</em> the line is open, a different mechanism already reconnects — that one stays exactly as it is.</p>
-    <p>Separately, our unit tests fake that phone line in three different ways (one per corner of the repo), and they disagree about basics such as "can two lines share a name" and "can a line be hung up". The fake written for the last plan (#613) is the honest one; it becomes the only one.</p>
+    <p><strong>The second loop.</strong> The codex review caught something the first draft missed. When a log line can't be delivered, the page's "something went wrong" handler writes <em>that</em> failure to the log — through the same dead line — which fails again, which gets written again. Today this crawls along at one turn per request timeout (a minute), hidden behind it. Making failures immediate without fixing it would have turned the crawl into a sprint: a page burning CPU for as long as it stays open. The fix is one line at the logger: a failed log line is noted and dropped instead of being re-reported.</p>
+    <p>Separately, our unit tests fake that phone line in four different ways (one per corner of the repo), and they disagree about basics such as "can two lines share a name" and "can a line be hung up". The fake written for the last plan (#613) is the honest one; it becomes the only one.</p>
   </section>
 
   <section>
@@ -77,17 +78,17 @@
     <div class="phases">
       <div class="phase">
         <h3>1 · A dead line fails once</h3>
-        <p>Remove the redial loop and the "still connecting…" polling. When the line can't be opened, the request that needed it fails right away with a named error; calling "connect" on its own still never throws (many screens fire it and don't wait).</p>
-        <p class="proves">Proves itself by: three new unit tests (fails at once, nothing retries, recovers on a later success) plus the existing reconnect tests, lint and typecheck — all green.</p>
+        <p>Remove the redial loop and the "still connecting…" polling. When the line can't be opened, the request that needed it fails right away with a named error that carries Chrome's reason; calling "connect" on its own still never throws (many screens fire it and don't wait). Close the second loop at the logger.</p>
+        <p class="proves">Proves itself by: four new unit tests (fails at once, nothing retries, recovers on a later success, a dead line mid-reconnect stays clean) plus one that proves the second loop cannot start, the existing reconnect tests, lint and typecheck — all green.</p>
       </div>
       <div class="phase">
         <h3>2 · One shared fake phone line</h3>
         <p>Move the honest fake into the messaging package where the other test helpers live, and put the package's own test harness on it. The helper names tests already use keep working.</p>
-        <p class="proves">Proves itself by: three contract tests for the fake, every existing messaging test green, lint and typecheck.</p>
+        <p class="proves">Proves itself by: two contract tests for the fake, every existing messaging test green, lint and typecheck.</p>
       </div>
       <div class="phase">
         <h3>3 · The extension's tests use it too</h3>
-        <p>The extension's global test setup and the #613 port test switch to the shared fake; the old "throw if a second line opens" guard becomes an explicit count a test asks for.</p>
+        <p>The extension's global test setup, the #613 port test and the logger redaction test switch to the shared fake; the old "throw if a second line opens" guard becomes an explicit count a test asks for.</p>
         <p class="proves">Proves itself by: the whole extension unit + component suite green, lint and typecheck.</p>
       </div>
       <div class="phase">
@@ -114,8 +115,9 @@
       <li>No <code>/harden</code> pass — no trust boundary moves.</li>
     </ul>
     <div class="verdict" id="codex-verdict">
-      <span class="eyebrow">Codex audit</span>
-      <b>pending — round 1 running</b>
+      <span class="eyebrow">Codex audit (GPT-6 Astra, high)</span>
+      <p>Round 1: <b>reject</b> — it found the second loop (a High) plus eleven smaller corrections; all twelve were folded in, none rejected.</p>
+      <p>Round 2 on the revised plan: <b>approve</b> — six Low wording fixes, all folded in.</p>
     </div>
     <p>Reply <code>approve</code>, <code>conditional approve (with conditions: …)</code> or <code>reject (with blocking findings: …)</code>.</p>
   </section>
