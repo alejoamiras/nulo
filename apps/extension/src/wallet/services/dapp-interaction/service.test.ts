@@ -18,7 +18,7 @@
 import type { ILogger } from "@/wallet/logger"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, TermsAcceptanceRequiredError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { DappInteractionService } from "./service"
 import type { DappInteraction, ExecutionHooks } from "./spec"
 
@@ -483,5 +483,59 @@ describe("DappInteractionService.focusInteractionWindow (Queued card → bring t
 
 		await expect(svc.focusInteractionWindow("j-1")).resolves.toBe(false)
 		expect(internals.windowManager.focus).not.toHaveBeenCalled()
+	})
+})
+
+describe("DappInteractionService when the Terms acceptance lapses after the request was admitted", () => {
+	const refuse = async () => {
+		throw new TermsAcceptanceRequiredError()
+	}
+
+	test("an approved request is cancelled with the typed error, so the dApp still gets the 4100 envelope", async () => {
+		const { svc, internals } = makeService({ executeOperations: refuse })
+		const id = "interaction-terms"
+		internals.storage.set(id, { id, payload: emptyPayload, handleId: "handle-t", cancellationToken: id } as unknown as DappInteraction)
+
+		await svc.approveInteraction(id, [])
+		await flush()
+
+		expect(internals.windowManager.cancel).toHaveBeenCalledTimes(1)
+		expect(internals.windowManager.cancel.mock.calls[0]?.[1]).toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(internals.windowManager.settle).not.toHaveBeenCalled()
+	})
+
+	test("a silent send settles the record it advanced to pending, which the ingress safety net would not close", async () => {
+		const { internals } = makeService({ executeOperations: refuse })
+		const transitionOperation = vi.fn(async () => {})
+		const transitionIfStage = vi.fn(async () => ({ outcome: "transitioned" }))
+		Object.assign(internals, { operationJournal: { transitionOperation, transitionIfStage } })
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+
+		await expect(internals.silentInteraction(payload, { queuedJournalId: "journal-1" })).rejects.toBeInstanceOf(
+			TermsAcceptanceRequiredError,
+		)
+
+		expect(transitionOperation).toHaveBeenCalledWith("journal-1", { stage: "pending" })
+		// Stage-guarded to `pending`: a record execution did claim is its owner's to settle.
+		expect(transitionIfStage).toHaveBeenCalledWith(
+			"journal-1",
+			["pending"],
+			{ stage: "failed" },
+			expect.objectContaining({ message: TermsAcceptanceRequiredError.MESSAGE }),
+		)
+	})
+
+	test("any other failure on the silent path leaves the record alone", async () => {
+		const { internals } = makeService({
+			executeOperations: async () => {
+				throw new Error("node unreachable")
+			},
+		})
+		const transitionIfStage = vi.fn()
+		Object.assign(internals, { operationJournal: { transitionOperation: vi.fn(async () => {}), transitionIfStage } })
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+
+		await expect(internals.silentInteraction(payload, { queuedJournalId: "journal-2" })).rejects.toThrow("node unreachable")
+		expect(transitionIfStage).not.toHaveBeenCalled()
 	})
 })

@@ -32,7 +32,7 @@ import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
-import { transferFailureCopy } from "@/popup/utils/transfer-failure-copy"
+import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
@@ -384,7 +384,8 @@ const handleSend = async () => {
 			if (classifyCancellableRejection(err) === "silent") return
 
 			openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
-			console.error("[send] executeTransfer failed:", err)
+			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
+			else console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {
 			submitInFlight = false

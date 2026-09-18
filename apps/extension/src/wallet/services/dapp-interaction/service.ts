@@ -16,7 +16,7 @@ import {
 	type OperationKind,
 } from "@/wallet/services/execution/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, TermsAcceptanceRequiredError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
 import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import { Lock } from "@/wallet/utils"
@@ -299,9 +299,21 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
-			this.logError(`executeAndResolve: failed [${kinds}]`, error)
-			this.windowManager.cancel(interaction.handleId, error instanceof Error ? error.message : "Execution failed")
+			this.windowManager.cancel(interaction.handleId, this.describeApprovalFailure(kinds, error))
 		}
+	}
+
+	/**
+	 * What the waiting dApp request is cancelled with. A Terms refusal keeps its class so the ingress
+	 * answers with the typed envelope, and logs at `debug`: it is expected, and a dApp retries.
+	 */
+	private describeApprovalFailure(kinds: string, error: unknown): string | Error {
+		if (error instanceof TermsAcceptanceRequiredError) {
+			this.logDebug(`executeAndResolve: refused [${kinds}]: terms not accepted`)
+			return error
+		}
+		this.logError(`executeAndResolve: failed [${kinds}]`, error)
+		return error instanceof Error ? error.message : "Execution failed"
 	}
 
 	/**
@@ -517,17 +529,39 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// request enqueues on the execution mutex) via the forwarded `hooks`, NOT
 		// here — see acquireExecutionSlot. Releasing before executeOperations
 		// would let a later request overtake this one in the execution FIFO.
-		return await this.executionService.executeOperations(
-			operations,
-			{
-				type: OriginType.DAPP,
-				name: payload.session.dappMetadata.name ?? "Unknown dapp",
-			},
-			undefined,
-			hooks,
-			undefined,
-			authorizedFence,
-		)
+		try {
+			return await this.executionService.executeOperations(
+				operations,
+				{
+					type: OriginType.DAPP,
+					name: payload.session.dappMetadata.name ?? "Unknown dapp",
+				},
+				undefined,
+				hooks,
+				undefined,
+				authorizedFence,
+			)
+		} catch (error) {
+			await this.settleUnclaimedAfterTermsRefusal(error, hooks?.queuedJournalId)
+			throw error
+		}
+	}
+
+	/**
+	 * A Terms refusal at execution's entry throws before anything claims the record this path just
+	 * advanced to `pending`, and the ingress safety net only closes `queued` ones. Stage-guarded, so a
+	 * record execution did claim (refused later, at the broadcast line) is left to its owner.
+	 */
+	private async settleUnclaimedAfterTermsRefusal(error: unknown, journalId: string | undefined): Promise<void> {
+		if (!journalId || !(error instanceof TermsAcceptanceRequiredError)) return
+		await this.operationJournal
+			.transitionIfStage(
+				journalId,
+				["pending"],
+				{ stage: "failed" },
+				{ kind: "popup_bound", message: error.message, normalizedRaw: null },
+			)
+			.catch((err) => this.logDebug("could not settle a pending record after a terms refusal", err))
 	}
 
 	private async validateSession({ sessionId, operations }: ExecutionParams): Promise<DappSession> {
