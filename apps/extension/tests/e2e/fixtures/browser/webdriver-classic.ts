@@ -86,14 +86,34 @@ export class WebDriverSession {
 		return (await this.send("GET", "/url")) as string
 	}
 
+	private queue: Promise<unknown> = Promise.resolve()
+
+	/** A session has ONE current window, so a switch and the command that depends on it must not
+	 *  interleave with another caller's pair — two pages navigating at once would cross over. */
+	private exclusive<T>(work: () => Promise<T>): Promise<T> {
+		const run = this.queue.then(work, work)
+		this.queue = run.catch(() => {})
+		return run
+	}
+
 	/** Reading a handle's URL requires switching to it, so this leaves the last window focused. */
-	async windowsWithUrls(): Promise<WindowWithUrl[]> {
-		const out: WindowWithUrl[] = []
-		for (const handle of await this.windowHandles()) {
+	windowsWithUrls(): Promise<WindowWithUrl[]> {
+		return this.exclusive(async () => {
+			const out: WindowWithUrl[] = []
+			for (const handle of await this.windowHandles()) {
+				await this.switchToWindow(handle)
+				out.push({ handle, url: await this.currentUrl() })
+			}
+			return out
+		})
+	}
+
+	/** Resolves once the document has loaded, per the session's default page-load strategy. */
+	navigateWindow(handle: string, url: string): Promise<void> {
+		return this.exclusive(async () => {
 			await this.switchToWindow(handle)
-			out.push({ handle, url: await this.currentUrl() })
-		}
-		return out
+			await this.send("POST", "/url", { url })
+		})
 	}
 
 	async setScriptTimeout(ms: number): Promise<void> {

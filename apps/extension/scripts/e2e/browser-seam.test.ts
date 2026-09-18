@@ -15,6 +15,21 @@ const E2E_ROOT = path.resolve(__dirname, "../../tests/e2e")
 const EXEMPT = new Set(["fixtures/browser/chrome.ts", "scripts/check-derivation-parity.ts"])
 
 const SCHEME = "chrome-extension://"
+const WORKER_TYPE = "service_worker"
+const WORKER_LOADER = "service-worker-loader"
+
+/**
+ * Chrome-only target assumptions that predate the seam. Firefox MV3 runs a background *script* and
+ * produces no `service_worker` target at all, so each of these is a place a ported suite stops —
+ * as `settleLaunchedExtension` did, silently, until a probe spent thirty seconds proving it.
+ * The counts are exact and only shrink: a new site fails this test instead of joining the list.
+ */
+const WORKER_DEBT: Record<string, number> = {
+	"fixtures/helpers.ts": 2,
+	"fixtures/journal.ts": 1,
+	"helpers/rpc-intercept.ts": 1,
+	"network/cold-wake-discovery.test.ts": 1,
+}
 
 /**
  * The scan walks the TypeScript AST rather than the text. A regex literal ending in `\//` — one
@@ -70,8 +85,19 @@ function closesABrowser(receiver: ts.Expression, aliases: Set<string>): boolean 
 	return ts.isIdentifier(bare) && (bare.text === "browser" || aliases.has(bare.text))
 }
 
+const literalText = (node: ts.Node): string | undefined =>
+	ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined
+
+/** A target-TYPE test — `t.type() === "service_worker"`, or the loader URL — never a log line. */
+function testsForWorkerTarget(node: ts.Node): boolean {
+	if (!ts.isBinaryExpression(node)) return literalText(node)?.includes(WORKER_LOADER) ?? false
+	const op = node.operatorToken.kind
+	if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsToken) return false
+	return [node.left, node.right].some((side) => literalText(unwrap(side)) === WORKER_TYPE)
+}
+
 /** 1-based line numbers of executable seam violations in one file's source. */
-function violations(source: string): { scheme: number[]; close: number[] } {
+function violations(source: string): { scheme: number[]; close: number[]; worker: number[] } {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	// Source the parser could not read is source the scan cannot vouch for: an unterminated regex
 	// swallows whatever follows it, so accepting a partial tree would fail open.
@@ -82,17 +108,20 @@ function violations(source: string): { scheme: number[]; close: number[] } {
 	const aliases = localBrowserAliases(file)
 	const scheme: number[] = []
 	const close: number[] = []
+	const worker: number[] = []
 	const lineOf = (node: ts.Node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1
 
 	const visit = (node: ts.Node): void => {
 		if (isSchemeText(node)) scheme.push(lineOf(node))
+		if (testsForWorkerTarget(node)) worker.push(lineOf(node))
 		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "close") {
 			if (closesABrowser(node.expression.expression, aliases)) close.push(lineOf(node))
 		}
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
-	return { scheme: [...new Set(scheme)].sort((a, b) => a - b), close: [...new Set(close)].sort((a, b) => a - b) }
+	const dedupe = (lines: number[]) => [...new Set(lines)].sort((a, b) => a - b)
+	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker) }
 }
 
 /** String and template *text* only — a comment or a regex literal is never one of these nodes. */
@@ -121,14 +150,16 @@ function* e2eSources(dir: string): Generator<{ rel: string; source: string }> {
 function scan() {
 	const scheme: string[] = []
 	const close: string[] = []
+	const worker: Record<string, number> = {}
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
 		const found = violations(source)
 		scheme.push(...found.scheme.map((n) => `${rel}:${n}`))
 		close.push(...found.close.map((n) => `${rel}:${n}`))
+		if (found.worker.length) worker[rel] = found.worker.length
 	}
-	return { scheme, close, visited }
+	return { scheme, close, worker, visited }
 }
 
 /**
@@ -154,6 +185,10 @@ describe("browser seam", () => {
 	test("no browser is closed outside the seam — use ctx.close()", () => {
 		expect(found.close).toEqual([])
 	})
+
+	test("the service-worker target debt is exactly what Firefox still has to unpick", () => {
+		expect(found.worker).toEqual(WORKER_DEBT)
+	})
 })
 
 /** A guard whose scanner silently matched nothing would pass forever; these pin that it bites. */
@@ -161,7 +196,7 @@ describe("browser seam guard", () => {
 	test("flags a scheme literal and a direct close", () => {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: source text under scan, not a template.
 		const src = ["await page.goto(`chrome-extension://${id}/src/popup/index.html`)", "await ctx.browser.close()"].join("\n")
-		expect(violations(src)).toEqual({ scheme: [1], close: [2] })
+		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [] })
 	})
 
 	// A regex ending in `\//` reads as a line comment to any text-based strip, which silently hid
@@ -196,6 +231,20 @@ describe("browser seam guard", () => {
 		expect(violations(inAsync("await page.close()\nawait popup.close()")).close).toEqual([])
 	})
 
+	// The gap a probe found the expensive way: neither of the other two rules sees it, and Firefox
+	// MV3 never produces the target, so such a wait just burns its whole timeout.
+	test.each([
+		["a type comparison", 'const live = t.type() === "service_worker"'],
+		["the comparison reversed", 'const live = "service_worker" === t.type()'],
+		["the loader URL", 'await browser.waitForTarget((t) => t.url().includes("service-worker-loader"))'],
+	])("flags a service-worker target test written as %s", (_label, body) => {
+		expect(violations(inAsync(body)).worker).toEqual([2])
+	})
+
+	test("leaves the words alone outside a target test", () => {
+		expect(violations('const msg = "<no service_worker target>"').worker).toEqual([])
+	})
+
 	// Source the parser rejects is source the scan cannot vouch for; accepting a partial tree is
 	// how an unterminated regex would swallow a violation and report a clean file.
 	test("refuses to vouch for source it cannot parse", () => {
@@ -206,12 +255,12 @@ describe("browser seam guard", () => {
 		const src = ["// chrome-extension:// and browser.close()", "/* chrome-extension://", "   browser.close() */", "const ok = 1"].join(
 			"\n",
 		)
-		expect(violations(src)).toEqual({ scheme: [], close: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [] })
 	})
 
 	test("does not flag the seam's own call shapes", () => {
 		const src = 'await page.goto(extensionUrl(id, "/src/popup/index.html"))\nawait ctx.close()'
-		expect(violations(src)).toEqual({ scheme: [], close: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [] })
 	})
 
 	test("a scheme inside a string still counts, and one inside a regex does not", () => {

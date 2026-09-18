@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { extensionUrl, launchBrowser } from "./browser"
+import { discoverExtensionId, extensionUrl, gotoExtensionPage, launchBrowser, openScratchPage } from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -79,12 +79,7 @@ async function settleLaunchedExtension(
 	browser: Browser,
 	{ freshProfile, waitForLiveness }: { freshProfile: boolean; waitForLiveness: boolean },
 ): Promise<string> {
-	// Discover extension ID from service worker target
-	const workerTarget = await browser.waitForTarget(
-		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
-		{ timeout: 30_000 },
-	)
-	const extensionId = new URL(workerTarget.url()).hostname
+	const extensionId = await discoverExtensionId(browser)
 
 	// The scratch page is ours, not `pages()[0]`: puppeteer can hand back a page
 	// whose frame is half-initialized and detaches during the first navigation
@@ -96,11 +91,8 @@ async function settleLaunchedExtension(
 	for (let attempt = 1; ; attempt++) {
 		let candidate: Page | undefined
 		try {
-			candidate = await browser.newPage()
+			candidate = await openScratchPage(browser, extensionId, { freshProfile })
 			patchPagePolling(candidate)
-			await candidate.goto(extensionUrl(extensionId, "/src/popup/index.html"), {
-				waitUntil: "domcontentloaded",
-			})
 			blankPage = candidate
 			break
 		} catch (err) {
@@ -178,7 +170,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	// fresh install (launchExtension seeded it to true by default).
 	const setupPage = await ctx.browser.newPage()
 	patchPagePolling(setupPage)
-	await setupPage.goto(extensionUrl(ctx.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(setupPage, extensionUrl(ctx.extensionId, "/src/popup/index.html"))
 	await setupPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 	})
@@ -228,7 +220,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	})
 
 	const url = extensionUrl(ctx.extensionId, "/src/onboarding/index.html#/onboarding/welcome")
-	await page.goto(url, { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(page, url)
 	// Wait for Vue mount: welcome CTA must render.
 	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
 	return page
@@ -1230,7 +1222,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 	// counting fallback occurrences in CI artifacts).
 	const FAST_PATH_BUDGET_MS = 2_000
 	const t0 = Date.now()
-	await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(page, popupUrl)
 	let path: "fast" | "fallback" = "fast"
 	try {
 		await page.waitForFunction(
@@ -1241,7 +1233,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		if (!(err instanceof TimeoutError)) throw err
 		path = "fallback"
 		await page.goto("about:blank")
-		await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
+		await gotoExtensionPage(page, popupUrl)
 		await page.waitForFunction(
 			() => window.location.hash !== "#/" && window.location.hash !== "" && !document.querySelector('[data-testid="global-loader"]'),
 			{ timeout: 30_000, polling: 200 },

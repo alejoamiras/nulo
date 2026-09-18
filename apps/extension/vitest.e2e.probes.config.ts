@@ -7,8 +7,12 @@ import networkConfig from "./vitest.e2e.network.config"
  *
  * Their own directory keeps them out of every Chrome shard's glob, and `retry: 0` is the point:
  * a capability that only appears on the second attempt is not a capability.
+ *
+ * The one setting that differs: a probe launches its browser inside the test body, where the
+ * suite's tests launch in a fixture under the five-minute hook timeout, so the body needs the
+ * headroom the hook would have had.
  */
 export default {
 	...networkConfig,
-	test: { ...networkConfig.test, include: ["tests/e2e/probes/*.test.ts"], retry: 0 },
+	test: { ...networkConfig.test, include: ["tests/e2e/probes/*.test.ts"], retry: 0, testTimeout: 180_000 },
 }
