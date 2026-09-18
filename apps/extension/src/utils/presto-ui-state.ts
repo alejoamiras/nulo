@@ -33,7 +33,7 @@ export interface PrestoCopy {
 	title: string
 	detail: string
 	steps?: string[]
-	retry?: "Test" | "Retry" | "Re-test" | "Check for Presto" | "Check again"
+	retry?: "Retry" | "Re-test" | "Check for Presto" | "Check again"
 }
 
 /** The onboarding step has room for the full recovery copy; the settings page is compact. */
@@ -104,12 +104,36 @@ const PERMISSION_BLOCKED_COPY: Record<PrestoSurface, Omit<PrestoCopy, "tone" | "
 	},
 }
 
+type ProbeKind = "idle" | "detecting" | "offline"
+
+/** The states where Presto is not known to be there, so a surface shows the install pitch. */
+export function isPitchKind(kind: PrestoUiState["kind"]): kind is ProbeKind {
+	return kind === "idle" || kind === "detecting" || kind === "offline"
+}
+
+/** `secure-connection-unavailable` qualifies: every diagnosis that keeps that kind parsed a health body. */
+const REACHED_KINDS: ReadonlySet<PrestoUiState["kind"]> = new Set([
+	"available",
+	"downloading",
+	"version-mismatch",
+	"secure-connection-unavailable",
+])
+
 /**
- * Onboarding probes only on a click, because the probe can raise the browser's local-network
- * prompt: `idle` names that prompt before the click that may cause it, and `offline` is the
- * answer to "check", not an unprompted verdict.
+ * Whether a probe got an answer from Presto, which shows the browser let the request through
+ * when it ran. No other outcome shows that: a dismissed prompt and an absent Presto both read
+ * `offline`, and `error` is also what a probe that threw looks like.
  */
-const ONBOARDING_PROBE_COPY: Partial<Record<PrestoUiState["kind"], PrestoCopy>> = {
+export function hasReachedPresto(state: PrestoUiState): boolean {
+	return REACHED_KINDS.has(state.kind)
+}
+
+/**
+ * A first probe runs only on a click, because it can raise the browser's local-network prompt:
+ * `idle` names that prompt before the click that may cause it, and `offline` is the answer to
+ * "check", not an unprompted verdict.
+ */
+const PROBE_COPY: Record<ProbeKind, PrestoCopy> = {
 	idle: {
 		tone: "accent",
 		title: "Already have Presto?",
@@ -142,12 +166,8 @@ function connectedDetail(info: PrestoInfo, surface: PrestoSurface): string {
  * earlier" — it is history, not a statement about approval now.
  */
 export function copyFor(state: PrestoUiState, last?: LastProveOutcome | null, surface: PrestoSurface = "onboarding"): PrestoCopy {
-	const probeCopy = surface === "onboarding" ? ONBOARDING_PROBE_COPY[state.kind] : undefined
-	if (probeCopy) return probeCopy
+	if (isPitchKind(state.kind)) return PROBE_COPY[state.kind]
 	switch (state.kind) {
-		case "idle":
-		case "detecting":
-			return { tone: "pending", title: "Looking…", detail: "" }
 		case "available":
 			if (last?.denial) {
 				return {
@@ -166,8 +186,6 @@ export function copyFor(state: PrestoUiState, last?: LastProveOutcome | null, su
 				detail: "It needs a one-time download for this Aztec version, which starts with your next proof.",
 				retry: "Re-test",
 			}
-		case "offline":
-			return { tone: "off", title: "Presto not detected", detail: "Proofs run in your browser (slower).", retry: "Test" }
 		case "permission-blocked":
 			return { tone: "warn", ...PERMISSION_BLOCKED_COPY[surface], retry: "Retry" }
 		case "secure-connection-unavailable": {
@@ -192,6 +210,7 @@ export function copyFor(state: PrestoUiState, last?: LastProveOutcome | null, su
 export function rowDescriptionFor(state: PrestoUiState, last?: LastProveOutcome | null): string {
 	switch (state.kind) {
 		case "idle":
+			return "In browser · Presto not set up"
 		case "detecting":
 			return "Checking Presto…"
 		case "available":

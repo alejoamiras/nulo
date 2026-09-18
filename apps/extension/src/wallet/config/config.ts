@@ -49,6 +49,12 @@ export const ConfigSchema = z.object({
 	// Bounded so the micro-USD conversion can never overflow to Infinity.
 	incomingDustUsdThreshold: z.number().nonnegative().max(1_000_000).default(0),
 
+	// Proving
+	// Set once a probe the user asked for has reached Presto from this browser, which proves the
+	// loopback permission is granted: only then may Settings probe unasked without raising the
+	// browser's local-network prompt. It describes this browser, so a backup never restores it.
+	prestoReached: z.boolean().default(false),
+
 	// Developer
 	developerMode: z.boolean().default(false),
 	debugMode: z.boolean().default(false),

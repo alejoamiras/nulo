@@ -6,24 +6,25 @@
 import "@alejoamiras/presto-banners/register"
 import { BANNER_EVENTS, clearDismissal } from "@alejoamiras/presto-banners"
 
+/** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
+
 /** Composables */
-import { usePrestoStatus } from "@/composables/usePrestoStatus"
+import { usePrestoCheck } from "@/composables/usePrestoCheck"
 
 /** Utils */
 import { PRESTO_SITE_URL } from "@/presto/config"
-import { copyFor } from "@/utils/presto-ui-state"
+import { copyFor, isPitchKind } from "@/utils/presto-ui-state"
 
 /** The card pitch's dismissal record: `persist-key`:variant:state (`PrestoBanner.persistKey`). */
 const PITCH_DISMISSAL_KEY = "presto:banner:card:offline"
 
-const PITCH_KINDS: ReadonlySet<string> = new Set(["idle", "detecting", "offline"])
-
 const router = useRouter()
-// The probe can raise the browser's local-network prompt, so it runs only from the user's click.
-const { state, detect, dispose } = usePrestoStatus({ autoDetect: false })
+const configService = new ConfigServiceClient()
+const { state, start, check, dispose } = usePrestoCheck(configService)
 
 const copy = computed(() => copyFor(state.value))
-const isPitch = computed(() => PITCH_KINDS.has(state.value.kind))
+const isPitch = computed(() => isPitchKind(state.value.kind))
 const isProbing = computed(() => state.value.kind === "detecting")
 const canContinue = computed(() => state.value.kind === "available" || state.value.kind === "downloading")
 const diagnosis = computed(() => (state.value.kind === "secure-connection-unavailable" ? state.value.diagnosis : undefined))
@@ -33,7 +34,7 @@ const bannerTheme = document.documentElement.getAttribute("theme") === "light" ?
 const pitchRef = useTemplateRef<HTMLDivElement>("pitchRef")
 
 function retry() {
-	void detect({ forceRefresh: true })
+	void check()
 }
 
 function skip() {
@@ -49,6 +50,7 @@ onBeforeMount(() => {
 	// earlier onboarding must not stay hidden from a re-onboarding user. The banner checks the
 	// record when it connects and a later clear triggers no redraw, so this runs before first render.
 	clearDismissal(PITCH_DISMISSAL_KEY)
+	void start()
 })
 
 onMounted(() => {
@@ -59,6 +61,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	pitchRef.value?.removeEventListener(BANNER_EVENTS.retry, retry)
 	pitchRef.value?.removeEventListener(BANNER_EVENTS.dismiss, skip)
+	configService.disconnect()
 	dispose()
 })
 </script>

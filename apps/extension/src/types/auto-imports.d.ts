@@ -117,6 +117,7 @@ declare global {
   const getTxTitle: typeof import('../utils/tx-enrichment').getTxTitle
   const h: typeof import('vue').h
   const hasInFlightSend: typeof import('../utils/in-flight-send').hasInFlightSend
+  const hasReachedPresto: typeof import('../utils/presto-ui-state').hasReachedPresto
   const humanizeErrorKind: typeof import('../utils/journal-state').humanizeErrorKind
   const humanizeMethodName: typeof import('../utils/tx-enrichment').humanizeMethodName
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
@@ -129,6 +130,7 @@ declare global {
   const isHiddenHolding: typeof import('../utils/token-fold').isHiddenHolding
   const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
   const isNewPasswordValid: typeof import('../utils/password').isNewPasswordValid
+  const isPitchKind: typeof import('../utils/presto-ui-state').isPitchKind
   const isPopupSubmitKey: typeof import('../composables/usePopupEntity').isPopupSubmitKey
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
@@ -270,6 +272,7 @@ declare global {
   const usePinnedTokens: typeof import('../composables/usePinnedTokens').usePinnedTokens
   const usePopupEntity: typeof import('../composables/usePopupEntity').usePopupEntity
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
+  const usePrestoCheck: typeof import('../composables/usePrestoCheck').usePrestoCheck
   const usePrestoStatus: typeof import('../composables/usePrestoStatus').usePrestoStatus
   const usePrices: typeof import('../composables/usePrices').usePrices
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
@@ -355,6 +358,9 @@ declare global {
   // @ts-ignore
   export type { UsePopupEntityHandlers, UsePopupEntityOptions } from '../composables/usePopupEntity'
   import('../composables/usePopupEntity')
+  // @ts-ignore
+  export type { PrestoCheckConfig } from '../composables/usePrestoCheck'
+  import('../composables/usePrestoCheck')
   // @ts-ignore
   export type { UseProfileCreateFlowOptions } from '../composables/useProfileCreateFlow'
   import('../composables/useProfileCreateFlow')
@@ -558,6 +564,7 @@ declare module 'vue' {
     readonly getTxTitle: UnwrapRef<typeof import('../utils/tx-enrichment')['getTxTitle']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
     readonly hasInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['hasInFlightSend']>
+    readonly hasReachedPresto: UnwrapRef<typeof import('../utils/presto-ui-state')['hasReachedPresto']>
     readonly humanizeErrorKind: UnwrapRef<typeof import('../utils/journal-state')['humanizeErrorKind']>
     readonly humanizeMethodName: UnwrapRef<typeof import('../utils/tx-enrichment')['humanizeMethodName']>
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
@@ -570,6 +577,7 @@ declare module 'vue' {
     readonly isHiddenHolding: UnwrapRef<typeof import('../utils/token-fold')['isHiddenHolding']>
     readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
     readonly isNewPasswordValid: UnwrapRef<typeof import('../utils/password')['isNewPasswordValid']>
+    readonly isPitchKind: UnwrapRef<typeof import('../utils/presto-ui-state')['isPitchKind']>
     readonly isPopupSubmitKey: UnwrapRef<typeof import('../composables/usePopupEntity')['isPopupSubmitKey']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
@@ -709,6 +717,7 @@ declare module 'vue' {
     readonly usePinnedTokens: UnwrapRef<typeof import('../composables/usePinnedTokens')['usePinnedTokens']>
     readonly usePopupEntity: UnwrapRef<typeof import('../composables/usePopupEntity')['usePopupEntity']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
+    readonly usePrestoCheck: UnwrapRef<typeof import('../composables/usePrestoCheck')['usePrestoCheck']>
     readonly usePrestoStatus: UnwrapRef<typeof import('../composables/usePrestoStatus')['usePrestoStatus']>
     readonly usePrices: UnwrapRef<typeof import('../composables/usePrices')['usePrices']>
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>

@@ -8,16 +8,18 @@
 
 <script setup>
 /** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 
 /** Composables */
-import { usePrestoStatus } from "@/composables/usePrestoStatus"
+import { usePrestoCheck } from "@/composables/usePrestoCheck"
 
 /** Utils */
 import { PRESTO_SITE_URL } from "@/presto/config"
-import { copyFor, detailRowsFor } from "@/utils/presto-ui-state"
+import { copyFor, detailRowsFor, isPitchKind } from "@/utils/presto-ui-state"
 
-const { state, detect, dispose } = usePrestoStatus()
+const configService = new ConfigServiceClient()
+const { state, start, check, dispose } = usePrestoCheck(configService)
 
 const lastProve = ref(null)
 const copy = computed(() => copyFor(state.value, lastProve.value, "settings"))
@@ -27,10 +29,11 @@ const diagnosis = computed(() => (state.value.kind === "secure-connection-unavai
 const executionService = new ExecutionServiceClient()
 
 function retry() {
-	void detect({ forceRefresh: true })
+	void check()
 }
 
 onBeforeMount(async () => {
+	void start()
 	try {
 		lastProve.value = await executionService.getLastProveOutcome()
 	} catch {
@@ -41,6 +44,7 @@ onBeforeMount(async () => {
 
 onBeforeUnmount(() => {
 	executionService.disconnect()
+	configService.disconnect()
 	dispose()
 })
 </script>
@@ -57,7 +61,7 @@ onBeforeUnmount(() => {
 			@retry="retry"
 		/>
 
-		<ItemsContainer v-if="state.kind === 'offline'" title="Presto">
+		<ItemsContainer v-if="isPitchKind(state.kind)" title="Presto">
 			<SettingItem
 				:to="PRESTO_SITE_URL"
 				title="Get Presto"
