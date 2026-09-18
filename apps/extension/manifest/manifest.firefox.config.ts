@@ -24,10 +24,10 @@ export default defineManifest((_env) => ({
 			// string) and rejects the whole add-on as invalid otherwise. It is the add-on's
 			// permanent identity on AMO: never change it once a Firefox build has shipped.
 			id: "wallet@nulo.sh",
-			// AMO requires every new extension to declare what it collects. The wallet stores
-			// keys and settings on the user's own machine and sends nothing anywhere that
-			// identifies them; RPC and price queries carry addresses, which Mozilla's schema
-			// does not class as collection. Revisit before adding telemetry of any kind.
+			// AMO requires every new extension to declare what it collects. "none" is the
+			// owner's call for this build, not a settled classification: Mozilla's taxonomy
+			// grants no exemption for the addresses and transactions this wallet hands to an
+			// RPC node. Settle the classification before submitting to AMO.
 			data_collection_permissions: {
 				required: ["none"],
 			},

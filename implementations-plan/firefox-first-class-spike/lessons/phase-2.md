@@ -22,9 +22,13 @@ FILE_TOO_LARGE  File is too large to parse.  assets/offscreen-BvYQZHn4.js
 
 That chunk is **20.3 MB** (`barretenberg-*.js` 4.1 MB and `public-events-*.js` 4.4 MB are the next largest). It is a pre-existing property of the Firefox bundle — three manifest JSON keys cannot affect a JS chunk's size — and it is unrelated to anything this phase touched.
 
-**What it means:** web-ext cannot parse the file, so it cannot scan it. For an AMO submission that is a blocker, and it is part of the same problem the owner already scoped out (AMO needs a source package plus build instructions precisely because reviewers cannot process bundles like this). It blocks nothing in arcs 3–6: no Firefox test lane runs `web-ext lint`.
+**What it means:** web-ext cannot parse the file, so it cannot scan it — an AMO blocker on its own. Shipping a source package plus build instructions is a *separate* AMO requirement and does not clear it; the chunk has to shrink. It blocks nothing in arcs 3–6: no Firefox test lane runs `web-ext lint`.
 
-**Status:** the manifest half of the gate passes with zero manifest-attributable errors or warnings. The literal "0 errors" text does not pass. Recorded here rather than quietly rewritten — the owner rules on whether to restate the gate as "zero errors attributable to the manifest" or to treat the bundle as in scope.
+**`--metadata` is not a narrower gate — it is a weaker one.** Tested against a deliberately broken manifest (bogus permission, invalid `data_collection_permissions` category, malformed `strict_min_version`): `--metadata` catches both invalid gecko keys as errors and exits non-zero, but reports **zero warnings of any kind**. `MANIFEST_PERMISSIONS` is a *warning*, so the `sidePanel` defect this very phase found would have passed `--metadata` silently. Rejected.
+
+**Proposed amendment (awaiting owner ratification — Phase 2 is NOT marked done against it):** keep the full `--self-hosted` lint and pin its error set to exactly `{FILE_TOO_LARGE on assets/offscreen-*.js}`. That is stricter than the literal "0 errors" reading it replaces — any *new* error still reds the gate, and the one carve-out is named, evidence-backed, and cannot absorb drift. The 20.3 MB chunk carries forward as an AMO-readiness item for the store-launch plan.
+
+**Status:** zero errors and zero **new** warnings are attributable to this diff — it removed one (`sidePanel`), 18 → 17. The four `ICON_SIZE_INVALID` warnings below are manifest-attributable but pre-existing and shared with the Chrome build. The literal "0 errors" text does not pass. Recorded here rather than quietly rewritten.
 
 ## Also surfaced, not fixed
 

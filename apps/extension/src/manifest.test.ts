@@ -117,8 +117,8 @@ describe("firefox manifest", () => {
 		expect(buildGecko().data_collection_permissions).toEqual({ required: ["none"] })
 	})
 
-	// Below 153 a passkey profile cannot be created: WebAuthn from an extension page needs 150+,
-	// and 153 is the tested floor. Lowering this ships a flow that fails on the versions it admits.
+	// Extension-page WebAuthn — how a passkey profile is created — landed in Firefox 150; 153 is
+	// the line the flow is actually exercised on. Lowering this admits versions nothing has run.
 	test("admits only Firefox 153 and newer", () => {
 		expect(buildGecko().strict_min_version).toBe("153.0")
 	})
