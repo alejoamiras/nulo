@@ -11,54 +11,56 @@ budget: recon 2 agents · foreign reviewer /codex high · fable leg on Fable 5.1
 
 Closes release blockers 1–3 of [`legal/README.md`](../../legal/README.md) and the missing
 third-party attribution found while answering blocker 4. Read [`recon.md`](recon.md) first; the
-design below is a consequence of its first section. The alternative shape and the fork-by-fork
-reasoning are in [`competing-outline.md`](competing-outline.md).
+design below is a consequence of its first section. The alternative shape is in
+[`competing-outline.md`](competing-outline.md); round-1 audits and their adjudication are in
+[`audit-codex.md`](audit-codex.md), [`audit-fable.md`](audit-fable.md) and
+[`decisions.md`](decisions.md). **This is revision 2** — Codex rejected revision 1 over a confirmed
+broadcast path outside the guards; the fix is the first item under Architecture.
 
 ## Success criterion
 
 1. `nulo.sh/terms` and `nulo.sh/privacy` resolve, are generated from `legal/*.md` at build time, and
    every published version keeps a permalink.
-2. A new install cannot create or import a profile without an unchecked-by-default "I agree" control
-   being checked; the accepted versions and a timestamp are recorded on the device.
-3. When a **material** version ships, the wallet asks again, lists what changed, and — if the user
-   declines — refuses to send and refuses dApp requests while balances, history, recovery-material
-   export and full-backup export keep working. Existing preview installs (no record) take the same
-   path.
+2. A new install cannot create or import a profile without selecting an unchecked-by-default
+   "I agree to the Terms of Use" control; the accepted version and a timestamp are recorded on the
+   device. (An install that already holds a profile — a preview build — is caught by 3 instead.)
+3. When a **material** Terms version ships, or no record exists, the wallet asks, lists what changed,
+   and — if the user declines — **broadcasts no transaction and serves no dApp request**, while
+   balances, history, recovery-phrase export, account export and full-backup export (password and
+   passkey) keep working.
 4. Settings → About shows what was accepted and when, and opens the third-party notices.
-5. The extension zip contains `THIRD-PARTY-NOTICES.txt` covering exactly what is bundled, and the
-   build fails on a licence outside the allowlist.
+5. The extension zip contains `THIRD-PARTY-NOTICES.txt` covering every package with a rendered
+   module in any emitted chunk plus a reviewed list of vendored code, and the build fails on a
+   licence outside the allowlist.
 6. All of it is held by tests at the repo's existing bar: unit, component, smoke e2e, landing unit.
 
 ## Out of scope
 
-- Any edit to the legal *text* beyond adding a machine-readable version line (owner + counsel).
 - Filling the nine `«FILL»` placeholders; the Chrome trader-disclosure decision; a Spanish version.
 - Tests pinning the privacy policy's factual claims (offered in Phase 0, not selected) → follow-up.
-- The Presto MIT relicense itself (another session). **Arc C is blocked on it** — see Delivery.
-- `apps/tools`, `packages/bridge-core` (being removed in another worktree), Firefox
+- The Presto MIT relicense itself (another session), and upstream licence metadata for
+  `@aztec/sqlite3mc-wasm`. **Arc C is blocked on both** — see Delivery.
+- `apps/tools`, `packages/bridge-core` (being removed elsewhere), Firefox
   `data_collection_permissions` (another worktree).
-- Storage migrations: pre-production rule applies; the new key simply joins the launch baseline.
+- Storage migrations: pre-production rule applies; the new key joins the launch baseline.
 
 ## UI impact — owner sign-off required per surface
 
 Mockups: the design canvas published in this session (boards `Gate`, `ReAccept`, `NotNow`,
-`SettingsAbout`). "Approved" below means the owner approved that board in conversation; the
-approval gate at the end of this plan asks for the quote to paste into the PR body.
+`SettingsAbout`). No pending surface is implemented until its sign-off is quoted in this file.
 
 | # | Surface | Before | After | Sign-off |
 |---|---|---|---|---|
-| U1 | `onboarding/terms` (new) | — | `Gate` board: "Before you start", four numbered risk points, one unchecked box, Continue disabled until checked, no step indicator | approved board |
-| U2 | `onboarding/pages/welcome.vue` footer | "By continuing, you are confirming that you read and agree to…" | sentence removed; both CTAs route through U1 | **pending** — follows from U1 but changes copy |
-| U3 | `popup/pages/register.vue` footer | same browsewrap sentence | replaced by plain "Terms of Use · Privacy Policy" links | **pending** |
-| U4 | Popup re-acceptance sheet (new) | — | `ReAccept` board: version + effective date, numbered changes, "Read the full Terms ›", checkbox, Accept / Not now | approved board |
-| U4b | Same sheet, no prior record (preview installs) | — | same layout; heading "Review the terms", body = the four risk points from U1, no "changed since" line | **pending** — variant not drawn |
-| U5 | Declined screen (new) | — | `NotNow` board: "Your keys are still yours", ✓ balances/history, ✓ recovery material, ✓ full backup, ✗ send / approve, buttons Review · Export a backup | approved board |
-| U6 | `popup/pages/send.vue` while not accepted | Send enabled | Send disabled + one-line banner "Accept the Terms to send" with a Review button | **pending** — implied by U5, not drawn |
-| U7 | Settings → About, Legal group | two rows | `SettingsAbout` board: Terms, Privacy, "You accepted these — Terms v1.0 · Privacy v1.0 — date" + "Kept on this device…"; when not accepted the record row reads "Not accepted — Review" | approved board (+ **pending** for the not-accepted variant) |
-| U8 | Settings → About, "Open-source licences" row (new) | — | one `SettingItem` opening the notices file in a tab | **pending** — decided after the mockups |
-| U9 | `nulo.sh/terms`, `/privacy` | 404 | landing shell (header, `page.css` type scale), document body, version + effective date, "Previous versions" list; a DRAFT banner + `noindex` while any `«FILL»` survives | **pending** |
-
-No pending surface is implemented until its sign-off is quoted in this file.
+| U1 | `onboarding/terms` (new) | — | `Gate` board, with **one copy change forced by the Terms themselves**: the checkbox reads "I understand the four points above, and **I agree to the Terms of Use**." with a separate line "The Privacy Policy explains what leaves your device." The board's "…and the Privacy Policy" contradicts Terms § 23 (acceptance is not processing consent) and § 3's literal label | **re-opened** |
+| U2 | `onboarding/pages/welcome.vue` footer | browsewrap sentence | removed; both CTAs route through U1 | **pending** |
+| U3 | `popup/pages/register.vue` footer | same sentence | plain "Terms of Use · Privacy Policy" links | **pending** |
+| U4 | Popup re-acceptance sheet (new) | — | `ReAccept` board; primary button reads **Continue** (Terms § 3's label), not "Accept and continue" | approved board + **pending** label change |
+| U4b | Same sheet, no prior record | — | heading "Review the terms", body = the four risk points, same checkbox | **pending** |
+| U5 | Declined screen (new) | — | `NotNow` board | approved board |
+| U6 | `popup/pages/send.vue` while not accepted | — | one-line banner "Accept the Terms to send" + Review button; fee estimation paused | **pending** |
+| U7 | Settings → About, Legal group | two rows | `SettingsAbout` board, reworded to match the mechanism: "You accepted the Terms — v1.0 — date"; Privacy shown as "Privacy Policy v1.0"; not-accepted variant "Not accepted — Review"; a non-blocking "Privacy Policy updated" notice on a privacy-only change | approved board + **pending** rewording/variants |
+| U8 | Settings → About, "Open-source licences" row (new) | — | one `SettingItem` opening the notices file in a tab | **pending** |
+| U9 | `nulo.sh/terms`, `/privacy` | 404 | landing shell, document body, version + effective date, "Previous versions"; DRAFT banner + `noindex` while any `«FILL»` survives | **pending** |
 
 ## Architecture
 
@@ -68,204 +70,229 @@ legal/*.md ──┐
 legal/archive┘        │                │
                       ▼                ▼
         apps/landing prebuild      apps/extension
-        Bun.markdown → HTML        UI: gate page · sheet · declined screen · About
-        /terms /privacy            SW: assertLegalAcceptanceCurrent()
-        /terms/v1.0/ …                  ├─ ExecutionService.executeTransfer
-                                        ├─ ExecutionService.executeOperations
-                                        └─ head of WalletSdkDispatcher guard ladder (injected)
+        Bun.markdown → HTML        UI ──client──► LegalAcceptanceService (SW, sole writer)
+        /terms /privacy                                  │ assertCurrent()
+        /terms/v1.0/ …                                   ▼
+                          THE WALL   ExecutionCoordinator.sendTxTask   (only node.sendTx in src/wallet)
+                          early      executeTransfer · executeOperations · executeSendTransaction
+                          dApp       background.ts before dispatcher.dispatch · pending-discovery handler
 ```
 
-**`@nulo/legal`** (new workspace package, no runtime deps, no `chrome.*`):
-`manifest.ts` — hand-authored `{ terms, privacy }`, each a list of `{ version, effective, material,
-changes: string[] }`, plus `RISK_POINTS` (the four lines of U1). `status.ts` —
-`acceptanceStatus(record, manifest): "current" | "stale" | "missing"`; a record is current iff, for
-both documents, its accepted `major.minor` ≥ the newest **material** version's `major.minor`; any
-unparsable record is `missing`. `pendingChanges(record)` returns the `changes` of every material
-version newer than the accepted one. `permalink(doc, version)`.
+**The wall is at broadcast.** Revision 1 guarded the entry points it had found; Codex found a third
+(`AuthRegistryService` → `executeSendTransaction`, `auth-registry/service.ts:283, :337`). Every path
+— wallet send, dApp send, authwit revoke, registry toggle — converges on
+`ExecutionCoordinator.sendTxTask` (`execution/execution-coordinator.ts:281-292`), the only
+`node.sendTx` under `src/wallet`. The guard is awaited there **before** `assertLive()`: that
+method's documented invariant forbids any await between the liveness check and the send. Guards at
+the three `ExecutionService` entry points remain as *early refusals* so nobody proves for minutes and
+then gets refused; they are not what makes the property true. A test pins that `node.sendTx(` occurs
+exactly once under `src/wallet` and that the file containing it calls the guard.
 
-**Record.** `chrome.storage.local["nulo:legal:accepted"]` =
-`{ termsVersion, privacyVersion, acceptedAt, surface: "onboarding" | "popup", history: [...] }`
-(`history` append-only, capped at 20). Device-local, survives profile reset exactly like
-`nulo:onboarding:completed`, never in a backup. UI writes through `@/utils/storage` via one helper,
-`@/utils/legal-acceptance.ts`; the store exposes it the way `createOnboardingFlag()` does and listens
-to `chrome.storage.onChanged` so the popup notices an acceptance made in the onboarding tab.
+**`@nulo/legal`** (new leaf package; no runtime deps, no `chrome.*`). `manifest.ts` — hand-authored
+per document: `{ version, effective: string | null, material, changes: string[] }[]`, plus
+`RISK_POINTS`. Invariants, all tested: versions strictly increase; a **material version always bumps
+minor or major** (so `major.minor` comparison can never swallow a material patch); every material
+version has ≥ 1 change. `status.ts` — `acceptanceStatus(record): "current" | "stale" | "missing"`
+from **the Terms only** (Terms § 20 promises re-acceptance for the Terms; § 23 says acceptance is not
+privacy consent). An accepted version *newer* than the manifest (extension downgrade) is `current`.
+Unparsable ⇒ `missing`. `pendingChanges(record)` accumulates across skipped versions.
+`permalink(doc, version)`. The current version is **parsed from line 3 of each markdown file** by the
+package's tests and the landing build — no front matter, no plumbing edit to the legal text.
 
-**Enforcement (service worker).** `wallet/services/legal/guard.ts` exports
-`assertLegalAcceptanceCurrent()`: reads the key raw (SW context, allowlisted), no cache, and throws
-`TermsAcceptanceRequiredError` (new, `@nulo/extension-messaging/errors`) unless status is `current`.
-**Fail direction:** storage read error or corrupt record ⇒ throws ⇒ sending refused. It is called
-first thing in `executeTransfer` and `executeOperations`, and is injected into `WalletSdkDispatcher`
-as an optional `preDispatch` port invoked at the head of `enforceMethodAndScope` — `wallet-bridge`
-learns nothing about storage or legal. While not accepted, **every** dispatcher method is refused;
-`toWalletResponseError` maps the error to code `4100`, `walletErrorCode:
-"TERMS_ACCEPTANCE_REQUIRED"`, message "Open Nulo and accept the Terms to continue."
+**Record.** `chrome.storage.local["nulo:legal:accepted"]` = `{ termsVersion, privacyVersionShown,
+acceptedAt, surface, history }`; `history` is the last 20 entries. Device-local, survives profile
+reset, never in a backup. `acceptedAt` is informational: nothing orders or expires by it.
 
-**Why export cannot break:** the guard is reachable only from those three call sites; the session,
-the router's auth gate and every export service are untouched. A structural test pins it (Phase 3).
+**`LegalAcceptanceService`** (service worker, `wallet/services/legal/`): the **sole writer**.
+`accept(surface)` runs under the service lock, stamps versions from its own compiled manifest, never
+replaces a newer accepted version with an older one, awaits the storage write before resolving, and
+emits `onAcceptanceChanged`. `getStatus()`, `assertCurrent()` (throws `TermsAcceptanceRequiredError`,
+new in `@nulo/extension-messaging/errors`; storage failure or corrupt record ⇒ throws). No cache.
+The UI holds a client through one C1 composable, `useLegalAcceptance(client)` — status starts
+`"loading"`, so neither the sheet nor the banner flashes — and nothing is added to `app.store`
+(its shape is pinned by `stores/app.store.shape.pins.test.ts`).
 
-**Links.** The extension opens the **versioned permalink** of the version compiled into it
-(`nulo.sh/terms/v1.0/`), never bare `/terms` — otherwise a site updated ahead of the extension shows
-text the user is not being asked to accept. One `openLegalDocument(doc)` helper replaces the three
-duplicated `handleOpen` copies.
+**dApp side.** `await legal.assertCurrent()` inside the existing `try`, immediately before
+`dispatcher.dispatch(...)` at `wallet-sdk/background.ts:1082` — one read per top-level request, the
+existing catch maps it through `toWalletResponseError` (code `4100`, `walletErrorCode:
+"TERMS_ACCEPTANCE_REQUIRED"`, "Open Nulo and accept the Terms to continue."), and
+`packages/wallet-bridge` is untouched. **New** discovery sessions are refused at the
+pending-discovery handler; an *existing* session keeps transport-level discovery, which moves
+nothing and is what lets the dApp receive the typed error. Refusals log `{ operation, status }` at
+`debug`.
 
-**Landing.** `scripts/build-legal.ts` (prebuild + predev, Bun runtime) reads `legal/*.md` and
-`legal/archive/<doc>-<version>.md`, renders with the built-in `Bun.markdown.html` (verified on the
-pinned 1.4 line: GFM tables render; raw HTML passes through, so the script **rejects any `<` tag in
-source**), wraps in a shared template, and writes `terms.html`, `privacy.html`,
-`terms/v<version>/index.html`, … as gitignored generated entries. `vite.config.ts` gains
-`rollupOptions.input` computed from the manifest. `sitemap.xml` gains the two canonical URLs.
-No inline script (CSP is `script-src 'self'`).
+**Sheet placement.** `LegalAcceptanceSheet` mounts in `popup/app.vue`, z-index below
+`GlobalLoader`'s 9999 so both barriers win. It renders only when status ∈ {stale, missing}, the user
+is logged in, and the route is **not** `windows-*` (each dApp/passkey window is its own app
+instance, and navigating one away abandons its request), `popup-auth`, `popup-register`,
+`/popup/legal/*`, or `/popup/settings/security/export/*`. "Not now" writes
+`chrome.storage.session["nulo:legal:dismissed"] = <termsVersion>` — once per browser session — then
+routes to the declined screen. The export pages therefore cannot be covered by construction, which
+matters most for passkey full backup: its WebAuthn ceremony runs **in-page** (`full.vue:147`).
 
-**Notices.** A Vite plugin in the shared extension config, `generateBundle` hook: map every module
-id Rollup actually bundled to its owning `package.json` (walk up from the resolved file), add an
-explicit `EXTRA_PACKAGES` list for assets emitted outside the module graph (the bb wasm, the
-sqlite3mc wasm), collect `{ name, version, license, licence text, NOTICE text }`, emit
-`THIRD-PARTY-NOTICES.txt` via `this.emitFile({ fileName })`. Build **fails** on a licence outside
-`ALLOWED` (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, CC0-1.0, Unlicense,
-BlueOak-1.0.0, MPL-2.0) or on a package with neither a licence file nor an SPDX id we hold a
-template for. Pure core in `scripts/third-party-notices/` with its own tests; the plugin is a shell.
+**Links.** The extension opens the **versioned permalink** of the version compiled into it, never
+bare `/terms`. One `openLegalDocument(doc)` helper replaces the three duplicated `handleOpen` copies.
+
+**Landing.** `scripts/build-legal.ts`, chained into the existing single `prebuild` / `predev` slots
+with `&&`. It asserts `typeof Bun.markdown?.html === "function"` (Cloudflare's Bun is pinned by a
+dashboard variable, not by the repo), rejects any raw tag in source, renders with
+`{ headings: { ids: true } }`, rewrites `](terms.md)` / `](privacy.md)` to site paths, and writes
+gitignored `terms.html`, `privacy.html`, `terms/v<version>/index.html`, …; `vite.config.ts` gains a
+computed `rollupOptions.input`; `sitemap.xml` gains the two canonical URLs; the landing tsconfig
+gains Bun types. **The landing has never been built in CI** — `quality-status` gains a landing
+test + build job so the first real build is not production.
+
+**Notices** (`packages/third-party-notices`, a workspace package so `test:all` runs its tests; the
+Vite plugin is a thin shell registered for the main build **and** worker builds). Input is the
+**rendered** module set of each emitted chunk (`chunk.modules`), not every loaded module. Each module
+maps to its owning `package.json`; a reviewed `VENDORED` list covers what no module walk can see —
+third-party code embedded inside a package (the Buffer shim carries `base64-js` and `ieee754`) and
+assets emitted outside the graph (the bb and sqlite3mc wasm) — each with a source URL. SPDX
+expressions are evaluated properly (`OR`: any branch allowed; `AND`: every branch allowed).
+`ALLOWED` = MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, CC0-1.0, Unlicense,
+BlueOak-1.0.0, MPL-2.0, **Zlib** (`pako` is `(MIT AND Zlib)`). A package with no licence metadata
+needs a hand-verified `OVERRIDES` entry with provenance; the generator never synthesises a copyright
+line. Output is byte-stable. Build fails on anything disallowed, missing, or unreviewed.
 
 ## Phases
 
-Each phase ends green on its gates before the next starts. `G-base` = `bun run lint` +
-`bun run typecheck:all`.
+`G-base` = `bun run lint` + `bun run typecheck:all`. `bun run test` is the extension's full unit +
+component run (`test:components` filters `src/components` only and would miss onboarding).
 
 ### Arc A — source of truth + published pages
 
-**P1 · `@nulo/legal`.** Create the package; add `version:`/`effective:` front-matter lines to
-`legal/terms.md` and `legal/privacy.md` (the only text edit); create `legal/archive/` with a README.
-Tests: status truth table (current / patch-newer / minor-newer / major-newer / missing / garbage /
-one doc stale); `pendingChanges` accumulates across skipped versions; **manifest ↔ markdown pin** —
-front-matter version equals the manifest head, every manifest version has a row in the doc's
-`## Version history` table, every non-head version has an archive file, every material version has
-≥ 1 change. Add `"license": "Apache-2.0"` to every workspace `package.json`.
-Gates: `G-base`, `bun run --cwd packages/legal test`.
+**P1 · `@nulo/legal`.** Package, manifest, status, `legal/archive/` + README, `"license":
+"Apache-2.0"` on every workspace `package.json`, CI path filters gain `packages/legal/**` and
+`legal/**`. Tests: status truth table (current / patch-newer / minor-newer / major-newer / accepted
+newer than manifest / missing / garbage); manifest invariants above; **manifest ↔ markdown pin** —
+line-3 version equals the manifest head, every version has a `## Version history` row, every non-head
+version has an archive file; **label pin** — the literal strings "I agree to the Terms of Use" and
+"Continue" exported by the package appear verbatim in `legal/terms.md` § 3.
+Gates: `G-base`, `bun run --cwd packages/legal test`, `bun run test:ci-gating`.
 
-**P2 · landing pages.** `build-legal.ts`, template, multi-entry config, sitemap, `.gitignore`.
-Tests (`apps/landing/scripts/build-legal.test.ts`): headings get stable anchor ids; tables survive;
-source containing a raw tag is rejected; `«FILL»` ⇒ DRAFT banner + `noindex`, none ⇒ neither; one
-output per manifest version; canonical link per page; output contains no `<script`. 
-Gates: `G-base`, `bun run --cwd apps/landing test`, `bun run --cwd apps/landing build` then assert
-`dist/terms.html`, `dist/privacy.html`, `dist/terms/v1.0/index.html` exist. Manual: `vite preview`,
-confirm the CSP header and that `/terms/v1.0/` resolves (a dotted path segment is the one thing
-to eyeball on a Cloudflare preview deploy before merge).
+**P2 · landing pages + CI.** Tests (`apps/landing/scripts/build-legal.test.ts`): heading ids stable;
+tables survive; raw tag rejected; `.md` links rewritten (no `href` ending `.md` in output);
+`«FILL»` ⇒ DRAFT + `noindex`, and a null `effective` renders as "not yet effective"; one output per
+manifest version; canonical per page; no `<script`.
+Gates: `G-base`, `bun run --cwd apps/landing test`, `bun run --cwd apps/landing build` + assert the
+three outputs exist, `bun run lint:actions`. Manual before merge: a Cloudflare preview deploy
+resolves `/terms/v1.0/` (documented to work for folder indexes; fallback `v1-0`).
 
 ### Arc B — acceptance in the extension
 
-**P3 · record + enforcement (no UI).** `legal-acceptance.ts` helper + store wiring; `guard.ts`;
-the error class + envelope mapping; the three call sites; dispatcher `preDispatch` port.
-Tests: helper writes the compiled versions and appends history; guard — current passes, stale /
-missing / corrupt / storage-throws all refuse; envelope maps to `4100` + code and leaks nothing else;
-dispatcher — `preDispatch` runs before `assertKnownMethod`, a refusal reaches no handler, absence of
-the port changes nothing (existing `dispatcher.test.ts` stays green untouched); `ExecutionService` —
-both entry points refuse before `captureFence()`. **Structural pin:** a test that greps
-`settings/security/export/*.vue` and the backup service graph for `legal/guard` and
-`TermsAcceptanceRequiredError` and expects zero hits.
-Gates: `G-base`, `bun run test`.
+**P3 · service, wall, fixtures (no UI).** `LegalAcceptanceService` + client; the error + envelope
+mapping; the guard at `sendTxTask`, the three early refusals, `background.ts`, the discovery handler.
+**Fixtures land here**, because this is the commit that first breaks every existing caller:
+`launchExtension({ legal = "current" })` seeds a record built from `@nulo/legal` (never a literal),
+accepts `"missing" | "stale" | "corrupt"`, and honours the choice across relaunch; unit/composition
+harnesses get a current record by default.
+Tests: service — sole-writer serialisation (two concurrent `accept()` ⇒ two history entries); never
+downgrades; resolves only after the write; `assertCurrent` refuses on stale / missing / corrupt /
+storage-throws. Wall — with a refusing legal fake, `sendTxTask` rejects and `node.sendTx` is never
+called, for each of transfer, dApp send, **authwit revoke and registry toggle**; early refusals reach
+no executor. Envelope — `4100` + code, nothing else leaks. Background — a refused request never
+reaches `dispatch`; a batch costs one read. **Structural pins:** `node.sendTx(` occurs once under
+`src/wallet`; the set of files referencing `assertCurrent` equals the intended list exactly.
+Gates: `G-base`, `bun run test`, `bun run test:e2e` (proves the seed keeps the suite green).
 
-**P4 · onboarding gate (U1, U2).** `onboarding/components/LegalConsent.vue` — the four points,
-checkbox, links; emits `accept`. It is a component, not page logic, because onboarding *pages* carry
-no tests here and components do. `onboarding/pages/terms.vue` is a thin shell:
-`?next=create|import`, writes the record, `router.push`. `welcome.vue` CTAs route to it. An
-onboarding `router.beforeEach` sends `create`/`import` to `terms` when status ≠ current, so editing
-the hash does not skip it. No `StepIndicator` on the gate ⇒ **no renumbering**.
-Component tests (≥ 10): unchecked by default; Continue disabled then enabled; `accept` not emitted
-while unchecked (click and Enter); Space/Enter toggle the box; `tabindex="0"`, never positive; links
-call the open handler with the permalink and do not toggle the box; four points render from
-`RISK_POINTS`; testids present.
-Gates: `G-base`, `bun run test:components`, `bun run test`.
+**P4 · onboarding gate (U1, U2).** `components/composite/LegalConsent.vue` — L3, props-only: points,
+label, link handler; emits `accept`. `onboarding/pages/terms.vue` is a thin shell (`next` validated
+as `"create" | "import"`), awaits `legal.accept("onboarding")` before `router.push`. Onboarding
+`beforeEach` is an **allowlist**: `welcome` and `terms` are open, every other route needs a current
+record — which also closes the `hydrateKnownProfile()` → `/learn` path. No `StepIndicator` on the
+gate ⇒ no renumbering. Update `openOnboarding()` callers that click past Welcome,
+`gotoOnboardingImport()`, add `acceptOnboardingTerms(page)`.
+Component tests (≥ 10, written once, serving U1 and U4b): unchecked by default and never restored;
+Continue disabled → enabled; no `accept` while unchecked (click and Enter); Space/Enter toggle;
+`tabindex="0"`; links call the handler with the permalink and do not toggle; points render from
+props; label equals the package constant; `legal-*` testids.
+Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
-**P5 · popup sheet, declined screen, send (U3–U6).** `components/legal/LegalAcceptanceSheet.vue`
-(cross-shell location per the layer rules), mounted in `popup/app.vue` beside the two barriers but
-**dismissible**, shown once per popup session when status ≠ current and the user is logged in, never
-on `popup-auth` / `popup-register` / passkey windows. "Not now" → `/popup/legal/declined` (U5).
-`send.vue`: `isAllowedToSend` gains the status term; banner + Review button. `register.vue` footer.
-Component tests (≥ 10 for the sheet): both variants (changes list vs risk points); cumulative
-changes; Accept disabled until checked; `accept` / `dismiss` events; not rendered when current;
-declined screen's two buttons route correctly.
-Gates: `G-base`, `bun run test:components`, `bun run test`, `bun run test:e2e` (must still be green
-— this is where the fixture seed below lands).
+**P5 · popup sheet, declined screen, send (U3–U6).** `components/LegalAcceptanceSheet.vue`
+(store/route-bound, beside the barriers; 4 tests: variant choice, events, route suppression list,
+nothing while `"loading"`); `popup/pages/legal/declined.vue`; `send.vue` banner + estimation pause;
+`register.vue` footer. One unit test on the `onAcceptanceChanged` listener for the two-popups case.
+Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
-**P6 · Settings → About (U7).** Record row, not-accepted variant, links via `openLegalDocument`.
-Gates: `G-base`, `bun run test`.
+**P6 · Settings → About (U7).** Gates: `G-base`, `bun run test`.
 
-**P7 · e2e.** Fixtures first: `launchExtension()` seeds a current record built from `@nulo/legal`
-(never a literal — it must not go stale at the next version); `openOnboarding()` clears it alongside
-`onboardingCompleted`; new `acceptOnboardingTerms(page)`; update the `onboarding-tab.test.ts` call
-sites that click past Welcome and `gotoOnboardingImport()`.
-New smoke spec `tests/e2e/legal-acceptance.test.ts`, testid-only:
-1. fresh onboarding — `onboarding-terms-continue` disabled; check; continue; lands on create; the
-   stored record carries the manifest's versions and a timestamp within the test window;
-2. hash-jump to `#/onboarding/create` without acceptance lands on `#/onboarding/terms`;
-3. About row text (the `profile-rename.test.ts` idiom) contains both versions;
-4. seeded stale record → sheet appears → Not now → declined screen; Send is disabled; **seed export
-   reveals the phrase** and **full-backup export produces a file**; balances render;
-5. from 4, Review → accept → Send enabled; record's history has two entries;
-6. no record + existing profile (the preview-install path) → the U4b variant → accept.
-One network-suite test (proverless pool): connected playground, record made stale, a dApp call
-rejects with `TERMS_ACCEPTANCE_REQUIRED`, accept, the same call succeeds. The smoke suite has no
-dApp (verified: no playground in `global-setup-smoke.ts`), so this is the only end-to-end proof of
-the dApp leg; dispatcher + envelope unit tests carry it otherwise.
-Gates: `G-base`, `bun run test:e2e` ×2 consecutive green at `retry: 0` for the new spec,
+**P7 · e2e.** New smoke spec `tests/e2e/legal-acceptance.test.ts`, testid-only; **lock-out proofs
+use hit-tested pointer clicks** (`page.mouse` at the element's centre), because `clickByTestId`
+dispatches `target.click()` and would click through a covering sheet. Extract the seed-export flow
+inlined at `import-paths.test.ts:59-82` into a helper; full backup via `helpers/backup-export.ts`.
+1. fresh onboarding — `legal-consent-continue` disabled; check; continue; lands on create; stored
+   record carries the manifest's Terms version;
+2. hash-jump to `#/onboarding/create` and to `#/onboarding/learn` without a record ⇒ `#/onboarding/terms`;
+3. About row text (the `profile-rename.test.ts` idiom) contains the accepted version;
+4. `legal: "missing"` + existing profile ⇒ sheet (U4b) ⇒ Not now ⇒ declined screen;
+   `send-legal-banner` present; `legal-sheet` absent on the export routes; **seed export reveals the
+   phrase, account export and full backup produce files**; balances render; relaunch ⇒ still declined;
+5. same with `legal: "corrupt"` — the fail-closed direction still leaves export working;
+6. passkey profile (virtual authenticator, as `passkey-backup.test.ts`): full backup completes its
+   in-page ceremony while declined;
+7. from 4: Review ⇒ Continue ⇒ `send-legal-banner` absent; history has one entry.
+The stale-with-changes rendering is carried by component tests (it needs a second manifest version,
+which a smoke run cannot inject without a production seam). One network-suite test, proverless pool:
+connected playground, `legal: "stale"`, a dApp call rejects with `TERMS_ACCEPTANCE_REQUIRED` and a
+wallet-UI send is refused; accept; both succeed.
+Gates: `G-base`, new smoke spec green twice consecutively at `retry: 0`, `bun run test:e2e`,
 `bun run e2e:agent tests/e2e/network/<new spec>`, `bun run audit:vue`.
 
-### Arc C — third-party notices (blocked until the Presto MIT versions are in `bun.lock`)
+### Arc C — third-party notices (blocked)
 
-**P8 · generator + policy.** Pure core + tests: owning-package resolution; dedupe by
-`name@version`; licence-file discovery (`LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`); SPDX
-expression handling (`(MIT OR Apache-2.0)` passes when any branch is allowed); disallowed and
-missing both throw with the package named; deterministic ordering (byte-stable output).
-**P9 · wire-up + About row (U8).** Plugin in the shared config; extend
-`presto-core-deps.test.ts` to assert `license === "MIT"` for the three Presto packages; a build
-assertion in `_build-extension.yml` that both zips contain the file and that it names
-`@aztec/bb.js` and `vue` (a canary that the graph walk is not empty).
-Gates: `G-base`, `bun run test`, `bun run build:chrome`, `bun run build:firefox`, `bun run
-lint:actions`, `bun run test:ci-gating`.
-If the lockfile still resolves AGPL Presto versions when Arc C is reached, the arc **waits**. The
-policy check is not softened and no exception list is added: a notice file declaring AGPL for code
-that is meant to be MIT would be a false statement inside the product.
+Blocked until (a) the Presto MIT versions are in `bun.lock` and (b) `@aztec/sqlite3mc-wasm`'s
+provenance is established well enough to write an honest `OVERRIDES` entry. Neither the policy nor
+the allowlist is softened to unblock it.
+
+**P8 · generator + policy.** Tests: rendered-module extraction from a fixture bundle (a tree-shaken
+module is excluded); owning-package resolution; dedupe; licence-file discovery; SPDX `OR` / `AND` /
+nested; disallowed, missing and un-overridden all throw naming the package; `VENDORED` entries
+require a source URL; byte-stable output.
+**P9 · wire-up + About row (U8).** Plugin in main and worker builds; extend
+`presto-core-deps.test.ts` to assert `license === "MIT"` for the three Presto packages;
+`_build-extension.yml` asserts both zips contain the file and that its package set is a superset of a
+checked-in expected-minimum list (a two-name canary proves almost nothing).
+Gates: `G-base`, `bun run test:all`, `bun run build:chrome`, `bun run build:firefox`,
+`bun run lint:actions`, `bun run test:ci-gating`.
 
 ## Security & adversarial considerations
 
-- **What this gate is and is not.** It is a consent record, not an access control against the device
-  owner: anyone who can write `chrome.storage.local` already owns the wallet. The threat is not
-  bypass by the user; it is **lock-out caused by us**. Hence: enforcement touches three call sites
-  and nothing session- or route-shaped; every failure mode of the guard blocks *sending only*.
-- **Fail direction is asymmetric on purpose.** Corrupt/missing record ⇒ cannot send, can always
-  view/export/re-accept. There is no state in which the guard can prevent acceptance itself: the
-  sheet and the gate write the record without calling any guarded path.
-- **dApp-facing oracle.** `TERMS_ACCEPTANCE_REQUIRED` tells any page that probes the wallet that the
-  user has not accepted. That is one bit about the install, not about an account, and it is what
-  makes the dApp able to tell the user what to do. Accepted; the refusal happens before method
-  validation, so it discloses nothing about capabilities or accounts.
-- **In-flight interactions across an update.** An interaction approved under v1.0 whose execution
-  lands after a material v1.1 update is refused at `executeOperations`. Correct, and the reason the
-  guard is in the service and not only in the UI.
-- **Hostile input.** The record is parsed as untrusted (it can arrive via a tampered profile dir):
-  shape-checked, versions regex-checked, anything else is `missing`. Nothing from it is rendered as
-  HTML; the About row renders two version strings and a date through text interpolation.
-- **Landing XSS / supply chain.** First-party markdown only; raw tags rejected at build; no inline
-  script; CSP unchanged. No new dependency anywhere in the arc (`Bun.markdown` is built in; the
-  notices generator is ours) — nothing to age-gate, nothing new to audit.
-- **Logging.** The guard logs `{ operation, status }` at `debug`; never the record, never a URL.
-- **Clickjacking / pre-checked consent.** The box is never pre-checked, never restored from state,
-  and the component test pins it; `frame-ancestors 'none'` already covers the landing.
+- **What this gate is.** A consent record, not an access control against the device owner. The
+  threats are (1) **lock-out caused by us** and (2) **a broadcast that escapes**. (1) is answered by
+  never touching the session and by structurally excluding the sheet from export routes; (2) by
+  putting the wall on the single broadcast line and pinning that it stays single.
+- **Fail direction is asymmetric.** Corrupt / missing / unreadable ⇒ no broadcast, no dApp service;
+  view, export and *accepting* always work — `accept()` calls no guarded path.
+- **In-flight work across an update.** An interaction approved under v1.0 that reaches broadcast after
+  a material update is refused at the wall. That is the case only a service-side wall catches.
+- **dApp-facing oracle.** `TERMS_ACCEPTANCE_REQUIRED` leaks one bit about the install, before any
+  method or capability validation. Accepted: it is what lets a dApp tell the user what to do.
+- **Hostile input.** The record is shape- and regex-checked; anything else is `missing`. Only version
+  strings and a date are rendered, via text interpolation.
+- **Landing.** First-party markdown, raw tags rejected, no inline script, CSP unchanged.
+  **No new dependency anywhere in this plan.**
+- **Logging.** `{ operation, status }` at `debug`; never the record, never a URL.
+- **Consent hygiene.** Never pre-checked, never restored; labels pinned to the Terms' own wording.
 - **Evidence honesty.** The record proves a click on this device at a time the device reported. The
-  Terms must not claim more; § 3 already says "recorded on your device."
+  documents must say so and no more — see the first Ask.
 
 ## Assumptions and asks
 
-- **Ask (UI):** sign-off for U2, U3, U4b, U6, U7's not-accepted variant, U8, U9.
-- **Ask:** refusing **all** dApp methods while not accepted (not only approval-requiring ones). It
-  is the smallest rule and the hardest to get wrong; the cost is that a connected dApp's read calls
-  fail too until the user accepts.
+- **Ask (text):** add to Terms § 3 one sentence — acceptance is recorded on your device with the
+  version and time — and to privacy § 3 one storage-table row for that record. Without them the
+  product does something the documents do not describe.
+- **Ask (UI):** U1's checkbox copy, U2, U3, U4's button label, U4b, U6, U7's rewording and variants,
+  U8, U9.
+- **Ask:** while declined, **every** broadcast is refused, including protective ones (revoking an
+  authwit, disabling the auth registry). One rule that cannot be got wrong; the user is never trapped
+  because export always works. Alternative: allowlist those two operations at the wall.
+- **Ask:** every dispatcher method is refused while declined, reads included.
 - **Ask:** `/harden security` before the 1.0 store submission — recommended, not scheduled here.
-- Assumed: I read "the checkbox for delta on license" as the re-acceptance checkbox on the
-  terms-changed sheet (U4), not something on the third-party licence file.
-- Assumed: Cloudflare serves `terms/v1.0/index.html` at `/terms/v1.0/`. Verified on a preview deploy
-  in P2 before merge; fallback is `v1-0`.
-- Follow-ups recorded, not done: privacy-claim pin tests; a Spanish Terms; a release-workflow check
-  that refuses a stable publish while `«FILL»` survives; a rendered licences window.
+- Assumed: "the checkbox for delta on license" = the re-acceptance checkbox on the terms-changed
+  sheet (U4).
+- Follow-ups, not done here: privacy-claim pin tests; a Spanish Terms; a release-workflow check that
+  refuses a stable publish while `«FILL»` survives; a rendered licences window; opening the wallet
+  automatically when a dApp is refused.
 
 ## Deviation from the blueprint skill
 
@@ -280,12 +307,12 @@ Three PRs into `dev`, stacked with `gh stack`: **A** `feat(landing): publish the
 pages from legal/` → **B** `feat(legal): record terms acceptance and gate sending on it` → **C**
 `feat(build): ship third-party notices in the extension`. A is independently mergeable and fixes
 the three 404s on its own. B's PR body carries the quoted UI sign-offs and screenshots of U1, U4,
-U5, U7. C opens only once unblocked. PR titles ≤ 93 chars. Merging is always the owner's call.
+U5, U7. C opens only once both of its blockers clear. PR titles ≤ 93 chars. Merging is always the owner's call.
 
 ## Post-implementation
 
 Per arc, before opening its PR: local gates green → `/codex high` adversarial review of the arc's
-diff (brief: find a path where a user cannot export, a path where a send escapes the guard, a test
+diff (brief: find a path where a user cannot export, a broadcast that escapes the wall, a test
 that passes for the wrong reason) → fix → repeat until clean, hard stop at 3 rounds (a 4th means the
 scope is wrong; surface it). `/code-review` is **off** for this plan. Lessons go to
 `implementations-plan/legal-terms/lessons/phase-N.md`; after three failures on one step, stop and
