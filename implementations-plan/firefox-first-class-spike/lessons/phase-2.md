@@ -26,7 +26,15 @@ That chunk is **20.3 MB** (`barretenberg-*.js` 4.1 MB and `public-events-*.js` 4
 
 **`--metadata` is not a narrower gate — it is a weaker one.** Tested against a deliberately broken manifest (bogus permission, invalid `data_collection_permissions` category, malformed `strict_min_version`): `--metadata` catches both invalid gecko keys as errors and exits non-zero, but reports **zero warnings of any kind**. `MANIFEST_PERMISSIONS` is a *warning*, so the `sidePanel` defect this very phase found would have passed `--metadata` silently. Rejected.
 
-**Proposed amendment (awaiting owner ratification — Phase 2 is NOT marked done against it):** keep the full `--self-hosted` lint and pin its error set to exactly `{FILE_TOO_LARGE on assets/offscreen-*.js}`. That is stricter than the literal "0 errors" reading it replaces — any *new* error still reds the gate, and the one carve-out is named, evidence-backed, and cannot absorb drift. The 20.3 MB chunk carries forward as an AMO-readiness item for the store-launch plan.
+**Proposed EXCEPTION (awaiting owner authorization — Phase 2 is NOT marked done against it).** An earlier draft of this section called the amendment "stricter than zero errors". That was wrong, and the arc's review said so: a rule admitting one error accepts a result the original rejects. It is narrower than "ignore manifest-unrelated errors" and weaker than zero errors, and it needs the owner's explicit exception rather than a claim of compliance. **The full lint result stands as FAILED.**
+
+What is actually being asked for, scoped as tightly as it can be:
+
+- keep the full `--self-hosted` lint — `--metadata` is out for the reason above;
+- permit **zero or exactly one** error record, and only this one, identified by name *and* content so a rebuild cannot inherit the exception silently: `assets/offscreen-BvYQZHn4.js`, 20,263,920 bytes, sha256 `e2ff2f441afe2e2bfda2e3bbc714b503580b456afa4f76a2ef939e1cd867c609`. A different chunk, a second oversized file, or any other code re-opens the decision. (Zero is permitted too — shrinking the bundle must not fail an exact-set check.)
+- **warnings are reviewed, not counted.** An errors-only rule passes a newly introduced permission warning, which is exactly the class of defect this phase caught.
+
+**What the exception costs, stated plainly:** `FILE_TOO_LARGE` means the linter never scans that chunk at all. Syntax errors and security findings inside 20.3 MB of Aztec/barretenberg bundle stay invisible behind it. This accepts a known blind spot; it does not shrink one.
 
 **Status:** zero errors and zero **new** warnings are attributable to this diff — it removed one (`sidePanel`), 18 → 17. The four `ICON_SIZE_INVALID` warnings below are manifest-attributable but pre-existing and shared with the Chrome build. The literal "0 errors" text does not pass. Recorded here rather than quietly rewritten.
 
