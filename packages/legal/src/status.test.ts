@@ -78,6 +78,25 @@ describe("hostile shapes", () => {
 		expect(acceptanceStatus(hostile, manifest)).toBe("missing")
 	})
 
+	test("a history that throws on inspection, or overrides slice, is contained", () => {
+		const throwing = new Proxy(record("1.1"), {
+			getOwnPropertyDescriptor: (target, key) => {
+				if (key === "history") throw new Error("boom")
+				return Reflect.getOwnPropertyDescriptor(target, key)
+			},
+		})
+		expect(acceptanceStatus(throwing, manifest)).toBe("missing")
+		const ran = { slice: false }
+		const history = Object.defineProperty([record("1.0")], "slice", {
+			get: () => {
+				ran.slice = true
+				return () => []
+			},
+		})
+		expect(parseAcceptanceRecord({ ...record("1.1"), history })?.history).toHaveLength(1)
+		expect(ran.slice).toBe(false)
+	})
+
 	test("a Date carrying the fields is not a record", () => {
 		expect(acceptanceStatus(Object.assign(new Date(), record("1.1")), manifest)).toBe("missing")
 	})

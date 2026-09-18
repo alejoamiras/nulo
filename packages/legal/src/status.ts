@@ -95,14 +95,27 @@ function parseEntry(raw: unknown): LegalAcceptanceEntry | null {
 	return { termsVersion: termsVersion as string, privacyVersionShown: privacyVersionShown as string, acceptedAt, surface }
 }
 
-/** Storage is untrusted input: anything that is not exactly a record is no record. */
-export function parseAcceptanceRecord(raw: unknown): LegalAcceptanceRecord | null {
-	const head = parseEntry(raw)
-	if (!head) return null
-	const rawHistory = ownDataValue(raw as object, "history")?.value
+/** Index reads only: `slice`, `length` and iteration are all overridable on an untrusted array. */
+function historyTail(raw: unknown): unknown[] {
+	if (!Array.isArray(raw)) return []
+	const length = ownDataValue(raw, "length")?.value
+	if (typeof length !== "number") return []
+	const tail: unknown[] = []
 	// Bounded before parsing: a hostile record cannot make this walk an arbitrarily long array.
-	const tail = Array.isArray(rawHistory) ? rawHistory.slice(-LEGAL_HISTORY_LIMIT) : []
-	return { ...head, history: tail.map(parseEntry).filter((entry) => entry !== null) }
+	for (let at = Math.max(0, length - LEGAL_HISTORY_LIMIT); at < length; at++) tail.push(ownDataValue(raw, String(at))?.value)
+	return tail
+}
+
+/** Storage is untrusted input: anything that is not exactly a record is no record, and nothing here throws. */
+export function parseAcceptanceRecord(raw: unknown): LegalAcceptanceRecord | null {
+	try {
+		const head = parseEntry(raw)
+		if (!head) return null
+		const history = historyTail(ownDataValue(raw as object, "history")?.value)
+		return { ...head, history: history.map(parseEntry).filter((entry) => entry !== null) }
+	} catch {
+		return null
+	}
 }
 
 /**

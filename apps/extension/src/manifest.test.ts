@@ -66,13 +66,14 @@ describe("passkey relying party", () => {
 		const roots = ["apps/landing", "apps/tools"].map((r) => resolve(__dirname, "../../..", r))
 		// The generated legal pages are build output like `dist`: the privacy policy has to NAME the
 		// host to disclose it, and prose on nulo.sh routes nothing to the RP host.
-		const generatedLegalPage = (rel: string) => /^(terms|privacy)(\.html|\/)/.test(rel)
-		const skipped = (rel: string) =>
-			generatedLegalPage(rel) || rel.split("/").some((seg) => seg === "node_modules" || seg === "dist" || seg.startsWith("."))
+		// Exactly those HTML paths, in the landing only: a config file beside them is still scanned.
+		const generatedLegalPage = (root: string, rel: string) =>
+			root.endsWith("apps/landing") && /^(terms|privacy)(\.html|\/v\d+\.\d+(\.\d+)?\/index\.html)$/.test(rel)
+		const skipped = (rel: string) => rel.split("/").some((seg) => seg === "node_modules" || seg === "dist" || seg.startsWith("."))
 		const deployable = (rel: string) => /\.(jsonc?|toml|ts|vue|html)$/.test(rel) && !skipped(rel)
 		const hits = roots.flatMap((root) =>
 			(readdirSync(root, { recursive: true }) as string[])
-				.filter(deployable)
+				.filter((rel) => deployable(rel) && !generatedLegalPage(root, rel))
 				.map((rel) => join(root, rel))
 				.filter((full) => statSync(full).isFile() && readFileSync(full, "utf8").includes(RP_ID)),
 		)
