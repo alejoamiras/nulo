@@ -520,7 +520,7 @@ step, not only at the gate.
 - `cd apps/extension && bun --bun vitest run src/popup/components/modules/send/fee-privacy.test.ts src/popup/components/modules/send/fee-send-selection.test.ts`
 - Pass: exit 0; `git diff --quiet -- scripts/complexity-baseline/manifest.json` exits 0.
 
-### Phase 2 — the card's selection
+### Phase 2 — the card's selection ✓
 
 Everything in the change map for the card except the warning row; `mutateSendSelections`;
 `fpcs/index.vue`; `reset.vue`. The storage fake in the new blocks returns **cloned** snapshots after a
