@@ -252,6 +252,32 @@ describe("popup: declining never locks a person out", () => {
 		expect(await isSheetPresent(page)).toBe(false)
 		await page.close()
 	}, 90_000)
+
+	test("S9 Settings, About: the accepted version and date; declined reads Not accepted and leads back to the sheet", async ({
+		registeredExtensionPerTest: extension,
+	}) => {
+		const page = await openPopup(extension)
+		await waitForHash(page, "#/popup/general", 30_000)
+
+		await navigateByHash(page, "#/popup/settings/about", 15_000)
+		await page.waitForSelector('[data-testid="legal-about-accepted"]', { visible: true, timeout: 15_000 })
+		const accepted = await textOf(page, "legal-about-accepted")
+		expect(accepted).toContain("You accepted the Terms")
+		expect(accepted).toContain(`Terms v${CURRENT_TERMS}`)
+		expect(await textOf(page, "legal-about-privacy")).toContain(`Privacy Policy v${CURRENT_PRIVACY}`)
+
+		await reloadWithLegalState(page, "missing")
+		await declineFromSheet(page, "review")
+		await navigateByHash(page, "#/popup/settings/about", 15_000)
+		await page.waitForSelector('[data-testid="legal-about-not-accepted"]', { visible: true, timeout: 15_000 })
+		expect(await textOf(page, "legal-about-not-accepted")).toContain("Not accepted")
+		expect(await page.$('[data-testid="legal-about-accepted"]')).toBeNull()
+
+		await pointerClick(page, "legal-about-not-accepted")
+		await waitForHash(page, "#/popup/general", 10_000)
+		await waitForSheet(page, "review")
+		await page.close()
+	}, 150_000)
 })
 
 /** The register screen with no acceptance stored, as a fresh install has it. */
