@@ -158,6 +158,46 @@ BlueOak-1.0.0, MPL-2.0, **Zlib** (`pako` is `(MIT AND Zlib)`). A package with no
 needs a hand-verified `OVERRIDES` entry with provenance; the generator never synthesises a copyright
 line. Output is byte-stable. Build fails on anything disallowed, missing, or unreviewed.
 
+## E2E contract — the definition of done
+
+Owner, 2026-09-18: "I want to e2e test this, I want to be sure, automatically, that we've done a
+great job. Like we do for everything else on this extension app's e2e." So e2e is not the last phase;
+it is how each phase proves itself, and CI must run it without anyone remembering to.
+
+1. **Every user-visible behaviour in the success criteria has a smoke scenario**, written in the same
+   phase as the behaviour (table below) — never batched at the end. A phase is not done until its
+   scenarios are green at `retry: 0` twice in a row locally.
+2. **CI runs them automatically.** `extension-smoke-e2e-status` and `extension-network-e2e-status`
+   are required checks, but their path filters **enumerate** dependency packages
+   (`pr-extension-smoke-e2e.yml:43-75`, `pr-extension-network-e2e.yml:49+`). Without an edit, a PR
+   that only bumps the Terms version in `packages/legal` — *the exact change that triggers
+   re-acceptance for every user* — would run no e2e at all. P1 adds `packages/legal/src/**` and
+   `packages/legal/package.json` to both filters and to the pin in
+   `scripts/ci-cd/behavior-gating.test.ts`.
+3. **The version-bump path is exercised for real, not only in component tests.** The v1.0 manifest
+   entry carries `changes: ["First published version."]`, so a record seeded at an older version
+   (`legal: "stale"` ⇒ `0.9`) drives the genuine "terms have changed" sheet, change list included,
+   end to end. No production seam, no fixture manifest.
+4. **Lock-out proofs use hit-tested pointer input** and assert the artefact, not the click: the
+   revealed phrase is non-empty, the exported file exists and parses.
+5. **Negative proofs assert the refusal, not the absence of success:** the banner testid, the typed
+   dApp error code, and that no transaction row was written.
+6. **Testids only**, all prefixed `legal-`; text is read only from a testid-scoped element.
+
+| Scenario | Proves | Lands in |
+|---|---|---|
+| S1 fresh onboarding: Continue disabled → tick → create; record has the manifest version | criterion 2 | P4 |
+| S2 hash-jump to `create` / `learn` without a record ⇒ `terms` | the gate cannot be skipped | P4 |
+| S3 import path passes the same gate (`gotoOnboardingImport`) | criterion 2, import leg | P4 |
+| S4 `missing` + profile ⇒ sheet ⇒ Not now ⇒ declined screen; banner on Send; survives relaunch | criterion 3 | P5 |
+| S5 export block (seed, account, full backup) under `missing` / `stale` / `corrupt` | never locked out | P5 |
+| S6 passkey profile, `stale`, declined: full backup's in-page ceremony completes | never locked out, passkey | P5 |
+| S7 `stale` ⇒ sheet lists the change ⇒ Continue ⇒ banner gone; history grows | re-acceptance works | P5 |
+| S8 sheet absent on the lock screen, register, and every export route while not accepted | placement rules | P5 |
+| S9 About row text shows the accepted version; "Not accepted — Review" when declined | criterion 4 | P6 |
+| N1 network: `stale` ⇒ dApp call rejects `TERMS_ACCEPTANCE_REQUIRED`, wallet send refused, no tx row; accept ⇒ both succeed | the wall, against a real node | P5 |
+| B1 build artifact: both zips contain `THIRD-PARTY-NOTICES.txt` ⊇ expected-minimum list | criterion 5 | P9 |
+
 ## Phases
 
 `G-base` = `bun run lint` + `bun run typecheck:all`. `bun run test` is the extension's full unit +
@@ -167,8 +207,8 @@ component run (`test:components` filters `src/components` only and would miss on
 
 **P1 · `@nulo/legal`.** Package, manifest, status, `legal/archive/` + README, `"license":
 "Apache-2.0"` on every workspace `package.json` this arc may touch (not `apps/tools` or
-`packages/bridge-core` — out of bounds for wallet work and being removed), CI path filters gain `packages/legal/**` and
-`legal/**`. Tests: status truth table (current / patch-newer / minor-newer / major-newer / accepted
+`packages/bridge-core` — out of bounds for wallet work and being removed), the smoke **and** network e2e path filters plus `behavior-gating.test.ts` gain `packages/legal`
+(E2E contract § 2); `quality-status` filters gain `legal/**`. Tests: status truth table (current / patch-newer / minor-newer / major-newer / accepted
 newer than manifest / missing / garbage); manifest invariants above; **manifest ↔ markdown pin** —
 line-3 version equals the manifest head, every version has a `## Version history` row, every non-head
 version has an archive file; **label pin** — the literal strings "I agree to the Terms of Use" and
@@ -214,7 +254,8 @@ Component tests (≥ 10, written once, serving U1 and U4b): unchecked by default
 Continue disabled → enabled; no `accept` while unchecked (click and Enter); Space/Enter toggle;
 `tabindex="0"`; links call the handler with the permalink and do not toggle; points render from
 props; label equals the package constant; `legal-*` testids.
-Gates: `G-base`, `bun run test`, `bun run test:e2e`.
+Gates: `G-base`, `bun run test`, `bun run test:e2e` incl. **S1–S3** (new spec
+`tests/e2e/legal-acceptance.test.ts`), green twice at `retry: 0`.
 
 **P5 · popup sheet, declined screen, send (U3–U6).** `components/LegalAcceptanceSheet.vue`
 (store/route-bound, beside the barriers; 4 tests: variant choice, events, route suppression list,
@@ -222,33 +263,17 @@ nothing while `"loading"`); `composables/useLegalAcceptance.ts` with its ≥ 10 
 resolved, subscribe-before-read, stale read dropped, event after read, reconnect refresh, accept
 resolves after write, accept failure surfaces, dispose unsubscribes, double dispose, error ⇒ not
 current); `popup/pages/legal/declined.vue`; `send.vue` banner + estimation pause;
-`register.vue` footer. Gates: `G-base`, `bun run test`, `bun run test:e2e`.
+`register.vue` footer. e2e **S4–S8** and network **N1** land here. Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
-**P6 · Settings → About (U7).** Gates: `G-base`, `bun run test`.
+**P6 · Settings → About (U7).** e2e **S9**. Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
-**P7 · e2e.** New smoke spec `tests/e2e/legal-acceptance.test.ts`, testid-only; **lock-out proofs
-use hit-tested pointer clicks** (`page.mouse` at the element's centre), because `clickByTestId`
-dispatches `target.click()` and would click through a covering sheet. Extract the seed-export flow
-inlined at `import-paths.test.ts:59-82` into a helper; full backup via `helpers/backup-export.ts`.
-1. fresh onboarding — `legal-consent-continue` disabled; check; continue; lands on create; stored
-   record carries the manifest's Terms version;
-2. hash-jump to `#/onboarding/create` and to `#/onboarding/learn` without a record ⇒ `#/onboarding/terms`;
-3. About row text (the `profile-rename.test.ts` idiom) contains the accepted version;
-4. `legal: "missing"` + existing profile ⇒ sheet (U4b) ⇒ Not now ⇒ declined screen;
-   `send-legal-banner` present; `legal-sheet` absent on the export routes; **seed export reveals the
-   phrase, account export and full backup produce files**; balances render; relaunch ⇒ still declined;
-5. the export block of 4 repeated under `legal: "corrupt"` and `legal: "stale"` — one parametrised
-   body, three record states; the fail-closed direction must still leave export working;
-6. passkey profile (virtual authenticator, as `passkey-backup.test.ts`), `legal: "stale"`, declined:
-   full backup completes its in-page ceremony and produces a file;
-7. from 4: Review ⇒ Continue ⇒ `send-legal-banner` absent; history has one entry.
-Only the *wording* of a change list is left to component tests (it needs a second manifest version,
-which a smoke run cannot inject without a production seam); stale **reachability** is proven above. One network-suite test, proverless pool:
-connected playground, `legal: "stale"`, a dApp call rejects with `TERMS_ACCEPTANCE_REQUIRED` and a
-wallet-UI send is refused; accept; both succeed.
-Gates: `G-base`, new smoke spec green twice consecutively at `retry: 0`, `bun run test:e2e`,
+**P7 · e2e consolidation.** No new behaviour. Confirm S1–S9 + N1 all exist and are green together:
+`bun run test:e2e` (whole smoke suite), the new spec twice consecutively at `retry: 0`,
 `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/<new spec>` (the runner rejects a
-proverless-marked spec without it), `bun run audit:vue`.
+proverless-marked spec without it), `bun run audit:vue`. Extract the seed-export flow inlined at
+`import-paths.test.ts:59-82` into a shared helper if P5 did not already; update
+`apps/extension/tests/e2e/README.md` and the `e2e-testing` skill with the `legal:` fixture option
+and the pointer-click rule for overlay proofs.
 
 ### Arc C — third-party notices (blocked)
 
@@ -318,7 +343,8 @@ After reviewing the rebuilt screens page, the owner wrote:
 ## Assumptions and open items
 
 - Every dispatcher method is refused while declined, reads included (follows from decision 3).
-- **Still open:** `/harden security` before the 1.0 store submission — recommended, not scheduled.
+- **`/harden security` is not run for this arc** — owner decision (2026-09-18): "Don't run the harden
+  security. We've run a lot of them already."
 - Assumed: "the checkbox for delta on license" = the re-acceptance checkbox on the terms-changed
   sheet (U4).
 - Follow-ups, not done here: privacy-claim pin tests; a Spanish Terms; a release-workflow check that
