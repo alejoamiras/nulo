@@ -55,11 +55,34 @@ function newestMaterial(doc: LegalDocument, manifest = LEGAL_MANIFEST): LegalVer
 
 const ENTRY_FIELDS = ["termsVersion", "privacyVersionShown", "acceptedAt", "surface"] as const
 
-/** Own data properties of a plain object only: an inherited field is not something that was stored. */
-function ownFields(raw: unknown): Record<(typeof ENTRY_FIELDS)[number], unknown> | null {
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
-	if (!ENTRY_FIELDS.every((field) => Object.hasOwn(raw, field))) return null
-	return raw as Record<(typeof ENTRY_FIELDS)[number], unknown>
+type EntryFields = Record<(typeof ENTRY_FIELDS)[number], unknown>
+
+/** An own DATA property of a plain object, read from its descriptor so no getter ever runs. */
+function ownDataValue(raw: object, key: string): { value: unknown } | null {
+	const descriptor = Object.getOwnPropertyDescriptor(raw, key)
+	return descriptor && "value" in descriptor ? { value: descriptor.value } : null
+}
+
+function isPlainObject(raw: unknown): raw is object {
+	if (typeof raw !== "object" || raw === null) return false
+	const prototype = Object.getPrototypeOf(raw)
+	return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * Own data properties of a plain object only: an inherited field, a getter, a `Date` or an array
+ * carrying the right names is not something that was stored. Inspection that throws (a proxy) is
+ * "no record", never an exception the caller has to think about.
+ */
+function ownFields(raw: unknown): EntryFields | null {
+	try {
+		if (!isPlainObject(raw)) return null
+		const values = ENTRY_FIELDS.map((field) => ownDataValue(raw, field))
+		if (values.some((entry) => entry === null)) return null
+		return Object.fromEntries(ENTRY_FIELDS.map((field, index) => [field, values[index]?.value])) as EntryFields
+	} catch {
+		return null
+	}
 }
 
 function parseEntry(raw: unknown): LegalAcceptanceEntry | null {
@@ -76,7 +99,7 @@ function parseEntry(raw: unknown): LegalAcceptanceEntry | null {
 export function parseAcceptanceRecord(raw: unknown): LegalAcceptanceRecord | null {
 	const head = parseEntry(raw)
 	if (!head) return null
-	const rawHistory = Object.hasOwn(raw as object, "history") ? (raw as { history: unknown }).history : undefined
+	const rawHistory = ownDataValue(raw as object, "history")?.value
 	// Bounded before parsing: a hostile record cannot make this walk an arbitrarily long array.
 	const tail = Array.isArray(rawHistory) ? rawHistory.slice(-LEGAL_HISTORY_LIMIT) : []
 	return { ...head, history: tail.map(parseEntry).filter((entry) => entry !== null) }

@@ -59,6 +59,29 @@ describe("hostile shapes", () => {
 		expect(acceptanceStatus(Object.assign([], record("1.1")), manifest)).toBe("missing")
 	})
 
+	test("a getter is never run, and a throwing proxy is just no record", () => {
+		const ran = { getter: false }
+		const withGetter = Object.defineProperty({ ...record("1.1") }, "termsVersion", {
+			enumerable: true,
+			get: () => {
+				ran.getter = true
+				return "1.1"
+			},
+		})
+		expect(acceptanceStatus(withGetter, manifest)).toBe("missing")
+		expect(ran.getter).toBe(false)
+		const hostile = new Proxy(record("1.1"), {
+			getPrototypeOf: () => {
+				throw new Error("boom")
+			},
+		})
+		expect(acceptanceStatus(hostile, manifest)).toBe("missing")
+	})
+
+	test("a Date carrying the fields is not a record", () => {
+		expect(acceptanceStatus(Object.assign(new Date(), record("1.1")), manifest)).toBe("missing")
+	})
+
 	test("history entries get the same scrutiny, and only the tail is walked", () => {
 		const history = [...Array.from({ length: 500 }, () => record("1.0")), Object.create(record("1.0")), record("1.1")]
 		const parsed = parseAcceptanceRecord({ ...record("1.1"), history })

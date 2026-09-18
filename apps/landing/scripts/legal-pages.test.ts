@@ -49,8 +49,23 @@ describe("renderLegalPage", () => {
 		["an entity-encoded scheme", "[x](&#106;avascript:alert(1))"],
 		["a protocol-relative link", "[x](//evil.example)"],
 		["plain http", "[x](http://example.com)"],
+		["a named-entity slash", "[x](/&sol;evil.example)"],
+		["an unterminated numeric entity", "[x](/&#47evil.example)"],
 	])("%s is rejected", (_name, body) => {
 		expect(() => render(body)).toThrow(/unsupported link target/)
+	})
+
+	test("a backslash or tab in a link target stays a percent-encoded same-site path", () => {
+		expect(render("[x](/\\evil.example)")).toContain('href="/%5Cevil.example"')
+		expect(render("[x](/&Tab;/evil.example)")).toContain('href="/%09/evil.example"')
+	})
+
+	test("an inherited property name is not an allowed tag", () => {
+		expect(() => render("<constructor>x</constructor>")).toThrow(/raw HTML/)
+	})
+
+	test("a long but ordinary link is accepted", () => {
+		expect(render(`[x](https://example.com/${"a".repeat(900)})`)).toContain("https://example.com/aaa")
 	})
 
 	test("a link title is refused rather than rendered, so nothing can be injected through it", () => {

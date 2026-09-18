@@ -34,25 +34,23 @@ function escapeHtml(text: string): string {
 	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 
-const ALLOWED_TAGS: Readonly<Record<string, readonly string[]>> = {
-	a: ["href"],
-	h1: ["id"],
-	h2: ["id"],
-	h3: ["id"],
-	h4: ["id"],
-	th: ["align"],
-	td: ["align"],
-	...Object.fromEntries(
-		["p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote", "table", "thead", "tbody", "tr", "hr", "br", "del"].map(
-			(tag) => [tag, []],
-		),
+const ALLOWED_TAGS: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+	["a", ["href"]],
+	...["h1", "h2", "h3", "h4"].map((tag): [string, string[]] => [tag, ["id"]]),
+	...["th", "td"].map((tag): [string, string[]] => [tag, ["align"]]),
+	...["p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote", "table", "thead", "tbody", "tr", "hr", "br", "del"].map(
+		(tag): [string, string[]] => [tag, []],
 	),
-}
+])
 
-const TAG_PATTERN = /^<(\/?)([a-z][a-z0-9]*)((?:\s+[a-z-]+="[^"<>]*")*)\s*\/?>/
-const SAFE_HREF = /^(https:\/\/|mailto:|#|\/(?!\/))/
+const TAG_PATTERN = /^<(\/?)([a-z][a-z0-9]*)((?:\s+[a-z-]+="[^"<>]*")*)\s*\/?>$/
+const MAX_TAG_LENGTH = 4096
+/** RFC 3986's characters and nothing else: no backslash, whitespace, control character or stray `&`. */
+const URL_CHARACTERS = /^[A-Za-z0-9\-._~:/?#[\]@!$'()*+,;=%&]+$/
 
-function decodeEntities(value: string): string {
+/** The renderer's own escapes, reversed. A named entity it would never emit (`&Tab;`, `&sol;`) is left
+ *  as a literal `&…;` and then fails the character check above — refused, not interpreted. */
+function decodeAttribute(value: string): string {
 	return value
 		.replace(/&#x([0-9a-f]+);/gi, (_all, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
 		.replace(/&#(\d+);/g, (_all, dec: string) => String.fromCodePoint(Number(dec)))
@@ -62,16 +60,29 @@ function decodeEntities(value: string): string {
 		.replaceAll("&amp;", "&")
 }
 
-function assertAllowedTag(fragment: string, label: string): void {
-	const match = TAG_PATTERN.exec(fragment)
+/** Same-document, same-site, https or mailto — judged on the URL a browser would actually resolve. */
+function isSafeHref(raw: string): boolean {
+	const href = decodeAttribute(raw)
+	if (!URL_CHARACTERS.test(href) || /&[A-Za-z0-9#]+;?/.test(href.replaceAll(/&(?=[A-Za-z0-9_.~-]+=)/g, ""))) return false
+	if (href.startsWith("#")) return true
+	let url: URL
+	try {
+		url = new URL(href, SITE)
+	} catch {
+		return false
+	}
+	if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return url.protocol === "https:" || url.protocol === "mailto:"
+	return href.startsWith("/") && url.origin === SITE
+}
+
+function assertAllowedTag(tagText: string, label: string): void {
+	const match = TAG_PATTERN.exec(tagText)
 	const tag = match?.[2] ?? ""
-	const allowed = ALLOWED_TAGS[tag]
-	if (!match || !allowed) throw new Error(`${label}: raw HTML is not allowed in legal documents (near "${fragment.slice(0, 40)}")`)
+	const allowed = ALLOWED_TAGS.get(tag)
+	if (!match || !allowed) throw new Error(`${label}: raw HTML is not allowed in legal documents (near "${tagText.slice(0, 40)}")`)
 	for (const [, name, value] of (match[3] ?? "").matchAll(/([a-z-]+)="([^"]*)"/g)) {
 		if (!allowed.includes(name ?? "")) throw new Error(`${label}: attribute "${name}" is not allowed on <${tag}>`)
-		// Decoded first: `&#106;avascript:` is still `javascript:` to a browser.
-		if (name === "href" && !SAFE_HREF.test(decodeEntities(value ?? "").trim()))
-			throw new Error(`${label}: unsupported link target "${value}"`)
+		if (name === "href" && !isSafeHref(value ?? "")) throw new Error(`${label}: unsupported link target "${value}"`)
 	}
 }
 
@@ -83,7 +94,12 @@ function assertAllowedTag(fragment: string, label: string): void {
  * across lines all end up here, whatever syntax produced them.
  */
 function assertOnlyAllowedHtml(html: string, label: string): void {
-	for (let at = html.indexOf("<"); at !== -1; at = html.indexOf("<", at + 1)) assertAllowedTag(html.slice(at, at + 400), label)
+	for (let at = html.indexOf("<"); at !== -1; at = html.indexOf("<", at + 1)) {
+		// Attribute values may not contain `>`, so the first one closes the tag or the tag is refused.
+		const end = html.indexOf(">", at)
+		const tagText = end === -1 || end - at > MAX_TAG_LENGTH ? html.slice(at, at + 40) : html.slice(at, end + 1)
+		assertAllowedTag(tagText, label)
+	}
 }
 
 /** `](terms.md#x)` → `](/terms#x)`. Whatever else a link points at is judged after rendering. */

@@ -64,7 +64,11 @@ describe("passkey relying party", () => {
 
 	test("no in-repo deployable names the RP host (dashboard-managed hosting is out of this test's sight)", () => {
 		const roots = ["apps/landing", "apps/tools"].map((r) => resolve(__dirname, "../../..", r))
-		const skipped = (rel: string) => rel.split("/").some((seg) => seg === "node_modules" || seg === "dist" || seg.startsWith("."))
+		// The generated legal pages are build output like `dist`: the privacy policy has to NAME the
+		// host to disclose it, and prose on nulo.sh routes nothing to the RP host.
+		const generatedLegalPage = (rel: string) => /^(terms|privacy)(\.html|\/)/.test(rel)
+		const skipped = (rel: string) =>
+			generatedLegalPage(rel) || rel.split("/").some((seg) => seg === "node_modules" || seg === "dist" || seg.startsWith("."))
 		const deployable = (rel: string) => /\.(jsonc?|toml|ts|vue|html)$/.test(rel) && !skipped(rel)
 		const hits = roots.flatMap((root) =>
 			(readdirSync(root, { recursive: true }) as string[])
