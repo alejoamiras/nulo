@@ -145,7 +145,7 @@ Fast layers (`bun run lint`, `bun run typecheck`) run after every meaningful ste
 
 **Validation gate.** `bun run lint && bun run typecheck`; then `NULO_E2E_BROWSER=firefox bun run e2e:agent:probes` — a root script this phase adds, which reuses `agent.sh`'s stack bring-up with the probes config — prints `PROBE T PASS`, `PROBE 1 PASS`, `PROBE 2 PASS`, `PROBE 3 PASS`, `PROBE R PASS` (Probe T may instead print its documented FAIL once the Firefox-only finders are implemented and the other four pass through them). Results in `lessons/phase-4.md`. Layers: e2e (local network) on Firefox.
 
-### Phase 5 — Smoke suite on Firefox
+### Phase 5 — Smoke suite on Firefox ✓
 
 Classic passkey implementation; `journal.swEvaluate` no-op on Firefox; whole-file `describe.skipIf(isFirefox)` with `CHROME_ONLY` reasons; a guard inside `stopServiceWorker` that throws if called on Firefox; delete `firefox-smoke.mjs` and the spike scripts.
 
