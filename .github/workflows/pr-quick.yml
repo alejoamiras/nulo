@@ -257,6 +257,7 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: chrome
       upload_artifacts: true
+      version_suffix: ${{ github.event.pull_request.number && format('pr.{0}', github.event.pull_request.number) || '' }}
 
   build-firefox:
     name: Build Firefox
@@ -267,6 +268,61 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: firefox
       upload_artifacts: true
+      version_suffix: ${{ github.event.pull_request.number && format('pr.{0}', github.event.pull_request.number) || '' }}
+
+  # The extension builds above are workflow artifacts nobody finds from the PR. This job keeps ONE
+  # sticky comment on the PR pointing at them, edited in place on every push, the way a Cloudflare
+  # preview comment does for a site. The script re-reads the PR head right before writing and
+  # leaves the comment alone when the PR has moved on, so a slow run cannot overwrite a newer one.
+  # Same-repo PRs only: a fork's token is read-only. Advisory twice over — not in quality-status's
+  # needs, and continue-on-error so a comment failure cannot red the run either.
+  preview-comment:
+    name: Preview build comment
+    needs: [changes, build-chrome, build-firefox]
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.outputs.needs-extension-build == 'true'
+      && needs.build-chrome.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # The head sha, not the merge commit the default checkout gives a pull_request run: the version
+      # printed must be the one the builds (also checked out at head.sha) stamped.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: |
+            /package.json
+            /scripts/ci-cd/
+            /apps/extension/package.json
+          sparse-checkout-cone-mode: false
+      # The script has no dependencies, so no `bun install` (and no setup-bun composite, which
+      # always installs). The Bun line is read from root package.json's `packageManager` — not a
+      # third pin site.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Upsert the preview comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CHROME_RESULT: ${{ needs.build-chrome.result }}
+          CHROME_URL: ${{ needs.build-chrome.outputs.chrome_artifact_url }}
+          FIREFOX_RESULT: ${{ needs.build-firefox.result }}
+          FIREFOX_URL: ${{ needs.build-firefox.outputs.firefox_artifact_url }}
+        run: |
+          PREVIEW_VERSION="$(bun -e "console.log(require('./apps/extension/package.json').version)")-pr.${PR_NUMBER}"
+          export PREVIEW_VERSION
+          bun scripts/ci-cd/preview-comment.ts
 
   build-tools:
     name: Build Tools (${{ matrix.target }})
