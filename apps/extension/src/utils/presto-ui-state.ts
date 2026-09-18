@@ -33,7 +33,7 @@ export interface PrestoCopy {
 	title: string
 	detail: string
 	steps?: string[]
-	retry?: "Test" | "Retry" | "Re-test"
+	retry?: "Test" | "Retry" | "Re-test" | "Check for Presto" | "Check again"
 }
 
 /** The onboarding step has room for the full recovery copy; the settings page is compact. */
@@ -104,6 +104,27 @@ const PERMISSION_BLOCKED_COPY: Record<PrestoSurface, Omit<PrestoCopy, "tone" | "
 	},
 }
 
+/**
+ * Onboarding probes only on a click, because the probe can raise the browser's local-network
+ * prompt: `idle` names that prompt before the click that may cause it, and `offline` is the
+ * answer to "check", not an unprompted verdict.
+ */
+const ONBOARDING_PROBE_COPY: Partial<Record<PrestoUiState["kind"], PrestoCopy>> = {
+	idle: {
+		tone: "accent",
+		title: "Already have Presto?",
+		detail: "Your browser may ask whether Nulo can access apps on this device. That app is Presto, on your own computer. Choose Allow.",
+		retry: "Check for Presto",
+	},
+	detecting: { tone: "pending", title: "Looking for Presto…", detail: "If your browser asks, choose Allow." },
+	offline: {
+		tone: "off",
+		title: "Presto isn't running yet",
+		detail: "Install it, open it from your menu bar, then check again.",
+		retry: "Check again",
+	},
+}
+
 function connectedDetail(info: PrestoInfo, surface: PrestoSurface): string {
 	// The settings page lists the versions and the connection in its Details rows.
 	if (surface === "settings") return "Proving natively"
@@ -121,6 +142,8 @@ function connectedDetail(info: PrestoInfo, surface: PrestoSurface): string {
  * earlier" — it is history, not a statement about approval now.
  */
 export function copyFor(state: PrestoUiState, last?: LastProveOutcome | null, surface: PrestoSurface = "onboarding"): PrestoCopy {
+	const probeCopy = surface === "onboarding" ? ONBOARDING_PROBE_COPY[state.kind] : undefined
+	if (probeCopy) return probeCopy
 	switch (state.kind) {
 		case "idle":
 		case "detecting":
