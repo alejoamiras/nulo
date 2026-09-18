@@ -10,7 +10,6 @@
  * each balance (success) or surface an error on its task record.
  */
 
-import { FunctionType } from "@aztec/stdlib/abi"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
@@ -24,7 +23,7 @@ import { createViewTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { PxeStaleAnchorError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import type { ViewFn } from "@/wallet/utils/fn"
+import { buildViewCall, type ViewFn } from "@/wallet/utils/fn"
 import { rowMatchesToken } from "./balance-identity"
 import type { TokenBalanceRaw } from "./spec"
 
@@ -261,36 +260,6 @@ export class BalanceProjector {
 		tbIndex: number,
 		isPrivate: boolean,
 	): Promise<void> {
-		if (fn.type === FunctionType.UTILITY) {
-			calls.push([
-				{
-					kind: "call",
-					contract: token.contract,
-					method: fn.name,
-					args: fn.buildArgs(account),
-				},
-				tbIndex,
-				isPrivate,
-				fn,
-			])
-		} else {
-			const selector = await fn.getSelector()
-			const encodedArgs = fn.encodeArgs(fn.buildArgs(account))
-			calls.push([
-				{
-					kind: "encoded_call",
-					to: token.contract,
-					selector: selector.toString(),
-					args: encodedArgs.map((x) => x.toString()),
-					name: fn.name,
-					type: fn.type,
-					isStatic: fn.isStatic,
-					returnTypes: fn.getReturnTypes(),
-				},
-				tbIndex,
-				isPrivate,
-				fn,
-			])
-		}
+		calls.push([await buildViewCall(token.contract, fn, fn.buildArgs(account)), tbIndex, isPrivate, fn])
 	}
 }

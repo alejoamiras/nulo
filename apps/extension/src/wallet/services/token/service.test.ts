@@ -1,7 +1,7 @@
 /**
  * Unit pins for `TokenService.addToken`'s journal/lock machinery (F-Q09
  * characterization — this path had no unit coverage; the composition layer
- * excludes it because the real `fetchTokenMetadata` calls `simulate(...)`).
+ * excludes it because the real `fetchTokenMetadata` runs a view simulation).
  * The private fetch is stubbed via the repo's established test-only reach-in,
  * which is legitimate HERE (a unit file) but would violate the composition
  * layer's boundary rules — see COMPOSITION-TESTS.md.

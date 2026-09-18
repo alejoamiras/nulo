@@ -201,22 +201,22 @@ Arc 1 boundary → quality loop → `gh stack add`.
 
 ### Arc 2 — scan health, seeding speed
 
-**Phase 6 — outcomes + deletion.** Delete the sync-state API and the four `emitSyncStateIfChanged` call sites FIRST (frees the line budget), then `scanPublicContract` returns `ScanOutcome`; extract `handleScanFailure`; `scan-health.ts`.
+**Phase 6 ✓ — outcomes + deletion.** Delete the sync-state API and the four `emitSyncStateIfChanged` call sites FIRST (frees the line budget), then `scanPublicContract` returns `ScanOutcome`; extract `handleScanFailure`; `scan-health.ts`.
 - Tests: each early-return and throw path maps to the right outcome (`unresolved` gate ⇒ `failed`, `non-standard` ⇒ `ineligible`); dropped page ⇒ `no-progress`; many pages inside ONE block ⇒ `progress` every tick; a multi-tick reconciliation ⇒ `progress` per step; reconciliation still begins on any anchored throw and the scan recovers to `idle-at-tip` after a transient anchored failure; pending-page marker preserved on failure; coverage never advances on failure. "§3 Catching up" describe replaced. The deletion commit removes declarations, client exports, implementation and obsolete tests together and passes on its own; coverage data the outcome needs stays.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/incoming-transfer src/popup` — exit 0.
 
-**Phase 7 — episodes, backoff, health RPC.** Verify I2. Session-backed episodes, per-profile keys, clear rules, backoff with re-evaluation on skipped ticks, RPC/event/retry.
+**Phase 7 ✓ — episodes, backoff, health RPC.** Verify I2. Session-backed episodes, per-profile keys, clear rules, backoff with re-evaluation on skipped ticks, RPC/event/retry.
 - Tests: node down 1 h unlocked ⇒ stalled after 10 min; unlock after 8 h + two failures ⇒ NOT stalled; SW restart mid-episode keeps `failingSince` (hydrated before the first poll); same-profile rebuild keeps, profile switch clears; a late outcome after lock/purge cannot recreate an episode; hostile stored episode values are repaired or dropped; a restart during an active backoff keeps the streak and the (future) `nextAttemptAt`; two profiles sharing a network do not cross-talk; Retry keeps the count; success clears and emits once.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/incoming-transfer` — exit 0.
 
-**Phase 8 — one metadata read.** Verify I1.
+**Phase 8 ✓ — one metadata read.** Verify I1.
 - Tests: one read issued; fallbacks/decoding/validation unchanged; slow-arm path.
 - Gate: fast layers + `bun run --cwd apps/extension test src/wallet/services/token src/wallet/services/execution` — exit 0.
 
-**Phase 9 — stalled line.** `useIncomingSyncHealth` (≥ 10 cases), `RecentActivityView`, screenshot.
+**Phase 9 ✓ — stalled line.** `useIncomingSyncHealth` (≥ 10 cases), `RecentActivityView`, screenshot.
 - Gate: fast layers + `bun run --cwd apps/extension test src/popup/components/modules/general/RecentActivityView src/composables/useIncomingSyncHealth` — exit 0.
 
-**Phase 10 — e2e + docs.** The stalled line stays pinned at unit/component level (a node outage is not deterministic in e2e); the network suite proves no regression. Docs: `ARCHITECTURE.md` (scan outcomes/health, one metadata read), `implementations-plan/index.md` (+ the proposed `incoming-tip-first-scan` follow-up).
+**Phase 10 ✓ — e2e + docs.** The stalled line stays pinned at unit/component level (a node outage is not deterministic in e2e); the network suite proves no regression. Docs: `ARCHITECTURE.md` (scan outcomes/health, one metadata read), `implementations-plan/index.md` (+ the proposed `incoming-tip-first-scan` follow-up).
 - Gate: `bun run audit:vue` exit 0; `bun run test:e2e` green; `bun run e2e:agent` complete network suite green; `bun run baseline:rescore` unchanged (no new complexity acceptances).
 
 ## Delivery

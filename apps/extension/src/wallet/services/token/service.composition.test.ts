@@ -7,7 +7,7 @@
  *
  * SCOPE (narrow, on purpose): targets `parseTokenInterface` — the shallow
  * register + name-based candidate-extraction path. It does NOT touch
- * `fetchTokenMetadata`/`addToken`, which call `simulate(...)` (deep — e2e).
+ * `fetchTokenMetadata`/`addToken`, which run a view simulation (deep — e2e).
  * Candidate extraction is bb-FREE (it filters the artifact's functions by name/
  * params); the contract instance is a HARDCODED fake (deriving one needs the
  * Barretenberg WASM, which vitest/jsdom doesn't load). See
