@@ -23,7 +23,7 @@ that cannot be read out of this repository.
 | `legal name` | The natural person who is the counterparty. There is no entity, so the contract needs an identifiable human. |
 | `country/state of residence` | Governing law. Also used in § 22's venue. |
 | `city or judicial district…` | § 22 venue — a court location, not just a country. Do not let governing law float with a future move. |
-| `contact email` | Contract notices, rights requests, pre-action contact. |
+| ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
 | `effective date` | The date the 1.0 listing goes live. |
 | `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
 | `published security-reporting URL` | `SECURITY.md` is a repo path; a rendered legal page needs a URL that resolves for a reader who is not in the repo. |
@@ -48,6 +48,10 @@ These came out of the two-round review and are **not** fixed by editing the docu
    implement the mechanism**, including a path for existing preview installs.
 3. **Preserve export access on decline.** § 20 promises that declining revised Terms does not disable
    backup or export. That has to be true in code before it is true on the page.
+
+   Blockers 1–3 are one arc and are to be planned with `/blueprint` once the identity question below
+   is settled — the acceptance record's shape depends on nothing in it, but the published pages carry
+   the name and jurisdiction, so drafting the plan before those are known would bake in a rewrite.
 4. **Resolve the Presto licensing.** Three bundled packages declare `AGPL-3.0-only` and are runtime
    value imports, not type-only: `@alejoamiras/presto-core@1.0.1` (`PrestoClient` in
    `apps/extension/src/presto/client.ts`), `@alejoamiras/presto@5.2.0-revision.2`, and
@@ -57,17 +61,39 @@ These came out of the two-round review and are **not** fixed by editing the docu
    exact versions incorporated — republishing with `(Apache-2.0 OR AGPL-3.0-only)` is the cleaner
    maintenance path — and the licence files must travel **in the distributed extension**, not only on
    GitHub. The Terms describe the resolved position; they cannot substitute for resolving it.
-5. **Firefox data-collection consent.** `manifest.firefox.config.ts` declares no
-   `data_collection_permissions`. New AMO submissions require Mozilla's built-in consent system, and
-   a privacy page does not replace it.
-6. **Declare a Firefox minimum version.** The passkey RP-ID-via-host-permission flow needs Firefox
-   150+; the manifest declares no floor. Either declare it or explain the flow's absence on older
-   versions.
-7. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
+5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
    "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
    verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
-8. **Rewrite the README banner.** It still says "Aztec testnet only. Do not use with real funds",
-   while the seeded default network is mainnet. That contradiction is itself a liability.
+   This is the one blocker a clause genuinely cannot route around; see § Identity below.
+
+Owned elsewhere, tracked here so nothing falls between worktrees:
+
+- **Firefox** `data_collection_permissions` (required for new AMO submissions) and the Firefox 150+
+  minimum version the passkey RP-ID flow needs — handled in a separate worktree.
+- **The README banner** said "Aztec testnet only. Do not use with real funds" while mainnet is the
+  seeded default; corrected in the same commit as this file. The rest of that banner still reads
+  "DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET", which will also need rewriting at the 1.0 cut.
+
+## Identity
+
+The counterparty question is unresolved and blocks `«FILL: legal name»`, `«FILL: country/state of
+residence»` and the two venue placeholders.
+
+What does **not** work: choosing a "crypto-friendly" governing law you have no connection to. A
+governing-law clause does not move regulatory, tax or sanctions exposure — those follow residence
+and activity, not drafting. Against consumers it is close to inert: Rome I Art. 6 preserves the
+mandatory law of the consumer's own country, and Brussels I bis Arts. 17–19 let an EU consumer sue at
+home regardless. Against business users, a court applying something like Restatement (Second) § 187
+asks whether the chosen forum has a substantial relationship to the parties; an unconnected one can
+simply be disregarded. A jurisdiction picked for optics also reads as evasion to the court that ends
+up hearing the case.
+
+What **does** work: an entity. Incorporating is the one move that legitimately makes jurisdiction a
+choice, puts a legal person between the claimant and the individual, and satisfies store trader
+disclosure with a registered-agent address instead of a home address. The entity must actually be the
+publisher — hold the store accounts, own the domain, and be the party named in these documents —
+or it is decorative. An entity does not move personal tax residence, and most jurisdictions will
+still look through to the individual for that.
 
 ## Changing these documents
 

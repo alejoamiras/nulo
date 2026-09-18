@@ -22,15 +22,14 @@ also depend on the configurations and provider practices identified below.
 
 ## 1. Who is responsible
 
-Nulo is maintained by **«FILL: legal name»**, a natural person resident in «FILL: country/state of
-residence» ("**the Developer**", "**I**"). There is no company.
+Nulo is maintained by **«FILL: legal name»**, a natural person resident in «FILL: country/state of residence» ("**the Developer**", "**I**"). There is no company.
 
 Where applicable data-protection law applies, I am responsible as controller for processing carried
 out for the Nulo website, the passkey relying-party host, correspondence and reports described below.
 Independent providers are responsible for processing they determine themselves; providers acting on
 my instructions are processors.
 
-Contact: **«FILL: contact email»**
+Contact: **hello@nulo.sh**
 
 ## 2. No wallet telemetry; limited website and correspondence processing
 
@@ -109,8 +108,7 @@ them, including after you change or remove that endpoint.** Changing an endpoint
 information already disclosed.
 
 **What the Developer can see:** the default endpoint uses a provider account belonging to the
-Developer. Information available to the Developer through that account is «FILL: verified
-dashboard/reporting categories, or confirmed absence of such access».
+Developer. Information available to the Developer through that account is «FILL: verified dashboard/reporting categories, or confirmed absence of such access».
 
 ### 5.2 Price data (CoinGecko)
 
@@ -164,25 +162,19 @@ Article 6(1)(f).
 
 The website is static and carries no analytics or tracking of mine.
 
-Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting
-entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
+Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
 browser headers to the hosting provider. Information available to the Developer through hosting tools
 is «FILL: verified categories and access». This processing supports delivery and security of the
 sites, relying on legitimate interests where applicable. The retention information below and the
 international-processing information in § 12 cover these hosting records.
 
 If you submit a report or contact me, I receive the information you provide, such as your message,
-contact details and attachments. The form provider is «FILL: provider legal name and
-privacy-policy link»; the email provider is «FILL: provider legal name and privacy-policy link».
-Their processing and the metadata available to me are «FILL: actual data categories and
-processor/independent-controller roles». I use correspondence to respond, investigate reported
+contact details and attachments. The form provider is «FILL: provider legal name and privacy-policy link»; the email provider is «FILL: provider legal name and privacy-policy link».
+Their processing and the metadata available to me are «FILL: actual data categories and processor/independent-controller roles». I use correspondence to respond, investigate reported
 problems and maintain security, relying on legitimate interests where that basis is available and
 appropriate. Providing a report is optional.
 
-**Retention.** Website and security records are retained for «FILL: actual period or specific
-retention criteria». Correspondence and attachments are retained for «FILL: actual period or criteria
-tied to resolving the report and any necessary legal retention». Provider retention is «FILL:
-applicable periods or linked schedules». I may retain relevant records longer where necessary to
+**Retention.** Website and security records are retained for «FILL: actual period or specific retention criteria». Correspondence and attachments are retained for «FILL: actual period or criteria tied to resolving the report and any necessary legal retention». Provider retention is «FILL: applicable periods or linked schedules». I may retain relevant records longer where necessary to
 comply with law or to establish, exercise or defend legal claims.
 
 **Uninstall page.** If you remove the extension, your browser opens a page on `nulo.sh`. The URL the
@@ -217,8 +209,7 @@ sensitive private transaction data — to a process on `127.0.0.1`. Production p
 HTTPS; a limited HTTP health check may also occur, carrying no proving inputs.
 
 The extension's connection is local. **The native application's own processing, storage and network
-activity are governed by its implementation and its own privacy information**, available at «FILL:
-actual native-application legal links».
+activity are governed by its implementation and its own privacy information**, available at «FILL: actual native-application legal links».
 
 ### 5.9 Public proving parameters
 
@@ -287,7 +278,7 @@ Depending on the law applicable to you and the processing concerned, you may hav
 correct, delete, restrict or obtain a copy of personal data, to object to processing, or to withdraw
 consent where processing relies on consent.
 
-Contact «FILL: contact email» to exercise applicable rights. I will respond within the applicable
+Contact hello@nulo.sh to exercise applicable rights. I will respond within the applicable
 legal period and explain any lawful limitation. I may request proportionate information needed to
 locate records or verify a request, but will never ask for wallet secrets.
 
@@ -296,8 +287,7 @@ remove blockchain records, exported files, or records held independently by othe
 complain to the competent data-protection authority, including, where applicable, the authority
 where you live or work.
 
-«FILL: if an EU or UK Article 27 representative is required, name the representative and contact
-details here; otherwise delete this line rather than leaving it blank.»
+«FILL: if an EU or UK Article 27 representative is required, name the representative and contact details here; otherwise delete this line rather than leaving it blank.»
 
 ## 11. Children
 
@@ -308,8 +298,7 @@ the [Terms of Use](terms.md) § 3.
 
 Providers used for website hosting and correspondence may process personal data outside your
 country. For transfers for which I am responsible, the destinations and applicable safeguards are
-«FILL: provider/destination mapping and the actual adequacy decision or contractual safeguard,
-including the UK mechanism where relevant». Contact me for information about those safeguards.
+«FILL: provider/destination mapping and the actual adequacy decision or contractual safeguard, including the UK mechanism where relevant». Contact me for information about those safeguards.
 
 Independent providers — including the node provider, the price API and the block explorer you reach
 directly from your own browser — describe their own international processing in their privacy
@@ -339,7 +328,7 @@ processing begins. Other changes take effect when published.
 
 ## 15. Contact
 
-**«FILL: legal name»** — «FILL: contact email»
+**«FILL: legal name»** — hello@nulo.sh
 
 ---
 

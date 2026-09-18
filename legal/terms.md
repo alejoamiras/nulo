@@ -28,9 +28,8 @@ There is no company, foundation, DAO or other legal entity behind Nulo. There ar
 support desk and no service organisation. These Terms are an agreement between you and one
 individual.
 
-Contact: **«FILL: contact email»**. Any additional publisher disclosures required by the applicable
-extension store are available at «FILL: official Chrome Web Store listing URL» and «FILL: official
-Firefox Add-ons listing URL».
+Contact: **hello@nulo.sh**. Any additional publisher disclosures required by the applicable
+extension store are available at «FILL: official Chrome Web Store listing URL» and «FILL: official Firefox Add-ons listing URL».
 
 In these Terms, "**Nulo**" means the Nulo browser extension distributed for Chrome and Firefox.
 These Terms do not govern separate applications or websites. The [Privacy Policy](privacy.md)
@@ -376,14 +375,10 @@ Do not include your recovery phrase, password, private keys or backup files in a
 
 ## 16. NO WARRANTY
 
-**Application of §§ 16–18.** The warranty exclusions in § 16 and the restrictions in §§ 17.1–17.2 and
-18 apply only to **Business Users**. A Business User is a person acting mainly for their trade,
-business, craft or profession who is not entitled to consumer protection for the claim concerned
-under applicable law. Those provisions also do not apply to a contract protected by the Australian
-unfair-contract-terms rules for small-business contracts.
-
-**This section is subject to § 19 and does not override rights or representations that applicable law
-makes binding.**
+**This section and §§ 17–18 are subject to § 19**, which states the rights that survive them. If you
+are a consumer in the European Union, the United Kingdom or Australia, read § 19 first: substantial
+parts of this section do not apply to you, and nothing here is a representation that your statutory
+rights do not exist.
 
 **NULO IS PROVIDED "AS IS" AND "AS AVAILABLE", WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY KIND.**
 
@@ -404,31 +399,35 @@ WARRANTY NOT EXPRESSLY STATED HERE.
 
 ## 17. Limitation of liability
 
-**17.1 Business Users — excluded losses.** For Business Users (as defined at the start of § 16), and
-subject to § 19, the Developer and contributors exclude liability for indirect or consequential loss
-and loss of business profits, revenue, opportunity or goodwill, to the extent permitted by law.
+**17.1 Excluded losses.** SUBJECT TO § 19, AND TO THE FULLEST EXTENT PERMITTED BY LAW, THE DEVELOPER
+AND EVERY CONTRIBUTOR TO NULO WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, EXEMPLARY OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF OR INABILITY TO ACCESS **DIGITAL
+ASSETS, TOKENS, KEYS, RECOVERY PHRASES OR PASSWORDS**, LOSS OF PROFITS, REVENUE, BUSINESS,
+OPPORTUNITY, GOODWILL OR ANTICIPATED SAVINGS, LOSS OR CORRUPTION OF DATA, LOSS OF PRIVACY OR
+CONFIDENTIALITY, OR THE COST OF SUBSTITUTE SOFTWARE OR SERVICES — IN EACH CASE HOWEVER CAUSED, UNDER
+ANY THEORY OF LIABILITY (CONTRACT, TORT INCLUDING NEGLIGENCE, STRICT LIABILITY, STATUTE OR
+OTHERWISE), AND EVEN IF ADVISED OF THE POSSIBILITY OF SUCH LOSS.
 
-**For consumers, liability is determined under applicable law.** These Terms impose no monetary cap
-on that liability and do not displace applicable rules concerning causation, remoteness of loss,
-contributory fault or mitigation.
-
-**17.2 Business Users — aggregate cap.** For Business Users, and subject to § 19, the aggregate
-liability of the Developer and contributors together for claims arising from Nulo or these Terms is
-limited to the greater of US$100 and the amount paid to the Developer for Nulo (which is zero).
+**17.2 Aggregate cap.** SUBJECT TO § 19, THE TOTAL AGGREGATE LIABILITY OF THE DEVELOPER AND ALL
+CONTRIBUTORS TO YOU, FOR ALL CLAIMS ARISING OUT OF OR RELATING TO NULO OR THESE TERMS, WILL NOT
+EXCEED THE GREATER OF (A) THE TOTAL AMOUNT YOU HAVE ACTUALLY PAID THE DEVELOPER FOR NULO (WHICH IS
+ZERO), AND (B) **ONE HUNDRED UNITED STATES DOLLARS (US$100)**.
 
 **17.3 Third parties.** The Developer does not control independent third-party services or guarantee
 their performance. Responsibility for loss caused solely by those parties is governed by applicable
 law and their arrangements with you. This section does not exclude responsibility imposed by law for
 the Developer's own implementation, statements, selection or configuration.
 
-**17.4 Independent allocation of risk.** For users to whom §§ 17.1–17.2 apply, those provisions are
-separate allocations of risk underlying the free distribution of Nulo. Subject to § 19, each applies
-independently of any other contractual remedy, including where that other remedy fails of its
-essential purpose.
+**17.4 Independent allocation of risk.** Sections 17.1 and 17.2 are separate allocations of risk
+underlying the free distribution of Nulo. Subject to § 19, each applies independently of any other
+contractual remedy, including where that other remedy fails of its essential purpose.
 
-## 18. Reimbursement by Business Users
+## 18. Reimbursement by business users
 
-This section applies only to Business Users (as defined at the start of § 16).
+**This section applies only to Business Users.** A Business User is a person acting mainly for their
+trade, business, craft or profession who is not entitled to consumer protection for the claim
+concerned under applicable law. It does not apply to a contract protected by the Australian
+unfair-contract-terms rules for small-business contracts.
 
 You will reimburse the Developer or a contributor for damages payable under a final judgment or a
 settlement you approve, and reasonable external legal costs actually incurred in defending a
@@ -451,12 +450,26 @@ negligence, for fraud or fraudulent misrepresentation, or for anything else that
 limited or excluded.**
 
 If you are a consumer, you have rights under the mandatory consumer protection law of the country
-where you live, and these Terms do not affect them.
+where you live, and these Terms do not affect them. Sections 16, 17.1 and 17.2 apply only so far as
+that law allows.
 
-If a provision is unlawful, unfair or unenforceable against you, it does not apply to the extent
-required by applicable law. The remaining provisions continue where the agreement can lawfully
-operate without it. An unfair consumer term will not be rewritten merely to preserve a restriction
-that applicable law requires to be disregarded.
+**19.1 Australia.** If the Australian Consumer Law applies to you, Nulo comes with guarantees that
+**cannot be excluded** under that law, and nothing in §§ 16–18 excludes, restricts or modifies any
+such guarantee, right or remedy, or purports to represent that it does not exist. Where a guarantee
+applies and liability for breach of it may lawfully be limited, the Developer's liability is limited
+to resupplying the software or paying the cost of having it resupplied.
+
+**19.2 United Kingdom.** If you are a consumer, nothing in §§ 16–18 excludes or restricts any right
+or remedy under the Consumer Rights Act 2015 or other mandatory UK consumer law, and those
+provisions bind you only so far as that law permits.
+
+**19.3 European Union.** If you are a consumer habitually resident in an EU member state, nothing in
+§§ 16–18 deprives you of the protection of the mandatory provisions of the law of that state.
+
+**19.4 Everywhere else.** If a provision is unlawful, unfair or unenforceable against you, it does
+not apply to the extent required by applicable law. The remaining provisions continue where the
+agreement can lawfully operate without it. An unfair consumer term will not be rewritten merely to
+preserve a restriction that applicable law requires to be disregarded.
 
 ## 20. Changes to these Terms
 
@@ -484,9 +497,7 @@ agreement.
 
 ## 22. Governing law and where disputes are heard
 
-Subject to mandatory consumer rights, these Terms are governed by the laws of **«FILL: fixed country
-and applicable state/province of residence»**, and the competent courts in **«FILL: city or judicial
-district, state/province and country»** have exclusive jurisdiction.
+Subject to mandatory consumer rights, these Terms are governed by the laws of **«FILL: fixed country and applicable state/province of residence»**, and the competent courts in **«FILL: city or judicial district, state/province and country»** have exclusive jurisdiction.
 
 If you are a consumer, this does not remove any mandatory protection or right to sue in another
 court available under applicable law, or permit proceedings against you in a court that applicable
@@ -499,7 +510,7 @@ Claims are subject to the limitation periods imposed by applicable law. Contacti
 does not suspend those periods unless applicable law or a separate written agreement provides
 otherwise.
 
-Before starting proceedings, please contact me at «FILL: contact email» and describe the problem. I
+Before starting proceedings, please contact me at hello@nulo.sh and describe the problem. I
 would much rather fix it.
 
 ## 23. General
@@ -530,10 +541,9 @@ would much rather fix it.
 
 ## 24. Contact
 
-**«FILL: legal name»** — «FILL: contact email»
+**«FILL: legal name»** — hello@nulo.sh
 
-Security vulnerabilities: please follow the disclosure process at «FILL: published security-reporting
-URL» rather than the public feedback forms.
+Security vulnerabilities: please follow the disclosure process at «FILL: published security-reporting URL» rather than the public feedback forms.
 
 ---
 
