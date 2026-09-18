@@ -116,9 +116,7 @@ describe("runPasskeyCeremony in create mode", () => {
 		const opts = get.mock.calls[0][0].publicKey
 		expect(opts.allowCredentials).toHaveLength(1)
 		expect(b64(opts.allowCredentials?.[0].id as Uint8Array)).toBe(b64(RAW_ID))
-		// The re-prompt has to request the same secret under the same terms as the create leg —
-		// a different rp, a weaker userVerification or a different eval input all derive a
-		// different master, or none.
+		// The mock accepts invalid options, so check the fallback's security and derivation inputs.
 		expect(opts.rpId).toBe("passkey.nulo.sh")
 		expect(opts.userVerification).toBe("required")
 		const prfLabel = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("nulo:profile:v1")))
