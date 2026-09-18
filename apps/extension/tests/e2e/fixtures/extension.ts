@@ -1,7 +1,16 @@
 import { existsSync, readdirSync } from "node:fs"
 import { TimeoutError, type Browser, type Page, type ConsoleMessage, type ElementHandle } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { discoverExtensionId, extensionUrl, gotoExtensionPage, isFirefox, isTargetGone, launchBrowser, openScratchPage } from "./browser"
+import {
+	discoverExtensionId,
+	extensionUrl,
+	gotoExtensionPage,
+	isFirefox,
+	isTargetGone,
+	launchBrowser,
+	newPage,
+	openScratchPage,
+} from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -168,7 +177,7 @@ async function settleLaunchedExtension(
 export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	// Reset onboardingCompleted=false so the onboarding flow runs as on
 	// fresh install (launchExtension seeded it to true by default).
-	const setupPage = await ctx.browser.newPage()
+	const setupPage = await newPage(ctx.browser)
 	patchPagePolling(setupPage)
 	await gotoExtensionPage(setupPage, extensionUrl(ctx.extensionId, "/src/popup/index.html"))
 	await setupPage.evaluate(async () => {
@@ -176,7 +185,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	})
 	await setupPage.close()
 
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
 	await page.setViewport({ width: 720, height: 900 })
 	await page.bringToFront()
@@ -1127,7 +1136,7 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 }
 
 async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	try {
 		return await setUpPopupPage(ctx, page)
 	} catch (err) {
@@ -1343,11 +1352,19 @@ export async function replaceInputValue(page: Page, selector: string, value: str
 	)
 }
 
+/**
+ * A real click focuses the window it lands in; a scripted one does not. Headless Firefox hands
+ * focus to every window the wallet opens, its minimized PXE window included, and refuses WebAuthn
+ * from any window but the focused one — so a click that starts a ceremony has to bring its own.
+ */
+const focusLikeAClick = (page: Page): Promise<void> => (isFirefox ? page.bringToFront().catch(() => {}) : Promise.resolve())
+
 /** Click a visible, enabled element by an arbitrary CSS selector. Same
  *  in-page synthetic-click pattern as `clickByTestId`, just unscoped from
  *  testids — use this when the target's only stable handle is a class
  *  combo, ARIA role, or other non-testid selector. */
 export async function clickSelector(page: Page, selector: string, timeout = 10_000): Promise<void> {
+	await focusLikeAClick(page)
 	try {
 		await page.waitForFunction(
 			(sel: string) => {
@@ -1381,10 +1398,7 @@ export async function clickSelector(page: Page, selector: string, timeout = 10_0
  *  the right choice for popup chains; matches the same pattern in
  *  `replaceInputValue`. */
 export async function clickByTestId(page: Page, testId: string, timeout = 10_000): Promise<void> {
-	// A person can only click a page they are looking at; this click is scripted and says nothing
-	// about focus. Firefox hosts the PXE in a real window, which headless lets take the foreground,
-	// and it refuses WebAuthn outright from a tab that is not the active one.
-	if (isFirefox) await page.bringToFront().catch(() => {})
+	await focusLikeAClick(page)
 	try {
 		await page.waitForFunction(
 			(id: string) => {

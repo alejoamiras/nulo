@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
-import { extensionUrl, gotoExtensionPage, waitForTarget } from "./fixtures/browser"
+import { extensionUrl, gotoExtensionPage, newPage, waitForTarget } from "./fixtures/browser"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import {
 	interceptHealth,
@@ -126,7 +126,7 @@ describe("onboarding tab", () => {
 			.catch(async () => {
 				// The page may have started closing before the function could
 				// run — open a fresh page and re-check from there.
-				const fresh = await extension.browser.newPage()
+				const fresh = await newPage(extension.browser)
 				await gotoExtensionPage(fresh, extensionUrl(extension.extensionId, "/src/popup/index.html"))
 				const flag = await fresh.evaluate(async () => {
 					const r = await chrome.storage.local.get("nulo:onboarding:completed")
@@ -271,14 +271,14 @@ describe("onboarding tab", () => {
 
 	test("popup with onboardingCompleted=false redirects to tab", async ({ freshExtensionPerTest: extension }) => {
 		// Reset the flag so the redirect predicate fires.
-		const setupPage = await extension.browser.newPage()
+		const setupPage = await newPage(extension.browser)
 		await gotoExtensionPage(setupPage, extensionUrl(extension.extensionId, "/src/popup/index.html"))
 		await setupPage.evaluate(async () => {
 			await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 		})
 		await setupPage.close()
 		// Open the popup explicitly — should trigger redirect to onboarding tab.
-		const popup = await extension.browser.newPage()
+		const popup = await newPage(extension.browser)
 		const tabPromise = waitForTarget(
 			extension.browser,
 			(target) => target.type() === "page" && target.url().includes("src/onboarding/index.html"),

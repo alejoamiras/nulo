@@ -55,9 +55,13 @@ export const chromeDriver: BrowserDriver = {
 	scheme: SCHEME,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
+	newPage: (browser) => browser.newPage(),
 	discoverExtensionId,
 	gotoExtensionPage: async (page, url) => {
 		await page.goto(url, { waitUntil: "domcontentloaded" })
+	},
+	reloadExtensionPage: async (page) => {
+		await page.reload({ waitUntil: "domcontentloaded" })
 	},
 	waitForTarget: (browser, predicate, timeout) => browser.waitForTarget(predicate, { timeout }),
 	openScratchPage: async (browser, extensionId) => {

@@ -258,6 +258,18 @@ async function gotoExtensionPage(page: Page, url: string): Promise<void> {
 	await classicSessionFor(page.browser()).navigateWindow(contextIdOf(page), url)
 }
 
+async function reloadExtensionPage(page: Page): Promise<void> {
+	await classicSessionFor(page.browser()).refreshWindow(contextIdOf(page))
+}
+
+/**
+ * A new *tab* goes into the most recently focused window, and once the wallet has started its PXE
+ * that is the minimized window hosting it. A page in there is never visible: no animation frames,
+ * so every Vue transition freezes half-way, and it is not the active tab, which WebAuthn requires.
+ * A window of its own is visible whatever the wallet has opened.
+ */
+const newPage = (browser: Browser): Promise<Page> => browser.newPage({ type: "window" })
+
 /**
  * The popup closes itself when onboarding is unfinished and no profile exists, and Firefox honours
  * that `window.close()` where Chrome ignores it on a tab no script opened. Preload scripts do not
@@ -267,7 +279,7 @@ async function gotoExtensionPage(page: Page, url: string): Promise<void> {
  * launch, which is the state where the popup stays and the onboarding page would not.
  */
 async function openScratchPage(browser: Browser, extensionId: string, { freshProfile }: { freshProfile: boolean }): Promise<Page> {
-	const page = await browser.newPage()
+	const page = await newPage(browser)
 	const path = freshProfile ? "/src/onboarding/index.html" : "/src/popup/index.html"
 	await gotoExtensionPage(page, `${SCHEME}${extensionId}${path}`)
 	return page
@@ -346,6 +358,8 @@ export const firefoxDriver: BrowserDriver = {
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
 	discoverExtensionId,
 	gotoExtensionPage,
+	reloadExtensionPage,
+	newPage,
 	openScratchPage,
 	waitForTarget,
 	// Firefox reports a closed window as a missing browsing context, per command.

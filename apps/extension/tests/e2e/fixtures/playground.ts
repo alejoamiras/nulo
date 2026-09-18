@@ -10,7 +10,7 @@
  */
 import type { Page, Target } from "puppeteer"
 import { inject } from "vitest"
-import { EXTENSION_SCHEME } from "./browser"
+import { EXTENSION_SCHEME, newPage } from "./browser"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
 import { dumpDeepDiagnostics } from "./journal"
 
@@ -27,7 +27,7 @@ export const PLAYGROUND_TEST_URL = (() => {
  * persistence and the protocol log so the DOM stays minimal).
  */
 export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
 	const url = PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
 	await page.goto(url, { waitUntil: "domcontentloaded" })

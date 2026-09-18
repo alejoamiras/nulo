@@ -1,7 +1,7 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { CDPSession, Page, Target } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./browser"
+import { CHROME_ONLY, isFirefox, reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 
@@ -99,7 +99,7 @@ export async function waitForLockScreen(page: Page, timeoutMs = 60_000): Promise
 	// If the redirect lost the race, reload: a fresh popup derives the locked
 	// state from storage and routes to /popup/auth (the real reopen path).
 	if (!(await page.evaluate(() => window.location.hash.includes("/popup/auth")))) {
-		await page.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(page)
 	}
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
@@ -987,7 +987,7 @@ export async function seedUsdQuoteAndReload(page: Page): Promise<void> {
 		const state = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
 	})
-	await page.reload({ waitUntil: "domcontentloaded" })
+	await reloadExtensionPage(page)
 	await page.waitForFunction(() => window.location.hash === "#/popup/general", { timeout: 15_000 })
 }
 

@@ -26,6 +26,8 @@ export interface BrowserDriver {
 	launch(opts: LaunchOptions): Promise<LaunchedBrowser>
 	/** `path` starts at the package root: `/src/popup/index.html#/windows/execute`. */
 	extensionUrl(extensionId: string, path: string): string
+	/** Every page the suite opens comes from here: where a browser puts a new tab is not neutral. */
+	newPage(browser: Browser): Promise<Page>
 	/**
 	 * The host part of the extension's own URLs, once it is installed. Chrome derives it from the
 	 * service-worker target; Firefox MV3 runs a background *script* and has no such target, and
@@ -38,6 +40,8 @@ export interface BrowserDriver {
 	 * arrives but strands the `Page` on a dead context — so this cannot be a bare `page.goto`.
 	 */
 	gotoExtensionPage(page: Page, url: string): Promise<void>
+	/** Reload an extension page in place. Over BiDi a reload strands the `Page` just as a navigation does. */
+	reloadExtensionPage(page: Page): Promise<void>
 	/**
 	 * An extension page with `chrome.*` that stays open on a wallet that has not finished onboarding,
 	 * for the launch fixture to settle the extension through. It has to be a driver's job because
@@ -83,8 +87,10 @@ export const CHROME_ONLY = {
 
 export const extensionUrl = (extensionId: string, path: string): string => driver.extensionUrl(extensionId, path)
 export const launchBrowser = (opts: LaunchOptions): Promise<LaunchedBrowser> => driver.launch(opts)
+export const newPage = (browser: Browser): Promise<Page> => driver.newPage(browser)
 export const discoverExtensionId = (browser: Browser): Promise<string> => driver.discoverExtensionId(browser)
 export const gotoExtensionPage = (page: Page, url: string): Promise<void> => driver.gotoExtensionPage(page, url)
+export const reloadExtensionPage = (page: Page): Promise<void> => driver.reloadExtensionPage(page)
 export const isTargetGone = (text: string): boolean => driver.targetGone?.test(text) ?? false
 export const waitForTarget = (browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> =>
 	driver.waitForTarget(browser, predicate, timeout)

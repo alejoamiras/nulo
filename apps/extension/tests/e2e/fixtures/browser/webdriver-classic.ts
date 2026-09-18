@@ -116,6 +116,13 @@ export class WebDriverSession {
 		})
 	}
 
+	refreshWindow(handle: string): Promise<void> {
+		return this.exclusive(async () => {
+			await this.switchToWindow(handle)
+			await this.send("POST", "/refresh", {})
+		})
+	}
+
 	async setScriptTimeout(ms: number): Promise<void> {
 		await this.send("POST", "/timeouts", { script: ms })
 	}

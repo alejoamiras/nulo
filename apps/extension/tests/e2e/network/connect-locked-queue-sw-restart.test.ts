@@ -1,5 +1,6 @@
 import type { Page } from "puppeteer"
-import { expect, inject } from "vitest"
+import { describe, expect, inject } from "vitest"
+import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
 import { ensureUnlocked, lockWallet, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "../fixtures/helpers"
@@ -29,42 +30,44 @@ async function readBadgeText(page: Page): Promise<string> {
  * permanent — even unlocking never cleared it, because the empty-queue drain
  * early-returns without touching the badge).
  */
-test.skipIf(!hasConfig)(
-	"connect-locked-queue-sw-restart — a killed SW drops the queue cleanly: badge reconciled at boot, no popup on unlock",
-	{ timeout: 120_000 },
-	async ({ registeredExtensionPerTest }) => {
-		const ext = registeredExtensionPerTest
+describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+	test.skipIf(!hasConfig)(
+		"connect-locked-queue-sw-restart — a killed SW drops the queue cleanly: badge reconciled at boot, no popup on unlock",
+		{ timeout: 120_000 },
+		async ({ registeredExtensionPerTest }) => {
+			const ext = registeredExtensionPerTest
 
-		// Lock the wallet first.
-		const popupPage = await openPopup(ext)
-		await waitForHash(popupPage, "#/popup/general")
-		await lockWallet(popupPage)
+			// Lock the wallet first.
+			const popupPage = await openPopup(ext)
+			await waitForHash(popupPage, "#/popup/general")
+			await lockWallet(popupPage)
 
-		// Fire discovery — queued (no popup while locked), badge shows the count.
-		const dappPage = await openPlayground(ext)
-		await clickByTestId(dappPage, "pg-btn-connect")
-		await new Promise((r) => setTimeout(r, 1_500))
-		expect(ext.browser.targets().some((t) => t.url().includes("#/windows/discover"))).toBe(false)
-		expect(await readBadgeText(popupPage)).toBe("1")
+			// Fire discovery — queued (no popup while locked), badge shows the count.
+			const dappPage = await openPlayground(ext)
+			await clickByTestId(dappPage, "pg-btn-connect")
+			await new Promise((r) => setTimeout(r, 1_500))
+			expect(ext.browser.targets().some((t) => t.url().includes("#/windows/discover"))).toBe(false)
+			expect(await readBadgeText(popupPage)).toBe("1")
 
-		// Kill the SW for real.
-		await popupPage.close()
-		await stopServiceWorker(ext)
+			// Kill the SW for real.
+			await popupPage.close()
+			await stopServiceWorker(ext)
 
-		// Re-open the popup (wakes the replacement worker) and wait for its boot.
-		const popupPage2 = await openPopup(ext)
-		await waitForWorkerLiveness(popupPage2, await readLivenessBaseline(popupPage2))
+			// Re-open the popup (wakes the replacement worker) and wait for its boot.
+			const popupPage2 = await openPopup(ext)
+			await waitForWorkerLiveness(popupPage2, await readLivenessBaseline(popupPage2))
 
-		// Boot reconciliation: the ghost badge is cleared BEFORE any unlock/drain.
-		await popupPage2.waitForFunction(async () => (await chrome.action.getBadgeText({})) === "", { timeout: 10_000, polling: 250 })
+			// Boot reconciliation: the ghost badge is cleared BEFORE any unlock/drain.
+			await popupPage2.waitForFunction(async () => (await chrome.action.getBadgeText({})) === "", { timeout: 10_000, polling: 250 })
 
-		// Unlock — the queue was in-memory, so nothing drains: clean loss, no popup.
-		await ensureUnlocked(popupPage2)
-		await new Promise((r) => setTimeout(r, 3_000))
-		expect(ext.browser.targets().some((t) => t.url().includes("#/windows/discover"))).toBe(false)
-		expect(await readBadgeText(popupPage2)).toBe("")
+			// Unlock — the queue was in-memory, so nothing drains: clean loss, no popup.
+			await ensureUnlocked(popupPage2)
+			await new Promise((r) => setTimeout(r, 3_000))
+			expect(ext.browser.targets().some((t) => t.url().includes("#/windows/discover"))).toBe(false)
+			expect(await readBadgeText(popupPage2)).toBe("")
 
-		await dappPage.close()
-		await popupPage2.close()
-	},
-)
+			await dappPage.close()
+			await popupPage2.close()
+		},
+	)
+})
