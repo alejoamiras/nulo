@@ -50,16 +50,24 @@ These came out of the two-round review and are **not** fixed by editing the docu
 
    Blockers 1–3 are one arc, to be planned with `/blueprint`. The identity and jurisdiction inputs
    the published pages need are now settled (see § Identity below), so nothing gates the plan.
-4. **Land the Presto MIT relicense in a published version, and repoint the lockfile.** The SDK is
-   being relicensed to MIT in a separate session; the documents are written on the basis that this
-   has happened. What closes the blocker is not the decision but the artifact: the versions the
-   lockfile resolves still declare `AGPL-3.0-only` in their installed `package.json`, and those are
-   what get bundled. All **three** packages need it, not just the SDK — `@alejoamiras/presto-core`
-   (`PrestoClient`, a value import in `apps/extension/src/presto/client.ts`), `@alejoamiras/presto`,
-   and `@alejoamiras/presto-banners` (value-imported in `apps/extension/src/onboarding/pages/presto.vue`
-   and `apps/extension/src/utils/presto-ui-state.ts`). Publish the relicensed versions, bump the
-   lockfile, and confirm the licence notices travel **inside the distributed extension**, not only on
-   GitHub.
+4. **Verify the Presto MIT relicense reached the bundled artifacts.** Everything under the
+   `@alejoamiras` Presto scope is MIT — decided, and these documents are written on that basis. The
+   remaining work is mechanical, because what ships is the installed package, not the intent: at the
+   time of writing the lockfile still resolves `@alejoamiras/presto-core@1.0.1`,
+   `@alejoamiras/presto@5.2.0-revision.2` and `@alejoamiras/presto-banners@1.0.0`, all three of which
+   declare `AGPL-3.0-only` in their installed `package.json`, and all three are **value** imports, not
+   type-only (`PrestoClient` in `apps/extension/src/presto/client.ts`; the banners in
+   `apps/extension/src/onboarding/pages/presto.vue` and `apps/extension/src/utils/presto-ui-state.ts`).
+   So: publish the relicensed versions, bump the lockfile, and confirm the MIT copyright + permission
+   notices travel **inside the distributed extension** — MIT requires that, and a notice that only
+   exists on GitHub does not satisfy it.
+
+   **Add the drift guard in the same PR as the lockfile bump**, not before: a test asserting the
+   installed `license` of those three packages would red the build today, since today they still say
+   AGPL. `apps/extension/src/presto/presto-core-deps.test.ts` already reads
+   `@alejoamiras/presto-core/package.json` through `createRequire`, so it is the natural home — extend
+   it to all three packages and assert the licence, and a future dependency bump that pulls an
+   AGPL-declared version back in fails a check instead of shipping.
 5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
    "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
    verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
