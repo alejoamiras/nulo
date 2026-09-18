@@ -50,7 +50,7 @@ export class WebDriverSession {
 	static async open(base: string, capabilities: Record<string, unknown>, timeoutMs = 20_000): Promise<WebDriverSession> {
 		const deadline = Date.now() + timeoutMs
 		while (Date.now() < deadline) {
-			const up = await fetch(`${base}/status`).then(
+			const up = await fetch(`${base}/status`, { signal: AbortSignal.timeout(2_000) }).then(
 				(r) => r.ok,
 				() => false,
 			)
@@ -65,8 +65,8 @@ export class WebDriverSession {
 		return new WebDriverSession(base, sessionId, caps)
 	}
 
-	private send(method: string, path: string, body?: unknown): Promise<unknown> {
-		return request(this.base, method, `/session/${this.sessionId}${path}`, body)
+	private send(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<unknown> {
+		return request(this.base, method, `/session/${this.sessionId}${path}`, body, timeoutMs)
 	}
 
 	/** Install an unpacked add-on. `temporary` is the only form that accepts an unsigned build. */
@@ -75,7 +75,7 @@ export class WebDriverSession {
 	}
 
 	async windowHandles(): Promise<string[]> {
-		return (await this.send("GET", "/window/handles")) as string[]
+		return (await this.send("GET", "/window/handles", undefined, 5_000)) as string[]
 	}
 
 	async switchToWindow(handle: string): Promise<void> {
@@ -141,14 +141,21 @@ export class WebDriverSession {
 		return (await this.send("GET", `/webauthn/authenticator/${id}/credentials`)) as unknown[]
 	}
 
+	/** Short, because everything that releases the launch waits behind it. */
 	async close(): Promise<void> {
-		await this.send("DELETE", "")
+		await request(this.base, "DELETE", `/session/${this.sessionId}`, undefined, 15_000)
 	}
 }
 
-async function request(base: string, method: string, path: string, body?: unknown): Promise<unknown> {
+/**
+ * Every request carries a deadline: a wedged geckodriver otherwise holds the caller forever, and
+ * the caller's own timeout cannot interrupt a fetch that is already outstanding. The default is
+ * long because a navigation replies only once the page has loaded.
+ */
+async function request(base: string, method: string, path: string, body?: unknown, timeoutMs = 120_000): Promise<unknown> {
 	const res = await fetch(`${base}${path}`, {
 		method,
+		signal: AbortSignal.timeout(timeoutMs),
 		headers: { "content-type": "application/json" },
 		body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(body ?? {}),
 	})

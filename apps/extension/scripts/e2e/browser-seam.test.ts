@@ -73,6 +73,10 @@ function localBrowserAliases(file: ts.SourceFile): Set<string> {
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && yieldsBrowser(node.initializer)) {
 			aliases.add(node.name.text)
 		}
+		// `const { browser: b } = ctx` — the plain `{ browser }` form already reads as `browser`.
+		if (ts.isBindingElement(node) && ts.isIdentifier(node.name) && node.propertyName && ts.isIdentifier(node.propertyName)) {
+			if (node.propertyName.text === "browser") aliases.add(node.name.text)
+		}
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
@@ -88,12 +92,32 @@ function closesABrowser(receiver: ts.Expression, aliases: Set<string>): boolean 
 const literalText = (node: ts.Node): string | undefined =>
 	ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined
 
-/** A target-TYPE test — `t.type() === "service_worker"`, or the loader URL — never a log line. */
+const EQUALITY = new Set([
+	ts.SyntaxKind.EqualsEqualsEqualsToken,
+	ts.SyntaxKind.EqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsToken,
+])
+const STRING_TESTS = new Set(["includes", "startsWith", "endsWith", "indexOf", "match", "search"])
+
+/** `x.method(...)` or `x["method"](...)` — the member a call invokes, however it was spelled. */
+function calledMember(call: ts.CallExpression): { receiver: ts.Expression; name: string } | undefined {
+	const callee = unwrap(call.expression)
+	if (ts.isPropertyAccessExpression(callee)) return { receiver: callee.expression, name: callee.name.text }
+	const key = ts.isElementAccessExpression(callee) ? literalText(unwrap(callee.argumentExpression)) : undefined
+	return key !== undefined && ts.isElementAccessExpression(callee) ? { receiver: callee.expression, name: key } : undefined
+}
+
+/**
+ * A target test, never a log line: the type compared for (in)equality, or the loader URL handed
+ * to a string test. A negated comparison assumes a service-worker target exists just as much.
+ */
 function testsForWorkerTarget(node: ts.Node): boolean {
-	if (!ts.isBinaryExpression(node)) return literalText(node)?.includes(WORKER_LOADER) ?? false
-	const op = node.operatorToken.kind
-	if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsToken) return false
-	return [node.left, node.right].some((side) => literalText(unwrap(side)) === WORKER_TYPE)
+	if (ts.isBinaryExpression(node)) {
+		return EQUALITY.has(node.operatorToken.kind) && [node.left, node.right].some((side) => literalText(unwrap(side)) === WORKER_TYPE)
+	}
+	if (!ts.isCallExpression(node) || !STRING_TESTS.has(calledMember(node)?.name ?? "")) return false
+	return node.arguments.some((arg) => literalText(unwrap(arg))?.includes(WORKER_LOADER) ?? false)
 }
 
 /**
@@ -126,10 +150,10 @@ function violations(source: string): { scheme: number[]; close: number[]; worker
 	const visit = (node: ts.Node): void => {
 		if (isSchemeText(node)) scheme.push(lineOf(node))
 		if (testsForWorkerTarget(node)) worker.push(lineOf(node))
-		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-			const onBrowser = closesABrowser(node.expression.expression, aliases)
-			if (onBrowser && node.expression.name.text === "close") close.push(lineOf(node))
-			if (onBrowser && node.expression.name.text === "waitForTarget") wait.push(lineOf(node))
+		const member = ts.isCallExpression(node) ? calledMember(node) : undefined
+		if (member && closesABrowser(member.receiver, aliases)) {
+			if (member.name === "close") close.push(lineOf(node))
+			if (member.name === "waitForTarget") wait.push(lineOf(node))
 		}
 		ts.forEachChild(node, visit)
 	}
@@ -261,6 +285,16 @@ describe("browser seam guard", () => {
 		expect(violations(inAsync(body)).worker).toEqual([2])
 	})
 
+	// Ordinary spellings of the same call; each was a live bypass of the rule above it.
+	test.each([
+		["element access", 'await ctx.browser["waitForTarget"]((t) => true)', "wait"],
+		["a renamed destructure", "const { browser: b } = ctx\nawait b.waitForTarget((t) => true)", "wait"],
+		["element-access close", 'await ctx.browser["close"]()', "close"],
+		["a negated type test", 'const others = targets.filter((t) => t.type() !== "service_worker")', "worker"],
+	] as const)("flags %s", (_label, body, rule) => {
+		expect(violations(inAsync(body))[rule].length).toBe(1)
+	})
+
 	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {
 		expect(violations(inAsync("await ctx.browser.waitForTarget((t) => true)")).wait).toEqual([2])
 		expect(violations(inAsync("await waitForTarget(ctx.browser, (t) => true, 1000)")).wait).toEqual([])
@@ -268,6 +302,7 @@ describe("browser seam guard", () => {
 
 	test("leaves the words alone outside a target test", () => {
 		expect(violations('const msg = "<no service_worker target>"').worker).toEqual([])
+		expect(violations('console.log("waiting for service-worker-loader")').worker).toEqual([])
 	})
 
 	// Source the parser rejects is source the scan cannot vouch for; accepting a partial tree is

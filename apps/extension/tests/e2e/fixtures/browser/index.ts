@@ -39,9 +39,9 @@ export interface BrowserDriver {
 	 */
 	gotoExtensionPage(page: Page, url: string): Promise<void>
 	/**
-	 * A popup page with `chrome.*` that stays open on a wallet that has not finished onboarding,
+	 * An extension page with `chrome.*` that stays open on a wallet that has not finished onboarding,
 	 * for the launch fixture to settle the extension through. It has to be a driver's job because
-	 * that popup redirects to the onboarding tab and calls `window.close()`: Chrome ignores the
+	 * the popup redirects to the onboarding tab and calls `window.close()`: Chrome ignores the
 	 * call on a tab no script opened, Firefox honours it and the page dies under the fixture.
 	 */
 	openScratchPage(browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page>
@@ -57,12 +57,6 @@ export interface BrowserDriver {
 	 * resolves it, so that error is the expected end of a click there, not a failure.
 	 */
 	readonly targetGone?: RegExp
-	/**
-	 * Whether the page's window no longer exists. `page.isClosed()` is not enough on its own: over
-	 * BiDi, Firefox reports nothing when a window closes ITSELF, so Puppeteer keeps the page open
-	 * forever — and every approval window ends by closing itself.
-	 */
-	isPageGone(page: Page): Promise<boolean>
 }
 
 const DRIVERS: Partial<Record<BrowserKind, BrowserDriver>> = { chrome: chromeDriver, firefox: firefoxDriver }
@@ -84,15 +78,6 @@ export const extensionUrl = (extensionId: string, path: string): string => drive
 export const launchBrowser = (opts: LaunchOptions): Promise<LaunchedBrowser> => driver.launch(opts)
 export const discoverExtensionId = (browser: Browser): Promise<string> => driver.discoverExtensionId(browser)
 export const gotoExtensionPage = (page: Page, url: string): Promise<void> => driver.gotoExtensionPage(page, url)
-/** Poll `isPageGone` until it holds, or reject after `timeout` ms with `message`. */
-export async function waitForPageGone(page: Page, timeout: number, message: string): Promise<void> {
-	const deadline = Date.now() + timeout
-	while (Date.now() < deadline) {
-		if (await driver.isPageGone(page)) return
-		await new Promise((resolve) => setTimeout(resolve, 50))
-	}
-	throw new Error(message)
-}
 export const isTargetGone = (text: string): boolean => driver.targetGone?.test(text) ?? false
 export const waitForTarget = (browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> =>
 	driver.waitForTarget(browser, predicate, timeout)

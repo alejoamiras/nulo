@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterAll, describe, expect, test } from "vitest"
@@ -9,9 +9,8 @@ import { afterAll, describe, expect, test } from "vitest"
 const ROOT = mkdtempSync(path.join(tmpdir(), "nulo-ownership-test-"))
 process.env.NULO_E2E_DATA_ROOT = ROOT
 
-const { ownedByThisRun, listOwnedLaunches, ownsProcess, readStartTime, reapOrphanLaunches, recordLaunch, releaseLaunch } = await import(
-	"../../tests/e2e/fixtures/browser/ownership"
-)
+const { ownedByThisRun, listOwnedLaunches, newProfileDir, ownsProcess, readStartTime, reapOrphanLaunches, recordLaunch, releaseLaunch } =
+	await import("../../tests/e2e/fixtures/browser/ownership")
 
 const profileFor = (name: string) => {
 	const dir = path.join(ROOT, name)
@@ -50,7 +49,6 @@ describe("webdriver launch ownership", () => {
 		sleepers.push(pid)
 		const record = ownedByThisRun({
 			pid,
-			startTime: readStartTime(pid) ?? "",
 			profileDir: profileFor("owned"),
 			ownsProfile: true,
 			label: "t",
@@ -62,8 +60,8 @@ describe("webdriver launch ownership", () => {
 	test("release kills the group and only then removes the profile", async () => {
 		const pid = spawnSleeper()
 		sleepers.push(pid)
-		const profileDir = profileFor("released")
-		const record = ownedByThisRun({ pid, startTime: readStartTime(pid) ?? "", profileDir, ownsProfile: true, label: "release" })
+		const profileDir = newProfileDir()
+		const record = ownedByThisRun({ pid, profileDir, ownsProfile: true, label: "release" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
@@ -76,7 +74,7 @@ describe("webdriver launch ownership", () => {
 		const pid = spawnSleeper()
 		sleepers.push(pid)
 		const profileDir = profileFor("caller-owned")
-		const record = ownedByThisRun({ pid, startTime: readStartTime(pid) ?? "", profileDir, ownsProfile: false, label: "borrowed" })
+		const record = ownedByThisRun({ pid, profileDir, ownsProfile: false, label: "borrowed" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
@@ -89,7 +87,7 @@ describe("webdriver launch ownership", () => {
 		sleepers.push(pid)
 		const profileDir = profileFor("live-owner")
 		// Owned by THIS process, which is alive for the duration of the test.
-		recordLaunch(ownedByThisRun({ pid, startTime: readStartTime(pid) ?? "", profileDir, ownsProfile: true, label: "live" }))
+		recordLaunch(ownedByThisRun({ pid, profileDir, ownsProfile: true, label: "live" }))
 		expect(await reapOrphanLaunches()).toEqual([])
 		expect(existsSync(profileDir)).toBe(true)
 		expect(readStartTime(pid)).toBeDefined()
@@ -98,7 +96,7 @@ describe("webdriver launch ownership", () => {
 	test("a record whose owner is gone is reaped, process group and profile both", async () => {
 		const pid = spawnSleeper()
 		sleepers.push(pid)
-		const profileDir = profileFor("dead-owner")
+		const profileDir = newProfileDir()
 		recordLaunch({
 			pid,
 			startTime: readStartTime(pid) ?? "",
@@ -111,5 +109,67 @@ describe("webdriver launch ownership", () => {
 		expect(await reapOrphanLaunches()).toContain("orphan")
 		expect(readStartTime(pid)).toBeUndefined()
 		expect(existsSync(profileDir)).toBe(false)
+	})
+
+	// geckodriver can exit on SIGTERM while the Firefox it started lives on. Judging by the leader
+	// alone would call that group gone and delete the profile under a running browser.
+	test("a group whose leader has exited is still owned while a member survives", async () => {
+		const leader = spawn("sh", ["-c", "sleep 120 & echo $!; exec sleep 0.2"], { detached: true, stdio: ["ignore", "pipe", "ignore"] })
+		if (!leader.pid) throw new Error("could not spawn a test process group")
+		sleepers.push(leader.pid)
+		const profileDir = newProfileDir()
+		const record = ownedByThisRun({ pid: leader.pid, profileDir, ownsProfile: true, label: "leaderless" })
+		await new Promise((resolve) => leader.once("exit", resolve))
+		expect(readStartTime(leader.pid)).toBeUndefined()
+		expect(ownsProcess(record)).toBe(true)
+
+		await releaseLaunch(record)
+		expect(ownsProcess(record)).toBe(false)
+		expect(existsSync(profileDir)).toBe(false)
+	})
+
+	// A record is a file any process on this host can write, and it names a directory to delete.
+	test("a record cannot authorise deleting a directory the driver did not create", async () => {
+		const outside = profileFor("not-a-driver-profile")
+		recordLaunch({
+			pid: 2_000_000_000,
+			startTime: "1",
+			ownerPid: 0,
+			ownerStartTime: "1",
+			profileDir: outside,
+			ownsProfile: true,
+			label: "forged",
+		})
+		expect(await reapOrphanLaunches()).toContain("forged")
+		expect(existsSync(outside)).toBe(true)
+		expect(listOwnedLaunches().map((record) => record.label)).not.toContain("forged")
+	})
+
+	test("a malformed or misfiled record is discarded without acting on it", async () => {
+		const outside = profileFor("named-by-a-bad-record")
+		const dir = path.join(ROOT, "webdriver-owned")
+		writeFileSync(
+			path.join(dir, "12345.json"),
+			JSON.stringify({
+				pid: 54321,
+				startTime: "1",
+				ownerPid: 0,
+				ownerStartTime: "1",
+				profileDir: outside,
+				ownsProfile: true,
+				label: "misfiled",
+			}),
+		)
+		writeFileSync(path.join(dir, "777.json"), "{ not json")
+		expect(await reapOrphanLaunches()).toEqual([])
+		expect(existsSync(outside)).toBe(true)
+		expect(existsSync(path.join(dir, "12345.json"))).toBe(false)
+		expect(existsSync(path.join(dir, "777.json"))).toBe(false)
+	})
+
+	test("an identity that cannot be read is refused, not recorded as empty", () => {
+		expect(() =>
+			ownedByThisRun({ pid: 2_000_000_000, profileDir: profileFor("unreadable"), ownsProfile: true, label: "ghost" }),
+		).toThrow(/refusing to own/)
 	})
 })

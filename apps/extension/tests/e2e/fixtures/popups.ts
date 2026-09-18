@@ -9,7 +9,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
-import { waitForPageGone, waitForTarget } from "./browser"
+import { waitForTarget } from "./browser"
 import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
@@ -120,7 +120,12 @@ async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
  *  opening a second popup of the same kind so waitForTarget doesn't match
  *  the still-closing first popup. */
 export async function waitForPopupClosed(page: Page, timeout = 5_000): Promise<void> {
-	await waitForPageGone(page, timeout, `waitForPopupClosed: popup did not close within ${timeout}ms`)
+	const start = Date.now()
+	while (Date.now() - start < timeout) {
+		if (page.isClosed()) return
+		await new Promise((r) => setTimeout(r, 50))
+	}
+	throw new Error(`waitForPopupClosed: popup did not close within ${timeout}ms`)
 }
 
 export async function approveDiscover(page: Page): Promise<void> {
@@ -158,7 +163,17 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
 	// If the popup never closes within 10s, throw — silently proceeding would
 	// mask the very failure mode this wait exists to prevent. (Codex audit
 	// session 019e2b9b caught the earlier silent-resolve version.)
-	await waitForPageGone(page, 10_000, "approveVerify: popup did not close within 10s — setTrustedVerification persistence may be racy")
+	if (!page.isClosed()) {
+		await new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				reject(new Error("approveVerify: popup did not close within 10s — setTrustedVerification persistence may be racy"))
+			}, 10_000)
+			page.once("close", () => {
+				clearTimeout(timer)
+				resolve()
+			})
+		})
+	}
 }
 
 /**

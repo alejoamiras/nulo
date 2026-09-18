@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { E2E_DATA_ROOT } from "../../lockfile"
 
@@ -18,6 +18,25 @@ import { E2E_DATA_ROOT } from "../../lockfile"
 
 const RECORD_ROOT = path.join(E2E_DATA_ROOT, "webdriver-owned")
 
+/** The only place a driver creates profiles, and so the only place teardown may delete one. */
+export const PROFILE_ROOT = path.join(E2E_DATA_ROOT, "firefox-profiles")
+const PROFILE_PREFIX = "profile-"
+
+/**
+ * A record is a file any process on this host can write, and it names a directory to delete
+ * recursively. Deletion is therefore bounded by what a driver could have created, not by what the
+ * record claims.
+ */
+function isDriverProfile(dir: string): boolean {
+	const resolved = path.resolve(dir)
+	return path.dirname(resolved) === PROFILE_ROOT && path.basename(resolved).startsWith(PROFILE_PREFIX)
+}
+
+export function newProfileDir(): string {
+	mkdirSync(PROFILE_ROOT, { recursive: true })
+	return mkdtempSync(path.join(PROFILE_ROOT, PROFILE_PREFIX))
+}
+
 export interface LaunchOwnership {
 	/** The process we spawned; also the group leader, since it is spawned detached. */
 	pid: number
@@ -35,9 +54,13 @@ export interface LaunchOwnership {
 	label: string
 }
 
-/** Fill in the owner fields for a record this process is about to take ownership of. */
-export function ownedByThisRun(record: Omit<LaunchOwnership, "ownerPid" | "ownerStartTime">): LaunchOwnership {
-	return { ...record, ownerPid: process.pid, ownerStartTime: readStartTime(process.pid) ?? "" }
+/** Throws rather than record an identity it could not read: an empty start time matches nothing,
+ *  so such a record would call a live group "gone" and delete the profile under it. */
+export function ownedByThisRun(record: Omit<LaunchOwnership, "ownerPid" | "ownerStartTime" | "startTime">): LaunchOwnership {
+	const startTime = readStartTime(record.pid)
+	const ownerStartTime = readStartTime(process.pid)
+	if (!startTime || !ownerStartTime) throw new Error(`cannot read a start time for pid ${record.pid} or this run — refusing to own it`)
+	return { ...record, startTime, ownerPid: process.pid, ownerStartTime }
 }
 
 /** `undefined` when the pid is gone — a dead process has no start time to compare. */
@@ -52,9 +75,55 @@ export function readStartTime(pid: number): string | undefined {
 	}
 }
 
-/** True only if this pid is alive AND is still the process we recorded. */
+/** True while anything in the group exists. EPERM means it exists under another user — not ours
+ *  to signal, and not gone either. */
+function groupAlive(pgid: number): boolean {
+	try {
+		process.kill(-pgid, 0)
+		return true
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM"
+	}
+}
+
+/**
+ * Whether the recorded GROUP is still ours, not just its leader: geckodriver can exit on SIGTERM
+ * while the Firefox it spawned lives on. With the leader gone, the kernel still will not reissue a
+ * pid that names a live process group, so members surviving under it can only be ours — whereas a
+ * live leader with another start time proves the pid was reissued, which in turn proves our group
+ * had emptied first.
+ */
 export function ownsProcess(record: LaunchOwnership): boolean {
-	return readStartTime(record.pid) === record.startTime
+	const leader = readStartTime(record.pid)
+	if (leader !== undefined) return leader === record.startTime
+	return groupAlive(record.pid)
+}
+
+function isRecord(value: unknown): value is LaunchOwnership {
+	const r = value as Partial<LaunchOwnership> | null
+	return (
+		typeof r === "object" &&
+		r !== null &&
+		Number.isInteger(r.pid) &&
+		(r.pid as number) > 1 &&
+		Number.isInteger(r.ownerPid) &&
+		typeof r.startTime === "string" &&
+		r.startTime !== "" &&
+		typeof r.ownerStartTime === "string" &&
+		typeof r.profileDir === "string" &&
+		typeof r.ownsProfile === "boolean" &&
+		typeof r.label === "string"
+	)
+}
+
+/** `undefined` for anything that is not a well-formed record filed under its own pid. */
+function readRecord(file: string): LaunchOwnership | undefined {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path.join(RECORD_ROOT, file), "utf8"))
+		return isRecord(parsed) && file === `${parsed.pid}.json` ? parsed : undefined
+	} catch {
+		return undefined
+	}
 }
 
 export function recordLaunch(record: LaunchOwnership): void {
@@ -65,21 +134,17 @@ export function recordLaunch(record: LaunchOwnership): void {
 	renameSync(tmp, file)
 }
 
-/** Every record currently on disk, this run's and other runs'. Teardown assertions read this. */
-export function listOwnedLaunches(): LaunchOwnership[] {
+function recordFiles(): string[] {
 	try {
-		return readdirSync(RECORD_ROOT)
-			.filter((f) => f.endsWith(".json"))
-			.flatMap((f) => {
-				try {
-					return [JSON.parse(readFileSync(path.join(RECORD_ROOT, f), "utf8")) as LaunchOwnership]
-				} catch {
-					return []
-				}
-			})
+		return readdirSync(RECORD_ROOT).filter((f) => f.endsWith(".json"))
 	} catch {
 		return []
 	}
+}
+
+/** Every well-formed record on disk, this run's and other runs'. */
+export function listOwnedLaunches(): LaunchOwnership[] {
+	return recordFiles().flatMap((file) => readRecord(file) ?? [])
 }
 
 export function forgetLaunch(pid: number): void {
@@ -104,7 +169,7 @@ export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): P
 	// A process that outlived SIGKILL is unkillable (uninterruptible sleep); leaving its profile is
 	// the lesser harm, and the record survives for the next run's sweep.
 	if (ownsProcess(record)) return
-	if (record.ownsProfile) rmSync(record.profileDir, { recursive: true, force: true })
+	if (record.ownsProfile && isDriverProfile(record.profileDir)) rmSync(record.profileDir, { recursive: true, force: true })
 	forgetLaunch(record.pid)
 }
 
@@ -123,20 +188,12 @@ async function waitForExit(record: LaunchOwnership, timeoutMs: number): Promise<
  * exactly like its browser crashing, which is the failure this whole module exists to prevent.
  */
 export async function reapOrphanLaunches(): Promise<string[]> {
-	let files: string[]
-	try {
-		files = readdirSync(RECORD_ROOT).filter((f) => f.endsWith(".json"))
-	} catch {
-		return []
-	}
 	const reaped: string[] = []
-	for (const file of files) {
-		const full = path.join(RECORD_ROOT, file)
-		let record: LaunchOwnership
-		try {
-			record = JSON.parse(readFileSync(full, "utf8")) as LaunchOwnership
-		} catch {
-			rmSync(full, { force: true })
+	for (const file of recordFiles()) {
+		const record = readRecord(file)
+		if (!record) {
+			// Unreadable or misfiled: it identifies nothing that could be safely signalled or deleted.
+			rmSync(path.join(RECORD_ROOT, file), { force: true })
 			continue
 		}
 		if (readStartTime(record.ownerPid) === record.ownerStartTime) continue
@@ -150,6 +207,6 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
 	try {
 		process.kill(-pid, signal)
 	} catch {
-		// The group is already gone, or the leader exited before its children were reparented.
+		// Already gone.
 	}
 }

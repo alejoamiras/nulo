@@ -1,13 +1,12 @@
-import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs"
+import { type ChildProcess, spawn } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import type { Browser, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
-import { E2E_DATA_ROOT } from "../../lockfile"
-import { attachPuppeteerOverBiDi } from "./bidi-attach"
+import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
-import { type LaunchOwnership, ownedByThisRun, readStartTime, reapOrphanLaunches, recordLaunch, releaseLaunch } from "./ownership"
+import { type LaunchOwnership, newProfileDir, ownedByThisRun, reapOrphanLaunches, recordLaunch, releaseLaunch } from "./ownership"
 import { WebDriverSession } from "./webdriver-classic"
 
 const SCHEME = "moz-extension://"
@@ -46,14 +45,62 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 	const reaped = await sweep
 	if (reaped.length) console.warn(`[firefox] reaped ${reaped.length} orphaned launch(es): ${reaped.join(", ")}`)
 
-	// Held until the moment before spawn: geckodriver binds both immediately, so there is no
-	// build-length gap for the kernel to hand one of them to an outgoing connection.
-	const [http, bidi] = [await reservePort(), await reservePort()]
 	// A caller-supplied directory belongs to the caller: a relaunch-on-the-same-profile test exists
 	// to prove data survives teardown, so deleting it would destroy the fixture, not clean up.
-	const profileDir = userDataDir ?? freshProfileDir()
+	const profileDir = userDataDir ?? newProfileDir()
 	mkdirSync(profileDir, { recursive: true })
 
+	const { gecko, base } = await spawnGeckodriver()
+	let record: LaunchOwnership
+	try {
+		record = ownedByThisRun({ pid: gecko.pid, profileDir, ownsProfile: userDataDir === undefined, label: `geckodriver:${base}` })
+		recordLaunch(record)
+	} catch (err) {
+		// No record means no later sweep could find this group, so it cannot be left running.
+		process.kill(-gecko.pid, "SIGKILL")
+		throw err
+	}
+
+	try {
+		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }))
+		assertVersion(session.capabilities.browserVersion)
+		const addonId = await session.installAddon(extensionPath)
+		const attachment = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)
+		const { browser } = attachment
+		contexts.set(browser, { session, profileDir, addonId })
+		const stopWatching = watchForSilentCloses(session, attachment)
+		return {
+			browser,
+			close: async () => {
+				stopWatching()
+				try {
+					// Disconnect first: the BiDi transport is a client of a session the classic channel
+					// owns, and ending the session under it produces a socket error on the way out.
+					await browser.disconnect().catch(() => {})
+					await session.close().catch(() => {})
+				} finally {
+					await releaseLaunch(record)
+				}
+			},
+		}
+	} catch (err) {
+		await releaseLaunch(record)
+		throw err
+	}
+}
+
+/**
+ * The reservations are held until the moment before spawn: geckodriver binds both ports
+ * immediately, so there is no gap for the kernel to hand one to an outgoing connection.
+ */
+async function spawnGeckodriver(): Promise<{ gecko: ChildProcess & { pid: number }; base: string }> {
+	const reserved = [await reservePort()]
+	try {
+		reserved.push(await reservePort())
+	} finally {
+		if (reserved.length < 2) await reserved[0].release()
+	}
+	const [http, bidi] = reserved
 	await Promise.all([http.release(), bidi.release()])
 	const gecko = spawn(
 		geckodriverPath(),
@@ -64,36 +111,14 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 		// Detached so the pid is its own group leader: teardown signals the group, never a name.
 		{ detached: true, stdio: ["ignore", "ignore", "inherit"] },
 	)
-	if (!gecko.pid) throw new Error("geckodriver did not start")
-	const record: LaunchOwnership = ownedByThisRun({
-		pid: gecko.pid,
-		startTime: readStartTime(gecko.pid) ?? "",
-		profileDir,
-		ownsProfile: userDataDir === undefined,
-		label: `geckodriver:${http.port}`,
-	})
-	recordLaunch(record)
-
-	try {
-		const session = await WebDriverSession.open(`http://127.0.0.1:${http.port}`, capabilities({ profileDir, headless }))
-		assertVersion(session.capabilities.browserVersion)
-		const addonId = await session.installAddon(extensionPath)
-		const browser = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)
-		contexts.set(browser, { session, profileDir, addonId })
-		return {
-			browser,
-			close: async () => {
-				// Disconnect first: the BiDi transport is a client of a session the classic channel
-				// owns, and ending the session under it produces a socket error on the way out.
-				await browser.disconnect().catch(() => {})
-				await session.close().catch(() => {})
-				await releaseLaunch(record)
-			},
-		}
-	} catch (err) {
-		await releaseLaunch(record)
-		throw err
-	}
+	// Without a listener a missing binary surfaces as an unhandled `error` event, not a rejection.
+	const failed = new Promise<never>((_, reject) =>
+		gecko.once("error", (err) => reject(new Error(`geckodriver did not start: ${err.message}`))),
+	)
+	const started = new Promise<void>((resolve) => gecko.once("spawn", resolve))
+	await Promise.race([started, failed])
+	if (gecko.pid === undefined) throw new Error("geckodriver did not start")
+	return { gecko: gecko as ChildProcess & { pid: number }, base: `http://127.0.0.1:${http.port}` }
 }
 
 /** `spawn` reports a missing binary as a bare ENOENT, which reads as a crash rather than a missing
@@ -161,13 +186,6 @@ function assertVersion(browserVersion: string): void {
 	console.log(`[firefox] ${browserVersion}`)
 }
 
-/** Real disk, never tmpfs: a profile a killed Firefox still holds open would pin its store in RAM. */
-function freshProfileDir(): string {
-	const root = path.join(E2E_DATA_ROOT, "firefox-profiles")
-	mkdirSync(root, { recursive: true })
-	return mkdtempSync(path.join(root, "profile-"))
-}
-
 /**
  * Firefox mints a per-profile UUID for every add-on and serves its pages from that, not from the
  * manifest id — so the id this suite needs exists nowhere until the add-on is loaded, and
@@ -223,35 +241,18 @@ async function gotoExtensionPage(page: Page, url: string): Promise<void> {
 	await classicSessionFor(page.browser()).navigateWindow(contextIdOf(page), url)
 }
 
-const ONBOARDING_COMPLETED = "nulo:onboarding:completed"
-
-async function firstRunTab(browser: Browser): Promise<Page> {
-	const deadline = Date.now() + 15_000
-	while (Date.now() < deadline) {
-		const tab = (await browser.pages()).find((page) => page.url().includes("/src/onboarding/"))
-		if (tab) return tab
-		await new Promise((resolve) => setTimeout(resolve, 250))
-	}
-	throw new Error("a fresh Firefox profile never opened the first-run onboarding tab")
-}
-
 /**
- * The popup reads the onboarding flag before it mounts and closes itself when the flag is unset and
- * no profile exists. Preload scripts do not run in extension documents, so `close()` cannot be
- * stubbed; the flag is raised first instead, from the one extension page a fresh install is
- * guaranteed to have. That tab must be MOUNTED before the write: it reads the same flag on mount
- * and would replace itself with a popup window. The launch fixture sets the flag itself once it
- * has closed that tab, so raising it early changes the order, not the settled state. A reused
- * profile finished onboarding on an earlier launch.
+ * The popup closes itself when onboarding is unfinished and no profile exists, and Firefox honours
+ * that `window.close()` where Chrome ignores it on a tab no script opened. Preload scripts do not
+ * run in extension documents, so the call cannot be stubbed. In exactly that state the onboarding
+ * page is the inert one — it only replaces itself once the flag is set or a profile exists — so a
+ * fresh profile settles through it instead. A reused profile finished onboarding on an earlier
+ * launch, which is the state where the popup stays and the onboarding page would not.
  */
 async function openScratchPage(browser: Browser, extensionId: string, { freshProfile }: { freshProfile: boolean }): Promise<Page> {
-	if (freshProfile) {
-		const host = await firstRunTab(browser)
-		await host.waitForSelector('[data-testid="onboarding-welcome-create"]', { timeout: 30_000 })
-		await host.evaluate(async (key) => chrome.storage.local.set({ [key]: true }), ONBOARDING_COMPLETED)
-	}
 	const page = await browser.newPage()
-	await gotoExtensionPage(page, `${SCHEME}${extensionId}/src/popup/index.html`)
+	const path = freshProfile ? "/src/onboarding/index.html" : "/src/popup/index.html"
+	await gotoExtensionPage(page, `${SCHEME}${extensionId}${path}`)
 	return page
 }
 
@@ -266,10 +267,52 @@ async function waitForTarget(browser: Browser, predicate: (target: Target) => bo
 	throw new Error(`waitForTarget: no matching target after ${timeout}ms`)
 }
 
-/** The classic handle list is Firefox's own account of which windows exist. */
-async function isPageGone(page: Page): Promise<boolean> {
-	if (page.isClosed()) return true
-	return !(await classicSessionFor(page.browser()).windowHandles()).includes(contextIdOf(page))
+/**
+ * A window that closes itself — every approval window does — is never reported over BiDi, so
+ * Puppeteer would keep it in `targets()` and keep its page "open" for good. The classic handle
+ * list is Firefox's own account of which windows exist; a context seen there and then missing from
+ * two consecutive reads is reported closed. "Seen first" matters: a window BiDi has just announced
+ * may not be in the handle list yet, and must not be mistaken for one that left it.
+ */
+function watchForSilentCloses(session: WebDriverSession, attachment: BiDiAttachment): () => void {
+	const watch: SilentCloseWatch = { listed: new Set(), misses: new Map() }
+	let reading = false
+	const timer = setInterval(async () => {
+		if (reading) return
+		reading = true
+		try {
+			const handles = new Set(await session.windowHandles())
+			for (const context of silentlyClosed(watch, attachment.openContexts(), handles)) attachment.reportClosed(context)
+		} catch {
+			// The session is closing or geckodriver is busy; the next tick reads again.
+		} finally {
+			reading = false
+		}
+	}, 150)
+	timer.unref()
+	return () => clearInterval(timer)
+}
+
+export interface SilentCloseWatch {
+	listed: Set<string>
+	misses: Map<string, number>
+}
+
+/** One read of the handle list: the contexts that have now been missing from it twice running. */
+export function silentlyClosed(watch: SilentCloseWatch, open: readonly string[], handles: ReadonlySet<string>): string[] {
+	const closed: string[] = []
+	for (const context of open) {
+		if (handles.has(context)) {
+			watch.listed.add(context)
+			watch.misses.delete(context)
+			continue
+		}
+		if (!watch.listed.has(context)) continue
+		const missed = (watch.misses.get(context) ?? 0) + 1
+		watch.misses.set(context, missed)
+		if (missed >= 2) closed.push(context)
+	}
+	return closed
 }
 
 export const firefoxDriver: BrowserDriver = {
@@ -280,7 +323,6 @@ export const firefoxDriver: BrowserDriver = {
 	discoverExtensionId,
 	gotoExtensionPage,
 	openScratchPage,
-	isPageGone,
 	waitForTarget,
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext/i,
