@@ -340,6 +340,23 @@ After reviewing the rebuilt screens page, the owner wrote:
     surface is built from `@nulo/design` primitives and tokens and introduces no `border-radius` of
     its own.
 
+### Review of the open PR (2026-09-18)
+
+On the Arc B pull request the owner asked for two changes to U1, which are this surface's sign-off
+for them:
+
+> "I think it might make sense to make "Before you start" part of the "steps" on the onboarding? So
+> they can see "what comes next"? Because right now it feels like a full blackbox with nothing to
+> "go to" if I press "continue". […] it doesn't seem very horizontally aligned the "01" with "you
+> hold the keys" […] Basically, I think it's just adding it as 01 "disclaimer" (or a better UX
+> copy). "Acceptance" or something."
+
+- **The Terms gate is step 01 of the onboarding indicator**, which grows from five cells to six:
+  Terms, Setup, Aztec, Fees, Speed, Done. The label is "Terms": it is the word the page, the popup
+  sheet and Settings already use, and it fits the row's one-short-word cells.
+- **The ordinals share a baseline with their lead** (`align-items: baseline`), replacing a fixed
+  top padding that only approximated it.
+
 ## Assumptions and open items
 
 - Every dispatcher method is refused while declined, reads included (follows from decision 3).

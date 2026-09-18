@@ -41,6 +41,7 @@ const handleAccept = async () => {
 <template>
 	<OnboardingPage align="center" :gap="28">
 		<OnboardingBackLink testid="legal-terms-back" />
+		<StepIndicator :current="1" />
 
 		<Flex direction="column" align="center" gap="16" data-testid="legal-terms-page">
 			<BrutalistTitle main="Before" sub="you start" align="center" size="hero" />

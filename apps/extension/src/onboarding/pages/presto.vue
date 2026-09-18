@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<OnboardingPage>
-		<StepIndicator :current="4" />
+		<StepIndicator :current="5" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<BrutalistTitle main="Speed up" sub="Proving" />
 			<div :class="$style.hero_bar" />

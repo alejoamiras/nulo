@@ -39,7 +39,7 @@ const accept = () => {
 <template>
 	<Flex direction="column" gap="20" wide :class="$style.consent" data-testid="legal-consent">
 		<Flex v-if="points?.length" direction="column" :class="$style.card" data-testid="legal-points">
-			<Flex v-for="(point, index) in points" :key="point.lead" gap="12" align="start" :class="$style.point" data-testid="legal-point">
+			<Flex v-for="(point, index) in points" :key="point.lead" gap="12" :class="$style.point" data-testid="legal-point">
 				<Text size="11" color="primary" mono :class="$style.ordinal">{{ String(index + 1).padStart(2, "0") }}</Text>
 				<Text size="14" color="secondary" height="150">
 					<Text size="14" color="primary" weight="600">{{ point.lead }}</Text>
@@ -109,6 +109,8 @@ const accept = () => {
 
 .point {
 	padding: 14px 0;
+	/* The ordinal and the lead are different faces at different sizes; only their baselines agree. */
+	align-items: baseline;
 }
 
 .point + .point {
@@ -117,7 +119,6 @@ const accept = () => {
 
 .ordinal {
 	flex-shrink: 0;
-	padding-top: 3px;
 }
 
 .agree {
