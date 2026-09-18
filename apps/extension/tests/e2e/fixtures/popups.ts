@@ -9,6 +9,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
+import { waitForPageGone, waitForTarget } from "./browser"
 import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
@@ -38,7 +39,8 @@ export async function waitForPopup(
 			.filter((t) => t.type() === "page" && t.url().includes(`#/windows/${kind}`))
 			.map((t) => t.url()),
 	)
-	const target: Target = await ctx.browser.waitForTarget(
+	const target: Target = await waitForTarget(
+		ctx.browser,
 		(t) => {
 			if (t.type() !== "page") return false
 			const url = t.url()
@@ -47,7 +49,7 @@ export async function waitForPopup(
 			if (preExisting.has(url)) return false
 			return true
 		},
-		{ timeout },
+		timeout,
 	)
 	const page = await target.asPage()
 	// Puppeteer can resolve waitForTarget before the page's main frame is wired
@@ -118,12 +120,7 @@ async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
  *  opening a second popup of the same kind so waitForTarget doesn't match
  *  the still-closing first popup. */
 export async function waitForPopupClosed(page: Page, timeout = 5_000): Promise<void> {
-	const start = Date.now()
-	while (Date.now() - start < timeout) {
-		if (page.isClosed()) return
-		await new Promise((r) => setTimeout(r, 50))
-	}
-	throw new Error(`waitForPopupClosed: popup did not close within ${timeout}ms`)
+	await waitForPageGone(page, timeout, `waitForPopupClosed: popup did not close within ${timeout}ms`)
 }
 
 export async function approveDiscover(page: Page): Promise<void> {
@@ -161,17 +158,7 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
 	// If the popup never closes within 10s, throw — silently proceeding would
 	// mask the very failure mode this wait exists to prevent. (Codex audit
 	// session 019e2b9b caught the earlier silent-resolve version.)
-	if (!page.isClosed()) {
-		await new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				reject(new Error("approveVerify: popup did not close within 10s — setTrustedVerification persistence may be racy"))
-			}, 10_000)
-			page.once("close", () => {
-				clearTimeout(timer)
-				resolve()
-			})
-		})
-	}
+	await waitForPageGone(page, 10_000, "approveVerify: popup did not close within 10s — setTrustedVerification persistence may be racy")
 }
 
 /**

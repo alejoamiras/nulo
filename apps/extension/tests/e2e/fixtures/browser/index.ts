@@ -1,4 +1,4 @@
-import type { Browser, Page } from "puppeteer"
+import type { Browser, Page, Target } from "puppeteer"
 import { chromeDriver } from "./chrome"
 import { firefoxDriver } from "./firefox"
 import { type BrowserKind, resolveBrowserKind } from "./selection"
@@ -45,6 +45,24 @@ export interface BrowserDriver {
 	 * call on a tab no script opened, Firefox honours it and the page dies under the fixture.
 	 */
 	openScratchPage(browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page>
+	/**
+	 * Resolve with the first target matching `predicate`, or reject after `timeout` ms. Over BiDi a
+	 * window is born `about:blank` and no event reports the URL it then loads, so Puppeteer's own
+	 * `waitForTarget` never matches a URL there — while `targets()` does list it, correctly.
+	 */
+	waitForTarget(browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target>
+	/**
+	 * How this driver's protocol words "the window went away under the call", beyond the CDP
+	 * phrases the fixtures already match. An approval window closes itself on the click that
+	 * resolves it, so that error is the expected end of a click there, not a failure.
+	 */
+	readonly targetGone?: RegExp
+	/**
+	 * Whether the page's window no longer exists. `page.isClosed()` is not enough on its own: over
+	 * BiDi, Firefox reports nothing when a window closes ITSELF, so Puppeteer keeps the page open
+	 * forever — and every approval window ends by closing itself.
+	 */
+	isPageGone(page: Page): Promise<boolean>
 }
 
 const DRIVERS: Partial<Record<BrowserKind, BrowserDriver>> = { chrome: chromeDriver, firefox: firefoxDriver }
@@ -66,5 +84,17 @@ export const extensionUrl = (extensionId: string, path: string): string => drive
 export const launchBrowser = (opts: LaunchOptions): Promise<LaunchedBrowser> => driver.launch(opts)
 export const discoverExtensionId = (browser: Browser): Promise<string> => driver.discoverExtensionId(browser)
 export const gotoExtensionPage = (page: Page, url: string): Promise<void> => driver.gotoExtensionPage(page, url)
+/** Poll `isPageGone` until it holds, or reject after `timeout` ms with `message`. */
+export async function waitForPageGone(page: Page, timeout: number, message: string): Promise<void> {
+	const deadline = Date.now() + timeout
+	while (Date.now() < deadline) {
+		if (await driver.isPageGone(page)) return
+		await new Promise((resolve) => setTimeout(resolve, 50))
+	}
+	throw new Error(message)
+}
+export const isTargetGone = (text: string): boolean => driver.targetGone?.test(text) ?? false
+export const waitForTarget = (browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> =>
+	driver.waitForTarget(browser, predicate, timeout)
 export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
 	driver.openScratchPage(browser, extensionId, opts)

@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
-import { extensionUrl } from "./fixtures/browser"
+import { extensionUrl, waitForTarget } from "./fixtures/browser"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import {
 	interceptHealth,
@@ -279,9 +279,10 @@ describe("onboarding tab", () => {
 		await setupPage.close()
 		// Open the popup explicitly — should trigger redirect to onboarding tab.
 		const popup = await extension.browser.newPage()
-		const tabPromise = extension.browser.waitForTarget(
+		const tabPromise = waitForTarget(
+			extension.browser,
 			(target) => target.type() === "page" && target.url().includes("src/onboarding/index.html"),
-			{ timeout: 10_000 },
+			10_000,
 		)
 		await popup.goto(extensionUrl(extension.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 

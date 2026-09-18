@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { BROWSER } from "../fixtures/browser"
+import { BROWSER, waitForTarget } from "../fixtures/browser"
 import { launchExtension, openPopup } from "../fixtures/extension"
 
 /**
@@ -45,10 +45,32 @@ test("PROBE T — an extension-opened window is discoverable through the target 
 			listed = ctx.browser.targets().filter(isProbe)
 		}
 		const opened = await listed[0]?.page()
+
+		// A window that opens and closes inside one call: `callExpectingNoPopup` reads the URL of
+		// each `targetcreated` target AFTER the call, so the target object has to keep the last URL
+		// it loaded once its window is gone.
+		const seenBefore = created.length
+		const born = new Set<{ url(): string }>()
+		const onTransient = (target: { url(): string }) => born.add(target)
+		ctx.browser.on("targetcreated", onTransient)
+		await page.evaluate(async () => {
+			const win = await chrome.windows.create({ type: "popup", url: chrome.runtime.getURL("src/popup/index.html?probe=gone") })
+			await new Promise((resolve) => setTimeout(resolve, 1_500))
+			if (win?.id !== undefined) await chrome.windows.remove(win.id)
+		})
+		ctx.browser.off("targetcreated", onTransient)
+		const transientSeen = [...born].some((target) => target.url().includes("probe=gone"))
+
+		const viaSeam = await waitForTarget(ctx.browser, isProbe, 5_000).then(
+			() => true,
+			() => false,
+		)
 		const facts = {
 			"targets() lists it": listed.length === 1,
 			"type is page": listed[0]?.type() === "page",
 			"page is scriptable": (await opened?.evaluate(() => typeof chrome?.runtime?.id).catch(() => undefined)) === "string",
+			"the seam's waitForTarget resolves by url": viaSeam,
+			"a transient window is caught with its url": transientSeen && created.length > seenBefore,
 			"waitForTarget resolves by url": await waited,
 			"targetcreated carries the url": created.some((url) => url.includes("probe=t")),
 			"targetchanged carries the url": changed.some((url) => url.includes("probe=t")),
@@ -62,6 +84,8 @@ test("PROBE T — an extension-opened window is discoverable through the target 
 		// The kill line is reachability, not which API reached it: a window nothing can list or
 		// script ends the plan, while a missing event only decides how the finders are written.
 		expect(facts["targets() lists it"] && facts["type is page"] && facts["page is scriptable"]).toBe(true)
+		expect(facts["the seam's waitForTarget resolves by url"]).toBe(true)
+		expect(facts["a transient window is caught with its url"]).toBe(true)
 	} finally {
 		ctx.browser.off("targetcreated", onCreated)
 		ctx.browser.off("targetchanged", onChanged)

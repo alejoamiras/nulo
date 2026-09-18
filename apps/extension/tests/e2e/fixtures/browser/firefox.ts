@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
-import type { Browser, Page } from "puppeteer"
+import type { Browser, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { E2E_DATA_ROOT } from "../../lockfile"
 import { attachPuppeteerOverBiDi } from "./bidi-attach"
@@ -255,6 +255,23 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
 	return page
 }
 
+/** `targets()` is a synchronous read of Puppeteer's own map, so a tight poll costs no round trip. */
+async function waitForTarget(browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> {
+	const deadline = Date.now() + timeout
+	while (Date.now() < deadline) {
+		const match = browser.targets().find(predicate)
+		if (match) return match
+		await new Promise((resolve) => setTimeout(resolve, 100))
+	}
+	throw new Error(`waitForTarget: no matching target after ${timeout}ms`)
+}
+
+/** The classic handle list is Firefox's own account of which windows exist. */
+async function isPageGone(page: Page): Promise<boolean> {
+	if (page.isClosed()) return true
+	return !(await classicSessionFor(page.browser()).windowHandles()).includes(contextIdOf(page))
+}
+
 export const firefoxDriver: BrowserDriver = {
 	kind: "firefox",
 	scheme: SCHEME,
@@ -263,4 +280,8 @@ export const firefoxDriver: BrowserDriver = {
 	discoverExtensionId,
 	gotoExtensionPage,
 	openScratchPage,
+	isPageGone,
+	waitForTarget,
+	// Firefox reports a closed window as a missing browsing context, per command.
+	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext/i,
 }

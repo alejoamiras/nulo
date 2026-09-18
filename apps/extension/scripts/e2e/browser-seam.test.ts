@@ -96,8 +96,19 @@ function testsForWorkerTarget(node: ts.Node): boolean {
 	return [node.left, node.right].some((side) => literalText(unwrap(side)) === WORKER_TYPE)
 }
 
+/**
+ * Direct `browser.waitForTarget` calls left outside the seam, exact and shrink-only. Over BiDi no
+ * event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
+ * The fixture entry waits for the service worker, which is Chrome-only by nature; the probe calls
+ * it on purpose, to measure exactly that.
+ */
+const WAIT_DEBT: Record<string, number> = {
+	"fixtures/helpers.ts": 1,
+	"probes/discovery.test.ts": 1,
+}
+
 /** 1-based line numbers of executable seam violations in one file's source. */
-function violations(source: string): { scheme: number[]; close: number[]; worker: number[] } {
+function violations(source: string): { scheme: number[]; close: number[]; worker: number[]; wait: number[] } {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	// Source the parser could not read is source the scan cannot vouch for: an unterminated regex
 	// swallows whatever follows it, so accepting a partial tree would fail open.
@@ -109,19 +120,22 @@ function violations(source: string): { scheme: number[]; close: number[]; worker
 	const scheme: number[] = []
 	const close: number[] = []
 	const worker: number[] = []
+	const wait: number[] = []
 	const lineOf = (node: ts.Node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1
 
 	const visit = (node: ts.Node): void => {
 		if (isSchemeText(node)) scheme.push(lineOf(node))
 		if (testsForWorkerTarget(node)) worker.push(lineOf(node))
-		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "close") {
-			if (closesABrowser(node.expression.expression, aliases)) close.push(lineOf(node))
+		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+			const onBrowser = closesABrowser(node.expression.expression, aliases)
+			if (onBrowser && node.expression.name.text === "close") close.push(lineOf(node))
+			if (onBrowser && node.expression.name.text === "waitForTarget") wait.push(lineOf(node))
 		}
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
 	const dedupe = (lines: number[]) => [...new Set(lines)].sort((a, b) => a - b)
-	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker) }
+	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait) }
 }
 
 /** String and template *text* only — a comment or a regex literal is never one of these nodes. */
@@ -151,6 +165,7 @@ function scan() {
 	const scheme: string[] = []
 	const close: string[] = []
 	const worker: Record<string, number> = {}
+	const wait: Record<string, number> = {}
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
@@ -158,8 +173,9 @@ function scan() {
 		scheme.push(...found.scheme.map((n) => `${rel}:${n}`))
 		close.push(...found.close.map((n) => `${rel}:${n}`))
 		if (found.worker.length) worker[rel] = found.worker.length
+		if (found.wait.length) wait[rel] = found.wait.length
 	}
-	return { scheme, close, worker, visited }
+	return { scheme, close, worker, wait, visited }
 }
 
 /**
@@ -189,6 +205,10 @@ describe("browser seam", () => {
 	test("the service-worker target debt is exactly what Firefox still has to unpick", () => {
 		expect(found.worker).toEqual(WORKER_DEBT)
 	})
+
+	test("no new direct browser.waitForTarget — use the seam's waitForTarget()", () => {
+		expect(found.wait).toEqual(WAIT_DEBT)
+	})
 })
 
 /** A guard whose scanner silently matched nothing would pass forever; these pin that it bites. */
@@ -196,7 +216,7 @@ describe("browser seam guard", () => {
 	test("flags a scheme literal and a direct close", () => {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: source text under scan, not a template.
 		const src = ["await page.goto(`chrome-extension://${id}/src/popup/index.html`)", "await ctx.browser.close()"].join("\n")
-		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [] })
+		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [], wait: [] })
 	})
 
 	// A regex ending in `\//` reads as a line comment to any text-based strip, which silently hid
@@ -241,6 +261,11 @@ describe("browser seam guard", () => {
 		expect(violations(inAsync(body)).worker).toEqual([2])
 	})
 
+	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {
+		expect(violations(inAsync("await ctx.browser.waitForTarget((t) => true)")).wait).toEqual([2])
+		expect(violations(inAsync("await waitForTarget(ctx.browser, (t) => true, 1000)")).wait).toEqual([])
+	})
+
 	test("leaves the words alone outside a target test", () => {
 		expect(violations('const msg = "<no service_worker target>"').worker).toEqual([])
 	})
@@ -255,12 +280,12 @@ describe("browser seam guard", () => {
 		const src = ["// chrome-extension:// and browser.close()", "/* chrome-extension://", "   browser.close() */", "const ok = 1"].join(
 			"\n",
 		)
-		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
 	})
 
 	test("does not flag the seam's own call shapes", () => {
 		const src = 'await page.goto(extensionUrl(id, "/src/popup/index.html"))\nawait ctx.close()'
-		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
 	})
 
 	test("a scheme inside a string still counts, and one inside a regex does not", () => {

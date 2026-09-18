@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { discoverExtensionId, extensionUrl, gotoExtensionPage, launchBrowser, openScratchPage } from "./browser"
+import { discoverExtensionId, extensionUrl, gotoExtensionPage, isTargetGone, launchBrowser, openScratchPage } from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -294,7 +294,7 @@ export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 			return await fn()
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
-			throw new Error(`connectPlayground:${name} — ${msg}`)
+			throw new Error(`connectPlayground:${name} — ${msg}`, { cause: err })
 		}
 	}
 
@@ -1427,5 +1427,5 @@ function isTargetDetachError(err: unknown): boolean {
 	}
 	const stack = err instanceof Error && typeof err.stack === "string" ? err.stack : ""
 	const haystack = `${messages.join(" ")} ${stack}`
-	return /Target ?Close(d)?|frame was detached|frame got detached|Session closed/i.test(haystack)
+	return /Target ?Close(d)?|frame was detached|frame got detached|Session closed/i.test(haystack) || isTargetGone(haystack)
 }
