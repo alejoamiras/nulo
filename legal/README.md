@@ -20,14 +20,13 @@ that cannot be read out of this repository.
 
 | Placeholder | What it needs |
 |---|---|
-| `legal name` | The natural person who is the counterparty. There is no entity, so the contract needs an identifiable human. |
-| `country/state of residence` | Governing law. Also used in § 22's venue. |
-| `city or judicial district…` | § 22 venue — a court location, not just a country. Do not let governing law float with a future move. |
+| ~~`legal name`~~ | Filled: Alejo Amiras. |
+| ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
 | `effective date` | The date the 1.0 listing goes live. |
 | `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
 | `published security-reporting URL` | `SECURITY.md` is a repo path; a rendered legal page needs a URL that resolves for a reader who is not in the repo. |
-| `provider legal name and privacy-policy link` ×2 | The form provider and the email provider behind `nulo.sh/forms/*`. |
+| `provider legal name and privacy-policy link` | The email provider behind `hello@nulo.sh`. There is no form provider any more — the wallet's contact items are `mailto:` links. |
 | `applicable Cloudflare contracting entity and privacy-policy link` | Hosting for `nulo.sh` and `passkey.nulo.sh`. |
 | `verified categories and access` ×2 | What the dRPC provider account and the Cloudflare dashboard actually expose to the Developer. **Check the dashboards; do not guess.** |
 | `actual period or criteria` ×3 | Retention for website/security records, correspondence, and provider schedules. |
@@ -49,18 +48,18 @@ These came out of the two-round review and are **not** fixed by editing the docu
 3. **Preserve export access on decline.** § 20 promises that declining revised Terms does not disable
    backup or export. That has to be true in code before it is true on the page.
 
-   Blockers 1–3 are one arc and are to be planned with `/blueprint` once the identity question below
-   is settled — the acceptance record's shape depends on nothing in it, but the published pages carry
-   the name and jurisdiction, so drafting the plan before those are known would bake in a rewrite.
-4. **Resolve the Presto licensing.** Three bundled packages declare `AGPL-3.0-only` and are runtime
-   value imports, not type-only: `@alejoamiras/presto-core@1.0.1` (`PrestoClient` in
-   `apps/extension/src/presto/client.ts`), `@alejoamiras/presto@5.2.0-revision.2`, and
-   `@alejoamiras/presto-banners@1.0.0` (`apps/extension/src/onboarding/pages/presto.vue`,
-   `apps/extension/src/utils/presto-ui-state.ts`). They ship inside an extension the repo presents as
-   Apache-2.0. Same copyright holder, so this is fixable by an explicit alternative grant for the
-   exact versions incorporated — republishing with `(Apache-2.0 OR AGPL-3.0-only)` is the cleaner
-   maintenance path — and the licence files must travel **in the distributed extension**, not only on
-   GitHub. The Terms describe the resolved position; they cannot substitute for resolving it.
+   Blockers 1–3 are one arc, to be planned with `/blueprint`. The identity and jurisdiction inputs
+   the published pages need are now settled (see § Identity below), so nothing gates the plan.
+4. **Land the Presto MIT relicense in a published version, and repoint the lockfile.** The SDK is
+   being relicensed to MIT in a separate session; the documents are written on the basis that this
+   has happened. What closes the blocker is not the decision but the artifact: the versions the
+   lockfile resolves still declare `AGPL-3.0-only` in their installed `package.json`, and those are
+   what get bundled. All **three** packages need it, not just the SDK — `@alejoamiras/presto-core`
+   (`PrestoClient`, a value import in `apps/extension/src/presto/client.ts`), `@alejoamiras/presto`,
+   and `@alejoamiras/presto-banners` (value-imported in `apps/extension/src/onboarding/pages/presto.vue`
+   and `apps/extension/src/utils/presto-ui-state.ts`). Publish the relicensed versions, bump the
+   lockfile, and confirm the licence notices travel **inside the distributed extension**, not only on
+   GitHub.
 5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
    "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
    verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
@@ -74,26 +73,39 @@ Owned elsewhere, tracked here so nothing falls between worktrees:
   seeded default; corrected in the same commit as this file. The rest of that banner still reads
   "DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET", which will also need rewriting at the 1.0 cut.
 
-## Identity
+## Identity and jurisdiction — the decision, and what it costs
 
-The counterparty question is unresolved and blocks `«FILL: legal name»`, `«FILL: country/state of
-residence»` and the two venue placeholders.
+**Settled:** named individual (Alejo Amiras), no entity, no address; Argentine law; Buenos Aires
+venue.
 
-What does **not** work: choosing a "crypto-friendly" governing law you have no connection to. A
-governing-law clause does not move regulatory, tax or sanctions exposure — those follow residence
-and activity, not drafting. Against consumers it is close to inert: Rome I Art. 6 preserves the
-mandatory law of the consumer's own country, and Brussels I bis Arts. 17–19 let an EU consumer sue at
-home regardless. Against business users, a court applying something like Restatement (Second) § 187
-asks whether the chosen forum has a substantial relationship to the parties; an unconnected one can
-simply be disregarded. A jurisdiction picked for optics also reads as evasion to the court that ends
-up hearing the case.
+Jurisdiction was not a free choice here, and it is worth recording why, because the question will
+come back. A governing-law clause does not move regulatory, tax or sanctions exposure — those follow
+residence and activity. Against consumers it is close to inert anyway: Rome I Art. 6 preserves the
+mandatory law of the consumer's own country and Brussels I bis Arts. 17–19 let an EU consumer sue at
+home; Argentina's own CCyC Art. 1109 does the same thing domestically and treats a contrary clause as
+not written. Against business users, a court asks whether the chosen forum has a substantial
+relationship to the parties, so an unconnected one gets disregarded. Naming somewhere you do not live
+buys nothing and reads as evasion.
 
-What **does** work: an entity. Incorporating is the one move that legitimately makes jurisdiction a
-choice, puts a legal person between the claimant and the individual, and satisfies store trader
-disclosure with a registered-agent address instead of a home address. The entity must actually be the
-publisher — hold the store accounts, own the domain, and be the party named in these documents —
-or it is decorative. An entity does not move personal tax residence, and most jurisdictions will
-still look through to the individual for that.
+What would make jurisdiction genuinely selectable, and would also keep a home address off a store
+listing, is an entity that actually publishes — holds the store accounts, owns the domain, and is the
+party named in these documents. That was considered and deferred. Two things follow from deferring
+it:
+
+- **Argentine consumer law is now the most likely law to be applied to a claim**, and it is
+  protective. Ley 24.240 Art. 37 treats a clause limiting liability for damage as not written, and
+  CCyC Art. 1109–1110 void the venue clause for consumers. §§ 19.1 and 22 say so openly rather than
+  pretending otherwise — a term that misstates a non-excludable guarantee is its own offence in
+  several regimes, Argentina included.
+- **Chrome's trader disclosure is the one exposure a clause cannot route around.** If the listing is
+  classed as a trader listing, Chrome requires a verified name, address and phone number displayed
+  publicly. Check the developer account's trader declaration before submitting 1.0: if it forces
+  disclosure, the address becomes public without any of the liability separation an entity would have
+  provided, which is the worst of both outcomes and the trigger to revisit this.
+
+**Language.** Ley 24.240 Art. 10 expects consumer contracts to be in Spanish. These documents are
+English-only. For an Argentine consumer that is a real weakness; a Spanish version of at least the
+Terms is worth doing before or shortly after 1.0.
 
 ## Changing these documents
 

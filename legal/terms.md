@@ -21,8 +21,8 @@ install or use Nulo. If you do not agree, do not install or use it.
 
 ## 1. Who you are agreeing with
 
-Nulo is an independent, open-source project maintained by **«FILL: legal name»**, a natural person
-resident in «FILL: country/state of residence» ("**the Developer**", "**I**", "**me**", "**my**").
+Nulo is an independent, open-source project maintained by **Alejo Amiras**, a natural person
+resident in Argentina ("**the Developer**", "**I**", "**me**", "**my**").
 
 There is no company, foundation, DAO or other legal entity behind Nulo. There are no employees, no
 support desk and no service organisation. These Terms are an agreement between you and one
@@ -453,20 +453,26 @@ If you are a consumer, you have rights under the mandatory consumer protection l
 where you live, and these Terms do not affect them. Sections 16, 17.1 and 17.2 apply only so far as
 that law allows.
 
-**19.1 Australia.** If the Australian Consumer Law applies to you, Nulo comes with guarantees that
+**19.1 Argentina.** If you are a consumer under Law No. 24,240 (*Ley de Defensa del Consumidor*) and
+Article 42 of the National Constitution, nothing in §§ 16–18 excludes, restricts or waives any right
+or remedy that law gives you. Article 37 of that law treats clauses limiting liability for damage,
+or waiving or restricting consumer rights, as **not written** — these Terms do not attempt to do so,
+and are to be read accordingly. Where an ambiguity remains, it is resolved in your favour.
+
+**19.2 Australia.** If the Australian Consumer Law applies to you, Nulo comes with guarantees that
 **cannot be excluded** under that law, and nothing in §§ 16–18 excludes, restricts or modifies any
 such guarantee, right or remedy, or purports to represent that it does not exist. Where a guarantee
 applies and liability for breach of it may lawfully be limited, the Developer's liability is limited
 to resupplying the software or paying the cost of having it resupplied.
 
-**19.2 United Kingdom.** If you are a consumer, nothing in §§ 16–18 excludes or restricts any right
+**19.3 United Kingdom.** If you are a consumer, nothing in §§ 16–18 excludes or restricts any right
 or remedy under the Consumer Rights Act 2015 or other mandatory UK consumer law, and those
 provisions bind you only so far as that law permits.
 
-**19.3 European Union.** If you are a consumer habitually resident in an EU member state, nothing in
+**19.4 European Union.** If you are a consumer habitually resident in an EU member state, nothing in
 §§ 16–18 deprives you of the protection of the mandatory provisions of the law of that state.
 
-**19.4 Everywhere else.** If a provision is unlawful, unfair or unenforceable against you, it does
+**19.5 Everywhere else.** If a provision is unlawful, unfair or unenforceable against you, it does
 not apply to the extent required by applicable law. The remaining provisions continue where the
 agreement can lawfully operate without it. An unfair consumer term will not be rewritten merely to
 preserve a restriction that applicable law requires to be disregarded.
@@ -497,11 +503,19 @@ agreement.
 
 ## 22. Governing law and where disputes are heard
 
-Subject to mandatory consumer rights, these Terms are governed by the laws of **«FILL: fixed country and applicable state/province of residence»**, and the competent courts in **«FILL: city or judicial district, state/province and country»** have exclusive jurisdiction.
+Subject to mandatory consumer rights, these Terms are governed by the laws of **the Argentine
+Republic**, and the competent courts of **the Ciudad Autónoma de Buenos Aires, Argentina** have
+exclusive jurisdiction.
 
-If you are a consumer, this does not remove any mandatory protection or right to sue in another
-court available under applicable law, or permit proceedings against you in a court that applicable
-law prohibits.
+**If you are a consumer, that exclusive-jurisdiction sentence does not apply to you.** It does not
+remove any mandatory protection, does not remove a right to sue in another court available under
+applicable law, and does not permit proceedings against you in a court that applicable law
+prohibits.
+
+**Consumers in Argentina.** Article 1109 of the Civil and Commercial Code fixes jurisdiction at the
+place where the consumer received or should have received performance, and treats a clause extending
+jurisdiction elsewhere as **not written**. The choice of Buenos Aires courts above therefore has no
+effect on you.
 
 These Terms do not require arbitration and do not waive rights to participate in collective
 proceedings. After a dispute arises, the parties may agree to mediation or arbitration.
@@ -541,7 +555,7 @@ would much rather fix it.
 
 ## 24. Contact
 
-**«FILL: legal name»** — hello@nulo.sh
+**Alejo Amiras** — hello@nulo.sh
 
 Security vulnerabilities: please follow the disclosure process at «FILL: published security-reporting URL» rather than the public feedback forms.
 

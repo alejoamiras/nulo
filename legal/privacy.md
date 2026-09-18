@@ -22,12 +22,18 @@ also depend on the configurations and provider practices identified below.
 
 ## 1. Who is responsible
 
-Nulo is maintained by **«FILL: legal name»**, a natural person resident in «FILL: country/state of residence» ("**the Developer**", "**I**"). There is no company.
+Nulo is maintained by **Alejo Amiras**, a natural person resident in Argentina ("**the Developer**",
+"**I**"). There is no company.
 
 Where applicable data-protection law applies, I am responsible as controller for processing carried
-out for the Nulo website, the passkey relying-party host, correspondence and reports described below.
+out for the Nulo website, the passkey relying-party host, and correspondence described below.
 Independent providers are responsible for processing they determine themselves; providers acting on
 my instructions are processors.
+
+In Argentina that processing is governed by **Law No. 25,326** (*Protección de los Datos
+Personales*), and the supervisory authority is the **Agencia de Acceso a la Información Pública
+(AAIP)**. Where the GDPR or UK GDPR applies to particular processing, the bases stated below apply to
+it.
 
 Contact: **hello@nulo.sh**
 
@@ -158,29 +164,37 @@ website request. I do not run analytics on that host.
 **Legal basis (GDPR):** legitimate interests — keeping the domain available and secure — under
 Article 6(1)(f).
 
-### 5.5 `nulo.sh`, its forms, and the uninstall page
+### 5.5 `nulo.sh`, contacting me, and the uninstall page
 
 The website is static and carries no analytics or tracking of mine.
 
-Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
+Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting
+entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
 browser headers to the hosting provider. Information available to the Developer through hosting tools
 is «FILL: verified categories and access». This processing supports delivery and security of the
 sites, relying on legitimate interests where applicable. The retention information below and the
 international-processing information in § 12 cover these hosting records.
 
-If you submit a report or contact me, I receive the information you provide, such as your message,
-contact details and attachments. The form provider is «FILL: provider legal name and privacy-policy link»; the email provider is «FILL: provider legal name and privacy-policy link».
-Their processing and the metadata available to me are «FILL: actual data categories and processor/independent-controller roles». I use correspondence to respond, investigate reported
-problems and maintain security, relying on legitimate interests where that basis is available and
-appropriate. Providing a report is optional.
+**There are no web forms.** The Feedback, Report Issue and Report Scam items in the wallet open your
+own email client addressed to `hello@nulo.sh`; nothing is submitted to a form service, and no
+third-party form provider receives anything.
 
-**Retention.** Website and security records are retained for «FILL: actual period or specific retention criteria». Correspondence and attachments are retained for «FILL: actual period or criteria tied to resolving the report and any necessary legal retention». Provider retention is «FILL: applicable periods or linked schedules». I may retain relevant records longer where necessary to
+If you email me, I receive what you send — your message, your email address, and any attachments —
+through the email provider «FILL: provider legal name and privacy-policy link». I use correspondence
+to respond, investigate reported problems and maintain security, relying on legitimate interests
+where that basis is available and appropriate. Writing to me is entirely optional. **Do not attach
+wallet secrets, recovery phrases or unencrypted backups.**
+
+**Retention.** Website and security records are retained for «FILL: actual period or specific
+retention criteria». Correspondence and attachments are retained for «FILL: actual period or criteria
+tied to resolving the report and any necessary legal retention». Provider retention is «FILL:
+applicable periods or linked schedules». I may retain relevant records longer where necessary to
 comply with law or to establish, exercise or defend legal claims.
 
-**Uninstall page.** If you remove the extension, your browser opens a page on `nulo.sh`. The URL the
-extension configures contains no wallet address and no per-installation identifier. Opening it still
-exposes ordinary website request metadata, including IP address, browser headers and any cookies
-applicable to that site.
+**Uninstall page.** If you remove the extension, your browser opens the site root, `nulo.sh`. There is
+no uninstall survey. The URL the extension configures contains no wallet address and no
+per-installation identifier. Opening it still exposes ordinary website request metadata, including IP
+address, browser headers and any cookies applicable to that site.
 
 ### 5.6 The extension stores
 
@@ -284,8 +298,8 @@ locate records or verify a request, but will never ask for wallet secrets.
 
 I cannot remotely access or delete information held only in your extension. Local deletion does not
 remove blockchain records, exported files, or records held independently by other providers. You may
-complain to the competent data-protection authority, including, where applicable, the authority
-where you live or work.
+complain to the competent data-protection authority — in Argentina, the **Agencia de Acceso a la
+Información Pública (AAIP)**; elsewhere, where applicable, the authority where you live or work.
 
 «FILL: if an EU or UK Article 27 representative is required, name the representative and contact details here; otherwise delete this line rather than leaving it blank.»
 
@@ -328,7 +342,7 @@ processing begins. Other changes take effect when published.
 
 ## 15. Contact
 
-**«FILL: legal name»** — hello@nulo.sh
+**Alejo Amiras** — hello@nulo.sh
 
 ---
 
