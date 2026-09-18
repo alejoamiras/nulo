@@ -93,13 +93,42 @@ describe("passkey relying party", () => {
 })
 
 describe("firefox manifest", () => {
-	test("gecko id is well-formed and frozen — Firefox rejects the add-on as invalid otherwise", () => {
+	const buildFirefox = () => {
 		const build = firefoxManifest as unknown as (env: { command: string; mode: string }) => {
-			browser_specific_settings: { gecko: { id: string } }
+			permissions: string[]
+			browser_specific_settings: {
+				gecko: { id: string; strict_min_version: string; data_collection_permissions: { required: string[] } }
+			}
 		}
-		const { id } = build({ command: "build", mode: "production" }).browser_specific_settings.gecko
+		return build({ command: "build", mode: "production" })
+	}
+	const buildGecko = () => buildFirefox().browser_specific_settings.gecko
+
+	test("gecko id is well-formed and frozen — Firefox rejects the add-on as invalid otherwise", () => {
+		const { id } = buildGecko()
 		expect(id).toMatch(/^(\{[0-9a-f-]{36}\}|[a-z0-9._-]+@[a-z0-9._-]+)$/i)
 		// The AMO identity of the add-on: changing it orphans every installed Firefox copy.
 		expect(id).toBe("wallet@nulo.sh")
+	})
+
+	// Declaring collection the wallet does not do is a false public statement on the AMO listing;
+	// "none" is only true while nothing is sent anywhere that identifies the user.
+	test("declares no data collection", () => {
+		expect(buildGecko().data_collection_permissions).toEqual({ required: ["none"] })
+	})
+
+	// Below 153 a passkey profile cannot be created: WebAuthn from an extension page needs 150+,
+	// and 153 is the tested floor. Lowering this ships a flow that fails on the versions it admits.
+	test("admits only Firefox 153 and newer", () => {
+		expect(buildGecko().strict_min_version).toBe("153.0")
+	})
+
+	// AMO's validator rejects permissions Firefox does not implement, so anything Chrome-only has
+	// to be filtered out of this build rather than left to be ignored at install.
+	test("drops the permissions Firefox does not implement", () => {
+		const { permissions } = buildFirefox()
+		expect(permissions).not.toContain("sidePanel")
+		expect(permissions).not.toContain("offscreen")
+		expect(permissions).toContain("storage")
 	})
 })
