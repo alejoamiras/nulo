@@ -347,4 +347,25 @@ describe("popup: a passkey wallet that declined", () => {
 			await page.close().catch(() => {})
 		}
 	}, 300_000)
+	test("S10 Settings, About: Open-source licences opens the notices file the build shipped", async ({
+		registeredExtensionPerTest: extension,
+	}) => {
+		const page = await openPopup(extension)
+		await waitForHash(page, "#/popup/general", 30_000)
+		await navigateByHash(page, "#/popup/settings/about", 15_000)
+		await page.waitForSelector('[data-testid="legal-about-licences"]', { visible: true, timeout: 15_000 })
+
+		await pointerClick(page, "legal-about-licences")
+		const expected = `chrome-extension://${extension.extensionId}/THIRD-PARTY-NOTICES.txt`
+		const target = await extension.browser.waitForTarget((candidate) => candidate.url() === expected, { timeout: 15_000 })
+		expect(target.type()).toBe("page")
+
+		// Read through the extension origin rather than the tab's text/plain rendering.
+		const notices = await page.evaluate(async (url) => (await fetch(url)).text(), expected)
+		expect(notices.startsWith("THIRD-PARTY NOTICES\n")).toBe(true)
+		for (const name of ["@aztec/sqlite3mc-wasm@", "@alejoamiras/presto@", "vue@", "buffer@"]) {
+			expect(notices).toContain(`\n${name}`)
+		}
+		await page.close()
+	}, 90_000)
 })

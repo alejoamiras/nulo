@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { dirname, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
 import { resolveExportedAsset } from "@nulo/resolve-asset"
+import { thirdPartyNotices } from "@nulo/third-party-notices"
 import vue from "@vitejs/plugin-vue"
 import usePages from "vite-plugin-pages"
 import useAutoImport from "unplugin-auto-import/vite"
@@ -12,6 +13,8 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
 import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
+
+const notices = thirdPartyNotices()
 
 export default defineConfig({
 	server: {
@@ -297,7 +300,12 @@ export default defineConfig({
 			// uses naked `Buffer` (no import) — see its docstring for why.
 			globals: { Buffer: true },
 		}),
+
+		notices.main,
 	],
+	// Worker bundles are separate Rollup builds that the main plugin list never sees; without this
+	// the bb and sqlite workers' dependencies would be missing from the notices file.
+	worker: { plugins: () => [notices.worker] },
 	build: {
 		// Disable module preload polyfill — it references `window.dispatchEvent`
 		// which doesn't exist in Chrome MV3 service workers.

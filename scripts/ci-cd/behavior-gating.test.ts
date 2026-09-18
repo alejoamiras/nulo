@@ -139,6 +139,24 @@ describe("CI behavior-gating guard", () => {
     assertGraphCovered(union, "extension", "needs-extension-build")
   })
 
+  test("a notices-generator change rebuilds both targets, and every build asserts the file shipped", () => {
+    const inputs = ["src/**", "package.json", "texts/**", "bin/**", "expected-minimum.txt"].map(
+      (path) => `packages/third-party-notices/${path}`,
+    )
+    // Beyond src + manifest: the licence texts and the expected-minimum list are build inputs too.
+    for (const input of inputs) {
+      expect(quick["extension"], `extension build: ${input}`).toContain(input)
+      expect(quick["firefox-touching"], `the zip-content assertion runs per target: ${input}`).toContain(input)
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/_build-extension.yml"), "utf8")) as any
+    const steps: { name?: string; run?: string }[] = wf.jobs.build.steps
+    const assertion = steps.findIndex((step) => step.run?.includes("third-party-notices/bin/check-minimum.ts"))
+    const firstUpload = steps.findIndex((step) => step.name?.startsWith("Upload"))
+    expect(assertion, "the assertion step exists").toBeGreaterThan(-1)
+    expect(assertion, "an artifact without notices is never uploaded").toBeLessThan(firstUpload)
+  })
+
   test("tools build covers the tools graph", () => {
     assertGraphCovered(quick["tools"], "tools", "tools")
     expect(quick["tools"], "tools must gate its build workflow").toContain(".github/workflows/_build-tools.yml")

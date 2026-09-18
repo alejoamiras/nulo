@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { LEGAL_MANIFEST } from "@nulo/legal"
-import { openLegalDocument } from "./legal-links"
+import { NOTICES_FILE } from "@nulo/third-party-notices"
+import { openLegalDocument, openThirdPartyNotices, THIRD_PARTY_NOTICES_FILE } from "./legal-links"
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -18,5 +19,16 @@ describe("openLegalDocument", () => {
 		vi.stubGlobal("chrome", { windows: { create } })
 		openLegalDocument("terms", "tab")
 		expect(create.mock.calls[0]?.[0]).toMatchObject({ width: 480, height: 720 })
+	})
+})
+
+describe("openThirdPartyNotices", () => {
+	test("opens the file the build emits, from the extension's own origin, in a tab", () => {
+		const create = vi.fn(async (_options: unknown) => ({}))
+		const getURL = vi.fn((path: string) => `chrome-extension://id/${path}`)
+		vi.stubGlobal("chrome", { tabs: { create }, runtime: { getURL } })
+		openThirdPartyNotices()
+		expect(THIRD_PARTY_NOTICES_FILE).toBe(NOTICES_FILE)
+		expect(create).toHaveBeenCalledWith({ url: `chrome-extension://id/${NOTICES_FILE}` })
 	})
 })
