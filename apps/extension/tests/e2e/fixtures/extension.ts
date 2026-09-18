@@ -1434,8 +1434,13 @@ export async function pickFileByTestId(page: Page, testId: string, filePath: str
 		await chooser.accept([filePath])
 		return
 	}
+	// The wallet removes an input only on `change`, so an abandoned pick leaves one behind and the
+	// file would go to that dead request instead of this one.
+	await page.evaluate(() => {
+		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
+	})
 	await clickByTestId(page, testId)
-	const pending = 'body > input[type="file"]'
+	const pending = 'body > input[type="file"]:not([data-e2e-stale])'
 	// This fixture's `waitForSelector` waits without returning the handle.
 	await page.waitForSelector(pending, { timeout: 10_000 })
 	const input = await page.$(pending)

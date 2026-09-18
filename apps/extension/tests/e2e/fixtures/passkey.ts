@@ -142,7 +142,11 @@ export async function stallNextPasskeyCeremony(page: Page, auth: PasskeyAuthSetu
 	await page.evaluate(() => {
 		navigator.credentials.get = (options) =>
 			new Promise((_, reject) => {
-				options?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")))
+				const abort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+				// An Escape that lands while the caller is still building its options aborts the
+				// signal before this runs, and an aborted signal never fires the event again.
+				if (options?.signal?.aborted) abort()
+				options?.signal?.addEventListener("abort", abort)
 			})
 	})
 }
