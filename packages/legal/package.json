@@ -1,5 +1,5 @@
 {
-	"name": "@nulo/resolve-asset",
+	"name": "@nulo/legal",
 	"private": true,
 	"version": "0.1.0",
 	"license": "Apache-2.0",
@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
 	},
 	"devDependencies": {
 		"@types/node": "^24.10.1",
