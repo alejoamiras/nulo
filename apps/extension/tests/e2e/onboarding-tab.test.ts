@@ -202,6 +202,8 @@ describe("onboarding tab", () => {
 		await gotoPrestoStep(page)
 
 		await page.waitForSelector('[data-testid="onboarding-presto-pitch"]', { visible: true, timeout: 10_000 })
+		// The card reads `detecting` for the moment it takes to learn that no earlier check reached Presto.
+		await page.waitForSelector(statusCardSelector("idle"), { visible: true, timeout: 10_000 })
 		const readState = () =>
 			page.evaluate(() => {
 				const banner = document.querySelector('[data-testid="onboarding-presto-pitch"] presto-banner')

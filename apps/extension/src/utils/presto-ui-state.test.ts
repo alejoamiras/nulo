@@ -1,6 +1,6 @@
 import type { PrestoStatus } from "@alejoamiras/presto-core"
 import { describe, expect, test } from "vitest"
-import { copyFor, detailRowsFor, rowDescriptionFor, uiStateFromStatus } from "./presto-ui-state"
+import { copyFor, detailRowsFor, hasReachedPresto, isPitchKind, rowDescriptionFor, uiStateFromStatus } from "./presto-ui-state"
 
 const available: PrestoStatus = {
 	available: true,
@@ -73,12 +73,7 @@ describe("uiStateFromStatus", () => {
 })
 
 describe("copyFor", () => {
-	test("settings: detecting/idle → Looking…, pending tone, no retry", () => {
-		expect(copyFor({ kind: "detecting" }, null, "settings")).toEqual({ tone: "pending", title: "Looking…", detail: "" })
-		expect(copyFor({ kind: "idle" }, null, "settings")).toEqual({ tone: "pending", title: "Looking…", detail: "" })
-	})
-
-	test("onboarding: idle names the browser prompt before the click that may raise it; detecting says what to press", () => {
+	test("idle names the browser prompt before the click that may raise it; detecting says what to press", () => {
 		const idle = copyFor({ kind: "idle" })
 		expect(idle).toMatchObject({ tone: "accent", title: "Already have Presto?", retry: "Check for Presto" })
 		expect(idle.detail).toContain("Your browser may ask")
@@ -90,6 +85,22 @@ describe("copyFor", () => {
 			detail: "If your browser asks, choose Allow.",
 		})
 	})
+
+	test("offline answers the check and offers another", () => {
+		expect(copyFor({ kind: "offline", info: {} })).toEqual({
+			tone: "off",
+			title: "Presto isn't running yet",
+			detail: "Install it, open it from your menu bar, then check again.",
+			retry: "Check again",
+		})
+	})
+
+	test.each([{ kind: "idle" }, { kind: "detecting" }, { kind: "offline", info: {} }] as const)(
+		"the settings surface rests and checks with the same words as onboarding ($kind)",
+		(state) => {
+			expect(copyFor(state, null, "settings")).toEqual(copyFor(state))
+		},
+	)
 
 	test("available → connected line built from the facts present, Re-test, go tone", () => {
 		expect(copyFor(uiStateFromStatus(available))).toEqual({
@@ -120,21 +131,6 @@ describe("copyFor", () => {
 	test("downloading → connected title with the one-time download detail, accent tone", () => {
 		expect(copyFor({ kind: "downloading", info: {} })).toMatchObject({ tone: "accent", title: "Presto connected", retry: "Re-test" })
 		expect(copyFor({ kind: "downloading", info: {} }).detail).toContain("one-time download")
-	})
-
-	test("offline → settings reports not detected; onboarding answers the check and offers another", () => {
-		expect(copyFor({ kind: "offline", info: {} }, null, "settings")).toEqual({
-			tone: "off",
-			title: "Presto not detected",
-			detail: "Proofs run in your browser (slower).",
-			retry: "Test",
-		})
-		expect(copyFor({ kind: "offline", info: {} })).toEqual({
-			tone: "off",
-			title: "Presto isn't running yet",
-			detail: "Install it, open it from your menu bar, then check again.",
-			retry: "Check again",
-		})
 	})
 
 	test("permission-blocked → Presto's title and three steps on onboarding; the compact variant on settings", () => {
@@ -181,6 +177,7 @@ describe("copyFor", () => {
 
 describe("rowDescriptionFor", () => {
 	test.each([
+		[{ kind: "idle" } as const, null, "In browser · Presto not set up"],
 		[{ kind: "detecting" } as const, null, "Checking Presto…"],
 		[uiStateFromStatus(available), null, "Presto · connected"],
 		[uiStateFromStatus(available), denied, "Presto · approval needed"],
@@ -208,5 +205,20 @@ describe("detailRowsFor", () => {
 	test("the connection row names a plain-HTTP answer and a blocked probe", () => {
 		expect(detailRowsFor({ kind: "error", info: { protocol: "http" } })[2].value).toBe("Plain HTTP")
 		expect(detailRowsFor({ kind: "permission-blocked", info: {} })[2].value).toBe("Blocked")
+	})
+})
+
+describe("state helpers", () => {
+	test("the pitch shows while Presto is not known to be there, and never once something answered", () => {
+		expect((["idle", "detecting", "offline"] as const).every(isPitchKind)).toBe(true)
+		expect((["available", "downloading", "permission-blocked", "version-mismatch", "error"] as const).some(isPitchKind)).toBe(false)
+	})
+
+	test("only an answer from Presto counts as reached: offline cannot tell a granted permission from a dismissed prompt", () => {
+		const reached = (kind: "available" | "downloading" | "version-mismatch" | "offline" | "permission-blocked" | "error") =>
+			hasReachedPresto({ kind, info: {} })
+		expect(["available", "downloading", "version-mismatch"].every((k) => reached(k as "available"))).toBe(true)
+		expect(["offline", "permission-blocked", "error"].some((k) => reached(k as "offline"))).toBe(false)
+		expect(hasReachedPresto({ kind: "idle" })).toBe(false)
 	})
 })

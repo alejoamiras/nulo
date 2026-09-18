@@ -1,43 +1,81 @@
+import type { Page } from "puppeteer"
 import { expect } from "vitest"
-import { test, openPopup, waitForHash } from "./fixtures/extension"
+import { clickByTestId, openPopup, test, waitForHash } from "./fixtures/extension"
 import { navigateToSettings } from "./fixtures/helpers"
-import { interceptHealth, PRESTO_DETAILED_HEALTH } from "./fixtures/presto"
+import { interceptHealth, PRESTO_DETAILED_HEALTH, PRESTO_HTTP_HEALTH_URL, PRESTO_HTTPS_HEALTH_URL } from "./fixtures/presto"
 
-test("settings → proving with Presto available: the connected card, Details, no Get Presto row", async ({ registeredExtension }) => {
-	const page = await openPopup(registeredExtension)
+const rowSelector = (status: string) => `[data-testid="setting-nav-proving"][data-status="${status}"]`
+const cardSelector = (status: string) => `[data-testid="settings-proving-status"][data-status="${status}"]`
+
+/** Counts the health probes the page sends; `interceptHealth`'s own listener answers them. */
+function countProbes(page: Page): () => number {
+	let probes = 0
+	page.on("request", (req) => {
+		if (req.url() === PRESTO_HTTPS_HEALTH_URL || req.url() === PRESTO_HTTP_HEALTH_URL) probes++
+	})
+	return () => probes
+}
+
+async function backToSettingsList(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		window.location.hash = "#/popup/settings"
+	})
+	await waitForHash(page, "#/popup/settings")
+}
+
+test("settings rests without probing; a check that reaches Presto is remembered, and the list then probes on its own", async ({
+	registeredExtensionPerTest,
+}) => {
+	const page = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page, "#/popup/general")
 	await interceptHealth(page, { https: { status: 200, body: PRESTO_DETAILED_HEALTH }, http: "refused" })
+	const probes = countProbes(page)
 
+	// A probe can raise the browser's local-network prompt, so neither page may send one unasked.
+	await navigateToSettings(page)
+	await page.waitForSelector(rowSelector("idle"), { visible: true, timeout: 10_000 })
 	await navigateToSettings(page, "proving")
 	await waitForHash(page, "#/popup/settings/proving")
+	await page.waitForSelector(cardSelector("idle"), { visible: true, timeout: 10_000 })
+	await page.waitForSelector('[data-testid="settings-proving-get"]', { visible: true, timeout: 5_000 })
+	expect(probes()).toBe(0)
 
-	await page.waitForSelector('[data-testid="settings-proving-status"][data-status="available"]', { visible: true, timeout: 10_000 })
+	await clickByTestId(page, "settings-proving-retry")
+	await page.waitForSelector(cardSelector("available"), { visible: true, timeout: 10_000 })
 	const state = await page.evaluate(() => ({
 		retry: !!document.querySelector('[data-testid="settings-proving-retry"]'),
 		get: !!document.querySelector('[data-testid="settings-proving-get"]'),
 	}))
 	expect(state).toEqual({ retry: true, get: false })
 
-	expect(registeredExtension.consoleErrors).toEqual([])
-	expect(registeredExtension.pageErrors).toEqual([])
+	await backToSettingsList(page)
+	await page.waitForSelector(rowSelector("available"), { visible: true, timeout: 10_000 })
+
+	expect(registeredExtensionPerTest.consoleErrors).toEqual([])
+	expect(registeredExtensionPerTest.pageErrors).toEqual([])
 })
 
-test("settings → proving with nothing listening: the not-detected card and the Get Presto row; the index row agrees", async ({
-	registeredExtension,
+test("a check that finds nothing shows the not-running card and the Get Presto row, and is not remembered", async ({
+	registeredExtensionPerTest,
 }) => {
-	const page = await openPopup(registeredExtension)
+	const page = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page, "#/popup/general")
 	await interceptHealth(page, { https: "refused", http: "refused" })
-
-	await navigateToSettings(page)
-	await page.waitForSelector('[data-testid="setting-nav-proving"][data-status="offline"]', { visible: true, timeout: 10_000 })
+	const probes = countProbes(page)
 
 	await navigateToSettings(page, "proving")
 	await waitForHash(page, "#/popup/settings/proving")
-
-	await page.waitForSelector('[data-testid="settings-proving-status"][data-status="offline"]', { visible: true, timeout: 10_000 })
+	await page.waitForSelector(cardSelector("idle"), { visible: true, timeout: 10_000 })
+	await clickByTestId(page, "settings-proving-retry")
+	await page.waitForSelector(cardSelector("offline"), { visible: true, timeout: 10_000 })
 	await page.waitForSelector('[data-testid="settings-proving-get"]', { visible: true, timeout: 5_000 })
 
-	expect(registeredExtension.consoleErrors).toEqual([])
-	expect(registeredExtension.pageErrors).toEqual([])
+	// `offline` cannot tell a granted permission from a dismissed prompt, so the list stays at rest.
+	const afterCheck = probes()
+	await backToSettingsList(page)
+	await page.waitForSelector(rowSelector("idle"), { visible: true, timeout: 10_000 })
+	expect(probes()).toBe(afterCheck)
+
+	expect(registeredExtensionPerTest.consoleErrors).toEqual([])
+	expect(registeredExtensionPerTest.pageErrors).toEqual([])
 })

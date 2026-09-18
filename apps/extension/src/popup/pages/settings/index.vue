@@ -10,6 +10,7 @@
 
 <script setup>
 /** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 
 /** Utils */
@@ -20,12 +21,14 @@ import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
 /** Proving row: Presto's live status plus the SW's memory of the last prove attempt. */
-const { state: prestoState, dispose: disposePresto } = usePrestoStatus()
+const configService = new ConfigServiceClient()
+const { state: prestoState, start: startPresto, dispose: disposePresto } = usePrestoCheck(configService)
 const lastProve = ref(null)
 const provingDescription = computed(() => rowDescriptionFor(prestoState.value, lastProve.value))
 const executionService = new ExecutionServiceClient()
 
 onBeforeMount(async () => {
+	void startPresto()
 	try {
 		lastProve.value = await executionService.getLastProveOutcome()
 	} catch {
@@ -53,6 +56,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	heroObserver?.disconnect()
 	executionService.disconnect()
+	configService.disconnect()
 	disposePresto()
 })
 </script>
