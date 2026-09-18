@@ -26,3 +26,7 @@ Registration with a passkey passed; every later ceremony (unlock, backup export,
 - `journal.swEvaluate` needed no change: with no `service_worker` target it already returns its marker string.
 - Killing a run mid-flight left one geckodriver; the next launch logged `reaped 1 orphaned launch(es)` and removed it — the orphan sweep's first unplanned use.
 - `firefox-smoke.mjs`, `smoke:firefox` and the three spike scripts are gone; the debug skill points at `NULO_E2E_BROWSER=firefox bun run test:e2e`.
+
+## Review (codex, same arc session) — converged
+
+One Medium and one Low, both taken: the stalled-ceremony stub hung for good if Escape aborted the signal before the stub subscribed (the dialog listens before `runGet` finishes building its options), and the file helper took the first pending input, which after an abandoned pick is a dead request's. The stub now honours an already-aborted signal and the helper tags inputs that predate its click. Follow-up round: "no new material findings".
