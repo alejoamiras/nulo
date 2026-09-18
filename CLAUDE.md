@@ -4,6 +4,7 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 ## Pointers — read these once before you start
 
+- [`BEFORE-LAUNCH.md`](./BEFORE-LAUNCH.md) — what is still blank in the legal documents and **when** each blank is due (before v1.0.0, at the store listing, on the v1.0.0 promote, on every later promote). Check it before any `release: promote dev → main`.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
 - **The any-ERC-20 bridge** — [`packages/bridge-core/README.md`](./packages/bridge-core/README.md) (the generation model, file map, the conductor + verifier scripts, the salt/leaf/portal invariants), [`contracts/bridge/evm/README.md`](./contracts/bridge/evm/README.md) (factory / clone / router threat model, the test layers, the halmos counts), [`contracts/bridge/aztec/README.md`](./contracts/bridge/aztec/README.md) (the hub, the split Noir/JS toolchain, TXE), [`apps/tools/README.md`](./apps/tools/README.md) (the tools app + Send wizard). The tools app is a standard dApp over `@aztec/wallet-sdk` — see **§ Two products, one repo** below for the independence rule (bridge work never touches `apps/extension/**` or the wallet packages).

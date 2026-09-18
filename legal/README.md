@@ -17,6 +17,8 @@ disagree. While any `«FILL»` survives, the published page carries a DRAFT bann
 
 ## Placeholders
 
+**When each one is due: [`BEFORE-LAUNCH.md`](../BEFORE-LAUNCH.md) at the repo root.**
+
 Every `«FILL: …»` must be substituted before publication. They are deliberate: each one is a fact
 that cannot be read out of this repository.
 
