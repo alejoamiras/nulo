@@ -86,7 +86,8 @@ legal/archive┘        │                │
 method's documented invariant forbids any await between the liveness check and the send. Guards at
 the three `ExecutionService` entry points remain as *early refusals* so nobody proves for minutes and
 then gets refused; they are not what makes the property true. A test pins that `node.sendTx(` occurs
-exactly once under `src/wallet` and that the file containing it calls the guard.
+exactly once under `src/wallet` and that, inside `sendTxTask`, the guard call precedes `assertLive()`
+which precedes the send — ordering, not mere presence.
 
 **`@nulo/legal`** (new leaf package; no runtime deps, no `chrome.*`). `manifest.ts` — hand-authored
 per document: `{ version, effective: string | null, material, changes: string[] }[]`, plus
@@ -108,8 +109,11 @@ reset, never in a backup. `acceptedAt` is informational: nothing orders or expir
 replaces a newer accepted version with an older one, awaits the storage write before resolving, and
 emits `onAcceptanceChanged`. `getStatus()`, `assertCurrent()` (throws `TermsAcceptanceRequiredError`,
 new in `@nulo/extension-messaging/errors`; storage failure or corrupt record ⇒ throws). No cache.
-The UI holds a client through one C1 composable, `useLegalAcceptance(client)` — status starts
-`"loading"`, so neither the sheet nor the banner flashes — and nothing is added to `app.store`
+The UI holds a client through one C1 composable, `useLegalAcceptance(client)`: it **subscribes
+before it reads**, stamps each read with a sequence number and drops a read that resolves after a
+newer event (the ordering `MigrationBarrier.vue:59` already documents), re-reads on client
+reconnect, and exposes `dispose()` for the parent. Status starts `"loading"`, so neither the sheet
+nor the banner flashes. Nothing is added to `app.store`
 (its shape is pinned by `stores/app.store.shape.pins.test.ts`).
 
 **dApp side.** `await legal.assertCurrent()` inside the existing `try`, immediately before
@@ -162,7 +166,8 @@ component run (`test:components` filters `src/components` only and would miss on
 ### Arc A — source of truth + published pages
 
 **P1 · `@nulo/legal`.** Package, manifest, status, `legal/archive/` + README, `"license":
-"Apache-2.0"` on every workspace `package.json`, CI path filters gain `packages/legal/**` and
+"Apache-2.0"` on every workspace `package.json` this arc may touch (not `apps/tools` or
+`packages/bridge-core` — out of bounds for wallet work and being removed), CI path filters gain `packages/legal/**` and
 `legal/**`. Tests: status truth table (current / patch-newer / minor-newer / major-newer / accepted
 newer than manifest / missing / garbage); manifest invariants above; **manifest ↔ markdown pin** —
 line-3 version equals the manifest head, every version has a `## Version history` row, every non-head
@@ -188,9 +193,12 @@ accepts `"missing" | "stale" | "corrupt"`, and honours the choice across relaunc
 harnesses get a current record by default.
 Tests: service — sole-writer serialisation (two concurrent `accept()` ⇒ two history entries); never
 downgrades; resolves only after the write; `assertCurrent` refuses on stale / missing / corrupt /
-storage-throws. Wall — with a refusing legal fake, `sendTxTask` rejects and `node.sendTx` is never
-called, for each of transfer, dApp send, **authwit revoke and registry toggle**; early refusals reach
-no executor. Envelope — `4100` + code, nothing else leaks. Background — a refused request never
+storage-throws. Wall — a legal fake that **admits at the entry points and refuses only at broadcast**
+(otherwise the early refusals mask the wall): `node.sendTx` is never called, the task and journal
+settle as failed, the controller/slot is released and no transaction record is written, for each of
+transfer, dApp send, **authwit revoke and registry toggle**. Liveness — hold the legal read, end the
+session, resolve the read as current: `assertLive()` still prevents the send. Separately, early
+refusals reach no executor. Envelope — `4100` + code, nothing else leaks. Background — a refused request never
 reaches `dispatch`; a batch costs one read. **Structural pins:** `node.sendTx(` occurs once under
 `src/wallet`; the set of files referencing `assertCurrent` equals the intended list exactly.
 Gates: `G-base`, `bun run test`, `bun run test:e2e` (proves the seed keeps the suite green).
@@ -210,9 +218,11 @@ Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
 **P5 · popup sheet, declined screen, send (U3–U6).** `components/LegalAcceptanceSheet.vue`
 (store/route-bound, beside the barriers; 4 tests: variant choice, events, route suppression list,
-nothing while `"loading"`); `popup/pages/legal/declined.vue`; `send.vue` banner + estimation pause;
-`register.vue` footer. One unit test on the `onAcceptanceChanged` listener for the two-popups case.
-Gates: `G-base`, `bun run test`, `bun run test:e2e`.
+nothing while `"loading"`); `composables/useLegalAcceptance.ts` with its ≥ 10 cases (loading →
+resolved, subscribe-before-read, stale read dropped, event after read, reconnect refresh, accept
+resolves after write, accept failure surfaces, dispose unsubscribes, double dispose, error ⇒ not
+current); `popup/pages/legal/declined.vue`; `send.vue` banner + estimation pause;
+`register.vue` footer. Gates: `G-base`, `bun run test`, `bun run test:e2e`.
 
 **P6 · Settings → About (U7).** Gates: `G-base`, `bun run test`.
 
@@ -227,16 +237,18 @@ inlined at `import-paths.test.ts:59-82` into a helper; full backup via `helpers/
 4. `legal: "missing"` + existing profile ⇒ sheet (U4b) ⇒ Not now ⇒ declined screen;
    `send-legal-banner` present; `legal-sheet` absent on the export routes; **seed export reveals the
    phrase, account export and full backup produce files**; balances render; relaunch ⇒ still declined;
-5. same with `legal: "corrupt"` — the fail-closed direction still leaves export working;
-6. passkey profile (virtual authenticator, as `passkey-backup.test.ts`): full backup completes its
-   in-page ceremony while declined;
+5. the export block of 4 repeated under `legal: "corrupt"` and `legal: "stale"` — one parametrised
+   body, three record states; the fail-closed direction must still leave export working;
+6. passkey profile (virtual authenticator, as `passkey-backup.test.ts`), `legal: "stale"`, declined:
+   full backup completes its in-page ceremony and produces a file;
 7. from 4: Review ⇒ Continue ⇒ `send-legal-banner` absent; history has one entry.
-The stale-with-changes rendering is carried by component tests (it needs a second manifest version,
-which a smoke run cannot inject without a production seam). One network-suite test, proverless pool:
+Only the *wording* of a change list is left to component tests (it needs a second manifest version,
+which a smoke run cannot inject without a production seam); stale **reachability** is proven above. One network-suite test, proverless pool:
 connected playground, `legal: "stale"`, a dApp call rejects with `TERMS_ACCEPTANCE_REQUIRED` and a
 wallet-UI send is refused; accept; both succeed.
 Gates: `G-base`, new smoke spec green twice consecutively at `retry: 0`, `bun run test:e2e`,
-`bun run e2e:agent tests/e2e/network/<new spec>`, `bun run audit:vue`.
+`NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/<new spec>` (the runner rejects a
+proverless-marked spec without it), `bun run audit:vue`.
 
 ### Arc C — third-party notices (blocked)
 
@@ -248,7 +260,9 @@ the allowlist is softened to unblock it.
 module is excluded); owning-package resolution; dedupe; licence-file discovery; SPDX `OR` / `AND` /
 nested; disallowed, missing and un-overridden all throw naming the package; `VENDORED` entries
 require a source URL; byte-stable output.
-**P9 · wire-up + About row (U8).** Plugin in main and worker builds; extend
+**P9 · wire-up + About row (U8).** Plugin in main and worker builds; `packages/third-party-notices/**`
+added to the extension and Firefox build path filters in `pr-quick.yml`, so a generator-only change
+still runs the zip-content assertions; extend
 `presto-core-deps.test.ts` to assert `license === "MIT"` for the three Presto packages;
 `_build-extension.yml` asserts both zips contain the file and that its package set is a superset of a
 checked-in expected-minimum list (a two-name canary proves almost nothing).

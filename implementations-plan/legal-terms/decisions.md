@@ -35,3 +35,24 @@ by the driver before adjudication. `C#` = `audit-codex.md`, `F#` = `audit-fable.
 
 Shape A's enforcement and scope, Shape B's write path. The guard moved from "the entry points I
 found" to "the one line every broadcast crosses", which is the change that answers the reject.
+
+## Round 2 — fresh-context Codex pass on revision 2
+
+**Conditional-approve.** It independently confirmed the wall: no alternate broadcast in the extension,
+`aztec-runtime` or `wallet-bridge`; account initialisation and fee-juice claims feed the same
+pipeline; awaiting the guard before `assertLive()` preserves the fence invariant; the transaction
+record is written *after* send (`execution-coordinator.ts:335`) and the executors' catches settle
+journals and release slots, so a refusal at the wall strands nothing. Also confirmed: signing,
+private-event reads and simulation all cross the dispatcher; the discovery handler is at
+`background.ts:659`; onboarding already uses service-worker clients pre-profile; `windows-*` matches
+existing detection; the three export paths are right.
+
+| # | Finding | Decision | Effect |
+|---|---|---|---|
+| R2-1 | Composable lacks snapshot/event ordering, reconnect refresh, and its ≥ 10 cases | **Adopt** | Subscribe-before-read, sequence-stamped reads, reconnect refresh, `dispose()`; ten named cases in P5 |
+| R2-2 | C3 adopted only partially — no stale or passkey-state export coverage | **Adopt** | Export block parametrised over missing / corrupt / stale; passkey scenario pinned to stale + declined |
+| R2-3 | A refusing fake stops at the early guards and never exercises the wall; structural pin checked presence, not order | **Adopt** | Admit-then-refuse fake with settlement assertions; held-read liveness case; ordering pin |
+| R2-4 | Notices package missing from build path filters | **Adopt** | `pr-quick.yml` filters in P9 |
+| R2-5 | Proverless env var missing from the P7 command; "every workspace package.json" reaches `apps/tools` / `bridge-core` | **Adopt** | Command fixed; licence-field edit narrowed |
+
+Nothing rejected. No HIGH remains open.

@@ -31,3 +31,27 @@ Looks fine:
 - Proposed layering, logging, migration exemption, and pending UI-sign-off handling fit repository rules.
 - Cloudflare documents folder-index trailing-slash serving; retain the deployed-preview check ([Pages documentation](https://developers.cloudflare.com/pages/configuration/serving-pages/)).
 - No files modified; builds/tests were not run.
+---
+
+# Round 2 — fresh-context pass on revision 2
+
+**Conditional-approve — moderate confidence overall. Revision 2 fixes the confirmed broadcast bypass, but several adopted safeguards and validation requirements remain incomplete.**
+
+1. **MEDIUM — The acceptance composable still lacks snapshot/event ordering and reconnect requirements.** [plan.md:111](implementations-plan/legal-terms/plan.md:111) specifies loading state; [plan.md:214](implementations-plan/legal-terms/plan.md:214) adds one listener test. Neither prevents an older status read from overwriting a newer acceptance event, nor requires refresh after reconnect. This was explicitly raised in C6/F4; [MigrationBarrier.vue:59](apps/extension/src/components/MigrationBarrier.vue:59) documents the existing ordering solution. Specify subscription/read ordering, stale-result suppression, reconnect refresh, and disposal. The new composable also needs the ≥10 cases required by [CLAUDE.md:270](CLAUDE.md:270). **Confidence: high on the omission; moderate on resulting UI failure.**
+
+2. **MEDIUM — C3’s “Adopt” is only partially implemented in the test plan.** [decisions.md:12](implementations-plan/legal-terms/decisions.md:12) promises pointer-driven password and passkey export coverage under **missing, stale, and corrupt** records. [plan.md:227](implementations-plan/legal-terms/plan.md:227) tests missing/corrupt password exports, leaves the passkey record state unspecified, and substitutes component tests for stale coverage. Component rendering cannot establish passkey ceremony or download reachability. Use the already-planned stale fixture to test export access; testing every change-summary string is a separate concern. **Confidence: high.**
+
+3. **MEDIUM — The wall’s regression tests need to distinguish early refusal from broadcast refusal.** [plan.md:191](implementations-plan/legal-terms/plan.md:191) uses a refusing legal fake, which can stop execution at the early guards without exercising the wall. Require a case that passes admission and refuses only at broadcast, asserting task/journal settlement, controller/slot cleanup, and no transaction record. Also hold the legal read, end the session, then resolve it successfully: `assertLive()` must still prevent sending. The structural test at [plan.md:89](implementations-plan/legal-terms/plan.md:89) checks that the file *calls* the guard, weaker than the ledger’s promised ordering assertion. **Confidence: high.**
+
+4. **MEDIUM — Notices-only changes remain outside the specified build filters.** P1 adds legal paths, but P8/P9 never adds `packages/third-party-notices/**` to extension/Firefox build gating. Existing filters enumerate dependencies ([pr-quick.yml:95](.github/workflows/pr-quick.yml:95), [:142](.github/workflows/pr-quick.yml:142)). Workspace test discovery does not ensure the zip-content assertions run after a generator-only change. C9’s original notices-filter requirement remains unresolved. **Confidence: high.**
+
+5. **LOW — P7’s command does not select its promised proverless configuration.** [plan.md:239](implementations-plan/legal-terms/plan.md:239) needs `NULO_E2E_PROVERLESS=1`; the runner explicitly rejects marked tests without it ([agent.sh:16](apps/extension/scripts/e2e/agent.sh:16)). Separately, P1’s “every workspace package.json” includes `apps/tools` and `packages/bridge-core`, contradicting both the plan’s exclusions and [CLAUDE.md:25](CLAUDE.md:25). Narrow that instruction. **Confidence: high.**
+
+What is now solid:
+
+- **The wall:** I found no alternate transaction broadcast in extension source, aztec-runtime, or wallet-bridge. Account initialization and fee-juice claims feed the same transaction pipeline; no internally sending wallet class was found on these paths. Awaiting the guard **inside the existing try, before `assertLive()`**, preserves the fence invariant. Transaction recording follows send ([execution-coordinator.ts:335](apps/extension/src/wallet/services/execution/execution-coordinator.ts:335)); catches fail journals and release controllers/slots ([dapp-send-executor.ts:258](apps/extension/src/wallet/services/execution/dapp-send-executor.ts:258)). No stranded nonce reservation or balance hold was found. **Confidence: high.**
+- **dApp coverage:** signing, private-event reads, and simulation cross the dispatcher. The discovery handler exists at `background.ts:659`; returning-session discovery/verification remains the documented transport exception. No second application-request ingress was found.
+- **Service and routes:** onboarding already uses SW clients before profile creation; sender trust permits extension tabs. A profile-independent legal service introduces no necessary cycle. `windows-*` matches existing detection; the three export paths are correct.
+- Terms-only acceptance, serialized persistence, downgrade handling, worker/vendor attribution, SPDX `AND`, and explicit SQLite/Presto blockers resolve substantial round-one findings.
+
+Read-only inspection; no files changed or tests run.
