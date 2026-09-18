@@ -33,8 +33,11 @@ export interface Vendored {
 	components: readonly VendoredComponent[]
 	/** Packages whose own entry already carries this asset's notice; each must be present. */
 	coveredBy?: readonly string[]
-	/** For an asset the build itself writes from modules already walked: what writes it. */
-	generated?: string
+	/**
+	 * For an asset a build tool writes itself: what writes it, and the shape its WHOLE text must
+	 * have. A file name proves nothing about where a file came from; its content can.
+	 */
+	generated?: { by: string; content: RegExp }
 }
 
 export interface Policy {
@@ -64,9 +67,9 @@ const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/75061fab15986eedee4e
 const SQLITE3MC_TAG = "https://github.com/utelle/SQLite3MultipleCiphers/blob/v2.3.5"
 
 const SQLITE3MC_NOTE =
-	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms. Of the cipher code compiled in, the parts that are neither sqlite3mc's own MIT code nor public domain have their own entries: sha2 and libaegis."
+	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms. Upstream builds it from the sqlite3mc amalgamation with the default cipher set and none of the optional extensions (no miniz). Of the code that amalgamation compiles in, what is neither sqlite3mc's own MIT code nor public domain or CC0 has its own entry: sha2, libaegis and Argon2. The Emscripten runtime links musl libc, whose notice follows Emscripten's."
 
-const SQLITE3MC_TEXTS = ["sqlite3mc.MIT.txt", "sqlite-wasm-bundle-header.txt", "emscripten.MIT.txt"] as const
+const SQLITE3MC_TEXTS = ["sqlite3mc.MIT.txt", "sqlite-wasm-bundle-header.txt", "emscripten.MIT.txt", "musl.MIT.txt"] as const
 
 export const OVERRIDES: readonly Override[] = [
 	{
@@ -185,6 +188,13 @@ export const VENDORED: readonly Vendored[] = [
 				texts: ["libaegis.MIT.txt"],
 				note: "SQLite3 Multiple Ciphers vendors Frank Denis's AEGIS implementation under src/aegis, each file marked MIT; its tree carries no separate licence file, so the text is libaegis's own.",
 			},
+			{
+				name: "Argon2 reference implementation",
+				license: "(CC0-1.0 OR Apache-2.0)",
+				source: `${SQLITE3MC_TAG}/src/argon2/src/argon2.c`,
+				texts: ["sqlite3mc-argon2.CC0-1.0-OR-Apache-2.0.txt"],
+				note: "Compiled in with the AEGIS cipher, which derives its keys with it. Used under CC0-1.0. The text is the header the vendored sources carry.",
+			},
 		],
 	},
 	{
@@ -193,14 +203,13 @@ export const VENDORED: readonly Vendored[] = [
 		coveredBy: ["@aztec/sqlite3mc-wasm"],
 	},
 	{
-		trigger: { asset: /^assets\/(main\.worker|thread\.worker|worker)-[\w-]+\.js$/ },
-		components: [],
-		generated: "Vite worker bundles, whose modules the worker plugin records",
-	},
-	{
 		trigger: { asset: /^assets\/[\w.-]+-loader-[\w-]+\.js$/ },
 		components: [],
-		generated: "content-script loaders written by @crxjs/vite-plugin",
+		generated: {
+			by: "@crxjs/vite-plugin's content-script loader",
+			content:
+				/^\(function \(\) \{\s*'use strict';\s*const injectTime = performance\.now\(\);\s*\(async \(\) => \{\s*const \{ onExecute \} = await import\(\s*\/\* @vite-ignore \*\/\s*chrome\.runtime\.getURL\("assets\/[\w.-]+\.js"\)\s*\);\s*onExecute\?\.\(\{ perf: \{ injectTime, loadTime: performance\.now\(\) - injectTime \} \}\);\s*\}\)\(\)\.catch\(console\.error\);\s*\}\)\(\);\s*$/,
+		},
 	},
 	{
 		trigger: { asset: /^assets\/barretenberg(-threads)?\.wasm\.gz$/ },

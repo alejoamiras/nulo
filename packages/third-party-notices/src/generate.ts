@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { BundleContents } from "./collect.ts"
-import { type InstalledPackage, licenceFiles, moduleOrigin, modulePath, owningPackage } from "./packages.ts"
+import { type InstalledPackage, licenceFiles, moduleOrigin, modulePath, type NamedManifest, owningPackage } from "./packages.ts"
 import type { Override, Policy, Vendored, VendoredComponent } from "./policy.ts"
 import { isSpdxAllowed, parseSpdx } from "./spdx.ts"
 
@@ -57,7 +57,7 @@ function bundledPackages(moduleIds: readonly string[], workspaceRoot: string, vi
 			violations.push(`${path.split("/").slice(-2).join("/")}: bundled from outside the workspace and outside node_modules`)
 		if (origin !== "third-party") continue
 		const pkg = owningPackage(path)
-		found.set(`${pkg.dir}\0${pkg.embedded ?? ""}`, pkg)
+		found.set(`${pkg.dir}\0${JSON.stringify(pkg.nested)}`, pkg)
 	}
 	return [...found.values()].sort((a, b) => byCodePoint(a.dir, b.dir))
 }
@@ -94,14 +94,39 @@ function overrideProblems(pkg: InstalledPackage, override: Override, shipsFile: 
 	return problems
 }
 
-function embeddedProblem(pkg: InstalledPackage, policy: Policy): string | undefined {
-	if (!pkg.embedded) return undefined
-	const embeddedName = pkg.embedded.replace(/(?!^)@[^@]*$/, "")
-	const claimed = policy.vendored.some(
+/** A reviewed record for a foreign package found inside `host`: same name, same version, same licence. */
+function isReviewedEmbed(host: InstalledPackage, nested: NamedManifest, policy: Policy): boolean {
+	return policy.vendored.some(
 		({ trigger, components }) =>
-			"package" in trigger && trigger.package === pkg.name && components.some(({ name }) => name === embeddedName),
+			"package" in trigger &&
+			trigger.package === host.name &&
+			components.some(
+				(component) =>
+					component.name === nested.name &&
+					component.version === nested.version &&
+					(nested.license === undefined || nested.license === component.license),
+			),
 	)
-	return claimed ? undefined : `${pkg.name}@${pkg.version}: embeds ${pkg.embedded}, which needs a VENDORED component record`
+}
+
+/** Holds every manifest found below the installation root against the root, or against a reviewed record. */
+function nestedProblems(pkg: InstalledPackage, policy: Policy): string[] {
+	const title = `${pkg.name}@${pkg.version}`
+	return pkg.nested.flatMap((nested) => {
+		const found = `${nested.name}@${nested.version}`
+		if (nested.malformedLicence) return [`${title}: nested manifest ${found} declares a licence that cannot be read`]
+		if (nested.name !== pkg.name) {
+			return isReviewedEmbed(pkg, nested, policy)
+				? []
+				: [`${title}: embeds ${found}, which has no matching VENDORED component record`]
+		}
+		const agrees = nested.version === pkg.version && (nested.license === undefined || nested.license === pkg.license)
+		return agrees
+			? []
+			: [
+					`${title}: carries a nested manifest (${found}, ${nested.license ?? "no licence"}) that disagrees with its installation root`,
+				]
+	})
 }
 
 function packageEntry(pkg: InstalledPackage, options: GenerateOptions, violations: string[]): Entry | undefined {
@@ -111,11 +136,11 @@ function packageEntry(pkg: InstalledPackage, options: GenerateOptions, violation
 	const override = options.policy.overrides.find((candidate) => candidate.names.includes(pkg.name))
 	const before = violations.length
 	if (override) violations.push(...overrideProblems(pkg, override, shipsLicence))
-	const embedded = embeddedProblem(pkg, options.policy)
-	if (embedded) violations.push(embedded)
+	violations.push(...nestedProblems(pkg, options.policy))
+	if (pkg.malformedLicence) violations.push(`${title}: declares a licence that cannot be read; an OVERRIDES entry cannot stand in for it`)
 	const license = override?.license ?? pkg.license
 	if (license === undefined) {
-		violations.push(`${title}: no licence metadata and no OVERRIDES entry`)
+		if (!pkg.malformedLicence) violations.push(`${title}: no licence metadata and no OVERRIDES entry`)
 		return undefined
 	}
 	if (!override && !shipsLicence) violations.push(`${title}: ships no licence file and has no OVERRIDES entry`)
@@ -156,10 +181,13 @@ function componentEntry(component: VendoredComponent, options: GenerateOptions, 
 const describeTrigger = (vendored: Vendored) =>
 	"package" in vendored.trigger ? `package ${vendored.trigger.package}` : `asset ${vendored.trigger.asset}`
 
-function triggerProblem(vendored: Vendored, packages: readonly InstalledPackage[], assets: readonly string[]) {
-	const { trigger } = vendored
+function triggerProblem(vendored: Vendored, packages: readonly InstalledPackage[], contents: BundleContents) {
+	const { trigger, generated } = vendored
 	if ("asset" in trigger) {
-		return assets.some((asset) => trigger.asset.test(asset)) ? undefined : "matched nothing; remove or fix it"
+		const matched = contents.assets.filter((asset) => trigger.asset.test(asset))
+		if (matched.length === 0) return "matched nothing; remove or fix it"
+		const foreign = generated && matched.find((asset) => !generated.content.test(contents.assetText[asset] ?? ""))
+		return foreign ? `claims ${foreign}, whose content is not what ${generated.by} writes` : undefined
 	}
 	const hosts = packages.filter((pkg) => pkg.name === trigger.package)
 	if (hosts.length === 0) return "matched nothing; remove or fix it"
@@ -177,7 +205,7 @@ function vendoredEntries(
 	const entries: Entry[] = []
 	for (const vendored of options.policy.vendored) {
 		const label = `VENDORED entry for ${describeTrigger(vendored)}`
-		const problem = triggerProblem(vendored, packages, contents.assets)
+		const problem = triggerProblem(vendored, packages, contents)
 		if (problem) {
 			violations.push(`${label} ${problem}`)
 			continue
@@ -194,8 +222,9 @@ function vendoredEntries(
 
 function unclaimedAssets(contents: BundleContents, policy: Policy): string[] {
 	const claims = policy.vendored.flatMap(({ trigger }) => ("asset" in trigger ? [trigger.asset] : []))
+	const built = new Set(contents.builtAssets)
 	return contents.assets
-		.filter((asset) => policy.codeAsset.test(asset) && !claims.some((claim) => claim.test(asset)))
+		.filter((asset) => policy.codeAsset.test(asset) && !built.has(asset) && !claims.some((claim) => claim.test(asset)))
 		.map((asset) => `${asset}: emitted code asset with no VENDORED entry`)
 }
 
@@ -239,16 +268,16 @@ export function generateNotices(contents: BundleContents, options: GenerateOptio
 
 /**
  * Component names listed in a rendered notices file, without versions. Reads only the inventory,
- * which ends at the first blank line and sits above all third-party text.
+ * at the fixed position the renderer puts it, above all third-party text.
+ * @throws when the inventory is not there or its row count is not the one it states.
  */
 export function noticeNames(notices: string): Set<string> {
 	const lines = notices.split("\n")
-	const start = lines.findIndex((line) => line.startsWith(`${INVENTORY_START} (`))
-	const names = new Set<string>()
-	if (start === -1) return names
-	for (const line of lines.slice(start + 1)) {
-		if (line === "") break
-		names.add((line.split("\t")[0] ?? "").replace(/(?!^)@[^@]*$/, ""))
-	}
-	return names
+	const start = HEADER.split("\n").length + 1
+	const stated = /^COMPONENTS \((\d+)\)$/.exec(lines[start] ?? "")
+	if (!notices.startsWith(`${HEADER}\n\n`) || !stated) throw new Error("notices file does not open with the component inventory")
+	const end = lines.indexOf("", start)
+	const rows = lines.slice(start + 1, end === -1 ? undefined : end)
+	if (rows.length !== Number(stated[1])) throw new Error(`inventory states ${stated[1]} components and lists ${rows.length}`)
+	return new Set(rows.map((row) => (row.split("\t")[0] ?? "").replace(/(?!^)@[^@]*$/, "")))
 }

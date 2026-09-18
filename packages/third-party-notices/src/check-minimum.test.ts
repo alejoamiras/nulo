@@ -1,18 +1,14 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "vitest"
 import { buildDirsFor, missingFromNotices, parseMinimum } from "./check-minimum.ts"
-import { OVERRIDES, VENDORED } from "./policy.ts"
+import { generateNotices } from "./generate.ts"
+import { ALLOWED, OVERRIDES, VENDORED } from "./policy.ts"
 
-const notices = [
-	"HEADER",
-	"",
-	"COMPONENTS (3)",
-	"@scope/pkg@1.2.3\tMIT",
-	"plain@0.1.0-rc.1\tISC",
-	"un versioned\tMIT",
-	"",
-	"=".repeat(80),
-].join("\n")
+const empty = generateNotices(
+	{ moduleIds: [], assets: [], assetText: {}, builtAssets: [] },
+	{ policy: { allowed: ALLOWED, overrides: [], vendored: [], codeAsset: /\.wasm$/ }, textsDir: ".", workspaceRoot: "." },
+)
+const notices = empty.replace("COMPONENTS (0)", "COMPONENTS (3)\n@scope/pkg@1.2.3\tMIT\nplain@0.1.0-rc.1\tISC\nun versioned\tMIT")
 
 describe("expected-minimum check", () => {
 	test("parses names, ignoring comments and blanks", () => {

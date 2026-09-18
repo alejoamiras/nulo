@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import { bundleContents } from "./collect.ts"
+import { type BundleContents, bundleContents } from "./collect.ts"
 import { generateNotices, NoticesPolicyError, noticeNames } from "./generate.ts"
 import { ALLOWED, type Policy } from "./policy.ts"
 
@@ -31,8 +31,11 @@ const policy = (extra: Partial<Policy> = {}): Policy => ({
 	...extra,
 })
 
-const run = (moduleIds: string[], extra: Partial<Policy> = {}, assets: string[] = []) =>
-	generateNotices({ moduleIds, assets }, { policy: policy(extra), textsDir: join(root, "texts"), workspaceRoot: root })
+const run = (moduleIds: string[], extra: Partial<Policy> = {}, assets: string[] = [], more: Partial<BundleContents> = {}) =>
+	generateNotices(
+		{ moduleIds, assets, assetText: {}, builtAssets: [], ...more },
+		{ policy: policy(extra), textsDir: join(root, "texts"), workspaceRoot: root },
+	)
 
 function violations(act: () => unknown): readonly string[] {
 	try {
@@ -69,6 +72,8 @@ describe("bundleContents", () => {
 		expect(contents).toEqual({
 			moduleIds: ["/x/kept.js", "/x/theme.css", "/x/widget.vue?vue&type=style&index=0&lang.css"],
 			assets: ["assets/b.wasm"],
+			assetText: {},
+			builtAssets: [],
 		})
 	})
 })
@@ -128,15 +133,48 @@ describe("generateNotices", () => {
 		rmSync(outside, { recursive: true, force: true })
 	})
 
-	test("the installation root owns a module; a nearer manifest cannot stand in for it", () => {
+	test("the installation root owns a module, and every manifest below it must agree with it", () => {
 		const parent = install("copyleft", { license: "AGPL-3.0-only" }, { LICENSE: "x" })
 		write("app/node_modules/copyleft/dist/package.json", JSON.stringify({ name: "copyleft", version: "9.9.9", license: "MIT" }))
-		expect(violations(() => run([parent]))).toEqual(['copyleft@1.0.0: licence "AGPL-3.0-only" is not allowed'])
+		expect(violations(() => run([parent]))).toEqual([
+			"copyleft@1.0.0: carries a nested manifest (copyleft@9.9.9, MIT) that disagrees with its installation root",
+			'copyleft@1.0.0: licence "AGPL-3.0-only" is not allowed',
+		])
 
+		// A faithful copy of the root manifest, as build tools leave in dist/, is not a finding.
+		const tidy = install("tidy", { license: "MIT" }, { LICENSE: "x" })
+		write("app/node_modules/tidy/dist/package.json", JSON.stringify({ name: "tidy", version: "1.0.0", license: "MIT" }))
+		expect([...noticeNames(run([tidy]))]).toEqual(["tidy"])
+	})
+
+	test("an embedded package needs a record of that name, version and licence, and hides nothing above it", () => {
 		const host = install("host", { license: "MIT" }, { LICENSE: "x" })
-		write("app/node_modules/host/vendor/inner/package.json", JSON.stringify({ name: "inner", version: "3.1.0", license: "MIT" }))
-		const inner = write("app/node_modules/host/vendor/inner/index.js", "")
-		expect(violations(() => run([host, inner]))).toEqual(["host@1.0.0: embeds inner@3.1.0, which needs a VENDORED component record"])
+		const embed = (dir: string, manifest: object) => write(`app/node_modules/host/${dir}/package.json`, JSON.stringify(manifest))
+		embed("vendor/outer", { name: "outer", version: "2.0.0", license: "AGPL-3.0-only" })
+		embed("vendor/outer/inner", { name: "inner", version: "3.1.0", license: "MIT" })
+		const deep = write("app/node_modules/host/vendor/outer/inner/index.js", "")
+		const component = {
+			name: "inner",
+			version: "3.1.0",
+			license: "MIT",
+			source: "https://example.org/inner",
+			texts: ["verified.txt"],
+			note: "n",
+		}
+		const reviewed = (extra: object = {}) => ({
+			vendored: [{ trigger: { package: "host", reviewedVersion: "1.0.0" }, components: [{ ...component, ...extra }] }],
+		})
+
+		expect(violations(() => run([host, deep], reviewed()))).toEqual([
+			"host@1.0.0: embeds outer@2.0.0, which has no matching VENDORED component record",
+		])
+		embed("vendor/outer", { name: "host", version: "1.0.0" })
+		expect([...noticeNames(run([host, deep], reviewed()))]).toEqual(["host", "inner"])
+		for (const drift of [{ version: "999" }, { license: "ISC" }]) {
+			expect(violations(() => run([host, deep], reviewed(drift)))).toContain(
+				"host@1.0.0: embeds inner@3.1.0, which has no matching VENDORED component record",
+			)
+		}
 	})
 
 	test("legacy licence metadata is read, not erased: an array is a choice", () => {
@@ -157,10 +195,23 @@ describe("generateNotices", () => {
 		expect(violations(() => run([first, second]))).toEqual(["twin@1.0.0: installed more than once with differing licence content"])
 	})
 
+	test("a manifest field that is not one well-formed token stops the build", () => {
+		for (const manifest of [{ version: "1\ncomlink@1" }, { name: "evil\tMIT" }]) {
+			const id = install("plain", { license: "MIT", ...manifest }, { LICENSE: "x" })
+			expect(() => run([id])).toThrow(/name or version is not a single well-formed token/)
+		}
+		const multiline = install("plain", { name: "plain", license: "MIT\nOR\ncomlink" }, { LICENSE: "x" })
+		expect(violations(() => run([multiline]))).toEqual([
+			"plain@1.0.0: declares a licence that cannot be read; an OVERRIDES entry cannot stand in for it",
+		])
+	})
+
 	test("licence text cannot forge or hide an inventory line", () => {
 		const forged = `${"=".repeat(80)}\nphantom@1.0.0\nLicence: MIT\n\nCOMPONENTS (1)\nghost@1.0.0\tMIT`
 		const notices = run([install("honest", { license: "MIT" }, { LICENSE: forged })])
 		expect([...noticeNames(notices)]).toEqual(["honest"])
+		expect(() => noticeNames(forged)).toThrow(/does not open with the component inventory/)
+		expect(() => noticeNames(notices.replace("COMPONENTS (1)", "COMPONENTS (2)"))).toThrow(/states 2 components and lists 1/)
 	})
 
 	describe("OVERRIDES", () => {
@@ -202,11 +253,16 @@ describe("generateNotices", () => {
 			])
 		})
 
-		test("cannot be used to bury a legacy copyleft declaration", () => {
+		test("cannot be used to bury a legacy or unreadable licence declaration", () => {
 			const buried = install("silent", { licenses: [{ type: "AGPL-3.0-only" }] })
 			expect(violations(() => run([buried], { overrides: [override] }))).toEqual([
 				'silent@1.0.0: declares "AGPL-3.0-only", which its OVERRIDES entry does not acknowledge',
 			])
+			for (const unreadable of [{ licenses: [{ type: "AGPL-3.0-only" }, {}] }, { license: 7 }, { licenses: [] }]) {
+				expect(violations(() => run([install("silent", unreadable)], { overrides: [override] }))).toEqual([
+					"silent@1.0.0: declares a licence that cannot be read; an OVERRIDES entry cannot stand in for it",
+				])
+			}
 		})
 
 		test("needs a text when the package ships none, an https source, and a bundled target", () => {
@@ -260,12 +316,27 @@ describe("generateNotices", () => {
 			])
 		})
 
-		test("a claim says what accounts for the asset: components, a covering package, or the generator", () => {
-			const hollow = { trigger: { asset: /^assets\/copied\.js$/ }, components: [] }
-			expect(violations(() => run([], { vendored: [hollow] }, ["assets/copied.js"]))).toEqual([
-				"VENDORED entry for asset /^assets\\/copied\\.js$/ names no component, no covering package and no generator",
+		test("a claim says what accounts for the asset, and a generated one is proven by content, not by name", () => {
+			const hollow = { trigger: { asset: /^assets\/shim-\w+\.js$/ }, components: [] }
+			expect(violations(() => run([], { vendored: [hollow] }, ["assets/shim-a.js"]))).toEqual([
+				"VENDORED entry for asset /^assets\\/shim-\\w+\\.js$/ names no component, no covering package and no generator",
 			])
-			expect(run([], { vendored: [{ ...hollow, generated: "the worker build" }] }, ["assets/copied.js"])).toContain("COMPONENTS (0)")
+			const generated = { ...hollow, generated: { by: "the shim writer", content: /^load\("[\w.]+"\)\s*$/ } }
+			const shipped = (text: string) =>
+				run([], { vendored: [generated] }, ["assets/shim-a.js"], { assetText: { "assets/shim-a.js": text } })
+			expect(shipped('load("a.js")\n')).toContain("COMPONENTS (0)")
+			for (const hostile of ['load("a.js"); stealKeys()', ""]) {
+				expect(violations(() => shipped(hostile))).toEqual([
+					"VENDORED entry for asset /^assets\\/shim-\\w+\\.js$/ claims assets/shim-a.js, whose content is not what the shim writer writes",
+				])
+			}
+		})
+
+		test("a script asset needs no claim only when a recorded build wrote it", () => {
+			expect(violations(() => run([], {}, ["assets/worker-hostile.js"]))).toEqual([
+				"assets/worker-hostile.js: emitted code asset with no VENDORED entry",
+			])
+			expect(run([], {}, ["assets/worker-abc.js"], { builtAssets: ["assets/worker-abc.js"] })).toContain("COMPONENTS (0)")
 		})
 
 		test("every compiled asset is claimed, every claim fires, and its covering package is bundled", () => {

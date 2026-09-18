@@ -75,3 +75,28 @@
 - *The CI step's target handling lived in untested shell*; it is now a tested function.
 
 Both targets rebuilt under the stricter policy with identical output (135 entries).
+
+**Round 2: reject.** Six findings, each reproduced by Codex with a probe, all accepted:
+
+- *A malformed licence declaration read as "absent"*, which is exactly what an override may fill:
+  `licenses: [{type: "AGPL-3.0-only"}, {}]` passed under an MIT override. Unreadable is now its own
+  state and nothing can stand in for it.
+- *The embedded check trusted the nearest differing name only*: a reviewed inner name at the wrong
+  version passed, and a reviewed child hid an unreviewed package above it. The whole manifest
+  chain is now held against the root or against a record of that exact name, version and licence.
+- *A file name is not provenance.* `assets/worker-hostile.js` satisfied the "Vite worker output"
+  claim with no worker recorded. Script assets are now accepted only when a recorded worker build
+  wrote that exact file, and the one remaining generated claim (the crx content-script loader)
+  must match the loader's whole text.
+- *The Emscripten notice pointed at musl's COPYRIGHT without including it*, and `strings` finding
+  no `argon2` symbol proved nothing: AEGIS calls Argon2 directly. The inventory now comes from
+  upstream's build inputs (the amalgamation, default ciphers, no optional extensions).
+- *A manifest version of `"1\ncomlink@1"` forged an inventory row.* Manifest fields must be single
+  tokens, and the inventory is read at a fixed position with a verified row count.
+- *Worker records were keyed by output file names*, so a changed hash added a record instead of
+  replacing one and a removed worker lingered. Keyed by entry module now, and used only while the
+  main bundle still carries the files that build wrote.
+
+A slip worth recording: the edit that replaced the worker claim also deleted the three wasm
+claims, and the next real build refused with all four assets named. The policy caught its own
+author.

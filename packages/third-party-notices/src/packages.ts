@@ -1,14 +1,20 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-export interface InstalledPackage {
+/** A manifest that names a package: the installation root's, or one found below it. */
+export interface NamedManifest {
 	name: string
 	version: string
 	/** The declared licence as one SPDX-shaped string; legacy object and array forms are folded into it. */
 	license: string | undefined
+	/** A licence declaration is present but is not something this reader can state as a string. */
+	malformedLicence: boolean
+}
+
+export interface InstalledPackage extends NamedManifest {
 	dir: string
-	/** A different named package found between the module and the installation root. */
-	embedded?: string
+	/** Every other named manifest between the module and the installation root, nearest first. */
+	nested: NamedManifest[]
 }
 
 export type ModuleOrigin = "third-party" | "first-party" | "external" | "virtual"
@@ -37,39 +43,51 @@ export function moduleOrigin(path: string, workspaceRoot: string): ModuleOrigin 
 	return existsSync(path) ? "external" : "virtual"
 }
 
-function legacyLicence(entry: unknown): string | undefined {
-	if (typeof entry === "string") return entry
-	if (typeof entry !== "object" || entry === null) return undefined
-	const { type } = entry as { type?: unknown }
-	return typeof type === "string" ? type : undefined
+// Everything written into the notices inventory is one line: a manifest field carrying a line
+// break or a tab could otherwise forge a row of it.
+const PACKAGE_NAME = /^(@[\w.~-]+\/)?[\w.~-]+$/
+const PACKAGE_VERSION = /^[\w.+-]+$/
+const LICENCE_EXPRESSION = /^[A-Za-z0-9.+() -]+$/
+
+function licenceOf(entry: unknown): string | undefined {
+	const value = typeof entry === "object" && entry !== null ? (entry as { type?: unknown }).type : entry
+	return typeof value === "string" && LICENCE_EXPRESSION.test(value) ? value : undefined
 }
 
-/** npm's pre-SPDX forms (`{ type }`, `licenses: [...]`) still declare a licence; an array offers a choice. */
-function declaredLicence(manifest: Record<string, unknown>): string | undefined {
-	const single = legacyLicence(manifest.license)
-	if (single !== undefined) return single
-	if (!Array.isArray(manifest.licenses)) return undefined
-	const listed = manifest.licenses.map(legacyLicence)
-	if (listed.length === 0 || listed.includes(undefined)) return undefined
-	return listed.length === 1 ? listed[0] : `(${listed.join(" OR ")})`
+/**
+ * npm's pre-SPDX forms (`{ type }`, `licenses: [...]`) still declare a licence; an array offers a
+ * choice. A declaration that is present and unreadable is `malformed`, never "absent": absence is
+ * what an override may fill, and an unreadable declaration could be hiding anything.
+ */
+function declaredLicence(manifest: Record<string, unknown>): Pick<NamedManifest, "license" | "malformedLicence"> {
+	const declarations = [manifest.license, manifest.licenses].filter((field) => field !== undefined)
+	if (declarations.length === 0) return { license: undefined, malformedLicence: false }
+	const [first] = declarations
+	const listed = (Array.isArray(first) ? first : [first]).map(licenceOf)
+	if (listed.length === 0 || listed.includes(undefined)) return { license: undefined, malformedLicence: true }
+	return { license: listed.length === 1 ? listed[0] : `(${listed.join(" OR ")})`, malformedLicence: false }
 }
 
-function readManifest(dir: string): Omit<InstalledPackage, "embedded"> | undefined {
+function readManifest(dir: string): (NamedManifest & { dir: string }) | undefined {
 	const file = join(dir, "package.json")
 	if (!existsSync(file)) return undefined
 	const raw: unknown = JSON.parse(readFileSync(file, "utf8"))
 	if (typeof raw !== "object" || raw === null) return undefined
 	const manifest = raw as Record<string, unknown>
 	const { name, version } = manifest
+	// A bare `{ "type": "module" }` marker names nothing and is not a package.
 	if (typeof name !== "string" || typeof version !== "string") return undefined
-	return { name, version, license: declaredLicence(manifest), dir }
+	if (!PACKAGE_NAME.test(name) || !PACKAGE_VERSION.test(version)) {
+		throw new Error(`${file.split("/node_modules/").at(-1)}: name or version is not a single well-formed token`)
+	}
+	return { name, version, ...declaredLicence(manifest), dir }
 }
 
 /**
  * The installed package that owns `path`: the manifest at the installation root, the directory
  * `node_modules/<name>` or `node_modules/@scope/<name>` names. A nearer manifest is never trusted
- * to be the owner, since a package can carry anything in a subdirectory; a nearer manifest naming
- * a DIFFERENT package is reported as `embedded`.
+ * to be the owner, since a package can carry anything in a subdirectory; every one found on the
+ * way up is returned in `nested` for the caller to hold against the reviewed records.
  * @throws when the installation root has no manifest for the name its directory carries.
  */
 export function owningPackage(path: string): InstalledPackage {
@@ -79,11 +97,13 @@ export function owningPackage(path: string): InstalledPackage {
 	const root = path.slice(0, base) + expected
 	const owner = readManifest(root)
 	if (owner?.name !== expected) throw new Error(`no package.json naming "${expected}" at its installation root`)
+	const nested: NamedManifest[] = []
 	for (let dir = dirname(path); dir.length > root.length; dir = dirname(dir)) {
-		const nested = readManifest(dir)
-		if (nested && nested.name !== owner.name) return { ...owner, embedded: `${nested.name}@${nested.version}` }
+		const found = readManifest(dir)
+		if (found)
+			nested.push({ name: found.name, version: found.version, license: found.license, malformedLicence: found.malformedLicence })
 	}
-	return owner
+	return { ...owner, nested }
 }
 
 export interface LicenceFiles {

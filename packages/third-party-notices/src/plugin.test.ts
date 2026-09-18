@@ -17,12 +17,23 @@ function install(name: string) {
 	return join(dir, "index.js")
 }
 
-const chunk = (file: string, ...ids: string[]): OutputBundleLike => ({
-	[file]: { type: "chunk", modules: Object.fromEntries(ids.map((id) => [id, { renderedLength: 1 }])) },
+const workerBundle = (entry: string, file: string, ...ids: string[]): OutputBundleLike => ({
+	[file]: {
+		type: "chunk",
+		isEntry: true,
+		facadeModuleId: entry,
+		modules: Object.fromEntries(ids.map((id) => [id, { renderedLength: 1 }])),
+	},
+})
+
+/** A main bundle: one chunk, plus the worker files Vite hands it as assets. */
+const mainBundle = (ids: string[], workerFiles: string[]): OutputBundleLike => ({
+	"assets/index.js": { type: "chunk", modules: Object.fromEntries(ids.map((id) => [id, { renderedLength: 1 }])) },
+	...Object.fromEntries(workerFiles.map((file) => [file, { type: "asset" as const, source: "/* worker */" }])),
 })
 
 function plugins() {
-	const policy = { allowed: ALLOWED, overrides: [], vendored: [], codeAsset: /\.wasm$/ }
+	const policy = { allowed: ALLOWED, overrides: [], vendored: [], codeAsset: /\.js$/ }
 	const { main, worker } = thirdPartyNotices({ policy, textsDir: root, workspaceRoot: root })
 	const emitted: string[] = []
 	const context = { emitFile: (file: { fileName: string; source: string }) => emitted.push(file.source) }
@@ -41,21 +52,40 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe("thirdPartyNotices", () => {
-	test("the main build emits one file covering its own modules and every worker's", () => {
+	test("the main build emits one file covering its own modules and every worker it ships", () => {
 		const build = plugins()
-		build.worker(chunk("assets/worker-a.js", install("only-in-worker")))
-		expect(build.main(chunk("assets/index.js", install("in-main")))).toEqual(["in-main", "only-in-worker"])
+		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-a1.js", install("only-in-worker")))
+		expect(build.main(mainBundle([install("in-main")], ["assets/worker-a1.js"]))).toEqual(["in-main", "only-in-worker"])
 		expect(NOTICES_FILE).toBe("THIRD-PARTY-NOTICES.txt")
 	})
 
-	test("a rebuild forgets main modules that left, and keeps a worker Vite did not bundle again", () => {
+	test("a script asset no recorded worker wrote is refused, whatever it is called", () => {
 		const build = plugins()
-		build.worker(chunk("assets/worker-a.js", install("only-in-worker")))
-		build.main(chunk("assets/index.js", install("removed-later")))
-		expect(build.main(chunk("assets/index.js", install("in-main")))).toEqual(["in-main", "only-in-worker"])
+		expect(() => build.main(mainBundle([install("in-main")], ["assets/worker-hostile.js"]))).toThrow(
+			/assets\/worker-hostile\.js: emitted code asset with no VENDORED entry/,
+		)
+	})
 
-		// The same worker output generated again replaces its record rather than adding to it.
-		build.worker(chunk("assets/worker-a.js", install("worker-dep-v2")))
-		expect(build.main(chunk("assets/index.js", install("in-main")))).toEqual(["in-main", "worker-dep-v2"])
+	test("across rebuilds: a changed worker replaces its record, a removed one drops out, a cached one stays", () => {
+		const build = plugins()
+		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-a1.js", install("a-dep-v1")))
+		build.worker(workerBundle("/src/b.worker.ts", "assets/worker-b1.js", install("b-dep")))
+		build.main(mainBundle([install("removed-later")], ["assets/worker-a1.js", "assets/worker-b1.js"]))
+
+		// Worker a changed (new hash, new dependency); b was served from Vite's cache and not generated again.
+		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-a2.js", install("a-dep-v2")))
+		expect(build.main(mainBundle([install("in-main")], ["assets/worker-a2.js", "assets/worker-b1.js"]))).toEqual([
+			"a-dep-v2",
+			"b-dep",
+			"in-main",
+		])
+		expect(build.main(mainBundle([install("in-main")], ["assets/worker-a2.js"]))).toEqual(["a-dep-v2", "in-main"])
+	})
+
+	test("two workers writing the same file names keep separate records", () => {
+		const build = plugins()
+		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-x.js", install("a-dep")))
+		build.worker(workerBundle("/src/b.worker.ts", "assets/worker-x.js", install("b-dep")))
+		expect(build.main(mainBundle([], ["assets/worker-x.js"]))).toEqual(["a-dep", "b-dep"])
 	})
 })

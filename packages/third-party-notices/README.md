@@ -18,8 +18,10 @@ registered from the Chrome and Firefox wrapper configs only: Storybook and vites
 config, and the policy describes the shipped extension.
 
 Each module maps to the manifest at its **installation root** (`node_modules/<name>`), never to a
-nearer `package.json`, which a package could plant in any subdirectory; a nearer manifest naming a
-different package is reported as embedded code that needs a `VENDORED` record. A file inside the
+nearer `package.json`, which a package could plant in any subdirectory. Every named manifest found
+between the module and that root is held to account: one of the same name must agree with the root
+(version and licence), and one of another name is embedded code that needs a `VENDORED` component
+record of exactly that name, version and licence. A file inside the
 workspace and outside every `node_modules` is first-party; a real file anywhere else refuses the
 build rather than vanishing. Every installation is validated before duplicates are merged.
 
@@ -29,13 +31,15 @@ build rather than vanishing. Every installation is validated before duplicates a
 |---|---|
 | Licence expression not satisfied by `ALLOWED` (`OR`: any branch, `AND`: every branch; a `WITH` exception never matches) | refused |
 | No licence metadata, or an unparseable expression (legacy `{ type }` and `licenses: []` forms are read, an array as a choice) | refused unless an `OVERRIDES` entry covers it |
+| A licence declaration that is present but unreadable, or a manifest `name` / `version` that is not one well-formed token | refused; no override can stand in |
 | No non-empty licence / copying file at the package root (a `NOTICE` is reproduced but never stands in; `LICENSE.js` is code) | refused unless an `OVERRIDES` entry supplies the text |
 | One `name@version` installed twice with differing licence content | refused |
 | A module from outside the workspace and outside `node_modules`, or a package embedding another named package | refused |
 | `OVERRIDES` entry whose `reviewedVersion` is not the installed version | refused — re-verify, then bump it |
 | `OVERRIDES` entry the package no longer needs, or that matches nothing bundled | refused — delete it |
 | Package declares a licence its `OVERRIDES` entry neither uses nor acknowledges (`declared`) | refused |
-| Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) with no `VENDORED` asset claim, or a claim whose covering package is not bundled | refused |
+| Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) that no recorded worker build wrote and no `VENDORED` asset claim covers, or a claim whose covering package is not bundled | refused |
+| A `generated` claim whose asset's whole text is not the shape that tool writes (a file name proves nothing) | refused |
 | `VENDORED` entry that matches nothing, accounts for nothing, was reviewed at another host version, or whose component lacks an `https` source, a text, or an allowed licence | refused |
 
 All violations of one build are reported together, each naming its package.
@@ -72,15 +76,22 @@ no syntax that needs transformation (parameter properties, enums) is allowed.
 - **A new compiled asset**: add a `VENDORED` claim naming the package whose entry covers it, or the
   components compiled into it.
 
-The file opens with a `COMPONENTS` inventory (`title<TAB>licence`), above every third-party text, and
-that inventory is the only thing `noticeNames` and the CI check read: a licence text cannot forge or
-hide a line of it.
+The file opens with a `COMPONENTS (n)` inventory (`title<TAB>licence`) at a fixed position above
+every third-party text, and that inventory is the only thing `noticeNames` and the CI check read; a
+missing inventory or a row count other than `n` throws. Licence text cannot forge a row, and neither
+can a manifest, whose fields are refused unless they are single tokens.
+
+A worker's record is keyed by its entry module and used only while the main bundle still carries
+the files that build wrote, so a changed worker replaces its record, a removed one drops out, and
+one Vite served from cache stays.
 
 ## Known limits
 
-- `sqlite3.wasm` was inventoried from the sqlite3mc source tree at its pinned tag: besides
-  sqlite3mc's own MIT code and public-domain / CC0 code, it compiles in Olivier Gay's sha2
-  (BSD-3-Clause) and libaegis (MIT), which have their own entries. `barretenberg.wasm` and the noir
+- `sqlite3.wasm` was inventoried from its build inputs: upstream's release workflow compiles the
+  sqlite3mc amalgamation with the default cipher set and no optional extension. Besides sqlite3mc's
+  own MIT code and public-domain / CC0 code, that compiles in Olivier Gay's sha2 (BSD-3-Clause),
+  libaegis (MIT) and the Argon2 reference implementation (CC0-1.0 OR Apache-2.0), which have their
+  own entries; the Emscripten runtime brings musl libc, whose notice rides with Emscripten's. `barretenberg.wasm` and the noir
   wasm have **not** been inventoried to that depth: they are attributed to the project that
   publishes them, under its licence files.
 - Third-party source copied into a first-party directory is invisible to any module walk.
