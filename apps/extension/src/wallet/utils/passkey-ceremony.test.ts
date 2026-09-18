@@ -113,9 +113,16 @@ describe("runPasskeyCeremony in create mode", () => {
 		const data = await runPasskeyCeremony(CREATE_REQUEST)
 		expect(data).toEqual({ id: b64(RAW_ID), prf: b64(PRF_AT_GET), userHandle: ID })
 		expect(get).toHaveBeenCalledTimes(1)
-		const allowed = get.mock.calls[0][0].publicKey.allowCredentials
-		expect(allowed).toHaveLength(1)
-		expect(b64(allowed?.[0].id as Uint8Array)).toBe(b64(RAW_ID))
+		const opts = get.mock.calls[0][0].publicKey
+		expect(opts.allowCredentials).toHaveLength(1)
+		expect(b64(opts.allowCredentials?.[0].id as Uint8Array)).toBe(b64(RAW_ID))
+		// The re-prompt has to request the same secret under the same terms as the create leg —
+		// a different rp, a weaker userVerification or a different eval input all derive a
+		// different master, or none.
+		expect(opts.rpId).toBe("passkey.nulo.sh")
+		expect(opts.userVerification).toBe("required")
+		const prfLabel = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("nulo:profile:v1")))
+		expect(toHex(opts.extensions?.prf?.eval?.first as BufferSource)).toBe(Buffer.from(prfLabel).toString("hex"))
 	})
 
 	it("refuses a fallback assertion from a different credential", async () => {
@@ -136,8 +143,7 @@ describe("runPasskeyCeremony in create mode", () => {
 		create.mockResolvedValue(new StubCredential(RAW_ID, { prf: { enabled: true } }))
 		get.mockResolvedValue(new StubCredential(RAW_ID, { prf: {} }, new StubAssertionResponse(null)))
 		await expect(runPasskeyCeremony(CREATE_REQUEST)).rejects.toThrow("Passkey PRF has no results")
-		// Without this the case also passes against the pre-fallback code, which threw the same
-		// message straight from create.
+		// Create can throw the same message; verify the failure reached get.
 		expect(get).toHaveBeenCalledTimes(1)
 	})
 

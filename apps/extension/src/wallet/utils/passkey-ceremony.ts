@@ -115,12 +115,9 @@ async function runCreate(userHandle: string, name: string, signal?: AbortSignal)
 		}
 	}
 
-	// Some authenticators report `prf.enabled` but withhold the output until an assertion —
-	// Firefox's does, so creating a profile costs the user a second prompt there. Pin the
-	// re-prompt to the credential just created and verify what comes back is that credential:
-	// an unpinned assertion could bind the profile to a different passkey. The handle stays
-	// the one minted above, because an assertion may legally omit `userHandle` when
-	// `allowCredentials` is set, and a missing handle would mint a second profile identity.
+	// Some authenticators expose PRF only on assertion. Pin the re-prompt to the credential just
+	// created and keep the registration handle: a pinned assertion may legally omit `userHandle`,
+	// and a missing one would mint a second profile identity.
 	const fallback = await runGet(id, signal)
 	if (fallback.id !== id) throw new Error("Passkey PRF fallback returned a different credential")
 	return { ...fallback, userHandle: asHexUserHandle(userHandle) }
