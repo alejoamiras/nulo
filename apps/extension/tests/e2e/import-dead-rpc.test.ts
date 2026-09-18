@@ -261,6 +261,9 @@ async function withFreshExtension(
 		armed = await intercept(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
 		const page = await gotoPopupImport(ctx)
 		await fn(page, ctx, armed.hits)
+		// A target the helper could not arm may have dialed the real seed endpoint: the scenario's
+		// outcome proves nothing then, whichever way it came out.
+		expect(armed.failures(), "rpc interception failures").toEqual([])
 	} finally {
 		await armed?.stop()
 		await ctx.browser.close()
@@ -315,8 +318,9 @@ test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bo
 		})
 		const firstInfo = stub.methods.indexOf("aztec_getNodeInfo")
 		const firstBoot = stub.methods.indexOf("aztec_getL1ContractAddresses")
-		expect(firstInfo).toBeGreaterThanOrEqual(0)
-		expect(firstBoot).toBeGreaterThan(firstInfo)
+		const seen = `stub saw: [${stub.methods.join(", ")}]`
+		expect(firstInfo, seen).toBeGreaterThanOrEqual(0)
+		expect(firstBoot, seen).toBeGreaterThan(firstInfo)
 	} finally {
 		await stub.close()
 	}
