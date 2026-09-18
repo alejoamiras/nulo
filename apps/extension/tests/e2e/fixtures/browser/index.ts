@@ -1,5 +1,6 @@
 import type { Browser } from "puppeteer"
 import { chromeDriver } from "./chrome"
+import { firefoxDriver } from "./firefox"
 import { type BrowserKind, resolveBrowserKind } from "./selection"
 
 export type { BrowserKind }
@@ -27,7 +28,7 @@ export interface BrowserDriver {
 	extensionUrl(extensionId: string, path: string): string
 }
 
-const DRIVERS: Partial<Record<BrowserKind, BrowserDriver>> = { chrome: chromeDriver }
+const DRIVERS: Partial<Record<BrowserKind, BrowserDriver>> = { chrome: chromeDriver, firefox: firefoxDriver }
 
 /** `resolveBrowserKind` has already rejected anything unsupported, so a kind with no entry here
  *  means this registry drifted from that list — which must fail, never fall back to Chrome. */
