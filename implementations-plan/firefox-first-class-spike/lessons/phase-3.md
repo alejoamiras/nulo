@@ -28,6 +28,14 @@ A guard that scans a clean tree passes whether or not its scanner works, which i
 
 Warning count moved 30 → 31 and the complexity baseline held; the one new warning is the suppressed fixture string above.
 
+## The smoke suite needs the fixture-armed build, and says so loudly
+
+The first local run of `bun run test:e2e` failed one case — `fixture-arming contract: unarmed runs are allowed ONLY against a release artifact`. Nothing to do with the seam: a plain `bun run build` omits the fixture stamps, and the smoke job builds with them (`_extension-smoke-e2e.yml`). The gate command below therefore builds with CI's exact flags and runs with `NULO_E2E_MIGRATION_FIXTURE=1`. Running the bare command against a bare build is a false red, and the contract test exists precisely to make that loud rather than silent.
+
 ## Gate
 
-`bun run lint` → 0 errors · `bun run typecheck` → 0 · `vitest run scripts/` → 28 passed (7 new). Chrome build + full Chrome smoke, then the two CI dispatches, are recorded below when they land.
+`bun run lint` → 0 errors · `bun run typecheck` → 0 · `vitest run scripts/` → 28 passed (7 new).
+
+Full Chrome smoke, against a build made with `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 build:chrome` and run with `NULO_E2E_MIGRATION_FIXTURE=1`: **32 files passed, 1 skipped; 123 tests passed, 6 skipped, 0 failed.**
+
+The two Chrome CI dispatches are held until the arc's review findings are applied, since the plan binds their acceptance to an exact SHA and any later commit on this arc invalidates them.
