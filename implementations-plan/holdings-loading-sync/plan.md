@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 1 sweep agent (+2 pre-blueprint explorers reused); foreign reviewer /codex high
-status: approved 2026-09-17 — implementing
+status: MERGED 2026-09-18 — stack #621 squash-merged to dev (#619 arc 1 44fd0190, #620 arc 2 92922b6a); all 10 phases green, three codex loops converged, post-rebase codex pass converged
 ---
 
 # Holdings loading states + incoming-scan health
