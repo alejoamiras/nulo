@@ -68,6 +68,7 @@ described in § 5.
 | Transaction history, activity records, networks, granted app permissions | Extension local storage | Stored without application-level encryption |
 | Private execution database (notes, proving state) | Browser Origin Private File System, using SQLite | Encrypted with a profile-specific database key |
 | Public proving-parameter cache | Browser cache / IndexedDB | Public parameters; not wallet-secret storage |
+| Terms acceptance record (version accepted, time, which screen) and the Privacy Policy version shown | Extension local storage; never transmitted, not included in backups | Stored without application-level encryption |
 | Session state | Extension session storage and process memory | Strict mode requires fresh authentication after worker loss; disabling it permits a locally stored credential capable of restoring the password-profile session |
 | Diagnostic logs | In memory; written to session storage only if you turn on Developer Mode | See § 8 |
 

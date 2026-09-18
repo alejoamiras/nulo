@@ -47,20 +47,20 @@ broadcast path outside the guards; the fix is the first item under Architecture.
 ## UI impact — owner sign-off required per surface
 
 Mockups: the design canvas published in this session (boards `Gate`, `ReAccept`, `NotNow`,
-`SettingsAbout`). No pending surface is implemented until its sign-off is quoted in this file.
+`SettingsAbout`). All surfaces are signed off — see **Owner decisions** below for the quote and its two corrections.
 
 | # | Surface | Before | After | Sign-off |
 |---|---|---|---|---|
-| U1 | `onboarding/terms` (new) | — | `Gate` board, with **one copy change forced by the Terms themselves**: the checkbox reads "I understand the four points above, and **I agree to the Terms of Use**." with a separate line "The Privacy Policy explains what leaves your device." The board's "…and the Privacy Policy" contradicts Terms § 23 (acceptance is not processing consent) and § 3's literal label | **re-opened** |
-| U2 | `onboarding/pages/welcome.vue` footer | browsewrap sentence | removed; both CTAs route through U1 | **pending** |
-| U3 | `popup/pages/register.vue` footer | same sentence | plain "Terms of Use · Privacy Policy" links | **pending** |
-| U4 | Popup re-acceptance sheet (new) | — | `ReAccept` board; primary button reads **Continue** (Terms § 3's label), not "Accept and continue" | approved board + **pending** label change |
-| U4b | Same sheet, no prior record | — | heading "Review the terms", body = the four risk points, same checkbox | **pending** |
-| U5 | Declined screen (new) | — | `NotNow` board | approved board |
-| U6 | `popup/pages/send.vue` while not accepted | — | one-line banner "Accept the Terms to send" + Review button; fee estimation paused | **pending** |
-| U7 | Settings → About, Legal group | two rows | `SettingsAbout` board, reworded to match the mechanism: "You accepted the Terms — v1.0 — date"; Privacy shown as "Privacy Policy v1.0"; not-accepted variant "Not accepted — Review"; a non-blocking "Privacy Policy updated" notice on a privacy-only change | approved board + **pending** rewording/variants |
-| U8 | Settings → About, "Open-source licences" row (new) | — | one `SettingItem` opening the notices file in a tab | **pending** |
-| U9 | `nulo.sh/terms`, `/privacy` | 404 | landing shell, document body, version + effective date, "Previous versions"; DRAFT banner + `noindex` while any `«FILL»` survives | **pending** |
+| U1 | `onboarding/terms` (new) | — | `Gate` board, with **one copy change forced by the Terms themselves**: the checkbox reads "I understand the four points above, and **I agree to the Terms of Use**." with a separate line "The Privacy Policy explains what leaves your device." The board's "…and the Privacy Policy" contradicts Terms § 23 (acceptance is not processing consent) and § 3's literal label | **signed off** |
+| U2 | `onboarding/pages/welcome.vue` footer | browsewrap sentence | removed; both CTAs route through U1 | **signed off** |
+| U3 | `popup/pages/register.vue` footer | same sentence | plain "Terms of Use · Privacy Policy" links | **signed off** |
+| U4 | Popup re-acceptance sheet (new) | — | `ReAccept` board; primary button reads **Continue** (Terms § 3's label), not "Accept and continue" | **signed off** |
+| U4b | Same sheet, no prior record | — | heading "Review the terms", body = the four risk points, same checkbox | **signed off** |
+| U5 | Declined screen (new) | — | `NotNow` board | **signed off** |
+| U6 | `popup/pages/send.vue` while not accepted | — | one-line banner "Accept the Terms to send" + Review button; fee estimation paused | **signed off** |
+| U7 | Settings → About, Legal group | two rows | `SettingsAbout` board, reworded to match the mechanism: "You accepted the Terms — v1.0 — date"; Privacy shown as "Privacy Policy v1.0"; not-accepted variant "Not accepted — Review"; a non-blocking "Privacy Policy updated" notice on a privacy-only change | **signed off** |
+| U8 | Settings → About, "Open-source licences" row (new) | — | one `SettingItem` opening the notices file in a tab | **signed off** |
+| U9 | `nulo.sh/terms`, `/privacy` | 404 | landing shell, document body, version + effective date, "Previous versions"; DRAFT banner + `noindex` while any `«FILL»` survives | **signed off** |
 
 ## Architecture
 
@@ -290,18 +290,35 @@ Gates: `G-base`, `bun run test:all`, `bun run build:chrome`, `bun run build:fire
 - **Evidence honesty.** The record proves a click on this device at a time the device reported. The
   documents must say so and no more — see the first Ask.
 
-## Assumptions and asks
+## Owner decisions (2026-09-18)
 
-- **Ask (text):** add to Terms § 3 one sentence — acceptance is recorded on your device with the
-  version and time — and to privacy § 3 one storage-table row for that record. Without them the
-  product does something the documents do not describe.
-- **Ask (UI):** U1's checkbox copy, U2, U3, U4's button label, U4b, U6, U7's rewording and variants,
-  U8, U9.
-- **Ask:** while declined, **every** broadcast is refused, including protective ones (revoking an
-  authwit, disabling the auth registry). One rule that cannot be got wrong; the user is never trapped
-  because export always works. Alternative: allowlist those two operations at the wall.
-- **Ask:** every dispatcher method is refused while declined, reads included.
-- **Ask:** `/harden security` before the 1.0 store submission — recommended, not scheduled here.
+After reviewing the rebuilt screens page, the owner wrote:
+
+> "I'd drop a bit the usage of em dashes on the "Before you start" please. UX/UI looks great other
+> than that. Though a lot of border radiuses when Nulo doesn't use them, but I think that just wasnt
+> on purpose. Regarding the decisions: (1) ok. (2) ok. (3) yes. (4) signed-off."
+
+- **(1) Text edits — done** in this worktree: Terms § 3 now says acceptance is recorded on the device;
+  privacy § 3's storage table has a row for the record.
+- **(2) Gate checkbox copy — approved:** "I understand the four points above, and I agree to the Terms
+  of Use." with the Privacy Policy on its own non-blocking line.
+- **(3) While declined, every broadcast is refused**, including authwit revocation and the
+  auth-registry toggle. No allowlist at the wall.
+- **(4) UI sign-off — U1 through U9**, with two corrections that bind the implementation:
+  - **No em dashes in the "Before you start" points.** `RISK_POINTS` ships as:
+    1. "You hold the keys. Nobody else has them: not the developer, not a server, not anyone."
+    2. "Lose what protects your wallet and your money is gone. Permanently. There is no reset and no
+       support ticket. A passkey wallet has no recovery phrase to fall back on."
+    3. "Sent is sent. A transaction cannot be cancelled, reversed or refunded by anyone."
+    4. "Nulo has not been audited, and Aztec is young. Use what you can afford to lose entirely."
+  - **No border radii.** The mockups' rounded corners were the mockup's, not Nulo's. Every new
+    surface is built from `@nulo/design` primitives and tokens and introduces no `border-radius` of
+    its own.
+
+## Assumptions and open items
+
+- Every dispatcher method is refused while declined, reads included (follows from decision 3).
+- **Still open:** `/harden security` before the 1.0 store submission — recommended, not scheduled.
 - Assumed: "the checkbox for delta on license" = the re-acceptance checkbox on the terms-changed
   sheet (U4).
 - Follow-ups, not done here: privacy-claim pin tests; a Spanish Terms; a release-workflow check that

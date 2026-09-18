@@ -81,8 +81,9 @@ You may use Nulo only if you:
 4. will comply with all laws that apply to you.
 
 **You accept this version of the Terms by selecting the unchecked "I agree to the Terms of Use"
-control and then selecting Continue.** These Terms apply from that acceptance and do not
-retrospectively change rights or liabilities arising before it.
+control and then selecting Continue.** Nulo records that acceptance on your device, with the version
+you accepted and the time; the record is not sent anywhere and is not part of a backup. These Terms
+apply from that acceptance and do not retrospectively change rights or liabilities arising before it.
 
 Before accepting, review the mainnet, security and recovery risks in §§ 4–5. **Recovery options
 differ between password and passkey profiles** — see § 4.3.
