@@ -234,7 +234,7 @@ export async function seedLegalAcceptance(page: Page, seed: Exclude<LegalSeed, "
  *  flow; complementary to `openPopup` which targets the popup HTML.
  *  Clears the `onboardingCompleted` flag first so the redirect predicates
  *  in register/import/profile-new behave as they would on a fresh install. */
-export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
+export async function openOnboarding(ctx: ExtensionContext, opts: { legal?: Exclude<LegalSeed, "keep"> } = {}): Promise<Page> {
 	// Reset onboardingCompleted=false so the onboarding flow runs as on
 	// fresh install (launchExtension seeded it to true by default).
 	const setupPage = await ctx.browser.newPage()
@@ -243,6 +243,9 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	await setupPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 	})
+	// A real fresh install has no acceptance; specs that are about the gate ask for that. Left alone,
+	// the launch's `current` seed stands and a spec about a later step can still jump to it.
+	if (opts.legal) await seedLegalAcceptance(setupPage, opts.legal)
 	await setupPage.close()
 
 	const page = await ctx.browser.newPage()
