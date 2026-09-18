@@ -9,8 +9,6 @@ const props = defineProps<{
 	changes?: readonly string[]
 	termsVersion: string
 	busy?: boolean
-	/** Leads only, for the popup: the sentence under each one is a click away in the Terms. */
-	compact?: boolean
 }>()
 
 /** Never seeded from a prop or storage: Terms § 3 promises a control that starts unchecked. */
@@ -45,7 +43,7 @@ const accept = () => {
 				<Text size="11" color="primary" mono :class="$style.ordinal">{{ String(index + 1).padStart(2, "0") }}</Text>
 				<Text size="14" color="secondary" height="150">
 					<Text size="14" color="primary" weight="600">{{ point.lead }}</Text>
-					<template v-if="!compact"> {{ point.body }}</template>
+					{{ point.body }}
 				</Text>
 			</Flex>
 		</Flex>

@@ -94,16 +94,6 @@ describe("composite/LegalConsent", () => {
 		})
 	})
 
-	test("compact keeps every lead and drops the sentences under them", () => {
-		const rows = mountConsent({ compact: true })
-			.findAll('[data-testid="legal-point"]')
-			.map((row) => row.text())
-		RISK_POINTS.forEach((point, index) => {
-			expect(rows[index]).toContain(point.lead)
-			expect(rows[index]).not.toContain(point.body)
-		})
-	})
-
 	test("the label carries the package's consent wording and button label verbatim", () => {
 		const w = mountConsent()
 		expect(text(w, "legal-consent-label")).toBe(`I understand the four points above, and ${CONSENT_LABEL}.`)

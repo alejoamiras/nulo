@@ -31,9 +31,14 @@ import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { classifyOperationCatch } from "./rpc-cancel"
+import { type CancelOrFailResult, classifyOperationCatch } from "./rpc-cancel"
 import { EstimateCancelRegistry } from "./estimate-cancel-registry"
-import { ContractNotRegisteredError, JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import {
+	ContractNotRegisteredError,
+	JobCancelledError,
+	SessionEndedError,
+	TermsAcceptanceRequiredError,
+} from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
@@ -693,15 +698,23 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				results.push({ status: "ok", result })
 			} catch (error) {
 				const classified = classifyOperationCatch(error, operationTask, getErrorMessage)
-				if (classified.status === "cancelled") {
-					this.logInfo(`[${traceId}] executeOperations: ${operation.kind} cancelled by user`)
-				} else {
-					this.logError(`[${traceId}] executeOperations: ${operation.kind} failed:`, classified.error)
-				}
+				this.logOperationOutcome(traceId, operation.kind, classified)
 				results.push(classified)
 			}
 		}
 		return results
+	}
+
+	/** Level by reach: a Terms refusal is expected and a connected dApp retries, so at `error` it
+	 *  would fill every user's log buffer. */
+	private logOperationOutcome(traceId: string, kind: Operation["kind"], classified: CancelOrFailResult): void {
+		if (classified.status === "cancelled") {
+			this.logInfo(`[${traceId}] executeOperations: ${kind} cancelled by user`)
+		} else if (classified.code === TermsAcceptanceRequiredError.CODE) {
+			this.logDebug(`[${traceId}] executeOperations: ${kind} refused: terms not accepted`)
+		} else {
+			this.logError(`[${traceId}] executeOperations: ${kind} failed:`, classified.error)
+		}
 	}
 
 	/** Per-operation dispatch — one contiguous awaited region (every arm was

@@ -42,6 +42,15 @@ describe("legalAboutRow", () => {
 		expect(row).toMatchObject({ accepted: true, privacyUpdated: true })
 	})
 
+	test("a privacy patch is flagged too, though a patch never asks for the Terms again", () => {
+		const patched = {
+			...LEGAL_MANIFEST,
+			privacy: [...LEGAL_MANIFEST.privacy, { version: `${PRIVACY}.1`, effective: null, material: false, changes: ["Typo."] }],
+		}
+		expect(legalAboutRow("current", record(), undefined, patched)).toMatchObject({ accepted: true, privacyUpdated: true })
+		expect(legalAboutRow("current", record({ privacyVersionShown: `${PRIVACY}.1` }), undefined, patched).privacyUpdated).toBe(false)
+	})
+
 	test("no em dash in any variant", () => {
 		for (const row of [legalAboutRow("current", record()), legalAboutRow("missing", null)]) {
 			expect(`${row.title}${row.description}`).not.toContain("—")

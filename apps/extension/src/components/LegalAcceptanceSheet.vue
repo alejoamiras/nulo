@@ -79,28 +79,33 @@ onBeforeUnmount(() => {
 
 <template>
 	<div v-if="visible" :class="$style.backdrop" data-testid="legal-sheet" :data-variant="isReacceptance ? 'changed' : 'review'">
-		<Flex direction="column" gap="16" :class="$style.sheet" role="dialog" aria-modal="true" aria-labelledby="legal-sheet-title">
-			<Flex direction="column" gap="8">
-				<Text size="10" color="secondary" mono :class="$style.eyebrow" data-testid="legal-sheet-version">Terms v{{ termsVersion }}</Text>
-				<Text id="legal-sheet-title" size="18" color="primary" weight="700" :class="$style.title" data-testid="legal-sheet-title">
-					{{ isReacceptance ? "The terms have changed" : "Review the terms" }}
-				</Text>
-				<Text v-if="isReacceptance" size="13" color="secondary" height="150" data-testid="legal-sheet-since">
-					Here is what changed since the version you accepted on {{ acceptedOn }}.
-				</Text>
+		<Flex direction="column" :class="$style.sheet" role="dialog" aria-modal="true" aria-labelledby="legal-sheet-title">
+			<!-- Everything to read, then the control that agrees to it, in one scroll. -->
+			<Flex direction="column" gap="16" :class="$style.body" data-testid="legal-sheet-body">
+				<Flex direction="column" gap="8">
+					<Text size="10" color="secondary" mono :class="$style.eyebrow" data-testid="legal-sheet-version">Terms v{{ termsVersion }}</Text>
+					<Text id="legal-sheet-title" size="18" color="primary" weight="700" :class="$style.title" data-testid="legal-sheet-title">
+						{{ isReacceptance ? "The terms have changed" : "Review the terms" }}
+					</Text>
+					<Text v-if="isReacceptance" size="13" color="secondary" height="150" data-testid="legal-sheet-since">
+						Here is what changed since the version you accepted on {{ acceptedOn }}.
+					</Text>
+				</Flex>
+
+				<LegalConsent
+					:points="isReacceptance ? undefined : RISK_POINTS"
+					:changes="isReacceptance ? changes : undefined"
+					:terms-version="termsVersion"
+					:busy="busy"
+					@accept="handleAccept"
+					@open="openLegalDocument"
+				/>
 			</Flex>
 
-			<LegalConsent
-				:points="isReacceptance ? undefined : RISK_POINTS"
-				:changes="isReacceptance ? changes : undefined"
-				:terms-version="termsVersion"
-				:busy="busy"
-				compact
-				@accept="handleAccept"
-				@open="openLegalDocument"
-			/>
-
-			<button type="button" :class="$style.later" :disabled="busy" data-testid="legal-sheet-not-now" @click="handleNotNow">Not now</button>
+			<!-- Outside the scroll: declining is always one visible tap away. -->
+			<Flex justify="center" :class="$style.footer">
+				<button type="button" :class="$style.later" :disabled="busy" data-testid="legal-sheet-not-now" @click="handleNotNow">Not now</button>
+			</Flex>
 		</Flex>
 	</div>
 </template>
@@ -121,10 +126,20 @@ onBeforeUnmount(() => {
 .sheet {
 	width: 100%;
 	max-height: 100%;
-	overflow-y: auto;
-	padding: 20px 16px 16px;
 
 	background: var(--app-bg, var(--nulo-surface-low));
+	border-top: 1px solid var(--nulo-border);
+}
+
+.body {
+	min-height: 0;
+	overflow-y: auto;
+	padding: 20px 16px 16px;
+}
+
+.footer {
+	flex-shrink: 0;
+	padding: 8px 16px 12px;
 	border-top: 1px solid var(--nulo-border);
 }
 
@@ -140,7 +155,6 @@ onBeforeUnmount(() => {
 }
 
 .later {
-	align-self: center;
 	padding: 6px 12px;
 
 	font-family: var(--font-mono);

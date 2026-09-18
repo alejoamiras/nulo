@@ -5,10 +5,12 @@ import {
 	JobCancelledError,
 	PxeStaleAnchorError,
 	SessionEndedError,
+	TermsAcceptanceRequiredError,
 	TooManyPendingError,
 	walletErrorFromPayload,
 } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { toWalletResponseError } from "@/wallet/services/wallet-sdk/error-envelope"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 
 describe("maybeRethrowAsRpcCancel", () => {
@@ -89,6 +91,20 @@ describe("classifyOperationCatch", () => {
 		expect(result).toMatchObject({ status: "failed", code: "SESSION_ENDED", error: SessionEndedError.MESSAGE })
 		const failed = result as { code: string; error: string }
 		expect(walletErrorFromPayload({ code: failed.code, message: failed.error })).toBeInstanceOf(SessionEndedError)
+	})
+
+	test("a Terms refusal at the broadcast line keeps its code all the way to the dApp envelope", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new TermsAcceptanceRequiredError(), task, errorMessage) as { code: string; error: string }
+		expect(result).toMatchObject({ status: "failed", code: TermsAcceptanceRequiredError.CODE })
+		// What the wallet-sdk dispatcher does with a coded failure, then what the ingress sends back.
+		const rebuilt = walletErrorFromPayload({ code: result.code, message: result.error })
+		expect(rebuilt).toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(toWalletResponseError(rebuilt)).toEqual({
+			code: 4100,
+			message: TermsAcceptanceRequiredError.MESSAGE,
+			data: { walletErrorCode: TermsAcceptanceRequiredError.CODE },
+		})
 	})
 
 	test("(N-15) OTHER WalletError subclasses do NOT ride the code channel (unsound reconstruction guard)", () => {

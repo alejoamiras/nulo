@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
-import { LEGAL_MANIFEST, type LegalStatus } from "@nulo/legal"
+import { LEGAL_MANIFEST, type LegalStatus, RISK_POINTS } from "@nulo/legal"
 
 const TERMS = LEGAL_MANIFEST.terms.at(-1)?.version as string
 const { route, push, legal } = vi.hoisted(() => {
@@ -31,6 +31,7 @@ const STUBS = {
 	Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false },
 	Text: { template: '<span v-bind="$attrs"><slot /></span>', inheritAttrs: false },
 	LegalConsent: {
+		name: "LegalConsent",
 		template:
 			'<div data-testid="stub-consent" :data-points="points ? points.length : 0" :data-changes="(changes || []).join(\'|\')" @click="$emit(\'accept\')" />',
 		props: ["points", "changes", "termsVersion", "busy"],
@@ -84,7 +85,8 @@ describe("LegalAcceptanceSheet", () => {
 		legal.getRecord.mockResolvedValue(null)
 		const review = await mountSheet()
 		expect(sheet(review).attributes("data-variant")).toBe("review")
-		expect(review.get('[data-testid="stub-consent"]').attributes("data-points")).toBe("4")
+		// Every point whole: the sheet asks the person to acknowledge them, so it may not abridge them.
+		expect(review.getComponent({ name: "LegalConsent" }).props("points")).toEqual(RISK_POINTS)
 	})
 
 	test("Continue records a popup acceptance and the sheet leaves; Not now remembers the version and goes to the declined screen", async () => {
