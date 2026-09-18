@@ -54,24 +54,14 @@ These came out of the two-round review and are **not** fixed by editing the docu
    (`apps/extension/tests/e2e/legal-acceptance.test.ts`, scenarios S5, S6, S8).
 
    Blockers 1–3 shipped as one arc: `implementations-plan/legal-terms/`.
-4. **Verify the Presto MIT relicense reached the bundled artifacts.** Everything under the
-   `@alejoamiras` Presto scope is MIT — decided, and these documents are written on that basis. The
-   remaining work is mechanical, because what ships is the installed package, not the intent: at the
-   time of writing the lockfile still resolves `@alejoamiras/presto-core@1.0.1`,
-   `@alejoamiras/presto@5.2.0-revision.2` and `@alejoamiras/presto-banners@1.0.0`, all three of which
-   declare `AGPL-3.0-only` in their installed `package.json`, and all three are **value** imports, not
-   type-only (`PrestoClient` in `apps/extension/src/presto/client.ts`; the banners in
-   `apps/extension/src/onboarding/pages/presto.vue` and `apps/extension/src/utils/presto-ui-state.ts`).
-   So: publish the relicensed versions, bump the lockfile, and confirm the MIT copyright + permission
-   notices travel **inside the distributed extension** — MIT requires that, and a notice that only
-   exists on GitHub does not satisfy it.
-
-   **Add the drift guard in the same PR as the lockfile bump**, not before: a test asserting the
-   installed `license` of those three packages would red the build today, since today they still say
-   AGPL. `apps/extension/src/presto/presto-core-deps.test.ts` already reads
-   `@alejoamiras/presto-core/package.json` through `createRequire`, so it is the natural home — extend
-   it to all three packages and assert the licence, and a future dependency bump that pulls an
-   AGPL-declared version back in fails a check instead of shipping.
+4. ~~**Verify the Presto MIT relicense reached the bundled artifacts.**~~ — done. The lockfile
+   resolves the MIT versions (`@alejoamiras/presto@5.2.0-revision.3`, `presto-core@1.1.0`,
+   `presto-banners@1.1.0`; their tarballs differ from the AGPL ones only in the licence files and
+   field), `apps/extension/src/presto/presto-licence.test.ts` reds if a bump pulls an
+   AGPL-declared version back in, and every build emits `THIRD-PARTY-NOTICES.txt` into the
+   extension root, carrying each bundled component's own copyright and permission notice
+   (`packages/third-party-notices/`; Settings → About → Open-source licences opens it). The build
+   refuses any licence outside its allowlist, and CI asserts the file in both targets.
 5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
    "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
    verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
