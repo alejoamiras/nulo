@@ -92,6 +92,10 @@ All five probe lines were re-run on the post-review commit and hold.
 - **"Never listed" cannot mean "never closed".** A verify window can open, be approved and close between two handle reads; requiring a prior sighting left that target stale for good. Unlisted contexts are now reported after 8 consecutive misses (listed ones after 2), and the open-context snapshot is taken before the handle read so a window born during the read is not charged a miss.
 - The launch record is built before the profile or the process exists, so every acquisition failure leaves through the same `releaseLaunch`.
 
+## Review rounds 3 and 4 — converged
+
+Round 3 left one Medium and one Low: a whole `/proc` scan sat between finding a pid and signalling it, and a profile whose marker file failed to write was unclaimable. The marker is now re-read for each pid immediately before its signal, and an unstamped profile is rolled back. The remaining read-to-signal gap can only be closed with a pidfd, which neither Node nor Bun exposes; the reviewer accepted that residual for a test harness. Round 4: "no new material findings".
+
 ## Accepted risk to confirm with the owner: `--allow-system-access`
 
 Firefox refuses remote navigation to `moz-extension://` without it, so the suite cannot run otherwise. It grants the remote agent chrome-privileged access to the browser's parent process, and geckodriver's HTTP port and the BiDi socket are unauthenticated on `127.0.0.1` — so for the life of a test run, any local process that can reach loopback can execute privileged code as the user running the tests. "The keys are throwaway" is not the justification; the justification is that the hosts this runs on (a single-user agent box, a single-tenant CI runner) already give every local process that power. It must not be run on a shared multi-user machine.
