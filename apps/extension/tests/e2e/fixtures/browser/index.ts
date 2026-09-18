@@ -1,7 +1,8 @@
 import type { Browser } from "puppeteer"
 import { chromeDriver } from "./chrome"
+import { type BrowserKind, resolveBrowserKind } from "./selection"
 
-export type BrowserKind = "chrome" | "firefox"
+export type { BrowserKind }
 
 export interface LaunchOptions {
 	/** Unpacked extension directory, as the run's global setup resolved it. */
@@ -26,12 +27,15 @@ export interface BrowserDriver {
 	extensionUrl(extensionId: string, path: string): string
 }
 
-/** An unrecognised value must not silently run the suite on Chrome and report a pass for a
- *  browser that never started. */
+const DRIVERS: Partial<Record<BrowserKind, BrowserDriver>> = { chrome: chromeDriver }
+
+/** `resolveBrowserKind` has already rejected anything unsupported, so a kind with no entry here
+ *  means this registry drifted from that list — which must fail, never fall back to Chrome. */
 function selectDriver(): BrowserDriver {
-	const requested = process.env.NULO_E2E_BROWSER ?? "chrome"
-	if (requested === "chrome") return chromeDriver
-	throw new Error(`NULO_E2E_BROWSER=${requested} is not a browser this suite can drive`)
+	const kind = resolveBrowserKind()
+	const selected = DRIVERS[kind]
+	if (!selected) throw new Error(`NULO_E2E_BROWSER=${kind} is supported but has no registered driver`)
+	return selected
 }
 
 export const driver = selectDriver()

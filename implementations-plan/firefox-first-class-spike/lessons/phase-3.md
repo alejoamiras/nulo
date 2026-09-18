@@ -8,17 +8,27 @@
 - `index.ts` selects the driver from `NULO_E2E_BROWSER` and **throws** on a value it cannot drive. Falling back to Chrome would let a Firefox lane report a pass for a browser that never started — the exact failure the advisory lanes in phase 7 exist to detect.
 - `ExtensionContext` gains `close()`. `browser.close()` is enough for Chrome and will not be for Firefox, where a geckodriver process and a profile directory outlive the browser.
 
-Rewrite counts: **34** `ctx.browser.close()` → `ctx.close()` across 14 files; **17** scheme literals → `extensionUrl()` (14) or `EXTENSION_SCHEME` (3) across 7 files. Both were done mechanically and then read back, not hand-edited site by site.
+Rewrite counts: **34** `ctx.browser.close()` → `ctx.close()` across 14 files; **10** `extensionUrl()` call sites plus **3** `EXTENSION_SCHEME` substitutions across 7 files. (An earlier draft said 17 scheme sites — that was the raw grep count, which included comments and the exempt standalone tool. The review caught it.) Both rewrites were done mechanically and then read back, not hand-edited site by site.
 
 `global-setup.ts` gains the `EXTENSION_PATH` seam that `global-setup-smoke.ts` has carried since the release workflow needed it.
 
-## The guard, and why it has its own tests
+## The guard, and the fail-open the review found
 
 `scripts/e2e/browser-seam.test.ts` scans `tests/e2e/**.ts` and fails on an executable scheme literal or a direct browser close outside `fixtures/browser/chrome.ts` and `scripts/check-derivation-parity.ts` (a standalone tool that launches its own Chrome and owns no `ExtensionContext`).
 
-A guard that scans a clean tree passes whether or not its scanner works, which is how a dead guard survives for a year. So the file also feeds the scanner synthetic sources and asserts it flags an executable literal and a `ctx.browser.close()`, ignores both inside line and block comments, and leaves `extensionUrl(...)` / `ctx.close()` alone.
+A guard that scans a clean tree passes whether or not its scanner works, which is how a dead guard survives for a year. So the file also feeds the scanner synthetic sources and asserts what it flags.
 
-**Comment stripping cannot split on `//`** — that is inside the very literal being searched for. The strip is one regex whose string alternatives come first, so a scheme literal is consumed as a string before its `//` can open a comment, and comment bodies are blanked while newlines survive so reported line numbers still match the file.
+**The first implementation was a hand-rolled text scan, and it failed open.** Comment stripping cannot simply split on `//` — that sequence is inside the very literal being searched for — so the strip was one regex whose string alternatives came first. The foreign review broke it with a construct already in the tree: `PUPPETEER_PREFIXED_SELECTOR_RE = /^(?:text|xpath|aria|pierce)\//` at `fixtures/extension.ts`. A regex ending in `\//` looks like the start of a line comment, so everything after it on that line was blanked; appending `; await ctx.browser.close()` there produced **zero violations**. Reproduced, not theorised.
+
+The scan now walks the **TypeScript AST** (`typescript` is a declared devDependency of `apps/extension`, so no phantom import). Strings and template fragments are literal nodes, so a comment or a regex can never be mistaken for one; closes are `CallExpression`s, so the three other escapes the review listed — a close split across lines, `ctx.browser?.close()`, and a local alias `const b = ctx.browser; b.close()` — are all caught, and each is pinned as its own case. What it still cannot see is an alias that crosses a function or file boundary; that needs type information the scan deliberately does not build, and the limitation is stated in the file.
+
+**The coverage floor was also too weak.** `files > 50` would still have passed with the entire 93-file network tree missing (64 files remain without it). It now names a file from each subtree and requires the network directory to be genuinely walked.
+
+## Selector validation moved ahead of the side effects
+
+`NULO_E2E_BROWSER` was validated when `fixtures/browser/index.ts` was first imported — which happens in a worker, *after* the network global setup has already booted anvil, a node and a playground. `resolveBrowserKind()` now lives in `fixtures/browser/selection.ts`, a module with no driver import (so pulling it in costs nothing), and both global setups call it at module scope. An unusable selector now fails before the sandbox, not minutes into it.
+
+The driver registry is `Partial<Record<BrowserKind, BrowserDriver>>` with a throw on a missing entry. The first draft mapped `firefox` to the Chrome driver to satisfy the total `Record` — which is exactly the silent-Chrome-fallback this seam exists to prevent.
 
 ## Lint encounters worth keeping
 
