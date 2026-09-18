@@ -36,3 +36,7 @@ vite-plugin-node-polyfills
 buffer
 base64-js
 ieee754
+
+# compiled into sqlite3.wasm
+sha2 by Olivier Gay
+libaegis

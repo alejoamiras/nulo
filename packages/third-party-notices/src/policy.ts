@@ -25,19 +25,24 @@ export interface VendoredComponent {
 }
 
 export interface Vendored {
-	/** Fires when the named package rendered code, or when an emitted asset matches the pattern. */
-	trigger: { package: string } | { asset: RegExp }
+	/**
+	 * Fires when the named package rendered code, or when an emitted asset matches the pattern. A
+	 * package trigger is bound to the version whose contents were inspected.
+	 */
+	trigger: { package: string; reviewedVersion: string } | { asset: RegExp }
 	components: readonly VendoredComponent[]
 	/** Packages whose own entry already carries this asset's notice; each must be present. */
 	coveredBy?: readonly string[]
+	/** For an asset the build itself writes from modules already walked: what writes it. */
+	generated?: string
 }
 
 export interface Policy {
 	allowed: ReadonlySet<string>
 	overrides: readonly Override[]
 	vendored: readonly Vendored[]
-	/** Emitted assets that are compiled code; each must be claimed by a `vendored` asset trigger. */
-	binaryAsset: RegExp
+	/** Emitted assets that carry code; each must be claimed by a `vendored` asset trigger. */
+	codeAsset: RegExp
 }
 
 export const ALLOWED: ReadonlySet<string> = new Set([
@@ -59,7 +64,7 @@ const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/75061fab15986eedee4e
 const SQLITE3MC_TAG = "https://github.com/utelle/SQLite3MultipleCiphers/blob/v2.3.5"
 
 const SQLITE3MC_NOTE =
-	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms."
+	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms. Of the cipher code compiled in, the parts that are neither sqlite3mc's own MIT code nor public domain have their own entries: sha2 and libaegis."
 
 const SQLITE3MC_TEXTS = ["sqlite3mc.MIT.txt", "sqlite-wasm-bundle-header.txt", "emscripten.MIT.txt"] as const
 
@@ -136,7 +141,7 @@ export const OVERRIDES: readonly Override[] = [
 
 export const VENDORED: readonly Vendored[] = [
 	{
-		trigger: { package: "vite-plugin-node-polyfills" },
+		trigger: { package: "vite-plugin-node-polyfills", reviewedVersion: "0.28.0" },
 		components: [
 			{
 				name: "buffer",
@@ -164,8 +169,38 @@ export const VENDORED: readonly Vendored[] = [
 	},
 	{
 		trigger: { asset: /^assets\/sqlite3(-[\w-]+)?\.wasm$/ },
+		coveredBy: ["@aztec/sqlite3mc-wasm"],
+		components: [
+			{
+				name: "sha2 by Olivier Gay",
+				license: "BSD-3-Clause",
+				source: `${SQLITE3MC_TAG}/src/sha2.c`,
+				texts: ["sqlite3mc-sha2.BSD-3-Clause.txt"],
+				note: "Compiled into sqlite3.wasm by SQLite3 Multiple Ciphers, which uses it for key derivation. The text is the file's own header.",
+			},
+			{
+				name: "libaegis",
+				license: "MIT",
+				source: "https://github.com/jedisct1/libaegis/blob/b4e81fbf6bcb87308cc164bfce7f382882c41aec/LICENSE",
+				texts: ["libaegis.MIT.txt"],
+				note: "SQLite3 Multiple Ciphers vendors Frank Denis's AEGIS implementation under src/aegis, each file marked MIT; its tree carries no separate licence file, so the text is libaegis's own.",
+			},
+		],
+	},
+	{
+		trigger: { asset: /^assets\/sqlite3-opfs-async-proxy\.js$/ },
 		components: [],
 		coveredBy: ["@aztec/sqlite3mc-wasm"],
+	},
+	{
+		trigger: { asset: /^assets\/(main\.worker|thread\.worker|worker)-[\w-]+\.js$/ },
+		components: [],
+		generated: "Vite worker bundles, whose modules the worker plugin records",
+	},
+	{
+		trigger: { asset: /^assets\/[\w.-]+-loader-[\w-]+\.js$/ },
+		components: [],
+		generated: "content-script loaders written by @crxjs/vite-plugin",
 	},
 	{
 		trigger: { asset: /^assets\/barretenberg(-threads)?\.wasm\.gz$/ },
@@ -188,5 +223,5 @@ export const POLICY: Policy = {
 	allowed: ALLOWED,
 	overrides: OVERRIDES,
 	vendored: VENDORED,
-	binaryAsset: /\.wasm(\.gz)?$/,
+	codeAsset: /\.(wasm(\.gz)?|[cm]?js)$/,
 }

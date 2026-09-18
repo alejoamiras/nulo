@@ -50,3 +50,28 @@
   production Chrome build and a Firefox build produced the same SHA-256.
 
 ## Codex fix loop
+
+**Round 1 (GPT-6 Astra, `high`): reject.** Ten findings, all accepted:
+
+- *Attribution completeness is not provenance.* Byte-identity with the upstream archive proved where
+  `sqlite3.wasm` came from, not what it contains. Reading sqlite3mc's source tree at the pinned tag
+  found Olivier Gay's sha2 (BSD-3-Clause) and libaegis (MIT) compiled in; both now have entries.
+  (Upstream's own `filelist.md` still calls `rijndael.*` LGPL with the wxWindows exception; the
+  file headers at the tag say MIT over a public-domain original, and the headers are what ships.)
+- *The nearest manifest is not the owner.* Owner resolution now reads the installation root; a
+  nearer manifest naming another package is reported as embedded code.
+- *Legacy licence metadata was erased before override validation*, so an override could bury an
+  AGPL `licenses: []`. Legacy forms are now read into the same string the checks compare.
+- *A NOTICE, an empty LICENSE and a `LICENSE.js` all counted as a licence file.*
+- *Deduplication ran before validation*, so of two installations of one version only the first
+  was checked.
+- *A stylesheet renders zero bytes of JavaScript and still ships*, so dropping on length dropped
+  CSS-only packages; and only `.wasm` assets needed a claim, so copied `.js` did not.
+- *The Buffer shim's component records were not bound to the host's version.*
+- *Storybook loads the shared Vite config*, where the policy's stale-record checks would have
+  refused its smaller bundle; the plugin moved to the Chrome and Firefox wrappers.
+- *An 80-`=` line inside a licence text could forge a name for the CI check*; the file now opens
+  with an inventory that is the only thing the check reads.
+- *The CI step's target handling lived in untested shell*; it is now a tested function.
+
+Both targets rebuilt under the stricter policy with identical output (135 entries).

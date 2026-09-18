@@ -145,11 +145,7 @@ jobs:
       - name: Assert the third-party notices shipped
         env:
           TARGET: ${{ inputs.target }}
-        run: |
-          dirs=()
-          if [ "$TARGET" = "chrome" ] || [ "$TARGET" = "both" ]; then dirs+=(apps/extension/dist/chrome); fi
-          if [ "$TARGET" = "firefox" ] || [ "$TARGET" = "both" ]; then dirs+=(apps/extension/dist/firefox); fi
-          bun packages/third-party-notices/bin/check-minimum.ts "${dirs[@]}"
+        run: bun packages/third-party-notices/bin/check-minimum.ts "$TARGET" apps/extension/dist
 
       - name: Upload Chrome build
         id: upload-chrome

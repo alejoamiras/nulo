@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { BundleContents } from "./collect.ts"
-import { type InstalledPackage, isThirdPartyPath, licenceFiles, modulePath, owningPackage } from "./packages.ts"
+import { type InstalledPackage, licenceFiles, moduleOrigin, modulePath, owningPackage } from "./packages.ts"
 import type { Override, Policy, Vendored, VendoredComponent } from "./policy.ts"
 import { isSpdxAllowed, parseSpdx } from "./spdx.ts"
 
@@ -9,6 +9,8 @@ export interface GenerateOptions {
 	policy: Policy
 	/** Directory holding the hand-verified texts that `Override.texts` and `VendoredComponent.texts` name. */
 	textsDir: string
+	/** The repository root: only files under it, outside every `node_modules`, are first-party. */
+	workspaceRoot: string
 }
 
 interface Entry {
@@ -39,22 +41,25 @@ const HEADER = [
 	"Nulo includes the open-source software listed below. Each entry names the component, the",
 	"licence it is distributed under, and reproduces the licence text that comes with it.",
 ].join("\n")
+const INVENTORY_START = "COMPONENTS"
 
 const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const normalise = (text: string) => text.replace(/\r\n?/g, "\n").trimEnd()
 
-function bundledPackages(moduleIds: readonly string[]): InstalledPackage[] {
+/** Every distinct installation that rendered code; one name@version can be installed more than once. */
+function bundledPackages(moduleIds: readonly string[], workspaceRoot: string, violations: string[]): InstalledPackage[] {
 	const found = new Map<string, InstalledPackage>()
 	for (const id of moduleIds) {
 		const path = modulePath(id)
-		if (!path || !isThirdPartyPath(path)) continue
+		if (!path) continue
+		const origin = moduleOrigin(path, workspaceRoot)
+		if (origin === "external")
+			violations.push(`${path.split("/").slice(-2).join("/")}: bundled from outside the workspace and outside node_modules`)
+		if (origin !== "third-party") continue
 		const pkg = owningPackage(path)
-		const key = `${pkg.name}@${pkg.version}`
-		const known = found.get(key)
-		// The isolated linker can install one name@version in several directories; pick one stably.
-		if (!known || pkg.dir < known.dir) found.set(key, pkg)
+		found.set(`${pkg.dir}\0${pkg.embedded ?? ""}`, pkg)
 	}
-	return [...found.values()]
+	return [...found.values()].sort((a, b) => byCodePoint(a.dir, b.dir))
 }
 
 function licenceProblem(title: string, license: string, policy: Policy): string | undefined {
@@ -89,24 +94,53 @@ function overrideProblems(pkg: InstalledPackage, override: Override, shipsFile: 
 	return problems
 }
 
+function embeddedProblem(pkg: InstalledPackage, policy: Policy): string | undefined {
+	if (!pkg.embedded) return undefined
+	const embeddedName = pkg.embedded.replace(/(?!^)@[^@]*$/, "")
+	const claimed = policy.vendored.some(
+		({ trigger, components }) =>
+			"package" in trigger && trigger.package === pkg.name && components.some(({ name }) => name === embeddedName),
+	)
+	return claimed ? undefined : `${pkg.name}@${pkg.version}: embeds ${pkg.embedded}, which needs a VENDORED component record`
+}
+
 function packageEntry(pkg: InstalledPackage, options: GenerateOptions, violations: string[]): Entry | undefined {
 	const title = `${pkg.name}@${pkg.version}`
 	const files = licenceFiles(pkg.dir)
+	const shipsLicence = files.licences.length > 0
 	const override = options.policy.overrides.find((candidate) => candidate.names.includes(pkg.name))
 	const before = violations.length
-	if (override) violations.push(...overrideProblems(pkg, override, files.length > 0))
+	if (override) violations.push(...overrideProblems(pkg, override, shipsLicence))
+	const embedded = embeddedProblem(pkg, options.policy)
+	if (embedded) violations.push(embedded)
 	const license = override?.license ?? pkg.license
 	if (license === undefined) {
 		violations.push(`${title}: no licence metadata and no OVERRIDES entry`)
 		return undefined
 	}
-	if (!override && files.length === 0) violations.push(`${title}: ships no licence file and has no OVERRIDES entry`)
+	if (!override && !shipsLicence) violations.push(`${title}: ships no licence file and has no OVERRIDES entry`)
 	const problem = licenceProblem(title, license, options.policy)
 	if (problem) violations.push(problem)
 	if (violations.length > before) return undefined
-	const shipped = files.map((file) => ({ label: file, body: normalise(readFileSync(join(pkg.dir, file), "utf8")) }))
+	const shipped = [...files.licences, ...files.notices].map((file) => ({
+		label: file,
+		body: normalise(readFileSync(join(pkg.dir, file), "utf8")),
+	}))
 	const verified = readTexts(override?.texts ?? [], options.textsDir)
 	return { title, license, source: override?.source, note: override?.note, texts: [...shipped, ...verified] }
+}
+
+/** Two installations of one name@version are one entry only when they would print identically. */
+function mergeInstallations(entries: readonly Entry[], violations: string[]): Entry[] {
+	const merged = new Map<string, Entry>()
+	for (const entry of entries) {
+		const known = merged.get(entry.title)
+		if (!known) merged.set(entry.title, entry)
+		else if (JSON.stringify(known) !== JSON.stringify(entry)) {
+			violations.push(`${entry.title}: installed more than once with differing licence content`)
+		}
+	}
+	return [...merged.values()]
 }
 
 function componentEntry(component: VendoredComponent, options: GenerateOptions, violations: string[]): Entry {
@@ -122,20 +156,36 @@ function componentEntry(component: VendoredComponent, options: GenerateOptions, 
 const describeTrigger = (vendored: Vendored) =>
 	"package" in vendored.trigger ? `package ${vendored.trigger.package}` : `asset ${vendored.trigger.asset}`
 
-function fires(vendored: Vendored, names: ReadonlySet<string>, assets: readonly string[]): boolean {
+function triggerProblem(vendored: Vendored, packages: readonly InstalledPackage[], assets: readonly string[]) {
 	const { trigger } = vendored
-	return "package" in trigger ? names.has(trigger.package) : assets.some((asset) => trigger.asset.test(asset))
+	if ("asset" in trigger) {
+		return assets.some((asset) => trigger.asset.test(asset)) ? undefined : "matched nothing; remove or fix it"
+	}
+	const hosts = packages.filter((pkg) => pkg.name === trigger.package)
+	if (hosts.length === 0) return "matched nothing; remove or fix it"
+	const drifted = hosts.find((pkg) => pkg.version !== trigger.reviewedVersion)
+	return drifted ? `was reviewed at ${trigger.reviewedVersion}, not ${drifted.version}; re-inspect what it embeds` : undefined
 }
 
-function vendoredEntries(contents: BundleContents, names: ReadonlySet<string>, options: GenerateOptions, violations: string[]): Entry[] {
+function vendoredEntries(
+	contents: BundleContents,
+	packages: readonly InstalledPackage[],
+	options: GenerateOptions,
+	violations: string[],
+): Entry[] {
+	const names = new Set(packages.map((pkg) => pkg.name))
 	const entries: Entry[] = []
 	for (const vendored of options.policy.vendored) {
-		if (!fires(vendored, names, contents.assets)) {
-			violations.push(`VENDORED entry for ${describeTrigger(vendored)} matched nothing; remove or fix it`)
+		const label = `VENDORED entry for ${describeTrigger(vendored)}`
+		const problem = triggerProblem(vendored, packages, contents.assets)
+		if (problem) {
+			violations.push(`${label} ${problem}`)
 			continue
 		}
+		const accounted = vendored.components.length > 0 || vendored.coveredBy?.length || vendored.generated
+		if (!accounted) violations.push(`${label} names no component, no covering package and no generator`)
 		for (const name of vendored.coveredBy ?? []) {
-			if (!names.has(name)) violations.push(`${describeTrigger(vendored)} is covered by ${name}, which is not bundled`)
+			if (!names.has(name)) violations.push(`${label} is covered by ${name}, which is not bundled`)
 		}
 		for (const component of vendored.components) entries.push(componentEntry(component, options, violations))
 	}
@@ -145,8 +195,8 @@ function vendoredEntries(contents: BundleContents, names: ReadonlySet<string>, o
 function unclaimedAssets(contents: BundleContents, policy: Policy): string[] {
 	const claims = policy.vendored.flatMap(({ trigger }) => ("asset" in trigger ? [trigger.asset] : []))
 	return contents.assets
-		.filter((asset) => policy.binaryAsset.test(asset) && !claims.some((claim) => claim.test(asset)))
-		.map((asset) => `${asset}: compiled asset with no VENDORED entry`)
+		.filter((asset) => policy.codeAsset.test(asset) && !claims.some((claim) => claim.test(asset)))
+		.map((asset) => `${asset}: emitted code asset with no VENDORED entry`)
 }
 
 function unusedOverrides(names: ReadonlySet<string>, policy: Policy): string[] {
@@ -157,16 +207,17 @@ function unusedOverrides(names: ReadonlySet<string>, policy: Policy): string[] {
 }
 
 function render(entries: readonly Entry[]): string {
-	const blocks = [...entries]
-		.sort((a, b) => byCodePoint(a.title, b.title))
-		.map((entry) => {
-			const head = [entry.title, `Licence: ${entry.license}`]
-			if (entry.source) head.push(`Source: ${entry.source}`)
-			if (entry.note) head.push(`Note: ${entry.note}`)
-			const texts = entry.texts.map((text) => `${THIN_RULE}\n[${text.label}]\n\n${text.body}`)
-			return [RULE, ...head, ...texts].join("\n")
-		})
-	return `${[HEADER, ...blocks].join("\n\n")}\n`
+	const sorted = [...entries].sort((a, b) => byCodePoint(a.title, b.title))
+	// The inventory precedes every licence text, so no text can forge or hide a line of it.
+	const inventory = [`${INVENTORY_START} (${sorted.length})`, ...sorted.map((entry) => `${entry.title}\t${entry.license}`)]
+	const blocks = sorted.map((entry) => {
+		const head = [entry.title, `Licence: ${entry.license}`]
+		if (entry.source) head.push(`Source: ${entry.source}`)
+		if (entry.note) head.push(`Note: ${entry.note}`)
+		const texts = entry.texts.map((text) => `${THIN_RULE}\n[${text.label}]\n\n${text.body}`)
+		return [RULE, ...head, ...texts].join("\n")
+	})
+	return `${[HEADER, inventory.join("\n"), ...blocks].join("\n\n")}\n`
 }
 
 /**
@@ -176,22 +227,28 @@ function render(entries: readonly Entry[]): string {
  */
 export function generateNotices(contents: BundleContents, options: GenerateOptions): string {
 	const violations: string[] = []
-	const packages = bundledPackages(contents.moduleIds)
+	const packages = bundledPackages(contents.moduleIds, options.workspaceRoot, violations)
 	const names = new Set(packages.map((pkg) => pkg.name))
-	const entries = packages.flatMap((pkg) => packageEntry(pkg, options, violations) ?? [])
-	entries.push(...vendoredEntries(contents, names, options, violations))
+	const installed = packages.flatMap((pkg) => packageEntry(pkg, options, violations) ?? [])
+	const entries = mergeInstallations(installed, violations)
+	entries.push(...vendoredEntries(contents, packages, options, violations))
 	violations.push(...unclaimedAssets(contents, options.policy), ...unusedOverrides(names, options.policy))
-	if (violations.length > 0) throw new NoticesPolicyError([...violations].sort(byCodePoint))
+	if (violations.length > 0) throw new NoticesPolicyError([...new Set(violations)].sort(byCodePoint))
 	return render(entries)
 }
 
-/** Component names listed in a rendered notices file, without versions. */
+/**
+ * Component names listed in a rendered notices file, without versions. Reads only the inventory,
+ * which ends at the first blank line and sits above all third-party text.
+ */
 export function noticeNames(notices: string): Set<string> {
 	const lines = notices.split("\n")
+	const start = lines.findIndex((line) => line.startsWith(`${INVENTORY_START} (`))
 	const names = new Set<string>()
-	lines.forEach((line, index) => {
-		const title = line === RULE ? lines[index + 1] : undefined
-		if (title) names.add(title.replace(/(?!^)@[^@]*$/, ""))
-	})
+	if (start === -1) return names
+	for (const line of lines.slice(start + 1)) {
+		if (line === "") break
+		names.add((line.split("\t")[0] ?? "").replace(/(?!^)@[^@]*$/, ""))
+	}
 	return names
 }

@@ -8,28 +8,35 @@ One concern: given what a build rendered, produce the notices or refuse the buil
 
 ## How it decides what ships
 
-Input is the **rendered** module set of every emitted chunk (`chunk.modules` with
-`renderedLength > 0`), not every module the bundler loaded: a tree-shaken module contributes no code,
-and naming its package would claim something the artifact does not contain. The Vite plugin is
-registered for the main build **and** for worker builds (`worker.plugins`), which are separate
-bundles the main plugin list never sees; one shared collector gathers both and the main build emits
-the file once.
+Input is the **rendered** module set of every emitted chunk (`chunk.modules`), not every module the
+bundler loaded: a tree-shaken script contributes no code, and naming its package would claim
+something the artifact does not contain. Stylesheets and other resources render zero bytes of
+JavaScript while their content ships as an asset, so only script modules are dropped on length. The
+Vite plugin is registered for the main build **and** for worker builds (`worker.plugins`), which are
+separate bundles the main plugin list never sees; the main build emits the file once. It is
+registered from the Chrome and Firefox wrapper configs only: Storybook and vitest load the shared
+config, and the policy describes the shipped extension.
 
-Each module id maps to its owning `package.json` (nearest ancestor with a name and a version, never
-above its `node_modules`). Paths without a `node_modules` segment are first-party and skipped.
+Each module maps to the manifest at its **installation root** (`node_modules/<name>`), never to a
+nearer `package.json`, which a package could plant in any subdirectory; a nearer manifest naming a
+different package is reported as embedded code that needs a `VENDORED` record. A file inside the
+workspace and outside every `node_modules` is first-party; a real file anywhere else refuses the
+build rather than vanishing. Every installation is validated before duplicates are merged.
 
 ## Policy — the build fails on anything not reviewed
 
 | Case | Result |
 |---|---|
 | Licence expression not satisfied by `ALLOWED` (`OR`: any branch, `AND`: every branch; a `WITH` exception never matches) | refused |
-| No `license` field, a legacy object/array form, or an unparseable expression | refused unless an `OVERRIDES` entry covers it |
-| No licence / copying / notice file at the package root | refused unless an `OVERRIDES` entry supplies the text |
+| No licence metadata, or an unparseable expression (legacy `{ type }` and `licenses: []` forms are read, an array as a choice) | refused unless an `OVERRIDES` entry covers it |
+| No non-empty licence / copying file at the package root (a `NOTICE` is reproduced but never stands in; `LICENSE.js` is code) | refused unless an `OVERRIDES` entry supplies the text |
+| One `name@version` installed twice with differing licence content | refused |
+| A module from outside the workspace and outside `node_modules`, or a package embedding another named package | refused |
 | `OVERRIDES` entry whose `reviewedVersion` is not the installed version | refused — re-verify, then bump it |
 | `OVERRIDES` entry the package no longer needs, or that matches nothing bundled | refused — delete it |
 | Package declares a licence its `OVERRIDES` entry neither uses nor acknowledges (`declared`) | refused |
-| Emitted `.wasm` / `.wasm.gz` with no `VENDORED` asset claim, or a claim whose covering package is not bundled | refused |
-| `VENDORED` entry that matches nothing, lacks an `https` source, a text, or an allowed licence | refused |
+| Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) with no `VENDORED` asset claim, or a claim whose covering package is not bundled | refused |
+| `VENDORED` entry that matches nothing, accounts for nothing, was reviewed at another host version, or whose component lacks an `https` source, a text, or an allowed licence | refused |
 
 All violations of one build are reported together, each naming its package.
 
@@ -65,11 +72,18 @@ no syntax that needs transformation (parameter properties, enums) is allowed.
 - **A new compiled asset**: add a `VENDORED` claim naming the package whose entry covers it, or the
   components compiled into it.
 
+The file opens with a `COMPONENTS` inventory (`title<TAB>licence`), above every third-party text, and
+that inventory is the only thing `noticeNames` and the CI check read: a licence text cannot forge or
+hide a line of it.
+
 ## Known limits
 
-- A compiled asset is attributed to the project that publishes it. Third-party code statically
-  linked *inside* `barretenberg.wasm` or the noir wasm is not enumerated beyond what upstream's own
-  licence files state.
+- `sqlite3.wasm` was inventoried from the sqlite3mc source tree at its pinned tag: besides
+  sqlite3mc's own MIT code and public-domain / CC0 code, it compiles in Olivier Gay's sha2
+  (BSD-3-Clause) and libaegis (MIT), which have their own entries. `barretenberg.wasm` and the noir
+  wasm have **not** been inventoried to that depth: they are attributed to the project that
+  publishes them, under its licence files.
+- Third-party source copied into a first-party directory is invisible to any module walk.
 - The bundled fonts (`@nulo/design`) are outside this generator; see the open items in `implementations-plan/legal-terms/plan.md`.
 
 ## Scripts
