@@ -1,0 +1,340 @@
+---
+plan: tools-extraction
+tier: deep
+driver: claude-code
+code_review: off
+eli5_mode: artifact
+budget: recon 3 agents (spent) · foreign reviewer /codex high · code-review off · same-family leg fable, fallback opus
+base: dev @ 9b2c747b
+repos: alejoamiras/nulo (this repo) · alejoamiras/unleashed (empty, public, provisional name)
+---
+
+# tools-extraction — split the bridge/tools product out of nulo
+
+Nulo becomes wallet-only (extension, playground, landing, their packages). `apps/tools`, `packages/bridge-core`, `contracts/bridge`, their CI, runbooks and plans move to `alejoamiras/unleashed` with history. Both repos leave Cloudflare Pages for Workers static assets deployed by Workers Builds.
+
+**Rule of the whole plan: add → rehearse → prove → cut over → delete from git → delete from Cloudflare.** Every nulo PR before the removal only adds or relocates; `dev` is green at every commit. The whole extraction is rehearsed offline — real filtered history, the exact npm tarballs, the full unleashed gate — before the first irreversible act. Steps without a rollback come last, each behind a named precondition and an explicit owner go. `main` changes only at the next `release: promote dev → main`.
+
+**UI impact (nulo extension): none.** No popup, onboarding or window surface changes. The wallet's `https://tools.nulo.sh` link and the landing's two `testnet.tools.nulo.sh` links are unchanged (a redirect serves them).
+**UI impact (unleashed):** colour values and the logo glyph become a neutral placeholder on every tools screen; layout, copy, rows, fonts, component API and every `data-testid` are unchanged. Owner signs off on screenshots in the B1 PR.
+
+## Owner decisions (Phase 0)
+
+1. History preserved via `git filter-repo`. 2. Shared code is **published to npm from nulo** (chosen over forking twice, with the cost stated). 3. De-branded vendored UI package, same API, frontend code untouched. 4. Scope `@unleashed/*`. 5. `tools.nulo.sh` / `testnet.tools.nulo.sh` **redirect** to provisional `*.workers.dev` URLs; Pages projects deleted. 6. `fee-juice` moves into `packages/aztec-runtime`. 7. Cloudflare access = scoped TTL'd API token in the agent's shell only; dashboard-only steps are the owner's. 8. Validation: fast layers everywhere + tools browser e2e + bridge contracts in unleashed + extension smoke & network e2e in nulo. 9. `code_review: off`. 10. deep tier; the 36 MIXED plans stay in nulo. 11. **The owner is the only user of either product** — no third-party bridge journals exist, so the origin change needs no recovery programme.
+
+## Architecture & Implementation
+
+### 1. Wallet decoupling (nulo)
+
+`packages/bridge-core/src/fee-juice.ts` (148 lines, imports only `@aztec/*`) + its test are copied to `packages/aztec-runtime/src/fee-juice.ts`, exported as `@nulo/aztec-runtime/fee-juice`. The four production importers and one mock under `apps/extension/src/wallet/services/execution/` repoint; `@nulo/bridge-core` leaves `apps/extension/package.json`. bridge-core keeps its copy (tools still builds from nulo until removal; unleashed inherits it through history). Nothing under `packages/aztec-runtime/src/account/` changes.
+
+### 2. Published packages — three, staged, narrow
+
+unleashed consumes exactly: `deriveNuloAccountKeys` and the `EncryptionKey` **class** (a runtime import in `packages/bridge-core/src/recovery-crypto.ts:1`, not type-only), the resolver, and schema-patch `/register` + `/apply`. `account-derivation.ts` imports only `@aztec/*` + a local separator; `encryption-key.ts` needs `./secret-types`, `./zeroize` and one helper (`bytesToHex`) from `@nulo/wallet-core/utils`. **wallet-core is not published** — the helper is bundled.
+
+| npm package | Published exports | Excluded |
+|---|---|---|
+| `@nulo/wallet-crypto` | `.` → new `src/public.ts`: `deriveNuloAccountKeys`, `deriveSigningKeyFromSeed`, `EncryptionKey` | passkey, secret-box, DEK, mnemonic-master, entropy-MAC — everything else |
+| `@nulo/resolve-asset` | `.` | — |
+| `@nulo/wallet-sdk-schema-patch` | `./apply`, `./register` (`sideEffects` lists `register`) | — |
+
+- **Workspace manifests do not change** (`private: true`, raw-`.ts` exports): the extension, playground and every vite/vitest config keep consuming source, and `npm publish` from a workspace dir is refused by `private`.
+- `scripts/publish/stage.ts <pkg>` writes `dist-publish/<pkg>/`: JS from `bun build --format=esm --target=node --external '@aztec/*' --external zod` per entry (sources use extensionless relative imports, so plain `tsc` emit would not run under Node ESM); types from `tsc -p tsconfig.publish.json` — a small per-package config (the packages' own tsconfig sets `noEmit` and includes every test) with `declaration` + `emitDeclarationOnly`, rooted at the public entries only; a generated `package.json` (not private, `exports` → `dist`, `files`, repository metadata, `sideEffects` naming the **emitted** path `./dist/register.js`, `zod` kept as a declared dependency, **`@aztec/*` as exact `peerDependencies`** where the package has any — `resolve-asset` has none), README, LICENSE.
+- **Peer deps are necessary, not sufficient**: under Bun's isolated linker identical version strings do not prove a single instance. unleashed keeps its own explicit `@aztec/*` dependencies, and R + B1 assert real identity with the helper that already exists for this — `assertPackageIdentity(…, { lockstepVia })` (`packages/resolve-asset/src/index.ts:128`) — plus a check that the `/register` import mutated the `WalletSchema` object the app's wallet-sdk client actually uses (asserted on a production Vite bundle, not just under Node). A deliberately mismatched fixture must fail.
+- `scripts/publish/stage.test.ts`, wired by changing root `test:release` to `bun test scripts/release/ scripts/publish/` (today it covers `scripts/release/` only): staged dist has no `@nulo/wallet-core` specifier in JS or d.ts; staged `wallet-crypto` reproduces the existing key-derivation vectors byte-for-byte; `EncryptionKey` **cross-compatibility** — sealed by source / opened by bundle and the reverse, plus AAD-mismatch and tamper rejection (two changed implementations can round-trip with each other and still reject existing recovery ciphertext); `npm pack --dry-run` file list equals an allowlist; an out-of-workspace fixture installs the three tarballs, imports every export under Bun and Node 24 ESM, and **type-checks** under both `NodeNext` and `Bundler` resolution (runtime imports cannot validate declarations).
+- **Publication is bound to the rehearsed bytes.** R records the SHA-256 of each packed tarball in `scripts/publish/approved-digests.json` (committed through A2's PR or a follow-up). `.github/workflows/publish-packages.yml` (`workflow_dispatch` only; inputs: version, `dry_run` default true; ref restricted to `dev`/`main`; actions pinned by SHA) has two jobs: an unprivileged **build** (`contents: read`: frozen install → `test:release` → stage → `npm pack` → compare digests to the approved file, **fail before anything is published** → upload the `.tgz` artifacts) and a **publish** job (`id-token: write`, environment `npm-publish`, owner as required reviewer, environment restricted to `dev`/`main`) that downloads those artifacts, re-checks the digests and runs `npm publish <tgz> --provenance --access public` with a pinned npm CLI ≥ 11.5.1. The approval screen shows the source commit and the three digests. One lockstep version. No token exists anywhere. (*Inference*: `bun build` + `npm pack` are byte-reproducible across this host and the runner. If they are not, the approved digest becomes a hash over the **complete unpacked package** — every shipped path and its bytes, `package.json` included, since its `exports`, dependencies and lifecycle scripts are part of what a consumer executes — never over `dist` alone; and the publish job additionally records the final archive digest before publishing. Build and publish jobs enforce the same definition.)
+- **Bootstrap** (npm needs the package to exist before a trusted publisher can be attached — *Inference, verify on npmjs.com*): owner publishes a code-free `0.0.0` placeholder per package with 2FA → configures trusted publisher (repo, workflow file, environment) → sets "disallow tokens" → deprecates `0.0.0`. The first real version `0.1.0` ships through OIDC, so no code is ever published without provenance.
+- **Scope fallback**: if the owner does not control `@nulo` on npm, packages stage as `@alejoamiras/nulo-<name>` (a scope `bunfig.toml`'s min-age excludes already show the owner publishing under) and unleashed aliases them (`"@nulo/wallet-crypto": "npm:@alejoamiras/nulo-wallet-crypto@x"`) — no import changes either way.
+
+### 3. Extraction recipe (versioned, replayable)
+
+The recipe lives in `implementations-plan/tools-extraction/tools/` (the repo's convention for arc-scoped tooling): `paths.txt`, `extract.sh` (clone → `--analyze` → filter → callbacks → audit), `bootstrap/` (the fresh root-config commit as a patch set), `codemod.ts`. The rehearsal and the real run execute the **same files**; the real run differs only in the frozen SHA and the push.
+
+Fresh `git clone --single-branch --branch dev --no-tags` from origin into a scratch dir (never a local clone: stray refs, shared stash). `git filter-repo --paths-from-file`, ancestors listed explicitly — filter-repo does not follow renames; ancestry verified from `git log --diff-filter=R`: `packages/faucet → apps/faucet → apps/tools`; `packages/bridge-evm`, `packages/bridge-aztec → contracts/bridge`; plus `packages/bridge-app`:
+- apps/packages/contracts: `apps/tools`, `apps/faucet`, `packages/faucet`, `packages/bridge-core`, `packages/bridge-app`, `packages/bridge-aztec`, `packages/bridge-evm`, `contracts/bridge`
+- CI: `bridge-contracts.yml`, `_bridge-contracts.yml`, `pr-tools-e2e.yml`, `_tools-e2e.yml`, `_build-tools.yml`, `_build-faucet.yml`, `.github/actions/setup-playwright`, `scripts/ci-cd/aggregate-status.{sh,test.ts}`
+- plans: the 36 TOOLS-ONLY dirs (recon.md) + `aztec-5.0.0-stable/lessons`, `aztec-5.0.1-line/lessons` (read by `packages/bridge-core/scripts/live-intent.ts:171-191`)
+
+Layout is identical in unleashed, so no `--path-rename`: Foundry `allow_paths`, `gen-remappings.ts`, `agent.sh` and the `../../vitest.base` imports keep working. Root config and shared actions are **copied as a fresh commit**, not filtered (they would drag every unrelated commit): `package.json`, `bunfig.toml`, `biome.json`, `vitest.base.ts`, `patches/` + `patchedDependencies`, tsconfig, `.githooks`, commitlint, LICENSE, `SECURITY.md`, `.github/actions/setup-bun`, **`.github/actions/setup-aztec` (copied, not moved — nulo's extension network e2e still uses it)**. Extracted blobs total ~50 MB uncompressed; the largest are committed contract artifacts the hub-parity check pins, so nothing is stripped.
+`--message-callback` rewrites `(#N)` → `(alejoamiras/nulo#N)` so GitHub does not autolink to unleashed's own PR numbers. `--replace-text` normalises home-directory / mount-point absolute paths (a sample of 7 plan dirs holds 45 such lines). filter-repo's `commit-map` is committed in unleashed: historical deploy intents record nulo SHAs (`live-intent.ts` `assertNoSourceDrift`), which stop resolving after the rewrite — the map is the evidence trail and the drift check is never disabled. Concretely (`live-intent.ts:361` diffs the literal recorded SHA and verification calls it at `:562`): any deployment in flight is **finished from nulo before the freeze**; historical intents are immutable evidence; the first live operation from unleashed requires a **newly authorised intent** recorded against an unleashed commit — no operation runs against an old intent.
+**Audit before the first push** (report kept outside the repo, owner-reviewed) — run over the **complete final history that will be pushed**, bootstrap commit included, not the pre-callback output: gitleaks + trufflehog (`--no-verification`: a rehearsal must not phone candidate secrets to third parties) over every blob **and every commit message** (`--replace-text` rewrites blobs only; messages go through the `--message-callback`); author/committer identities and emails reviewed; added-filename scan (`.env`, `*.pem`, `keystore`, `*key*`); absolute-path grep → 0. A finding **or a scanner error** fails the gate. Exactly one ref is pushed (`main`), named explicitly — never `--mirror`, no tags. The filtered paths were already public in nulo; the bootstrap commit is new content and gets the same scan. A real credential finding is rotated, not merely filtered. Rewritten commits lose signatures: push first, enable `required_signatures` + rulesets after; README records source SHA + the recipe.
+**Freeze**: from the extraction SHA, `apps/tools`, `packages/bridge-core`, `contracts/bridge` are frozen in nulo — bridge work happens in unleashed only. (Sole developer; stated so the removal diff is provably "delete what was extracted".)
+
+### 4. unleashed workspace
+
+- `codemod.ts`, specifiers and manifests only: `@nulo/(bridge-core|design|tools|txe-server)` → `@unleashed/…`; root scripts' `--filter '@nulo/*'` → `--filter '@unleashed/*'` (otherwise `typecheck:all` / `test:all` match zero workspaces and exit 0 having run nothing) with a `scripts/ci-cd/workspaces.test.ts` asserting the filter resolves the expected package set. `@nulo/{wallet-crypto,resolve-asset,wallet-sdk-schema-patch}` stay (npm deps, exact-pinned). `deriveNuloAccountKeys`, KDF labels, storage keys (`nulo:theme`), recovery-signature messages, manifests, salts, addresses: **byte-for-byte untouched** — protocol, not brand.
+- **`packages/design` named `@unleashed/design`**, fresh commit (no brand history). Keeping the directory keeps both hardcoded tests (`apps/tools/src/lib/theme-vars.test.ts:7`, `apps/tools/src/app.css.parity.test.ts:10`) and the `biome.json` overrides valid unedited. Closure: 12 SFCs (`Toast Button Icon AddressDisplay Flex BalanceRow Card DisclaimerTag DripButton EmojiGrid Tag Spinner`) + tests, `severity.ts`, `color-names.ts`, `layout-names.ts`, `internal/icons.json`, `base.css`, `utilities.css`, `fonts/*` + licence notes, `testing.ts`, `theme-vars.ts`, `theme-contrast.ts`, trimmed `index.ts`.
+- **Tokens**: the app reads 7 `--nulo-*` custom properties ~120× across 33 files. They stay the canonical names with **neutral values** (grey palette + one accent; contrast check re-run). A CSS variable name is not a visible brand, renaming touches frontend code, and the real brand will rename once. `icons.json` `logo` glyph → neutral mark. Fonts unchanged (open fonts; a swap is a layout risk for the e2e suite).
+- `apps/tools/scripts/design-resolver.ts` `from` → `@unleashed/design`.
+- `bunfig.toml`: 7-day min-age kept; `minimumReleaseAgeExcludes` names the three packages explicitly. A unit test asserts each `@nulo/*` peer pin equals the repo's `@aztec/*` pin. CI runs `npm audit signatures`. No Renovate (owner default).
+- Complexity baseline: plain `bun run baseline:complexity` (no manifest exists, so `--adopt` does not apply) → 3 acceptances, their sentences carried verbatim. `check-no-brand.sh` extended to flag "nulo" outside an allowlist (npm dep names, protocol identifiers, CSS token names, history notes). `behavior-gating.test.ts` trimmed to unleashed's workflows and taught that `@nulo/*` are external. The bridge-core block of `apps/extension/scripts/layout-identity.test.ts` moves here.
+- `NODE_VERSION=24` stops being a build requirement: it existed because `apps/tools/vite.config.ts` imports raw `.ts` from `@nulo/resolve-asset`; from npm it is built JS.
+
+### 5. Cloudflare
+
+Verified against Cloudflare docs this session: Workers static assets honours `_headers` (≤100 rules, ≤2,000 chars/line, asset responses only); Workers Builds injects `WORKERS_CI_COMMIT_SHA` / `WORKERS_CI_BRANCH`, has separate production and non-production deploy commands, and offers branch-bound deploy hooks (secret URL, POST, revocable); preview hosts are `<version-or-alias>-<worker>.<subdomain>.workers.dev`; `preview_urls` defaults to `workers_dev`.
+
+**Landing** — `apps/landing/wrangler.jsonc`: `name: "nulo-landing"`, `compatibility_date`, `account_id` (as `infra/passkey-rp` already commits it), `assets: { directory: "./dist", not_found_handling: "none" }`, no `main`, `preview_urls: true`, and — until L-cut — `workers_dev: true` with no `routes` (see the hostname-claim note below). `public/_headers` carries over unchanged. Workers Builds: production branch `main`; build `bun install --frozen-lockfile && bun run --cwd apps/landing build`; deploy `bunx wrangler deploy -c apps/landing/wrangler.jsonc`; non-production `bunx wrangler versions upload -c …`.
+The landing's `prebuild` fetches the latest GitHub release, so it must rebuild **after** release assets exist → the `refresh-landing` job and `refresh-landing.yml` stay. **Cut-over without a workflow race**: both read `secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK || secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK`. Until the owner sets the new secret (at L-cut, after the promote), every run keeps hitting Pages, which still serves `nulo.sh`; setting it flips the target with no merge. The fallback expression is removed once Pages is deleted. No Cloudflare API token ever enters Actions.
+**The landing has the same hostname-claim problem as C1.** `wrangler deploy` with a `custom_domain` route tries to attach `nulo.sh`, and Cloudflare refuses a Custom Domain over the record Pages still holds — so a route-bearing config could never produce the "successful production build" L-cut waits for. The committed `wrangler.jsonc` therefore ships **without** `routes` (`workers_dev: true` so the production build is reachable for validation); L-cut is: confirm the route-free production build serves correctly on its `workers.dev` host → detach `nulo.sh` from Pages and remove the conflicting record → attach `nulo.sh` to the Worker as a Custom Domain (dashboard or `wrangler`, then committed as `routes` + `workers_dev: false` in a one-line follow-up so the file matches reality) → verify → set the hook secret. The actual DNS record type on the account is read before N3.
+
+**Tools** — `apps/tools/wrangler.testnet.jsonc` (`unleashed-testnet`, `workers_dev: true`, `preview_urls: true`) and `wrangler.mainnet.jsonc` (`unleashed-mainnet`, `workers_dev: true`, **`preview_urls: false`**). Assets-only; the per-target `_headers` `headersPlugin()` already generates (COOP/COEP + CSP) is reused. Build from repo root: `bun install --frozen-lockfile && bun run --cwd apps/tools build:<target>`; the command selects the target, never a dashboard variable.
+Host model (`lib/` + vite plugin, no component code): `network-targets.ts` hosts → `unleashed-<target>.<account-subdomain>.workers.dev`; `buildMetaPlugin` sha source ← `WORKERS_CI_COMMIT_SHA`, and a production build with no build identity fails. `CF_PAGES_URL` has no Workers equivalent (the version id is assigned after the build), so **only a branch alias is baked**: `scripts/preview-alias.ts` derives `p-<8-hex hash of the branch>-<slug>` from `WORKERS_CI_BRANCH` (the hash makes truncation collision-free, the `p-` prefix keeps the label from starting with a digit; lowercase `[a-z0-9-]`, DNS label ≤ 63 chars including the worker name) and the same string goes to vite and, as a quoted argument, to `wrangler versions upload --preview-alias`. Per-version URLs stay rejected (fail closed); exact host, never a wildcard; testnet only; never on the production branch.
+**The Workers Builds credential.** Connecting a repo makes Cloudflare mint its own persistent build token, separate from the agent's TTL token and by default far broader than one Worker (account-wide Workers/KV/R2 edit, routes across zones). A "preview" deploy command is not a permission boundary. So the token is chosen **at** connection time, not repaired after it: the owner pre-creates a build token scoped to Workers Scripts:Edit (+ Workers Routes on `nulo.sh` for the landing only) and selects it in the connect dialog (Workers Builds accepts an existing token), with the branch restrictions (`main` plus owner-pushed branches) set in the same dialog before the first build can start; then confirms fork PRs do not build (*Inference* — verified with a throwaway fork before the bridge Worker is connected); and puts Cloudflare Access in front of the testnet preview URLs (previews are for the owner; CI never uses them).
+First-build verifications (*Inferences*): `BUN_VERSION=1.4.0` honoured by the Workers Builds image (fallback: install Bun in the build command); the testnet CSP line fits 2,000 chars; COOP/COEP present on production and alias hosts; `--preview-alias` available in the pinned wrangler.
+
+**Redirect** — `infra/tools-redirect`, workspace `@nulo/tools-redirect` shaped like `infra/passkey-rp` (scripts `typecheck`, `test: bun test`, `deploy`, `deploy:dry`; `infra/*` is a workspace glob and `typecheck:all` has no `--if-present`, so the scripts are mandatory). ~30-line code Worker: exact-host map → hardcoded target **origin**, only the request's pathname + query appended (parsed and re-serialised through `URL`, so `//evil`, backslashes and header tricks cannot change the origin), **302** (provisional target; browsers cache 301s indefinitely), `Cache-Control: no-store`, unknown host → 404. `workers_dev: false`, `preview_urls: false`, two `custom_domain` routes, deployed by hand with `wrangler deploy`. `_redirects` cannot branch on host; a zone Redirect Rule would be untracked dashboard state.
+
+### 6. unleashed CI
+
+`pr-quick.yml` (commitlint, lint, typecheck, unit, `verify:deployments`, build ×2 + `verify:build-target`), `pr-tools-e2e.yml` + `_tools-e2e.yml` (6 shards), `bridge-contracts.yml` + `_bridge-contracts.yml`, `actionlint.yml`; each PR workflow opens with a `changes` paths-filter job; `workflow_dispatch` bypasses it. The contract workflow is carried **whole**: forge build/test/gas-snapshot, `forge build --ast --force` before halmos (without it halmos reports "no tests" and exits 0) plus the proof-name assertions, the keystone and hub `nargo test`, `compile.sh --check` hub parity, the TXE runner, the sandbox integration suite, the sole-consumer guard — and its **two separate toolchain resolutions**: the Noir toolchain from the crates' `Nargo.toml` tag (`v5.0.1`), the sandbox/JS line from `packages/bridge-core/package.json` (`5.2.0`). Exact-state aggregation via `aggregate-status.sh` for both e2e and contracts — the inherited `bridge-contracts.yml:91` aggregator accepts an empty filter output; the port fixes that. Required on `main`: `quality-status`, `tools-e2e-status`, `bridge-contracts-status`. `permissions: contents: read` at workflow level, plus `pull-requests: read` on the `changes` jobs only (dorny/paths-filter needs it, as `pr-tools-e2e.yml:21-23` has today); `pull_request` only; no secrets exist. One long-lived branch `main`, squash-only, signed commits.
+
+### 7. nulo removal — file-level map
+
+Delete: `apps/tools`, `packages/bridge-core`, `contracts/bridge`, the 5 workflows, `.github/actions/setup-playwright` (its only `uses:` is `_tools-e2e.yml`), `scripts/ci-cd/aggregate-status.{sh,test.ts}` (sole caller gone), 36 plan dirs + their `index.md` lines.
+Edit: `pr-quick.yml` (tools filter/output/`needs-tools-build`/`build-tools`/status needs; `bridge-core` drops out of the extension's dependency-library filter), `release.yml` (`deploy-tools`, `verify-live` needs, status needs), `refresh-landing.yml` (drop `tools|both`); `scripts/release/chain-guard.ts` + test and the tools half of `verify-live{,-run}.ts` + tests **removed** (it compared the tools build sha to nulo's release sha — meaningless across repos); `scripts/ci-cd/behavior-gating.test.ts`, `required-checks.{ts,test.ts}` (`e2e:tools` label, `bridge-contracts-status` rename); `apps/extension/src/manifest.test.ts:66` roots → `["apps/landing"]`; `layout-identity.test.ts` bridge-core block; `packages/resolve-asset/src/index.test.ts:9,42` — its PrivateFPC-artifact case anchors on `bridge-core/package.json`; re-anchor on the already-defined `fromExtension` (the extension declares the same `@alejoamiras/private-fee-juice` package); root `package.json` scripts (`dev:tools build:tools test:tools e2e:tools e2e:tools:reap audit:tools`), root `tsconfig.json` reference, `biome.json:17,343`; comment cites in `price-map.ts:37-41`, `default-tokens.ts:57,68`, `fpc/service.ts:37`, `tests/e2e/fixtures/aztec.ts:608` → name the unleashed repo; `bun install` (lockfile shrinks); `bun run baseline:complexity` (27 → 24, removals only — passes the ratchet).
+Docs: `CLAUDE.md` (bridge pointer; § Two products → a pointer to unleashed, the independence rule restated for extension ↔ playground; Pages / `NODE_VERSION` sentence; advisory aggregators; Renovate third pin site → Workers Builds `BUN_VERSION`; complexity counts corrected to the manifest's real numbers; quality-gate rows; release runbook `deploy-tools` / `verify-live` / troubleshooting rows; Workers instead of Pages), `CI.md`, `ARCHITECTURE.md:239,241`, `.github/README.md:14-15`, `UPDATE.md` (bridge section + 5 bullets → unleashed), `.claude/skills/aztec-update/SKILL.md` (Phase 0 probe wallet-only; Branch B → unleashed, replaced by § 8's contract).
+The 36 MIXED plans and everything live code references (`isolated-linker-store/tools/phantom-sweep.ts`, `vitest-on-bun/lessons/baselines`) stay.
+
+### 8. The cross-repo contract (what still couples the two products)
+
+After the split, exactly four facts cross the boundary. Each gets one documented owner and one direction:
+
+| Fact | Source of truth | Mirror | Mechanism |
+|---|---|---|---|
+| Bridged-token L2 addresses (wallet default tokens + price map) | unleashed `apps/tools/public/*-bridge.json` → `tokens[].l2Token` | `default-tokens.ts`, `price-map.ts` | nulo `aztec-update` reset step: "unleashed promotes a generation → mirror `tokens[].l2Token` here"; comments cite the unleashed path |
+| PrivateFPC salt / canonical address | unleashed `private-fpc-canonical.json` | wallet `fpc/service.ts` `PRIVATE_FPC_PARAMS` | **today nothing in nulo asserts it**: `service-create.test.ts:20-29` mocks the derivation, and `service.ts:33-42` says the real assertion lives in bridge-core and that a wrong address is an unrecoverable loss. Before bridge-core leaves, A1 adds a real (artifact, salt, deployer) → canonical-address assertion on the wallet side — in `packages/aztec-runtime` if that env can hash, otherwise pinned in the extension's network e2e, which runs the real prover stack |
+| `@aztec/*` line | nulo (publishes the shared packages) | unleashed peer pins | unleashed's pin-equality test; nulo's `aztec-update` gains "publish shared packages"; unleashed cannot bump before it |
+| Chain identity (chainId / rollup version) | each repo owns its own constants | — | no sharing: the extension's network-service seeds and tools' `chain-constants.ts` are already independent copies; `chain-guard` (the only importer across the line) is deleted |
+
+No test in either repo reads the other. The "Nulo extension driving unleashed" smoke stays a manual pre-release step.
+
+## Dependency graph
+
+```
+N1 ─────────────────────────────┐
+N2 ─► R (rehearsal) ─► publish ─┼─► U0 ─► B1 ─► B2 ─► B3 ─► B4 ─► GATE-U ─► C1 ─► N5a ─► N5b ─► P1 ─► C2
+N3 (landing config) ────────────┘                                  ▲                              │
+N4 (redirect worker) ──────────────────────────────────────────────┘              L-cut ◄─────────┘
+```
+
+## Phases and validation gates
+
+Fast layers, nulo: `bun run lint && bun run typecheck:all && bun run test:all`. Fast layers, unleashed: same names, `@unleashed/*` filters. Workflow changes add `bun run lint:actions && bun run test:ci-gating`. "Green" = exit 0 with the suites actually executed — no new skips, no relaxed gate. Gates are **pre-PR** unless marked *post-merge*.
+
+### N1 — wallet decoupling · nulo
+Work: § 1 (fee-juice into aztec-runtime) + § 8's wallet-side PrivateFPC canonical-address assertion, as two commits.
+**Validation gate** — the new FPC assertion fails when the salt constant is changed by one and passes unchanged (proves it is not mocked); fast layers (`test:all` is what runs the new `aztec-runtime` test; `audit:vue` alone would not); `bun run audit:vue`; `bun run test:e2e`; `bun run e2e:agent` (with `NODE_OPTIONS=--dns-result-order=ipv4first` on this host). Pass: exit 0; `git grep "@nulo/bridge-core" apps/extension` → empty; `git diff --stat -- packages/aztec-runtime/src/account` empty. Layers: lint/typecheck · unit · e2e smoke · e2e network.
+
+### N2 — publishable packages + pipeline · nulo
+**Validation gate** — fast layers; `bun run test:release` (now including `scripts/publish/`); `bun run lint:actions`; `bun run test:ci-gating`. Pass: staged-dist assertions green. Layers: lint/typecheck · unit · integration (tarball fixture).
+
+### R — local rehearsal (nothing is published, pushed or deployed)
+"Local", not "offline": a **preparation** step uses the network (clone from origin, `bun install` of registry deps, forge libs, the two Aztec toolchains, halmos), then the gate runs with no outbound publication of any kind. Inputs: the N1 and N2 feature branches are pushed to origin (checkpointing, no PR), and the scratch clone of `dev` merges them locally — so the rehearsal needs neither arc merged. Run `tools/extract.sh`; apply `bootstrap/` + `codemod.ts` + the design package; install the three **staged tarballs** as `file:` deps; record their SHA-256 into `scripts/publish/approved-digests.json`.
+**Validation gate** — in the scratch tree: `bun install`; fast layers; `assertPackageIdentity` lockstep + the `WalletSchema` mutation check on a production bundle; `bun run --cwd apps/tools verify:deployments`; `build:testnet` + `verify:build-target testnet` (repeat mainnet); `bun run --cwd apps/tools test:e2e`; `bun run e2e:tools` (the whole suite, unsharded locally — `agent.sh` shards only when passed `--shard=i/n`, which is CI's job); the full contract block of § 6 (forge, `forge build --ast --force`, halmos + proof names, nargo keystone + hub, `compile.sh --check token_bridge_hub`, `run-txe-tests.sh`, `bun run --cwd packages/bridge-core test:integration`, `check-sole-consumer.sh`); the history audit. Pass: all exit 0; `git diff --stat -- apps/tools/tests` shows specifier changes only; `git log --follow apps/tools/src/main.ts` reaches the `packages/faucet` era; audit report clean. This proves the exact tarball bytes against their real consumer **before** they are published and the extraction **before** it is pushed. Layers: all five.
+
+### N2-publish · *post-merge*, owner + agent (**Irreversible #2**)
+`publish-packages.yml` dispatched from `dev` with `dry_run: true` → build job green, digests equal `approved-digests.json`. Owner: placeholder bootstrap ×3 → trusted publisher (choosing direct rather than staged publication if npm defaults new publishers to staged — *Inference*) → dispatch `0.1.0`, approve the environment after reading commit + digests. Pass: for each of the three, `npm view <pkg>@0.1.0 dist.integrity` matches the approved archive, and `npm audit signatures` in a scratch consumer **verifies** the provenance attestation (presence alone is not validity) naming repo `alejoamiras/nulo`, workflow `publish-packages.yml` and the expected source commit.
+
+### N3 — landing on Workers (config only) · nulo
+Work: `wrangler.jsonc`, pinned `wrangler` devDependency, the `LANDING || PAGES` hook expression, docs.
+**Validation gate** — fast layers; `bun run --cwd apps/landing build`; `bunx wrangler deploy --dry-run -c apps/landing/wrangler.jsonc`; `bun run lint:actions`; `bun run test:release`. *Post-merge* (after the owner connects Workers Builds): a branch preview URL serves, and `curl -sI` header set equals `https://nulo.sh`'s for `/` and one `/assets/*` file.
+
+### N4 — redirect Worker · nulo
+**Validation gate** — `bun install` (lockfile gains the workspace); `bun run lint && bun run typecheck:all && bun run --cwd infra/tools-redirect test`; `bun run --cwd infra/tools-redirect deploy:dry`. Tests cover: both hosts → 302 with path + query, `no-store`, unknown host 404, no open-redirect via path or header.
+
+### U0 — audited history import · unleashed (**Irreversible #1**)
+Re-run the recipe at the frozen SHA (after N1 + N2 merge). **Gate**: R's audit checks on the real output; owner approves the report; then push to `main`.
+
+### B1 — bootstrap, codemod, design package, npm deps · unleashed
+**Validation gate** — R's gate minus contracts, against the **registry** packages; `scripts/check-no-brand.sh`; screenshots of Send, Exit, Drip, wallet picker for owner sign-off.
+
+### B2 — CI · unleashed (stacked on B1)
+**Validation gate** — `bun run lint:actions`; `bun run test:ci-gating`; R's contract block locally. *Post-PR*: `quality-status`, `tools-e2e-status`, `bridge-contracts-status` green → rulesets + required checks applied via `gh api`.
+
+### B3 — Workers + host model · unleashed (stacked on B2)
+**Validation gate (pre-PR)** — fast layers incl. `preview-hosts`, `build-integrity`, `preview-alias` unit tests (hostile branch names, 63-char bound); `verify:build-target` both targets; `bunx wrangler deploy --dry-run` both configs. *Post-PR*: the branch's alias preview loads and passes the integrity check; a non-allowlisted host refuses to boot.
+
+### B4 — docs, runbooks, plans · unleashed (stacked on B3)
+README, CLAUDE.md/AGENTS.md, `UPDATE.md` bridge section, the generation runbook (ex-Branch B) as a project skill, plans `index.md`, commit-map, § 8's contract.
+**Validation gate** — fast layers; `scripts/check-no-brand.sh`; every relative link in moved docs resolves.
+
+### GATE-U (precondition for every cut) · *post-merge*
+B1–B4 merged; three required checks green on `main`; both Workers live; `curl -sI` shows COOP `same-origin`, COEP `require-corp`, the CSP; headless Chromium against the live URL asserts `crossOriginIsolated === true` and a passing integrity check; the mainnet Worker exposes no preview URL; owner runs one Drip and one Send on testnet. Recorded in `lessons/` with run URLs.
+
+### C1 — cut-over · Cloudflare (**Irreversible #3**)
+Owner pre-step: on **both** `testnet.tools.nulo.sh` (the live bridge) and `tools.nulo.sh`, finish or claim any of your own in-flight deposits and residual fuel claims — the journal is origin-bound `localStorage` and a private-fuel salt can be the sole recovery input. Then, in one sitting — ordered so the Worker never tries to claim an occupied hostname (Cloudflare refuses a Custom Domain over an existing CNAME): (1) upload `infra/tools-redirect` **with its routes commented out** and exercise it through `wrangler dev`; (2) **pause** git builds on both tools Pages projects (N5a would break the `dev`-tracking Pages build at merge); (3) detach both custom domains from Pages and delete their `*.pages.dev` CNAMEs; (4) redeploy the Worker with the two `custom_domain` routes; (5) wait for the certificates, verify. Steps 3–4 are minutes apart, and between them the names do not resolve at all — never to an unclaimed `*.pages.dev` target. The Pages projects are kept (paused) until C2 as the rollback.
+**Validation gate** — `curl -sI "https://tools.nulo.sh/a/b?c=1"` and the testnet host → `302`, `Location` = the matching Worker URL with path + query, `no-store`; the wallet's fee-juice link lands on the working app. Rollback: re-attach the domains to Pages.
+
+### N5a — removal, code + CI · nulo
+**Validation gate** — `bun install --frozen-lockfile`; fast layers; `bun run audit:vue`; `bun run lint:actions`; `bun run test:ci-gating`; `bun run test:release`; `bun run test:e2e`; `bun run e2e:agent`. Pass: exit 0; no **executable** reference to the deleted paths (`git grep` over `*.ts *.vue *.json *.yml *.sh` outside `implementations-plan/` and docs → only the four allowlisted comment cites). *Post-PR*: `quality-status`, `extension-smoke-e2e-status`, `extension-network-e2e-status` green (open the PR first, add `e2e:*` labels after).
+
+### N5b — removal, docs + plans · nulo (stacked on N5a)
+**Validation gate** — fast layers; repository-wide `git grep -nE "apps/tools|bridge-core|contracts/bridge"` → only the MIXED plans' history and explicit unleashed pointers; `CLAUDE.md`'s complexity counts equal `manifest.json`'s.
+
+### P1 — promote + landing cut-over · nulo `main`
+At the next `release: promote dev → main`: run the pending `required-checks.sh` main cut-over already in the runbook; merge; confirm `apps/faucet`, `contracts/bridge`, `packages/bridge-core` are gone from `main`. The promote's own release run still refreshes **Pages** (the new secret is unset) — expected. Then **L-cut**, in the order § 5 gives: the route-free production build on `main` serves correctly on its `workers.dev` host (header parity checked there) → detach `nulo.sh` from Pages, remove the conflicting record → attach `nulo.sh` to the Worker → verify → set `CLOUDFLARE_LANDING_DEPLOY_HOOK` → one-line follow-up PR commits `routes` + `workers_dev: false`.
+**Validation gate** — after L-cut: `gh workflow run refresh-landing.yml`, wait for the Workers build it triggers to finish, then `VERSION=<released version> bun scripts/release/verify-live-run.ts` → landing half green. (`verify-live-run.ts:89` defaults `VERSION` to `""`, and `verify-live.ts:78` then matches *any* release-tag link — N5a makes an empty `VERSION` a hard failure, since it is already editing that file.); `curl -sI https://nulo.sh` header parity with the pre-cut capture.
+
+### C2 — delete · Cloudflare (**Irreversible #4**)
+Preconditions: ≥ 48 h since C1 with GATE-U's checks still passing; N5 on `dev`; ≥ 48 h since L-cut. Delete `nulo-tools-testnet`, `nulo-tools-mainnet`, then the `nulo` Pages project; delete secrets `CLOUDFLARE_TOOLS_DEPLOY_HOOK`, `CLOUDFLARE_PAGES_DEPLOY_HOOK`; a follow-up one-line PR drops the fallback expression; owner revokes the API token.
+**Validation gate** — `wrangler pages project list` shows none of the three; all three hostnames still answer as in C1/P1; `gh secret list` shows neither secret.
+
+## Delivery — arcs → PRs
+
+Arcs cross two repos and depend on each other's **merges** (U0 needs N1 + N2 on `dev`; N5a needs unleashed merged and green), so each arc is delivered as soon as *its own* quality loop converges — never batched to the end. The rule that holds: no PR (draft included) opens before its arc's codex loop has converged.
+
+| Arc | Repo | Phases | Depends on | Delivery |
+|---|---|---|---|---|
+| A1 `refactor(aztec-runtime): own the fee-juice prediction helpers` | nulo | N1 | — | `gh pr create` |
+| A2 `feat(publish): stage and publish the three shared packages with provenance` | nulo | N2 (+R evidence in the body) | — | `gh pr create` |
+| A3 `chore(landing): deploy as a workers static-assets site` | nulo | N3 | — | `gh pr create` |
+| A4 `feat(infra): redirect worker for the tools hostnames` | nulo | N4 | — | `gh pr create` |
+| B0 initial import | unleashed | U0 | A1, A2 merged | direct push (empty repo) |
+| B1…B4 | unleashed | B1…B4 | N2-publish | `gh stack`; cross-arc pass before submit |
+| A5a `chore: remove the tools app, bridge packages and their ci` | nulo | N5a | A1, GATE-U, C1 | `gh stack` |
+| A5b `docs: point bridge docs, runbooks and plans at unleashed` | nulo | N5b | A5a | `gh stack` |
+
+Nulo PRs squash into `dev`; titles ≤ 93 chars. Merging — including `gh stack merge` — is always the owner's call.
+
+## Irreversible steps
+
+| # | Step | Precondition | Rollback |
+|---|---|---|---|
+| 1 | First public push of rewritten history | R + U0 audit approved by owner | delete the repo within minutes; none for disclosure |
+| 2 | npm publishes (name + version never reusable) | R passed on the exact tarballs; scope ownership confirmed | deprecate + supersede |
+| 3 | Custom domains off Pages (brief outage) | GATE-U; redirect Worker deployed | re-attach to Pages |
+| 4 | Pages projects + secrets deleted | C2 preconditions | none |
+| 5 | API token revoked | C2 done | mint a new one |
+
+Each is announced in chat and waits for an explicit owner go — never an AFK action.
+
+## Security & Adversarial Considerations
+
+- **Threat model**: a public repo + a bridge UI + a wallet that links to it. Attackers: npm scope squatters / publish takeover, a compromised PR trying to publish or deploy, subdomain takeover on `nulo.sh`, a hostile preview deployment posing as the bridge, history scrapers.
+- **npm**: scope ownership verified before any name appears in a public manifest. Placeholder-then-OIDC bootstrap → no code without provenance; "disallow tokens" per package; trusted publisher pinned to repo + workflow file + environment; the environment's required reviewer means a merged malicious PR still cannot publish; `id-token: write` is job-local. Published surface is three functions and one class, not the wallet's crypto toolbox. Provenance proves origin, not safety — the vector + seal/open tests on the staged bundle are the correctness gate, and R proves them against the real consumer.
+- **Supply chain (unleashed)**: 7-day min-age kept; excludes name three packages, never a wildcard; `npm audit signatures`; frozen lockfile; exact pins.
+- **Cloudflare token**: Account → Workers Scripts:Edit, Cloudflare Pages:Edit, Workers Builds Configuration:Edit; Zone `nulo.sh` → DNS:Edit, Workers Routes:Edit. TTL ≤ 14 days, shell env only, never on disk, in a repo or in CI; revoked in C2. Residual: Workers Scripts:Edit is account-wide.
+- **Dangling DNS**: domain detach and re-attach in one sitting; Pages projects deleted only when no record points at `*.pages.dev`.
+- **Redirect**: exact-host map, hardcoded targets, nothing user-controlled reaches `Location`, 302 + `no-store`, unknown host 404, tested against open-redirect inputs. A `workers.dev` name is only as safe as the Cloudflare account — the real domain should replace it soon.
+- **Host allowlist / previews**: exact-match and fail-closed; alias computed by us; per-version URLs rejected; testnet only; mainnet `preview_urls: false`. CSP / COOP / COEP asserted against the deployed Workers in GATE-U.
+- **CI (unleashed)**: `contents: read`, `pull_request` only, no secrets; exact-state aggregators (an empty filter output fails, fixing the inherited gap); halmos cannot pass vacuously (`--ast --force` + proof names carried).
+- **Custody**: KDF labels, salts, manifests, addresses, amounts move byte-for-byte; deploy intents are already-public data; historical intent SHAs are explained by the committed commit-map; before any live operation from unleashed, `verify:deployments` and the L1 verification script are re-run from the new repo. The audit confirms no `.env` or keystore ever entered history.
+- **Smart contracts**: no source changes; all four proof/test layers green from unleashed (R, then B2) before nulo's copy is deleted, so coverage never lapses.
+- **Input validation**: the only new parser is branch → alias (bounded charset + length, tested against hostile names).
+
+## Assumptions
+
+**Facts** (verified this session)
+- The extension imports `@nulo/bridge-core/fee-juice` from 4 production files + 1 mock; `fee-juice.ts` imports only `@aztec/*` — `apps/extension/package.json:62`, `packages/bridge-core/src/fee-juice.ts:13-18`.
+- `deriveNuloAccountKeys` needs nothing from wallet-core; `EncryptionKey` is a runtime import in bridge-core and needs only `bytesToHex` from wallet-core — `packages/wallet-crypto/src/account-derivation.ts:24-28`, `encryption-key.ts:1`, `packages/bridge-core/src/recovery-crypto.ts:1`.
+- The three shared packages are `private` and raw-`.ts`; `wallet-crypto` and `wallet-sdk-schema-patch` carry exact `@aztec/*` plain deps, `resolve-asset` has no dependencies; their tsconfigs set `noEmit` (`packages/wallet-crypto/tsconfig.json:7`); no publish pipeline exists.
+- Nothing in nulo asserts the wallet's PrivateFPC derivation: `apps/extension/src/wallet/services/fpc/service-create.test.ts:20-29` mocks it.
+- Bridge manifests expose token addresses as `tokens[].l2Token` (`apps/tools/public/testnet-bridge.json:57`).
+- `verify-live-run.ts:89` defaults `VERSION` to the empty string.
+- `test:release` = `bun test scripts/release/`; `typecheck:all` / `test:all` filter on `@nulo/*` — root `package.json:32-34`.
+- `setup-aztec` is used by `_extension-network-e2e.yml` and `pr-extension-network-e2e.yml`; `setup-playwright`'s only `uses:` is `_tools-e2e.yml`; `aggregate-status.sh`'s only caller is `pr-tools-e2e.yml`.
+- Noir crates pin aztec-packages `v5.0.1` (`contracts/bridge/aztec/keystone/Nargo.toml:8`); the JS line is `5.2.0`; halmos needs `forge build --ast --force` (`_bridge-contracts.yml:83-86`).
+- Rename ancestry: `packages/faucet → apps/faucet → apps/tools`; `packages/bridge-{evm,aztec} → contracts/bridge` (`git log --diff-filter=R`).
+- tools reads `--nulo-*` tokens in 33 files and never sets them; tools has no router.
+- `scripts/release/chain-guard.ts:15` imports tools source; `manifest.test.ts:66` and `layout-identity.test.ts:14` read directories that will be deleted.
+- `bridge-contracts-status` / `tools-e2e-status` are in neither branch's required set. Default branch is `dev`, so `workflow_dispatch` workflows run `dev`'s definition.
+- The complexity manifest holds 27 acceptances (3 leave); `CLAUDE.md:107` says 35.
+- The tools journal is origin-bound `localStorage` (`useBridgeJournal.ts:281`); the live bridge is on `testnet.tools.nulo.sh` (`network-targets.ts:88`).
+- `main` still carries `contracts/bridge`, `packages/bridge-core`, `apps/faucet`.
+- Cloudflare: `_headers` on static assets, `WORKERS_CI_*` vars, deploy hooks, preview host shape, `preview_urls` default (docs, fetched this session).
+- Owner-stated: the owner is the sole user of both products.
+
+**Inferences** (each has a verification point)
+- Workers Builds image honours `BUN_VERSION` (N3 / B3 first build).
+- `wrangler versions upload --preview-alias` exists in the pinned wrangler; the alias host is reachable (B3).
+- npm requires an existing package before a trusted publisher can be attached; npm CLI ≥ 11.5.1 for OIDC (N2-publish).
+- `bun build` + `tsc --emitDeclarationOnly` emit d.ts with no `@nulo/wallet-core` leak (N2 test; fallback: a d.ts bundler).
+- `secrets.A || secrets.B` evaluates as a fallback in a workflow `env:` (N3; actionlint + a dispatch).
+- Pages production branches (testnet `dev`, mainnet/landing `main`) — C1 reads the project config before pausing.
+- The ancestor path list is complete (`--analyze` in R).
+
+**Asks** (resolved at the approval gate)
+1. Do you own the `@nulo` org on npm? If not: claim it, or use the `@alejoamiras/nulo-*` fallback.
+2. Your account's `workers.dev` subdomain (it becomes part of the baked production hosts).
+3. Neutral grey + single-accent placeholder palette acceptable?
+4. unleashed stays public during the import (the audit precedes the push either way)?
+
+## Decision ledger
+
+| Decision | Source | Rejected alternative → why |
+|---|---|---|
+| Publish 3 packages via a staged manifest; wallet-core not published | fable (surface), driver + codex (peer deps, tarball tests) | driver's `@nulo/bytes` leaf → a new workspace package + layer rule for one helper. codex's restricted `@nulo/wallet-core ./utils` publish → two surfaces under one name (codex withdrew it). `exports` custom conditions → consumer-side config everywhere. |
+| Offline rehearsal (R) before publish and before the public push | driver | publish-then-discover → the two irreversible acts would be the first real test of the bytes and the recipe. |
+| Versioned extraction recipe under `tools/` | driver | ad-hoc commands → the real run would differ from the rehearsal. |
+| Manual `workflow_dispatch` publish, lockstep version | driver | tag trigger / release-please component → the v4 abort bug already taxes every release. |
+| Placeholder `0.0.0` bootstrap | fable | manual first real publish → one version without provenance. |
+| Dir `packages/design`, name `@unleashed/design`, fresh commit | codex + fable | `packages/ui` → breaks two hardcoded tests and biome overrides. Importing design history → brand history in a de-branded repo. |
+| `--nulo-*` stay canonical, neutral values | codex (contradiction round) | driver's prefix sed → touches 33 frontend files. fable's `--ui-*` + per-block aliases + guard test → machinery for a rename the real brand will redo anyway. |
+| Fonts unchanged | driver (revised) | dropping Space Grotesk → layout-shift risk in e2e for a placeholder. |
+| Branch-alias-only previews, alias computed by us | codex + fable | per-version host derivation → the version id does not exist at build time. |
+| Redirect as a tracked code Worker | fable | zone Redirect Rules → untracked dashboard state, extra token scope. `_redirects` → cannot branch on host. |
+| Pause Pages builds + move domains BEFORE the removal PR | fable | removal-then-cut-over → the `dev`-tracking Pages build breaks at merge. |
+| Landing hook cut-over by secret presence (`LANDING \|\| PAGES`) | driver, from codex + opus findings | repoint in N3 → `refresh-landing.yml` (runs `dev`'s definition) would target an unbuilt Worker; repoint only at P1 → needs a second promote. |
+| Landing keeps a deploy hook | all | build-on-push only → downloads 404 between push and asset attach. CF token in Actions → violates the owner's rule. |
+| Remove the tools half of `verify-live` and `chain-guard` | all | inline the constants → compares against a release sha the other repo never carries. |
+| Per-arc delivery | codex (contradiction round) | all-PRs-at-the-end → deadlock: U0 needs N1/N2 merged, N5a needs unleashed merged. |
+| `setup-aztec` copied, `setup-playwright` moved | driver + opus | moving both → breaks nulo's extension network e2e. |
+| No recovery programme for the origin change | owner fact | codex's user-inventory gate → no other users. One owner checklist line, covering both origins. |
+| Historical intents: commit-map as evidence, drift check untouched | codex (finding), driver (mitigation) | rewriting intent SHAs → falsifies custody records. |
+| Root config as a fresh commit | driver + fable | codex's root-files-in-filter → drags every unrelated nulo commit. |
+| No plan-folder hygiene migration | driver | out of scope: nulo's CLAUDE.md treats audit transcripts as committed artifacts; this plan keeps its own scratch untracked with a plan-local `.gitignore`. |
+
+**Unresolved disagreements**: none blocking. All three planners independently judged forking cheaper than publishing; the owner chose publishing twice, so the plan implements its least-bad form. First scope cut if it bites: publish only `wallet-crypto`, vendor the two trivial packages.
+
+## Enablement checklist
+
+| Need | Who | When |
+|---|---|---|
+| `gh auth refresh -h github.com -s workflow` (token lacks `workflow`; required to push `.github/workflows/*`) | owner | before U0 |
+| `git-filter-repo`, `gitleaks`, `trufflehog`, user-local | agent | before R |
+| `halmos` (pipx, version from `contracts/bridge/evm/halmos.version`); Noir toolchain for tag `v5.0.1` and the `5.2.0` sandbox line, resolved the way `setup-aztec` does | agent | before R |
+| `wrangler` as a pinned devDependency (no global install) | agent | N3 / N4 / B3 |
+| npm: confirm scope, 2FA, 3 placeholder publishes, trusted publisher ×3, "disallow tokens" | owner | after A2 merges + R passes |
+| GitHub environment `npm-publish` (required reviewer = owner) on nulo | agent via `gh api`, owner confirms | with A2 |
+| Cloudflare API token (scopes above, TTL ≤ 14 d) as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` in the agent shell | owner | before N3's post-merge check |
+| Cloudflare GitHub App on `nulo` + `unleashed`; 3 Workers connected to Workers Builds (root dir, build / deploy / non-prod commands from § 5, `BUN_VERSION`); **the auto-minted build token narrowed**, build branches restricted, fork-PR behaviour checked with a throwaway fork, Access on testnet preview URLs; landing deploy hook created | owner (dashboard-only; the agent supplies the click-path and the verification commands) | N3 / B3 |
+| npm trusted-publisher mode (direct vs staged publication) chosen; environment `npm-publish` restricted to `dev`/`main` with the owner as sole reviewer (self-approval allowed) | owner | N2-publish |
+| Any bridge deployment in flight finished from nulo | owner | before the freeze (U0) |
+| unleashed settings via `gh api`: default branch, squash-only, rulesets, required checks, Actions `contents: read` | agent | after B2's checks exist |
+| Explicit go for each irreversible step | owner | at each |
+
+## Post-implementation
+
+`code_review` is `off`: `/code-review` is **not** run at any point.
+
+**Per arc**, after its pre-PR gates pass and before its PR opens:
+1. **Codex audit** — `/codex high` (GPT-6 Astra; `run-codex.sh <prompt> <cwd> high read-only`) with: the arc's diff; this plan.md + decision ledger; the arc map ("arc N of M; later arcs build X on it", so reserved seams are not flagged as dead code); the adversarial ask — *"What could go wrong? What would an attacker target? What are we trusting that we shouldn't? Where are the supply-chain / crypto / least-privilege weaknesses?"*; and both rules below, verbatim.
+2. **Fix loop** — verify each factual claim against the repo first (codex can misread code); apply accepted fixes; commit; log the round (consult + verdict, accepted and rejected with reasons) in `lessons/phase-N.md`; **resume the same codex session** (`resume-codex.sh`) with the fix diff. Repeat until a round yields no new material findings (rejected nitpicks are not churn). Still material after 3 rounds → stop and surface to the owner: a scope smell.
+3. **Deliver the arc** per the Delivery table; `gh pr checks --watch`; then run its *post-merge* gates once the owner merges.
+
+**Cross-arc passes** — a FRESH codex session over the net diff, asking for seams between arcs, duplication across arcs and drift from this plan, same loop: once in unleashed before B1–B4 are submitted; once in nulo before A5a/A5b are submitted (covering A1–A5 net).
+
+**No-over-engineering rule** (verbatim in every codex prompt): *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
+
+**Comment-quality rule** (verbatim in every codex prompt): *"Audit the comments for value per character. Flag any comment that narrates what the code visibly does, restates its line, references implementation plans / phases / reviews, or spends a paragraph where a sentence works — and flag places where a non-obvious invariant or constraint deserves a comment it doesn't have. Comments are permanent context every future reader, human or LLM, pays to re-read: they must be few, dense, and exact."*
+
+Dispositions for an autonomous run: never idle; a decision you would bring to the owner goes to `/codex high` and the verdict is logged — except the five irreversible steps, merges, publishes and anything beyond this plan's scope, which always wait for the owner. While blocked on the owner, work any arc whose dependencies are met (the graph has four independent starts). Same step failing 5 times → reassess with codex. Commits are signed on this host (`SSH_AUTH_SOCK= git commit …` if the agent hangs).
+
+**Closing**: `## Outcome` block under the front matter (status, PRs, what was dropped, seeds retired); generalizable lessons and open follow-ups promoted per the repo's conventions; `index.md` line updated. **Post-implementation hardening**: recommend `/harden security` on unleashed before its mainnet bridge goes live — not scheduled by this plan.
+
+## Audit verdicts
+
+**Contradiction check — codex (resumed session): changes required → all 8 findings adopted.** Per-arc delivery (was a deadlock); N2 dry-run moved post-merge; contract gates carry `forge build --ast --force`, proof names and the separate `v5.0.1` Noir toolchain; `test:release` extended to `scripts/publish/`, unleashed filters renamed; landing hook cut over by secret presence; owner checklist covers both origins; N5a/N5b residue gates split; `--nulo-*` kept canonical (reverses the ledger's earlier alias design).
+**Contradiction check — same-family leg (opus; the fable leg hit the account spend limit): sound with three false-green gates → all 10 findings adopted.** Unleashed fast layers matched zero workspaces; `stage.test.ts` never ran; P1's `verify-live` gate was unreachable as ordered; B3's production checks moved into GATE-U; N1 now runs `test:all`; N1's grep criterion corrected to empty; N4 phase added with the workspace's mandatory scripts; `aztec.ts:608` cite added; plain `baseline:complexity` instead of `--adopt`; C2 wording. No ledger rejection was found wrongly made.
+
+**Audit — codex (resumed session): `reject` → 17 findings, 16 adopted, 1 adopted in part.** Adopted: the Workers Builds build token as a second, broader credential (narrowed, branch-restricted, fork behaviour verified, previews behind Access); publication bound to rehearsed bytes (approved digests checked *before* publish, build and publish jobs split, provenance *verified* not merely present); history audit over the final pushed history incl. commit messages, identities and the bootstrap commit, trufflehog without verification, one explicit ref; C1 reordered so the Worker never claims an occupied hostname, and the false "nothing user-controlled reaches `Location`" replaced by origin-pinned URL construction; historical intents immutable + a newly authorised intent before any live operation from unleashed, in-flight deployments finished before the freeze; § 8's invented FPC test replaced by a real wallet-side assertion in A1; `tokens[].l2Token`; `resolve-asset` has no Aztec deps; identity proven with `assertPackageIdentity` + a `WalletSchema` mutation check + a mismatched fixture, consumer keeps explicit `@aztec/*` deps; `tsconfig.publish.json` and NodeNext/Bundler type-check fixtures; source↔bundle crypto cross-compat + tamper rejection; `sideEffects` on emitted paths + production-bundle schema assertion; hashed `p-` preview alias; `pull-requests: read` on `changes` jobs; non-empty `VERSION` for the landing check; npm staged-vs-direct publication surfaced. **In part**: "R is not offline" — renamed to a *local* rehearsal with an explicit networked preparation step and the branch-merge input path; the claim that bare `e2e:tools` is deficient is rejected — unsharded is the complete suite, sharding is CI's parallelism.
+**Re-review — codex (same session): `reject` on 2 of 4 new findings → all 4 adopted.** The digest fallback excluded `package.json` (now: whole unpacked package, plus the archive digest recorded before publish); the landing config claimed `nulo.sh` while Pages still held it (now: route-free until L-cut, same ordering as C1); the build token must be chosen at connection time, not narrowed after; `packages/resolve-asset/src/index.test.ts` anchors on the deleted bridge-core workspace (re-anchored in N5a). Codex withdrew its sharding objection and confirmed the earlier blockers closed.
+**Audit — same-family fresh auditor: NOT RUN.** Both attempts (fable, then the opus fallback) were terminated by the account's session rate limit before producing findings. Recorded rather than substituted: a driver self-review is not an independent audit. To be re-run when the limit resets; its verdict is a precondition of the approval gate.
+
+_(final fresh-context codex pass: pending)_
+
+## Seeds
+
+ELI5 Artifact: https://claude.ai/artifact/81QyGrJksxuSgTgnff4Fas — source `implementations-plan/tools-extraction/eli5.html` (untracked; republish the same file to keep the URL).
+Draft seeds live in the ELI5 (`/loop 15m` recommended: the work spans days and repeatedly waits on the owner and on CI); finalized after approval.
