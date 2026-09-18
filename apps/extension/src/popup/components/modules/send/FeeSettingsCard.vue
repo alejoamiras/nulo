@@ -20,7 +20,7 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
 import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
-import { applyFpcEdits, recordOf, resolveSendSelection, rowForPick } from "./fee-privacy"
+import { applyFpcEdits, feePayerNotice, recordOf, resolveSendSelection, rowForPick } from "./fee-privacy"
 import { loadSendSelections, mutateSendSelections, readSendSlots, withSendSlot } from "./fee-send-selection"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
@@ -178,6 +178,20 @@ const effectiveMethod = computed(() => {
 	if (props.originPrivacy === null) return selectedMethod.value
 	return sendSelection.value.kind === "selected" ? sendSelection.value.method : undefined
 })
+/** Set exactly when this send would name the account as its fee payer while its origin is private —
+ *  derived from the method that actually pays, so a defaulted and a hand-picked Fee Juice read alike. */
+const payerNotice = computed(() => feePayerNotice(props.originPrivacy, props.destinationPrivacy, effectiveMethod.value))
+/** A private send is paid from private gas; every other card keeps the generic wording. */
+const nudgeCopy = computed(() =>
+	props.originPrivacy === "private"
+		? {
+				title: "You have no private gas yet",
+				body: "A private send pays its fee from private gas, so the fee contract is the payer instead of you. Bridge some to cover this send.",
+				link: "Get private gas",
+			}
+		: { title: "You have no fee juice yet", body: "Bridge some to cover the network fee.", link: "Get fee juice" },
+)
+
 /** What the dropdown trigger shows: the paying method, or the saved pick's row while loading. */
 const displayMethod = computed(() => effectiveMethod.value ?? sendSelection.value?.preview)
 
@@ -684,7 +698,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="[$style.wrapper, embedded && $style.embedded]">
+	<Flex direction="column" :class="[$style.wrapper, embedded && $style.embedded]" data-testid="fee-settings-card" :data-origin="originPrivacy">
 		<!-- Embedded fee override banner -->
 		<template v-if="isCustomMethod && !useOwnMethod">
 			<Flex align="center" justify="between" :class="$style.card">
@@ -748,12 +762,35 @@ onBeforeUnmount(() => {
 				:privateFeeJuiceFormatted="privateFeeJuiceFormatted"
 			/>
 
+			<!-- The fee payer is public: on a private-origin send, the account's own Fee Juice names the sender. -->
+			<Flex
+				v-if="payerNotice"
+				align="start"
+				gap="8"
+				:class="$style.detail_row"
+				data-testid="send-fee-privacy-notice"
+				:data-notice-shape="payerNotice.shape"
+			>
+				<Icon name="warning" size="14" :class="$style.payer_notice_icon" />
+				<Flex direction="column" gap="4" :style="{ flex: 1, minWidth: 0 }">
+					<Text size="12" weight="700" color="primary">{{ payerNotice.title }}</Text>
+					<Text size="11" weight="500" color="tertiary" height="140">{{ payerNotice.body }}</Text>
+					<a
+						:href="FEE_JUICE_BRIDGE_URL"
+						target="_blank"
+						rel="noopener noreferrer"
+						:class="[$style.get_fee_juice, $style.payer_notice_remedy]"
+						data-testid="send-fee-privacy-remedy"
+					>Get private gas</a>
+				</Flex>
+			</Flex>
+
 			<!-- Get-fee-juice nudge: the selected method has no fee juice to pay with. -->
 			<Flex v-if="feeJuiceMissing" align="center" gap="8" :class="$style.detail_row" data-testid="send-fee-nudge">
 				<Icon name="warning" size="14" color="secondary" />
 				<Flex direction="column" gap="2" :style="{ flex: 1, minWidth: 0 }">
-					<Text size="12" weight="600" color="primary">You have no fee juice yet</Text>
-					<Text size="11" weight="500" color="tertiary">Bridge some to cover the network fee.</Text>
+					<Text size="12" weight="600" color="primary">{{ nudgeCopy.title }}</Text>
+					<Text size="11" weight="500" color="tertiary">{{ nudgeCopy.body }}</Text>
 				</Flex>
 				<a
 					:href="FEE_JUICE_BRIDGE_URL"
@@ -761,7 +798,7 @@ onBeforeUnmount(() => {
 					rel="noopener noreferrer"
 					:class="$style.get_fee_juice"
 					data-testid="send-fee-get-juice"
-				>Get fee juice</a>
+				>{{ nudgeCopy.link }}</a>
 			</Flex>
 
 			<FeeCostReadout
@@ -825,6 +862,19 @@ onBeforeUnmount(() => {
 	&:hover {
 		text-decoration: underline;
 	}
+}
+
+.payer_notice_icon {
+	flex: none;
+	color: var(--orange);
+}
+
+.payer_notice_remedy {
+	align-self: flex-start;
+	margin-top: 2px;
+	color: var(--orange);
+	text-decoration: underline;
+	text-underline-offset: 4px;
 }
 
 </style>
