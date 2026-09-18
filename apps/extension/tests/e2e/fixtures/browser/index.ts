@@ -73,6 +73,13 @@ function selectDriver(): BrowserDriver {
 export const driver = selectDriver()
 export const BROWSER: BrowserKind = driver.kind
 export const EXTENSION_SCHEME = driver.scheme
+export const isFirefox = BROWSER === "firefox"
+
+/** Why a whole file cannot run on Firefox. A capability the browser lacks, never a failing test. */
+export const CHROME_ONLY = {
+	backgroundKill: "kills the MV3 service worker over CDP; Firefox exposes no background context",
+	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
+} as const
 
 export const extensionUrl = (extensionId: string, path: string): string => driver.extensionUrl(extensionId, path)
 export const launchBrowser = (opts: LaunchOptions): Promise<LaunchedBrowser> => driver.launch(opts)

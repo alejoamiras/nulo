@@ -10,9 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // after it — the workers would otherwise reject it only once the suite was already underway.
 const BROWSER = resolveBrowserKind()
 // `EXTENSION_PATH` env var lets the release workflow point the smoke suite at a
-// freshly-unzipped artifact instead of the repo's `dist/chrome/`. Falls back to
+// freshly-unzipped artifact instead of the repo's `dist/<browser>/`. Falls back to
 // the local build for ordinary `bun run test:e2e` runs.
-const EXTENSION_PATH = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, "../../dist/chrome")
+const EXTENSION_PATH = process.env.EXTENSION_PATH
+	? path.resolve(process.env.EXTENSION_PATH)
+	: path.resolve(__dirname, "../../dist", BROWSER)
 
 /**
  * Kill orphan Chrome test processes started by THIS extension build only.

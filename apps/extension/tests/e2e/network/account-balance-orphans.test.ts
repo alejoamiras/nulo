@@ -26,7 +26,16 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
+import {
+	clickByTestId,
+	launchExtension,
+	openPopup,
+	registerProfile,
+	replaceInputValue,
+	test,
+	waitForHash,
+	pickFileByTestId,
+} from "../fixtures/extension"
 import { navigateByHash, reopenAndRecoverAfterImport } from "../fixtures/helpers"
 import { confirmImport, exportAccountBody, previewImport } from "../helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
@@ -159,11 +168,7 @@ test.skipIf(!hasConfig)(
 			await page2.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 300 })
 			await page2.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 15_000 })
 			await clickByTestId(page2, "import-option-full-backup")
-			const [chooser] = await Promise.all([
-				page2.waitForFileChooser({ timeout: 10_000 }),
-				clickByTestId(page2, "import-full-backup-pick-file"),
-			])
-			await chooser.accept([filePath])
+			await pickFileByTestId(page2, "import-full-backup-pick-file", filePath)
 			await page2.waitForSelector('[data-testid="import-full-backup-password-input"] input', { visible: true, timeout: 30_000 })
 			await replaceInputValue(page2, '[data-testid="import-full-backup-password-input"]', TEST_PASSWORD)
 			await replaceInputValue(page2, '[data-testid="import-full-backup-password-confirm-input"]', TEST_PASSWORD)

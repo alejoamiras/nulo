@@ -19,7 +19,7 @@ import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "../fixtures/constants"
-import { clickByTestId, replaceInputValue } from "../fixtures/extension"
+import { clickByTestId, replaceInputValue, pickFileByTestId } from "../fixtures/extension"
 import { closeStuckPopup, navigateByHash, waitForToast } from "../fixtures/helpers"
 
 /** Post-unlock/bootstrap routing can land a LATE `router.push("/popup/general")` that yanks a
@@ -190,8 +190,7 @@ export async function previewImport(page: Page, body: string, filePassword?: str
 	const filePath = join(dir, "account-import.json")
 	writeFileSync(filePath, body)
 	try {
-		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-account-pick-file")])
-		await chooser.accept([filePath])
+		await pickFileByTestId(page, "import-account-pick-file", filePath)
 		// The row's description reflects the picked file once the page has read it.
 		await page.waitForFunction(
 			() => (document.querySelector('[data-testid="import-account-pick-file"]')?.textContent ?? "").includes("account-import.json"),

@@ -17,7 +17,16 @@
 import { rmSync } from "node:fs"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import {
+	clickByTestId,
+	launchExtension,
+	openPopup,
+	registerProfile,
+	replaceInputValue,
+	test,
+	waitForHash,
+	pickFileByTestId,
+} from "./fixtures/extension"
 import { acceptConfirmPopup, closeStuckPopup, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
 import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
@@ -85,11 +94,7 @@ test("a full backup carries an imported account; restoring it (dup-confirmed) re
 		await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 300 })
 		await page.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 15_000 })
 		await clickByTestId(page, "import-option-full-backup")
-		const [chooser] = await Promise.all([
-			page.waitForFileChooser({ timeout: 10_000 }),
-			clickByTestId(page, "import-full-backup-pick-file"),
-		])
-		await chooser.accept([filePath])
+		await pickFileByTestId(page, "import-full-backup-pick-file", filePath)
 		await page.waitForSelector('[data-testid="import-full-backup-password-input"] input', { visible: true, timeout: 30_000 })
 		await replaceInputValue(page, '[data-testid="import-full-backup-password-input"]', RESTORE_PASSWORD)
 		await replaceInputValue(page, '[data-testid="import-full-backup-password-confirm-input"]', RESTORE_PASSWORD)

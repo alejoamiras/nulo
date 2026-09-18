@@ -1,4 +1,6 @@
 import type { Browser, CDPSession, Page, Target } from "puppeteer"
+import { isFirefox } from "./browser"
+import { classicSessionFor } from "./browser/firefox"
 import { clickByTestId, replaceInputValue, waitForHash } from "./extension"
 
 /**
@@ -89,14 +91,6 @@ const VIRTUAL_AUTH_OPTIONS = {
 }
 
 export interface PasskeyAuthSetup {
-	/** The anchor session that owns the persistent virtual authenticator. */
-	readonly anchorSession: CDPSession
-	/** AuthenticatorId of the long-lived authenticator on the anchor session.
-	 *  May be undefined if Chromium rejects the BrowserContext-scope path. */
-	readonly anchorAuthenticatorId: string | undefined
-	/** Per-popup CDP sessions, keyed by target URL. Useful for inspection
-	 *  / debugging; not required by tests. */
-	readonly perPopupSessions: ReadonlyMap<string, CDPSession>
 	/** Detach listeners and best-effort remove every authenticator we
 	 *  created. Auto-called by the `passkeyAuth` fixture in `extension.ts`. */
 	cleanup(): Promise<void>
@@ -109,7 +103,51 @@ export interface PasskeyAuthSetup {
  *                    keeping the credential alive while subsequent passkey
  *                    popups (register / unlock) come and go.
  */
-export async function setupPasskeyVirtualAuth(browser: Browser, anchorPage: Page): Promise<PasskeyAuthSetup> {
+export function setupPasskeyVirtualAuth(browser: Browser, anchorPage: Page): Promise<PasskeyAuthSetup> {
+	return isFirefox ? setupClassicVirtualAuth(browser) : setupCdpVirtualAuth(browser, anchorPage)
+}
+
+/**
+ * BiDi has no WebAuthn module, so Firefox's authenticator is added over the classic channel. It is
+ * scoped to the session rather than to a frame tree, so one serves every window and — unlike
+ * Chrome's — a credential outlives the window that created it.
+ */
+async function setupClassicVirtualAuth(browser: Browser): Promise<PasskeyAuthSetup> {
+	const session = classicSessionFor(browser)
+	const authenticatorId = await session.addVirtualAuthenticator({
+		protocol: "ctap2_1",
+		transport: VIRTUAL_AUTH_OPTIONS.transport,
+		hasResidentKey: VIRTUAL_AUTH_OPTIONS.hasResidentKey,
+		hasUserVerification: VIRTUAL_AUTH_OPTIONS.hasUserVerification,
+		isUserVerified: VIRTUAL_AUTH_OPTIONS.isUserVerified,
+		extensions: ["prf"],
+	})
+	return {
+		async cleanup() {
+			await session.removeVirtualAuthenticator(authenticatorId).catch(() => {})
+		},
+	}
+}
+
+/**
+ * Leave the next ceremony pending, so a test can cancel it. On Chrome removing the authenticator
+ * does that: the request waits for a platform authenticator that never comes. Firefox answers a
+ * request it has no authenticator for at once, and nothing in WebDriver holds one open, so there
+ * the page's own `get` is replaced by one that settles only when the caller aborts it — which is
+ * the path a cancel takes.
+ */
+export async function stallNextPasskeyCeremony(page: Page, auth: PasskeyAuthSetup): Promise<void> {
+	await auth.cleanup()
+	if (!isFirefox) return
+	await page.evaluate(() => {
+		navigator.credentials.get = (options) =>
+			new Promise((_, reject) => {
+				options?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")))
+			})
+	})
+}
+
+async function setupCdpVirtualAuth(browser: Browser, anchorPage: Page): Promise<PasskeyAuthSetup> {
 	const anchorSession = await anchorPage.createCDPSession()
 	let anchorAuthenticatorId: string | undefined
 
@@ -157,9 +195,6 @@ export async function setupPasskeyVirtualAuth(browser: Browser, anchorPage: Page
 	browser.on("targetcreated", onTarget)
 
 	return {
-		anchorSession,
-		anchorAuthenticatorId,
-		perPopupSessions,
 		async cleanup() {
 			browser.off("targetcreated", onTarget)
 

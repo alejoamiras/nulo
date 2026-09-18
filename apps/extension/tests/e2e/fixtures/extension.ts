@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
-import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
+import { TimeoutError, type Browser, type Page, type ConsoleMessage, type ElementHandle } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { discoverExtensionId, extensionUrl, gotoExtensionPage, isTargetGone, launchBrowser, openScratchPage } from "./browser"
+import { discoverExtensionId, extensionUrl, gotoExtensionPage, isFirefox, isTargetGone, launchBrowser, openScratchPage } from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -1381,6 +1381,10 @@ export async function clickSelector(page: Page, selector: string, timeout = 10_0
  *  the right choice for popup chains; matches the same pattern in
  *  `replaceInputValue`. */
 export async function clickByTestId(page: Page, testId: string, timeout = 10_000): Promise<void> {
+	// A person can only click a page they are looking at; this click is scripted and says nothing
+	// about focus. Firefox hosts the PXE in a real window, which headless lets take the foreground,
+	// and it refuses WebAuthn outright from a tab that is not the active one.
+	if (isFirefox) await page.bringToFront().catch(() => {})
 	try {
 		await page.waitForFunction(
 			(id: string) => {
@@ -1414,6 +1418,29 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 		// target-detach errors. Re-raise everything else.
 		if (!isTargetDetachError(err)) throw err
 	}
+}
+
+/**
+ * Click the control that opens a file picker and answer it with `filePath`.
+ *
+ * The click is programmatic, and only Chrome treats an evaluated script as a user gesture: Firefox
+ * refuses to open a picker without one, so no chooser event ever arrives there. The wallet appends
+ * its `<input type="file">` to the body before asking for the picker and removes it on `change`,
+ * so on Firefox the file goes straight into that pending input.
+ */
+export async function pickFileByTestId(page: Page, testId: string, filePath: string): Promise<void> {
+	if (!isFirefox) {
+		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, testId)])
+		await chooser.accept([filePath])
+		return
+	}
+	await clickByTestId(page, testId)
+	const pending = 'body > input[type="file"]'
+	// This fixture's `waitForSelector` waits without returning the handle.
+	await page.waitForSelector(pending, { timeout: 10_000 })
+	const input = await page.$(pending)
+	if (!input) throw new Error(`pickFileByTestId: "${testId}" opened no file input`)
+	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
 }
 
 function isTargetDetachError(err: unknown): boolean {
