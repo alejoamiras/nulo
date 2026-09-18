@@ -20,17 +20,36 @@ on:
         required: false
         type: string
         default: ""
+      version_suffix:
+        description: |
+          If set (and version_override is not), append `-<suffix>` to the checked-in version
+          before building, e.g. `pr.612` → `0.27.0-pr.612`. The manifest keeps the 4-int
+          `version` Chrome requires and shows the full string as `version_name`, so a preview
+          build is distinguishable from a dev build in chrome://extensions.
+        required: false
+        type: string
+        default: ""
       upload_artifacts:
         description: Upload dist/ as a workflow artifact (for downstream smoke / release).
         required: false
         type: boolean
         default: false
+    outputs:
+      chrome_artifact_url:
+        description: Download URL of the uploaded Chrome build (empty when not uploaded).
+        value: ${{ jobs.build.outputs.chrome_artifact_url }}
+      firefox_artifact_url:
+        description: Download URL of the uploaded Firefox build (empty when not uploaded).
+        value: ${{ jobs.build.outputs.firefox_artifact_url }}
 
 jobs:
   build:
     name: vite build (${{ inputs.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      chrome_artifact_url: ${{ steps.upload-chrome.outputs.artifact-url }}
+      firefox_artifact_url: ${{ steps.upload-firefox.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,16 +58,17 @@ jobs:
       - uses: ./.github/actions/setup-bun
 
       - name: Patch extension version
-        if: inputs.version_override != ''
+        if: inputs.version_override != '' || inputs.version_suffix != ''
         env:
           OVERRIDE: ${{ inputs.version_override }}
+          SUFFIX: ${{ inputs.version_suffix }}
         run: |
           bun -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('apps/extension/package.json', 'utf8'));
-            p.version = process.env.OVERRIDE;
+            p.version = process.env.OVERRIDE || p.version + '-' + process.env.SUFFIX;
             fs.writeFileSync('apps/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
-            console.log('patched extension version to', process.env.OVERRIDE);
+            console.log('patched extension version to', p.version);
           "
 
       # Vite bakes any VITE_* env into the bundle, so fail FAST if one of these
@@ -119,6 +139,7 @@ jobs:
           exit "$fail"
 
       - name: Upload Chrome build
+        id: upload-chrome
         if: inputs.upload_artifacts && (inputs.target == 'chrome' || inputs.target == 'both')
         uses: actions/upload-artifact@v7
         with:
@@ -128,6 +149,7 @@ jobs:
           retention-days: 7
 
       - name: Upload Firefox build
+        id: upload-firefox
         if: inputs.upload_artifacts && (inputs.target == 'firefox' || inputs.target == 'both')
         uses: actions/upload-artifact@v7
         with:
