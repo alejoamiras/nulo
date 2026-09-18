@@ -76,24 +76,32 @@ export function readStartTime(pid: number): string | undefined {
 export function newProfileDir(marker: string): string {
 	mkdirSync(PROFILE_ROOT, { recursive: true })
 	const dir = mkdtempSync(path.join(PROFILE_ROOT, PROFILE_PREFIX))
-	writeFileSync(path.join(dir, PROFILE_MARKER_FILE), marker, "utf8")
+	try {
+		writeFileSync(path.join(dir, PROFILE_MARKER_FILE), marker, "utf8")
+	} catch (err) {
+		// Unstamped, no record could ever claim it, so nothing later would remove it.
+		rmSync(dir, { recursive: true, force: true })
+		throw err
+	}
 	return dir
 }
 
 /** Every live process carrying the marker. Another user's environ is unreadable, and skipped:
  *  a process we cannot read is not one we started. */
 export function ownedProcesses(marker: string): number[] {
-	const entry = `${LAUNCH_ENV}=${marker}`
-	const owned: number[] = []
-	for (const name of readdirSync("/proc")) {
-		if (!/^\d+$/.test(name)) continue
-		try {
-			if (readFileSync(`/proc/${name}/environ`, "utf8").split("\0").includes(entry)) owned.push(Number(name))
-		} catch {
-			// Exited between the listing and the read, or not ours to read.
-		}
+	return readdirSync("/proc")
+		.filter((name) => /^\d+$/.test(name))
+		.map(Number)
+		.filter((pid) => carriesMarker(pid, marker))
+}
+
+function carriesMarker(pid: number, marker: string): boolean {
+	try {
+		return readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`${LAUNCH_ENV}=${marker}`)
+	} catch {
+		// Exited since it was listed, or not ours to read.
+		return false
 	}
-	return owned
 }
 
 export const ownsProcess = (record: LaunchOwnership): boolean => ownedProcesses(record.marker).length > 0
@@ -215,6 +223,10 @@ export async function reapOrphanLaunches(): Promise<string[]> {
 
 function signalOwned(record: LaunchOwnership, signal: NodeJS.Signals): void {
 	for (const pid of ownedProcesses(record.marker)) {
+		// A whole /proc scan separates finding this pid from signalling it, long enough for it to
+		// exit and be reissued. Asking again leaves one read between the check and the signal, which
+		// is as narrow as it gets without a pidfd — and the runtime exposes none.
+		if (!carriesMarker(pid, record.marker)) continue
 		try {
 			process.kill(pid, signal)
 		} catch {
