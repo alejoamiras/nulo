@@ -125,13 +125,13 @@ Fast layers (`bun run lint`, `bun run typecheck`) run after every meaningful ste
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/manifest.test.ts && bun run --cwd apps/extension build:firefox`, then `bunx web-ext@<exact version, ≥7 days old, recorded in lessons> lint --source-dir apps/extension/dist/firefox` reports 0 errors. Layers: lint, typecheck, unit, build.
 
-### Phase 3 — Browser seam, Chrome only
+### Phase 3 — Browser seam, Chrome only ✓
 
 `fixtures/browser/{index,chrome}.ts`; `extensionUrl()`; `ctx.close()` adopted at all 36 sites; the `EXTENSION_PATH` seam in network `global-setup.ts`. No Firefox code, no finder changes. A new static guard at `apps/extension/scripts/e2e/browser-seam.test.ts` — under `scripts/**/*.test.ts`, which the unit config includes; `tests/e2e/**` is excluded from it and a test placed there would never run — fails if an executable `chrome-extension://` literal or `browser.close()` call appears under `tests/e2e/` outside `fixtures/browser/chrome.ts`, skipping comments, itself, and the one named standalone tool.
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run test`; local `bun run test:e2e` (full Chrome smoke) exits 0; then push the branch and run the **complete Chrome CI topology on it**: `gh workflow run pr-extension-smoke-e2e.yml --ref <branch>` and `gh workflow run pr-extension-network-e2e.yml --ref <branch>` — both runs' `status` jobs conclude `success` (network CI runs `retry: 0` across all five shards, the heavy lanes and the canaries; smoke keeps its configured two retries). The acceptance is **bound to the tested SHA**: any later commit on this arc invalidates it and the two dispatches are re-run before the arc's loop is declared converged. These are genuine Chrome runs of the required suite, so the check-runs they emit on that SHA are earned, not borrowed. Layers: lint, typecheck, unit, smoke e2e, full network e2e on CI.
 
-### Phase 4 — Firefox driver + feasibility probes (kill criteria)
+### Phase 4 — Firefox driver + feasibility probes (kill criteria) ✓
 
 `firefox.ts`, `webdriver-classic.ts`, `bidi-attach.ts`, `ownership.ts`, reap pattern, `agent.sh` browser plumbing. Probes live in `tests/e2e/probes/` with their own `vitest.e2e.probes.config.ts` so no Chrome shard glob picks them up; they are deleted at the end of Phase 6.
 
