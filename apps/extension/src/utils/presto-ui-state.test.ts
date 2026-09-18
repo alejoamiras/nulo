@@ -1,6 +1,14 @@
 import type { PrestoStatus } from "@alejoamiras/presto-core"
 import { describe, expect, test } from "vitest"
-import { copyFor, detailRowsFor, hasReachedPresto, isPitchKind, rowDescriptionFor, uiStateFromStatus } from "./presto-ui-state"
+import {
+	copyFor,
+	detailRowsFor,
+	hasReachedPresto,
+	isPitchKind,
+	type PrestoUiState,
+	rowDescriptionFor,
+	uiStateFromStatus,
+} from "./presto-ui-state"
 
 const available: PrestoStatus = {
 	available: true,
@@ -215,10 +223,10 @@ describe("state helpers", () => {
 	})
 
 	test("only an answer from Presto counts as reached: offline cannot tell a granted permission from a dismissed prompt", () => {
-		const reached = (kind: "available" | "downloading" | "version-mismatch" | "offline" | "permission-blocked" | "error") =>
-			hasReachedPresto({ kind, info: {} })
-		expect(["available", "downloading", "version-mismatch"].every((k) => reached(k as "available"))).toBe(true)
-		expect(["offline", "permission-blocked", "error"].some((k) => reached(k as "offline"))).toBe(false)
+		const reached = (kind: Exclude<PrestoUiState["kind"], "idle" | "detecting">) => hasReachedPresto({ kind, info: {} })
+		expect((["available", "downloading", "version-mismatch", "secure-connection-unavailable"] as const).every(reached)).toBe(true)
+		// `error` is also what a probe that threw looks like, so it proves nothing.
+		expect((["offline", "permission-blocked", "error"] as const).some(reached)).toBe(false)
 		expect(hasReachedPresto({ kind: "idle" })).toBe(false)
 	})
 })

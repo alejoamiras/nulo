@@ -1,7 +1,11 @@
 /**
- * Presto detection that never raises the browser's local-network prompt unasked. A probe runs on
- * its own only once an earlier, user-asked probe reached Presto from this browser (the
- * `prestoReached` config flag); until then the page rests in `idle` and probes from `check()`.
+ * Presto detection that does not probe unasked until the browser is known to allow it. A probe
+ * can raise the browser's local-network prompt, so one runs on its own only once an earlier,
+ * user-asked probe reached Presto from this browser (the `prestoReached` config flag); until then
+ * the page rests in `idle` and probes from `check()`.
+ *
+ * The flag records a past answer, not the live permission: a browser that grants loopback access
+ * for one visit only can prompt again on a later unasked probe.
  *
  * The parent owns the config client's connection, calls `start()` once (it never throws), and
  * calls `dispose()`.
@@ -34,7 +38,7 @@ export function usePrestoCheck(config: PrestoCheckConfig, options?: { client?: P
 		if (reached) await presto.detect()
 	}
 
-	/** The user asked: probe, and remember it if Presto answered. */
+	/** The only probe a user's click stands behind, so the only one allowed to set the flag. */
 	async function check(): Promise<void> {
 		started.value = true
 		await presto.detect({ forceRefresh: true })

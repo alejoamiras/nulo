@@ -48,6 +48,15 @@ test("settings rests without probing; a check that reaches Presto is remembered,
 	}))
 	expect(state).toEqual({ retry: true, get: false })
 
+	// The card turns `available` before the flag's write lands, and the list reads the flag once.
+	await page.waitForFunction(
+		async () => {
+			// ValueStorage persists the config as one JSON string.
+			const raw = (await chrome.storage.local.get("nulo:config"))["nulo:config"]
+			return typeof raw === "string" && (JSON.parse(raw) as { prestoReached?: boolean }).prestoReached === true
+		},
+		{ timeout: 10_000 },
+	)
 	await backToSettingsList(page)
 	await page.waitForSelector(rowSelector("available"), { visible: true, timeout: 10_000 })
 

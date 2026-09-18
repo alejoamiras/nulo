@@ -111,12 +111,21 @@ export function isPitchKind(kind: PrestoUiState["kind"]): kind is ProbeKind {
 	return kind === "idle" || kind === "detecting" || kind === "offline"
 }
 
+/** `secure-connection-unavailable` qualifies: every diagnosis that keeps that kind parsed a health body. */
+const REACHED_KINDS: ReadonlySet<PrestoUiState["kind"]> = new Set([
+	"available",
+	"downloading",
+	"version-mismatch",
+	"secure-connection-unavailable",
+])
+
 /**
- * Whether a probe got through to Presto. That proves the browser's loopback permission is
- * granted, which no other outcome does: a dismissed prompt and an absent Presto both read `offline`.
+ * Whether a probe got an answer from Presto, which shows the browser let the request through
+ * when it ran. No other outcome shows that: a dismissed prompt and an absent Presto both read
+ * `offline`, and `error` is also what a probe that threw looks like.
  */
 export function hasReachedPresto(state: PrestoUiState): boolean {
-	return state.kind === "available" || state.kind === "downloading" || state.kind === "version-mismatch"
+	return REACHED_KINDS.has(state.kind)
 }
 
 /**

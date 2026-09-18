@@ -68,6 +68,10 @@ describe("usePrestoCheck", () => {
 	test.each([
 		["downloading", { ...available, needsDownload: true }],
 		["version-mismatch", { available: false, reason: "version-mismatch", nativeAztecVersion: "5.1.0", protocol: "https" }],
+		[
+			"an encrypted connection that needs fixing",
+			{ available: false, reason: "secure-connection-unavailable", diagnosis: "https-disabled" },
+		],
 	] as [string, PrestoStatus][])("check() remembers %s: Presto answered", async (_kind, status) => {
 		const config = fakeConfig()
 		await run(config, fakeClient(status)).check()
@@ -77,10 +81,9 @@ describe("usePrestoCheck", () => {
 	test.each([
 		["offline", offline],
 		["permission-blocked", { available: false, reason: "permission-blocked" }],
-		[
-			"an unreachable encrypted connection",
-			{ available: false, reason: "secure-connection-unavailable", diagnosis: "presto-reachable" },
-		],
+		// `unconfirmed` is what an absent Presto looks like under HTTPS-only: nothing answered.
+		["an unconfirmed connection", { available: false, reason: "secure-connection-unavailable", diagnosis: "unconfirmed" }],
+		["a probe error", { available: false, reason: "error", protocol: "https" }],
 	] as [string, PrestoStatus][])(
 		"check() does not remember %s: it cannot tell a granted permission from a dismissed prompt",
 		async (_kind, status) => {
