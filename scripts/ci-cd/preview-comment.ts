@@ -66,17 +66,49 @@ export function parseBuildResult(value: string | undefined): BuildResult {
 	return value === "success" || value === "failure" || value === "cancelled" ? value : "skipped"
 }
 
-async function findExistingComment(repo: string, prNumber: number): Promise<number | null> {
-	const out = await $`gh api ${`repos/${repo}/issues/${prNumber}/comments?per_page=100`} --paginate --jq ${".[] | select(.body | startswith(\"" + PREVIEW_COMMENT_MARKER + "\")) | .id"}`
-		.nothrow()
-		.quiet()
-	if (out.exitCode !== 0) throw new Error(`gh api comments failed: ${out.stderr.toString()}`)
-	const first = out.stdout.toString().trim().split("\n").find(Boolean)
-	return first ? Number(first) : null
+/** The login GitHub gives comments posted with the workflow token. */
+export const WORKFLOW_BOT_LOGIN = "github-actions[bot]"
+
+export interface IssueComment {
+	id: number
+	body: string
+	user: { login: string }
 }
 
-/** Create the comment or edit the existing one in place. */
-export async function upsertPreviewComment(repo: string, prNumber: number, body: string): Promise<"created" | "updated"> {
+/** The comment to edit: the marker alone is spoofable by any commenter, so the author must be the
+ *  workflow bot too — otherwise a planted marker would make the job try to edit a stranger's
+ *  comment (and fail, or worse, succeed for an admin token). */
+export function selectPreviewComment(comments: IssueComment[]): number | null {
+	return comments.find((c) => c.user.login === WORKFLOW_BOT_LOGIN && c.body.startsWith(PREVIEW_COMMENT_MARKER))?.id ?? null
+}
+
+async function findExistingComment(repo: string, prNumber: number): Promise<number | null> {
+	const out = await $`gh api ${`repos/${repo}/issues/${prNumber}/comments?per_page=100`} --paginate --slurp`.nothrow().quiet()
+	if (out.exitCode !== 0) throw new Error(`gh api comments failed: ${out.stderr.toString()}`)
+	// `--slurp` wraps the pages in an array of arrays.
+	const pages = JSON.parse(out.stdout.toString()) as IssueComment[][]
+	return selectPreviewComment(pages.flat())
+}
+
+/** The PR's live head. The job runs after minute-long builds; a push in between makes this run's
+ *  links describe a superseded head, and the run that describes the new one may already have
+ *  written — so a stale run must not overwrite it. */
+async function liveHeadSha(repo: string, prNumber: number): Promise<string> {
+	const out = await $`gh api ${`repos/${repo}/pulls/${prNumber}`} --jq .head.sha`.nothrow().quiet()
+	if (out.exitCode !== 0) throw new Error(`gh api pull failed: ${out.stderr.toString()}`)
+	return out.stdout.toString().trim()
+}
+
+/** Create the comment or edit the existing one in place; a run whose head the PR has moved past
+ *  leaves the comment alone. */
+export async function upsertPreviewComment(
+	repo: string,
+	prNumber: number,
+	headSha: string,
+	body: string,
+): Promise<"created" | "updated" | "stale"> {
+	const live = await liveHeadSha(repo, prNumber)
+	if (live !== headSha) return "stale"
 	const existing = await findExistingComment(repo, prNumber)
 	const res = existing
 		? await $`gh api -X PATCH ${`repos/${repo}/issues/comments/${existing}`} -f body=${body}`.nothrow().quiet()
@@ -100,6 +132,6 @@ if (import.meta.main) {
 			{ name: "Firefox", result: parseBuildResult(process.env.FIREFOX_RESULT), url: process.env.FIREFOX_URL ?? "" },
 		],
 	})
-	const action = await upsertPreviewComment(env("REPO"), Number(env("PR_NUMBER")), body)
-	console.log(`preview comment ${action} on #${env("PR_NUMBER")}`)
+	const action = await upsertPreviewComment(env("REPO"), Number(env("PR_NUMBER")), env("HEAD_SHA"), body)
+	console.log(action === "stale" ? `PR #${env("PR_NUMBER")} head moved past ${env("HEAD_SHA")}; comment left alone` : `preview comment ${action} on #${env("PR_NUMBER")}`)
 }

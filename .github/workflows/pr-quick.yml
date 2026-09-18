@@ -271,27 +271,32 @@ jobs:
       version_suffix: ${{ github.event.pull_request.number && format('pr.{0}', github.event.pull_request.number) || '' }}
 
   # The extension builds above are workflow artifacts nobody finds from the PR. This job keeps ONE
-  # sticky comment on the PR pointing at them (edited in place on every push, so a stale link never
-  # outlives its head), the way a Cloudflare preview comment does for a site. Same-repo PRs only: a
-  # fork's token is read-only. Advisory — it is not in quality-status's needs, so a comment failure
-  # never reds the gate.
+  # sticky comment on the PR pointing at them, edited in place on every push, the way a Cloudflare
+  # preview comment does for a site. The script re-reads the PR head right before writing and
+  # leaves the comment alone when the PR has moved on, so a slow run cannot overwrite a newer one.
+  # Same-repo PRs only: a fork's token is read-only. Advisory twice over — not in quality-status's
+  # needs, and continue-on-error so a comment failure cannot red the run either.
   preview-comment:
     name: Preview build comment
     needs: [changes, build-chrome, build-firefox]
     if: >-
-      always()
+      !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
       && needs.changes.outputs.needs-extension-build == 'true'
       && needs.build-chrome.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
+      # The head sha, not the merge commit the default checkout gives a pull_request run: the version
+      # printed must be the one the builds (also checked out at head.sha) stamped.
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           sparse-checkout: |
             /package.json
             /scripts/ci-cd/
