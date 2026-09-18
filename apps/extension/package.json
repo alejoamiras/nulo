@@ -30,9 +30,9 @@
 		"build-storybook": "storybook build"
 	},
 	"dependencies": {
-		"@alejoamiras/presto": "5.2.0-revision.2",
-		"@alejoamiras/presto-banners": "1.0.0",
-		"@alejoamiras/presto-core": "1.0.1",
+		"@alejoamiras/presto": "5.2.0-revision.3",
+		"@alejoamiras/presto-banners": "1.1.0",
+		"@alejoamiras/presto-core": "1.1.0",
 		"@aztec/accounts": "5.2.0",
 		"@aztec/aztec.js": "5.2.0",
 		"@aztec/bb.js": "5.2.0",
