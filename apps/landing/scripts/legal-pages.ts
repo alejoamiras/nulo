@@ -34,24 +34,69 @@ function escapeHtml(text: string): string {
 	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 
-/** Markdown passes raw HTML through, so a tag in the source would be a tag on the site. */
-function assertNoRawHtml(markdown: string, label: string): void {
-	const withoutCode = markdown.replace(/`[^`\n]*`/g, "")
-	const tag = /<\/?[a-zA-Z!][^>\n]*>/.exec(withoutCode)
-	if (tag) throw new Error(`${label}: raw HTML is not allowed in legal documents (found ${tag[0]})`)
+const ALLOWED_TAGS: Readonly<Record<string, readonly string[]>> = {
+	a: ["href"],
+	h1: ["id"],
+	h2: ["id"],
+	h3: ["id"],
+	h4: ["id"],
+	th: ["align"],
+	td: ["align"],
+	...Object.fromEntries(
+		["p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote", "table", "thead", "tbody", "tr", "hr", "br", "del"].map(
+			(tag) => [tag, []],
+		),
+	),
 }
 
-/** `](terms.md#x)` → `](/terms#x)`; any other relative target fails the build rather than 404ing. */
-function rewriteLinks(markdown: string, label: string): string {
-	const rewritten = markdown.replace(
-		/\]\((terms|privacy)\.md(#[^)]*)?\)/g,
-		(_all, doc: string, hash?: string) => `](/${doc}${hash ?? ""})`,
-	)
-	for (const match of rewritten.matchAll(/\]\(([^)]+)\)/g)) {
-		const target = match[1] ?? ""
-		if (!/^(https:\/\/|mailto:|#|\/)/.test(target)) throw new Error(`${label}: unsupported link target "${target}"`)
+const TAG_PATTERN = /^<(\/?)([a-z][a-z0-9]*)((?:\s+[a-z-]+="[^"<>]*")*)\s*\/?>/
+const SAFE_HREF = /^(https:\/\/|mailto:|#|\/(?!\/))/
+
+function decodeEntities(value: string): string {
+	return value
+		.replace(/&#x([0-9a-f]+);/gi, (_all, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+		.replace(/&#(\d+);/g, (_all, dec: string) => String.fromCodePoint(Number(dec)))
+		.replaceAll("&quot;", '"')
+		.replaceAll("&lt;", "<")
+		.replaceAll("&gt;", ">")
+		.replaceAll("&amp;", "&")
+}
+
+function assertAllowedTag(fragment: string, label: string): void {
+	const match = TAG_PATTERN.exec(fragment)
+	const tag = match?.[2] ?? ""
+	const allowed = ALLOWED_TAGS[tag]
+	if (!match || !allowed) throw new Error(`${label}: raw HTML is not allowed in legal documents (near "${fragment.slice(0, 40)}")`)
+	for (const [, name, value] of (match[3] ?? "").matchAll(/([a-z-]+)="([^"]*)"/g)) {
+		if (!allowed.includes(name ?? "")) throw new Error(`${label}: attribute "${name}" is not allowed on <${tag}>`)
+		// Decoded first: `&#106;avascript:` is still `javascript:` to a browser.
+		if (name === "href" && !SAFE_HREF.test(decodeEntities(value ?? "").trim()))
+			throw new Error(`${label}: unsupported link target "${value}"`)
 	}
-	return rewritten
+}
+
+/**
+ * Markdown passes raw HTML through, and Vite would happily bundle a smuggled inline script into an
+ * external one the CSP allows. So the check runs on the RENDERED page: the renderer escapes every
+ * literal `<` in text, which makes each remaining `<` the start of a tag — and each must be one of
+ * ours, with attributes we expect. Reference links, images, entity-encoded schemes and tags split
+ * across lines all end up here, whatever syntax produced them.
+ */
+function assertOnlyAllowedHtml(html: string, label: string): void {
+	for (let at = html.indexOf("<"); at !== -1; at = html.indexOf("<", at + 1)) assertAllowedTag(html.slice(at, at + 400), label)
+}
+
+/** `](terms.md#x)` → `](/terms#x)`. Whatever else a link points at is judged after rendering. */
+function rewriteLinks(markdown: string): string {
+	return markdown.replace(/\]\((terms|privacy)\.md(#[^)]*)?\)/g, (_all, doc: string, hash?: string) => `](/${doc}${hash ?? ""})`)
+}
+
+/** Placeholders are marked in text only; a tag's attributes are never rewritten. */
+function markPlaceholders(html: string): string {
+	return html
+		.split(/(<[^>]*>)/)
+		.map((part) => (part.startsWith("<") ? part : part.replace(/«FILL:[^»]*»/g, (fill) => `<mark class="legal-fill">${fill}</mark>`)))
+		.join("")
 }
 
 function renderMarkdown(markdown: string): string {
@@ -88,12 +133,13 @@ export function renderLegalPage(source: LegalSource, options: RenderOptions): st
 	const label = `${doc} v${version}`
 	const header = parseDocumentHeader(markdown)
 	if (header.version !== version) throw new Error(`${label}: the document says version ${header.version}`)
-	assertNoRawHtml(markdown, label)
 
 	const head = manifest[doc][manifest[doc].length - 1]
 	const superseded = head?.version !== version
 	const draft = hasPlaceholders(markdown)
-	const body = renderMarkdown(rewriteLinks(markdown, label)).replace(/«FILL:[^»]*»/g, (fill) => `<mark class="legal-fill">${fill}</mark>`)
+	const rendered = renderMarkdown(rewriteLinks(markdown))
+	assertOnlyAllowedHtml(rendered, label)
+	const body = markPlaceholders(rendered)
 	const banners = [draft ? banner("draft", doc) : "", superseded ? banner("superseded", doc) : ""].join("")
 	// Only the canonical, final page is indexable: permalinks duplicate it and drafts are not in effect.
 	const robots = draft || options.permalink ? `<meta name="robots" content="noindex" />` : ""

@@ -3,7 +3,7 @@ export type LegalDocument = "terms" | "privacy"
 export interface LegalVersion {
 	/** `major.minor` or `major.minor.patch`. A material version always bumps minor or major. */
 	readonly version: string
-	/** ISO date, or `null` while the document still carries its effective-date placeholder. */
+	/** The effective date exactly as the document prints it, or `null` while it is still a placeholder. */
 	readonly effective: string | null
 	/** Material versions require re-acceptance; the rest take effect on publication. */
 	readonly material: boolean

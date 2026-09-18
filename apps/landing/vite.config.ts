@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
@@ -9,7 +9,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 
 // Written by scripts/build-legal.ts (predev/prebuild). Read as data: Vite loads this config under
 // the ambient Node with workspace imports externalized, where a raw-TypeScript package cannot load.
-const legalPages: string[] = JSON.parse(readFileSync(resolve(here, "src/generated/legal-pages.json"), "utf8"))
+// Absent only when nothing is being built (`vite preview` over an existing dist); CI asserts that a
+// build ships the pages, so a missing list cannot silently drop them.
+const legalPagesFile = resolve(here, "src/generated/legal-pages.json")
+const legalPages: string[] = existsSync(legalPagesFile) ? JSON.parse(readFileSync(legalPagesFile, "utf8")) : []
 
 export default defineConfig({
 	server: {

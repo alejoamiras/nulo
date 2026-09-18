@@ -14,6 +14,14 @@ test("a placeholder effective date is null", () => {
 	expect(hasPlaceholders(doc("3 June 2027"))).toBe(false)
 })
 
+test("tolerates CRLF and trailing spaces", () => {
+	expect(parseDocumentHeader("# T\r\n\r\n**Version 1.2 — effective 3 June 2027**  \r\n").version).toBe("1.2")
+})
+
+test("only the line under the title counts, not a look-alike further down", () => {
+	expect(() => parseDocumentHeader("# T\n\nIntro.\n\n**Version 9.9 — effective never**\n")).toThrow(/Version X/)
+})
+
 test("a document without the version line is an error, not a default", () => {
 	expect(() => parseDocumentHeader("# T\n\nBody.")).toThrow(/Version X/)
 })

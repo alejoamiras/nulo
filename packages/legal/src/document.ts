@@ -1,4 +1,4 @@
-const HEADER_PATTERN = /^\*\*Version (\d+\.\d+(?:\.\d+)?) — effective (.+?)\*\*$/m
+const HEADER_PATTERN = /^\*\*Version (\d+\.\d+(?:\.\d+)?) — effective (.+?)\*\*\s*$/
 const PLACEHOLDER = "«FILL"
 
 export interface DocumentHeader {
@@ -9,7 +9,9 @@ export interface DocumentHeader {
 
 /** The `**Version X — effective Y**` line is the documents' one machine-readable fact. */
 export function parseDocumentHeader(markdown: string): DocumentHeader {
-	const match = HEADER_PATTERN.exec(markdown)
+	// Position matters: the line directly under the title, not a look-alike quoted further down.
+	const [title, versionLine] = markdown.split(/\r?\n/).filter((line) => line.trim() !== "")
+	const match = title?.startsWith("# ") ? HEADER_PATTERN.exec(versionLine ?? "") : null
 	if (!match?.[1] || !match[2]) throw new Error("legal document has no `**Version X — effective Y**` line")
 	return { version: match[1], effective: match[2].includes(PLACEHOLDER) ? null : match[2] }
 }

@@ -22,16 +22,24 @@ export interface LegalAcceptanceRecord extends LegalAcceptanceEntry {
 
 const VERSION_PATTERN = /^(\d{1,4})\.(\d{1,4})(?:\.(\d{1,4}))?$/
 
-/** `[major, minor]`, or `null` for anything that is not a well-formed version. */
-export function parseVersion(value: unknown): readonly [number, number] | null {
+type VersionTriple = readonly [major: number, minor: number, patch: number]
+
+/** `[major, minor, patch]`, or `null` for anything that is not a well-formed version. */
+export function parseVersion(value: unknown): VersionTriple | null {
 	if (typeof value !== "string") return null
 	const match = VERSION_PATTERN.exec(value)
 	if (!match) return null
-	return [Number(match[1]), Number(match[2])]
+	return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]
 }
 
-function compareMajorMinor(a: readonly [number, number], b: readonly [number, number]): number {
+/** Consent is per `major.minor`: a patch never asks again. */
+function compareMajorMinor(a: VersionTriple, b: VersionTriple): number {
 	return a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]
+}
+
+/** Evidence is exact: which text was on screen includes the patch. */
+function compareExact(a: VersionTriple, b: VersionTriple): number {
+	return compareMajorMinor(a, b) || a[2] - b[2]
 }
 
 export function currentVersion(doc: LegalDocument, manifest = LEGAL_MANIFEST): LegalVersion {
@@ -45,9 +53,19 @@ function newestMaterial(doc: LegalDocument, manifest = LEGAL_MANIFEST): LegalVer
 	return [...manifest[doc]].reverse().find((entry) => entry.material)
 }
 
+const ENTRY_FIELDS = ["termsVersion", "privacyVersionShown", "acceptedAt", "surface"] as const
+
+/** Own data properties of a plain object only: an inherited field is not something that was stored. */
+function ownFields(raw: unknown): Record<(typeof ENTRY_FIELDS)[number], unknown> | null {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+	if (!ENTRY_FIELDS.every((field) => Object.hasOwn(raw, field))) return null
+	return raw as Record<(typeof ENTRY_FIELDS)[number], unknown>
+}
+
 function parseEntry(raw: unknown): LegalAcceptanceEntry | null {
-	if (typeof raw !== "object" || raw === null) return null
-	const { termsVersion, privacyVersionShown, acceptedAt, surface } = raw as Record<string, unknown>
+	const fields = ownFields(raw)
+	if (!fields) return null
+	const { termsVersion, privacyVersionShown, acceptedAt, surface } = fields
 	if (!parseVersion(termsVersion) || !parseVersion(privacyVersionShown)) return null
 	if (typeof acceptedAt !== "number" || !Number.isFinite(acceptedAt)) return null
 	if (surface !== "onboarding" && surface !== "popup") return null
@@ -58,9 +76,10 @@ function parseEntry(raw: unknown): LegalAcceptanceEntry | null {
 export function parseAcceptanceRecord(raw: unknown): LegalAcceptanceRecord | null {
 	const head = parseEntry(raw)
 	if (!head) return null
-	const rawHistory = (raw as { history?: unknown }).history
-	const history = Array.isArray(rawHistory) ? rawHistory.map(parseEntry).filter((entry) => entry !== null) : []
-	return { ...head, history: history.slice(-LEGAL_HISTORY_LIMIT) }
+	const rawHistory = Object.hasOwn(raw as object, "history") ? (raw as { history: unknown }).history : undefined
+	// Bounded before parsing: a hostile record cannot make this walk an arbitrarily long array.
+	const tail = Array.isArray(rawHistory) ? rawHistory.slice(-LEGAL_HISTORY_LIMIT) : []
+	return { ...head, history: tail.map(parseEntry).filter((entry) => entry !== null) }
 }
 
 /**
@@ -89,8 +108,8 @@ export function pendingTermsVersions(raw: unknown, manifest = LEGAL_MANIFEST): r
 }
 
 /**
- * The record after an acceptance. Never replaces a newer accepted Terms version with an older one:
- * evidence of the newer acceptance outlives a downgrade.
+ * The record after an acceptance. Never replaces a newer accepted Terms version with an older one,
+ * patch included: evidence of the newer acceptance outlives a downgrade.
  */
 export function applyAcceptance(
 	previousRaw: unknown,
@@ -108,7 +127,7 @@ export function applyAcceptance(
 	const history = [...(previous?.history ?? []), entry].slice(-LEGAL_HISTORY_LIMIT)
 	const prevVersion = parseVersion(previous?.termsVersion)
 	const nextVersion = parseVersion(entry.termsVersion)
-	const keepPrevious = previous && prevVersion && nextVersion && compareMajorMinor(prevVersion, nextVersion) > 0
+	const keepPrevious = previous && prevVersion && nextVersion && compareExact(prevVersion, nextVersion) > 0
 	const head: LegalAcceptanceEntry = keepPrevious
 		? {
 				termsVersion: previous.termsVersion,

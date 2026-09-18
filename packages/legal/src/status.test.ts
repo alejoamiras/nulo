@@ -50,6 +50,22 @@ describe("acceptanceStatus", () => {
 	})
 })
 
+describe("hostile shapes", () => {
+	test("inherited fields are not a stored record", () => {
+		expect(acceptanceStatus(Object.create(record("1.1")), manifest)).toBe("missing")
+	})
+
+	test("an array carrying the fields is not a record", () => {
+		expect(acceptanceStatus(Object.assign([], record("1.1")), manifest)).toBe("missing")
+	})
+
+	test("history entries get the same scrutiny, and only the tail is walked", () => {
+		const history = [...Array.from({ length: 500 }, () => record("1.0")), Object.create(record("1.0")), record("1.1")]
+		const parsed = parseAcceptanceRecord({ ...record("1.1"), history })
+		expect(parsed?.history.length).toBe(LEGAL_HISTORY_LIMIT - 1)
+	})
+})
+
 describe("parseAcceptanceRecord", () => {
 	test("drops malformed history entries and keeps the rest", () => {
 		const parsed = parseAcceptanceRecord({ ...record("1.1"), history: [record("1.0"), "junk", { termsVersion: "x" }] })
@@ -89,6 +105,11 @@ describe("applyAcceptance", () => {
 		const next = applyAcceptance(record("3.0"), "popup", 9, manifest)
 		expect(next.termsVersion).toBe("3.0")
 		expect(next.history.at(-1)?.termsVersion).toBe("1.1.1")
+	})
+
+	test("a newer PATCH is evidence too and is not overwritten", () => {
+		const next = applyAcceptance({ ...record("1.1.9"), acceptedAt: 7 }, "popup", 9, manifest)
+		expect(next).toMatchObject({ termsVersion: "1.1.9", acceptedAt: 7 })
 	})
 
 	test("keeps only the most recent entries", () => {

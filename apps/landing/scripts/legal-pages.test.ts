@@ -30,10 +30,38 @@ describe("renderLegalPage", () => {
 		expect(() => render("[security](../SECURITY.md)")).toThrow(/unsupported link target/)
 	})
 
-	test("raw HTML in the source is rejected, inline code is not", () => {
-		expect(() => render("<script>alert(1)</script>")).toThrow(/raw HTML/)
-		expect(() => render("<img src=x onerror=alert(1)>")).toThrow(/raw HTML/)
-		expect(render("Uses `<Flex>` internally.")).toContain("&lt;Flex&gt;")
+	test.each([
+		["a script tag", "<script>alert(1)</script>"],
+		[
+			"a tag split across lines, which Vite would bundle into a CSP-legal script",
+			'<script\ntype="module">globalThis.pwned=true;</script\n>',
+		],
+		["an event-handler image", "<img src=x onerror=alert(1)>"],
+		["a markdown image", "![logo](https://example.com/x.png)"],
+		["an HTML comment", "<!-- hidden -->"],
+	])("%s is rejected", (_name, body) => {
+		expect(() => render(body)).toThrow(/raw HTML|not allowed/)
+	})
+
+	test.each([
+		["an inline javascript: link", "[x](javascript:alert(1))"],
+		["a reference-style javascript: link", "[click][x]\n\n[x]: javascript:alert(1)"],
+		["an entity-encoded scheme", "[x](&#106;avascript:alert(1))"],
+		["a protocol-relative link", "[x](//evil.example)"],
+		["plain http", "[x](http://example.com)"],
+	])("%s is rejected", (_name, body) => {
+		expect(() => render(body)).toThrow(/unsupported link target/)
+	})
+
+	test("a link title is refused rather than rendered, so nothing can be injected through it", () => {
+		expect(() => render('[x](https://example.com "«FILL: title»")')).toThrow(/attribute "title" is not allowed/)
+	})
+
+	test("autolinks, mailto and inline code are fine", () => {
+		const html = render("Write to <mailto:hello@nulo.sh> or see <https://nulo.sh>. Uses `<Flex>` internally.")
+		expect(html).toContain('href="mailto:hello@nulo.sh"')
+		expect(html).toContain('href="https://nulo.sh"')
+		expect(html).toContain("&lt;Flex&gt;")
 	})
 
 	test("a document whose version line disagrees with the manifest entry is rejected", () => {

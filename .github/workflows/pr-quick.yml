@@ -96,6 +96,8 @@ jobs:
             extension:
               # Built target — whole package; design + bridge-core dep libs — src + manifest.
               - 'apps/extension/**'
+              - 'packages/legal/src/**'
+              - 'packages/legal/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
               - 'packages/bridge-core/src/**'

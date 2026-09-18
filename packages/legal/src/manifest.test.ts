@@ -43,16 +43,18 @@ describe.each(DOCS)("%s manifest", (doc) => {
 		const header = parseDocumentHeader(read(doc))
 		const head = versions[versions.length - 1]
 		expect(header.version).toBe(head?.version)
-		expect(header.effective === null).toBe(head?.effective === null)
+		expect(header.effective).toBe(head?.effective ?? null)
 	})
 
 	test("the document's version history lists exactly the manifest versions", () => {
 		expect([...parseVersionHistory(read(doc))].sort()).toEqual(versions.map((entry) => entry.version).sort())
 	})
 
-	test("every superseded version has an archived copy", () => {
+	test("every superseded version has an archived copy whose own header agrees", () => {
 		for (const entry of versions.slice(0, -1)) {
-			expect(existsSync(resolve(legalDir, "archive", `${doc}-${entry.version}.md`)), entry.version).toBe(true)
+			const file = resolve(legalDir, "archive", `${doc}-${entry.version}.md`)
+			expect(existsSync(file), entry.version).toBe(true)
+			expect(parseDocumentHeader(readFileSync(file, "utf8"))).toEqual({ version: entry.version, effective: entry.effective })
 		}
 	})
 })

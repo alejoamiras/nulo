@@ -4,7 +4,7 @@
  * HTML entries. The markdown under `legal/` stays the only source; these files are gitignored.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { LEGAL_MANIFEST } from "@nulo/legal"
@@ -22,6 +22,9 @@ const sources: LegalSource[] = LEGAL_DOCUMENTS.flatMap((doc) => {
 		return { doc, version: entry.version, markdown: readFileSync(file, "utf8") }
 	})
 })
+
+// A version removed from the manifest must not linger as a stale local page.
+for (const doc of LEGAL_DOCUMENTS) rmSync(resolve(landingRoot, doc), { recursive: true, force: true })
 
 const pages = planLegalPages(sources)
 for (const page of pages) {
