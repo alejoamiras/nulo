@@ -582,7 +582,7 @@ controllable delay (Fact 16), so ordering bugs are observable. New `describe` bl
 - `git diff -U0 b0ebbb40 -- apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts apps/extension/src/popup/components/modules/fee-cards.comount.test.ts | grep '^-[^-]'`
 - Pass: the first two exit 0; the third prints nothing (no pre-existing test line removed or changed).
 
-### Phase 3 — the row and the page
+### Phase 3 — the row and the page ✓
 
 The inline row (testids `send-fee-privacy-notice`, `send-fee-privacy-remedy`; the root carries
 `data-notice-shape` so e2e tells the wordings apart without reading text), origin-aware nudge copy,
@@ -597,7 +597,7 @@ for a public origin, a `null` origin, Sponsored and Private Fee Juice; the link'
 - `cd apps/extension && NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e`
 - Pass: all exit 0. Capture a screenshot of the row for the PR.
 
-### Phase 4 — e2e
+### Phase 4 — e2e ✓
 
 **Smoke** — `tests/e2e/send-fee-privacy.test.ts`, "a private send with unreadable balances never
 falls back to the public payer". Arm `interceptRpc(browser, extensionId, <active network RPC origin>,
@@ -609,16 +609,26 @@ the read was actually intercepted. Confirm's disabled state is not asserted: wit
 disabled for an unrelated reason (Fact 10). If I1 or I2 is false, record it in `lessons/phase-4.md`
 and assert at the deepest settled surface smoke reaches rather than dropping the file.
 
-**Network** — one test in `tests/e2e/network/fee-methods.test.ts` on `feeJuiceImportedExtension`,
-`{ timeout: 300_000 }`. The fixture is file-scoped and earlier tests leave picks behind, so the test
-asserts no default: shield 100 with `selectFeeMethod(page, "sponsored")` explicit → await confirmation
-and the refreshed private balance row → open Send, private → private →
-`selectFeeMethod(page, "sponsored")` → the row is absent → `selectFeeMethod(page, "public")` → the row
-is present, `data-notice-shape="private-private"`, the remedy's `href` is the bridge URL → destination
-to public → `private-public` → origin to public → the row is gone → origin back to private → the
-private slot's pick returns with the row → submit → confirmed → reopen Send, private origin → the pick
-and the row persisted. Testid selectors only. Then I6: grep `selectFeeMethod` callers, and run the two
-`tx-sendTx-*` files.
+**Network** — widened at implementation on the owner's instruction (*"add all the necessary e2e tests
+… QA is of the upmost priority"*): three tests in `tests/e2e/network/fee-methods.test.ts`, one per
+funding shape, each clearing Send's picks key first so it asserts **defaults**, not leftovers from the
+file-scoped fixtures:
+
+1. **No gas** (`tokenReadyExtension`) — both origins default to the sponsor; no notice; nothing persisted.
+2. **Public gas only** (`feeJuiceReadyExtension`, until now a fixture with no consumer — this makes the
+   *defaulted* fallback reachable end to end, superseding I3) — a public-origin shield defaults to Fee
+   Juice silently; then a private → private send is **defaulted** to Fee Juice with the
+   `private-private` row and the remedy link, the wording follows the destination, picking the sponsor
+   silences the row, and the send still confirms paid by the account (warn-and-allow).
+3. **Both gases** (`feeJuiceImportedExtension`) — each origin defaults to its own gas, silently; a
+   hand-picked Fee Juice under a private origin warns in both wordings; a public origin drops the row
+   and keeps its own default; flipping back restores the private-origin pick and the row; storage
+   holds exactly `{ [account]: { private: { type: "fj" } } }`; the send confirms; a fresh popup still
+   has the pick and the row.
+
+Testid selectors only (`fee-settings-card[data-origin]`, `send-fee-method-trigger[data-fee-method]`,
+`send-fee-privacy-notice[data-notice-shape]`, `send-fee-privacy-remedy`). Then I6: grep
+`selectFeeMethod` callers, and run the two `tx-sendTx-*` files.
 
 **Validation gate** — layers: smoke e2e · network e2e
 - the Phase 3 rebuild command, then `cd apps/extension && NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e --retry=0 tests/e2e/send-fee-privacy.test.ts`
