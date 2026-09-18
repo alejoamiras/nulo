@@ -46,8 +46,8 @@ function goNext() {
 
 onBeforeMount(() => {
 	// A reset clears chrome.storage, not this page's localStorage: a pitch dismissed during an
-	// earlier onboarding must not stay hidden from a re-onboarding user. The banner reads the
-	// record once, when it connects, so the clear has to land before the first render.
+	// earlier onboarding must not stay hidden from a re-onboarding user. The banner checks the
+	// record when it connects and a later clear triggers no redraw, so this runs before first render.
 	clearDismissal(PITCH_DISMISSAL_KEY)
 })
 
