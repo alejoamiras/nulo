@@ -50,6 +50,7 @@
         "@nulo/extension-messaging": "workspace:*",
         "@nulo/legal": "workspace:*",
         "@nulo/resolve-asset": "workspace:*",
+        "@nulo/third-party-notices": "workspace:*",
         "@nulo/wallet-bridge": "workspace:*",
         "@nulo/wallet-core": "workspace:*",
         "@nulo/wallet-crypto": "workspace:*",
@@ -299,6 +300,15 @@
     },
     "packages/resolve-asset": {
       "name": "@nulo/resolve-asset",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
+    },
+    "packages/third-party-notices": {
+      "name": "@nulo/third-party-notices",
       "version": "0.1.0",
       "devDependencies": {
         "@types/node": "^24.10.1",
@@ -838,6 +848,8 @@
     "@nulo/playground": ["@nulo/playground@workspace:apps/playground"],
 
     "@nulo/resolve-asset": ["@nulo/resolve-asset@workspace:packages/resolve-asset"],
+
+    "@nulo/third-party-notices": ["@nulo/third-party-notices@workspace:packages/third-party-notices"],
 
     "@nulo/tools": ["@nulo/tools@workspace:apps/tools"],
 

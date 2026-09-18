@@ -1,0 +1,38 @@
+# Components every shipped extension build must name in THIRD-PARTY-NOTICES.txt. A floor, not the
+# full list: it catches a generator that silently loses a whole class of input — the main graph,
+# a worker build, the overrides, the vendored components. One name per line.
+
+# main graph
+vue
+vue-router
+pinia
+zod
+pino
+luxon
+@noble/curves
+@noble/hashes
+@codemirror/view
+@alejoamiras/presto
+@alejoamiras/presto-core
+@alejoamiras/presto-banners
+
+# worker builds only
+comlink
+
+# hand-verified overrides
+@aztec/aztec.js
+@aztec/pxe
+@aztec/stdlib
+@aztec/foundation
+@aztec/wallet-sdk
+@aztec/bb.js
+@aztec/noir-acvm_js
+@aztec/noir-noirc_abi
+@aztec/sqlite3mc-wasm
+hash.js
+
+# vendored inside another package
+vite-plugin-node-polyfills
+buffer
+base64-js
+ieee754
