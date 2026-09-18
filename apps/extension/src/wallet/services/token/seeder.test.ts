@@ -5,54 +5,36 @@
  * semantics, and single-flight.
  */
 
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { fakeBrowser } from "@webext-core/fake-browser"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed } from "./default-tokens"
+import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
 import { PinMismatchError, SEED_ATTEMPT_CAP, TokenSeeder, type SeedPreview, type TokenSeederDeps } from "./seeder"
-import type { TokenInterface } from "./spec"
-
-const CHAIN_ID = 999
-const CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-const CLASS_ID = "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf"
-const MARKER_KEY = "nulo:core:token-seeded@p1"
-
-const SEED: DefaultTokenSeed = { chainId: CHAIN_ID, contract: CONTRACT, expectedClassId: CLASS_ID, expectedSymbol: "cUSD" }
-
-const IFACE = { chainId: CHAIN_ID, contract: CONTRACT, isComplete: true } as unknown as TokenInterface
-
-function goodPreview(): SeedPreview {
-	return { name: "Compressed USD", symbol: "cUSD", decimals: 6, interface: IFACE }
-}
-
-function makeSeeder(overrides?: Partial<TokenSeederDeps> & { version?: string }) {
-	const api = new FakeBrowserApi()
-	const logger = new LoggerStore(new ConfigStore())
-	const deps: TokenSeederDeps = {
-		getSeeds: vi.fn(async () => [SEED]),
-		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
-		getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: CHAIN_ID })),
-		getAccounts: vi.fn(async () => [{ address: "0xacc1" }]),
-		preview: vi.fn(async () => goodPreview()),
-		isTokenPresent: vi.fn(async () => false),
-		persist: vi.fn(async () => {}),
-		...overrides,
-	}
-	const seeder = new TokenSeeder(deps, api.storage.local, logger, () => overrides?.version ?? "1.0.0")
-	return { seeder, deps, api }
-}
-
-async function readMarker(): Promise<Record<string, { attempts: number; cappedAtVersion?: string; outcome?: string }>> {
-	const res = await fakeBrowser.storage.local.get(MARKER_KEY)
-	return res[MARKER_KEY] ? JSON.parse(res[MARKER_KEY] as string) : {}
-}
-
-const KEY = `${CHAIN_ID}:${CONTRACT}`
+import {
+	CHAIN_ID,
+	CLASS_ID,
+	CONTRACT,
+	IFACE,
+	KEY,
+	MARKER_KEY,
+	SEED,
+	disposeSeeders,
+	goodPreview,
+	makeSeeder,
+	readMarker,
+	skipBackoff,
+	trackSeeder,
+} from "./seeder.harness"
 
 beforeEach(async () => {
 	await fakeBrowser.reset()
+})
+
+afterEach(() => {
+	disposeSeeders()
+	vi.useRealTimers()
 })
 
 describe("TokenSeeder — happy path + skips", () => {
@@ -206,9 +188,11 @@ describe("TokenSeeder — attempt cap + retry semantics", () => {
 		const preview = vi.fn(async (): Promise<SeedPreview> => {
 			throw new Error("rpc down")
 		})
+		vi.useFakeTimers({ toFake: ["Date"] })
 		const { seeder, deps } = makeSeeder({ preview })
 		for (let i = 0; i < SEED_ATTEMPT_CAP + 2; i++) {
 			await seeder.run()
+			skipBackoff()
 		}
 		expect(preview).toHaveBeenCalledTimes(SEED_ATTEMPT_CAP)
 		const marker = await readMarker()
@@ -245,9 +229,14 @@ describe("TokenSeeder — attempt cap + retry semantics", () => {
 			},
 			isTokenPresent: async () => false,
 			persist: vi.fn(async () => {}),
+			onStatusChanged: vi.fn(),
 		}
-		const seeder = new TokenSeeder(deps, api.storage.local, logger, () => version)
-		for (let i = 0; i < SEED_ATTEMPT_CAP; i++) await seeder.run()
+		vi.useFakeTimers({ toFake: ["Date"] })
+		const seeder = trackSeeder(new TokenSeeder(deps, api.storage.local, logger, () => version))
+		for (let i = 0; i < SEED_ATTEMPT_CAP; i++) {
+			await seeder.run()
+			skipBackoff()
+		}
 		expect((await readMarker())[KEY].cappedAtVersion).toBe("1.0.0")
 
 		version = "1.1.0"

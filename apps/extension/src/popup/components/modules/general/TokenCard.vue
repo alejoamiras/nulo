@@ -22,12 +22,6 @@ const props = defineProps({
 		type: Object,
 		required: false,
 	},
-	/** §3: this token's incoming public-transfer history is genuinely behind — drives the
-	 *  catching-up dot. Threshold-gated by TokensView from IncomingTransferService's sync state. */
-	backfilling: {
-		type: Boolean,
-		default: false,
-	},
 })
 
 const token = computed(() => props.tokenBalance.token)
@@ -57,20 +51,8 @@ onBeforeUnmount(() => {
 const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
 const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
 // Treat updatedAt===0 as "balance has never synced" — the projector hasn't run yet
-// so the "0" placeholder in the row would be misleading. Render a spinner instead.
+// so the "0" placeholder in the row would be misleading. Render a skeleton instead.
 const isInitialSync = computed(() => !!props.tokenBalance && props.tokenBalance.updatedAt === 0)
-// §3: the balance is known but incoming history is still hydrating → the ambient dot beside the symbol.
-const catchingUp = computed(() => props.backfilling && !isInitialSync.value)
-// §3: balance ALSO unknown (fresh add) → escalate the loading block from a plain spinner to a shimmer.
-const catchingUpUnresolved = computed(() => props.backfilling && isInitialSync.value)
-const description = computed(() => {
-	if (props.tokenBalance?.isMinting) return "Minting more tokens..."
-	if (catchingUpUnresolved.value) return "Catching up…"
-	if (isInitialSync.value) return "Loading balance…"
-	if (props.newToken) return "Minting in progress..."
-
-	return token.value?.name || "unknown"
-})
 
 // Routine refreshes are deliberately SILENT per row — batch refreshes would animate every row at
 // once; TokensView's section-header dot is the ONE activity signal. Only exceptions speak here:
@@ -80,47 +62,32 @@ const description = computed(() => {
 // retry in flight shows its honest in-flight state instead (the loading block
 // during an initial sync; silence after). Deliberately NOT gated on
 // isInitialSync: a never-synced row whose FIRST projection failed must show
-// the failure, not an infinite "Loading balance…" spinner.
+// the failure, not an infinite skeleton.
 const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.tokenBalance?.isUpdating)
 </script>
 
 <template>
 	<RouterLink v-if="tokenBalance" :to="`/popup/tokens/${token?.id}`" data-testid="tokens-card" :class="$style.row">
 		<Flex direction="column" gap="2">
-			<Flex align="center" gap="6">
-				<!-- §3 catching-up: an ambient dot, not a caption — it renders only when the scan is
-				     genuinely behind (TokensView's threshold gate) and explains itself via tooltip.
-				     Focusable so the tooltip is keyboard-reachable. -->
-				<Tooltip v-if="catchingUp" side="top" position="start">
-					<span
-						:class="$style.pulse_dot_wrap"
-						data-testid="token-catching-up"
-						tabindex="0"
-						role="img"
-						aria-label="Catching up on incoming transfers"
-					>
-						<span :class="$style.pulse_dot" />
-					</span>
-					<template #content>Catching up on incoming transfers</template>
-				</Tooltip>
-				<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
-					{{ token.symbol }}
-				</span>
-			</Flex>
+			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
+				{{ token.symbol }}
+			</span>
 			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
 			<span v-else :class="$style.fiat">{{ token?.name || "unknown" }}</span>
 		</Flex>
 
 		<Flex
 			v-if="isInitialSync && !syncFailed && !isMalformed"
-			align="center"
-			gap="6"
+			direction="column"
+			align="end"
+			justify="center"
+			gap="5"
 			data-testid="token-balance-loading"
+			aria-busy="true"
 			:class="$style.loading_block"
 		>
-			<span v-if="catchingUpUnresolved" :class="$style.balance_shimmer" data-testid="token-balance-shimmer" />
-			<Spinner v-else size="12" color="--txt-tertiary" />
-			<span :class="$style.loading_text">{{ description }}</span>
+			<Skeleton :width="64" :height="13" />
+			<Skeleton :width="92" :height="9" />
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
 			<span :class="[$style.amount, syncFailed && $style.amount_stale]" :data-malformed="isMalformed || undefined">{{ totalBalance || 0 }}</span>
@@ -242,52 +209,6 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 	min-height: 32px;
 }
 
-.loading_text {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-}
-
-.pulse_dot {
-	width: 5px;
-	height: 5px;
-	border-radius: 50%;
-	background: var(--nulo-accent);
-
-	animation: token_pulse 2s linear infinite;
-}
-
-/* §3 catching-up dot: sits LEFT of the symbol, glows softly (it must be findable without a
-   caption), explains itself via the wrapping Tooltip — hover or keyboard focus. */
-.pulse_dot_wrap {
-	display: inline-flex;
-	align-items: center;
-	cursor: help;
-	outline: none;
-}
-
-.pulse_dot_wrap .pulse_dot {
-	/* Glow follows the accent so it works in BOTH themes (bone halo in dark, warm in light). */
-	box-shadow: 0 0 4px 1px color-mix(in srgb, var(--nulo-accent) 35%, transparent);
-}
-
-.pulse_dot_wrap:focus-visible {
-	outline: 1px solid var(--nulo-accent);
-	outline-offset: 2px;
-}
-
-@keyframes token_pulse {
-	0% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.25;
-	}
-	100% {
-		opacity: 1;
-	}
-}
-
 /* Last projection failed: keep the last-known amount visible, dimmed (the
    GasBalanceCard stale vocabulary), with the reason underneath. */
 .amount_stale {
@@ -298,37 +219,5 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--red);
-}
-
-/* Escalated loading affordance (balance ALSO unresolved): a shimmer where the amount would be. */
-.balance_shimmer {
-	width: 72px;
-	height: 12px;
-
-	background: linear-gradient(
-		90deg,
-		var(--nulo-surface-low) 25%,
-		var(--nulo-surface-high) 50%,
-		var(--nulo-surface-low) 75%
-	);
-	background-size: 200% 100%;
-
-	animation: token_balance_shimmer 1.4s var(--bezier) infinite;
-}
-
-@keyframes token_balance_shimmer {
-	0% {
-		background-position: 200% 0;
-	}
-	100% {
-		background-position: -200% 0;
-	}
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.pulse_dot,
-	.balance_shimmer {
-		animation: none;
-	}
 }
 </style>

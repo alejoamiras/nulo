@@ -161,7 +161,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 	// tombstone-on-delete, and the three seed-trigger hooks.
 	const CUSD = DEFAULT_TOKEN_SEEDS[0].contract
 
-	async function seedHarness() {
+	async function seedHarness(seederOverrides?: ConstructorParameters<typeof TokenService>[3]) {
 		const fake = makeShallowPxeFake({
 			instances: new Map([[AztecAddress.fromStringUnsafe(CONTRACT).toString(), fakeTokenInstance()]]),
 			artifacts: new Map([[CLASS_ID, TokenContractArtifact]]),
@@ -206,7 +206,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }], onAccountAdded }))
 		collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
 		collection.add(svc(OperationJournalService.name, journal))
-		const tokenService = new TokenService(logger, api, () => fake.client)
+		const tokenService = new TokenService(logger, api, () => fake.client, seederOverrides)
 		collection.add(tokenService)
 		await collection.start()
 		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged, onAccountAdded }
@@ -376,6 +376,39 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			expect(runSpy).toHaveBeenCalledTimes(3)
 		} finally {
 			runSpy.mockRestore()
+		}
+	})
+
+	test("a fresh service graph with no popup connected: resumeSeeding runs a due default-token retry exactly once", async () => {
+		// The previous service worker recorded an attempt and its retry time, then
+		// died. Nothing but the boot-time resume exists in this one: no popup RPC, no
+		// profile/network/account event.
+		const seed = { ...DEFAULT_TOKEN_SEEDS[0], chainId: NETWORK.chainId }
+		const markerKey = "nulo:core:token-seeded@p1"
+		const seedKey = `${seed.chainId}:${seed.contract}`
+		// The metadata read is simulate-backed (deep): stubbed at the service seam.
+		const preview = vi.spyOn(TokenService.prototype, "previewTokenMetadata").mockRejectedValue(new Error("rpc down"))
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+		try {
+			const { tokenService } = await seedHarness({ getSeeds: async () => [seed], getVersion: () => "1.0.0" })
+			await fakeBrowser.storage.local.set({
+				[markerKey]: JSON.stringify({ [seedKey]: { attempts: 1, nextAttemptAt: Date.now() - 1 } }),
+			})
+			await tokenService.resumeSeeding()
+			await tokenService.resumeSeeding()
+			expect(preview).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(preview).toHaveBeenCalledTimes(1)
+			const stored = (await fakeBrowser.storage.local.get(markerKey))[markerKey] as string
+			expect(JSON.parse(stored)[seedKey].attempts).toBe(2)
+			expect((await tokenService.getSeedStatus(seed.chainId)).entries).toEqual([
+				expect.objectContaining({ contract: seed.contract, status: "pending" }),
+			])
+			const { seeder } = tokenService as unknown as { seeder: TokenSeeder }
+			seeder.dispose()
+		} finally {
+			vi.useRealTimers()
+			preview.mockRestore()
 		}
 	})
 

@@ -159,7 +159,7 @@ onBeforeUnmount(() => {
 		<div :class="$style.grid">
 			<div :class="$style.col">
 				<span :class="$style.label">Public Juice</span>
-				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-public" />
+				<Skeleton v-if="isLoading" data-testid="gas-skeleton-public" />
 				<span v-else :class="[$style.amount, isStale && $style.amount_stale]" data-testid="gas-balance-public"
 					>{{ publicFormatted }} FJ</span
 				>
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
 
 			<div :class="[$style.col, $style.col_right]">
 				<span :class="$style.label">Private Fee Juice</span>
-				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-private" />
+				<Skeleton v-if="isLoading" data-testid="gas-skeleton-private" />
 				<span v-else :class="[$style.amount, isStale && $style.amount_stale]" data-testid="gas-balance-private"
 					>{{ privateFormatted }} FJ</span
 				>
@@ -245,10 +245,6 @@ onBeforeUnmount(() => {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-secondary);
-}
-
-.skeleton {
-	composes: skeleton from "../send/fee-shared.module.css";
 }
 
 </style>

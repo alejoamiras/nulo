@@ -30,12 +30,7 @@ const STUBS = {
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
 	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
 	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
-	// Renders BOTH slots inline (the real component teleports #content on hover) so the tooltip
-	// copy is assertable without driving hover against a JSDOM teleport target.
-	Tooltip: {
-		template: '<span data-testid="stub-tooltip"><slot /><span data-testid="stub-tooltip-content"><slot name="content" /></span></span>',
-		props: ["side", "position", "delay"],
-	},
+	Skeleton: { template: '<i data-testid="stub-skeleton" />', props: ["width", "height"] },
 }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -68,13 +63,15 @@ const factory = (overrides: Record<string, unknown> = {}, tokenOverrides: Record
 }
 
 describe("TokenCard", () => {
-	test("updatedAt===0 renders the loading block (spinner + 'Loading balance…')", () => {
+	test("updatedAt===0 renders a skeleton pair where the amount will be — no spinner, no caption, no '0'", () => {
 		mockQuotes = {}
 		const w = factory()
 		const loader = w.find('[data-testid="token-balance-loading"]')
 		expect(loader.exists()).toBe(true)
-		expect(loader.find('[data-testid="stub-spinner"]').exists()).toBe(true)
-		expect(loader.text()).toContain("Loading balance")
+		expect(loader.findAll('[data-testid="stub-skeleton"]')).toHaveLength(2)
+		expect(loader.attributes("aria-busy")).toBe("true")
+		expect(loader.text()).toBe("")
+		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(false)
 		// And the misleading "0" amount column must not be rendered
 		expect(w.text()).not.toMatch(/^0$/m)
 	})
@@ -256,55 +253,5 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(w.text()).toContain("7")
 		expect(w.text()).toContain("3")
-	})
-})
-
-describe("TokenCard — §3 catching-up indicator", () => {
-	const mountCard = (overrides: Record<string, unknown> = {}, backfilling = false, tokenOverrides: Record<string, unknown> = {}) => {
-		const tokenBalance = {
-			id: 42,
-			token: { ...tokenInfo, ...tokenOverrides },
-			account: "0xacct",
-			publicBalance: "0",
-			privateBalance: "0",
-			updatedAt: 0,
-			isUpdating: false,
-			isMinting: false,
-			...overrides,
-		}
-		return mount(TokenCard, { props: { tokenBalance, backfilling } as never, global: { stubs: STUBS } })
-	}
-
-	test("backfilling with a resolved balance → the ambient dot beside the symbol, balance still visible", () => {
-		mockQuotes = {}
-		const w = mountCard({ updatedAt: 1, publicBalance: (5n * 10n ** 18n).toString() }, true)
-		const dot = w.find('[data-testid="token-catching-up"]')
-		expect(dot.exists()).toBe(true)
-		// Keyboard-reachable: the wrapper is focusable so the tooltip opens on focus, not only hover.
-		expect(dot.attributes("tabindex")).toBe("0")
-		// The explanation lives in the tooltip, not as a visible caption line.
-		expect(w.find('[data-testid="stub-tooltip-content"]').text()).toBe("Catching up on incoming transfers")
-		// the balance is shown, NOT the loading block
-		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
-		expect(w.text()).toContain("5")
-	})
-
-	test("backfilling AND balance unresolved (updatedAt===0) → escalates to the shimmer, not the spinner", () => {
-		mockQuotes = {}
-		const w = mountCard({ updatedAt: 0 }, true)
-		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
-		expect(w.find('[data-testid="token-balance-shimmer"]').exists()).toBe(true)
-		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(false) // spinner escalated away
-		expect(w.text()).toContain("Catching up")
-	})
-
-	test("NOT backfilling: no catching-up dot; updatedAt===0 keeps the plain spinner loader", () => {
-		mockQuotes = {}
-		const resolved = mountCard({ updatedAt: 1, publicBalance: "5" }, false)
-		expect(resolved.find('[data-testid="token-catching-up"]').exists()).toBe(false)
-
-		const loading = mountCard({ updatedAt: 0 }, false)
-		expect(loading.find('[data-testid="token-balance-shimmer"]').exists()).toBe(false)
-		expect(loading.find('[data-testid="stub-spinner"]').exists()).toBe(true)
 	})
 })

@@ -84,6 +84,7 @@ declare module 'vue' {
     SettingItem: typeof import('./../components/ui/Settings/SettingItem.vue')['default']
     SettingsPageShell: typeof import('./../components/composite/SettingsPageShell.vue')['default']
     SettingValue: typeof import('./../components/ui/Settings/SettingValue.vue')['default']
+    Skeleton: typeof import('@nulo/design')['Skeleton']
     Spinner: typeof import('@nulo/design')['Spinner']
     StepIndicator: typeof import('./../onboarding/components/StepIndicator.vue')['default']
     SubPageHeader: typeof import('./../components/ui/SubPageHeader.vue')['default']

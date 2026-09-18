@@ -33,6 +33,9 @@ export type DefaultTokenSeed = {
 	expectedClassId: string
 	/** Product-intent pin: chain symbol must match exactly. */
 	expectedSymbol: string
+	/** Compiled-in label for the row shown BEFORE the chain has answered. Never
+	 *  persisted and never compared: the token row carries the chain's own name. */
+	displayName: string
 }
 
 export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
@@ -47,6 +50,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		// (upstream sample Token, not aztec-standards), so the seeder correctly
 		// hard-skipped this token on every unlock since the pin landed.
 		expectedSymbol: "cUSDC",
+		displayName: "Clean USDC",
 	},
 	{
 		chainId: CHAIN_IDS.MAINNET,
@@ -56,6 +60,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		// aztec-standards Token class as cUSD.
 		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
 		expectedSymbol: "USDC",
+		displayName: "USD Coin",
 	},
 	{
 		chainId: CHAIN_IDS.TESTNET,
@@ -66,6 +71,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		// aztec-standards Token class as the mainnet tokens.
 		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
 		expectedSymbol: "USDC",
+		displayName: "Test USDC",
 	},
 ]
 

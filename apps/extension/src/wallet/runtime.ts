@@ -594,7 +594,8 @@ export async function providePxeStoreKey(
  *  the journal's, so an import RPC racing startup is never touched), the
  *  durable-job reaper (construct → `start()`, adjacent), the terminal-record GC
  *  (same), then the boot-time storage-usage probe (races the sweeps, so its
- *  count is the pre-cleanup snapshot — telemetry, not authoritative). Returns
+ *  count is the pre-cleanup snapshot — telemetry, not authoritative), then the
+ *  default-token seed resume. Returns
  *  the two instances `stop()` reads. Exported as a test seam for the order pin. */
 export function armPostStartWork(
 	services: ServiceCollection,
@@ -627,6 +628,12 @@ export function armPostStartWork(
 			logger.log("wallet", LogLevel.Debug, "local-storage probe skipped", error)
 		}
 	})()
+
+	// A default-token retry persisted by the previous service worker has no timer
+	// in this one. The reaper's periodic alarm is what wakes a closed-popup worker,
+	// so re-arming at every boot bounds a stranded retry to one alarm period.
+	const tokenService = services.get(TokenService.name) as TokenService
+	tokenService.resumeSeeding().catch((error) => logger.log("wallet", LogLevel.Debug, "seed resume skipped", error))
 	return { reaper, journalGc }
 }
 

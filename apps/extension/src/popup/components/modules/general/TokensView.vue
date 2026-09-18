@@ -1,16 +1,16 @@
 <script setup>
 /** Components */
-import { SectionLabel } from "@nulo/design"
+import { SectionLabel, Skeleton } from "@nulo/design"
 import { Dropdown } from "@/components/ui/Dropdown"
 import TokenCard from "./TokenCard.vue"
 import TokenImportRow from "./TokenImportRow.vue"
+import TokenSeedRow from "./TokenSeedRow.vue"
 
 /** Services */
 import { ContentKind } from "@/wallet/services/task/spec"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
-import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS, IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Utils */
@@ -28,19 +28,28 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
+/** The page owns the seed-status client; a mount without one has no defaults to wait for. */
+const props = defineProps({
+	seedEntries: {
+		type: Array,
+		default: () => [],
+	},
+	seedReady: {
+		type: Boolean,
+		default: true,
+	},
+})
+const emit = defineEmits(["retry-seed"])
+
 const router = useRouter()
 
 const tasks = ref([])
 
-/** Phase 2.5: in-flight + recently-failed token-import journal records.
- *  Renders as TokenImportRow above the existing TokenCard list. Succeeded
- *  records are filtered out — the new TokenCard with its initial-sync
- *  spinner takes over once the watchlist entry lands. */
+/** In-flight + recently-failed token-import journal records, rendered as TokenImportRow above the
+ *  TokenCard list. Succeeded records are filtered out — the new TokenCard, with its initial-sync
+ *  skeleton, takes over once the watchlist entry lands. */
 const FAILED_RETENTION_MS = 30_000
-/** Single source of truth for the kind this view scopes to. Used by both
- *  filters and the journal query so the four references no longer drift
- *  independently — codex caught two duplicate `getOperations({ kind: ... })`
- *  call sites in this file alone. */
+/** The one journal kind this view scopes to: the filters and the query must not drift apart. */
 const TOKENS_VIEW_KIND = "token_import"
 const tokenImports = ref([])
 // 5s tick is a generous fraction of the 30s retention window — the failed
@@ -64,6 +73,8 @@ const visibleTokenImports = computed(() => {
 })
 
 const tokenBalances = ref([])
+/** `loading` and `unavailable` both mean "not known yet": only `loaded` may say the list is empty. */
+const balancesState = ref("loading")
 /** Any row's balance projection in flight → the section-header activity dot. */
 const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdating))
 
@@ -82,6 +93,28 @@ const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, 
 const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
 const shownTokenBalances = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)
+
+/** A default shows as a placeholder only until something real stands for it: its token row, or
+ *  the import row its own persist step journals. Matched by contract, never by symbol. */
+const seedPlaceholders = computed(() => {
+	const chainId = appStore.network?.chainId
+	const taken = new Set(tokenBalances.value.map((tb) => tb.token?.contract?.toLowerCase()))
+	for (const op of visibleTokenImports.value) taken.add(op.contractAddress?.toLowerCase())
+	return props.seedEntries.filter((entry) => entry.chainId === chainId && !taken.has(entry.contract.toLowerCase()))
+})
+const hasAnyRow = computed(
+	() => shownTokenBalances.value.length > 0 || visibleTokenImports.value.length > 0 || seedPlaceholders.value.length > 0,
+)
+const isSettled = computed(() => balancesState.value === "loaded" && props.seedReady)
+
+/** Anonymous rows cover a wait with nothing to name yet — but only a wait long enough to notice:
+ *  a warm service worker answers first, and a flash of skeletons reads as a glitch. */
+const GHOST_ROWS = 2
+const GHOST_DELAY_MS = 300
+const ghostDelayElapsed = ref(false)
+let ghostTimer
+const isWaitingBlank = computed(() => !isSettled.value && !hasAnyRow.value)
+const showGhostRows = computed(() => isWaitingBlank.value && ghostDelayElapsed.value)
 
 const taskService = new TaskServiceClient()
 taskService.onTaskCreated.add(onTaskCreated)
@@ -152,33 +185,43 @@ const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
+// A snapshot in flight is older than any event that lands meanwhile: the event marks it stale and
+// the fetch refetches instead of overwriting the event's row with its own older answer.
+let fetchDirty = false
+// The balance service fans a shared address's rows out from every chain; only the active one counts.
+const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
 function onBalanceAdded(tb) {
-	// The balance service fans a shared address's rows out from every chain; keep the active one.
-	if (tb.account !== appStore.account.address || tb.token?.chainId !== appStore.network?.chainId) return
+	if (!inActiveScope(tb)) return
+	fetchDirty = true
+	if (tokenBalances.value.some((_tb) => _tb.id === tb.id)) return
 
 	tokenBalances.value.push({
 		...tb,
 		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
 		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
 	})
-	// §3: seed the newly-added token's sync state (via the same staleness-guarded applySnapshot, so it can't
-	// clobber a newer live event). With zero prior tokens `seedSyncStates` never ran, so the client isn't
-	// connected yet — this getSyncState also connects it so its future events flow.
-	const networkId = appStore.network?.id
-	const contract = tb.token?.contract
-	if (networkId && contract) applySnapshot(contract, networkId)
 }
 function onBalanceUpdated(tb) {
+	if (inActiveScope(tb)) fetchDirty = true
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
 	if (idx !== -1) {
 		tokenBalances.value[idx] = tb
 	}
 }
 function onBalanceDeleted(tb) {
+	if (inActiveScope(tb)) fetchDirty = true
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
 	if (idx !== -1) {
 		tokenBalances.value.splice(idx, 1)
 	}
+}
+// The first connect is the one the mount's fetch opened. A later one is a port drop: events may
+// have been missed and the request in flight was rejected, so resnapshot.
+let balanceConnectsSeen = 0
+tokenBalanceService.onConnected.add(onBalancesReconnected)
+function onBalancesReconnected() {
+	balanceConnectsSeen++
+	if (balanceConnectsSeen > 1) void fetchTokenBalances()
 }
 
 const journalService = new OperationJournalServiceClient()
@@ -210,104 +253,57 @@ async function fetchTokenImports() {
 	}
 }
 
-// §3 catching-up dot: per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
-// account / network change + on port reconnect via getSyncState (the snapshot the SW holds), then kept
-// live by the transition-only event. Keyed by contract because the scan is per (networkId, contract) and
-// this view only ever shows the active network's tokens.
-//
-// Async-ordering guards (a getSyncState snapshot resolves later than a live event / scope change):
-//  - LIVE events are the freshest truth. `liveClock` ticks per event; `lastLiveAt` records each contract's
-//    last event tick. A snapshot captures the clock at REQUEST and applies only if no newer live event for
-//    that contract landed since — so no stale snapshot (seed OR the onBalanceAdded fill) can clobber a
-//    live event.
-//  - `scopeGen` (below) discards any snapshot whose (account, network) scope changed before it resolved.
-const incomingTransferService = new IncomingTransferServiceClient()
-const syncByContract = ref(new Map())
-let liveClock = 0
-const lastLiveAt = new Map()
 // `scopeGen` identifies the current (account, network) scope. The watcher bumps it SYNCHRONOUSLY (before
 // any await) on every scope change; every snapshot captures it at request and drops if it changed by the
 // time it resolves. This closes the A→B→A cycle where an old scope's in-flight snapshot would otherwise
-// pass a bare network-equality check after the user switched back. `liveClock` is monotonic (never reset),
-// so a stale `lastLiveAt` from a prior scope can never falsely block a newer request.
+// pass a bare equality check after the user switched back.
 let scopeGen = 0
-incomingTransferService.onIncomingSyncStateChanged.add(onSyncStateChanged)
-// A SW restart / port reconnect can drop a transition event → resnapshot on reconnect (same pattern as
-// fetchTokenImports above); the event alone would never re-fire the missed state.
-incomingTransferService.onConnected.add(seedSyncStates)
-function onSyncStateChanged({ networkId, contract, state, blocksBehind }) {
-	// The scan runs per (networkId, contract); ignore events for any network other than the one on screen.
-	if (networkId !== appStore.network?.id) return
-	lastLiveAt.set(contract, ++liveClock)
-	syncByContract.value.set(contract, { state, blocksBehind })
-}
-
-// §3 threshold gate: the dot renders only when the scan is GENUINELY behind — never on routine
-// tip-following or RPC blips. The lag is node-reported and advisory: hostile values (non-integer,
-// negative, non-finite) degrade to "no dot" rather than poisoning the comparison.
-function isBackfilling(contract) {
-	const snap = syncByContract.value.get(contract)
-	if (snap?.state !== "backfilling") return false
-	return Number.isSafeInteger(snap.blocksBehind) && snap.blocksBehind >= BACKFILL_INDICATOR_THRESHOLD_BLOCKS
-}
-// Fetch + apply ONE contract's snapshot, dropping it if it's stale by the time it resolves: the scope
-// (account/network) changed since we requested, or a newer live event for this contract landed since.
-async function applySnapshot(contract, networkId) {
-	const scopeAtStart = scopeGen
-	const requestedAt = liveClock
-	let state
-	try {
-		state = await incomingTransferService.getSyncState(networkId, contract)
-	} catch {
-		return // unavailable (port race) — recovered by the next reconnect reseed
-	}
-	if (scopeGen !== scopeAtStart) return // account/network changed (incl. an A→B→A cycle) → stale
-	if ((lastLiveAt.get(contract) ?? 0) > requestedAt) return // a newer live event owns this contract
-	syncByContract.value.set(contract, state)
-}
-// Refresh the current scope's snapshots (called on mount, after a scope change, and on port reconnect).
-// The map is reset synchronously by the watcher on a scope change, so this only fills — it never reassigns.
-async function seedSyncStates() {
-	const networkId = appStore.network?.id
-	if (!networkId) return
-	const contracts = [...new Set(tokenBalances.value.map((tb) => tb.token?.contract).filter(Boolean))]
-	await Promise.all(contracts.map((contract) => applySnapshot(contract, networkId)))
-}
+let isUnmounted = false
 
 function refreshBalances() {
 	for (const tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(tb.id)
 }
 
-async function fetchTokenBalances() {
-	// Guard the outer race with the same scope generation: a rapid account/network switch fires two
-	// fetches; the one that RESOLVES last would otherwise write its (older) balances + reseed and win.
-	// The previous scope's rows go before the await so they are never ordered under the new scope's
-	// pins, and a rejected fetch leaves an empty list rather than a foreign one.
+/** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
+const BALANCES_RETRY_MS = 2_000
+let balancesRetryTimer
+let fetchGeneration = 0
+const withTaskFlags = (tb) => ({
+	...tb,
+	isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
+	isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
+})
+
+// Only the latest request may land, a snapshot overtaken by a live event is refetched rather than
+// applied, and a refetch within a scope keeps the rows already shown (the watcher clears them on a
+// scope change). A rejection never reads as an empty list: the state stays short of `loaded`.
+async function fetchTokenBalances(isTimedRetry = false) {
 	const scopeAtStart = scopeGen
+	const generation = ++fetchGeneration
+	clearTimeout(balancesRetryTimer)
+	fetchDirty = false
 	const address = appStore.account?.address
 	const chainId = appStore.network?.chainId
-	tokenBalances.value = []
-	if (!address) return
+	if (!address) {
+		tokenBalances.value = []
+		balancesState.value = "loaded"
+		return
+	}
 	let fetched
 	try {
 		fetched = await tokenBalanceService.getTokenBalances(undefined, address)
 	} catch {
+		if (scopeGen !== scopeAtStart || generation !== fetchGeneration) return
+		if (balancesState.value !== "loaded") balancesState.value = "unavailable"
+		if (!isTimedRetry) balancesRetryTimer = setTimeout(() => void fetchTokenBalances(true), BALANCES_RETRY_MS)
 		return
 	}
-	const rows = forChain(fetched, chainId)
-	const balances = rows.map((tb) => ({
-		...tb,
-		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
-		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
-	}))
-	if (scopeGen !== scopeAtStart) return // scope changed since we started → stale
-	tokenBalances.value = balances
-	await seedSyncStates()
+	if (scopeGen !== scopeAtStart || generation !== fetchGeneration) return
+	if (fetchDirty) return fetchTokenBalances()
+	tokenBalances.value = forChain(fetched, chainId).map(withTaskFlags)
+	balancesState.value = "loaded"
 }
 
-// Watch account AND the active network id — a network switch changes both the token list and the
-// per-(networkId, contract) sync scope. Bump `scopeGen` + reset the indicator map SYNCHRONOUSLY here
-// (before any await) so any in-flight snapshot from the prior scope is invalidated, then reseed.
 /** Resnapshot the task list for the ACTIVE scope. Runs on mount, scope changes, and TaskService
  *  reconnects — the live events alone can't repair a snapshot that went stale while disconnected,
  *  and `fetchTokenBalances` derives `isUpdating` from this list on every refetch. Scope-guarded so
@@ -332,13 +328,29 @@ async function onTaskReconnected() {
 }
 
 watch(
-	() => [appStore.account?.address, appStore.network?.id],
+	isWaitingBlank,
+	(waiting) => {
+		clearTimeout(ghostTimer)
+		ghostDelayElapsed.value = false
+		if (!waiting) return
+		ghostTimer = setTimeout(() => {
+			ghostDelayElapsed.value = true
+		}, GHOST_DELAY_MS)
+	},
+	{ immediate: true },
+)
+
+// Profile, account AND network id: a network switch changes the token list, and one phrase imported
+// twice gives two profiles the same address. `scopeGen` is bumped SYNCHRONOUSLY (before any await)
+// so every in-flight snapshot from the prior scope is invalidated.
+watch(
+	() => [appStore.profile?.id, appStore.account?.address, appStore.network?.id],
 	async () => {
 		scopeGen++
-		syncByContract.value = new Map()
 		// The previous scope's rows go now, before any await, so they are never ordered under the
 		// new scope's pins; pins refresh on their own, not behind the task snapshot.
 		tokenBalances.value = []
+		balancesState.value = "loading"
 		void pins.refresh()
 		const gen = scopeGen
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
@@ -349,21 +361,28 @@ watch(
 	},
 )
 onMounted(async () => {
-	await fetchTasks()
+	const gen = scopeGen
+	// A rejected task snapshot only costs the refresh dot; it must not strand the balances behind it.
+	await fetchTasks().catch(() => undefined)
+	// An unmount during an await leaves disconnected clients: a request here would reconnect one
+	// (and a rejected balance fetch would leave a retry timer behind).
+	if (isUnmounted) return
 	// Seed in-flight + recently-terminal token-import journal records so
 	// the row is visible even if the user opened the popup after submission.
 	await fetchTokenImports()
-
+	// A scope change meanwhile fetches the balances itself; the imports above are not scoped.
+	if (scopeGen !== gen) return
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {
+	isUnmounted = true
 	scopeGen++
+	clearTimeout(ghostTimer)
+	clearTimeout(balancesRetryTimer)
 	taskService.disconnect()
+	tokenBalanceService.onConnected.remove(onBalancesReconnected)
 	tokenBalanceService.disconnect()
 	journalService.disconnect()
-	incomingTransferService.onIncomingSyncStateChanged.remove(onSyncStateChanged)
-	incomingTransferService.onConnected.remove(seedSyncStates)
-	incomingTransferService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
 	pins.dispose()
@@ -374,7 +393,7 @@ onBeforeUnmount(() => {
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<Flex align="center" gap="8">
-				<SectionLabel label="Holdings" :count="tokenBalances.length || null" countTestid="tokens-count" />
+				<SectionLabel label="Holdings" :count="tokenBalances.length + seedPlaceholders.length || null" countTestid="tokens-count" />
 				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
 				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
 				     activity dot: grey pulse = a shown value being re-verified. -->
@@ -432,9 +451,27 @@ onBeforeUnmount(() => {
 				<TokenImportRow v-for="op in visibleTokenImports" :key="op.id" :op="op" />
 			</template>
 			<template v-if="shownTokenBalances.length">
-				<TokenCard v-for="tb in shownTokenBalances" :key="tb.id" :tokenBalance="tb" :backfilling="isBackfilling(tb.token.contract)" />
+				<TokenCard v-for="tb in shownTokenBalances" :key="tb.id" :tokenBalance="tb" />
 			</template>
-			<template v-if="!shownTokenBalances.length && !visibleTokenImports.length">
+			<TokenSeedRow
+				v-for="entry in seedPlaceholders"
+				:key="entry.contract"
+				:entry="entry"
+				@retry="emit('retry-seed', entry)"
+			/>
+			<template v-if="showGhostRows">
+				<div v-for="n in GHOST_ROWS" :key="n" data-testid="tokens-skeleton-row" aria-hidden="true" :class="$style.ghost_row">
+					<Flex direction="column" gap="5">
+						<Skeleton :width="52" :height="14" />
+						<Skeleton :width="84" :height="9" />
+					</Flex>
+					<Flex direction="column" align="end" gap="5">
+						<Skeleton :width="64" :height="13" />
+						<Skeleton :width="92" :height="9" />
+					</Flex>
+				</div>
+			</template>
+			<template v-if="isSettled && !hasAnyRow">
 				<div :class="$style.empty_state">
 					<span :class="$style.empty_headline">NOTHING HERE YET</span>
 					<span :class="$style.empty_sub">
@@ -505,6 +542,16 @@ onBeforeUnmount(() => {
 
 .token_list {
 	gap: 1px;
+}
+
+/* A TokenCard's box with nothing in it to name yet. */
+.ghost_row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+
+	min-height: 32px;
+	padding: 8px 0;
 }
 
 .empty_state {

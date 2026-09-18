@@ -136,6 +136,29 @@ export type TokenInterface = {
 	isComplete: boolean
 }
 
+/**
+ * Where a default token stands. `failed` spent its attempts for this extension
+ * version and can be retried by the user; `rejected` failed a pin or a metadata
+ * bound and cannot. `seeded` has its token row — but balance rows are created
+ * after it, by the balance service, so a consumer keeps waiting until it sees one.
+ */
+export type SeedStatus = "pending" | "seeding" | "failed" | "rejected" | "seeded"
+
+/** One default the user has not deleted. `symbol` and `displayName` are compiled-in literals, never chain data. */
+export type SeedStatusEntry = {
+	chainId: number
+	contract: string
+	symbol: string
+	displayName: string
+	status: SeedStatus
+}
+
+export type SeedScope = { profileId: string; chainId: number }
+
+/** `scope` is what the service worker read the entries for — `undefined` with no active profile or
+ *  network. An empty list proves nothing about any other scope. */
+export type SeedStatusSnapshot = { scope: SeedScope | undefined; entries: SeedStatusEntry[] }
+
 export type Methods = {
 	/**
 	 * Returns a list of tokens.
@@ -211,6 +234,30 @@ export type Methods = {
 		accountAddress: string,
 		contract: string,
 	): { name: string; symbol: string; decimals: number; interface: TokenInterface }
+
+	/**
+	 * Default tokens of the active profile on `chainId`.
+	 * The caller names the chain (its view switches before the active network
+	 * follows); the profile is always the active one, reported back in `scope`.
+	 * A pure read: it never starts or retries seeding. User-deleted defaults are
+	 * omitted.
+	 */
+	getSeedStatus(chainId: number): SeedStatusSnapshot
+
+	/**
+	 * Starts a seed pass when a default is still `pending` and nothing is working
+	 * on it — the recovery for a service worker that died mid-seeding. Acts at most
+	 * once per service-worker lifetime per (profile, chain); returns without
+	 * waiting for the pass.
+	 */
+	ensureSeeding(): void
+
+	/**
+	 * Gives a `failed` default a fresh round of attempts. Resolves `false` — and
+	 * changes nothing — for any other status, a contract outside the active
+	 * network's seed list, or a retry already accepted for the same default.
+	 */
+	retrySeed(chainId: number, contract: string): boolean
 }
 
 /**
@@ -228,4 +275,6 @@ export type Events = {
 	onTokenUpdated: TokenInfo
 	/** Emitted when an existing token is deleted */
 	onTokenDeleted: TokenDeleted
+	/** A default's status changed in this scope. An invalidation: consumers refetch `getSeedStatus`. */
+	onSeedStatusChanged: SeedScope
 }

@@ -1,7 +1,7 @@
 /**
  * Helper-seam pins (codex condition, round-2 plan 5): the post-start work fires
  * in the boot's exact order — deletion resume → reaper construct+start → GC
- * construct+start → storage probe — with ZERO awaits between them (the
+ * construct+start → storage probe → default-token seed resume — with ZERO awaits between them (the
  * instances `stop()` reads exist before the caller's next tick), and `stop()`
  * clears heartbeat → reaper → GC in that order. The runtime harness stops
  * pre-registration by design, so these are pinned at the helper seam.
@@ -47,7 +47,15 @@ const noopLogger = { log: () => {} } as never
 describe("runtime post-start seam", () => {
 	test("resume → reaper new/start → gc new/start → probe, all before the caller's next microtask", async () => {
 		log.length = 0
-		const services = { get: () => ({ kind: "journal" }) } as never
+		const services = {
+			get: () => ({
+				kind: "journal",
+				resumeSeeding: () => {
+					log.push("seed:resume")
+					return Promise.resolve()
+				},
+			}),
+		} as never
 		const deps = {
 			browserApi: {
 				alarms: {},
@@ -71,7 +79,7 @@ describe("runtime post-start seam", () => {
 
 		const armed = armPostStartWork(services, deps, deletionCoordinator, 4242)
 		// Synchronous view — nothing has yielded yet.
-		expect(log).toEqual(["resume:4242", "reaper:new", "reaper:start", "gc:new", "gc:start", "probe:get"])
+		expect(log).toEqual(["resume:4242", "reaper:new", "reaper:start", "gc:new", "gc:start", "probe:get", "seed:resume"])
 		expect(armed.reaper).toBeDefined()
 		expect(armed.journalGc).toBeDefined()
 		await Promise.resolve()

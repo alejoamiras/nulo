@@ -322,6 +322,153 @@ describe("BalanceView — Home aggregate", () => {
 	})
 })
 
+describe("BalanceView — Home hero while the total is still moving", () => {
+	const CAP_MS = 12_000
+	const amount = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-amount"]')
+	const isSkeleton = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-hero-loading"]').exists()
+	const seedEntry = (status: string) => ({
+		chainId: CHAIN_IDS.MAINNET,
+		contract: "0xseed",
+		symbol: "cUSDC",
+		displayName: "Clean USDC",
+		status,
+	})
+	const neverSynced = [{ ...SEED[0], updatedAt: 0 }]
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+		mockQuotes = FRESH()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("zero rows with a default token still seeding: a skeleton, not $0.00 — the figure lands when it settles", async () => {
+		seedRows = []
+		const { wrapper } = await mountView({ seedEntries: [seedEntry("seeding")], seedReady: true })
+		expect(isSkeleton(wrapper)).toBe(true)
+		expect(amount(wrapper).attributes("aria-busy")).toBe("true")
+		expect(amount(wrapper).text()).not.toContain("$")
+
+		await wrapper.setProps({ seedEntries: [] })
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("a seed-status snapshot that has not loaded holds the figure too", async () => {
+		const { wrapper } = await mountView({ seedEntries: [], seedReady: false })
+		expect(isSkeleton(wrapper)).toBe(true)
+		await wrapper.setProps({ seedReady: true })
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("a row that has never been projected holds the figure — unless its first projection FAILED", async () => {
+		seedRows = neverSynced as never
+		const pending = await mountView()
+		expect(isSkeleton(pending.wrapper)).toBe(true)
+		pending.wrapper.unmount()
+
+		seedRows = [{ ...neverSynced[0], syncFailure: { at: 1, message: "rpc down" } }] as never
+		const failed = await mountView()
+		expect(isSkeleton(failed.wrapper)).toBe(false)
+		expect(amount(failed.wrapper).text()).toContain("$")
+	})
+
+	test("a failed or rejected default does not hold the figure: nothing more is coming", async () => {
+		const { wrapper } = await mountView({ seedEntries: [seedEntry("failed"), seedEntry("rejected")], seedReady: true })
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("the 12 s cap releases a still-unsettled total to the aggregate of what IS known", async () => {
+		seedRows = [...neverSynced, SEED[1]] as never
+		const { wrapper } = await mountView({ seedEntries: [seedEntry("pending")], seedReady: true })
+		await vi.advanceTimersByTimeAsync(CAP_MS - 1)
+		expect(isSkeleton(wrapper)).toBe(true)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+		expect(amount(wrapper).attributes("aria-busy")).toBeUndefined()
+	})
+
+	test("a rejected snapshot BEFORE the cap keeps the skeleton — a retry may still land, and does", async () => {
+		let calls = 0
+		fetchRows = () => (calls++ === 0 ? Promise.reject(new Error("port closed")) : Promise.resolve(SEED))
+		const { wrapper } = await mountView()
+		expect(isSkeleton(wrapper)).toBe(true)
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(calls).toBe(2)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("after the cap a list that could not be read renders —, never $0.00 — rejected or still unanswered", async () => {
+		fetchRows = () => Promise.reject(new Error("port closed"))
+		const rejected = await mountView()
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		expect(rejected.wrapper.find('[data-testid="balance-hero-unknown"]').text()).toBe("—")
+		expect(amount(rejected.wrapper).text()).not.toContain("$")
+		expect(rejected.wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+		rejected.wrapper.unmount()
+
+		fetchRows = () => new Promise(() => {})
+		const unanswered = await mountView()
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		expect(unanswered.wrapper.find('[data-testid="balance-hero-unknown"]').text()).toBe("—")
+	})
+
+	test("a successfully loaded EMPTY list is a real $0.00, before and after the cap", async () => {
+		seedRows = []
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toContain("$0.00")
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("a scope change restarts the wait: the old total is gone and the new scope gets its own cap", async () => {
+		const { wrapper, appStore } = await mountView()
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		fetchRows = () => new Promise(() => {})
+		appStore.account = { address: "0xother" } as never
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(true)
+		await vi.advanceTimersByTimeAsync(CAP_MS)
+		expect(wrapper.find('[data-testid="balance-hero-unknown"]').exists()).toBe(true)
+	})
+
+	test("a profile-only switch (same address, same chain) restarts the wait too", async () => {
+		const { wrapper, appStore } = await mountView()
+		fetchRows = () => new Promise(() => {})
+		appStore.profile = { id: "p-other" } as never
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(true)
+	})
+
+	test("a SEEDED default whose balance row has not landed yet holds the figure: that row is about to change it", async () => {
+		seedRows = []
+		const { wrapper } = await mountView({ seedEntries: [seedEntry("seeded")], seedReady: true })
+		expect(isSkeleton(wrapper)).toBe(true)
+		await wrapper.setProps({ seedEntries: [] })
+		expect(amount(wrapper).text()).toContain("$0.00")
+	})
+
+	test("a default still listed as seeding stops holding the figure once its own row has landed", async () => {
+		const { wrapper } = await mountView({
+			seedEntries: [{ ...seedEntry("seeding"), contract: "0xUNMAPPED" }],
+			seedReady: true,
+		})
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("the token page's hero never waits on any of this", async () => {
+		const tokenBalance = { ...SEED[0], updatedAt: 0 }
+		const { wrapper } = await mountView({ tokenBalance, seedEntries: [seedEntry("seeding")], seedReady: false })
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("AAA")
+		expect(amount(wrapper).attributes("aria-busy")).toBeUndefined()
+	})
+})
+
 describe("BalanceView — token hero (tokenBalance prop)", () => {
 	test("a malformed row renders dashes for the amount and both sides, no fiat, and never throws", async () => {
 		mockQuotes = FRESH()

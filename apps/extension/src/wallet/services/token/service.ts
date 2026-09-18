@@ -30,6 +30,8 @@ import {
 	type Token,
 	type TokenInfo,
 	type TokenDeleted,
+	type SeedScope,
+	type SeedStatusSnapshot,
 	TOKEN_SERVICE_NAME,
 	TOKEN_STORAGE_ROOT,
 	TokenSchema,
@@ -78,12 +80,16 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		"deleteToken",
 		"parseTokenInterface",
 		"previewTokenMetadata",
+		"getSeedStatus",
+		"ensureSeeding",
+		"retrySeed",
 	)
 	public static name = TOKEN_SERVICE_NAME
 
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
+	public readonly onSeedStatusChanged = new EventHandler<SeedScope>()
 
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
@@ -136,6 +142,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				persist: async (input) => {
 					await this.addSeededToken(input)
 				},
+				onStatusChanged: (scope) => this.emit("onSeedStatusChanged", scope),
 			},
 			this.browserApi.storage.local,
 			this.logger,
@@ -440,6 +447,31 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 *  network-change subscriptions wired in `init`). */
 	public seedDefaultTokens(): Promise<void> {
 		return this.seeder.run()
+	}
+
+	public async getSeedStatus(chainId: number): Promise<SeedStatusSnapshot> {
+		await this.ensureInitialized()
+		if (!Number.isSafeInteger(chainId)) return { scope: undefined, entries: [] }
+		return await this.seeder.getStatus(chainId)
+	}
+
+	public async ensureSeeding(): Promise<void> {
+		await this.ensureInitialized()
+		if (this.seederOverrides?.enabled === false) return
+		await this.seeder.ensureSeeding()
+	}
+
+	public async retrySeed(chainId: number, contract: string): Promise<boolean> {
+		await this.ensureInitialized()
+		return await this.seeder.retry(chainId, contract)
+	}
+
+	/** Re-arms a retry the previous service worker persisted but did not live to
+	 *  run. SW-internal (the composition root calls it once the services are up). */
+	public async resumeSeeding(): Promise<void> {
+		await this.ensureInitialized()
+		if (this.seederOverrides?.enabled === false) return
+		await this.seeder.resume()
 	}
 
 	/**

@@ -36,6 +36,7 @@ declare global {
   const MINT_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').MINT_SIGNATURES
   const PINNED_TOKENS_MAX: typeof import('../composables/usePinnedTokens').PINNED_TOKENS_MAX
   const PINNED_TOKENS_MAX_CHAINS: typeof import('../composables/usePinnedTokens').PINNED_TOKENS_MAX_CHAINS
+  const SEED_STATUS_RETRY_MS: typeof import('../composables/useSeedStatus').SEED_STATUS_RETRY_MS
   const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
@@ -277,6 +278,7 @@ declare global {
   const useRouter: typeof import('vue-router').useRouter
   const useSecretClipboardCopy: typeof import('../composables/useSecretClipboardCopy').useSecretClipboardCopy
   const useSecretCountdown: typeof import('../composables/useSecretCountdown').useSecretCountdown
+  const useSeedStatus: typeof import('../composables/useSeedStatus').useSeedStatus
   const useSlots: typeof import('vue').useSlots
   const useSyncedRef: typeof import('../composables/syncedRef.js').useSyncedRef
   const useTemplateRef: typeof import('vue').useTemplateRef
@@ -360,6 +362,9 @@ declare global {
   // @ts-ignore
   export type { UseSecretCountdownOptions } from '../composables/useSecretCountdown'
   import('../composables/useSecretCountdown')
+  // @ts-ignore
+  export type { SnapshotState, UseSeedStatusDeps, UseSeedStatus } from '../composables/useSeedStatus'
+  import('../composables/useSeedStatus')
   // @ts-ignore
   export type { ProfileActivationSubject } from '../composables/waitForProfileActive'
   import('../composables/waitForProfileActive')
@@ -467,6 +472,7 @@ declare module 'vue' {
     readonly MINT_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['MINT_SIGNATURES']>
     readonly PINNED_TOKENS_MAX: UnwrapRef<typeof import('../composables/usePinnedTokens')['PINNED_TOKENS_MAX']>
     readonly PINNED_TOKENS_MAX_CHAINS: UnwrapRef<typeof import('../composables/usePinnedTokens')['PINNED_TOKENS_MAX_CHAINS']>
+    readonly SEED_STATUS_RETRY_MS: UnwrapRef<typeof import('../composables/useSeedStatus')['SEED_STATUS_RETRY_MS']>
     readonly TESTNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_L1_CHAIN_ID']>
     readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
@@ -706,6 +712,7 @@ declare module 'vue' {
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>
     readonly useSecretClipboardCopy: UnwrapRef<typeof import('../composables/useSecretClipboardCopy')['useSecretClipboardCopy']>
     readonly useSecretCountdown: UnwrapRef<typeof import('../composables/useSecretCountdown')['useSecretCountdown']>
+    readonly useSeedStatus: UnwrapRef<typeof import('../composables/useSeedStatus')['useSeedStatus']>
     readonly useSlots: UnwrapRef<typeof import('vue')['useSlots']>
     readonly useSyncedRef: UnwrapRef<typeof import('../composables/syncedRef.js')['useSyncedRef']>
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
