@@ -457,7 +457,7 @@ that law allows.
 Article 42 of the National Constitution, nothing in §§ 16–18 excludes, restricts or waives any right
 or remedy that law gives you. Article 37 of that law treats clauses limiting liability for damage,
 or waiving or restricting consumer rights, as **not written** — these Terms do not attempt to do so,
-and are to be read accordingly. Where an ambiguity remains, it is resolved in your favour.
+and are to be read accordingly.
 
 **19.2 Australia.** If the Australian Consumer Law applies to you, Nulo comes with guarantees that
 **cannot be excluded** under that law, and nothing in §§ 16–18 excludes, restricts or modifies any
