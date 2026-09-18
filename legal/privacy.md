@@ -7,7 +7,9 @@ extension's implemented data handling. Hosting, correspondence, authenticator an
 also depend on the configurations and provider practices identified below.
 
 > **The short version.** Nulo has no accounts, no wallet telemetry, no analytics, no tracking, no
-> advertising and no third-party scripts. The Developer receives nothing about your wallet. Wallet
+> advertising and no third-party scripts. The extension sends no wallet telemetry to the Developer;
+> the Developer may receive information you voluntarily submit and the provider-account information
+> described in § 5. Wallet
 > secrets are protected locally as described below; some wallet metadata is stored without
 > application-level encryption, and wallet operation sends the information described in § 5. A few
 > things must leave your device for the wallet to work at all — requests to an Aztec node, downloads
@@ -32,8 +34,9 @@ Contact: **«FILL: contact email»**
 
 ## 2. No wallet telemetry; limited website and correspondence processing
 
-I do not operate a backend for the wallet. There is no account, no sign-up, no profile on any server
-of mine, and no identifier assigned to you by the extension.
+I do not operate a backend for the wallet. Nulo requires no Developer-hosted account or sign-up. It
+creates local identifiers for wallet operation, including profile identifiers, but does not use them
+for wallet telemetry.
 
 Specifically, the extension contains **no** analytics SDK, **no** crash or error reporting service,
 **no** telemetry, **no** advertising or marketing tags, **no** cookies set by me, **no**
@@ -87,9 +90,9 @@ below.
 
 ### 5.1 The Aztec node you are connected to
 
-**What it is:** to read balances, follow the chain and submit transactions, Nulo sends requests to an
-Aztec node over HTTPS. Nulo ships with default endpoints operated by a third-party provider so the
-wallet works on first run.
+**What it is:** to read chain data and submit transactions, Nulo sends requests to the configured
+Aztec node. Remote endpoints use HTTPS; loopback endpoints may use HTTP. Nulo ships with default
+endpoints operated by a third-party provider so the wallet works on first run.
 
 **What the node receives:** protocol-defined transaction data, including proofs, public effects and
 encrypted data, plus ordinary request metadata — your IP address, user agent, timing, and the shape
@@ -101,7 +104,9 @@ intentionally discloses it. Protocol privacy does not eliminate inference, and d
 information that a transaction makes public.
 
 **Your control:** Settings → Networks lets you replace any endpoint with one you trust or run
-yourself. Replacing the default is the only way to remove that provider from your data path.
+yourself. **Pending transactions may continue to be checked through the endpoint used to submit
+them, including after you change or remove that endpoint.** Changing an endpoint does not withdraw
+information already disclosed.
 
 **What the Developer can see:** the default endpoint uses a provider account belonging to the
 Developer. Information available to the Developer through that account is «FILL: verified
@@ -134,15 +139,20 @@ the transaction hash you opened, like any website you visit.
 ### 5.4 `passkey.nulo.sh` — the passkey relying-party domain
 
 If you protect a profile with a passkey, the WebAuthn ceremony is bound to the domain
-`passkey.nulo.sh`, which I operate. It serves a single static page with no scripts and a strict
-content security policy; it exists as a cryptographic anchor and contains no application code.
+`passkey.nulo.sh`, which I operate. The application response served by my Worker is a static page
+without scripts and with restrictive response policies; it exists as a cryptographic anchor and
+contains no application code. **Cloudflare may independently serve infrastructure or security
+responses on that hostname, including challenge pages containing its own scripts.**
 
-**The extension does not fetch that page.** It invokes the browser's WebAuthn API using
-`passkey.nulo.sh` as the relying-party identifier; no passkey secret and no PRF output is submitted
-to that web server, and in ordinary use no request is made to it at all. Your browser and your
-selected authenticator process credential identifiers and a label derived from your profile name.
-Depending on your provider, passkey credentials and related metadata may be synchronised under that
-provider's own policies.
+**The extension does not fetch that page.** Nulo's passkey ceremony code invokes the browser's
+WebAuthn API with `passkey.nulo.sh` as the relying-party identifier; it does not make an HTTP request
+to that domain or send the passkey secret or PRF output to its web server. Browser and authenticator
+services may perform their own communications under their providers' policies.
+
+Your browser and selected authenticator process the credential identifier, a Nulo-generated profile
+identifier used as the WebAuthn user handle, and a credential label containing that identifier and a
+normalised form of your profile name. Depending on your provider, passkey credentials and related
+metadata may be synchronised under that provider's own policies.
 
 If you or a browser visit the domain directly, the hosting provider processes that request like any
 website request. I do not run analytics on that host.
@@ -153,6 +163,13 @@ Article 6(1)(f).
 ### 5.5 `nulo.sh`, its forms, and the uninstall page
 
 The website is static and carries no analytics or tracking of mine.
+
+Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting
+entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
+browser headers to the hosting provider. Information available to the Developer through hosting tools
+is «FILL: verified categories and access». This processing supports delivery and security of the
+sites, relying on legitimate interests where applicable. The retention information below and the
+international-processing information in § 12 cover these hosting records.
 
 If you submit a report or contact me, I receive the information you provide, such as your message,
 contact details and attachments. The form provider is «FILL: provider legal name and
@@ -261,8 +278,8 @@ Nulo supports both unencrypted and password-encrypted exports.
 - A passkey-profile backup still requires the original passkey credential for restoration, even when
   the file is encrypted.
 
-Protect every export, and verify which format you saved. I have no copy of any export and no way to
-revoke one.
+Protect every export, and verify which format you saved. Nulo does not automatically send the
+Developer copies of your exports, and the Developer cannot revoke an exported copy.
 
 ## 10. Your rights
 
@@ -304,9 +321,9 @@ Wallet secrets are encrypted at rest with modern authenticated encryption, deriv
 password or passkey. The private execution database is encrypted with a profile-specific key. The
 extension loads no remote code.
 
-The current passkey host serves a static page without application scripts and uses restrictive
-response policies. Keeping that domain and its eligible subdomains secure is part of the passkey
-security model.
+The Developer's passkey-host application response contains no scripts; hosting-provider responses and
+their limitations are described in § 5.4. Keeping that domain and its eligible subdomains secure is
+part of the passkey security model.
 
 No software is perfectly secure. Nulo has not been audited by an independent security firm, and it
 cannot protect you from a compromised device. See the [Terms of Use](terms.md) §§ 4.7 and 5.

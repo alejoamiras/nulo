@@ -6,9 +6,10 @@ These Terms are a binding agreement between you and the developer of Nulo. Read 
 install or use Nulo. If you do not agree, do not install or use it.
 
 > **The short version.** Nulo is free, open-source software that runs in your browser. It is not a
-> company, a bank, an exchange or a custodian. Nobody but you can access your keys or your funds —
-> which also means nobody, including the developer, can recover them if you lose them, and nobody
-> can reverse a transaction once it is final. Nulo has not been audited by an independent security
+> company, a bank, an exchange or a custodian. The Developer does not hold your signing credentials
+> or custody your assets. Anyone who obtains usable credentials or an effective authorisation may be
+> able to access your assets. Recovery and transaction finality have the limitations described in
+> § 4. Nulo has not been audited by an independent security
 > firm, it connects to Aztec mainnet by default, and the network it connects to is early-stage. You
 > can lose everything you put into it. Warranty exclusions and liability limits appear in §§ 16–19
 > and are subject to rights that applicable law does not permit you to waive.
@@ -59,10 +60,11 @@ balances on the Developer's own ledger.
 assets.** I hold no account for you and no assets of yours. Legal obligations concerning records or
 actions otherwise within the Developer's possession or control remain unaffected by this.
 
-**Nulo does not intermediate your transactions.** When you send a transaction, your browser sends it
-to a node. It does not pass through me, and I have no ability to approve, delay, block, screen,
-censor or undo it. Nothing in these Terms should be read as the Developer assuming a duty to
-monitor, review or intervene in what you or anyone else does with Nulo.
+**Nulo does not intermediate your transactions.** Transactions submitted by the extension go
+directly to the configured node. The Developer does not operate a transaction-approval or screening
+service and cannot unilaterally reverse finalised transactions on the network. Nothing in these
+Terms should be read as the Developer assuming a duty to monitor, review or intervene in what you or
+anyone else does with Nulo.
 
 **No insurance or compensation scheme.** The Developer does not provide insurance or a compensation
 fund for assets accessed through Nulo. Do not assume that wallet losses qualify for deposit
@@ -111,11 +113,16 @@ wallet data.
 page for anyone using a passkey. Nulo cannot export a recovery phrase for a passkey profile, and no
 phrase exists that would restore one.
 
-Recovery requires access to the original passkey credential with working PRF support, including
-through a compatible synced copy or supported cross-device use where available. A full backup does
-not replace that credential. Recreating a passkey with the same name does not recreate the wallet.
-Do not assume that moving a passkey between providers preserves the credential and PRF behaviour
-that Nulo requires.
+Recovery requires the same passkey credential identifier and the same PRF output used to create the
+profile, through a compatible browser and authenticator. A synced copy or supported cross-device use
+can satisfy this requirement; the original physical device is not necessarily required. A full
+backup does not replace that credential. Recreating a passkey with the same name does not recreate
+the wallet. Do not assume that moving a passkey between providers preserves the credential and PRF
+behaviour that Nulo requires.
+
+The credential alone does not restore separately imported account keys or all local wallet data;
+those require appropriate intact backup material. **Successful profile restoration is not proof that
+every account was recovered.**
 
 **4.4 Backups and exports are your responsibility.** Available exports depend on profile type and
 include full backups and, for supported profiles or accounts, recovery phrases or account-key
@@ -226,9 +233,10 @@ Nulo is a client. To be useful, it talks to things the Developer does not contro
 **7.1 Nodes and network endpoints.** Nulo ships with default Aztec node endpoints purely as a
 convenience so the wallet works out of the box. They are operated by third parties under their own
 terms, may log your requests, may be slow, wrong, unavailable or hostile, and may be changed or
-withdrawn at any time. You may replace them with your own at any time in Settings, and doing so is
-the only way to remove that third party from your data path. A default is not an endorsement, a
-recommendation or a warranty.
+withdrawn at any time. You can change the endpoint in Settings → Networks. **Pending transactions may
+continue to be checked through the endpoint used to submit them, including after you change or
+remove that endpoint**, and changing an endpoint does not withdraw information already disclosed. A
+default is not an endorsement, a recommendation or a warranty.
 
 **7.2 Tokens and contracts.** Anyone can deploy a token or a contract and give it any name, symbol
 or icon they like, including the name of a real one. Nulo showing a token, letting you add one, or
@@ -283,7 +291,9 @@ software defects and third-party conduct is determined under applicable law and 
   passes itself off as an official Nulo release (see § 13.2);
 - in a way that breaches any law, regulation, sanction or court order that applies to you.
 
-You must not remove, disable or work around any warning, confirmation or security control in Nulo.
+You must not bypass authentication or authorisation controls to gain unauthorised access to another
+person's wallet or data. This does not prohibit supported settings or modifications permitted by the
+applicable open-source licences.
 
 ## 10. Sanctions, export control and compliance
 
@@ -308,8 +318,9 @@ and should not be relied on for any purpose.
 
 Nothing in Nulo or in any material published under the Nulo name is financial, investment, legal,
 tax or accounting advice, or a recommendation, solicitation or offer to buy, sell or hold anything.
-Information shown in the interface — balances, prices, estimates, labels, warnings — is provided for
-convenience, may be incomplete, delayed or wrong, and must not be relied on as accurate.
+Balances, prices, estimates, labels and warnings shown in the interface may be incomplete, delayed or
+affected by errors. Review transaction details before approving. This warning does not remove
+responsibility for statements or duties that applicable law makes binding.
 
 The Developer is not your agent, adviser, trustee, fiduciary, partner or broker, and owes you no
 fiduciary duty, duty of care in respect of your financial decisions, or duty of best execution. You
@@ -319,8 +330,10 @@ make your own decisions.
 
 **13.1 The code.** Nulo's original code is licensed under the **Apache License, Version 2.0**, which
 governs the rights it grants in source and object form. These Terms address use of the Developer's
-distributed extension and do not restrict rights granted by that licence. Bundled third-party
-components remain subject to their respective licences and notices.
+distributed extension and do not restrict rights granted by that licence. Bundled components are
+licensed as identified in the licence files and notices accompanying each release, including any
+alternative licence expressly granted by their copyright holders. These Terms do not restrict
+permissions granted by those licences.
 
 **13.2 The name and the marks.** Apache-2.0 does not grant trademark rights in the Nulo name or
 marks, except for the descriptive uses permitted by that licence. Do not present a modified or
@@ -363,6 +376,12 @@ Do not include your recovery phrase, password, private keys or backup files in a
 
 ## 16. NO WARRANTY
 
+**Application of §§ 16–18.** The warranty exclusions in § 16 and the restrictions in §§ 17.1–17.2 and
+18 apply only to **Business Users**. A Business User is a person acting mainly for their trade,
+business, craft or profession who is not entitled to consumer protection for the claim concerned
+under applicable law. Those provisions also do not apply to a contract protected by the Australian
+unfair-contract-terms rules for small-business contracts.
+
 **This section is subject to § 19 and does not override rights or representations that applicable law
 makes binding.**
 
@@ -385,36 +404,45 @@ WARRANTY NOT EXPRESSLY STATED HERE.
 
 ## 17. Limitation of liability
 
-**17.1 Business users — excluded losses.** If you use Nulo for business purposes, and subject to
-§ 19, the Developer and contributors exclude liability for indirect or consequential loss and loss
-of business profits, revenue, opportunity or goodwill, to the extent permitted by law. **For
-consumers, this section does not exclude losses for which applicable consumer law makes the
-Developer responsible.**
+**17.1 Business Users — excluded losses.** For Business Users (as defined at the start of § 16), and
+subject to § 19, the Developer and contributors exclude liability for indirect or consequential loss
+and loss of business profits, revenue, opportunity or goodwill, to the extent permitted by law.
 
-**17.2 Business users — aggregate cap.** For users acting for business purposes, and subject to
-§ 19, the aggregate liability of the Developer and contributors together for claims arising from
-Nulo or these Terms is limited to the greater of US$100 and the amount paid to the Developer for
-Nulo (which is zero). **This contractual cap does not apply to consumer claims or to liability
-identified in § 19.**
+**For consumers, liability is determined under applicable law.** These Terms impose no monetary cap
+on that liability and do not displace applicable rules concerning causation, remoteness of loss,
+contributory fault or mitigation.
+
+**17.2 Business Users — aggregate cap.** For Business Users, and subject to § 19, the aggregate
+liability of the Developer and contributors together for claims arising from Nulo or these Terms is
+limited to the greater of US$100 and the amount paid to the Developer for Nulo (which is zero).
 
 **17.3 Third parties.** The Developer does not control independent third-party services or guarantee
 their performance. Responsibility for loss caused solely by those parties is governed by applicable
 law and their arrangements with you. This section does not exclude responsibility imposed by law for
 the Developer's own implementation, statements, selection or configuration.
 
-**17.4 Basis of the bargain.** These exclusions and limits are a basis on which Nulo is made
-available free of charge.
+**17.4 Independent allocation of risk.** For users to whom §§ 17.1–17.2 apply, those provisions are
+separate allocations of risk underlying the free distribution of Nulo. Subject to § 19, each applies
+independently of any other contractual remedy, including where that other remedy fails of its
+essential purpose.
 
-## 18. Reimbursement by business users
+## 18. Reimbursement by Business Users
 
-This section applies only to users acting for business purposes.
+This section applies only to Business Users (as defined at the start of § 16).
 
-You will reimburse reasonable losses and legal costs awarded in a third-party claim to the extent
-directly caused by your intentional unlawful use of Nulo or your knowing infringement of that third
-party's rights. This obligation excludes losses attributable to the Developer's or a contributor's
-breach, negligence or misconduct, and excludes penalties that cannot lawfully be transferred. The
-protected party must give prompt notice, take reasonable steps to limit loss, and obtain your
-consent before agreeing to a settlement for which it seeks reimbursement.
+You will reimburse the Developer or a contributor for damages payable under a final judgment or a
+settlement you approve, and reasonable external legal costs actually incurred in defending a
+third-party claim, but only to the extent directly caused by your intentional unlawful use of Nulo
+or your knowing infringement of that third party's rights. No amount may be recovered twice.
+
+This obligation excludes losses attributable to the Developer's or a contributor's breach,
+negligence or misconduct, and excludes penalties that cannot lawfully be transferred. The protected
+party must give prompt notice, take reasonable steps to limit loss, and obtain your consent before
+agreeing to a settlement for which it seeks reimbursement.
+
+Nothing in this section releases any user from liability otherwise imposed by applicable law for
+their intentional unlawful conduct. For consumers, any recovery of losses or legal costs is
+determined under applicable law.
 
 ## 19. Rights you keep, whatever this document says
 
