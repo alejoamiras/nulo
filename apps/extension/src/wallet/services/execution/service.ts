@@ -23,6 +23,7 @@ import { TokenService } from "@/wallet/services/token/service"
 import { FpcService, FpcType } from "@/wallet/services/fpc/service"
 import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, TxStatus } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { LegalAcceptanceService } from "@/wallet/services/legal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { isApprovedSendInFlight } from "@/utils/in-flight-send"
 import { DAPP_INTERACTION_SERVICE_NAME, type ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
@@ -99,6 +100,11 @@ export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient =>
 /** A popup decodes one approval window at a time; anything past this is not a display request. */
 const MAX_DISPLAY_CALLS = 64
 
+/** The operations that end in a broadcast. Refused up front without a current Terms acceptance so
+ *  nobody proves for minutes first; reads, registrations and simulations are untouched, because the
+ *  wallet's own views run through `executeOperations` too. */
+const BROADCASTING_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set(["send_transaction", "aztec_sendTx"])
+
 /** The operations that run under the authorizing session's fence. The wallet-sdk dispatcher sends
  *  a dApp's reads, registrations and simulations with none, and those never read one; its
  *  silently-covered authwit arrives under the wire handler's admission fence. */
@@ -136,6 +142,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private authRegistryService: AuthRegistryService = null!
 	private taskService: TaskService = null!
 	private operationJournal: OperationJournalService = null!
+	private legal: LegalAcceptanceService = null!
 	private planner: OperationPlanner = null!
 	private resolver: ContractResolver = null!
 
@@ -210,10 +217,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.authRegistryService = services.get(AuthRegistryService.name)
 		this.taskService = services.get(TaskService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		this.legal = services.get(LegalAcceptanceService.name)
 		this.planner = new OperationPlanner(this.profileService, this.tokenService)
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
-		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.proofGate, {
+		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.legal, this.proofGate, {
 			updateProvingBackend: (journalId, backend) => this.operationJournal.updateProvingBackend(journalId, backend),
 		})
 		this.pxeService.onProvePhase.add((event) => void this.coordinator.onProvePhase(event))
@@ -463,6 +471,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		precomputedEstimateId?: string,
 	): Promise<string> {
 		await this.ensureInitialized()
+		// Early refusal only — the wall is in the coordinator. This spares the user a proof.
+		await this.legal.assertCurrent()
 		amount = coerceAmount(amount)
 		const fence = await this.captureFence()
 		return this.transferExecutor.execute(
@@ -650,6 +660,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
+		if (operations.some((op) => BROADCASTING_OPERATION_KINDS.has(op.kind))) await this.legal.assertCurrent()
 		if (origin.type === OriginType.DAPP && !authorizedFence && operations.some((op) => FENCED_OPERATION_KINDS.has(op.kind))) {
 			throw new Error("a dApp send requires the fence of the session that authorized it")
 		}
@@ -881,6 +892,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		fence?: ExecutionFence,
 	): Promise<string> {
 		await this.ensureInitialized()
+		await this.legal.assertCurrent()
 		const authorized = fence ?? (await this.captureFence())
 		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, authorized, hooks)
 	}

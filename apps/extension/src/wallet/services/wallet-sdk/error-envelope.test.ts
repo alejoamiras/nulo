@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
+	TermsAcceptanceRequiredError,
 	JobCancelledError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
@@ -35,6 +36,14 @@ describe("toWalletResponseError", () => {
 			code: 4001,
 			message: "User rejected",
 			data: { walletErrorCode: UserRejectedError.CODE },
+		})
+	})
+
+	test("TermsAcceptanceRequiredError → {code:4100} with the message a dApp can show as is", () => {
+		expect(toWalletResponseError(new TermsAcceptanceRequiredError())).toEqual({
+			code: 4100,
+			message: TermsAcceptanceRequiredError.MESSAGE,
+			data: { walletErrorCode: TermsAcceptanceRequiredError.CODE },
 		})
 	})
 
