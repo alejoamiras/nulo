@@ -40,7 +40,7 @@ test("a full backup carries an imported account; restoring it (dup-confirmed) re
 			await waitForHash(donorPage, "#/popup/general", 30_000)
 			foreignBody = await exportAccountBody(donorPage, "Account", false)
 		} finally {
-			await donor.browser.close()
+			await donor.close()
 		}
 	}
 

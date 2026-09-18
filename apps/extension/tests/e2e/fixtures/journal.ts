@@ -23,6 +23,7 @@
  */
 import { execSync } from "node:child_process"
 import type { Page } from "puppeteer"
+import { EXTENSION_SCHEME } from "./browser"
 
 /** Non-terminal, claimed stages — "an op is in flight right now". */
 export const ACTIVE_STAGES = ["pending", "simulating", "proving", "submitting"] as const
@@ -114,7 +115,7 @@ async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R
 	const target = page
 		.browser()
 		.targets()
-		.find((t) => t.type() === "service_worker" && t.url().includes("chrome-extension://"))
+		.find((t) => t.type() === "service_worker" && t.url().includes(EXTENSION_SCHEME))
 	if (!target) return "<no service_worker target>"
 	const worker = await target.worker()
 	if (!worker) return "<service_worker has no worker handle>"
@@ -145,7 +146,7 @@ async function extCtxEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) 
 		}
 	}
 	for (const t of page.browser().targets()) {
-		if (t.type() !== "page" || !t.url().includes("chrome-extension://")) continue
+		if (t.type() !== "page" || !t.url().includes(EXTENSION_SCHEME)) continue
 		try {
 			const p = await t.page()
 			if (p && (await isExtCtx(p))) return await p.evaluate(fn, ...args)

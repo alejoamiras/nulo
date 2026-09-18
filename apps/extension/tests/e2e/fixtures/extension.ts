@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
-import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
+import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
+import { extensionUrl, launchBrowser } from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -20,6 +21,9 @@ export interface ExtensionContext {
 	extensionId: string
 	consoleErrors: string[]
 	pageErrors: Error[]
+	/** Tear the launch down through this, never through `browser.close()`: a driver may own a
+	 *  WebDriver process and a profile directory that closing the browser does not release. */
+	close(): Promise<void>
 }
 
 /**
@@ -55,57 +59,16 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	// A caller's freshly created empty `userDataDir` is therefore a fresh install, not a reuse.
 	const freshProfile = !userDataDir || !existsSync(userDataDir) || readdirSync(userDataDir).length === 0
 
-	// Headless `true` (the modern default in Puppeteer 24+) supports MV3
-	// extensions (offscreen docs, SW, chrome.storage, chrome.runtime.Port).
-	// `"new"` was the predecessor name that's now deprecated as a value;
-	// passing it here historically generated a deprecation warning that we
-	// ignored. Setting HEADLESS=0 in the environment flips to windowed mode
-	// for local debugging.
+	// HEADLESS=0 flips to windowed mode for local debugging.
 	const headless: boolean = process.env.HEADLESS !== "0"
-	const browser = await puppeteer.launch({
-		headless,
-		...(userDataDir ? { userDataDir } : {}),
-		args: [
-			`--disable-extensions-except=${extensionPath}`,
-			`--load-extension=${extensionPath}`,
-			"--no-sandbox",
-			"--disable-setuid-sandbox",
-			"--window-size=400,600",
-			// Prevent Chrome from throttling background/offscreen tabs. Headless
-			// Chrome doesn't have a "focused" page, so without these flags the
-			// renderer backgrounds the tab and rAF gets throttled to ~1Hz —
-			// which freezes Vue's `<Transition>` classes mid-enter and breaks
-			// any test that depends on a popup actually rendering.
-			"--disable-renderer-backgrounding",
-			"--disable-backgrounding-occluded-windows",
-			"--disable-features=CalculateNativeWinOcclusion",
-			// Artifact mode runs the PRODUCTION bundle, so Alpha is active and its
-			// default-token seeds are real — a first account now triggers a seed
-			// pass that can resolve. `fiat-display` asserts no fiat renders on a
-			// fresh wallet, and a resolved seed plus a resolved quote would break
-			// that, so the PRICE host is blocked. Deliberately not the RPC host:
-			// blocking that makes the node client retry, which delays profile
-			// deletion past the reset specs' waits (measured — it fails three specs
-			// that pass without it). A seeded token card is harmless here; no smoke
-			// assertion looks at the token list.
-			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP api.coingecko.com 127.0.0.1:1"] : []),
-		],
-		ignoreDefaultArgs: ["--disable-extensions"],
-		// Default protocolTimeout is 180_000ms — bump to 300_000 because the
-		// wallet's argon2 KDF unlock + bb.js wasm boot can spike CDP latency
-		// past 3 minutes on cold first run when vitest's worker pool has
-		// the host under memory pressure. Past timeouts (e.g. profile-export
-		// reveal flow) showed the unlock completed eventually but the CDP
-		// reply was lost because the call timed out.
-		protocolTimeout: 300_000,
-	})
+	const { browser, close } = await launchBrowser({ extensionPath, userDataDir, headless })
 
 	try {
 		const extensionId = await settleLaunchedExtension(browser, { freshProfile, waitForLiveness })
-		return { browser, extensionId, consoleErrors: [], pageErrors: [] }
+		return { browser, extensionId, consoleErrors: [], pageErrors: [], close }
 	} catch (err) {
-		// Nothing else holds this browser yet; an escaping error would strand its Chrome.
-		await browser.close().catch(() => {})
+		// Nothing else holds this launch yet; an escaping error would strand its browser.
+		await close().catch(() => {})
 		throw err
 	}
 }
@@ -135,7 +98,7 @@ async function settleLaunchedExtension(
 		try {
 			candidate = await browser.newPage()
 			patchPagePolling(candidate)
-			await candidate.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
+			await candidate.goto(extensionUrl(extensionId, "/src/popup/index.html"), {
 				waitUntil: "domcontentloaded",
 			})
 			blankPage = candidate
@@ -215,7 +178,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	// fresh install (launchExtension seeded it to true by default).
 	const setupPage = await ctx.browser.newPage()
 	patchPagePolling(setupPage)
-	await setupPage.goto(`chrome-extension://${ctx.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+	await setupPage.goto(extensionUrl(ctx.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 	await setupPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 	})
@@ -264,7 +227,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		ctx.pageErrors.push(err)
 	})
 
-	const url = `chrome-extension://${ctx.extensionId}/src/onboarding/index.html#/onboarding/welcome`
+	const url = extensionUrl(ctx.extensionId, "/src/onboarding/index.html#/onboarding/welcome")
 	await page.goto(url, { waitUntil: "domcontentloaded" })
 	// Wait for Vue mount: welcome CTA must render.
 	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
@@ -528,7 +491,7 @@ function firstTwoAccountsFixture(label: string, bundle: "transaction" | "transac
 		)
 
 		await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
-		await ctx.browser.close()
+		await ctx.close()
 	}
 }
 
@@ -614,7 +577,7 @@ export const test = base.extend<{
 		async ({}, use) => {
 			const ctx = await launchExtension()
 			await use(ctx)
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -625,7 +588,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			await registerProfile(ctx)
 			await use(ctx)
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -636,7 +599,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			await registerProfile(ctx)
 			await use(ctx)
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "test" },
 	],
@@ -646,7 +609,7 @@ export const test = base.extend<{
 		async ({}, use) => {
 			const ctx = await launchExtension()
 			await use(ctx)
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "test" },
 	],
@@ -674,7 +637,7 @@ export const test = base.extend<{
 		async ({}, use) => {
 			const { ctx, playgroundPage } = await setupConnectedPlayground("dappConnectedExtensionPerTest")
 			await use(Object.assign(ctx, { playgroundPage }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "test" },
 	],
@@ -692,7 +655,7 @@ export const test = base.extend<{
 				grantCapBundle(ctx, playgroundPage, "accounts", pickFirstAccount),
 			)
 			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "test" },
 	],
@@ -708,7 +671,7 @@ export const test = base.extend<{
 				grantCapBundle(ctx, playgroundPage, "transaction", pickFirstAccount),
 			)
 			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "test" },
 	],
@@ -732,7 +695,7 @@ export const test = base.extend<{
 			await switchToLocalNetwork(page)
 			await page.close()
 			await use(ctx)
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -796,7 +759,7 @@ export const test = base.extend<{
 			await page.close()
 
 			await use(Object.assign(ctx, { accountAddress }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -880,7 +843,7 @@ export const test = base.extend<{
 
 			await page.close()
 			await use(Object.assign(ctx, { accountAddress }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -1020,7 +983,7 @@ export const test = base.extend<{
 
 			await page.close()
 			await use(Object.assign(ctx, { accountAddress }))
-			await ctx.browser.close()
+			await ctx.close()
 		},
 		{ scope: "file" },
 	],
@@ -1232,7 +1195,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		ctx.pageErrors.push(err)
 	})
 
-	const popupUrl = `chrome-extension://${ctx.extensionId}/src/popup/index.html`
+	const popupUrl = extensionUrl(ctx.extensionId, "/src/popup/index.html")
 	// Fast-path-then-fallback for the SW-handshake workaround.
 	//
 	// Background: the SW's FIRST popup connection on a brand-new tab can

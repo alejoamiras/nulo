@@ -18,7 +18,10 @@ import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, newAztecDataDi
 import { markBootReady, markBootStarted } from "./sentinel"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
+// `EXTENSION_PATH` points the run at a build other than `dist/chrome` — another browser's, or an
+// artifact unzipped somewhere else. The smoke setup has carried the same seam since the release
+// workflow needed it.
+const EXTENSION_PATH = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────

@@ -169,7 +169,7 @@ test.skipIf(!hasConfig)(
 			expect(ctx.pageErrors).toEqual([])
 		} finally {
 			rmSync(dirname(backupPath), { recursive: true, force: true })
-			await ctx.browser.close()
+			await ctx.close()
 		}
 	},
 )
@@ -204,7 +204,7 @@ test.skipIf(!hasConfig)(
 			// assertions above are the real proof. Page errors stay asserted (popup-side truth).
 			expect(ctx.pageErrors).toEqual([])
 		} finally {
-			await ctx.browser.close()
+			await ctx.close()
 		}
 	},
 )
