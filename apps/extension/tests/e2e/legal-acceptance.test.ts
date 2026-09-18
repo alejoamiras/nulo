@@ -22,6 +22,7 @@ import {
 import { ensureUnlocked, lockWallet, navigateByHash, waitForLockScreen } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
 import { exportAccountBody } from "./helpers/account-io"
+import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { CANONICAL_SEED_24, importSeed, ONBOARDING_IMPORT_SHELL, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
 import {
 	acceptOnboardingTerms,
@@ -118,6 +119,32 @@ async function revealSeedPhrase(page: Page): Promise<string> {
 	return page.$eval('[data-testid="reveal-content"] input', (el) => (el as HTMLInputElement).value)
 }
 
+/**
+ * Assemble a full backup through the page flow and download it. A password profile unlocks first;
+ * a passkey profile's agreement starts its WebAuthn ceremony in the page itself, which is exactly
+ * what an overlay would break. Returns the parsed file.
+ */
+async function downloadFullBackup(page: Page, password?: string): Promise<Record<string, unknown>> {
+	await navigateByHash(page, "#/popup/settings/security/export", 15_000)
+	await navigateByHash(page, "#/popup/settings/security/export/full", 15_000)
+	await pointerClick(page, "agree-continue-btn")
+	if (password) {
+		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
+		await replaceInputValue(page, '[data-testid="unlock-password-input"]', password)
+		await pointerClick(page, "unlock-submit-btn")
+	}
+	await page.waitForFunction(
+		() => {
+			const download = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
+			return !!download && !download.disabled
+		},
+		{ timeout: 180_000, polling: 250 },
+	)
+	await armBackupDownloadCapture(page)
+	await pointerClick(page, "download-backup-btn")
+	return JSON.parse(await readCapturedBackupDownload(page)) as Record<string, unknown>
+}
+
 describe("popup: declining never locks a person out", () => {
 	test("S4 no record + a profile: sheet, Not now, the declined screen, the Send banner, and it all survives a relaunch", async () => {
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-e2e-legal-"))
@@ -160,7 +187,7 @@ describe("popup: declining never locks a person out", () => {
 	}, 240_000)
 
 	test.each(["missing", "stale", "corrupt"] as const)(
-		"S5 %s: the recovery phrase and an account file still export, under real pointer input",
+		"S5 %s: the recovery phrase, an account file and a full backup still export, under real pointer input",
 		async (seed) => {
 			const ctx = await launchExtension()
 			try {
@@ -180,11 +207,17 @@ describe("popup: declining never locks a person out", () => {
 				const body = await exportAccountBody(page, "Account", false)
 				expect(Object.keys(JSON.parse(body) as object).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)
+
+				const backup = await downloadFullBackup(page, TEST_PASSWORD)
+				expect(Object.keys(backup).length).toBeGreaterThan(0)
+				expect(await isSheetPresent(page)).toBe(false)
+				// The acceptance record is device-local: a backup must not carry it to another device.
+				expect(JSON.stringify(backup)).not.toContain("nulo:legal:accepted")
 			} finally {
 				await ctx.browser.close().catch(() => {})
 			}
 		},
-		300_000,
+		480_000,
 	)
 
 	test("S7 newer Terms: the sheet lists the change, Continue records it, the banner goes and history grows", async ({
@@ -287,10 +320,8 @@ async function reloadRegisterWithoutRecord(page: Page): Promise<void> {
 	await waitForHash(page, "#/popup/register", 30_000)
 }
 
-// The virtual authenticator's full-backup ceremony is skipped on CI for the same reason as
-// passkey-backup.test.ts: the hosted runner gives no deterministic completion signal for it.
-describe.skipIf(process.env.CI === "true")("popup: a passkey wallet that declined", () => {
-	test("S6 the full backup's in-page passkey ceremony completes with the Terms declined", async ({
+describe("popup: a passkey wallet that declined", () => {
+	test("S6 the full backup's in-page passkey ceremony completes and the file downloads, with the Terms declined", async ({
 		freshExtensionPerTest: extension,
 	}) => {
 		const page = await openPopup(extension)
@@ -308,15 +339,8 @@ describe.skipIf(process.env.CI === "true")("popup: a passkey wallet that decline
 			await reloadWithLegalState(page, "stale")
 			await declineFromSheet(page, "changed")
 
-			await navigateByHash(page, "#/popup/settings/security/export/full", 15_000)
-			await pointerClick(page, "agree-continue-btn")
-			await page.waitForFunction(
-				() => {
-					const download = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
-					return !!download && !download.disabled
-				},
-				{ timeout: 180_000, polling: 250 },
-			)
+			const backup = await downloadFullBackup(page)
+			expect(Object.keys(backup).length).toBeGreaterThan(0)
 			expect(await isSheetPresent(page)).toBe(false)
 		} finally {
 			await auth.cleanup()
