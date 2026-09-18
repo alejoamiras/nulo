@@ -66,6 +66,17 @@ describe("thirdPartyNotices", () => {
 		)
 	})
 
+	test("what a worker build copies or imports as an asset still needs its own claim", () => {
+		const build = plugins()
+		build.worker({
+			...workerBundle("/src/a.worker.ts", "assets/worker-a1.js", install("a-dep")),
+			"assets/copied.js": { type: "asset", source: "/* third-party */" },
+		})
+		expect(() => build.main(mainBundle([], ["assets/worker-a1.js", "assets/copied.js"]))).toThrow(
+			/assets\/copied\.js: emitted code asset with no VENDORED entry/,
+		)
+	})
+
 	test("across rebuilds: a changed worker replaces its record, a removed one drops out, a cached one stays", () => {
 		const build = plugins()
 		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-a1.js", install("a-dep-v1")))

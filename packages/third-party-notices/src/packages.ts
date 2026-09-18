@@ -7,8 +7,10 @@ export interface NamedManifest {
 	version: string
 	/** The declared licence as one SPDX-shaped string; legacy object and array forms are folded into it. */
 	license: string | undefined
-	/** A licence declaration is present but is not something this reader can state as a string. */
+	/** A licence declaration is present but unreadable, or the manifest's two declarations disagree. */
 	malformedLicence: boolean
+	/** Below the installation root: declares a name, a version or a licence without identifying a package. */
+	incomplete?: boolean
 }
 
 export interface InstalledPackage extends NamedManifest {
@@ -60,12 +62,14 @@ function licenceOf(entry: unknown): string | undefined {
  * what an override may fill, and an unreadable declaration could be hiding anything.
  */
 function declaredLicence(manifest: Record<string, unknown>): Pick<NamedManifest, "license" | "malformedLicence"> {
-	const declarations = [manifest.license, manifest.licenses].filter((field) => field !== undefined)
-	if (declarations.length === 0) return { license: undefined, malformedLicence: false }
-	const [first] = declarations
-	const listed = (Array.isArray(first) ? first : [first]).map(licenceOf)
-	if (listed.length === 0 || listed.includes(undefined)) return { license: undefined, malformedLicence: true }
-	return { license: listed.length === 1 ? listed[0] : `(${listed.join(" OR ")})`, malformedLicence: false }
+	const declarations = [manifest.license, manifest.licenses]
+		.filter((field) => field !== undefined)
+		.map((field) => (Array.isArray(field) ? field : [field]).map(licenceOf))
+	const unreadable = declarations.some((listed) => listed.length === 0 || listed.includes(undefined))
+	const stated = declarations.map((listed) => (listed.length === 1 ? listed[0] : `(${listed.join(" OR ")})`))
+	// `license` and `licenses` side by side must say the same thing, or neither can be believed.
+	if (unreadable || new Set(stated).size > 1) return { license: undefined, malformedLicence: true }
+	return { license: stated[0], malformedLicence: false }
 }
 
 function readManifest(dir: string): (NamedManifest & { dir: string }) | undefined {
@@ -81,6 +85,27 @@ function readManifest(dir: string): (NamedManifest & { dir: string }) | undefine
 		throw new Error(`${file.split("/node_modules/").at(-1)}: name or version is not a single well-formed token`)
 	}
 	return { name, version, ...declaredLicence(manifest), dir }
+}
+
+const NESTED_FIELDS = ["name", "version", "license", "licenses"] as const
+
+/**
+ * A manifest below the installation root. A bare `{ "type": "module" }` marker says nothing and is
+ * skipped; anything that states a name, a version or a licence is returned, flagged `incomplete`
+ * when it does not identify a package, so a licence declaration cannot hide behind a missing name.
+ */
+function readNestedManifest(dir: string): NamedManifest | undefined {
+	const file = join(dir, "package.json")
+	if (!existsSync(file)) return undefined
+	const raw: unknown = JSON.parse(readFileSync(file, "utf8"))
+	if (typeof raw !== "object" || raw === null) return undefined
+	const manifest = raw as Record<string, unknown>
+	if (!NESTED_FIELDS.some((field) => manifest[field] !== undefined)) return undefined
+	const { name, version } = manifest
+	if (typeof name !== "string" || typeof version !== "string" || !PACKAGE_NAME.test(name) || !PACKAGE_VERSION.test(version)) {
+		return { name: "(unidentified)", version: "?", ...declaredLicence(manifest), incomplete: true }
+	}
+	return { name, version, ...declaredLicence(manifest) }
 }
 
 /**
@@ -99,9 +124,8 @@ export function owningPackage(path: string): InstalledPackage {
 	if (owner?.name !== expected) throw new Error(`no package.json naming "${expected}" at its installation root`)
 	const nested: NamedManifest[] = []
 	for (let dir = dirname(path); dir.length > root.length; dir = dirname(dir)) {
-		const found = readManifest(dir)
-		if (found)
-			nested.push({ name: found.name, version: found.version, license: found.license, malformedLicence: found.malformedLicence })
+		const found = readNestedManifest(dir)
+		if (found) nested.push(found)
 	}
 	return { ...owner, nested }
 }

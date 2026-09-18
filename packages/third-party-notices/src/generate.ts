@@ -43,6 +43,9 @@ const HEADER = [
 ].join("\n")
 const INVENTORY_START = "COMPONENTS"
 
+/** Vite inlines such a worker as a string in the importing chunk, so its modules appear in no bundle. */
+const INLINE_WORKER = /[?&](?:shared)?worker\b.*[?&]inline\b|[?&]inline\b.*[?&](?:shared)?worker\b/
+
 const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const normalise = (text: string) => text.replace(/\r\n?/g, "\n").trimEnd()
 
@@ -50,6 +53,8 @@ const normalise = (text: string) => text.replace(/\r\n?/g, "\n").trimEnd()
 function bundledPackages(moduleIds: readonly string[], workspaceRoot: string, violations: string[]): InstalledPackage[] {
 	const found = new Map<string, InstalledPackage>()
 	for (const id of moduleIds) {
+		if (INLINE_WORKER.test(id))
+			violations.push(`${id.split("/").at(-1)}: an inline worker ships inside its importer, where no worker build records it`)
 		const path = modulePath(id)
 		if (!path) continue
 		const origin = moduleOrigin(path, workspaceRoot)
@@ -114,6 +119,8 @@ function nestedProblems(pkg: InstalledPackage, policy: Policy): string[] {
 	const title = `${pkg.name}@${pkg.version}`
 	return pkg.nested.flatMap((nested) => {
 		const found = `${nested.name}@${nested.version}`
+		if (nested.incomplete)
+			return [`${title}: carries a nested manifest that states a name, version or licence without identifying a package`]
 		if (nested.malformedLicence) return [`${title}: nested manifest ${found} declares a licence that cannot be read`]
 		if (nested.name !== pkg.name) {
 			return isReviewedEmbed(pkg, nested, policy)

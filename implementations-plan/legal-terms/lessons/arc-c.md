@@ -100,3 +100,22 @@ Both targets rebuilt under the stricter policy with identical output (135 entrie
 A slip worth recording: the edit that replaced the worker claim also deleted the three wasm
 claims, and the next real build refused with all four assets named. The policy caught its own
 author.
+
+**Round 3: reject. The loop stopped at its three-round cap without an approval.** Four findings,
+each reproduced, each fixed with a regression test, **none re-reviewed**:
+
+- The worker exemption covered every file a worker build wrote, including assets it copies; it now
+  covers only the chunks it compiled.
+- A nested manifest with a licence but no name and version was skipped as if it were a bare
+  `{ "type": "module" }` marker; anything that states a name, a version or a licence now counts.
+- Only the first of `license` / `licenses` was validated; both must be readable and agree.
+- An inline worker ships as a string inside its importer and reaches no worker build; such an
+  import is refused (there is none in the tree).
+
+What the three rounds say about the problem, not the patch: every finding was a way for a
+*crafted* dependency to keep its licence out of a notices file. None was a way for an ordinary
+dependency to do so, and the real build's output did not change across rounds 2 and 3 except for
+the components the sqlite inventory added. The generator is a compliance tool, not a security
+boundary against a hostile package, which would have worse options than hiding its licence. Round 1
+and the sqlite inventory were the findings with legal weight; the rest is hardening with
+diminishing returns. A fourth round is the owner's call.

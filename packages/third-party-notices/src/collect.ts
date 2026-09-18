@@ -51,9 +51,14 @@ function readableScript(fileName: string, source: string | Uint8Array | undefine
 	return typeof source === "string" ? source : new TextDecoder().decode(source)
 }
 
-/** The stable identity of a worker build and the files it wrote. */
+/**
+ * The stable identity of a worker build and the chunks it compiled. Assets a worker build emits
+ * (a wasm it imports, a file it copies) are not its compilation and still need a claim.
+ */
 export function workerIdentity(bundle: OutputBundleLike): { entry: string; outputs: string[] } {
-	const outputs = Object.keys(bundle).sort()
+	const outputs = Object.keys(bundle)
+		.filter((file) => bundle[file]?.type === "chunk")
+		.sort()
 	const entries = Object.values(bundle).flatMap((output) =>
 		output.type === "chunk" && output.isEntry && output.facadeModuleId ? [output.facadeModuleId] : [],
 	)

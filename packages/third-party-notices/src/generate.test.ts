@@ -147,6 +147,31 @@ describe("generateNotices", () => {
 		expect([...noticeNames(run([tidy]))]).toEqual(["tidy"])
 	})
 
+	test("a nested manifest cannot hide a licence behind a missing name or version", () => {
+		const host = install("host", { license: "MIT" }, { LICENSE: "x" })
+		const refusal = "host@1.0.0: carries a nested manifest that states a name, version or licence without identifying a package"
+		for (const partial of [
+			{ name: "foreign", license: "AGPL-3.0-only" },
+			{ type: "module", license: "AGPL-3.0-only" },
+		]) {
+			write("app/node_modules/host/lib/package.json", JSON.stringify(partial))
+			expect(violations(() => run([write("app/node_modules/host/lib/index.js", "")]))).toEqual([refusal])
+		}
+		// A marker that states nothing is what build tools really leave behind.
+		write("app/node_modules/host/lib/package.json", JSON.stringify({ type: "module", sideEffects: false }))
+		expect([...noticeNames(run([host, write("app/node_modules/host/lib/index.js", "")]))]).toEqual(["host"])
+	})
+
+	test("an inline worker is refused: its modules ship inside the importer and reach no worker build", () => {
+		write("src/crypto.worker.ts", "")
+		for (const query of ["?worker&inline", "?inline&worker", "?sharedworker&inline"]) {
+			expect(violations(() => run([join(root, `src/crypto.worker.ts${query}`)]))).toEqual([
+				`crypto.worker.ts${query}: an inline worker ships inside its importer, where no worker build records it`,
+			])
+		}
+		expect(run([join(root, "src/crypto.worker.ts?worker")])).toContain("COMPONENTS (0)")
+	})
+
 	test("an embedded package needs a record of that name, version and licence, and hides nothing above it", () => {
 		const host = install("host", { license: "MIT" }, { LICENSE: "x" })
 		const embed = (dir: string, manifest: object) => write(`app/node_modules/host/${dir}/package.json`, JSON.stringify(manifest))
@@ -258,7 +283,15 @@ describe("generateNotices", () => {
 			expect(violations(() => run([buried], { overrides: [override] }))).toEqual([
 				'silent@1.0.0: declares "AGPL-3.0-only", which its OVERRIDES entry does not acknowledge',
 			])
-			for (const unreadable of [{ licenses: [{ type: "AGPL-3.0-only" }, {}] }, { license: 7 }, { licenses: [] }]) {
+			const unreadables = [
+				{ licenses: [{ type: "AGPL-3.0-only" }, {}] },
+				{ license: 7 },
+				{ licenses: [] },
+				// A readable field beside an unreadable or a contradicting one proves nothing.
+				{ license: "MIT", licenses: [{ type: "AGPL-3.0-only" }, {}] },
+				{ license: "MIT", licenses: ["AGPL-3.0-only"] },
+			]
+			for (const unreadable of unreadables) {
 				expect(violations(() => run([install("silent", unreadable)], { overrides: [override] }))).toEqual([
 					"silent@1.0.0: declares a licence that cannot be read; an OVERRIDES entry cannot stand in for it",
 				])

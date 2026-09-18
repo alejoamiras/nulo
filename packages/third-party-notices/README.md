@@ -31,14 +31,16 @@ build rather than vanishing. Every installation is validated before duplicates a
 |---|---|
 | Licence expression not satisfied by `ALLOWED` (`OR`: any branch, `AND`: every branch; a `WITH` exception never matches) | refused |
 | No licence metadata, or an unparseable expression (legacy `{ type }` and `licenses: []` forms are read, an array as a choice) | refused unless an `OVERRIDES` entry covers it |
-| A licence declaration that is present but unreadable, or a manifest `name` / `version` that is not one well-formed token | refused; no override can stand in |
+| A licence declaration that is present but unreadable, `license` and `licenses` that disagree, or a manifest `name` / `version` that is not one well-formed token | refused; no override can stand in |
+| A manifest below the installation root that states a name, a version or a licence without identifying a package (a bare `{ "type": "module" }` marker is fine) | refused |
+| An inline worker (`?worker&inline`): Vite embeds it in the importing chunk as a string, so its modules reach no bundle | refused |
 | No non-empty licence / copying file at the package root (a `NOTICE` is reproduced but never stands in; `LICENSE.js` is code) | refused unless an `OVERRIDES` entry supplies the text |
 | One `name@version` installed twice with differing licence content | refused |
 | A module from outside the workspace and outside `node_modules`, or a package embedding another named package | refused |
 | `OVERRIDES` entry whose `reviewedVersion` is not the installed version | refused — re-verify, then bump it |
 | `OVERRIDES` entry the package no longer needs, or that matches nothing bundled | refused — delete it |
 | Package declares a licence its `OVERRIDES` entry neither uses nor acknowledges (`declared`) | refused |
-| Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) that no recorded worker build wrote and no `VENDORED` asset claim covers, or a claim whose covering package is not bundled | refused |
+| Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) that is not a chunk a recorded worker build compiled and that no `VENDORED` asset claim covers, or a claim whose covering package is not bundled | refused |
 | A `generated` claim whose asset's whole text is not the shape that tool writes (a file name proves nothing) | refused |
 | `VENDORED` entry that matches nothing, accounts for nothing, was reviewed at another host version, or whose component lacks an `https` source, a text, or an allowed licence | refused |
 
