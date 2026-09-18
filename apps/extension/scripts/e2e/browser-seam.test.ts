@@ -22,15 +22,35 @@ const SCHEME = "chrome-extension://"
  * line, so a violation appended there would go unreported. A guard that silently stops matching
  * is worse than no guard, so the parser decides what is code.
  *
- * What it still cannot see: an alias assigned across files, or one reached through a parameter or
- * a property. Local aliases (`const b = ctx.browser`) ARE caught; the rest needs type information
- * this scan deliberately does not build.
+ * Two limits it does have. A `const` bound to a browser is followed only within the file, and the
+ * name set is file-wide rather than scope-aware — so a shadowed binding of the same name can
+ * produce a false positive, which rejects a legitimate test rather than admitting a violation.
+ * Anything reached across a file, a parameter or a property needs type information this scan
+ * deliberately does not build.
  */
+
+/** Wrappers that change nothing at runtime, and so must not change what the scan sees. */
+function unwrap(node: ts.Expression): ts.Expression {
+	let current = node
+	while (
+		ts.isParenthesizedExpression(current) ||
+		ts.isAsExpression(current) ||
+		ts.isSatisfiesExpression(current) ||
+		ts.isNonNullExpression(current) ||
+		ts.isTypeAssertionExpression(current)
+	) {
+		current = current.expression
+	}
+	return current
+}
+
 const isBrowserProperty = (node: ts.Node): boolean => ts.isPropertyAccessExpression(node) && node.name.text === "browser"
 
 /** `x.browser` or `x.browser()` — the two shapes that yield a Browser without naming a driver. */
-const yieldsBrowser = (node: ts.Expression): boolean =>
-	isBrowserProperty(node) || (ts.isCallExpression(node) && isBrowserProperty(node.expression))
+function yieldsBrowser(node: ts.Expression): boolean {
+	const bare = unwrap(node)
+	return isBrowserProperty(bare) || (ts.isCallExpression(bare) && isBrowserProperty(unwrap(bare.expression)))
+}
 
 function localBrowserAliases(file: ts.SourceFile): Set<string> {
 	const aliases = new Set<string>()
@@ -45,15 +65,20 @@ function localBrowserAliases(file: ts.SourceFile): Set<string> {
 }
 
 function closesABrowser(receiver: ts.Expression, aliases: Set<string>): boolean {
-	if (yieldsBrowser(receiver)) return true
-	if (ts.isParenthesizedExpression(receiver)) return closesABrowser(receiver.expression, aliases)
-	if (ts.isIdentifier(receiver)) return receiver.text === "browser" || aliases.has(receiver.text)
-	return false
+	const bare = unwrap(receiver)
+	if (yieldsBrowser(bare)) return true
+	return ts.isIdentifier(bare) && (bare.text === "browser" || aliases.has(bare.text))
 }
 
 /** 1-based line numbers of executable seam violations in one file's source. */
 function violations(source: string): { scheme: number[]; close: number[] } {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
+	// Source the parser could not read is source the scan cannot vouch for: an unterminated regex
+	// swallows whatever follows it, so accepting a partial tree would fail open.
+	const parseErrors = (file as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? []
+	if (parseErrors.length > 0) {
+		throw new Error(`seam scan could not parse the source: ${ts.flattenDiagnosticMessageText(parseErrors[0].messageText, " ")}`)
+	}
 	const aliases = localBrowserAliases(file)
 	const scheme: number[] = []
 	const close: number[] = []
@@ -146,14 +171,35 @@ describe("browser seam guard", () => {
 		expect(violations(src).close).toEqual([1])
 	})
 
+	// Wrapped the way real test code is written. It matters: at the top level of a module TS reads
+	// `await (x)` as a call to a function named `await`, so an unwrapped fixture would exercise a
+	// different tree than the one the suite actually contains.
+	const inAsync = (body: string) => `async function spec() {\n${body}\n}`
+
+	// Each of these reaches the same Browser by a route that changes nothing at runtime, so each
+	// has to reach the same verdict. The type-level wrappers were live bypasses before `unwrap`.
 	test.each([
 		["split across lines", "await ctx.browser\n\t.close()"],
 		["optional chaining", "await ctx.browser?.close()"],
 		["a local alias", "const b = ctx.browser\nawait b.close()"],
-		["parenthesised", "await (ctx).browser.close()"],
+		["a parenthesised alias initializer", "const b = (ctx.browser)\nawait b.close()"],
+		["parentheses", "await (ctx.browser).close()"],
 		["a browser() accessor", "await page.browser().close()"],
-	])("flags a close reached by %s", (_label, src) => {
-		expect(violations(src).close.length).toBe(1)
+		["an as-assertion", "await (ctx.browser as Browser).close()"],
+		["a satisfies expression", "await (ctx.browser satisfies Browser).close()"],
+		["a non-null assertion", "await ctx.browser!.close()"],
+	])("flags a close reached by %s", (_label, body) => {
+		expect(violations(inAsync(body)).close.length).toBe(1)
+	})
+
+	test("leaves a page close alone", () => {
+		expect(violations(inAsync("await page.close()\nawait popup.close()")).close).toEqual([])
+	})
+
+	// Source the parser rejects is source the scan cannot vouch for; accepting a partial tree is
+	// how an unterminated regex would swallow a violation and report a clean file.
+	test("refuses to vouch for source it cannot parse", () => {
+		expect(() => violations("const re = /unterminated\nawait ctx.browser.close()")).toThrow(/could not parse/)
 	})
 
 	test("ignores both inside line and block comments", () => {
