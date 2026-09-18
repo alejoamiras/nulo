@@ -32,3 +32,14 @@ Four independent read-only audits (lint baseline · credential consumers · PATH
 `bun run lint` → 0 · `bun run typecheck` → 0 · `vitest run src/wallet/utils/passkey-ceremony.test.ts` → 11 passed (5 pre-existing + 6 new) · `bun run audit:vue` → 0. Phase 1 green 2026-09-18.
 
 `audit:vue` runs a full 16 GB vite build and outlives the agent shell's 10-minute cap — run it detached (`setsid nohup … > log`) and watch the log for the exit line, never in the foreground.
+
+## Arc 1 boundary — codex fix loop (GPT-6 Astra, `high`)
+
+Converged in three rounds; every round's verdict was `approve`, and each of the first two still carried a fixable [Low].
+
+- **Round 1** (`011b3090`) → approve + 3 [Low], all adopted as `135019da`. (a) The fallback comment spent six lines on three statements and generalised a *virtual*-authenticator observation to "Firefox's" authenticator — trimmed to three lines, generalisation dropped. (b) The fallback test pinned `allowCredentials` and nothing else, so a regression re-prompting under a different rp, weaker `userVerification` or a different PRF eval input would have passed on the permissive mock — all three now asserted. (c) A test comment referenced predecessor code; restated as an invariant.
+  Codex independently sustained the rejection of the `prf.enabled !== false` guard, while correcting the argument for it: "harmless anyway because PRF is deterministic" overstates the case — once an implementation violates the `enabled` contract, determinism cannot establish that its output is trustworthy. The conclusion stands on "no demonstrated downgrade", not on determinism.
+- **Round 2** (`135019da`) → approve + 1 [Low], adopted as `ba6046d2`. **The comment I had just written was factually wrong**: it claimed a weaker `userVerification` would "derive a different master, or none". WebAuthn exposes one PRF per credential; UV is an authentication requirement, not a derivation input, so weakening it does not change the PRF output. The assertions were right; the stated reason for them was not. Replaced with a single line about the mock accepting invalid options.
+- **Round 3** (`ba6046d2`) → approve, "No new material findings". Loop closed.
+
+**Carry forward:** a comment asserting a security or crypto property is a claim, and a reviewer will check it. Two of the four findings in this loop were wrong claims in comments I wrote, not defects in code.
