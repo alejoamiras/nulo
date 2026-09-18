@@ -73,9 +73,22 @@ describe("uiStateFromStatus", () => {
 })
 
 describe("copyFor", () => {
-	test("detecting/idle → Looking…, pending tone, no retry", () => {
-		expect(copyFor({ kind: "detecting" })).toEqual({ tone: "pending", title: "Looking…", detail: "" })
-		expect(copyFor({ kind: "idle" })).toEqual({ tone: "pending", title: "Looking…", detail: "" })
+	test("settings: detecting/idle → Looking…, pending tone, no retry", () => {
+		expect(copyFor({ kind: "detecting" }, null, "settings")).toEqual({ tone: "pending", title: "Looking…", detail: "" })
+		expect(copyFor({ kind: "idle" }, null, "settings")).toEqual({ tone: "pending", title: "Looking…", detail: "" })
+	})
+
+	test("onboarding: idle names the browser prompt before the click that may raise it; detecting says what to press", () => {
+		const idle = copyFor({ kind: "idle" })
+		expect(idle).toMatchObject({ tone: "accent", title: "Already have Presto?", retry: "Check for Presto" })
+		expect(idle.detail).toContain("Your browser may ask")
+		expect(idle.detail).toContain("Choose Allow")
+		// No retry while a probe runs: a second click could only race the first.
+		expect(copyFor({ kind: "detecting" })).toEqual({
+			tone: "pending",
+			title: "Looking for Presto…",
+			detail: "If your browser asks, choose Allow.",
+		})
 	})
 
 	test("available → connected line built from the facts present, Re-test, go tone", () => {
@@ -109,12 +122,18 @@ describe("copyFor", () => {
 		expect(copyFor({ kind: "downloading", info: {} }).detail).toContain("one-time download")
 	})
 
-	test("offline → not detected, Test, off tone", () => {
-		expect(copyFor({ kind: "offline", info: {} })).toEqual({
+	test("offline → settings reports not detected; onboarding answers the check and offers another", () => {
+		expect(copyFor({ kind: "offline", info: {} }, null, "settings")).toEqual({
 			tone: "off",
 			title: "Presto not detected",
 			detail: "Proofs run in your browser (slower).",
 			retry: "Test",
+		})
+		expect(copyFor({ kind: "offline", info: {} })).toEqual({
+			tone: "off",
+			title: "Presto isn't running yet",
+			detail: "Install it, open it from your menu bar, then check again.",
+			retry: "Check again",
 		})
 	})
 

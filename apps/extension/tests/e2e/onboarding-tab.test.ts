@@ -1,7 +1,13 @@
 import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { interceptHealth, PRESTO_DETAILED_HEALTH, PRESTO_HTTPS_HEALTH_URL, PRESTO_MINIMAL_HEALTH } from "./fixtures/presto"
+import {
+	interceptHealth,
+	PRESTO_DETAILED_HEALTH,
+	PRESTO_HTTP_HEALTH_URL,
+	PRESTO_HTTPS_HEALTH_URL,
+	PRESTO_MINIMAL_HEALTH,
+} from "./fixtures/presto"
 
 const TEST_PASSWORD = "OnboardingTest_!23"
 const TEST_PROFILE_NAME = "Onboarding Test"
@@ -11,6 +17,12 @@ async function gotoPrestoStep(page: Page): Promise<void> {
 		window.location.hash = "#/onboarding/presto"
 	})
 	await waitForHash(page, "#/onboarding/presto", 10_000)
+}
+
+/** The step probes only on a click, so a test that wants a probe result has to ask for one. */
+async function gotoPrestoStepAndCheck(page: Page): Promise<void> {
+	await gotoPrestoStep(page)
+	await clickByTestId(page, "onboarding-presto-retry")
 }
 
 const statusCardSelector = (status: string) => `[data-testid="onboarding-presto-status"][data-status="${status}"]`
@@ -58,15 +70,13 @@ describe("onboarding tab", () => {
 		await clickByTestId(page, "onboarding-fees-continue")
 		await waitForHash(page, "#/onboarding/presto", 10_000)
 
-		// Wait for the step to settle: the install pitch (no Presto on the box) or a
-		// status card in a terminal state. Continue only renders when proving can go
-		// native; otherwise Skip routes directly to /done.
+		// The step rests until asked. After the check it settles on a terminal status; Continue
+		// only renders when proving can go native, otherwise Skip routes directly to /done.
+		await clickByTestId(page, "onboarding-presto-retry")
 		const settled = await withTimeoutMessage(
 			page
 				.waitForFunction(
 					() => {
-						const pitch = document.querySelector<HTMLElement>('[data-testid="onboarding-presto-pitch"]')
-						if (pitch && pitch.style.display !== "none") return "pitch"
 						const s = document.querySelector('[data-testid="onboarding-presto-status"]')?.getAttribute("data-status")
 						return s && s !== "idle" && s !== "detecting" ? s : null
 					},
@@ -138,7 +148,7 @@ describe("onboarding tab", () => {
 		const page = await openOnboarding(extension)
 		// A healthy HTTPS Presto whose cached versions include the wallet's Aztec line.
 		await interceptHealth(page, { https: { status: 200, body: PRESTO_DETAILED_HEALTH }, http: "refused" })
-		await gotoPrestoStep(page)
+		await gotoPrestoStepAndCheck(page)
 
 		await page.waitForSelector(statusCardSelector("available"), { visible: true, timeout: 10_000 })
 		const state = await page.evaluate(() => {
@@ -177,27 +187,41 @@ describe("onboarding tab", () => {
 		await page.close()
 	})
 
-	test("nothing listening on either port renders the install pitch; Skip routes to /done", async ({
+	test("the step rests on the pitch without probing; a check that finds nothing keeps the pitch; Skip routes to /done", async ({
 		freshExtensionPerTest: extension,
 	}) => {
 		const page = await openOnboarding(extension)
 		// Both probes refused is what an uninstalled Presto looks like to the page.
 		await interceptHealth(page, { https: "refused", http: "refused" })
+		let probes = 0
+		page.on("request", (req) => {
+			if (req.url() === PRESTO_HTTPS_HEALTH_URL || req.url() === PRESTO_HTTP_HEALTH_URL) probes++
+		})
+		// A pitch dismissed in an earlier onboarding outlives a reset; the step must show it again.
+		await page.evaluate(() => localStorage.setItem("presto:banner:card:offline", JSON.stringify({ until: "never" })))
 		await gotoPrestoStep(page)
 
 		await page.waitForSelector('[data-testid="onboarding-presto-pitch"]', { visible: true, timeout: 10_000 })
-		const state = await page.evaluate(() => {
-			const banner = document.querySelector('[data-testid="onboarding-presto-pitch"] presto-banner')
-			return {
-				// The element renders its default ribbon whenever the variant attribute is missing.
-				variant: banner?.getAttribute("variant"),
-				cardRendered: !!banner?.shadowRoot?.querySelector(".root-card .card"),
-				card: !!document.querySelector('[data-testid="onboarding-presto-status"]'),
-				continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
-				retry: !!document.querySelector('[data-testid="onboarding-presto-retry"]'),
-			}
-		})
-		expect(state).toEqual({ variant: "card", cardRendered: true, card: false, continue: false, retry: true })
+		const readState = () =>
+			page.evaluate(() => {
+				const banner = document.querySelector('[data-testid="onboarding-presto-pitch"] presto-banner')
+				return {
+					// The element renders its default ribbon whenever the variant attribute is missing.
+					variant: banner?.getAttribute("variant"),
+					cardRendered: !!banner?.shadowRoot?.querySelector(".root-card .card"),
+					status: document.querySelector('[data-testid="onboarding-presto-status"]')?.getAttribute("data-status"),
+					continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
+					skip: !!document.querySelector('[data-testid="onboarding-presto-skip"]'),
+				}
+			})
+		// A probe can raise the browser's local-network prompt, so arriving must not send one.
+		expect(await readState()).toEqual({ variant: "card", cardRendered: true, status: "idle", continue: false, skip: true })
+		expect(probes).toBe(0)
+
+		await clickByTestId(page, "onboarding-presto-retry")
+		await page.waitForSelector(statusCardSelector("offline"), { visible: true, timeout: 10_000 })
+		expect(probes).toBeGreaterThan(0)
+		expect(await readState()).toEqual({ variant: "card", cardRendered: true, status: "offline", continue: false, skip: true })
 
 		await clickByTestId(page, "onboarding-presto-skip")
 		await waitForHash(page, "#/onboarding/done", 5_000)
@@ -211,7 +235,7 @@ describe("onboarding tab", () => {
 		const page = await openOnboarding(extension)
 		const { https_port: _omitted, ...withoutHttpsPort } = PRESTO_DETAILED_HEALTH
 		await interceptHealth(page, { https: "refused", http: { status: 200, body: withoutHttpsPort } })
-		await gotoPrestoStep(page)
+		await gotoPrestoStepAndCheck(page)
 
 		await page.waitForSelector(statusCardSelector("secure-connection-unavailable"), { visible: true, timeout: 10_000 })
 		const state = await page.evaluate(() => {
@@ -231,7 +255,7 @@ describe("onboarding tab", () => {
 	test("HTTPS refused + the minimal HTTP body is the presto-reachable copy", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 		await interceptHealth(page, { https: "refused", http: { status: 200, body: PRESTO_MINIMAL_HEALTH } })
-		await gotoPrestoStep(page)
+		await gotoPrestoStepAndCheck(page)
 
 		await page.waitForSelector(statusCardSelector("secure-connection-unavailable"), { visible: true, timeout: 10_000 })
 		const diagnosis = await page.evaluate(
