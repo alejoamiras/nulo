@@ -63,6 +63,8 @@
 | Round | Verdict | Findings | Disposition |
 |---|---|---|---|
 | 1 | conditional-approve, no HIGH | a refusal at the broadcast line lost its code in `classifyOperationCatch` and logged at `error`; full backup not proved under declined Terms and S6 stopped before the download; `compact` truncated the approved risk copy; a privacy patch produced no About notice | all fixed; S5 now downloads and parses a full backup in all three states, S6 completes the passkey download and is no longer skipped on CI |
+| 2 | conditional-approve, no HIGH | three lapse-after-admission edges: an approved request refused at execution lost its type in `windowManager.cancel`; a silent send left the record it had advanced to `pending` stranded (the ingress safety net closes only `queued`); the wallet's own Send logged the refusal at `error` and called it a failed simulation | all fixed with regressions in `dapp-interaction/service.test.ts` and `transfer-failure-copy.test.ts` |
+| 3 | **approve** | none | converged |
 
 ## Gates
 

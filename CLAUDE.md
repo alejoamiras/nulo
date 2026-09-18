@@ -24,7 +24,7 @@ Rules that follow:
 - **Neither app's quality gate depends on the other app.** No test in one app's suite boots, builds, installs, or selects the other. A change to the extension never needs a tools e2e to go green and vice versa; the shared packages below them are what CI gates in common.
 - **"Nulo extension driving Nulo tools" is a manual pre-release smoke, not a CI gate.** It proves the pair, not either product.
 - **The only sanctioned cross-cut is network identity**: a reset's chainId cascade (`apps/tools/src/lib/chain-constants.ts` mirrors the extension's network-service seeds) and the deployed-address mirrors (the extension's default-token / price entries quote `apps/tools/public/*-bridge.json`), both owned by the `aztec-update` skill. Bridge work never touches `apps/extension/**` or the wallet packages; wallet work never touches `apps/tools/**` or `packages/bridge-core/**`.
-- **Shared code lives in a package, never in the other app.** Anything both need (`@nulo/design`, `@nulo/wallet-crypto` key derivation, `@nulo/wallet-sdk-schema-patch`, `@nulo/resolve-asset`) is a workspace package with its own tests; an app importing from the other app's `src/` is a layering violation.
+- **Shared code lives in a package, never in the other app.** Anything both need (`@nulo/design`, `@nulo/wallet-crypto` key derivation, `@nulo/wallet-sdk-schema-patch`, `@nulo/resolve-asset`, and `@nulo/legal` — shared by the extension and the landing) is a workspace package with its own tests; an app importing from the other app's `src/` is a layering violation.
 
 ## Skills own their domains — route new lessons to them
 
