@@ -315,8 +315,9 @@ test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bo
 		})
 		const firstInfo = stub.methods.indexOf("aztec_getNodeInfo")
 		const firstBoot = stub.methods.indexOf("aztec_getL1ContractAddresses")
-		expect(firstInfo).toBeGreaterThanOrEqual(0)
-		expect(firstBoot).toBeGreaterThan(firstInfo)
+		const seen = `stub saw: [${stub.methods.join(", ")}]`
+		expect(firstInfo, seen).toBeGreaterThanOrEqual(0)
+		expect(firstBoot, seen).toBeGreaterThan(firstInfo)
 	} finally {
 		await stub.close()
 	}
