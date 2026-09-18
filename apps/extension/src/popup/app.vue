@@ -417,6 +417,7 @@ onBeforeUnmount(() => {
 			<GlobalLoader />
 			<MigrationBarrier />
 			<AccountIntegrityBarrier />
+			<LegalAcceptanceSheet />
 		</div>
 
 		<Header />
