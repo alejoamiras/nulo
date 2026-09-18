@@ -60,6 +60,7 @@ jobs:
       needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
       needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
       needs-tools-build: ${{ steps.compute.outputs.needs-tools-build }}
+      needs-landing-build: ${{ steps.compute.outputs.needs-landing-build }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -104,8 +105,14 @@ jobs:
             playground:
               - 'apps/playground/**'
             landing:
-              # Dead filter — no job consumes it; kept positive-only for the no-`!` invariant.
+              # Built target — landing (whole package) + the legal documents it renders and
+              # the dep libs it builds from.
               - 'apps/landing/**'
+              - 'legal/**'
+              - 'packages/legal/src/**'
+              - 'packages/legal/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
             tools:
               # Built target — tools (whole package) + its transitive dep libs
               # (bridge-core → wallet-crypto → wallet-core, + design) + the tools app build
@@ -161,6 +168,7 @@ jobs:
           BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
           EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
           TOOLS: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
+          LANDING: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
           WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
           ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
           FIREFOX_TOUCHING: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
@@ -188,6 +196,11 @@ jobs:
             echo "needs-tools-build=true" >> "$GITHUB_OUTPUT"
           else
             echo "needs-tools-build=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$LANDING" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-landing-build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-landing-build=false" >> "$GITHUB_OUTPUT"
           fi
 
   commitlint:
@@ -338,6 +351,33 @@ jobs:
       target: ${{ matrix.target }}
       upload_artifacts: true
 
+  # The landing deploys from Cloudflare's own Git integration, so without this job the first
+  # build of a change is the production one. No network: the release stub stands in for the
+  # GitHub API call `prebuild` makes, and the legal pages are generated from legal/*.md.
+  build-landing:
+    name: Build Landing
+    needs: changes
+    if: needs.changes.outputs.needs-landing-build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - uses: ./.github/actions/setup-bun
+      - name: Generate the release stub and the legal pages
+        working-directory: apps/landing
+        run: bun run scripts/ensure-release-json.ts && bun run scripts/build-legal.ts
+      - name: Build
+        working-directory: apps/landing
+        run: bunx vite build
+      - name: Verify the legal pages shipped
+        working-directory: apps/landing
+        run: |
+          for f in terms.html privacy.html terms/v1.0/index.html privacy/v1.0/index.html; do
+            test -s "dist/$f" || { echo "::error::missing dist/$f"; exit 1; }
+          done
+
   # Extension smoke e2e lives in its own pr-extension-smoke-e2e.yml workflow:
   # auto-runs on PRs to main, on changes within the `smoke-surface`
   # filter, or via the `e2e:extension-smoke` label. Mirrors pr-extension-network-e2e.yml.
@@ -345,7 +385,7 @@ jobs:
   status:
     name: quality-status
     if: always()
-    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-tools]
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-tools, build-landing]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -359,6 +399,7 @@ jobs:
             "${{ needs.build-chrome.result }}" \
             "${{ needs.build-firefox.result }}" \
             "${{ needs.build-tools.result }}" \
+            "${{ needs.build-landing.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required job failed or was cancelled: $r"

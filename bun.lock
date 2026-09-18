@@ -106,6 +106,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@nulo/design": "workspace:*",
+        "@nulo/legal": "workspace:*",
       },
       "devDependencies": {
         "typescript": "^6.0.3",

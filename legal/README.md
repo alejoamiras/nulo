@@ -9,9 +9,11 @@ routine change silently falsifies is a misrepresentation claim, not a typo.
 | [`terms.md`](terms.md) | `nulo.sh/terms` | onboarding welcome, popup register, Settings → About |
 | [`privacy.md`](privacy.md) | `nulo.sh/privacy` | the same three places |
 
-**None of those links resolve yet.** The landing app (`apps/landing/`) is a single `index.html` with
-no `/terms` or `/privacy` route, so all three call sites currently 404. Publishing is a release
-blocker, not a follow-up.
+The landing generates both pages, plus one permalink per version (`nulo.sh/terms/v1.0/`), from these
+files at build time — `apps/landing/scripts/build-legal.ts`, rendered with Bun's built-in markdown.
+The version list, which versions are material, and what changed in each live in
+[`@nulo/legal`](../packages/legal/README.md), whose tests fail when the manifest and these documents
+disagree. While any `«FILL»` survives, the published page carries a DRAFT banner and `noindex`.
 
 ## Placeholders
 
@@ -37,7 +39,7 @@ that cannot be read out of this repository.
 
 These came out of the two-round review and are **not** fixed by editing the documents.
 
-1. **Publish `/terms` and `/privacy`** on the landing, with archived previous versions. Cloudflare
+1. ~~**Publish `/terms` and `/privacy`**~~ — done; see above. Original note: publish on the landing, with archived previous versions. Cloudflare
    serves `terms.html` at `/terms`, so multi-entry Vite inputs are enough — no router, no redirects
    file. Keep the markdown canonical and generate the pages from it, so the published text cannot
    drift from what is reviewed here.
