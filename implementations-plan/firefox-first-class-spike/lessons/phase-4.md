@@ -72,3 +72,26 @@ Probe 3 ran as its own invocation (the proverless and Presto-required builds are
 No kill criterion fired.
 
 One thing the runs left behind that the driver could not have cleaned: a probe test that vitest times out never reaches its own `finally`, so its caller-owned profile directory stays. That is the probe's file, not the driver's — the driver deliberately never deletes a directory it was handed.
+
+## Review round 1 (codex, GPT-6 Astra, `high`) — request changes, all nine findings taken
+
+No Chrome regression was found; both Highs were in teardown. What changed, and what it taught:
+
+- **A leader's exit is not its group's exit.** geckodriver can die on SIGTERM while the Firefox it started lives on, and the first `ownsProcess` judged by the leader alone — which would have deleted a profile under a running browser, the exact deleted-but-open leak this module exists to prevent. It now answers for the group: leader alive ⇒ compare start times; leader gone ⇒ `kill(-pgid, 0)`, because the kernel does not reissue a pid that still names a live process group. An identity that cannot be read is refused rather than recorded as `""`, which matched nothing and so read as "gone".
+- **A deadline in the caller cannot interrupt a fetch that is already outstanding.** Every classic request carries its own, and `close()` releases the launch in a `finally`.
+- **A record is a file any process can write, and it named a directory to delete recursively.** Deletion is now bounded by what a driver could have created (parent is exactly the profile root, name starts `profile-`), and a record must be well-formed and filed under its own pid to be acted on at all.
+- **Probe R overstated itself.** It compared two schema versions that could both have been `undefined`, never asserted the origin, measured the first-run tab after the fixture had already cleaned it up, and asserted that *no* ownership record existed on a host where another agent's is legitimate. Re-measured properly: the extension **origin survives** a relaunch on the same profile (so the origin-keyed PXE store does too), and a relaunch opens **0** first-run tabs.
+- The seam guard had four ordinary-syntax bypasses (`browser["waitForTarget"]`, a renamed destructure, `!==`, and a false positive on the loader string in a log line). Each is now a test case.
+
+All five probe lines were re-run on the post-review commit and hold.
+
+## Review round 2 — the round-1 ownership fix was itself wrong
+
+- **Numbers cannot carry identity across an unattended interval.** "The kernel does not reissue a pgid while the group lives" is true and beside the point: an orphan's record sits on disk for exactly the interval in which its group can empty and its number be handed to a stranger, whose own leader may then exit — at which point "leaderless but alive" authorised killing the stranger. Identity is now a random marker in the launch's environment (`NULO_E2E_LAUNCH`), which geckodriver and Firefox inherit and `/proc/<pid>/environ` reports. A stranger cannot carry it, a child that `setsid`s out of the group still does, and a launch whose Firefox did not inherit it fails at launch rather than leaking later. Pid plus start time survives only for the *owner*, which is compared and never signalled.
+- **Containment is a filesystem fact, not a string fact.** `path.resolve` folds `link/..` away as text while the kernel follows `link` first, and a record could also name another launch's perfectly well-formed profile. A profile is deleted only if its real path sits directly in the real profile root and it holds a marker file matching the record's.
+- **"Never listed" cannot mean "never closed".** A verify window can open, be approved and close between two handle reads; requiring a prior sighting left that target stale for good. Unlisted contexts are now reported after 8 consecutive misses (listed ones after 2), and the open-context snapshot is taken before the handle read so a window born during the read is not charged a miss.
+- The launch record is built before the profile or the process exists, so every acquisition failure leaves through the same `releaseLaunch`.
+
+## Accepted risk to confirm with the owner: `--allow-system-access`
+
+Firefox refuses remote navigation to `moz-extension://` without it, so the suite cannot run otherwise. It grants the remote agent chrome-privileged access to the browser's parent process, and geckodriver's HTTP port and the BiDi socket are unauthenticated on `127.0.0.1` — so for the life of a test run, any local process that can reach loopback can execute privileged code as the user running the tests. "The keys are throwaway" is not the justification; the justification is that the hosts this runs on (a single-user agent box, a single-tenant CI runner) already give every local process that power. It must not be run on a shared multi-user machine.

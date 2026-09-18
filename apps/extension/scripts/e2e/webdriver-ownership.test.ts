@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterAll, describe, expect, test } from "vitest"
@@ -9,167 +9,191 @@ import { afterAll, describe, expect, test } from "vitest"
 const ROOT = mkdtempSync(path.join(tmpdir(), "nulo-ownership-test-"))
 process.env.NULO_E2E_DATA_ROOT = ROOT
 
-const { ownedByThisRun, listOwnedLaunches, newProfileDir, ownsProcess, readStartTime, reapOrphanLaunches, recordLaunch, releaseLaunch } =
-	await import("../../tests/e2e/fixtures/browser/ownership")
+const {
+	LAUNCH_ENV,
+	listOwnedLaunches,
+	newLaunchMarker,
+	newProfileDir,
+	ownedByThisRun,
+	ownedProcesses,
+	ownsProcess,
+	readStartTime,
+	reapOrphanLaunches,
+	recordLaunch,
+	releaseLaunch,
+} = await import("../../tests/e2e/fixtures/browser/ownership")
 
-const profileFor = (name: string) => {
+const RECORDS = path.join(ROOT, "webdriver-owned")
+
+const plainDir = (name: string) => {
 	const dir = path.join(ROOT, name)
 	mkdirSync(dir, { recursive: true })
 	return dir
 }
 
-/** A real detached process group to own, so the kill path is exercised rather than mocked. */
-function spawnSleeper() {
-	const child = spawn("sleep", ["120"], { detached: true, stdio: "ignore" })
+const markers: string[] = []
+function launchMarker(): string {
+	const marker = newLaunchMarker()
+	markers.push(marker)
+	return marker
+}
+
+/** Real processes to own, so the kill path is exercised rather than mocked. */
+function spawnMarked(marker: string, command = "sleep", args = ["120"]) {
+	const child = spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, [LAUNCH_ENV]: marker } })
 	if (!child.pid) throw new Error("could not spawn a test process")
 	return child.pid
 }
 
+/** A record whose owning run is gone, which is what makes the sweep act on it. */
+const orphaned = (record: { marker: string; pid: number; profileDir: string; ownsProfile: boolean; label: string }) => ({
+	...record,
+	ownerPid: 0,
+	ownerStartTime: "1",
+})
+
+async function until(condition: () => boolean, timeoutMs = 3_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs
+	while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
+}
+
 describe("webdriver launch ownership", () => {
-	const sleepers: number[] = []
 	afterAll(() => {
-		for (const pid of sleepers) {
+		for (const pid of markers.flatMap((marker) => ownedProcesses(marker))) {
 			try {
-				process.kill(-pid, "SIGKILL")
+				process.kill(pid, "SIGKILL")
 			} catch {
-				// already reaped by the case under test
+				// Already reaped by the case under test.
 			}
 		}
 		rmSync(ROOT, { recursive: true, force: true })
 	})
 
-	test("a start time identifies the process, and a dead pid has none", () => {
+	test("a start time identifies the owning run, and a dead pid has none", () => {
 		expect(readStartTime(process.pid)).toMatch(/^\d+$/)
-		// pid 0 is never a readable process; a recycled pid is what this guards against.
 		expect(readStartTime(0)).toBeUndefined()
 	})
 
-	test("ownership fails when the start time does not match — a recycled pid is not ours", () => {
-		const pid = spawnSleeper()
-		sleepers.push(pid)
-		const record = ownedByThisRun({
-			pid,
-			profileDir: profileFor("owned"),
-			ownsProfile: true,
-			label: "t",
-		})
-		expect(ownsProcess(record)).toBe(true)
-		expect(ownsProcess({ ...record, startTime: "999999999" })).toBe(false)
+	test("a process is owned by the marker it inherited, not by its number", () => {
+		const marker = launchMarker()
+		const pid = spawnMarked(marker)
+		expect(ownedProcesses(marker)).toEqual([pid])
+		// The same pid under another launch's marker is a stranger: this is the recycled-number case.
+		expect(ownsProcess(ownedByThisRun({ marker: launchMarker(), pid, profileDir: "", ownsProfile: false, label: "t" }))).toBe(false)
 	})
 
-	test("release kills the group and only then removes the profile", async () => {
-		const pid = spawnSleeper()
-		sleepers.push(pid)
-		const profileDir = newProfileDir()
-		const record = ownedByThisRun({ pid, profileDir, ownsProfile: true, label: "release" })
+	test("release stops the processes and only then removes the profile", async () => {
+		const marker = launchMarker()
+		const pid = spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
+		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "release" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
 		expect(existsSync(profileDir)).toBe(false)
+		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
+	})
+
+	// Firefox's children are free to start their own session. A group signal would miss that one
+	// and the profile would be deleted under it.
+	test("a child that left the process group is still found and stopped", async () => {
+		const marker = launchMarker()
+		const leader = spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
+		await until(() => ownedProcesses(marker).length === 2)
+		expect(ownedProcesses(marker)).toHaveLength(2)
+
+		const record = ownedByThisRun({ marker, pid: leader, profileDir: newProfileDir(marker), ownsProfile: true, label: "escaped" })
+		await releaseLaunch(record)
+		expect(ownedProcesses(marker)).toEqual([])
+		expect(existsSync(record.profileDir)).toBe(false)
 	})
 
 	// A relaunch-on-the-same-profile test hands in its own directory and exists to prove the data
 	// survives teardown. Deleting it destroys the fixture and the failure looks like a storage bug.
 	test("a caller-supplied profile survives release, and the record is still cleared", async () => {
-		const pid = spawnSleeper()
-		sleepers.push(pid)
-		const profileDir = profileFor("caller-owned")
-		const record = ownedByThisRun({ pid, profileDir, ownsProfile: false, label: "borrowed" })
+		const marker = launchMarker()
+		const profileDir = plainDir("caller-owned")
+		const record = ownedByThisRun({ marker, pid: spawnMarked(marker), profileDir, ownsProfile: false, label: "borrowed" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
 		expect(existsSync(profileDir)).toBe(true)
-		expect(listOwnedLaunches()).toEqual([])
+		expect(listOwnedLaunches().map((r) => r.marker)).not.toContain(marker)
 	})
 
 	test("a record whose owner is still alive is NOT an orphan — it belongs to a running agent", async () => {
-		const pid = spawnSleeper()
-		sleepers.push(pid)
-		const profileDir = profileFor("live-owner")
+		const marker = launchMarker()
+		const pid = spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
 		// Owned by THIS process, which is alive for the duration of the test.
-		recordLaunch(ownedByThisRun({ pid, profileDir, ownsProfile: true, label: "live" }))
-		expect(await reapOrphanLaunches()).toEqual([])
+		recordLaunch(ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "live" }))
+		expect(await reapOrphanLaunches()).not.toContain("live")
 		expect(existsSync(profileDir)).toBe(true)
-		expect(readStartTime(pid)).toBeDefined()
+		expect(ownedProcesses(marker)).toEqual([pid])
 	})
 
-	test("a record whose owner is gone is reaped, process group and profile both", async () => {
-		const pid = spawnSleeper()
-		sleepers.push(pid)
-		const profileDir = newProfileDir()
-		recordLaunch({
-			pid,
-			startTime: readStartTime(pid) ?? "",
-			ownerPid: 0,
-			ownerStartTime: "1",
-			profileDir,
-			ownsProfile: true,
-			label: "orphan",
-		})
+	test("a record whose owner is gone is reaped, processes and profile both", async () => {
+		const marker = launchMarker()
+		const pid = spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
+		recordLaunch(orphaned({ marker, pid, profileDir, ownsProfile: true, label: "orphan" }))
 		expect(await reapOrphanLaunches()).toContain("orphan")
-		expect(readStartTime(pid)).toBeUndefined()
+		expect(ownedProcesses(marker)).toEqual([])
 		expect(existsSync(profileDir)).toBe(false)
 	})
 
-	// geckodriver can exit on SIGTERM while the Firefox it started lives on. Judging by the leader
-	// alone would call that group gone and delete the profile under a running browser.
-	test("a group whose leader has exited is still owned while a member survives", async () => {
-		const leader = spawn("sh", ["-c", "sleep 120 & echo $!; exec sleep 0.2"], { detached: true, stdio: ["ignore", "pipe", "ignore"] })
-		if (!leader.pid) throw new Error("could not spawn a test process group")
-		sleepers.push(leader.pid)
-		const profileDir = newProfileDir()
-		const record = ownedByThisRun({ pid: leader.pid, profileDir, ownsProfile: true, label: "leaderless" })
-		await new Promise((resolve) => leader.once("exit", resolve))
-		expect(readStartTime(leader.pid)).toBeUndefined()
-		expect(ownsProcess(record)).toBe(true)
-
-		await releaseLaunch(record)
-		expect(ownsProcess(record)).toBe(false)
-		expect(existsSync(profileDir)).toBe(false)
+	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
+	test("an orphan's record never authorises a signal to a process that lacks its marker", async () => {
+		const stranger = spawnMarked(launchMarker())
+		recordLaunch(orphaned({ marker: launchMarker(), pid: stranger, profileDir: "", ownsProfile: false, label: "reissued" }))
+		expect(await reapOrphanLaunches()).toContain("reissued")
+		expect(readStartTime(stranger)).toBeDefined()
 	})
 
 	// A record is a file any process on this host can write, and it names a directory to delete.
-	test("a record cannot authorise deleting a directory the driver did not create", async () => {
-		const outside = profileFor("not-a-driver-profile")
-		recordLaunch({
-			pid: 2_000_000_000,
-			startTime: "1",
-			ownerPid: 0,
-			ownerStartTime: "1",
-			profileDir: outside,
-			ownsProfile: true,
-			label: "forged",
+	describe("a record cannot authorise deleting", () => {
+		const reapForged = async (profileDir: string, marker = launchMarker()) => {
+			recordLaunch(orphaned({ marker, pid: 2_000_000_000, profileDir, ownsProfile: true, label: "forged" }))
+			expect(await reapOrphanLaunches()).toContain("forged")
+		}
+
+		test("a directory the driver did not create", async () => {
+			const outside = plainDir("not-a-driver-profile")
+			await reapForged(outside)
+			expect(existsSync(outside)).toBe(true)
 		})
-		expect(await reapOrphanLaunches()).toContain("forged")
-		expect(existsSync(outside)).toBe(true)
-		expect(listOwnedLaunches().map((record) => record.label)).not.toContain("forged")
+
+		test("another launch's profile, however well-formed its path", async () => {
+			const victim = newProfileDir(launchMarker())
+			await reapForged(victim)
+			expect(existsSync(victim)).toBe(true)
+		})
+
+		// `path.resolve` folds `link/..` away as text; the filesystem follows `link` first.
+		test("a path that only looks contained until its symlinks are resolved", async () => {
+			const marker = launchMarker()
+			const outside = plainDir("reached-through-a-link")
+			const victim = path.join(outside, "profile-victim")
+			mkdirSync(victim)
+			writeFileSync(path.join(victim, ".nulo-launch"), marker)
+			const link = path.join(path.dirname(newProfileDir(launchMarker())), "profile-link")
+			symlinkSync(victim, link)
+			await reapForged(link, marker)
+			expect(existsSync(victim)).toBe(true)
+		})
 	})
 
 	test("a malformed or misfiled record is discarded without acting on it", async () => {
-		const outside = profileFor("named-by-a-bad-record")
-		const dir = path.join(ROOT, "webdriver-owned")
-		writeFileSync(
-			path.join(dir, "12345.json"),
-			JSON.stringify({
-				pid: 54321,
-				startTime: "1",
-				ownerPid: 0,
-				ownerStartTime: "1",
-				profileDir: outside,
-				ownsProfile: true,
-				label: "misfiled",
-			}),
-		)
-		writeFileSync(path.join(dir, "777.json"), "{ not json")
-		expect(await reapOrphanLaunches()).toEqual([])
-		expect(existsSync(outside)).toBe(true)
-		expect(existsSync(path.join(dir, "12345.json"))).toBe(false)
-		expect(existsSync(path.join(dir, "777.json"))).toBe(false)
-	})
-
-	test("an identity that cannot be read is refused, not recorded as empty", () => {
-		expect(() =>
-			ownedByThisRun({ pid: 2_000_000_000, profileDir: profileFor("unreadable"), ownsProfile: true, label: "ghost" }),
-		).toThrow(/refusing to own/)
+		const marker = launchMarker()
+		const pid = spawnMarked(marker)
+		mkdirSync(RECORDS, { recursive: true })
+		const misfiled = path.join(RECORDS, `${newLaunchMarker()}.json`)
+		writeFileSync(misfiled, JSON.stringify(orphaned({ marker, pid, profileDir: "", ownsProfile: false, label: "misfiled" })))
+		const garbage = path.join(RECORDS, "777.json")
+		writeFileSync(garbage, "{ not json")
+		expect(await reapOrphanLaunches()).not.toContain("misfiled")
+		expect(ownedProcesses(marker)).toEqual([pid])
+		expect(existsSync(misfiled)).toBe(false)
+		expect(existsSync(garbage)).toBe(false)
 	})
 })

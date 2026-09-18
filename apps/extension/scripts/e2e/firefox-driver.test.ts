@@ -70,10 +70,18 @@ describe("silent window closes", () => {
 
 	// BiDi can announce a window before the classic channel lists it. Calling that window closed
 	// would tear a live approval window out from under the test waiting for it.
-	test("a window the handle list has never shown is not closed, however long it is missing", () => {
+	test("a window the handle list has not shown yet is given far longer than a listed one", () => {
 		const watch = fresh()
-		for (let read = 0; read < 5; read++) expect(silentlyClosed(watch, ["new"], new Set())).toEqual([])
+		for (let read = 0; read < 7; read++) expect(silentlyClosed(watch, ["new"], new Set())).toEqual([])
 		expect(silentlyClosed(watch, ["new"], new Set(["new"]))).toEqual([])
+	})
+
+	// A verify window can open, be approved and close between two reads. If "never listed" meant
+	// "never closed", its target would stay in `targets()` for the rest of the run.
+	test("a window that opened and closed between reads is still reported, eventually", () => {
+		const watch = fresh()
+		for (let read = 0; read < 7; read++) expect(silentlyClosed(watch, ["flash"], new Set())).toEqual([])
+		expect(silentlyClosed(watch, ["flash"], new Set())).toEqual(["flash"])
 	})
 
 	test("one missed read is forgiven when the window is listed again", () => {

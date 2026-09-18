@@ -6,7 +6,16 @@ import type { Browser, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
-import { type LaunchOwnership, newProfileDir, ownedByThisRun, reapOrphanLaunches, recordLaunch, releaseLaunch } from "./ownership"
+import {
+	LAUNCH_ENV,
+	newLaunchMarker,
+	newProfileDir,
+	ownedByThisRun,
+	ownedProcesses,
+	reapOrphanLaunches,
+	recordLaunch,
+	releaseLaunch,
+} from "./ownership"
 import { WebDriverSession } from "./webdriver-classic"
 
 const SCHEME = "moz-extension://"
@@ -45,25 +54,32 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 	const reaped = await sweep
 	if (reaped.length) console.warn(`[firefox] reaped ${reaped.length} orphaned launch(es): ${reaped.join(", ")}`)
 
-	// A caller-supplied directory belongs to the caller: a relaunch-on-the-same-profile test exists
-	// to prove data survives teardown, so deleting it would destroy the fixture, not clean up.
-	const profileDir = userDataDir ?? newProfileDir()
-	mkdirSync(profileDir, { recursive: true })
-
-	const { gecko, base } = await spawnGeckodriver()
-	let record: LaunchOwnership
+	const marker = newLaunchMarker()
+	// Built before anything exists to clean up, so every failure below has the same one way out.
+	const record = ownedByThisRun({
+		marker,
+		pid: 0,
+		profileDir: userDataDir ?? "",
+		ownsProfile: userDataDir === undefined,
+		label: "geckodriver",
+	})
 	try {
-		record = ownedByThisRun({ pid: gecko.pid, profileDir, ownsProfile: userDataDir === undefined, label: `geckodriver:${base}` })
+		// A caller-supplied directory belongs to the caller: a relaunch-on-the-same-profile test
+		// exists to prove data survives teardown, so deleting it would destroy the fixture.
+		if (!userDataDir) record.profileDir = newProfileDir(marker)
+		const { profileDir } = record
+		mkdirSync(profileDir, { recursive: true })
+
+		const { gecko, base } = await spawnGeckodriver(marker)
+		record.pid = gecko.pid
+		record.label = `geckodriver:${base}`
 		recordLaunch(record)
-	} catch (err) {
-		// No record means no later sweep could find this group, so it cannot be left running.
-		process.kill(-gecko.pid, "SIGKILL")
-		throw err
-	}
 
-	try {
 		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }))
 		assertVersion(session.capabilities.browserVersion)
+		// Teardown owns a process by the marker in its environment. A Firefox that did not inherit
+		// it would outlive every release unnoticed, so that is a launch failure, not a later leak.
+		if (ownedProcesses(marker).length < 2) throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
 		const addonId = await session.installAddon(extensionPath)
 		const attachment = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)
 		const { browser } = attachment
@@ -93,7 +109,7 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
  * The reservations are held until the moment before spawn: geckodriver binds both ports
  * immediately, so there is no gap for the kernel to hand one to an outgoing connection.
  */
-async function spawnGeckodriver(): Promise<{ gecko: ChildProcess & { pid: number }; base: string }> {
+async function spawnGeckodriver(marker: string): Promise<{ gecko: ChildProcess & { pid: number }; base: string }> {
 	const reserved = [await reservePort()]
 	try {
 		reserved.push(await reservePort())
@@ -108,8 +124,9 @@ async function spawnGeckodriver(): Promise<{ gecko: ChildProcess & { pid: number
 		// `moz-extension://` on both channels; geckodriver rejects the Firefox-side flag when it
 		// arrives through capabilities, so this is the only place it can be set.
 		["--host", "127.0.0.1", "--port", String(http.port), "--websocket-port", String(bidi.port), "--allow-system-access"],
-		// Detached so the pid is its own group leader: teardown signals the group, never a name.
-		{ detached: true, stdio: ["ignore", "ignore", "inherit"] },
+		// Detached so a signal to this run's own group — a Ctrl-C — cannot stop it half-way through a
+		// session. The marker is how teardown finds it, and the Firefox that inherits it.
+		{ detached: true, stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, [LAUNCH_ENV]: marker } },
 	)
 	// Without a listener a missing binary surfaces as an unhandled `error` event, not a rejection.
 	const failed = new Promise<never>((_, reject) =>
@@ -271,8 +288,8 @@ async function waitForTarget(browser: Browser, predicate: (target: Target) => bo
  * A window that closes itself — every approval window does — is never reported over BiDi, so
  * Puppeteer would keep it in `targets()` and keep its page "open" for good. The classic handle
  * list is Firefox's own account of which windows exist; a context seen there and then missing from
- * two consecutive reads is reported closed. "Seen first" matters: a window BiDi has just announced
- * may not be in the handle list yet, and must not be mistaken for one that left it.
+ * two consecutive reads is reported closed. A window BiDi has just announced may not be in the
+ * handle list yet, so one never seen there is given much longer before it is judged the same way.
  */
 function watchForSilentCloses(session: WebDriverSession, attachment: BiDiAttachment): () => void {
 	const watch: SilentCloseWatch = { listed: new Set(), misses: new Map() }
@@ -281,8 +298,9 @@ function watchForSilentCloses(session: WebDriverSession, attachment: BiDiAttachm
 		if (reading) return
 		reading = true
 		try {
+			const open = attachment.openContexts()
 			const handles = new Set(await session.windowHandles())
-			for (const context of silentlyClosed(watch, attachment.openContexts(), handles)) attachment.reportClosed(context)
+			for (const context of silentlyClosed(watch, open, handles)) attachment.reportClosed(context)
 		} catch {
 			// The session is closing or geckodriver is busy; the next tick reads again.
 		} finally {
@@ -298,7 +316,14 @@ export interface SilentCloseWatch {
 	misses: Map<string, number>
 }
 
-/** One read of the handle list: the contexts that have now been missing from it twice running. */
+const LISTED_MISSES = 2
+/** A window can open, be approved and close between two reads, so "never listed" cannot mean
+ *  "never closed" — that target would be stale for good. It is given over a second instead, far
+ *  longer than the handle list lags a window BiDi has already announced. */
+const UNLISTED_MISSES = 8
+
+/** One read of the handle list: the contexts that have now been missing from it long enough. `open`
+ *  must have been taken BEFORE the read, or a window born during it counts a miss it never had. */
 export function silentlyClosed(watch: SilentCloseWatch, open: readonly string[], handles: ReadonlySet<string>): string[] {
 	const closed: string[] = []
 	for (const context of open) {
@@ -307,10 +332,9 @@ export function silentlyClosed(watch: SilentCloseWatch, open: readonly string[],
 			watch.misses.delete(context)
 			continue
 		}
-		if (!watch.listed.has(context)) continue
 		const missed = (watch.misses.get(context) ?? 0) + 1
 		watch.misses.set(context, missed)
-		if (missed >= 2) closed.push(context)
+		if (missed >= (watch.listed.has(context) ? LISTED_MISSES : UNLISTED_MISSES)) closed.push(context)
 	}
 	return closed
 }

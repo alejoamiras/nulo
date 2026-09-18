@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { E2E_DATA_ROOT } from "../../lockfile"
 
@@ -7,9 +8,13 @@ import { E2E_DATA_ROOT } from "../../lockfile"
  *
  * Many agents share this host, so teardown must kill exactly what this launch started and nothing
  * else: no `pkill -f geckodriver`, which would take down a neighbour's run and leave it believing
- * its browser crashed. Ownership is therefore a process group plus a start-time-verified pid — the
- * start time is what makes a recycled pid detectable, and a recycled pid is the one way a
- * pgid-scoped kill can still hit a stranger.
+ * its browser crashed.
+ *
+ * Identity is a random marker in the launch's environment, which every process it starts
+ * inherits. Numbers cannot carry it: a pid is reissued once its process is gone, a pgid once its
+ * group is, and an orphan's record sits unattended for exactly the interval in which that happens
+ * — so neither "the leader's start time matches" nor "the group still has members" proves the
+ * processes found are the ones recorded. A marker also follows a child that leaves the group.
  *
  * Records live on real disk, not tmpfs: a run killed before teardown must leave a record the next
  * run can read, and a profile directory under `/tmp` would be RAM-backed and pinned open by the
@@ -19,31 +24,24 @@ import { E2E_DATA_ROOT } from "../../lockfile"
 const RECORD_ROOT = path.join(E2E_DATA_ROOT, "webdriver-owned")
 
 /** The only place a driver creates profiles, and so the only place teardown may delete one. */
-export const PROFILE_ROOT = path.join(E2E_DATA_ROOT, "firefox-profiles")
+const PROFILE_ROOT = path.join(E2E_DATA_ROOT, "firefox-profiles")
 const PROFILE_PREFIX = "profile-"
+const PROFILE_MARKER_FILE = ".nulo-launch"
 
-/**
- * A record is a file any process on this host can write, and it names a directory to delete
- * recursively. Deletion is therefore bounded by what a driver could have created, not by what the
- * record claims.
- */
-function isDriverProfile(dir: string): boolean {
-	const resolved = path.resolve(dir)
-	return path.dirname(resolved) === PROFILE_ROOT && path.basename(resolved).startsWith(PROFILE_PREFIX)
-}
+export const LAUNCH_ENV = "NULO_E2E_LAUNCH"
+const MARKER_SHAPE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
 
-export function newProfileDir(): string {
-	mkdirSync(PROFILE_ROOT, { recursive: true })
-	return mkdtempSync(path.join(PROFILE_ROOT, PROFILE_PREFIX))
-}
+export const newLaunchMarker = (): string => randomUUID()
 
 export interface LaunchOwnership {
-	/** The process we spawned; also the group leader, since it is spawned detached. */
+	marker: string
+	/** The process we spawned. Names the record file and the log line; never an identity. */
 	pid: number
-	/** Field 22 of `/proc/<pid>/stat` at spawn time. A pid reused by another process has another. */
-	startTime: string
-	/** The test run that spawned it, identified the same way. A record whose owner is still alive
-	 *  belongs to a run in progress — possibly another agent's — and is never an orphan. */
+	/** The test run that spawned it. A record whose owner is still alive belongs to a run in
+	 *  progress — possibly another agent's — and is never an orphan. Pid plus start time is sound
+	 *  here where it is not for the launch, because the owner is only ever COMPARED, never
+	 *  signalled: a reissued pid cannot share the tick its predecessor started on, and with no
+	 *  signal there is no gap between the read and an action for a reissue to fall into. */
 	ownerPid: number
 	ownerStartTime: string
 	profileDir: string
@@ -54,13 +52,12 @@ export interface LaunchOwnership {
 	label: string
 }
 
-/** Throws rather than record an identity it could not read: an empty start time matches nothing,
- *  so such a record would call a live group "gone" and delete the profile under it. */
-export function ownedByThisRun(record: Omit<LaunchOwnership, "ownerPid" | "ownerStartTime" | "startTime">): LaunchOwnership {
-	const startTime = readStartTime(record.pid)
+/** Throws rather than record an owner it could not identify: that record would read as orphaned
+ *  to every other run on the host, and be reaped under its live owner. */
+export function ownedByThisRun(record: Omit<LaunchOwnership, "ownerPid" | "ownerStartTime">): LaunchOwnership {
 	const ownerStartTime = readStartTime(process.pid)
-	if (!startTime || !ownerStartTime) throw new Error(`cannot read a start time for pid ${record.pid} or this run — refusing to own it`)
-	return { ...record, startTime, ownerPid: process.pid, ownerStartTime }
+	if (!ownerStartTime) throw new Error("cannot read this run's start time — refusing to record a launch it could not be shown to own")
+	return { ...record, ownerPid: process.pid, ownerStartTime }
 }
 
 /** `undefined` when the pid is gone — a dead process has no start time to compare. */
@@ -75,28 +72,47 @@ export function readStartTime(pid: number): string | undefined {
 	}
 }
 
-/** True while anything in the group exists. EPERM means it exists under another user — not ours
- *  to signal, and not gone either. */
-function groupAlive(pgid: number): boolean {
-	try {
-		process.kill(-pgid, 0)
-		return true
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM"
-	}
+/** A profile stamped with the launch that will own it, so a record cannot claim another's. */
+export function newProfileDir(marker: string): string {
+	mkdirSync(PROFILE_ROOT, { recursive: true })
+	const dir = mkdtempSync(path.join(PROFILE_ROOT, PROFILE_PREFIX))
+	writeFileSync(path.join(dir, PROFILE_MARKER_FILE), marker, "utf8")
+	return dir
 }
 
+/** Every live process carrying the marker. Another user's environ is unreadable, and skipped:
+ *  a process we cannot read is not one we started. */
+export function ownedProcesses(marker: string): number[] {
+	const entry = `${LAUNCH_ENV}=${marker}`
+	const owned: number[] = []
+	for (const name of readdirSync("/proc")) {
+		if (!/^\d+$/.test(name)) continue
+		try {
+			if (readFileSync(`/proc/${name}/environ`, "utf8").split("\0").includes(entry)) owned.push(Number(name))
+		} catch {
+			// Exited between the listing and the read, or not ours to read.
+		}
+	}
+	return owned
+}
+
+export const ownsProcess = (record: LaunchOwnership): boolean => ownedProcesses(record.marker).length > 0
+
 /**
- * Whether the recorded GROUP is still ours, not just its leader: geckodriver can exit on SIGTERM
- * while the Firefox it spawned lives on. With the leader gone, the kernel still will not reissue a
- * pid that names a live process group, so members surviving under it can only be ours — whereas a
- * live leader with another start time proves the pid was reissued, which in turn proves our group
- * had emptied first.
+ * The canonical path to delete, or `undefined` if this record has no right to one. A record is a
+ * file any process on this host can write and it names a directory to remove recursively, so
+ * the claim is checked against the filesystem rather than the string: resolved through symlinks,
+ * directly inside the profile root, and stamped with this launch's own marker — which also stops
+ * a record naming another live launch's perfectly well-formed profile.
  */
-export function ownsProcess(record: LaunchOwnership): boolean {
-	const leader = readStartTime(record.pid)
-	if (leader !== undefined) return leader === record.startTime
-	return groupAlive(record.pid)
+function deletableProfile(record: LaunchOwnership): string | undefined {
+	try {
+		const real = realpathSync(record.profileDir)
+		if (path.dirname(real) !== realpathSync(PROFILE_ROOT) || !path.basename(real).startsWith(PROFILE_PREFIX)) return undefined
+		return readFileSync(path.join(real, PROFILE_MARKER_FILE), "utf8") === record.marker ? real : undefined
+	} catch {
+		return undefined
+	}
 }
 
 function isRecord(value: unknown): value is LaunchOwnership {
@@ -104,11 +120,10 @@ function isRecord(value: unknown): value is LaunchOwnership {
 	return (
 		typeof r === "object" &&
 		r !== null &&
+		typeof r.marker === "string" &&
+		MARKER_SHAPE.test(r.marker) &&
 		Number.isInteger(r.pid) &&
-		(r.pid as number) > 1 &&
 		Number.isInteger(r.ownerPid) &&
-		typeof r.startTime === "string" &&
-		r.startTime !== "" &&
 		typeof r.ownerStartTime === "string" &&
 		typeof r.profileDir === "string" &&
 		typeof r.ownsProfile === "boolean" &&
@@ -116,11 +131,13 @@ function isRecord(value: unknown): value is LaunchOwnership {
 	)
 }
 
-/** `undefined` for anything that is not a well-formed record filed under its own pid. */
+const recordFile = (record: Pick<LaunchOwnership, "marker">): string => path.join(RECORD_ROOT, `${record.marker}.json`)
+
+/** `undefined` for anything that is not a well-formed record filed under its own marker. */
 function readRecord(file: string): LaunchOwnership | undefined {
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(path.join(RECORD_ROOT, file), "utf8"))
-		return isRecord(parsed) && file === `${parsed.pid}.json` ? parsed : undefined
+		return isRecord(parsed) && file === `${parsed.marker}.json` ? parsed : undefined
 	} catch {
 		return undefined
 	}
@@ -128,10 +145,9 @@ function readRecord(file: string): LaunchOwnership | undefined {
 
 export function recordLaunch(record: LaunchOwnership): void {
 	mkdirSync(RECORD_ROOT, { recursive: true })
-	const file = path.join(RECORD_ROOT, `${record.pid}.json`)
-	const tmp = `${file}.tmp`
+	const tmp = `${recordFile(record)}.tmp`
 	writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, "utf8")
-	renameSync(tmp, file)
+	renameSync(tmp, recordFile(record))
 }
 
 function recordFiles(): string[] {
@@ -147,37 +163,31 @@ export function listOwnedLaunches(): LaunchOwnership[] {
 	return recordFiles().flatMap((file) => readRecord(file) ?? [])
 }
 
-export function forgetLaunch(pid: number): void {
-	rmSync(path.join(RECORD_ROOT, `${pid}.json`), { force: true })
-}
-
 /**
- * Stop the process group and only then delete the profile. Deleting a profile a live Firefox still
- * holds open leaves the store pinned as a deleted-but-open file, which is how a reaper turns one
- * failed run into host-wide memory pressure.
+ * Stop the launch's processes and only then delete the profile. Deleting a profile a live Firefox
+ * still holds open leaves the store pinned as a deleted-but-open file, which is how a reaper turns
+ * one failed run into host-wide memory pressure.
  */
 export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): Promise<void> {
-	if (ownsProcess(record)) {
-		signalGroup(record.pid, "SIGTERM")
-		if (!(await waitForExit(record, graceMs))) {
-			signalGroup(record.pid, "SIGKILL")
-			// A killed process stays in /proc until it is reaped, so this has to wait as well:
-			// reading the start time in the same tick always still says the process is ours.
-			await waitForExit(record, 2_000)
-		}
+	signalOwned(record, "SIGTERM")
+	if (!(await waitForExit(record, graceMs))) {
+		signalOwned(record, "SIGKILL")
+		// A killed process stays in /proc until it is reaped, so this has to wait as well.
+		await waitForExit(record, 2_000)
 	}
 	// A process that outlived SIGKILL is unkillable (uninterruptible sleep); leaving its profile is
 	// the lesser harm, and the record survives for the next run's sweep.
 	if (ownsProcess(record)) return
-	if (record.ownsProfile && isDriverProfile(record.profileDir)) rmSync(record.profileDir, { recursive: true, force: true })
-	forgetLaunch(record.pid)
+	const profile = record.ownsProfile ? deletableProfile(record) : undefined
+	if (profile) rmSync(profile, { recursive: true, force: true })
+	rmSync(recordFile(record), { force: true })
 }
 
 async function waitForExit(record: LaunchOwnership, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
 	while (Date.now() < deadline) {
 		if (!ownsProcess(record)) return true
-		await new Promise((resolve) => setTimeout(resolve, 50))
+		await new Promise((resolve) => setTimeout(resolve, 100))
 	}
 	return !ownsProcess(record)
 }
@@ -203,10 +213,12 @@ export async function reapOrphanLaunches(): Promise<string[]> {
 	return reaped
 }
 
-function signalGroup(pid: number, signal: NodeJS.Signals): void {
-	try {
-		process.kill(-pid, signal)
-	} catch {
-		// Already gone.
+function signalOwned(record: LaunchOwnership, signal: NodeJS.Signals): void {
+	for (const pid of ownedProcesses(record.marker)) {
+		try {
+			process.kill(pid, signal)
+		} catch {
+			// Already gone.
+		}
 	}
 }
