@@ -16,7 +16,6 @@ import { copyFor } from "@/utils/presto-ui-state"
 /** The card pitch's dismissal record: `persist-key`:variant:state (`PrestoBanner.persistKey`). */
 const PITCH_DISMISSAL_KEY = "presto:banner:card:offline"
 
-/** The install pitch shows before any probe, while one runs, and after one finds nothing. */
 const PITCH_KINDS: ReadonlySet<string> = new Set(["idle", "detecting", "offline"])
 
 const router = useRouter()
@@ -45,10 +44,14 @@ function goNext() {
 	router.push("/onboarding/done")
 }
 
-onMounted(() => {
+onBeforeMount(() => {
 	// A reset clears chrome.storage, not this page's localStorage: a pitch dismissed during an
-	// earlier onboarding must not stay hidden from a re-onboarding user.
+	// earlier onboarding must not stay hidden from a re-onboarding user. The banner reads the
+	// record once, when it connects, so the clear has to land before the first render.
 	clearDismissal(PITCH_DISMISSAL_KEY)
+})
+
+onMounted(() => {
 	pitchRef.value?.addEventListener(BANNER_EVENTS.retry, retry)
 	pitchRef.value?.addEventListener(BANNER_EVENTS.dismiss, skip)
 })

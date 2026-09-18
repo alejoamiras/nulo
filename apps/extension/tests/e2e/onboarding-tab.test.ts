@@ -197,6 +197,8 @@ describe("onboarding tab", () => {
 		page.on("request", (req) => {
 			if (req.url() === PRESTO_HTTPS_HEALTH_URL || req.url() === PRESTO_HTTP_HEALTH_URL) probes++
 		})
+		// A pitch dismissed in an earlier onboarding outlives a reset; the step must show it again.
+		await page.evaluate(() => localStorage.setItem("presto:banner:card:offline", JSON.stringify({ until: "never" })))
 		await gotoPrestoStep(page)
 
 		await page.waitForSelector('[data-testid="onboarding-presto-pitch"]', { visible: true, timeout: 10_000 })
