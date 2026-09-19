@@ -145,7 +145,6 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", () =
 		expect(existsSync(profileDir)).toBe(false)
 	})
 
-	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
 	test("a disowned profile survives the sweep of a run that died before its own cleanup", async () => {
 		const marker = launchMarker()
 		const profileDir = newProfileDir(marker)
@@ -157,6 +156,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", () =
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
 	})
 
+	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
 	test("an orphan's record never authorises a signal to a process that lacks its marker", async () => {
 		const stranger = spawnMarked(launchMarker())
 		recordLaunch(orphaned({ marker: launchMarker(), pid: stranger, profileDir: "", ownsProfile: false, label: "reissued" }))
