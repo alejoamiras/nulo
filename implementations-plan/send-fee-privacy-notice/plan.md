@@ -24,7 +24,7 @@ the only path where that still isn't possible.
 | Send → fee card, nothing can pay, private origin | Nudge "You have no fee juice yet / Bridge some to cover the network fee." + link "Get fee juice" | Nudge **"You have no private gas yet"** / **"A private send pays its fee from private gas, so the fee contract is the payer instead of you. Bridge some to cover this send."** + link **"Get private gas"** |
 | Send → primary button, nothing can pay, private origin | "Get Fee Juice" | **"Get private gas"** |
 | Send → fee card, private origin, private gas could not be established | Card selects the network default regardless | With a Sponsored option available: **Sponsored** is selected, nothing else changes. Without one: nothing is selected. The existing info row (`fee-init-degraded`, same icon) reads **"Couldn't check your private gas. Pick a fee source to continue."** Any *eligible* method can still be picked by hand (an unread method stays disabled in the dropdown, as today; with both balances read as unknown and no sponsor there is nothing to pick until a read lands; if the whole balance fetch failed the rows stay clickable as today, but a pick only takes effect once its balance is read) |
-| Send → opening with a private origin | Balances may come from the wallet's 5-minute cache | Balances are read fresh (one uncached read per open), so private gas received a moment ago is seen |
+| Send → opening (any origin — D31; approved as "private origin", widened because the origin flips inside one open with no further read) | Balances may come from the wallet's 5-minute cache | Balances are read fresh (one uncached read per open), so private gas received a moment ago is seen |
 | Send → fee card while loading | The trigger shows the last-used method | unchanged (the saved pick for the current origin) |
 | Send ↔ dApp approval window / authwit popups: remembered fee method | One pick per account, shared by all four | Send remembers one pick **per origin**; the other three keep their shared pick as today. The two memories no longer influence each other |
 | Send → fee card, every state where the fee source already matches | — | **unchanged: nothing is added** |
@@ -637,7 +637,7 @@ Testid selectors only (`fee-settings-card[data-origin]`, `send-fee-method-trigge
 - Pass: both exit 0 at retry 0. Record the new network test's wall time in `lessons/phase-4.md`
   (I5); one prover-ON run of `fee-methods.test.ts` is recorded too — informational, not gating.
 
-### Phase 5 — docs and the full gate
+### Phase 5 — docs and the full gate ✓
 
 `implementations-plan/index.md`: this plan's line, and a `proposed` line for `send-publish-ledger`
 (the constant three-row "This send publishes" ledger in the Send footer; closes the off-screen-notice
