@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url"
 import { type BundleContents, bundleContents, type OutputBundleLike, workerIdentity } from "./collect.ts"
 import { type GenerateOptions, generateNotices } from "./generate.ts"
 import { POLICY } from "./policy.ts"
+import { inlinedStylesheets, isStylesheet } from "./stylesheets.ts"
 
 export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt"
 
@@ -9,9 +10,14 @@ interface EmitContext {
 	emitFile(file: { type: "asset"; fileName: string; source: string }): unknown
 }
 
+interface TransformContext {
+	resolve(specifier: string, importer: string): Promise<{ id: string } | null>
+}
+
 interface NoticesPlugin {
 	name: string
 	apply: "build"
+	transform: { order: "pre"; handler(this: TransformContext, code: string, id: string): Promise<null> }
 	generateBundle(this: EmitContext, options: unknown, bundle: OutputBundleLike): void
 }
 
@@ -50,6 +56,17 @@ function shipped(main: BundleContents, workers: Iterable<WorkerRecord>): BundleC
  */
 export function thirdPartyNotices(overrides: Partial<GenerateOptions> = {}): { main: NoticesPlugin; worker: NoticesPlugin } {
 	const workers = new Map<string, WorkerRecord>()
+	// Keyed by the importing module, so a rebuild replaces what that stylesheet pulled in.
+	const stylesheets = new Map<string, string[]>()
+	const transform: NoticesPlugin["transform"] = {
+		order: "pre",
+		async handler(code, id) {
+			if (!isStylesheet(id)) return null
+			const resolve = async (specifier: string, importer: string) => (await this.resolve(specifier, importer))?.id
+			stylesheets.set(id, await inlinedStylesheets(id, code, resolve))
+			return null
+		},
+	}
 	const options: GenerateOptions = {
 		policy: POLICY,
 		textsDir: fileURLToPath(new URL("../texts/", import.meta.url)),
@@ -60,6 +77,7 @@ export function thirdPartyNotices(overrides: Partial<GenerateOptions> = {}): { m
 		worker: {
 			name: "nulo:third-party-notices:worker",
 			apply: "build",
+			transform,
 			generateBundle(_options, bundle) {
 				const { entry, outputs } = workerIdentity(bundle)
 				workers.set(entry, { outputs, contents: bundleContents(bundle) })
@@ -68,8 +86,10 @@ export function thirdPartyNotices(overrides: Partial<GenerateOptions> = {}): { m
 		main: {
 			name: "nulo:third-party-notices",
 			apply: "build",
+			transform,
 			generateBundle(_options, bundle) {
 				const contents = shipped(bundleContents(bundle), workers.values())
+				contents.moduleIds.push(...[...stylesheets.values()].flat())
 				this.emitFile({ type: "asset", fileName: NOTICES_FILE, source: generateNotices(contents, options) })
 			},
 		},

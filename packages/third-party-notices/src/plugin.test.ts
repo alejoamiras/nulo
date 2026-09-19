@@ -59,6 +59,41 @@ describe("thirdPartyNotices", () => {
 		expect(NOTICES_FILE).toBe("THIRD-PARTY-NOTICES.txt")
 	})
 
+	test("a package stylesheet that a CSS @import inlines is attributed although no chunk lists it", async () => {
+		const { main } = thirdPartyNotices({
+			policy: { allowed: ALLOWED, overrides: [], vendored: [], codeAsset: /\.js$/ },
+			textsDir: root,
+			workspaceRoot: root,
+		})
+		const theme = install("css-theme").replace(/index\.js$/, "theme.css")
+		const reset = install("css-reset").replace(/index\.js$/, "reset.css")
+		writeFileSync(theme, '@import "css-reset/reset.css";\nbody { margin: 0 }')
+		writeFileSync(reset, "* { box-sizing: border-box }")
+		mkdirSync(join(root, "src"), { recursive: true })
+		writeFileSync(join(root, "src/_partial.scss"), '@use "~css-theme/theme.css";')
+		const resolved: Record<string, string> = {
+			"./partial": join(root, "src/_partial.scss"),
+			"css-theme/theme.css": theme,
+			"css-reset/reset.css": reset,
+		}
+		const context = { resolve: async (specifier: string) => (resolved[specifier] ? { id: resolved[specifier] } : null) }
+
+		await main.transform.handler.call(
+			context,
+			'@use "./partial";\n@import url("https://fonts.example/x.css");',
+			join(root, "src/app.scss"),
+		)
+		await main.transform.handler.call(context, "export default 1", join(root, "src/app.ts"))
+
+		const emitted: string[] = []
+		main.generateBundle.call(
+			{ emitFile: (file: { source: string }) => emitted.push(file.source) },
+			{},
+			mainBundle([join(root, "src/app.scss")], []),
+		)
+		expect([...noticeNames(emitted[0] ?? "")]).toEqual(["css-reset", "css-theme"])
+	})
+
 	test("a script asset no recorded worker wrote is refused, whatever it is called", () => {
 		const build = plugins()
 		expect(() => build.main(mainBundle([install("in-main")], ["assets/worker-hostile.js"]))).toThrow(

@@ -17,6 +17,11 @@ separate bundles the main plugin list never sees; the main build emits the file 
 registered from the Chrome and Firefox wrapper configs only: Storybook and vitest load the shared
 config, and the policy describes the shipped extension.
 
+A stylesheet is the one input the module walk cannot follow: `@import "pkg/theme.css"` is resolved
+inside the CSS pipeline, so the package never becomes a module of any chunk. A `transform` hook reads
+every stylesheet's import specifiers, resolves them through the bundler and follows them from disk
+(partials are not modules either), and the files found join the walk.
+
 Each module maps to the manifest at its **installation root** (`node_modules/<name>`), never to a
 nearer `package.json`, which a package could plant in any subdirectory. Every named manifest found
 between the module and that root is held to account: one of the same name must agree with the root
@@ -57,6 +62,7 @@ a branch). An override cannot launder a licence: its expression goes through the
 | `src/spdx.ts` | SPDX expression parser + allowlist evaluation |
 | `src/packages.ts` | module id → owning package; licence-file discovery |
 | `src/collect.ts` | rendered modules + assets out of an output bundle |
+| `src/stylesheets.ts` | what a stylesheet inlines by `@import` / `@use` / `@forward`, transitively |
 | `src/policy.ts` | `ALLOWED`, `OVERRIDES`, `VENDORED` — the reviewed records |
 | `src/generate.ts` | policy checks + byte-stable rendering; `noticeNames` parses a rendered file |
 | `src/plugin.ts` | the thin Vite shell (`main` + `worker`) |

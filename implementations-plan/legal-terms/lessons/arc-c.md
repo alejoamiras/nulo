@@ -119,3 +119,18 @@ the components the sqlite inventory added. The generator is a compliance tool, n
 boundary against a hostile package, which would have worse options than hiding its licence. Round 1
 and the sqlite inventory were the findings with legal weight; the rest is hardening with
 diminishing returns. A fourth round is the owner's call.
+
+**Round 4 (authorised by the owner beyond the cap, as the last): reject, one finding.** The four
+round-3 fixes held. Judged as a compliance generator rather than a security boundary, Codex found
+one *ordinary* gap: a CSS `@import` of a package stylesheet is inlined by Vite's CSS pipeline and
+never appears in `chunk.modules`, so a CSS-only theme or reset would ship unattributed and
+unchecked. Fixed with a `transform` hook that reads each stylesheet's import specifiers, resolves
+them through the bundler and follows them from disk.
+
+The first attempt used `this.getWatchFiles()` in `generateBundle`, where Vite registers CSS
+dependencies. The unit test passed against a fake context; **the real build threw
+`getWatchFiles is not a function`** — Rolldown's `generateBundle` context does not have it. The
+second attempt was proven the same way: a temporary `@import` of a package stylesheet made the
+real build refuse, naming that package, and the clean builds kept their previous hash. A plugin
+test against a hand-made context proves the logic, never the host API. **This fix has not been
+re-reviewed.**
