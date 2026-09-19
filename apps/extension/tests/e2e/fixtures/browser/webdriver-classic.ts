@@ -46,17 +46,27 @@ export class WebDriverSession {
 		readonly capabilities: SessionCapabilities,
 	) {}
 
-	/** Poll `/status` until geckodriver answers, then open the one session it will allow. */
-	static async open(base: string, capabilities: Record<string, unknown>, timeoutMs = 20_000): Promise<WebDriverSession> {
+	/**
+	 * Poll `/status` until geckodriver answers, then open the one session it will allow.
+	 * `running` is the spawned driver's liveness: an answer on `base` after it has exited comes
+	 * from another launch's geckodriver that won the port, and must not be given a session.
+	 */
+	static async open(
+		base: string,
+		capabilities: Record<string, unknown>,
+		running: () => boolean,
+		timeoutMs = 20_000,
+	): Promise<WebDriverSession> {
 		const deadline = Date.now() + timeoutMs
-		while (Date.now() < deadline) {
-			const up = await fetch(`${base}/status`, { signal: AbortSignal.timeout(2_000) }).then(
+		let up = false
+		while (!up && running() && Date.now() < deadline) {
+			up = await fetch(`${base}/status`, { signal: AbortSignal.timeout(2_000) }).then(
 				(r) => r.ok,
 				() => false,
 			)
-			if (up) break
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			if (!up) await new Promise((resolve) => setTimeout(resolve, 100))
 		}
+		if (!running()) throw new Error(`geckodriver exited before serving ${base} — most likely another launch took its port; retry`)
 		const value = await request(base, "POST", "/session", { capabilities: { alwaysMatch: capabilities } })
 		const { sessionId, capabilities: caps } = value as { sessionId?: string; capabilities?: SessionCapabilities }
 		if (!sessionId || !caps?.webSocketUrl) {
@@ -123,29 +133,12 @@ export class WebDriverSession {
 		})
 	}
 
-	async setScriptTimeout(ms: number): Promise<void> {
-		await this.send("POST", "/timeouts", { script: ms })
-	}
-
-	/** The script's last argument is the completion callback; it runs in the focused window. */
-	async executeAsync(script: string, args: unknown[] = []): Promise<unknown> {
-		return this.send("POST", "/execute/async", { script, args })
-	}
-
-	async executeSync(script: string, args: unknown[] = []): Promise<unknown> {
-		return this.send("POST", "/execute/sync", { script, args })
-	}
-
 	async addVirtualAuthenticator(options: VirtualAuthenticatorOptions): Promise<string> {
 		return (await this.send("POST", "/webauthn/authenticator", options)) as string
 	}
 
 	async removeVirtualAuthenticator(id: string): Promise<void> {
 		await this.send("DELETE", `/webauthn/authenticator/${id}`)
-	}
-
-	async authenticatorCredentials(id: string): Promise<unknown[]> {
-		return (await this.send("GET", `/webauthn/authenticator/${id}/credentials`)) as unknown[]
 	}
 
 	/** Short, because everything that releases the launch waits behind it. */

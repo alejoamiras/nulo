@@ -12,11 +12,15 @@
  *   2. Sweep {@link E2E_DATA_ROOT} for orphaned `nulo-aztec-<pid>-*` dirs whose owning process is
  *      DEAD, and remove them (live pids are skipped, so a concurrent agent's run is never touched).
  *
+ *   3. Release Firefox launches (geckodriver, its Firefox, the profile) whose owning test run is
+ *      gone — otherwise they wait for the next Firefox launch on this host to sweep them.
+ *
  * Ownership-scoped by design: it only kills pids this worktree's lock recorded and only deletes
  * data dirs whose owner is gone — never a blanket `pkill -f aztec` that could hit another agent.
  */
 import { readdirSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
+import { reapOrphanLaunches } from "./fixtures/browser/ownership"
 import { E2E_DATA_ROOT, clearLock, isPidAlive, killOrphanByPid, readLock } from "./lockfile"
 
 function reapOwnedRun(): boolean {
@@ -64,8 +68,11 @@ function sweepOrphanDataDirs(): number {
 
 const reaped = reapOwnedRun()
 const swept = sweepOrphanDataDirs()
-if (!reaped && swept === 0) {
-	console.log("[e2e:reap] nothing to reap — no owned run, no orphaned data dirs")
+const launches = process.platform === "linux" ? await reapOrphanLaunches() : []
+if (!reaped && swept === 0 && launches.length === 0) {
+	console.log("[e2e:reap] nothing to reap — no owned run, no orphaned data dirs, no orphaned Firefox launches")
 } else {
-	console.log(`[e2e:reap] done (owned run reaped: ${reaped}, orphan data dirs swept: ${swept})`)
+	console.log(
+		`[e2e:reap] done (owned run reaped: ${reaped}, orphan data dirs swept: ${swept}, orphaned Firefox launches released: ${launches.length})`,
+	)
 }

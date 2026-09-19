@@ -337,7 +337,7 @@ describe("browser seam guard", () => {
 	const inAsync = (body: string) => `async function spec() {\n${body}\n}`
 
 	// Each of these reaches the same Browser by a route that changes nothing at runtime, so each
-	// has to reach the same verdict. The type-level wrappers were live bypasses before `unwrap`.
+	// has to reach the same verdict.
 	test.each([
 		["split across lines", "await ctx.browser\n\t.close()"],
 		["optional chaining", "await ctx.browser?.close()"],

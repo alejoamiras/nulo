@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
+import * as puppeteer from "puppeteer"
 import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
@@ -75,11 +76,19 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 		record.label = `geckodriver:${base}`
 		recordLaunch(record)
 
-		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }))
-		assertVersion(session.capabilities.browserVersion)
-		// Teardown owns a process by the marker in its environment. A Firefox that did not inherit
-		// it would outlive every release unnoticed, so that is a launch failure, not a later leak.
-		if (ownedProcesses(marker).length < 2) throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
+		const running = () => gecko.exitCode === null && gecko.signalCode === null
+		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }), running)
+		try {
+			assertVersion(session.capabilities.browserVersion)
+			// Teardown owns a process by the marker in its environment. A Firefox that did not inherit
+			// it would outlive every release unnoticed, so that is a launch failure, not a later leak.
+			if (ownedProcesses(marker).length < 2)
+				throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
+		} catch (err) {
+			// The session's Firefox holds this launch's profile; end it before the profile is deleted.
+			await session.close().catch(() => {})
+			throw err
+		}
 		const addonId = await session.installAddon(extensionPath)
 		const attachment = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)
 		const { browser } = attachment
@@ -106,8 +115,9 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 }
 
 /**
- * The reservations are held until the moment before spawn: geckodriver binds both ports
- * immediately, so there is no gap for the kernel to hand one to an outgoing connection.
+ * The reservations are held until the moment before spawn. Another launch can still win a port in
+ * that window; geckodriver then exits on the failed bind, which `WebDriverSession.open` reports
+ * instead of opening a session on the winner's geckodriver.
  */
 async function spawnGeckodriver(marker: string): Promise<{ gecko: ChildProcess & { pid: number }; base: string }> {
 	const reserved = [await reservePort()]
@@ -146,17 +156,18 @@ function geckodriverPath(): string {
 	return configured ?? "geckodriver"
 }
 
-/** Newest first, by the version digits in a Puppeteer cache directory name. */
-export function newestFirefoxDir(dirs: readonly string[]): string | undefined {
-	const digits = (dir: string): number[] => (dir.match(/\d+/g) ?? []).map(Number)
-	return [...dirs].sort((a, b) => {
-		const [va, vb] = [digits(a), digits(b)]
-		for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-			const delta = (vb[i] ?? 0) - (va[i] ?? 0)
-			if (delta !== 0) return delta
-		}
-		return 0
-	})[0]
+/** Cache directories are `<platform>-<revision>`. The cache is shared by every checkout on the
+ *  host, so "newest" would let another worktree's install change this one's browser. */
+export const firefoxDirFor = (dirs: readonly string[], revision: string): string | undefined =>
+	dirs.find((dir) => dir.endsWith(`-${revision}`))
+
+/** The revision the locked Puppeteer installs. Exported at runtime but absent from the typings,
+ *  so an upgrade that moves it fails here by name rather than as "no Firefox installed". */
+function lockedFirefoxRevision(): string {
+	const revision = (puppeteer as unknown as { PUPPETEER_REVISIONS?: { firefox?: string } }).PUPPETEER_REVISIONS?.firefox
+	if (!revision)
+		throw new Error("puppeteer no longer exports PUPPETEER_REVISIONS.firefox — set FIREFOX_PATH, or update lockedFirefoxRevision")
+	return revision
 }
 
 /**
@@ -172,9 +183,14 @@ function resolveFirefoxBinary(): string {
 	}
 	const root = path.join(process.env.PUPPETEER_CACHE_DIR ?? path.join(homedir(), ".cache", "puppeteer"), "firefox")
 	const installed = (existsSync(root) ? readdirSync(root) : []).filter((dir) => existsSync(path.join(root, dir, "firefox", "firefox")))
-	const newest = newestFirefoxDir(installed)
-	if (!newest) throw new Error(`no Firefox installed under ${root} — run \`bunx puppeteer browsers install firefox\` or set FIREFOX_PATH`)
-	return path.join(root, newest, "firefox", "firefox")
+	const revision = lockedFirefoxRevision()
+	const pinned = firefoxDirFor(installed, revision)
+	if (!pinned) {
+		throw new Error(
+			`Firefox ${revision} is not installed under ${root} — run \`bun x puppeteer browsers install firefox\` from apps/extension, or set FIREFOX_PATH`,
+		)
+	}
+	return path.join(root, pinned, "firefox", "firefox")
 }
 
 /**

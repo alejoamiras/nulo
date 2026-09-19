@@ -42,7 +42,6 @@ export async function cdpVirtualAuthenticator(browser: Browser, anchorPage: Page
 		console.warn("[passkey-fixture] anchor authenticator setup failed (ok if per-popup path works):", err)
 	}
 
-	const perPopupSessions = new Map<string, CDPSession>()
 	const perPopupAuthIds = new Map<CDPSession, string>()
 
 	const onTarget = async (target: Target) => {
@@ -61,7 +60,6 @@ export async function cdpVirtualAuthenticator(browser: Browser, anchorPage: Page
 			// Its own authenticator: the anchor's is invisible from here, and without one the
 			// ceremony goes to the platform authenticator and times out.
 			const result = await session.send("WebAuthn.addVirtualAuthenticator", { options: VIRTUAL_AUTH_OPTIONS })
-			perPopupSessions.set(url, session)
 			perPopupAuthIds.set(session, result.authenticatorId)
 		} catch (err) {
 			console.error("[passkey-fixture] failed to configure passkey-popup virtual auth:", err)
