@@ -1,4 +1,5 @@
 import { expect, inject } from "vitest"
+import { isFirefox } from "../fixtures/browser"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { openPlayground } from "../fixtures/playground"
 import { waitForPopup, approveDiscover, approveVerify } from "../fixtures/popups"
@@ -156,7 +157,10 @@ test.skipIf(!hasConfig)(
 			marker,
 			unpermittedOrigin,
 		)
-		expect(leakedUrls).toEqual([])
+		// Firefox counts a content script's match patterns as host permissions, and the wallet's
+		// content script matches every site — so there the URL IS delivered and the guard's
+		// cross-origin branch is live for ordinary origins, not only for the explicit grants.
+		expect([...new Set(leakedUrls)]).toEqual(isFirefox ? [`${unpermittedOrigin}/status`] : [])
 
 		await popup.close()
 		await dappPage.close()
