@@ -190,6 +190,12 @@ function capabilities({ profileDir, headless }: { profileDir: string; headless: 
 				// `credentials.create` never settles — it does not fail, it hangs.
 				"security.webauth.webauthn_enable_softtoken": true,
 				"security.webauth.webauthn_enable_usbtoken": false,
+				// The PXE lives in a minimized window, and Firefox clamps a background window's
+				// timers to one a second and then budgets them further. The Chrome driver turns
+				// the same behaviour off with its backgrounding flags.
+				"dom.min_background_timeout_value": 4,
+				"dom.min_background_timeout_value_without_budget_throttling": 4,
+				"dom.timeout.enable_budget_timer_throttling": false,
 			},
 		},
 	}
