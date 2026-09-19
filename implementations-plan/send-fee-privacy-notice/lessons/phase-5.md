@@ -27,12 +27,19 @@
 
 ## I7 — the Alpha observation (informational, not gating)
 
-Not performed live: it needs a real profile on Alpha in a real browser, which an unattended session
-does not have. From the code: the protocol PrivateFPC is derived and listed on every network by the
-FPC service (canonical salt), so on Alpha the private-origin walk starts at Private Fee Juice; an
-account with no private gas reads `"0"` when the PrivateFPC utility read succeeds and `null` when it
-fails, and only the former may default to Fee Juice. Left for the owner's manual pre-release smoke:
-open Send on a fresh Alpha profile and note whether the card holds or offers the nudge.
+First written off as "needs a real profile in a real browser". That was wrong, and the owner called
+it: the smoke harness already IS a real Chrome with a fresh profile, the observation is read-only and
+needs no funds, and an unarmed build seeds Alpha as the active network. The only thing that separates
+it from a gated test is the live public RPC, which makes it a one-off probe, not a gate.
+
+Run as a throwaway e2e (never committed) on the unarmed build: fresh profile → Send → wait for the
+card to settle. Result, settled in 8.6 s:
+
+`{"origin":"private","method":null,"degraded":null,"nudge":"You have no private gas yet…","notice":false,"takeover":"Get private gas"}`
+
+So on Alpha the protocol PrivateFPC **is** listed and both balances were **positively read as `"0"`**
+(`none`, the only state allowed to say "you have none") — not a hold, and not a fallback to Fee Juice.
+A brand-new Alpha user sees the private-gas nudge and the "Get private gas" primary button.
 
 ## Gate
 
@@ -40,3 +47,20 @@ open Send on a fresh Alpha profile and note whether the card holds or offers the
   re-run after them: exit 0 (6621 tests), with `bun run test` 0 and `bun run lint` 0.
 - After the loop: armed smoke build 0 · `send-fee-privacy.test.ts` retry 0 exit 0 · the Phase 4
   network command retry 0 re-run on the final code: exit 0, 4 files / 11 tests.
+
+## CI on the PR
+
+- **First attempt: `extension-network-e2e-status` red — and I first reported CI without seeing it**,
+  because I read the check list through `tail -25` and the two red rows were above the cut. Read the
+  whole list, or grep it for `fail|pending`.
+- Red jobs: the prover-ON canary (`frozen-account-canary` — `grantPublicAuthwit` "could not process
+  the request"; `transfers` — no "Transaction submitted" within 300 s) and shard 3/5
+  (`backup-restore-sw-restart`, a 120 s wait). Other PRs' runs were green, so it was not assumed a
+  flake: both canary tests were reproduced locally prover-ON (3/3 green) and the failed jobs re-run.
+- **Cause (canary): the runner's native prover, not the diff.** Attempt 1's presto-server summary
+  reads `3 /prove requests, 1 successful proofs`; with `VITE_NULO_PRESTO_REQUIRED=1` there is no
+  fallback, so each failed proof is a failed test. Attempt 2, same commit: `8 /prove requests, 8
+  successful proofs`, 3/3 files green. Shard 3's test never opens Send and passed on the re-run.
+- The canary step prints only proof COUNTS; the presto-server log lines for a failed proof are not in
+  the job log, so the prover-side reason is unknown. Worth a follow-up: tail the log on any
+  `PROVE_COUNT != PROVE_SUCCESS`, not only on zero successes.
