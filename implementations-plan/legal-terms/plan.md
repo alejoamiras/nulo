@@ -357,6 +357,11 @@ for them:
 - **The ordinals share a baseline with their lead** (`align-items: baseline`), replacing a fixed
   top padding that only approximated it.
 
+- **The step's header is left-aligned like every other step's**, asked for in a second note once
+  the indicator was in: "the "Before you start", "Terms" step title, it's centered in the middle
+  […] while all other steps are to the left. I think we should put it to the left too?" The centred
+  hero belonged to a gate that stood alone like Welcome; as step 01 it takes the shared header.
+
 ## Assumptions and open items
 
 - Every dispatcher method is refused while declined, reads included (follows from decision 3).

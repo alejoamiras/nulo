@@ -39,14 +39,14 @@ const handleAccept = async () => {
 </script>
 
 <template>
-	<OnboardingPage align="center" :gap="28">
+	<OnboardingPage :gap="28">
 		<OnboardingBackLink testid="legal-terms-back" />
 		<StepIndicator :current="1" />
 
-		<Flex direction="column" align="center" gap="16" data-testid="legal-terms-page">
-			<BrutalistTitle main="Before" sub="you start" align="center" size="hero" />
-			<div :class="$style.bar" />
-		</Flex>
+		<header :class="$style.hero" data-testid="legal-terms-page">
+			<BrutalistTitle main="Before" sub="you start" />
+			<div :class="$style.hero_bar" />
+		</header>
 
 		<LegalConsent
 			:points="RISK_POINTS"
@@ -59,9 +59,14 @@ const handleAccept = async () => {
 </template>
 
 <style module>
-.bar {
-	width: 56px;
+.hero {
+	padding: 8px 0 16px;
+}
+
+.hero_bar {
+	width: 40px;
 	height: 2px;
 	background: var(--nulo-accent);
+	margin-top: 12px;
 }
 </style>
