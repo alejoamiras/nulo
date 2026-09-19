@@ -4,7 +4,8 @@ description: |
 
   Chrome arrives with `bun install` (Puppeteer's postinstall); Firefox is installed here, at the
   revision the locked Puppeteer pins. The two caches share NO key prefix: Chrome restores by
-  prefix, so a Firefox key beginning `<os>-puppeteer-` could be restored into, or evict, Chrome's.
+  prefix, so a Firefox key beginning `<os>-puppeteer-` could be restored into a Chrome lane. (The
+  repository's cache quota is still shared: Firefox entries count toward its eviction.)
 
 inputs:
   browser:

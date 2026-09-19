@@ -311,7 +311,7 @@ jobs:
       artifact_name: extension-chrome
 
   # ADVISORY Firefox lanes: the same suites on `browser: firefox`. Deliberately absent from
-  # publish-nightly's and status's needs, so a red one is visible on the run and blocks nothing;
+  # publish-nightly's and status's needs, so a red one is visible on the run and cannot stop the publish;
   # promoting them is the owner's call (CLAUDE.md, "Staged-rollout switches"). The file lists
   # mirror the Chrome jobs above, minus the Chrome-only frozen-account-canary
   # (pinned by scripts/ci-cd/behavior-gating.test.ts).

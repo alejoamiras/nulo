@@ -272,6 +272,7 @@ describe("Firefox lanes", () => {
   const workflow = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8"))
   const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
   const CHROME_ONLY_CANARY = "tests/e2e/network/frozen-account-canary.test.ts"
+  type SuiteJob = { uses?: string; with?: Record<string, unknown>; strategy?: unknown; needs?: unknown; if?: unknown; secrets?: unknown }
   const TWINS = [
     { chrome: "pr-extension-smoke-e2e.yml", firefox: "pr-extension-smoke-e2e-firefox.yml", filter: "smoke-surface" },
     { chrome: "pr-extension-network-e2e.yml", firefox: "pr-extension-network-e2e-firefox.yml", filter: "extension-network" },
@@ -290,17 +291,20 @@ describe("Firefox lanes", () => {
     for (const { chrome, firefox } of TWINS) {
       const [chromeJobs, firefoxJobs] = [workflow(chrome).jobs, workflow(firefox).jobs]
       expect(Object.keys(firefoxJobs), firefox).toEqual(Object.keys(chromeJobs))
-      for (const [name, job] of Object.entries(chromeJobs) as [string, { uses?: string; with?: Record<string, unknown> }][]) {
+      for (const [name, job] of Object.entries(chromeJobs) as [string, SuiteJob][]) {
         if (!job.uses) continue
-        const twin = firefoxJobs[name]
-        expect(twin.uses, `${firefox} → ${name}`).toBe(job.uses)
-        expect(twin.with.browser, `${firefox} → ${name}`).toBe("firefox")
+        const twin: SuiteJob = firefoxJobs[name]
         expect(job.with?.browser, `${chrome} → ${name} stays on the default browser`).toBeUndefined()
-        expect(words(twin.with.exclude_files), `${firefox} → ${name} exclude_files`).toEqual(words(job.with?.exclude_files))
-        expect(words(twin.with.test_files), `${firefox} → ${name} test_files`).toEqual(
-          words(job.with?.test_files).filter((file) => file !== CHROME_ONLY_CANARY),
+        // Whole-shape equality: a dropped shard, input, dependency or condition is a lost file.
+        const { test_files: chromeFiles, ...chromeWith } = job.with ?? {}
+        const { test_files: firefoxFiles, ...firefoxWith } = twin.with ?? {}
+        expect(firefoxWith, `${firefox} → ${name} with`).toEqual({ ...chromeWith, browser: "firefox" })
+        expect(words(firefoxFiles), `${firefox} → ${name} test_files`).toEqual(
+          words(chromeFiles).filter((file) => file !== CHROME_ONLY_CANARY),
         )
-        expect(String(twin.with.retry), `${firefox} → ${name} retry`).toBe(String(job.with?.retry))
+        for (const key of ["uses", "strategy", "needs", "if", "secrets"] as const) {
+          expect(twin[key], `${firefox} → ${name} ${key}`).toEqual(job[key])
+        }
       }
     }
   })
@@ -313,7 +317,9 @@ describe("Firefox lanes", () => {
         const want = name === "changes" ? { contents: "read", "pull-requests": "read" } : undefined
         expect(job.permissions, `${firefox} → ${name}`).toEqual(want)
       }
-      expect(wf.jobs.decide.steps[0].run, `${firefox}: decide`).toContain('if [ "$DRAFT" = "true" ]')
+      const gate = wf.jobs.decide.steps[0]
+      expect(gate.run, `${firefox}: decide`).toContain('if [ "$DRAFT" = "true" ]')
+      expect(gate.env.DRAFT, `${firefox}: the gate reads the PR's real draft flag`).toBe("${{ github.event.pull_request.draft }}")
     }
   })
 

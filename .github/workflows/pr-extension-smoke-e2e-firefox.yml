@@ -1,13 +1,10 @@
-# ADVISORY: the Firefox twin of pr-extension-smoke-e2e.yml. Same gate, same suite, `browser: firefox`. Its
-# aggregator is in no branch's required set; promoting it is the owner's call (CLAUDE.md,
-# "Staged-rollout switches"). scripts/ci-cd/behavior-gating.test.ts pins the parity with the
-# Chrome caller, so a filter or file-list edit there that skips this file fails CI.
+# ADVISORY Firefox twin of pr-extension-smoke-e2e.yml: its aggregator is in no branch's required set (promotion:
+# CLAUDE.md, "Staged-rollout switches"). scripts/ci-cd/behavior-gating.test.ts pins the parity.
 name: Extension smoke e2e (Firefox)
 
 on:
   workflow_dispatch:
   pull_request:
-    # Same events as the Chrome caller, for the same reasons.
     types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
 
 concurrency:

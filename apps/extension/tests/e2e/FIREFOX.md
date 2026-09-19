@@ -2,7 +2,7 @@
 
 What is different about driving the wallet on Firefox, why each difference exists, and where the suite absorbs it. Read this before touching `fixtures/browser/` or debugging a test that is red on Firefox only.
 
-Run it: `NULO_E2E_BROWSER=firefox bun run test:e2e` (smoke) or `NULO_E2E_BROWSER=firefox bun run e2e:agent …` (network). Needs `geckodriver` on `PATH` or at `$GECKODRIVER`, and the Firefox that the locked Puppeteer pins: `bun x puppeteer browsers install firefox` from `apps/extension` (or `FIREFOX_PATH`). The launch fails below Firefox 153, the manifest's own floor.
+Run it: `NULO_E2E_BROWSER=firefox bun run e2e:agent …` (network; builds `dist/firefox` itself) or `NULO_E2E_BROWSER=firefox bun run test:e2e` (smoke). **Smoke does not build**: it loads whatever `apps/extension/dist/firefox` holds, so build first with the flags CI's smoke job uses — `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:firefox` — and run with `NULO_E2E_MIGRATION_FIXTURE=1` (`_extension-smoke-e2e.yml` is the authority for both). Needs `geckodriver` on `PATH` or at `$GECKODRIVER`, and the Firefox that the locked Puppeteer pins: `bun x puppeteer browsers install firefox` from `apps/extension` (or `FIREFOX_PATH`). The launch fails below Firefox 153, the manifest's own floor.
 
 ## The one rule
 
@@ -40,6 +40,10 @@ A classic window handle and a BiDi browsing-context id are the same string in Fi
 | Content-script **match patterns count as host permissions**. The wallet's content script matches every site. | `tabs.onUpdated` delivers `changeInfo.url` for ordinary origins, which Chrome withholds. | Not absorbed — it is real product behaviour. `network/session-tabNavigate.test.ts` pins both sides. |
 | Keys typed over BiDi dispatch an element's listeners **with no microtask checkpoint between them**. | Code that writes reactive state in one `input` listener and re-reads it in the next sees the old value. | Fixed in the product (`AmountCard`'s handler reads the input's own value and writes the model once). Treat a Firefox-only typing failure as this until shown otherwise. |
 
+## Artifact mode (the release and nightly smokes)
+
+`NULO_E2E_ARTIFACT_RUN=1` smokes a production bundle, which still calls the live price host. Chrome blackholes it with `--host-resolver-rules`; Firefox has no such flag, so the driver passes a `data:` PAC through the W3C `proxy` capability that sends only `api.coingecko.com` to a dead port. **Not yet observed in a run**: nothing local exercises artifact mode on Firefox, so the first nightly is its first evidence. If that smoke is slow or red on price-adjacent flows, suspect the PAC first.
+
 ## Ownership and teardown
 
 A Firefox launch owns more than a browser process: geckodriver, the Firefox it spawned, and a profile directory. `ownership.ts` finds them by an environment marker (`NULO_E2E_LAUNCH=<uuid>`, inherited by both processes, read back from `/proc/<pid>/environ`), never by name — many agents run on one host and a `pkill geckodriver` would take down someone else's run. The marker is re-checked immediately before every signal. A profile is deleted only if it sits directly under the suite's profile root, carries the `profile-` prefix and holds a `.nulo-launch` file matching the marker. Each launch first reaps the launches of runs that no longer exist. Always end a launch through `ctx.close()`; closing the `Browser` leaks all three.
@@ -54,4 +58,4 @@ A Firefox launch owns more than a browser process: geckodriver, the Firefox it s
 
 ## CI
 
-`pr-extension-{smoke,network}-e2e-firefox.yml` are twins of the Chrome callers with `browser: firefox`; `nightly.yml` and `release.yml` carry Firefox jobs too. All are **advisory** — in no required set, in no `needs` of an aggregator or publish step — and `scripts/ci-cd/behavior-gating.test.ts` pins both that and their parity with the Chrome lanes. geckodriver is pinned by tarball and binary SHA-256 in `.github/actions/setup-geckodriver`; Firefox itself is whatever the locked Puppeteer pins. Promotion to required is the owner's call (root `CLAUDE.md`, staged-rollout switches).
+`pr-extension-{smoke,network}-e2e-firefox.yml` are twins of the Chrome callers with `browser: firefox`; `nightly.yml` and `release.yml` carry Firefox jobs too. All are **advisory** — in no required set, in no `needs` of an aggregator or publish step. Advisory is not free: the PR lanes start fifteen more jobs on a PR that trips both filters and queue against the required lanes for the same runners, and `release.yml`'s Firefox smoke holds the `release` concurrency slot until it ends (20-minute cap). `scripts/ci-cd/behavior-gating.test.ts` pins the advisory wiring and the parity with the Chrome lanes. geckodriver is pinned by tarball and binary SHA-256 in `.github/actions/setup-geckodriver`; Firefox itself is whatever the locked Puppeteer pins. Promotion to required is the owner's call (root `CLAUDE.md`, staged-rollout switches).

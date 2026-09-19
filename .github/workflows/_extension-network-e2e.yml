@@ -156,6 +156,7 @@ jobs:
 
       # The suite rejects an unknown browser too, but only after the sandbox has been paid for.
       - name: Validate the browser input
+        id: browser
         env:
           BROWSER: ${{ inputs.browser }}
         run: |
@@ -300,7 +301,8 @@ jobs:
       # when `inputs.probe == '1'` because slow-test investigation builds
       # legitimately contain probe strings.
       - name: Verify no probe code in shipped bundle
-        if: always() && inputs.probe != '1'
+        # Gated on the validation: `always()` would otherwise put a rejected value into a path.
+        if: always() && steps.browser.outcome == 'success' && inputs.probe != '1'
         shell: bash
         env:
           BROWSER: ${{ inputs.browser }}
