@@ -597,6 +597,8 @@ onBeforeUnmount(() => {
 						:account="appStore.account"
 						:feeEstimate="feeEstimate"
 						:isEstimating="isEstimating"
+						:originPrivacy="selectedSendType"
+						:destinationPrivacy="selectedReceiverType"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 					/>
@@ -611,7 +613,7 @@ onBeforeUnmount(() => {
 					variant="cta"
 					wide
 				>
-					Get Fee Juice
+					{{ selectedSendType === "private" ? "Get private gas" : "Get Fee Juice" }}
 				</Button>
 				<Button
 					v-else

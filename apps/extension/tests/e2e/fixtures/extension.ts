@@ -850,7 +850,14 @@ export const test = base.extend<{
 						// Self-mint to the TEST wallet's account: each forced block must
 						// not add to the extension account, whose balance is asserted
 						// EXACTLY by the fail-hard row wait below.
-						mintPublicTokens(wallet, aztecConfig.tokenAddress, minterAddress, 1n, minterAddress, feeOptions),
+						mintPublicTokens(
+							wallet,
+							aztecConfig.tokenAddress,
+							minterAddress.toString(),
+							1n,
+							aztecConfig.minterAddress,
+							feeOptions,
+						),
 					90_000,
 				)
 

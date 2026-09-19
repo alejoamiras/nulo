@@ -90,8 +90,11 @@ export class GasBalanceReader {
 			// switch mid-flight: the private leg reads the OLD profile's FPCs).
 			// Wait it out, then re-enter: the epoch stamp has marked that
 			// flight's cache entry stale, so re-entry recomputes; if someone
-			// already restarted, their current-epoch flight is joined.
-			const reenter = () => this.get(networkId, accountAddress, false)
+			// already restarted, their current-epoch flight is joined. A forced
+			// caller stays forced: with no invalidation in between, the flight it
+			// waited out has just cached its result as fresh, and an unforced
+			// re-entry would be handed exactly the snapshot it asked to bypass.
+			const reenter = () => this.get(networkId, accountAddress, forceRefresh)
 			return inFlight.promise.then(reenter, reenter)
 		}
 		const epochAtStart = this.epoch
