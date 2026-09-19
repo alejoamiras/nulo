@@ -70,9 +70,13 @@ describe("thirdPartyNotices", () => {
 		writeFileSync(theme, "@import url(css-reset/reset.css);\nbody { margin: 0 }")
 		writeFileSync(reset, "* { box-sizing: border-box }")
 		mkdirSync(join(root, "src"), { recursive: true })
-		writeFileSync(join(root, "src/_partial.scss"), '@use "~css-theme/theme.css";')
+		// A script beside the theme: a module resolver picks it for the extensionless import below,
+		// while the CSS pipeline inlines theme.css.
+		writeFileSync(theme.replace(/\.css$/, ".ts"), "export {}")
+		// The partial is imported without its underscore or extension, and imports the package the same way.
+		writeFileSync(join(root, "src/_partial.scss"), '@use "~css-theme/theme";')
 		const resolved: Record<string, string> = {
-			"./partial": join(root, "src/_partial.scss"),
+			"css-theme/theme": theme.replace(/\.css$/, ".ts"),
 			"css-theme/theme.css": theme,
 			"css-reset/reset.css": reset,
 		}

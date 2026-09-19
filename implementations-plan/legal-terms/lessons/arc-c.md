@@ -145,3 +145,14 @@ the signature of chasing a resolver's semantics one spelling at a time. The rule
 instead: try the spellings a CSS, Sass or Less pipeline tries, and **refuse the build on any import
 that still cannot be followed**. Unresolvable no longer means invisible. The real extension build
 has no such import (both targets pass, same hash), and the extensionless probe is refused by name.
+
+The third verification found the last variant (an extensionless import beside a same-named script
+resolved to the script); a candidate now counts only if it is a style file. **Codex then returned
+`RESOLVED` and `conditional-approve`**, its one condition being that the regression the commit
+message claimed was not in the tree. It was right: Biome had reformatted the test file, the
+scripted edit's anchor no longer matched, and the edit silently did nothing while the commit
+message said otherwise. The regression is now in, and was shown to fail with the fix removed.
+A scripted edit needs an assertion that it applied; a commit message is not evidence.
+
+**Loop outcome: converged at conditional-approve, condition met**, in four rounds (the fourth
+authorised by the owner) plus three verifications scoped to round 4's single finding.
