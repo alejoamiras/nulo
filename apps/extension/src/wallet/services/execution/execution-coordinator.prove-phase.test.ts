@@ -29,7 +29,9 @@ function harness(opts: { journalRejects?: boolean } = {}) {
 		if (journalRejects) throw new Error("journal closed")
 		journal.push([id, backend])
 	})
-	const coordinator = new ExecutionCoordinator(tasks, new LoggerStore(new ConfigStore()), undefined, { updateProvingBackend })
+	const coordinator = new ExecutionCoordinator(tasks, new LoggerStore(new ConfigStore()), { assertCurrent: async () => {} }, undefined, {
+		updateProvingBackend,
+	})
 	const pending: Array<{ proveId: string; finish: () => void }> = []
 	const pxe = {
 		proveTx: vi.fn(

@@ -8,6 +8,7 @@
 
 <script setup>
 /** Utils */
+import { openLegalDocument } from "@/utils/legal-links"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 
 /** Store */
@@ -20,15 +21,6 @@ const router = useRouter()
 // for the welcome / create / import flow. Delegates to the shared predicate
 // helper so register/import/profile-new stay in lockstep.
 onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
-
-const handleOpen = (target) => {
-	chrome.windows.create({
-		type: "popup",
-		url: `https://nulo.sh/${target}`,
-		width: 360,
-		height: 600,
-	})
-}
 </script>
 
 <template>
@@ -70,10 +62,9 @@ const handleOpen = (target) => {
 
 		<!-- Terms footer -->
 		<p :class="$style.terms">
-			By continuing, you are confirming that you read and agree to
-			<span @click="handleOpen('terms')" :class="$style.link">Terms of Use</span>
-			and
-			<span @click="handleOpen('privacy')" :class="$style.link">Privacy Policy</span>
+			<span @click="openLegalDocument('terms')" :class="$style.link" data-testid="legal-register-terms">Terms of Use</span>
+			·
+			<span @click="openLegalDocument('privacy')" :class="$style.link" data-testid="legal-register-privacy">Privacy Policy</span>
 		</p>
 
 	</Flex>

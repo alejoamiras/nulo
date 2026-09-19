@@ -23,6 +23,7 @@ import { AccountService } from "./services/account/service"
 import { AccountStateService } from "./services/account-state/service"
 import { AuthRegistryService } from "./services/auth-registry/service"
 import { ConfigService } from "./services/config/service"
+import { LegalAcceptanceService } from "./services/legal/service"
 import { ContactService } from "./services/contact/service"
 import { DappInteractionService } from "./services/dapp-interaction/service"
 import { DappSessionService } from "./services/dapp-session/service"
@@ -459,6 +460,7 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	services.add(new AccountStateService(logger, restoreGate))
 	services.add(new AuthRegistryService(logger, browserApi))
 	services.add(new ConfigService(config, logger))
+	services.add(new LegalAcceptanceService(logger, browserApi))
 	const windowManager = new WindowManager(browserApi.windows, clock, logger)
 	services.add(new ContactService(logger, browserApi, restoreGate))
 	services.add(new DappInteractionService(logger, windowManager))

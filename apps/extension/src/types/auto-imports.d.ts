@@ -26,6 +26,8 @@ declare global {
   const IMPORT_REGISTRATION_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_REGISTRATION_BUDGET_MS
   const INIT_FETCH_TIMEOUT_MS: typeof import('../stores/balances.store').INIT_FETCH_TIMEOUT_MS
   const INIT_RETRY_BACKOFF_MS: typeof import('../stores/balances.store').INIT_RETRY_BACKOFF_MS
+  const LEGAL_DECLINED_PATH: typeof import('../utils/legal-sheet').LEGAL_DECLINED_PATH
+  const LEGAL_DISMISSED_KEY: typeof import('../utils/legal-sheet').LEGAL_DISMISSED_KEY
   const LOCAL_L1_CHAIN_ID: typeof import('../utils/chain-ids').LOCAL_L1_CHAIN_ID
   const MAINNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').MAINNET_L1_CHAIN_ID
   const MAINNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').MAINNET_ROLLUP_VERSION
@@ -144,6 +146,7 @@ declare global {
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
+  const legalAboutRow: typeof import('../utils/legal-about').legalAboutRow
   const managers: typeof import('../utils/core').managers
   const markRaw: typeof import('vue').markRaw
   const matchesQuery: typeof import('../utils/token-search').matchesQuery
@@ -168,6 +171,7 @@ declare global {
   const onUnmounted: typeof import('vue').onUnmounted
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
+  const openLegalDocument: typeof import('../utils/legal-links').openLegalDocument
   const orderTokenRows: typeof import('../utils/token-order').orderTokenRows
   const parseAmountToBaseUnits: typeof import('../utils/amount').parseAmountToBaseUnits
   const parseContactsExport: typeof import('../utils/contacts-export-format').parseContactsExport
@@ -223,6 +227,7 @@ declare global {
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
+  const shouldShowLegalSheet: typeof import('../utils/legal-sheet').shouldShowLegalSheet
   const smallFieldDecimal: typeof import('../utils/transfer-intent').smallFieldDecimal
   const stageSubtitle: typeof import('../utils/card-subtitle').stageSubtitle
   const storageLocalGet: typeof import('../utils/storage').storageLocalGet
@@ -263,6 +268,7 @@ declare global {
   const useId: typeof import('vue').useId
   const useIncomingSyncHealth: typeof import('../composables/useIncomingSyncHealth').useIncomingSyncHealth
   const useIncomingTransfers: typeof import('../composables/useIncomingTransfers').useIncomingTransfers
+  const useLegalAcceptance: typeof import('../composables/useLegalAcceptance').useLegalAcceptance
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel
   const useNetworkActivation: typeof import('../composables/useNetworkActivation').useNetworkActivation
@@ -350,6 +356,9 @@ declare global {
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
   import('../composables/useIncomingTransfers')
   // @ts-ignore
+  export type { LegalViewStatus } from '../composables/useLegalAcceptance'
+  import('../composables/useLegalAcceptance')
+  // @ts-ignore
   export type { UseNetworkActivationOptions } from '../composables/useNetworkActivation'
   import('../composables/useNetworkActivation')
   // @ts-ignore
@@ -425,6 +434,12 @@ declare global {
   export type { JournalTerminalVisualState, JournalTerminalDisplay, CategoricalFailureLabel, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
   // @ts-ignore
+  export type { LegalAboutRow } from '../utils/legal-about'
+  import('../utils/legal-about')
+  // @ts-ignore
+  export type { LegalSheetContext } from '../utils/legal-sheet'
+  import('../utils/legal-sheet')
+  // @ts-ignore
   export type { PrestoInfo, PrestoUiState, PrestoTone, PrestoCopy, PrestoSurface, PrestoDetailRow } from '../utils/presto-ui-state'
   import('../utils/presto-ui-state')
   // @ts-ignore
@@ -473,6 +488,8 @@ declare module 'vue' {
     readonly IMPORT_REGISTRATION_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_REGISTRATION_BUDGET_MS']>
     readonly INIT_FETCH_TIMEOUT_MS: UnwrapRef<typeof import('../stores/balances.store')['INIT_FETCH_TIMEOUT_MS']>
     readonly INIT_RETRY_BACKOFF_MS: UnwrapRef<typeof import('../stores/balances.store')['INIT_RETRY_BACKOFF_MS']>
+    readonly LEGAL_DECLINED_PATH: UnwrapRef<typeof import('../utils/legal-sheet')['LEGAL_DECLINED_PATH']>
+    readonly LEGAL_DISMISSED_KEY: UnwrapRef<typeof import('../utils/legal-sheet')['LEGAL_DISMISSED_KEY']>
     readonly LOCAL_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['LOCAL_L1_CHAIN_ID']>
     readonly MAINNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_L1_CHAIN_ID']>
     readonly MAINNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_ROLLUP_VERSION']>
@@ -591,6 +608,7 @@ declare module 'vue' {
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
+    readonly legalAboutRow: UnwrapRef<typeof import('../utils/legal-about')['legalAboutRow']>
     readonly managers: UnwrapRef<typeof import('../utils/core')['managers']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
     readonly matchesQuery: UnwrapRef<typeof import('../utils/token-search')['matchesQuery']>
@@ -615,6 +633,7 @@ declare module 'vue' {
     readonly onUnmounted: UnwrapRef<typeof import('vue')['onUnmounted']>
     readonly onUpdated: UnwrapRef<typeof import('vue')['onUpdated']>
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
+    readonly openLegalDocument: UnwrapRef<typeof import('../utils/legal-links')['openLegalDocument']>
     readonly orderTokenRows: UnwrapRef<typeof import('../utils/token-order')['orderTokenRows']>
     readonly parseAmountToBaseUnits: UnwrapRef<typeof import('../utils/amount')['parseAmountToBaseUnits']>
     readonly parseContactsExport: UnwrapRef<typeof import('../utils/contacts-export-format')['parseContactsExport']>
@@ -668,6 +687,7 @@ declare module 'vue' {
     readonly shallowReactive: UnwrapRef<typeof import('vue')['shallowReactive']>
     readonly shallowReadonly: UnwrapRef<typeof import('vue')['shallowReadonly']>
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>
+    readonly shouldShowLegalSheet: UnwrapRef<typeof import('../utils/legal-sheet')['shouldShowLegalSheet']>
     readonly smallFieldDecimal: UnwrapRef<typeof import('../utils/transfer-intent')['smallFieldDecimal']>
     readonly stageSubtitle: UnwrapRef<typeof import('../utils/card-subtitle')['stageSubtitle']>
     readonly storageLocalGet: UnwrapRef<typeof import('../utils/storage')['storageLocalGet']>
@@ -708,6 +728,7 @@ declare module 'vue' {
     readonly useId: UnwrapRef<typeof import('vue')['useId']>
     readonly useIncomingSyncHealth: UnwrapRef<typeof import('../composables/useIncomingSyncHealth')['useIncomingSyncHealth']>
     readonly useIncomingTransfers: UnwrapRef<typeof import('../composables/useIncomingTransfers')['useIncomingTransfers']>
+    readonly useLegalAcceptance: UnwrapRef<typeof import('../composables/useLegalAcceptance')['useLegalAcceptance']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>
     readonly useNetworkActivation: UnwrapRef<typeof import('../composables/useNetworkActivation')['useNetworkActivation']>

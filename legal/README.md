@@ -6,8 +6,8 @@ routine change silently falsifies is a misrepresentation claim, not a typo.
 
 | File | Published at | Linked from |
 |---|---|---|
-| [`terms.md`](terms.md) | `nulo.sh/terms` | onboarding welcome, popup register, Settings → About |
-| [`privacy.md`](privacy.md) | `nulo.sh/privacy` | the same three places |
+| [`terms.md`](terms.md) | `nulo.sh/terms` | the onboarding Terms gate, the popup re-acceptance sheet, popup register, Settings → About |
+| [`privacy.md`](privacy.md) | `nulo.sh/privacy` | the same places |
 
 The landing generates both pages, plus one permalink per version (`nulo.sh/terms/v1.0/`), from these
 files at build time — `apps/landing/scripts/build-legal.ts`, rendered with Bun's built-in markdown.
@@ -45,15 +45,15 @@ These came out of the two-round review and are **not** fixed by editing the docu
    serves `terms.html` at `/terms`, so multi-entry Vite inputs are enough — no router, no redirects
    file. Keep the markdown canonical and generate the pages from it, so the published text cannot
    drift from what is reviewed here.
-2. **Implement versioned acceptance.** § 3 describes an unchecked "I agree" control and a recorded
-   version + timestamp. That control does not exist — the three call sites carry a "By continuing…"
-   footer, which is browsewrap and records nothing. **Do not weaken § 3 to match the footer;
-   implement the mechanism**, including a path for existing preview installs.
-3. **Preserve export access on decline.** § 20 promises that declining revised Terms does not disable
-   backup or export. That has to be true in code before it is true on the page.
+2. ~~**Implement versioned acceptance.**~~ — done. § 3's unchecked "I agree" control is the
+   onboarding gate (`apps/extension/src/onboarding/pages/terms.vue`) and the popup sheet for installs
+   with an older or no record; the version and time are recorded on the device by
+   `LegalAcceptanceService`. The "By continuing…" browsewrap footers are gone.
+3. ~~**Preserve export access on decline.**~~ — done, and proved end to end: nothing but
+   broadcasting and dApp requests is gated, and the sheet cannot cover an export page
+   (`apps/extension/tests/e2e/legal-acceptance.test.ts`, scenarios S5, S6, S8).
 
-   Blockers 1–3 are one arc, to be planned with `/blueprint`. The identity and jurisdiction inputs
-   the published pages need are now settled (see § Identity below), so nothing gates the plan.
+   Blockers 1–3 shipped as one arc: `implementations-plan/legal-terms/`.
 4. **Verify the Presto MIT relicense reached the bundled artifacts.** Everything under the
    `@alejoamiras` Presto scope is MIT — decided, and these documents are written on that basis. The
    remaining work is mechanical, because what ships is the installed package, not the intent: at the

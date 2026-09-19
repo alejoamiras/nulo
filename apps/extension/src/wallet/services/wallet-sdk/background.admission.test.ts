@@ -65,7 +65,7 @@ function deferred<T>() {
 }
 
 /** Boot the handler over a remembered session (`trusted` decides whether a verify window opens). */
-function boot(opts: { remembered?: { trusted: boolean }; popup?: () => Promise<{ approved: boolean }> } = {}) {
+function boot(opts: { remembered?: { trusted: boolean }; popup?: () => Promise<{ approved: boolean }>; legal?: () => Promise<void> } = {}) {
 	let created = 0
 	const onRemoved: Array<(id: number) => void> = []
 	const ports = fakeSdkPorts({
@@ -105,6 +105,7 @@ function boot(opts: { remembered?: { trusted: boolean }; popup?: () => Promise<{
 				},
 				"operation-journal": {},
 				token: { getTokens: async () => [] },
+				"legal-acceptance": { assertCurrent: opts.legal ?? (async () => undefined) },
 			})[name],
 	} as never
 	initWalletSdkHandler(services, noopLogger, ports)
@@ -335,5 +336,32 @@ describe("handleDiscovery — fresh connection and dedupe waiters", () => {
 		await vi.advanceTimersByTimeAsync(DISCOVERY_STALE_MS + 20_000)
 		const settled = new Set(handlerCalls.map((c) => c.split(":")[1]))
 		for (let i = 0; i <= 9; i++) expect(settled.has(`d${i}`)).toBe(true)
+	})
+})
+
+describe("discovery without a current Terms acceptance", () => {
+	const refuse = async () => {
+		throw new Error("terms")
+	}
+
+	test("a new origin is rejected before any approval popup opens", async () => {
+		const popup = vi.fn(async () => ({ approved: true }))
+		const { discover } = boot({ popup, legal: refuse })
+
+		discover("fresh-1")
+		await flush()
+
+		expect(rejected()).toEqual(["fresh-1"])
+		expect(approved()).toEqual([])
+		expect(popup).not.toHaveBeenCalled()
+	})
+
+	test("a remembered origin still reconnects: its requests are what get refused, not its channel", async () => {
+		const { discover } = boot({ remembered: { trusted: true }, legal: refuse })
+
+		discover("again-1")
+		await flush()
+
+		expect(approved()).toEqual(["again-1"])
 	})
 })

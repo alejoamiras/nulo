@@ -11,10 +11,16 @@
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 const { openToast } = useToast()
 
 /** Utils */
+import { currentVersion } from "@nulo/legal"
 import { copyWithToast } from "@/utils/clipboard"
+import { managers } from "@/utils/core"
+import { legalAboutRow } from "@/utils/legal-about"
+import { openLegalDocument } from "@/utils/legal-links"
+import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 
 const version = __VERSION__
 const aztecVersion = __AZTEC_VERSION__
@@ -23,14 +29,28 @@ const handleCopy = (target) => {
 	void copyWithToast(target, openToast, "Version is copied")
 }
 
-const handleOpen = (target) => {
-	chrome.windows.create({
-		type: "popup",
-		url: `https://nulo.sh/${target}`,
-		width: 360,
-		height: 600,
-	})
+/** Terms acceptance. The shared client stays connected for the shell; only the composable is ours. */
+const router = useRouter()
+const legal = useLegalAcceptance(managers.legal)
+const legalRecord = ref(null)
+const legalRow = computed(() => legalAboutRow(legal.status.value, legalRecord.value))
+const privacyVersion = currentVersion("privacy").version
+
+const loadLegalRecord = async () => {
+	legalRecord.value = await managers.legal.getRecord().catch(() => null)
 }
+
+/** Clearing the dismissal reopens the shell's sheet, on a wallet page it is allowed to cover. */
+const handleReview = async () => {
+	await chrome.storage.session.remove(LEGAL_DISMISSED_KEY)
+	await router.push("/popup/general")
+}
+
+watch(() => legal.status.value, loadLegalRecord)
+
+onBeforeMount(() => legal.refresh())
+
+onBeforeUnmount(() => legal.dispose())
 </script>
 
 <template>
@@ -89,10 +109,36 @@ const handleOpen = (target) => {
 				/>
 			</ItemsContainer>
 
-			<ItemsContainer wide>
-				<SettingItem @click="handleOpen('terms')" size="small" title="Terms of use" chevron />
-				<SettingItem @click="handleOpen('privacy')" size="small" title="Privacy policy" chevron />
+			<ItemsContainer title="Legal" wide data-testid="legal-about-group">
+				<SettingItem @click="openLegalDocument('terms')" size="small" title="Terms of Use" chevron data-testid="legal-about-terms" />
+				<SettingItem
+					@click="openLegalDocument('privacy')"
+					size="small"
+					:title="`Privacy Policy v${privacyVersion}`"
+					:description="legalRow.privacyUpdated ? 'Privacy Policy updated' : undefined"
+					chevron
+					data-testid="legal-about-privacy"
+				/>
+				<SettingItem
+					v-if="legalRow.accepted"
+					size="large"
+					:title="legalRow.title"
+					:description="legalRow.description"
+					data-testid="legal-about-accepted"
+				/>
+				<SettingItem
+					v-else
+					@click="handleReview"
+					size="large"
+					:title="legalRow.title"
+					:description="legalRow.description"
+					chevron
+					data-testid="legal-about-not-accepted"
+				/>
 			</ItemsContainer>
+			<Text size="11" color="support" height="150" data-testid="legal-about-note">
+				Kept on this device. Never sent anywhere, and not part of a backup.
+			</Text>
 		</Flex>
 
 	</Flex>
