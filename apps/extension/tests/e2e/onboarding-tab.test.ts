@@ -1,5 +1,6 @@
 import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
+import { extensionUrl } from "./fixtures/browser"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import {
 	interceptHealth,
@@ -126,7 +127,7 @@ describe("onboarding tab", () => {
 				// The page may have started closing before the function could
 				// run — open a fresh page and re-check from there.
 				const fresh = await extension.browser.newPage()
-				await fresh.goto(`chrome-extension://${extension.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+				await fresh.goto(extensionUrl(extension.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 				const flag = await fresh.evaluate(async () => {
 					const r = await chrome.storage.local.get("nulo:onboarding:completed")
 					return r["nulo:onboarding:completed"]
@@ -271,7 +272,7 @@ describe("onboarding tab", () => {
 	test("popup with onboardingCompleted=false redirects to tab", async ({ freshExtensionPerTest: extension }) => {
 		// Reset the flag so the redirect predicate fires.
 		const setupPage = await extension.browser.newPage()
-		await setupPage.goto(`chrome-extension://${extension.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+		await setupPage.goto(extensionUrl(extension.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 		await setupPage.evaluate(async () => {
 			await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 		})
@@ -282,7 +283,7 @@ describe("onboarding tab", () => {
 			(target) => target.type() === "page" && target.url().includes("src/onboarding/index.html"),
 			{ timeout: 10_000 },
 		)
-		await popup.goto(`chrome-extension://${extension.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+		await popup.goto(extensionUrl(extension.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 
 		// The redirect happens in onBeforeMount of register.vue. We expect the
 		// onboarding tab to appear. window.close() inside register.vue is a

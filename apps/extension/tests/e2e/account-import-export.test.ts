@@ -89,7 +89,7 @@ test("account export → import into a SECOND profile (plaintext + encrypted rou
 
 		expect(target.pageErrors.filter((e) => !e.message.includes("Client disconnected"))).toEqual([])
 	} finally {
-		await target.browser.close()
+		await target.close()
 	}
 })
 

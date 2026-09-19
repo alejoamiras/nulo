@@ -92,7 +92,7 @@ test("round-trip: register → export recovery phrase → import in fresh ext �
 		expect(ctx2.pageErrors).toEqual([])
 		await page2.close()
 	} finally {
-		await ctx2.browser.close()
+		await ctx2.close()
 	}
 }, 120_000)
 

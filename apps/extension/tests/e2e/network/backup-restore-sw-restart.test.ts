@@ -349,7 +349,7 @@ test.skipIf(!hasConfig)(
 			expect(ctx2.pageErrors).toEqual([])
 		} finally {
 			if (gate.page) await clearRestoreGate(gate.page).catch(() => {})
-			await ctx2.browser.close().catch(() => {})
+			await ctx2.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })
 		}
 	},
@@ -468,7 +468,7 @@ test.skipIf(!hasConfig)(
 			await waitForTokenCardAmount(page3, "1,000", "TST")
 		} finally {
 			if (gatePage) await clearRestoreGate(gatePage).catch(() => {})
-			await ctx2.browser.close().catch(() => {})
+			await ctx2.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })
 		}
 	},

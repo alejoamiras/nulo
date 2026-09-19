@@ -10,6 +10,7 @@
  */
 import type { Page, Target } from "puppeteer"
 import { inject } from "vitest"
+import { EXTENSION_SCHEME } from "./browser"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
 import { dumpDeepDiagnostics } from "./journal"
 
@@ -235,7 +236,7 @@ export async function callExpectingNoPopup(
 ): Promise<PgResult> {
 	const fromSeq = await snapshotResultSeq(page)
 	const isPagePopup = (t: Target) =>
-		t.type() === "page" && t.url().startsWith("chrome-extension://") && t.url().includes("/src/popup/index.html")
+		t.type() === "page" && t.url().startsWith(EXTENSION_SCHEME) && t.url().includes("/src/popup/index.html")
 	const before = new Set(ctx.browser.targets())
 	const created: Target[] = []
 	const onCreated = (t: Target) => created.push(t)

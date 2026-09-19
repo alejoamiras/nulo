@@ -235,7 +235,7 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 			await waitForActiveAccount(page2, addressBefore)
 			await page2.close()
 		} finally {
-			await ctx2.browser.close()
+			await ctx2.close()
 			rmSync(profileDir, { recursive: true, force: true })
 			// The ciphertext file embeds the (test) master key — never leave it around.
 			rmSync(dir, { recursive: true, force: true })

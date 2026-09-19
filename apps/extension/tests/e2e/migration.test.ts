@@ -10,6 +10,7 @@ import {
 	MIGRATION_FIXTURE_ROOT,
 	MIGRATION_FIXTURE_VERSION,
 } from "@/e2e/migration-fixture"
+import { extensionUrl } from "./fixtures/browser"
 import { type ExtensionContext, launchExtension, openPopup } from "./fixtures/extension"
 
 /**
@@ -117,7 +118,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		const page = await openPopup(ctx)
 		await waitForVersion(page, MAX_VERSION)
 		await seedPreShape(page, extra)
-		await ctx.browser.close()
+		await ctx.close()
 		ctx = undefined
 	}
 
@@ -130,7 +131,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 	async function relaunch(): Promise<Page> {
 		ctx = await launchExtension({ userDataDir: profileDir, waitForLiveness: false })
 		const page = await ctx.browser.newPage()
-		await page.goto(`chrome-extension://${ctx.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+		await page.goto(extensionUrl(ctx.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 		return page
 	}
 
@@ -159,12 +160,12 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 				},
 			)
 			.catch(() => {})
-		await ctx.browser.close()
+		await ctx.close()
 		return relaunch()
 	}
 
 	afterEach(async () => {
-		await ctx?.browser.close()
+		await ctx?.close()
 		ctx = undefined
 		// Guarded: a failure before mkdtemp must not turn into an rmSync throw
 		// that masks the real assertion error.
@@ -197,7 +198,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		// UI level): version stays unadvanced and the barrier renders with the
 		// Retry button.
 		await storageRemove(page, [BOOM_KEY])
-		if (ctx) await ctx.browser.close()
+		if (ctx) await ctx.close()
 		const page2 = await relaunch()
 		await page2.waitForSelector("[data-testid='migration-retry-btn']", { visible: true, timeout: 10_000 })
 		expect((await storageGet(page2, [VERSION_KEY]))[VERSION_KEY]).toBe(1)
@@ -232,7 +233,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		await waitForKeyPresent(page, RUNNING_KEY) // journal armed: running + backup
 		await waitForKeyPresent(page, BACKUP_KEY)
 		// THE CRASH: kill the whole browser while the migration is mid-flight.
-		if (ctx) await ctx.browser.close()
+		if (ctx) await ctx.close()
 
 		// Next cold boot: the interrupted journal restores, the interruption is
 		// COUNTED, and the boot stands down (one authorization = one up()) —

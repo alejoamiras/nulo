@@ -244,7 +244,7 @@ test.skipIf(!hasConfig)(
 			expect(resurrectedTx).toBe(false)
 			await page3.close()
 		} finally {
-			await ctx2.browser.close()
+			await ctx2.close()
 			rmSync(profileDir, { recursive: true, force: true })
 			// The doctored file embeds the wallet's REAL (local-chain test) master-key.
 			rmSync(dirname(filePath), { recursive: true, force: true })

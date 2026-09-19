@@ -266,7 +266,7 @@ async function withFreshExtension(
 		expect(armed.failures(), "rpc interception failures").toEqual([])
 	} finally {
 		await armed?.stop()
-		await ctx.browser.close()
+		await ctx.close()
 		rmSync(profileDir, { recursive: true, force: true })
 	}
 	return { profileDir }
