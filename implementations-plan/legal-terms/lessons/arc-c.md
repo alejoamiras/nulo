@@ -134,3 +134,8 @@ second attempt was proven the same way: a temporary `@import` of a package style
 real build refuse, naming that package, and the clean builds kept their previous hash. A plugin
 test against a hand-made context proves the logic, never the host API. **This fix has not been
 re-reviewed.**
+
+Closing round 4, Codex verified that one finding only: **not resolved**, because the specifier
+pattern required quotes and `@import url(pkg/theme.css);` is ordinary CSS. The reader now takes
+quoted, `url("…")`, bare `url(…)` and comma-list forms, pinned by a table test, and the bare form
+was proven on a real build the same way as the quoted one.

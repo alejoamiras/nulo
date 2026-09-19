@@ -67,7 +67,7 @@ describe("thirdPartyNotices", () => {
 		})
 		const theme = install("css-theme").replace(/index\.js$/, "theme.css")
 		const reset = install("css-reset").replace(/index\.js$/, "reset.css")
-		writeFileSync(theme, '@import "css-reset/reset.css";\nbody { margin: 0 }')
+		writeFileSync(theme, "@import url(css-reset/reset.css);\nbody { margin: 0 }")
 		writeFileSync(reset, "* { box-sizing: border-box }")
 		mkdirSync(join(root, "src"), { recursive: true })
 		writeFileSync(join(root, "src/_partial.scss"), '@use "~css-theme/theme.css";')
