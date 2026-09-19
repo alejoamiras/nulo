@@ -151,7 +151,7 @@ Classic passkey implementation; `journal.swEvaluate` no-op on Firefox; whole-fil
 
 **Validation gate.** `bun run lint && bun run typecheck`. `test:e2e` does not build, so first build the Firefox smoke artifact with the same flags `_extension-smoke-e2e.yml:68-82` gives Chrome's: `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:firefox`. Then `NULO_E2E_BROWSER=firefox NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` exits 0 **twice in a row**. The browser adds exactly four whole-file exclusions on top of the suite's existing conditional skips (`sw-resilience`, `sw-restart-network`, `imported-account-lifecycle`, `import-dead-rpc`); `migration.test.ts` and `backup-migration.test.ts` must RUN, not skip, on Firefox (the fixture flag is what arms them); `bun run test:e2e` on Chrome still exits 0; after the runs, no owned geckodriver/Firefox process, pid file or profile dir remains. Layers: lint, typecheck, smoke e2e on both browsers.
 
-### Phase 6 — Network suite on Firefox
+### Phase 6 — Network suite on Firefox ✓
 
 Run what CI runs, lane by lane, with each lane's exact env and arguments as `_extension-network-e2e.yml:122-125,227-248` composes them, locally and sequentially (or split across agent runs). Every lane runs under one preamble, the executable form of CI's env (`_extension-network-e2e.yml:122-137`):
 
