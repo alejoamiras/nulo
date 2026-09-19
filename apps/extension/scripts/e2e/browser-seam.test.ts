@@ -175,10 +175,11 @@ const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
 function browserBranches(source: string): number[] {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	const flags = new Set([...BROWSER_FLAGS, ...importedFlagAliases(file)])
+	const namespaces = importedNamespaces(file)
 	const lines: number[] = []
 	const visit = (node: ts.Node): void => {
 		if (ts.isImportDeclaration(node)) return
-		const asks = asksTheDriverOrTheEnv(node) || (ts.isIdentifier(node) && flags.has(node.text) && !isMemberName(node))
+		const asks = asksTheDriverOrTheEnv(node) || (ts.isIdentifier(node) && flags.has(node.text) && !isMemberName(node, namespaces))
 		if (asks) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
 		ts.forEachChild(node, visit)
 	}
@@ -198,10 +199,22 @@ function importedFlagAliases(file: ts.SourceFile): string[] {
 		.map((spec) => spec.name.text)
 }
 
-/** `x.BROWSER` and `{ BROWSER: … }` name a member of something else, not the seam's flag. */
-function isMemberName(node: ts.Identifier): boolean {
+/** `import * as seam` — `seam.isFirefox` is the flag itself, reached through the module. */
+function importedNamespaces(file: ts.SourceFile): Set<string> {
+	const names = file.statements.filter(ts.isImportDeclaration).flatMap((declaration) => {
+		const bindings = declaration.importClause?.namedBindings
+		return bindings && ts.isNamespaceImport(bindings) ? [bindings.name.text] : []
+	})
+	return new Set(names)
+}
+
+/** `x.BROWSER` and `{ BROWSER: … }` name a member of something else — unless `x` is a module. */
+function isMemberName(node: ts.Identifier, namespaces: Set<string>): boolean {
 	const parent = node.parent
-	return (ts.isPropertyAccessExpression(parent) && parent.name === node) || (ts.isPropertyAssignment(parent) && parent.name === node)
+	if (ts.isPropertyAssignment(parent)) return parent.name === node
+	if (!ts.isPropertyAccessExpression(parent) || parent.name !== node) return false
+	const receiver = unwrap(parent.expression)
+	return !(ts.isIdentifier(receiver) && namespaces.has(receiver.text))
 }
 
 /** The same question put to `driver.kind`, or to the variable the seam itself resolves from. */
@@ -376,6 +389,7 @@ describe("browser seam guard", () => {
 
 	test.each([
 		["an import alias", 'import { isFirefox as ff } from "./browser"\nif (ff) stub()'],
+		["a namespace import", 'import * as seam from "./browser"\nif (seam.isFirefox) stub()'],
 		["the driver's kind", 'import { driver } from "./browser"\nif (driver.kind === "firefox") stub()'],
 		["the env var", 'const b = 1\nif (process.env.NULO_E2E_BROWSER === "firefox") stub()'],
 		["the env var by key", 'const b = 1\nif (process.env["NULO_E2E_BROWSER"] === "firefox") stub()'],
