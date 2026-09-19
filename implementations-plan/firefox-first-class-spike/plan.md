@@ -174,7 +174,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** All five pool shards and every portable dedicated lane exit 0 on Firefox. The Chrome-only set is exactly the six network files in `recon.md`. Layers: network e2e on Firefox, proverless and real-proving.
 
-### Phase 7 — CI lanes (all advisory)
+### Phase 7 — CI lanes (all advisory) ✓
 
 1. `setup-geckodriver` composite action on the `setup-presto-server` template (tarball SHA-256, single-member tar check, binary SHA-256 re-verified on cache hits).
 2. `browser` input on `setup-puppeteer` and the two reusable e2e workflows; artifact, log and cache names namespaced by browser — cache **restore prefixes** included (`setup-puppeteer`'s current prefix is browser-independent, so a Firefox run could restore or evict Chrome's cache). These three shared files are the one place a Firefox change can break Chrome; their `browser` input defaults to `chrome` and every Chrome code path stays textually unchanged.
@@ -186,7 +186,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 **Acceptance at delivery.** When arc 6's PR opens, the two Firefox workflows run from the PR's own workflow files and their aggregators conclude `success`; the three required checks are unchanged in name and result. CI-only fixes after that PR opens are expected and land on arc 6 — the one deliberate exception to "no churn after PR open".
 **Post-merge checklist (owner-triggered, recorded in `CLAUDE.md`).** First scheduled nightly on `dev` shows both Firefox jobs green; first release shows `smoke-firefox-against-artifact` green. Either red → fix forward or revert arc 6; nothing else depends on it. Until both are ticked the plan is **delivered, not completed**: `index.md` says "delivered — awaiting nightly + release evidence", and the owner's done line is not claimed.
 
-### Phase 8 — Docs and skills
+### Phase 8 — Docs and skills ✓
 
 `CLAUDE.md` (quality-gate tables; staged-rollout switches: release-chain Firefox smoke → `attach-assets.needs` after one clean release; PR Firefox smoke → required after 14 consecutive green nightlies; PR Firefox network → required after 30; the post-merge checklist), `CI.md`, `.github/README.md`, `tests/e2e/README.md`, `SECURITY.md` (geckodriver pin; the trusted-co-tenant statement), `e2e-testing` skill (Firefox section), `chrome-extension-debug` skill (replace the "no such frame" claim with the hybrid).
 
@@ -257,8 +257,8 @@ Multi-arc, stacked with `gh stack`. Arcs revert **top-down** (each builds on the
 |---|---|---|---|
 | 1 | `worktree-firefox-first-class-spike` (adopted) | 1 | `fix(passkey): fall back to a get ceremony when create returns no prf output` |
 | 2 | `firefox-manifest-items` | 2 | `feat(firefox): declare data collection permissions and a minimum version` |
-| 3 | `e2e-browser-seam` | 3 | `refactor(e2e): put browser launch, urls and disposal behind a seam` |
-| 4 | `e2e-firefox-smoke` | 4, 5 | `test(e2e): run the smoke suite on firefox` |
+| 3 | `firefox-browser-seam` | 3 | `refactor(e2e): put browser launch, urls and disposal behind a seam` |
+| 4 | `firefox-driver-probes` | 4, 5 | `test(e2e): run the smoke suite on firefox` |
 | 5 | `e2e-firefox-network` | 6 | `test(e2e): run the network suite on firefox` |
 | 6 | `ci-firefox-lanes` | 7, 8 | `ci(firefox): advisory firefox lanes in pr, nightly and release workflows` |
 

@@ -253,7 +253,8 @@ jobs:
 
   # ADVISORY: the shipped Firefox zip's contents, smoked on Firefox. Deliberately absent from
   # attach-assets' and status's needs — a red run is visible and cannot fail this publish. It
-  # does hold the `release` concurrency slot until it ends (20-minute job timeout). It joins
+  # does hold the `release` concurrency slot until it ends (20-minute timeout, plus any time
+  # queued for a runner). It joins
   # attach-assets.needs after one clean release (CLAUDE.md, "Staged-rollout switches").
   smoke-firefox-against-artifact:
     needs: [resolve, build-firefox]
