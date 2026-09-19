@@ -1,0 +1,216 @@
+# ADVISORY: the Firefox twin of pr-extension-network-e2e.yml. Same gate, same suite, `browser: firefox`. Its
+# aggregator is in no branch's required set; promoting it is the owner's call (CLAUDE.md,
+# "Staged-rollout switches"). scripts/ci-cd/behavior-gating.test.ts pins the parity with the
+# Chrome caller, so a filter or file-list edit there that skips this file fails CI.
+name: Extension network e2e (Firefox)
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_presto:
+        description: "Skip presto-server for this manual run (investigation override)"
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    # Same events as the Chrome caller, for the same reasons.
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: pr-extension-network-e2e-firefox-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    # dorny/paths-filter reads the PR's file list through the API.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      extension-network: ${{ steps.override.outputs.full || steps.filter.outputs.extension-network }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            extension-network:
+              - 'apps/extension/**'
+              - 'apps/playground/**'
+              - 'packages/aztec-runtime/src/**'
+              - 'packages/aztec-runtime/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+              - 'packages/extension-messaging/src/**'
+              - 'packages/extension-messaging/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
+              - 'packages/wallet-bridge/src/**'
+              - 'packages/wallet-bridge/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'tsconfig.json'
+              - 'patches/**'
+              - '.github/workflows/_extension-network-e2e.yml'
+              - '.github/workflows/pr-extension-network-e2e-firefox.yml'
+              - '.github/actions/setup-aztec/**'
+              - '.github/actions/setup-presto-server/**'
+              - '.github/actions/setup-bun/**'
+              - '.github/actions/setup-puppeteer/**'
+              - '.github/actions/setup-geckodriver/**'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+
+  decide:
+    name: Decide
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          NETWORK: ${{ needs.changes.outputs.extension-network }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:extension-network') || contains(github.event.pull_request.labels.*.name, 'e2e:network') }}
+        run: |
+          # An advisory lane has nothing to say about a draft; `ready_for_review` re-runs it.
+          if [ "$DRAFT" = "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE" = "main" ] \
+             || [ "$LABEL_HIT" = "true" ] \
+             || [ "$NETWORK" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  network-e2e:
+    name: Run / shard ${{ matrix.shard.id }}
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      browser: firefox
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
+      retry: "0"
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/selfpay-phase.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy:
+    name: Run / heavy / fee-methods + selfpay-phase
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      browser: firefox
+      shard_label: "heavy"
+      retry: "0"
+      test_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/selfpay-phase.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy-concurrent:
+    name: Run / heavy / concurrent-confirm
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      browser: firefox
+      shard_label: "heavy-concurrent"
+      retry: "0"
+      test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-canary:
+    name: Run / canary / real-proving
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      browser: firefox
+      shard_label: "canary"
+      retry: "0"
+      # frozen-account-canary restarts the service worker, which Firefox has none of, so it runs
+      # on Chrome alone; it stays excluded from the pool, where it would only skip.
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      disable_presto: ${{ github.event.inputs.disable_presto == 'true' || vars.NULO_E2E_DISABLE_PRESTO == '1' }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  status:
+    name: extension-network-e2e-firefox-status
+    if: always()
+    needs: [changes, decide, network-e2e, network-e2e-heavy, network-e2e-heavy-concurrent, network-e2e-canary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          RUN="${{ needs.decide.outputs.run }}"
+          for r in "${{ needs.changes.result }}" "${{ needs.decide.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A gate-control job did not succeed: $r"
+              exit 1
+            fi
+          done
+          case "$RUN" in
+            true) want="success" ;;
+            false) want="skipped" ;;
+            *) echo "::error::decide.outputs.run is not true/false: '$RUN'"; exit 1 ;;
+          esac
+          for r in \
+            "${{ needs.network-e2e.result }}" \
+            "${{ needs.network-e2e-heavy.result }}" \
+            "${{ needs.network-e2e-heavy-concurrent.result }}" \
+            "${{ needs.network-e2e-canary.result }}" \
+          ; do
+            if [ "$r" != "$want" ]; then
+              echo "::error::gate said run=$RUN, so every suite job must be '$want' — got '$r'"
+              exit 1
+            fi
+          done
+          echo "Extension network e2e (Firefox) gate passed (or was skipped — no relevant changes / not labeled)."

@@ -251,6 +251,18 @@ jobs:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact_name: extension-chrome
 
+  # ADVISORY: the shipped Firefox zip's contents, smoked on Firefox. Deliberately absent from
+  # attach-assets' and status's needs — a red run is visible and blocks no release. It joins
+  # attach-assets.needs after one clean release (CLAUDE.md, "Staged-rollout switches").
+  smoke-firefox-against-artifact:
+    needs: [resolve, build-firefox]
+    if: always() && needs.resolve.result == 'success' && needs.build-firefox.result == 'success'
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      artifact_name: extension-firefox
+      browser: firefox
+
   attach-assets:
     needs: [resolve, lint-and-typecheck, unit-tests, network-e2e, build-chrome, build-firefox, smoke-against-artifact]
     # Skipped needs (e.g. network-e2e on prerelease or manual run_network_e2e=false)

@@ -310,6 +310,91 @@ jobs:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact_name: extension-chrome
 
+  # ADVISORY Firefox lanes: the same suites on `browser: firefox`. Deliberately absent from
+  # publish-nightly's and status's needs, so a red one is visible on the run and blocks nothing;
+  # promoting them is the owner's call (CLAUDE.md, "Staged-rollout switches"). The file lists
+  # mirror the Chrome jobs above, minus the Chrome-only frozen-account-canary
+  # (pinned by scripts/ci-cd/behavior-gating.test.ts).
+
+  network-e2e-firefox:
+    name: Firefox / Run / shard ${{ matrix.shard.id }}
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      browser: firefox
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy-firefox:
+    name: Firefox / Run / heavy / fee-methods
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      browser: firefox
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "heavy"
+      test_files: "tests/e2e/network/fee-methods.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy-concurrent-firefox:
+    name: Firefox / Run / heavy / concurrent-confirm
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      browser: firefox
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "heavy-concurrent"
+      test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-canary-firefox:
+    name: Firefox / Run / canary / real-proving
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_extension-network-e2e.yml
+    with:
+      browser: firefox
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "canary"
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      disable_presto: ${{ vars.NULO_E2E_DISABLE_PRESTO == '1' }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  smoke-firefox-against-artifact:
+    needs: [resolve, build-firefox]
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.skip != 'true' &&
+      needs.build-firefox.result == 'success'
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      artifact_name: extension-firefox
+      browser: firefox
+
   publish-nightly:
     needs:
       [

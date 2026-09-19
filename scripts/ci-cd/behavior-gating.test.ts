@@ -69,6 +69,8 @@ const FILTER_WORKFLOWS = [
   "pr-quick.yml",
   "pr-extension-smoke-e2e.yml",
   "pr-extension-network-e2e.yml",
+  "pr-extension-smoke-e2e-firefox.yml",
+  "pr-extension-network-e2e-firefox.yml",
   "bridge-contracts.yml",
   "pr-tools-e2e.yml",
   "actionlint.yml",
@@ -83,6 +85,8 @@ const AGGREGATOR_CHECKS: Record<string, string> = {
   "pr-quick.yml": "quality-status",
   "pr-extension-smoke-e2e.yml": "extension-smoke-e2e-status",
   "pr-extension-network-e2e.yml": "extension-network-e2e-status",
+  "pr-extension-smoke-e2e-firefox.yml": "extension-smoke-e2e-firefox-status",
+  "pr-extension-network-e2e-firefox.yml": "extension-network-e2e-firefox-status",
   "bridge-contracts.yml": "bridge-contracts-status",
   "pr-tools-e2e.yml": "tools-e2e-status",
 }
@@ -255,5 +259,121 @@ describe("CI behavior-gating guard", () => {
     expect(String(pool?.[1].with?.retry), "the shard pool runs at retry 0").toBe("0")
     expect(existsSync(join(ROOT, "apps/extension/tests/e2e/network/sim-from-selfpay.test.ts")), "sim-from-selfpay exists").toBe(true)
     expect(existsSync(join(ROOT, "apps/extension/tests/e2e/network/selfpay-phase.test.ts")), "selfpay-phase exists").toBe(true)
+  })
+})
+
+/**
+ * The Firefox lanes are twins of the Chrome ones and ADVISORY. Two ways that can rot silently: a
+ * twin drifts from the lane it mirrors (a file stops running on Firefox and nothing says so), or
+ * a Firefox job slips into an aggregator a branch requires and starts blocking merges.
+ */
+describe("Firefox lanes", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+  const workflow = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8"))
+  const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
+  const CHROME_ONLY_CANARY = "tests/e2e/network/frozen-account-canary.test.ts"
+  const TWINS = [
+    { chrome: "pr-extension-smoke-e2e.yml", firefox: "pr-extension-smoke-e2e-firefox.yml", filter: "smoke-surface" },
+    { chrome: "pr-extension-network-e2e.yml", firefox: "pr-extension-network-e2e-firefox.yml", filter: "extension-network" },
+  ]
+
+  test("each Firefox filter is its Chrome twin's, re-pointed at its own file, plus geckodriver", () => {
+    for (const { chrome, firefox, filter } of TWINS) {
+      const expected = filtersOf(chrome)
+        [filter].map((pattern) => (pattern === `.github/workflows/${chrome}` ? `.github/workflows/${firefox}` : pattern))
+        .concat(".github/actions/setup-geckodriver/**")
+      expect([...filtersOf(firefox)[filter]].sort(), firefox).toEqual([...expected].sort())
+    }
+  })
+
+  test("every Firefox PR suite job runs the Chrome job's files on firefox, minus the Chrome-only canary", () => {
+    for (const { chrome, firefox } of TWINS) {
+      const [chromeJobs, firefoxJobs] = [workflow(chrome).jobs, workflow(firefox).jobs]
+      expect(Object.keys(firefoxJobs), firefox).toEqual(Object.keys(chromeJobs))
+      for (const [name, job] of Object.entries(chromeJobs) as [string, { uses?: string; with?: Record<string, unknown> }][]) {
+        if (!job.uses) continue
+        const twin = firefoxJobs[name]
+        expect(twin.uses, `${firefox} → ${name}`).toBe(job.uses)
+        expect(twin.with.browser, `${firefox} → ${name}`).toBe("firefox")
+        expect(job.with?.browser, `${chrome} → ${name} stays on the default browser`).toBeUndefined()
+        expect(words(twin.with.exclude_files), `${firefox} → ${name} exclude_files`).toEqual(words(job.with?.exclude_files))
+        expect(words(twin.with.test_files), `${firefox} → ${name} test_files`).toEqual(
+          words(job.with?.test_files).filter((file) => file !== CHROME_ONLY_CANARY),
+        )
+        expect(String(twin.with.retry), `${firefox} → ${name} retry`).toBe(String(job.with?.retry))
+      }
+    }
+  })
+
+  test("the Firefox PR lanes hold no write scope and skip drafts", () => {
+    for (const { firefox } of TWINS) {
+      const wf = workflow(firefox)
+      expect(wf.permissions, firefox).toEqual({ contents: "read" })
+      for (const [name, job] of Object.entries(wf.jobs) as [string, { permissions?: unknown }][]) {
+        const want = name === "changes" ? { contents: "read", "pull-requests": "read" } : undefined
+        expect(job.permissions, `${firefox} → ${name}`).toEqual(want)
+      }
+      expect(wf.jobs.decide.steps[0].run, `${firefox}: decide`).toContain('if [ "$DRAFT" = "true" ]')
+    }
+  })
+
+  // Exact, not a /firefox/ denylist: quality-status legitimately needs `build-firefox`.
+  test("the required extension aggregators wait on exactly the Chrome suites", () => {
+    expect(workflow("pr-extension-smoke-e2e.yml").jobs.status.needs).toEqual(["changes", "decide", "smoke"])
+    expect(workflow("pr-extension-network-e2e.yml").jobs.status.needs).toEqual([
+      "changes",
+      "decide",
+      "network-e2e",
+      "network-e2e-heavy",
+      "network-e2e-heavy-concurrent",
+      "network-e2e-canary",
+    ])
+  })
+
+  test("nightly and release run Firefox twins that no aggregator or publish step waits on", () => {
+    for (const [file, gates] of [
+      ["nightly.yml", ["status", "publish-nightly"]],
+      ["release.yml", ["status", "attach-assets"]],
+    ] as const) {
+      const { jobs } = workflow(file)
+      // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+      const firefoxJobs = Object.entries(jobs).filter(([, job]) => (job as any).with?.browser === "firefox").map(([name]) => name)
+      expect(firefoxJobs, `${file} runs Firefox`).toContain("smoke-firefox-against-artifact")
+      for (const [name, job] of Object.entries(jobs) as [string, { needs?: string | string[] }][]) {
+        const needs = [job.needs ?? []].flat()
+        const waitsOnFirefox = needs.filter((need) => firefoxJobs.includes(need))
+        expect(waitsOnFirefox, `${file} → ${name} must not wait on an advisory Firefox job`).toEqual([])
+      }
+      for (const gate of gates) expect(jobs[gate], `${file} → ${gate}`).toBeDefined()
+    }
+  })
+
+  test("nightly's Firefox network jobs mirror its Chrome ones", () => {
+    const { jobs } = workflow("nightly.yml")
+    for (const name of ["network-e2e", "network-e2e-heavy", "network-e2e-heavy-concurrent", "network-e2e-canary"]) {
+      const [chrome, firefox] = [jobs[name], jobs[`${name}-firefox`]]
+      expect(firefox, `nightly.yml → ${name}-firefox`).toBeDefined()
+      expect(firefox.with.browser).toBe("firefox")
+      expect(words(firefox.with.exclude_files)).toEqual(words(chrome.with.exclude_files))
+      expect(words(firefox.with.test_files)).toEqual(words(chrome.with.test_files).filter((file) => file !== CHROME_ONLY_CANARY))
+      expect(firefox.strategy).toEqual(chrome.strategy)
+    }
+  })
+
+  test("the shared pieces default to chrome, and the browser caches share no key prefix", () => {
+    for (const file of ["_extension-smoke-e2e.yml", "_extension-network-e2e.yml"]) {
+      expect(workflow(file).on.workflow_call.inputs.browser.default, file).toBe("chrome")
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const action = Bun.YAML.parse(readFileSync(join(ROOT, ".github/actions/setup-puppeteer/action.yml"), "utf8")) as any
+    expect(action.inputs.browser.default).toBe("chrome")
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const caches = action.runs.steps.filter((step: any) => String(step.uses).startsWith("actions/cache@"))
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const [chrome, firefox] = ["chrome", "firefox"].map((browser) => caches.find((step: any) => step.if === `inputs.browser == '${browser}'`))
+    const chromePrefix = String(chrome.with["restore-keys"]).trim()
+    expect(chromePrefix.length).toBeGreaterThan(0)
+    expect(String(firefox.with.key).startsWith(chromePrefix), "a Firefox key Chrome's restore prefix would match").toBe(false)
+    expect(firefox.with["restore-keys"]).toBeUndefined()
   })
 })
