@@ -106,6 +106,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@nulo/design": "workspace:*",
+        "@nulo/legal": "workspace:*",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
@@ -285,6 +286,15 @@
       "optionalPeers": [
         "zod",
       ],
+    },
+    "packages/legal": {
+      "name": "@nulo/legal",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
     },
     "packages/resolve-asset": {
       "name": "@nulo/resolve-asset",
@@ -819,6 +829,8 @@
     "@nulo/extension-messaging": ["@nulo/extension-messaging@workspace:packages/extension-messaging"],
 
     "@nulo/landing": ["@nulo/landing@workspace:apps/landing"],
+
+    "@nulo/legal": ["@nulo/legal@workspace:packages/legal"],
 
     "@nulo/passkey-rp": ["@nulo/passkey-rp@workspace:infra/passkey-rp"],
 

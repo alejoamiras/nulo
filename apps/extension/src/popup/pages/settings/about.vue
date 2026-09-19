@@ -64,7 +64,7 @@ const handleOpen = (target) => {
 
 			<ItemsContainer title="Contact us" wide>
 				<SettingItem
-					to="https://nulo.sh/forms/feedback"
+					to="mailto:hello@nulo.sh?subject=Nulo%20feedback"
 					size="large"
 					title="Feedback"
 					description="Suggest an idea"
@@ -72,7 +72,7 @@ const handleOpen = (target) => {
 					external
 				/>
 				<SettingItem
-					to="https://nulo.sh/forms/report-issue"
+					to="mailto:hello@nulo.sh?subject=Nulo%20bug%20report"
 					size="large"
 					title="Report Issue"
 					description="If you're facing a bug"
@@ -80,7 +80,7 @@ const handleOpen = (target) => {
 					external
 				/>
 				<SettingItem
-					to="https://nulo.sh/forms/report-scam"
+					to="mailto:hello@nulo.sh?subject=Nulo%20scam%20report"
 					size="large"
 					title="Report Scam"
 					description="Tell us about the scammers"

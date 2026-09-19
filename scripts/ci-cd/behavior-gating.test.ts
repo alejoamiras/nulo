@@ -144,6 +144,17 @@ describe("CI behavior-gating guard", () => {
     expect(quick["tools"], "tools must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
   })
 
+  test("landing build covers the landing graph and the documents it renders, and is wired into the aggregator", () => {
+    assertGraphCovered(quick["landing"], "landing", "landing")
+    expect(quick["landing"], "a Terms edit must rebuild the pages generated from it").toContain("legal/**")
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-quick.yml"), "utf8")) as any
+    expect(wf.jobs["build-landing"].if).toContain("needs-landing-build")
+    expect(wf.jobs.changes.outputs["needs-landing-build"]).toBeDefined()
+    expect(wf.jobs.status.needs, "a red landing build must red quality-status").toContain("build-landing")
+    expect(JSON.stringify(wf.jobs.status.steps)).toContain("needs.build-landing.result")
+  })
+
   test("bridge-contracts covers the contracts, the harness package, its graph, and the adopted manifests", () => {
     const contracts = filtersOf("bridge-contracts.yml")["contracts"]
     expect(contracts, "the Solidity + Noir sources").toContain("contracts/bridge/**")

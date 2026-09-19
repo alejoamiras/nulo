@@ -112,8 +112,10 @@ export interface WalletRuntime {
 /** Heartbeat cadence — matches the previous MV3 keepalive cadence (see AUDIT notes). */
 const HEARTBEAT_INTERVAL_MS = 10_000
 
-/** Uninstall URL. Matches nulo.sh brand; documented in SECURITY.md. */
-const UNINSTALL_URL = "https://nulo.sh/forms/uninstall"
+/** Opened by the browser on uninstall. The site root: there is no uninstall
+ *  survey, and the privacy policy states that this URL carries no wallet
+ *  address and no per-installation identifier. */
+const UNINSTALL_URL = "https://nulo.sh"
 
 /** The runtime's closure state. `retrySafe` is the single-flight memo's retry
  *  classification — vetoed at the three points where an in-lifetime re-run is
