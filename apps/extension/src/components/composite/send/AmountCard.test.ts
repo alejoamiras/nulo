@@ -29,6 +29,16 @@ describe("composite/AmountCard", () => {
 		expect(input.attributes("placeholder")).toBe("0.00")
 	})
 
+	test("a keystroke is read from the input, not from a model the parent has not re-rendered yet", async () => {
+		// The prop stays "1": the parent's re-render has not happened when the handler runs.
+		const w = mountCard({ modelValue: "1", token: { symbol: "TT", decimals: 18 } })
+		const input = w.find("input[data-testid='send-amount-input']")
+		;(input.element as HTMLInputElement).value = "1."
+		await input.trigger("input", { data: "." })
+		const emits = w.emitted("update:modelValue")
+		expect(emits?.[emits.length - 1]).toEqual(["1."])
+	})
+
 	test("renders ONLY the Max action link (Half was dropped in the 1A rework)", () => {
 		const w = mountCard()
 		expect(w.find("[data-testid='send-amount-half']").exists()).toBe(false)

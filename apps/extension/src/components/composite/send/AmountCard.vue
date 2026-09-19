@@ -48,30 +48,27 @@ onMounted(() => {
 	if (props.tokenBalanceByType) inputEl.value.focus()
 })
 
+// Works on locals and writes the model once: `model.value` only reflects a write after the
+// parent re-renders, and nothing guarantees a flush between v-model's listener and this one.
 const handleAmountInput = (e) => {
-	const purgedAmount = purgeNumber(model.value)
+	const purgedAmount = purgeNumber(e.target.value)
 
-	model.value = purgedAmount
-
-	if (["0", ","].includes(e.data) && model.value.length === 1) model.value = "0."
+	let next = purgedAmount
+	if (["0", ","].includes(e.data) && next.length === 1) next = "0."
 
 	const normalizedAmount = normalizeAmount(purgedAmount)
-	if (typeof normalizedAmount === "string") {
-		model.value = normalizedAmount
-	}
+	if (typeof normalizedAmount === "string") next = normalizedAmount
 
 	// Clamp decimal places to the token's `decimals`. If the typed value
 	// had more, surface a small inline hint so the truncation is visible.
 	if (tokenDecimals.value !== undefined) {
-		const before = model.value
-		const clamped = clampDecimals(model.value, tokenDecimals.value)
-		if (clamped !== before) {
-			model.value = clamped
-			wasClamped.value = true
-		} else {
-			wasClamped.value = false
-		}
+		const clamped = clampDecimals(next, tokenDecimals.value)
+		wasClamped.value = clamped !== next
+		next = clamped
 	}
+
+	model.value = next
+	if (e.target.value !== next) e.target.value = next
 }
 
 /** When the active token changes, re-clamp whatever the user previously
