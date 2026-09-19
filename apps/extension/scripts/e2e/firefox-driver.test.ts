@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import {
 	type SilentCloseWatch,
 	abandonSession,
@@ -42,16 +42,18 @@ describe("a session the launch refuses to keep", () => {
 
 	test("is ended, and the launch fails with its original reason", async () => {
 		const owned = record()
-		await expect(abandonSession({ close: async () => {} }, owned, cause)).rejects.toBe(cause)
-		expect(owned.ownsProfile).toBe(true)
+		const disown = vi.fn()
+		await expect(abandonSession({ close: async () => {} }, owned, cause, disown)).rejects.toBe(cause)
+		expect(disown).not.toHaveBeenCalled()
 	})
 
 	// Its Firefox may carry another launch's marker, invisible to this launch's teardown.
 	test("that cannot be ended keeps its profile out of teardown's reach", async () => {
 		const owned = record()
 		const close = () => Promise.reject(new Error("timed out"))
-		await expect(abandonSession({ close }, owned, cause)).rejects.toThrow(/could not be ended \(timed out\).*left in place/)
-		expect(owned.ownsProfile).toBe(false)
+		const disown = vi.fn()
+		await expect(abandonSession({ close }, owned, cause, disown)).rejects.toThrow(/could not be ended \(timed out\).*left in place/)
+		expect(disown).toHaveBeenCalledWith(owned)
 	})
 })
 

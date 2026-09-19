@@ -11,6 +11,7 @@ process.env.NULO_E2E_DATA_ROOT = ROOT
 
 const {
 	LAUNCH_ENV,
+	disownProfile,
 	listOwnedLaunches,
 	newLaunchMarker,
 	newProfileDir,
@@ -145,6 +146,17 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", () =
 	})
 
 	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
+	test("a disowned profile survives the sweep of a run that died before its own cleanup", async () => {
+		const marker = launchMarker()
+		const profileDir = newProfileDir(marker)
+		const record = orphaned({ marker, pid: 0, profileDir, ownsProfile: true, label: "disowned" })
+		recordLaunch(record)
+		disownProfile(record)
+		expect(await reapOrphanLaunches()).toContain("disowned")
+		expect(existsSync(profileDir)).toBe(true)
+		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
+	})
+
 	test("an orphan's record never authorises a signal to a process that lacks its marker", async () => {
 		const stranger = spawnMarked(launchMarker())
 		recordLaunch(orphaned({ marker: launchMarker(), pid: stranger, profileDir: "", ownsProfile: false, label: "reissued" }))

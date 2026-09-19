@@ -10,6 +10,7 @@ import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticato
 import {
 	LAUNCH_ENV,
 	type LaunchOwnership,
+	disownProfile,
 	newLaunchMarker,
 	newProfileDir,
 	ownedByThisRun,
@@ -53,11 +54,16 @@ export const classicSessionFor = (browser: Browser): WebDriverSession => context
  * session cannot be ended, that Firefox may carry a marker this launch cannot see, so the profile
  * is disowned — left on disk — rather than deleted under a live process.
  */
-export async function abandonSession(session: Pick<WebDriverSession, "close">, record: LaunchOwnership, cause: unknown): Promise<never> {
+export async function abandonSession(
+	session: Pick<WebDriverSession, "close">,
+	record: LaunchOwnership,
+	cause: unknown,
+	disown: (record: LaunchOwnership) => void = disownProfile,
+): Promise<never> {
 	try {
 		await session.close()
 	} catch (closeErr) {
-		record.ownsProfile = false
+		disown(record)
 		const text = (err: unknown) => (err instanceof Error ? err.message : String(err))
 		throw new Error(`${text(cause)}; the session could not be ended (${text(closeErr)}), so ${record.profileDir} was left in place`, {
 			cause,

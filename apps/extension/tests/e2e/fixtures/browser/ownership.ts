@@ -167,6 +167,13 @@ function recordFiles(): string[] {
 }
 
 /** Every well-formed record on disk, this run's and other runs'. */
+/** Persisted, not just set: a sweep reads the record from disk, and a run that dies before its
+ *  own cleanup would otherwise leave one that still authorises deleting the profile. */
+export function disownProfile(record: LaunchOwnership): void {
+	record.ownsProfile = false
+	recordLaunch(record)
+}
+
 export function listOwnedLaunches(): LaunchOwnership[] {
 	return recordFiles().flatMap((file) => readRecord(file) ?? [])
 }
