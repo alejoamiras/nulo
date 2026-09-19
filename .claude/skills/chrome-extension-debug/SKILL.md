@@ -43,18 +43,23 @@ The logger captures service worker logs that are otherwise not directly visible.
 
 ## Firefox
 
-Playwright cannot load extensions into Firefox; Puppeteer over WebDriver BiDi can
-(`puppeteer.launch({ browser: "firefox", protocol: "webDriverBiDi" })` then
-`browser.installExtension("dist/firefox")`). `NULO_E2E_BROWSER=firefox bun run test:e2e` runs the
-smoke suite on it. It needs `bun run build:firefox`, geckodriver (`GECKODRIVER`, or on `PATH`) and
-a Firefox Puppeteer can find (`bunx puppeteer browsers install firefox`, or `FIREFOX_PATH`).
+Playwright cannot load extensions into Firefox. The e2e suite drives it as a hybrid: geckodriver
+(WebDriver classic) owns the session — launch, add-on install, `moz-extension://` navigation,
+WebAuthn, window handles — and Puppeteer attaches to the same session over BiDi for the rest.
+`NULO_E2E_BROWSER=firefox bun run test:e2e` (smoke) and `NULO_E2E_BROWSER=firefox bun run e2e:agent`
+(network) run on it. It needs geckodriver (`GECKODRIVER`, or on `PATH`) and the Firefox the locked
+Puppeteer pins (`bun x puppeteer browsers install firefox`, or `FIREFOX_PATH`). The full account —
+every behaviour that differs and the debugging order — is `apps/extension/tests/e2e/FIREFOX.md`.
 
 What differs from Chrome when probing by hand:
 
-- Only the first-run onboarding tab is reachable over BiDi. Tabs the extension opens later
-  (`tabs.create`, `window.open`, the hidden offscreen window) answer "no such frame", and a web tab
-  may not navigate to `moz-extension://`. Navigate the onboarding tab with `location.assign(...)`
-  and reuse it as the popup.
+- Every window and tab the extension opens IS reachable, through that hybrid. Puppeteer's BiDi
+  alone is not enough: a BiDi `navigate` or `reload` of a `moz-extension://` page strands the page
+  ("no such frame"), so extension pages are navigated over the classic channel
+  (`gotoExtensionPage` / `reloadExtensionPage`), and geckodriver needs `--allow-system-access`.
+- A new tab lands in the most recently focused window, which is the wallet's minimized PXE window:
+  the page is hidden, gets no animation frames and cannot run WebAuthn. Open a window instead
+  (`newPage`), and bring a page to the front before a click that starts a ceremony.
 - `page.evaluateOnNewDocument` monkeypatching is a no-op (Xray wrappers), and page consoles stay
   empty because the extension routes `console.*` into the logger. The oracle is the logger ring
   buffer: turn on Developer Mode (Settings → Advanced) so it persists, then read

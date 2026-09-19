@@ -417,6 +417,32 @@ composite action. Trust posture:
   Nulo, so the trust model is what it is. Defense: pinning + per-bump
   PR review.
 
+`geckodriver` (Linux x86_64, from
+[`mozilla/geckodriver`](https://github.com/mozilla/geckodriver) releases) is
+installed on every CI runner that executes a Firefox e2e lane, via the
+[`setup-geckodriver`](./.github/actions/setup-geckodriver/action.yml)
+composite action, under the same posture: a tarball SHA-256 checked before
+extraction, a single-regular-member archive rule, and the extracted binary's
+SHA-256 re-checked on every run, cache hits included. Its three pins (version
++ two hashes) live in the action itself rather than in each caller, because
+both reusable e2e workflows install it and one bump must reach each; the bump
+commands are in the action's description. Mozilla publishes a detached `.asc`
+signature rather than a checksum sidecar, and the lanes do not verify it, so
+the pins are the integrity check. Firefox itself is
+not pinned by hash: the lanes run the revision the locked `puppeteer` pins
+(`bun x puppeteer browsers install firefox`), fetched over HTTPS from
+Mozilla's archive — the same trust as the Chrome that `puppeteer` downloads
+for the required lanes — and the suite refuses to launch below the
+manifest's `strict_min_version`.
+
+geckodriver runs with `--allow-system-access`, without which Firefox refuses
+remote navigation to `moz-extension://` pages. That flag lets the automation
+session reach privileged browser contexts, so the Firefox e2e suite assumes
+**trusted co-tenants**: a single-user development host or a single-tenant CI
+runner. geckodriver listens on loopback ports the run reserves; any local
+process that can reach them can drive that browser. Do not run the suite on
+a shared multi-user machine.
+
 **Distribution scope.** We download + execute the binary on ephemeral CI
 runners only. We do NOT vendor it into the repo, ship it with the
 extension, or expose it on a public network. The binary writes to
