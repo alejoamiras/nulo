@@ -25,9 +25,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, openPopup, replaceInputValue, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
-import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
+import { setupPasskeyVirtualAuth, stallNextPasskeyCeremony } from "./fixtures/passkey"
 
 /** Reset the wallet via the in-app reset flow (settings → security → reset).
  *  Cascades through every service (NetworkService.onProfileDeleted, etc.) so
@@ -182,8 +182,7 @@ async function importPasskeyFullBackup(page: Page, filePath: string): Promise<vo
 	await clickByTestId(page, "import-option-full-backup")
 
 	await page.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-	const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-full-backup-pick-file")])
-	await chooser.accept([filePath])
+	await pickFileByTestId(page, "import-full-backup-pick-file", filePath)
 
 	// Submit button gates on isAllowedToImportBackup — for passkey backups
 	// that means just `profileType && backup`. Wait for it + click.
@@ -358,7 +357,7 @@ test("passkey full-backup export: Escape during modal resets agreement gate", as
 		// Tear down the virtual authenticator BEFORE clicking agree so
 		// navigator.credentials.get hangs, giving the Escape handler a
 		// real chance to abort first.
-		await auth.cleanup()
+		await stallNextPasskeyCeremony(page, auth)
 		auth = undefined
 
 		await clickByTestId(page, "agree-continue-btn")

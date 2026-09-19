@@ -15,6 +15,21 @@ const E2E_ROOT = path.resolve(__dirname, "../../tests/e2e")
 const EXEMPT = new Set(["fixtures/browser/chrome.ts", "scripts/check-derivation-parity.ts"])
 
 const SCHEME = "chrome-extension://"
+const WORKER_TYPE = "service_worker"
+const WORKER_LOADER = "service-worker-loader"
+
+/**
+ * Chrome-only target assumptions that predate the seam. Firefox MV3 runs a background *script* and
+ * produces no `service_worker` target at all, so each of these is a place a ported suite stops —
+ * as `settleLaunchedExtension` did, silently, until a probe spent thirty seconds proving it.
+ * The counts are exact and only shrink: a new site fails this test instead of joining the list.
+ */
+const WORKER_DEBT: Record<string, number> = {
+	"fixtures/helpers.ts": 2,
+	"fixtures/journal.ts": 1,
+	"helpers/rpc-intercept.ts": 1,
+	"network/cold-wake-discovery.test.ts": 1,
+}
 
 /**
  * The scan walks the TypeScript AST rather than the text. A regex literal ending in `\//` — one
@@ -58,6 +73,10 @@ function localBrowserAliases(file: ts.SourceFile): Set<string> {
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && yieldsBrowser(node.initializer)) {
 			aliases.add(node.name.text)
 		}
+		// `const { browser: b } = ctx` — the plain `{ browser }` form already reads as `browser`.
+		if (ts.isBindingElement(node) && ts.isIdentifier(node.name) && node.propertyName && ts.isIdentifier(node.propertyName)) {
+			if (node.propertyName.text === "browser") aliases.add(node.name.text)
+		}
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
@@ -70,8 +89,50 @@ function closesABrowser(receiver: ts.Expression, aliases: Set<string>): boolean 
 	return ts.isIdentifier(bare) && (bare.text === "browser" || aliases.has(bare.text))
 }
 
+const literalText = (node: ts.Node): string | undefined =>
+	ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined
+
+const EQUALITY = new Set([
+	ts.SyntaxKind.EqualsEqualsEqualsToken,
+	ts.SyntaxKind.EqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsToken,
+])
+const STRING_TESTS = new Set(["includes", "startsWith", "endsWith", "indexOf", "match", "search"])
+
+/** `x.method(...)` or `x["method"](...)` — the member a call invokes, however it was spelled. */
+function calledMember(call: ts.CallExpression): { receiver: ts.Expression; name: string } | undefined {
+	const callee = unwrap(call.expression)
+	if (ts.isPropertyAccessExpression(callee)) return { receiver: callee.expression, name: callee.name.text }
+	const key = ts.isElementAccessExpression(callee) ? literalText(unwrap(callee.argumentExpression)) : undefined
+	return key !== undefined && ts.isElementAccessExpression(callee) ? { receiver: callee.expression, name: key } : undefined
+}
+
+/**
+ * A target test, never a log line: the type compared for (in)equality, or the loader URL handed
+ * to a string test. A negated comparison assumes a service-worker target exists just as much.
+ */
+function testsForWorkerTarget(node: ts.Node): boolean {
+	if (ts.isBinaryExpression(node)) {
+		return EQUALITY.has(node.operatorToken.kind) && [node.left, node.right].some((side) => literalText(unwrap(side)) === WORKER_TYPE)
+	}
+	if (!ts.isCallExpression(node) || !STRING_TESTS.has(calledMember(node)?.name ?? "")) return false
+	return node.arguments.some((arg) => literalText(unwrap(arg))?.includes(WORKER_LOADER) ?? false)
+}
+
+/**
+ * Direct `browser.waitForTarget` calls left outside the seam, exact and shrink-only. Over BiDi no
+ * event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
+ * The fixture entry waits for the service worker, which is Chrome-only by nature; the probe calls
+ * it on purpose, to measure exactly that.
+ */
+const WAIT_DEBT: Record<string, number> = {
+	"fixtures/helpers.ts": 1,
+	"probes/discovery.test.ts": 1,
+}
+
 /** 1-based line numbers of executable seam violations in one file's source. */
-function violations(source: string): { scheme: number[]; close: number[] } {
+function violations(source: string): { scheme: number[]; close: number[]; worker: number[]; wait: number[] } {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	// Source the parser could not read is source the scan cannot vouch for: an unterminated regex
 	// swallows whatever follows it, so accepting a partial tree would fail open.
@@ -82,17 +143,23 @@ function violations(source: string): { scheme: number[]; close: number[] } {
 	const aliases = localBrowserAliases(file)
 	const scheme: number[] = []
 	const close: number[] = []
+	const worker: number[] = []
+	const wait: number[] = []
 	const lineOf = (node: ts.Node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1
 
 	const visit = (node: ts.Node): void => {
 		if (isSchemeText(node)) scheme.push(lineOf(node))
-		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "close") {
-			if (closesABrowser(node.expression.expression, aliases)) close.push(lineOf(node))
+		if (testsForWorkerTarget(node)) worker.push(lineOf(node))
+		const member = ts.isCallExpression(node) ? calledMember(node) : undefined
+		if (member && closesABrowser(member.receiver, aliases)) {
+			if (member.name === "close") close.push(lineOf(node))
+			if (member.name === "waitForTarget") wait.push(lineOf(node))
 		}
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
-	return { scheme: [...new Set(scheme)].sort((a, b) => a - b), close: [...new Set(close)].sort((a, b) => a - b) }
+	const dedupe = (lines: number[]) => [...new Set(lines)].sort((a, b) => a - b)
+	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait) }
 }
 
 /** String and template *text* only — a comment or a regex literal is never one of these nodes. */
@@ -121,14 +188,18 @@ function* e2eSources(dir: string): Generator<{ rel: string; source: string }> {
 function scan() {
 	const scheme: string[] = []
 	const close: string[] = []
+	const worker: Record<string, number> = {}
+	const wait: Record<string, number> = {}
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
 		const found = violations(source)
 		scheme.push(...found.scheme.map((n) => `${rel}:${n}`))
 		close.push(...found.close.map((n) => `${rel}:${n}`))
+		if (found.worker.length) worker[rel] = found.worker.length
+		if (found.wait.length) wait[rel] = found.wait.length
 	}
-	return { scheme, close, visited }
+	return { scheme, close, worker, wait, visited }
 }
 
 /**
@@ -154,6 +225,14 @@ describe("browser seam", () => {
 	test("no browser is closed outside the seam — use ctx.close()", () => {
 		expect(found.close).toEqual([])
 	})
+
+	test("the service-worker target debt is exactly what Firefox still has to unpick", () => {
+		expect(found.worker).toEqual(WORKER_DEBT)
+	})
+
+	test("no new direct browser.waitForTarget — use the seam's waitForTarget()", () => {
+		expect(found.wait).toEqual(WAIT_DEBT)
+	})
 })
 
 /** A guard whose scanner silently matched nothing would pass forever; these pin that it bites. */
@@ -161,7 +240,7 @@ describe("browser seam guard", () => {
 	test("flags a scheme literal and a direct close", () => {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: source text under scan, not a template.
 		const src = ["await page.goto(`chrome-extension://${id}/src/popup/index.html`)", "await ctx.browser.close()"].join("\n")
-		expect(violations(src)).toEqual({ scheme: [1], close: [2] })
+		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [], wait: [] })
 	})
 
 	// A regex ending in `\//` reads as a line comment to any text-based strip, which silently hid
@@ -196,6 +275,36 @@ describe("browser seam guard", () => {
 		expect(violations(inAsync("await page.close()\nawait popup.close()")).close).toEqual([])
 	})
 
+	// The gap a probe found the expensive way: neither of the other two rules sees it, and Firefox
+	// MV3 never produces the target, so such a wait just burns its whole timeout.
+	test.each([
+		["a type comparison", 'const live = t.type() === "service_worker"'],
+		["the comparison reversed", 'const live = "service_worker" === t.type()'],
+		["the loader URL", 'await browser.waitForTarget((t) => t.url().includes("service-worker-loader"))'],
+	])("flags a service-worker target test written as %s", (_label, body) => {
+		expect(violations(inAsync(body)).worker).toEqual([2])
+	})
+
+	// Ordinary spellings of the same call; each was a live bypass of the rule above it.
+	test.each([
+		["element access", 'await ctx.browser["waitForTarget"]((t) => true)', "wait"],
+		["a renamed destructure", "const { browser: b } = ctx\nawait b.waitForTarget((t) => true)", "wait"],
+		["element-access close", 'await ctx.browser["close"]()', "close"],
+		["a negated type test", 'const others = targets.filter((t) => t.type() !== "service_worker")', "worker"],
+	] as const)("flags %s", (_label, body, rule) => {
+		expect(violations(inAsync(body))[rule].length).toBe(1)
+	})
+
+	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {
+		expect(violations(inAsync("await ctx.browser.waitForTarget((t) => true)")).wait).toEqual([2])
+		expect(violations(inAsync("await waitForTarget(ctx.browser, (t) => true, 1000)")).wait).toEqual([])
+	})
+
+	test("leaves the words alone outside a target test", () => {
+		expect(violations('const msg = "<no service_worker target>"').worker).toEqual([])
+		expect(violations('console.log("waiting for service-worker-loader")').worker).toEqual([])
+	})
+
 	// Source the parser rejects is source the scan cannot vouch for; accepting a partial tree is
 	// how an unterminated regex would swallow a violation and report a clean file.
 	test("refuses to vouch for source it cannot parse", () => {
@@ -206,12 +315,12 @@ describe("browser seam guard", () => {
 		const src = ["// chrome-extension:// and browser.close()", "/* chrome-extension://", "   browser.close() */", "const ok = 1"].join(
 			"\n",
 		)
-		expect(violations(src)).toEqual({ scheme: [], close: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
 	})
 
 	test("does not flag the seam's own call shapes", () => {
 		const src = 'await page.goto(extensionUrl(id, "/src/popup/index.html"))\nawait ctx.close()'
-		expect(violations(src)).toEqual({ scheme: [], close: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
 	})
 
 	test("a scheme inside a string still counts, and one inside a regex does not", () => {

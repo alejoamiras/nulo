@@ -31,8 +31,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { Page } from "puppeteer"
+import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
 import { LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
-import { clickByTestId, type ExtensionContext, launchExtension, test, waitForHash } from "./fixtures/extension"
+import { clickByTestId, type ExtensionContext, launchExtension, test, waitForHash, pickFileByTestId } from "./fixtures/extension"
 import { interceptRpc, type RpcInterception } from "./helpers/rpc-intercept"
 import {
 	buildSyntheticBackup,
@@ -225,8 +226,7 @@ async function submitBackup(page: Page, filePath: string): Promise<void> {
 	await page.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "import-option-full-backup")
 	await page.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-	const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-full-backup-pick-file")])
-	await chooser.accept([filePath])
+	await pickFileByTestId(page, "import-full-backup-pick-file", filePath)
 	await page.waitForSelector('[data-testid="import-full-backup-submit-btn"]', { visible: true, timeout: 15_000 })
 	await setInputs(page, {
 		'[data-testid="import-full-backup-password-input"] input': TEST_PASSWORD,
@@ -272,84 +272,89 @@ async function withFreshExtension(
 	return { profileDir }
 }
 
-test("REFUSED rpc: import lands on the errors screen fast; Continue enters the wallet", { timeout: 180_000, retry: 0 }, async () => {
-	// The seed's requests fail at the browser as a refused connection: each preflight attempt
-	// classifies in ~ms, so the whole leg costs ≈6s of backoff waits. Budget: slow-runner
-	// storage restore (≤15s) + ≈6s + margin.
-	const backup = await deadRpcBackup()
-	await withFreshExtension({ kind: "refuse" }, async (page, _ctx, intercepted) => {
-		await submitBackup(page, writeBackupToTemp(backup, "refused.json"))
-		await continueThroughErrorsScreen(page, 60_000)
-		// The refusal must be the interception's, not whatever happens to listen on the seed's port.
-		expect(intercepted()).toBeGreaterThan(0)
+describe.skipIf(isFirefox)(CHROME_ONLY.cdpFetch, () => {
+	test("REFUSED rpc: import lands on the errors screen fast; Continue enters the wallet", { timeout: 180_000, retry: 0 }, async () => {
+		// The seed's requests fail at the browser as a refused connection: each preflight attempt
+		// classifies in ~ms, so the whole leg costs ≈6s of backoff waits. Budget: slow-runner
+		// storage restore (≤15s) + ≈6s + margin.
+		const backup = await deadRpcBackup()
+		await withFreshExtension({ kind: "refuse" }, async (page, _ctx, intercepted) => {
+			await submitBackup(page, writeBackupToTemp(backup, "refused.json"))
+			await continueThroughErrorsScreen(page, 60_000)
+			// The refusal must be the interception's, not whatever happens to listen on the seed's port.
+			expect(intercepted()).toBeGreaterThan(0)
+		})
 	})
-})
 
-test("BLACKHOLE rpc: the preflight's per-attempt abort bounds a hanging endpoint", { timeout: 180_000, retry: 0 }, async () => {
-	// Never-answering socket: 3 aborted attempts (5s each) + backoff = 21s of
-	// preflight, then skip records. Budget: restore ≤15s + 21s + margin.
-	const stub = await startStub(() => undefined)
-	try {
-		const backup = await deadRpcBackup()
-		await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
-			await submitBackup(page, writeBackupToTemp(backup, "blackhole.json"))
-			await continueThroughErrorsScreen(page, 75_000)
-		})
-		// The preflight probes; the PXE boot call must never have been reached.
-		expect(stub.methods).toContain("aztec_getNodeInfo")
-		expect(stub.methods).not.toContain("aztec_getL1ContractAddresses")
-	} finally {
-		await stub.close()
-	}
-})
+	test("BLACKHOLE rpc: the preflight's per-attempt abort bounds a hanging endpoint", { timeout: 180_000, retry: 0 }, async () => {
+		// Never-answering socket: 3 aborted attempts (5s each) + backoff = 21s of
+		// preflight, then skip records. Budget: restore ≤15s + 21s + margin.
+		const stub = await startStub(() => undefined)
+		try {
+			const backup = await deadRpcBackup()
+			await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
+				await submitBackup(page, writeBackupToTemp(backup, "blackhole.json"))
+				await continueThroughErrorsScreen(page, 75_000)
+			})
+			// The preflight probes; the PXE boot call must never have been reached.
+			expect(stub.methods).toContain("aztec_getNodeInfo")
+			expect(stub.methods).not.toContain("aztec_getL1ContractAddresses")
+		} finally {
+			await stub.close()
+		}
+	})
 
-test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bounds the leg", { timeout: 240_000, retry: 0 }, async () => {
-	// Answers aztec_getNodeInfo (the preflight probe → Active) and blackholes
-	// everything after — the PXE boot's aztec_getL1ContractAddresses hangs, so
-	// ONLY the 30s registration deadline can unpark this variant. The observed
-	// method sequence proves the race actually engaged (probe answered BEFORE
-	// the boot call arrived). Budget: restore ≤15s + probe ≈0 + 30s + margin.
-	const stub = await startStub((method) => (method === "aztec_getNodeInfo" ? nodeInfoResult() : undefined))
-	try {
-		const backup = await deadRpcBackup()
-		await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
-			await submitBackup(page, writeBackupToTemp(backup, "stateful.json"))
-			await continueThroughErrorsScreen(page, 90_000)
-		})
-		const firstInfo = stub.methods.indexOf("aztec_getNodeInfo")
-		const firstBoot = stub.methods.indexOf("aztec_getL1ContractAddresses")
-		const seen = `stub saw: [${stub.methods.join(", ")}]`
-		expect(firstInfo, seen).toBeGreaterThanOrEqual(0)
-		expect(firstBoot, seen).toBeGreaterThan(firstInfo)
-	} finally {
-		await stub.close()
-	}
-})
+	test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bounds the leg", {
+		timeout: 240_000,
+		retry: 0,
+	}, async () => {
+		// Answers aztec_getNodeInfo (the preflight probe → Active) and blackholes
+		// everything after — the PXE boot's aztec_getL1ContractAddresses hangs, so
+		// ONLY the 30s registration deadline can unpark this variant. The observed
+		// method sequence proves the race actually engaged (probe answered BEFORE
+		// the boot call arrived). Budget: restore ≤15s + probe ≈0 + 30s + margin.
+		const stub = await startStub((method) => (method === "aztec_getNodeInfo" ? nodeInfoResult() : undefined))
+		try {
+			const backup = await deadRpcBackup()
+			await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
+				await submitBackup(page, writeBackupToTemp(backup, "stateful.json"))
+				await continueThroughErrorsScreen(page, 90_000)
+			})
+			const firstInfo = stub.methods.indexOf("aztec_getNodeInfo")
+			const firstBoot = stub.methods.indexOf("aztec_getL1ContractAddresses")
+			const seen = `stub saw: [${stub.methods.join(", ")}]`
+			expect(firstInfo, seen).toBeGreaterThanOrEqual(0)
+			expect(firstBoot, seen).toBeGreaterThan(firstInfo)
+		} finally {
+			await stub.close()
+		}
+	})
 
-test("an interception setup failure still closes the browser and removes its profile directory", {
-	timeout: 120_000,
-	retry: 0,
-}, async () => {
-	const failing: typeof interceptRpc = async () => {
-		throw new Error("synthetic interception failure")
-	}
-	let dir = ""
-	await expect(
-		withFreshExtension(
-			{ kind: "refuse" },
-			async () => {
-				throw new Error("must not run")
-			},
-			async (browser, id, from, mode) => {
-				dir =
-					(browser as unknown as { process(): { spawnargs: string[] } })
-						.process()
-						.spawnargs.find((a) => a.startsWith("--user-data-dir="))
-						?.slice("--user-data-dir=".length) ?? ""
-				return failing(browser, id, from, mode)
-			},
-		),
-	).rejects.toThrow(/synthetic interception failure/)
-	expect(dir).toMatch(/nulo-dead-rpc-/)
-	expect(existsSync(dir)).toBe(false)
+	test("an interception setup failure still closes the browser and removes its profile directory", {
+		timeout: 120_000,
+		retry: 0,
+	}, async () => {
+		const failing: typeof interceptRpc = async () => {
+			throw new Error("synthetic interception failure")
+		}
+		let dir = ""
+		await expect(
+			withFreshExtension(
+				{ kind: "refuse" },
+				async () => {
+					throw new Error("must not run")
+				},
+				async (browser, id, from, mode) => {
+					dir =
+						(browser as unknown as { process(): { spawnargs: string[] } })
+							.process()
+							.spawnargs.find((a) => a.startsWith("--user-data-dir="))
+							?.slice("--user-data-dir=".length) ?? ""
+					return failing(browser, id, from, mode)
+				},
+			),
+		).rejects.toThrow(/synthetic interception failure/)
+		expect(dir).toMatch(/nulo-dead-rpc-/)
+		expect(existsSync(dir)).toBe(false)
+	})
 })

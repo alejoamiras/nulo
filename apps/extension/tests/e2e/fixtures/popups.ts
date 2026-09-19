@@ -9,6 +9,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
+import { waitForTarget } from "./browser"
 import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
@@ -38,7 +39,8 @@ export async function waitForPopup(
 			.filter((t) => t.type() === "page" && t.url().includes(`#/windows/${kind}`))
 			.map((t) => t.url()),
 	)
-	const target: Target = await ctx.browser.waitForTarget(
+	const target: Target = await waitForTarget(
+		ctx.browser,
 		(t) => {
 			if (t.type() !== "page") return false
 			const url = t.url()
@@ -47,7 +49,7 @@ export async function waitForPopup(
 			if (preExisting.has(url)) return false
 			return true
 		},
-		{ timeout },
+		timeout,
 	)
 	const page = await target.asPage()
 	// Puppeteer can resolve waitForTarget before the page's main frame is wired

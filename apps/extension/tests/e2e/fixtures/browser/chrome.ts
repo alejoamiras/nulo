@@ -1,3 +1,4 @@
+import type { Browser } from "puppeteer"
 import puppeteer from "puppeteer"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
 
@@ -40,9 +41,34 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 	return { browser, close: () => browser.close() }
 }
 
+/** The MV3 service worker is the first extension context Chrome starts, and its URL carries the id. */
+async function discoverExtensionId(browser: Browser): Promise<string> {
+	const worker = await browser.waitForTarget(
+		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
+		{ timeout: 30_000 },
+	)
+	return new URL(worker.url()).hostname
+}
+
 export const chromeDriver: BrowserDriver = {
 	kind: "chrome",
 	scheme: SCHEME,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
+	discoverExtensionId,
+	gotoExtensionPage: async (page, url) => {
+		await page.goto(url, { waitUntil: "domcontentloaded" })
+	},
+	waitForTarget: (browser, predicate, timeout) => browser.waitForTarget(predicate, { timeout }),
+	openScratchPage: async (browser, extensionId) => {
+		const page = await browser.newPage()
+		try {
+			await page.goto(`${SCHEME}${extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+			return page
+		} catch (err) {
+			// The caller retries a detached frame with a fresh page and never sees this one.
+			await page.close().catch(() => {})
+			throw err
+		}
+	},
 }

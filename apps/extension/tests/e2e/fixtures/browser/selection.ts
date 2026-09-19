@@ -1,6 +1,6 @@
 export type BrowserKind = "chrome" | "firefox"
 
-const SUPPORTED: readonly BrowserKind[] = ["chrome"]
+const SUPPORTED: readonly BrowserKind[] = ["chrome", "firefox"]
 
 /**
  * Resolve the browser this run drives, rejecting anything there is no driver for.

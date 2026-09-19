@@ -19,7 +19,16 @@
 import { rmSync } from "node:fs"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import {
+	clickByTestId,
+	launchExtension,
+	openPopup,
+	registerProfile,
+	replaceInputValue,
+	test,
+	waitForHash,
+	pickFileByTestId,
+} from "./fixtures/extension"
 import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
@@ -139,8 +148,7 @@ test("the file-chooser import path accepts a written export file", { timeout: 18
 		await gotoAccounts(page)
 		await clickByTestId(page, "accounts-import-btn")
 		await page.waitForSelector('[data-testid="import-account-pick-file"]', { visible: true, timeout: 15_000 })
-		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-account-pick-file")])
-		await chooser.accept([filePath])
+		await pickFileByTestId(page, "import-account-pick-file", filePath)
 		// The chip reflects the picked file; Continue then decodes it.
 		await page.waitForFunction(
 			(name: string) => (document.querySelector('[data-testid="import-account-pick-file"]')?.textContent ?? "").includes(name),

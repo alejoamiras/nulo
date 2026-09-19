@@ -1,6 +1,7 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { CDPSession, Page, Target } from "puppeteer"
+import { CHROME_ONLY, isFirefox } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 
@@ -2002,6 +2003,9 @@ export function findServiceWorkerTarget(ext: ExtensionContext): Target | undefin
  * alternative — it leaves the worker running.
  */
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
+	// Without this the target wait below would burn its whole budget and report a worker that was
+	// slow to appear, when the truth is that the file should never have run on this browser.
+	if (isFirefox) throw new Error(`stopServiceWorker is Chrome-only: ${CHROME_ONLY.backgroundKill}`)
 	const isExtensionWorker = (t: Target) => isServiceWorkerTarget(ext, t)
 	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
 	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)

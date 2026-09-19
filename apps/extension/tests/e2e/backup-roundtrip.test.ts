@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
-import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash, pickFileByTestId } from "./fixtures/extension"
 import { ensureUnlocked, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { gotoPopupImport, readActiveAccount, TEST_PASSWORD, waitForActiveAccount } from "./helpers/import-drivers"
@@ -101,11 +101,7 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 			const page2 = await gotoPopupImport(ctx2)
 			await page2.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
 			await clickByTestId(page2, "import-option-full-backup")
-			const [chooser] = await Promise.all([
-				page2.waitForFileChooser({ timeout: 10_000 }),
-				clickByTestId(page2, "import-full-backup-pick-file"),
-			])
-			await chooser.accept([filePath])
+			await pickFileByTestId(page2, "import-full-backup-pick-file", filePath)
 
 			// Wrong password first: a clean, retryable "Decryption Failed".
 			await page2.waitForSelector('[data-testid="import-full-backup-decrypt-password-input"] input', {

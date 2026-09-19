@@ -22,9 +22,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Resolved here so an unusable selector fails before this file boots anvil, a node and a
 // playground — the workers would otherwise reject it minutes later.
 const BROWSER = resolveBrowserKind()
-// `EXTENSION_PATH` points the run at a build other than `dist/chrome` — another browser's, or an
+// `EXTENSION_PATH` points the run at a build other than `dist/<browser>` — for instance an
 // artifact unzipped somewhere else.
-const EXTENSION_PATH = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, "../../dist/chrome")
+const EXTENSION_PATH = process.env.EXTENSION_PATH
+	? path.resolve(process.env.EXTENSION_PATH)
+	: path.resolve(__dirname, "../../dist", BROWSER)
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────

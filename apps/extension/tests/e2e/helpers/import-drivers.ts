@@ -14,7 +14,15 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { type Page, TimeoutError } from "puppeteer"
 import { expect } from "vitest"
-import { clickByTestId, type ExtensionContext, openOnboarding, openPopup, waitForHash, withTimeoutMessage } from "../fixtures/extension"
+import {
+	clickByTestId,
+	type ExtensionContext,
+	openOnboarding,
+	openPopup,
+	waitForHash,
+	withTimeoutMessage,
+	pickFileByTestId,
+} from "../fixtures/extension"
 import { readSwLogTrail } from "../fixtures/journal"
 import {
 	appendImportRecord,
@@ -197,8 +205,7 @@ export async function submitFullBackupImport(page: Page, filePath: string, passw
 	// `pickFile` creates a hidden <input type="file"> + clicks it; puppeteer
 	// captures the resulting file chooser.
 	await page.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-	const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-full-backup-pick-file")])
-	await chooser.accept([filePath])
+	await pickFileByTestId(page, "import-full-backup-pick-file", filePath)
 
 	await page.waitForSelector(`[data-testid="${shell.submitTestId("full-backup")}"]`, { visible: true, timeout: 10_000 })
 	await setInputs(page, {
