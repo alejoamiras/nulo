@@ -37,15 +37,16 @@ function candidates(specifier: string): string[] {
 	return bases.flatMap((base) => EXTENSIONS.map((extension) => `${base}${extension}`))
 }
 
-const isFile = (path: string) => existsSync(path) && statSync(path).isFile()
+// A sibling `theme.ts` must never stand in for the `theme.css` the pipeline actually inlines.
+const isStyleFile = (path: string) => STYLESHEET_PATH.test(path) && existsSync(path) && statSync(path).isFile()
 
 async function follow(specifier: string, importer: string, resolve: ResolveStylesheet): Promise<string | undefined> {
 	const bare = specifier.replace(/^~/, "")
 	for (const candidate of candidates(bare)) {
 		const local = isAbsolute(candidate) ? candidate : resolvePath(dirname(importer), candidate)
-		if (isFile(local)) return local
+		if (isStyleFile(local)) return local
 		const resolved = (await resolve(candidate, importer))?.split("?")[0]
-		if (resolved && isFile(resolved)) return resolved
+		if (resolved && isStyleFile(resolved)) return resolved
 	}
 	return undefined
 }
