@@ -1,0 +1,135 @@
+# ADVISORY Firefox twin of pr-extension-smoke-e2e.yml: its aggregator is in no branch's required set (promotion:
+# CLAUDE.md, "Staged-rollout switches"). scripts/ci-cd/behavior-gating.test.ts pins the parity.
+name: Extension smoke e2e (Firefox)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: pr-extension-smoke-e2e-firefox-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    # dorny/paths-filter reads the PR's file list through the API.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      smoke-surface: ${{ steps.override.outputs.full || steps.filter.outputs.smoke-surface }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            smoke-surface:
+              - 'apps/extension/**'
+              - 'packages/aztec-runtime/src/**'
+              - 'packages/aztec-runtime/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+              - 'packages/extension-messaging/src/**'
+              - 'packages/extension-messaging/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
+              - 'packages/wallet-bridge/src/**'
+              - 'packages/wallet-bridge/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'tsconfig.json'
+              - 'patches/**'
+              - '.github/workflows/_extension-smoke-e2e.yml'
+              - '.github/workflows/_build-extension.yml'
+              - '.github/workflows/pr-extension-smoke-e2e-firefox.yml'
+              - '.github/actions/setup-bun/**'
+              - '.github/actions/setup-puppeteer/**'
+              - '.github/actions/setup-geckodriver/**'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+
+  decide:
+    name: Decide
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          SMOKE: ${{ needs.changes.outputs.smoke-surface }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:extension-smoke') || contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
+        run: |
+          # An advisory lane has nothing to say about a draft; `ready_for_review` re-runs it.
+          if [ "$DRAFT" = "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE" = "main" ] \
+             || [ "$LABEL_HIT" = "true" ] \
+             || [ "$SMOKE" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  smoke:
+    name: Run
+    needs: [decide]
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      browser: firefox
+
+  status:
+    name: extension-smoke-e2e-firefox-status
+    if: always()
+    needs: [changes, decide, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          RUN="${{ needs.decide.outputs.run }}"
+          for r in "${{ needs.changes.result }}" "${{ needs.decide.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A gate-control job did not succeed: $r"
+              exit 1
+            fi
+          done
+          case "$RUN" in
+            true) want="success" ;;
+            false) want="skipped" ;;
+            *) echo "::error::decide.outputs.run is not true/false: '$RUN'"; exit 1 ;;
+          esac
+          if [ "${{ needs.smoke.result }}" != "$want" ]; then
+            echo "::error::gate said run=$RUN, so the smoke suite must be '$want' — got '${{ needs.smoke.result }}'"
+            exit 1
+          fi
+          echo "Extension smoke e2e (Firefox) gate passed (or was skipped — no relevant changes / not labeled)."

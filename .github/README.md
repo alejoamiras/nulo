@@ -11,6 +11,8 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | `pr-quick.yml` | `quality-status` | dev + main | every PR to `main` / `dev` | commitlint, lint, typecheck, units, chrome+firefox build |
 | `pr-extension-smoke-e2e.yml` | `extension-smoke-e2e-status` | dev (cut over 2026-09-09) + main (**cut-over pending**; still legacy `smoke-e2e-status`) | PR to `main`, OR `e2e:extension-smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
 | `pr-extension-network-e2e.yml` | `extension-network-e2e-status` | dev (cut over 2026-09-09) + main (**cut-over pending**; still legacy `network-e2e-status`) | PR to `main`, OR `e2e:extension-network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
+| `pr-extension-smoke-e2e-firefox.yml` | `extension-smoke-e2e-firefox-status` (not required yet) | — | same gate as the Chrome twin (its own file + `setup-geckodriver` in the filter); skips drafts | firefox build + the smoke suite over geckodriver + Puppeteer BiDi |
+| `pr-extension-network-e2e-firefox.yml` | `extension-network-e2e-firefox-status` (not required yet) | — | same gate as the Chrome twin; skips drafts | the network suite on Firefox: 5 proverless shards + 2 heavy jobs + the real-proving canary (minus the Chrome-only `frozen-account-canary`) |
 | `bridge-contracts.yml` | `bridge-contracts-status` (not required yet) | — | when `contracts/bridge/**`, `packages/bridge-core/**` or the workflow change | forge hermetic + halmos + keystone nargo + hub artifact parity + sole-consumer guard + the sandbox integration suite (`integration`) + the hub's TXE tests (`txe`) |
 | `pr-tools-e2e.yml` | `tools-e2e-status` (not required yet) | — | when the tools graph, the bridge contracts or `packages/bridge-core/**` change, OR the `e2e:tools` label | the tools browser suite (Playwright, embedded wallet-sdk test wallet, injected L1 wallet) in 6 shards, one sandbox each |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
@@ -28,8 +30,10 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 | `_lint-and-typecheck.yml` | `pr-quick`, `release`, `nightly` |
 | `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
 | `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
-| `_extension-smoke-e2e.yml` | `pr-extension-smoke-e2e`, `release`, `nightly` |
-| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `release` (stable channel only), `nightly` |
+| `_extension-smoke-e2e.yml` | `pr-extension-smoke-e2e`, `pr-extension-smoke-e2e-firefox`, `release`, `nightly` |
+| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `pr-extension-network-e2e-firefox`, `extension-network-e2e-soak`, `release` (stable channel only), `nightly` |
+
+Both take a `browser` input (`chrome` default, `firefox`); log-artifact and browser-cache names carry the browser so a Firefox lane can neither overwrite nor restore a Chrome lane's.
 
 Composite actions live in `.github/actions/` and are shared step fragments used inside jobs.
 
@@ -37,7 +41,8 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 |---|---|
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
 | `setup-aztec` | Foundry + Aztec CLI matching the `@aztec/aztec.js` version |
-| `setup-puppeteer` | warm `~/.cache/puppeteer` |
+| `setup-puppeteer` | warm `~/.cache/puppeteer` (Chrome); with `browser: firefox`, install + cache the Firefox revision the locked Puppeteer pins, under a key that shares no prefix with Chrome's |
+| `setup-geckodriver` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install `geckodriver` for the Firefox lanes; the pins live in the action. See [SECURITY.md](../SECURITY.md#binary-dependencies). |
 | `setup-presto-server` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install the headless `presto-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#presto-in-ci). |
 
 ## Triggers cheat-sheet

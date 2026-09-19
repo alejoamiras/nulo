@@ -23,6 +23,13 @@ on:
         required: false
         type: string
         default: ""
+      browser:
+        description: |
+          chrome | firefox. Firefox adds geckodriver and the Firefox build; every name a run
+          publishes (logs artifact, browser cache) carries the browser so lanes never collide.
+        required: false
+        type: string
+        default: chrome
 
 jobs:
   smoke:
@@ -30,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      NULO_E2E_BROWSER: ${{ inputs.browser }}
       EXTENSION_PATH: ${{ inputs.extension_path }}
       # Explicit artifact-mode flag for BOTH prod-artifact delivery paths (downloaded artifact_name
       # AND caller-supplied extension_path) - the suite's skips/contracts key off this, never off
@@ -46,7 +54,22 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
+      # The suite rejects an unknown browser too, but only after the build has been paid for.
+      - name: Validate the browser input
+        env:
+          BROWSER: ${{ inputs.browser }}
+        run: |
+          case "$BROWSER" in
+            chrome|firefox) ;;
+            *) echo "::error::browser must be chrome or firefox, got '$BROWSER'"; exit 1 ;;
+          esac
+
       - uses: ./.github/actions/setup-puppeteer
+        with:
+          browser: ${{ inputs.browser }}
+
+      - uses: ./.github/actions/setup-geckodriver
+        if: inputs.browser == 'firefox'
 
       - name: Download extension artifact
         if: inputs.artifact_name != ''
@@ -59,15 +82,16 @@ jobs:
         if: inputs.artifact_name != ''
         run: echo "EXTENSION_PATH=${{ github.workspace }}/_e2e-extension" >> "$GITHUB_ENV"
 
-      - name: Build Chrome (no artifact, no override)
+      - name: Build the extension (no artifact, no override)
         if: inputs.artifact_name == '' && inputs.extension_path == ''
         # The migration-fixture stamp arms the e2e-only v2 migration so
         # tests/e2e/migration.test.ts can drive the migrator end-to-end. It is
         # inert for every other smoke test (fresh installs stamp max and run
         # nothing) and never ships: prod builds omit the env, and
         # _build-extension.yml greps release bundles for the marker.
-        run: bun run --cwd apps/extension build:chrome
+        run: bun run --cwd apps/extension "build:${BROWSER}"
         env:
+          BROWSER: ${{ inputs.browser }}
           VITE_NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
           # Pin the seeded ACTIVE network to Testnet for smoke: CI runners cannot reliably reach the
           # public Alpha mainnet RPC, and a blackholed default RPC makes chain-adjacent flows eat the
@@ -87,10 +111,12 @@ jobs:
       # every smoke profile back to the live seed list.
       - name: Assert the e2e token-seed source propagated (source build only)
         if: inputs.artifact_name == '' && inputs.extension_path == ''
+        env:
+          BROWSER: ${{ inputs.browser }}
         run: |
           for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
-            if ! grep -rq "$marker" apps/extension/dist/chrome; then
-              echo "::error::token-seed source did not propagate ($marker absent from dist/chrome)" >&2
+            if ! grep -rq "$marker" "apps/extension/dist/${BROWSER}"; then
+              echo "::error::token-seed source did not propagate ($marker absent from dist/${BROWSER})" >&2
               exit 1
             fi
           done
@@ -108,7 +134,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: smoke-e2e-logs
+          name: ${{ inputs.browser == 'chrome' && 'smoke-e2e-logs' || format('smoke-e2e-logs-{0}', inputs.browser) }}
           path: |
             apps/extension/.e2e-state
           if-no-files-found: ignore

@@ -1,0 +1,61 @@
+# Firefox in the e2e suite
+
+What is different about driving the wallet on Firefox, why each difference exists, and where the suite absorbs it. Read this before touching `fixtures/browser/` or debugging a test that is red on Firefox only.
+
+Run it: `NULO_E2E_BROWSER=firefox bun run e2e:agent …` (network; builds `dist/firefox` itself) or `NULO_E2E_BROWSER=firefox bun run test:e2e` (smoke). **Smoke does not build**: it loads whatever `apps/extension/dist/firefox` holds, so build first with the flags CI's smoke job uses — `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:firefox` — and run with `NULO_E2E_MIGRATION_FIXTURE=1` (`_extension-smoke-e2e.yml` is the authority for both). Needs `geckodriver` on `PATH` or at `$GECKODRIVER`, and the Firefox that the locked Puppeteer pins: `bun x puppeteer browsers install firefox` from `apps/extension` (or `FIREFOX_PATH`). The driver runs exactly that revision — the Puppeteer cache is shared by every checkout on the host, so "newest installed" would let another worktree change this one's browser — and the launch fails below Firefox 153, the manifest's own floor. **Linux only**: launch ownership reads `/proc/<pid>/environ`.
+
+## The one rule
+
+**A browser difference lives on `BrowserDriver` (`fixtures/browser/index.ts`), never in a fixture or helper.** Tests may read `isFirefox` to skip a whole file (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`) or to state a real behavioural difference in an expectation. `scripts/e2e/browser-seam.test.ts` enforces the rest: no scheme literal, no direct `browser.close()` / `newPage()` / `waitForTarget()`, no browser test — `isFirefox`, `BROWSER`, `driver.kind`, `NULO_E2E_BROWSER`, however imported — in `fixtures/**` or `helpers/**`.
+
+A fix that reads "on Firefox, also do X" inside a helper is a second, unlisted driver. Put X on the interface, give Chrome its (often empty) implementation, and say why in the doc comment.
+
+## How Firefox is driven
+
+Puppeteer speaks WebDriver BiDi to Firefox, and BiDi alone is not enough: it has no WebAuthn module, no window handles, and it cannot navigate to `moz-extension://`. So one browser is driven over **two channels on one session**:
+
+- **geckodriver (WebDriver classic, HTTP)** owns the session: it launches Firefox, installs the add-on, navigates and reloads extension pages, adds the virtual authenticator, lists window handles.
+- **Puppeteer over BiDi** attaches to that same session for everything else. `puppeteer.connect` insists on sending `session.new`, which Firefox refuses while the classic session holds the only slot, so `bidi-attach.ts` answers `session.new` / `session.end` locally and forwards the rest untouched.
+
+A classic window handle and a BiDi browsing-context id are the same string in Firefox, which is what lets a Puppeteer `Page` be addressed on the classic channel. The id is read from Puppeteer's internal `Frame._id` (`contextIdOf` in `firefox.ts`); it throws by name if a Puppeteer upgrade moves it. **A Puppeteer bump is the one routine change that can break the Firefox driver wholesale** — run the Firefox smoke on it.
+
+`--allow-system-access` is passed to geckodriver because Firefox otherwise refuses remote navigation to `moz-extension://` on both channels. It lets the automation session reach privileged contexts; acceptable on a single-user dev host and a single-tenant CI runner, and nowhere else.
+
+## What Firefox does differently, and where it is absorbed
+
+| Firefox behaviour | Symptom if ignored | Where it is handled |
+|---|---|---|
+| MV3 background is an event **page**, not a service worker. No `service_worker` target, nothing to kill over the protocol. | A wait for the worker target burns its whole timeout. | Ten files are Chrome-only by capability (`CHROME_ONLY.backgroundKill` / `cdpFetch`). `stopServiceWorker` throws by name. The seam test pins the remaining worker-target sites as a shrink-only debt list. |
+| The add-on's URL host is a **per-profile UUID**, not the manifest id, and exists nowhere until the add-on loads. | `installAddon`'s return value is the wrong id. | `discoverExtensionId` reads `extensions.webextensions.uuids` from the profile's `prefs.js`, falling back to an open add-on window. |
+| A BiDi `navigate` **or `reload`** of an extension page crosses a process swap and strands the `Page` on a dead context. | 30 s navigation timeout; later calls hit "no such frame". | `gotoExtensionPage` / `reloadExtensionPage` go over the classic channel. Never `page.goto(extensionUrl(…))` or `page.reload()` on an extension page. |
+| A new **tab** goes into the most recently focused window — which, once the wallet has started, is its **minimized PXE window**. | The page is never visible: no animation frames, every Vue `<Transition>` freezes half-way (`slide-enter-from slide-leave-active`), and `browsingContext.create` can fail with `browsingContext is null`. | `newPage` opens a **window** (`{ type: "window" }`). Every page the suite opens goes through it. |
+| Headless Firefox gives **focus** to every window the wallet opens (ignoring `focused: false`), and WebAuthn requires the focused window. | `navigator.credentials.get` rejects `NotAllowedError` after 0 ms; the wallet shows it as "user cancelled". | `prepareClick` brings the page to the front before every scripted click — a person's click would have. |
+| An **evaluated click is not a user gesture** (Chrome treats it as one). | The file picker is refused; `waitForFileChooser` never resolves. | `pickFile` sets the file on the wallet's pending `body > input[type=file]` instead. Anything else gated on user activation will need the same treatment. |
+| Timers in a **background window** are clamped to 1 Hz and then budget-throttled. The PXE lives in one. | Fee estimation crawls: `not approvable after 10000ms … feeMethod:null`. | Three `dom.*timeout*` prefs at launch — the counterpart of Chrome's `--disable-renderer-backgrounding` flags. |
+| A WebAuthn request with **no authenticator is answered at once** (Chrome leaves it pending). | A test that cancels a pending ceremony finds no ceremony. | `holdNextCredentialGet` replaces the page's `credentials.get` with one that settles only on the caller's abort. |
+| The virtual authenticator is **session-scoped** (Chrome's is per page), needs `security.webauth.webauthn_enable_softtoken`, and is reachable only over classic. | Without the pref `credentials.create` hangs rather than failing. | `virtualAuthenticator` on the driver; the pref pair at launch. A credential outlives the window that made it, so lock → unlock is testable on Firefox where it is not on Chrome. |
+| A window that **closes itself** (every approval window does) produces no `browsingContext.contextDestroyed`. | Puppeteer lists the target, and reports its page open, for the rest of the session. | `watchForSilentCloses` reconciles against the classic handle list and injects the missing event: 2 missed reads for a handle once seen, 8 for one never seen. |
+| A window is born `about:blank` and **no event reports the URL it then loads**. | `browser.waitForTarget(url predicate)` never matches. | The seam's `waitForTarget` polls `targets()`, which is correct. |
+| The popup's `window.close()` is **honoured** on a tab no script opened (Chrome ignores it). | The launch fixture's scratch page dies under it on a fresh profile. | `openScratchPage` settles a fresh profile through the onboarding page instead. |
+| Content-script **match patterns count as host permissions**. The wallet's content script matches every site. | `tabs.onUpdated` delivers `changeInfo.url` for ordinary origins, which Chrome withholds. | Not absorbed — it is real product behaviour. `network/session-tabNavigate.test.ts` pins both sides. |
+| Keys typed over BiDi dispatch an element's listeners **with no microtask checkpoint between them**. | Code that writes reactive state in one `input` listener and re-reads it in the next sees the old value. | Fixed in the product (`AmountCard`'s handler reads the input's own value and writes the model once). Treat a Firefox-only typing failure as this until shown otherwise. |
+
+## Artifact mode (the release and nightly smokes)
+
+`NULO_E2E_ARTIFACT_RUN=1` smokes a production bundle, which still calls the live price host. Chrome blackholes it with `--host-resolver-rules`; Firefox has no such flag, so the driver passes a `data:` PAC through the W3C `proxy` capability that sends only `api.coingecko.com` to a dead port. **Not yet observed in a run**: nothing local exercises artifact mode on Firefox, so the first nightly is its first evidence. If that smoke is slow or red on price-adjacent flows, suspect the PAC first.
+
+## Ownership and teardown
+
+A Firefox launch owns more than a browser process: geckodriver, the Firefox it spawned, and a profile directory. `ownership.ts` finds them by an environment marker (`NULO_E2E_LAUNCH=<uuid>`, inherited by both processes, read back from `/proc/<pid>/environ`), never by name — many agents run on one host and a `pkill geckodriver` would take down someone else's run. The marker is re-checked immediately before every signal. A profile is deleted only if it sits directly under the suite's profile root, carries the `profile-` prefix and holds a `.nulo-launch` file matching the marker. Each launch first reaps the launches of runs that no longer exist, and `bun run e2e:reap` does the same on demand — run it after the last Firefox run of a session, since nothing else will until the next launch. Always end a launch through `ctx.close()`; closing the `Browser` leaks all three.
+
+## Debugging a Firefox-only failure
+
+1. Reproduce one file at retry 0: `NULO_E2E_BROWSER=firefox NULO_E2E_RETRY=0 bun run e2e:agent <file>`.
+2. Check the page is **visible and focused** first — `document.visibilityState`, `document.hasFocus()`. Most early failures were a page in the wrong window, not the thing the assertion named.
+3. A stuck transition, a missing rAF or a 1 Hz timer means a background window. A `NotAllowedError` at 0 ms means focus. A timeout on a picker or a permission prompt means user activation.
+4. An error matching `no such frame | Browsing Context … not found | DiscardedBrowsingContext | Browsing context already closed` is a closed window (`targetGone`); on an approval click that is the expected end. The last wording is Puppeteer's own, for a realm disposed before the command fails.
+5. Measure in the page before changing a fixture. Three of this suite's wrong turns were fixes for symptoms; the cause each time was the minimized-window placement above.
+
+## CI
+
+`pr-extension-{smoke,network}-e2e-firefox.yml` are twins of the Chrome callers with `browser: firefox`; `nightly.yml` and `release.yml` carry Firefox jobs too. All are **advisory** — in no required set, in no `needs` of an aggregator or publish step. Advisory is not free: the PR lanes start fifteen more jobs on a PR that trips both filters and queue against the required lanes for the same runners, and `release.yml`'s Firefox smoke holds the `release` concurrency slot until it ends (a 20-minute execution timeout; time queued for a runner is on top). `scripts/ci-cd/behavior-gating.test.ts` pins the advisory wiring and the parity with the Chrome lanes. geckodriver is pinned by tarball and binary SHA-256 in `.github/actions/setup-geckodriver`; Firefox itself is whatever the locked Puppeteer pins. Promotion to required is the owner's call (root `CLAUDE.md`, staged-rollout switches).
