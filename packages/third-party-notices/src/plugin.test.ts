@@ -92,6 +92,12 @@ describe("thirdPartyNotices", () => {
 			mainBundle([join(root, "src/app.scss")], []),
 		)
 		expect([...noticeNames(emitted[0] ?? "")]).toEqual(["css-reset", "css-theme"])
+
+		// An import nothing can follow refuses the build instead of slipping past attribution.
+		await main.transform.handler.call(context, '@import url(mystery/skin);\n@use "sass:math";', join(root, "src/late.scss"))
+		expect(() => main.generateBundle.call({ emitFile: () => undefined }, {}, mainBundle([], []))).toThrow(
+			/late\.scss -> mystery\/skin: stylesheet import could not be followed/,
+		)
 	})
 
 	test("a script asset no recorded worker wrote is refused, whatever it is called", () => {

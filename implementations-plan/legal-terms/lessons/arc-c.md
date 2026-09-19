@@ -139,3 +139,9 @@ Closing round 4, Codex verified that one finding only: **not resolved**, because
 pattern required quotes and `@import url(pkg/theme.css);` is ordinary CSS. The reader now takes
 quoted, `url("…")`, bare `url(…)` and comma-list forms, pinned by a table test, and the bare form
 was proven on a real build the same way as the quoted one.
+
+The second verification found the next variant (an extensionless `@import url(pkg/base)`), which is
+the signature of chasing a resolver's semantics one spelling at a time. The rule became structural
+instead: try the spellings a CSS, Sass or Less pipeline tries, and **refuse the build on any import
+that still cannot be followed**. Unresolvable no longer means invisible. The real extension build
+has no such import (both targets pass, same hash), and the extensionless probe is refused by name.

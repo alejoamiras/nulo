@@ -269,6 +269,8 @@ export function generateNotices(contents: BundleContents, options: GenerateOptio
 	const entries = mergeInstallations(installed, violations)
 	entries.push(...vendoredEntries(contents, packages, options, violations))
 	violations.push(...unclaimedAssets(contents, options.policy), ...unusedOverrides(names, options.policy))
+	for (const style of contents.unfollowedStyles ?? [])
+		violations.push(`${style}: stylesheet import could not be followed, so what it inlines cannot be attributed`)
 	if (violations.length > 0) throw new NoticesPolicyError([...new Set(violations)].sort(byCodePoint))
 	return render(entries)
 }

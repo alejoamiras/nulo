@@ -14,6 +14,8 @@ export interface BundleContents {
 	assetText: Record<string, string>
 	/** Assets proven to be the output of a recorded build, which therefore need no claim. */
 	builtAssets: string[]
+	/** Stylesheet imports that could not be followed to a file, as `importer -> specifier`. */
+	unfollowedStyles?: string[]
 }
 
 /** Larger than any loader shim; a worker bundle runs to megabytes and is never matched by content. */

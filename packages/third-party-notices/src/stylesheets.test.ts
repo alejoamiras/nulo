@@ -10,7 +10,8 @@ describe("stylesheet imports", () => {
 			@import url(pkg/url-bare.css);
 			@import url( pkg/url-spaced.css ) layer(base);
 			@import "pkg/list-a", "pkg/list-b";
-			@use "~pkg/sass" as theme;
+			@use "~pkg/sass" as theme with ($accent: "not/a/path");
+			@use "sass:math";
 			@forward "pkg/forwarded";
 			@import url("https://fonts.example/remote.css");
 			@import url(//cdn.example/remote.css);

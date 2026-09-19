@@ -20,7 +20,9 @@ config, and the policy describes the shipped extension.
 A stylesheet is the one input the module walk cannot follow: `@import "pkg/theme.css"` is resolved
 inside the CSS pipeline, so the package never becomes a module of any chunk. A `transform` hook reads
 every stylesheet's import specifiers, resolves them through the bundler and follows them from disk
-(partials are not modules either), and the files found join the walk.
+(partials are not modules either), trying the spellings a CSS, Sass or Less pipeline tries: as
+written, with an extension, as a `_partial`, as an index. The files found join the walk, and **an
+import nothing can follow refuses the build**, so being unresolvable is never a way past attribution.
 
 Each module maps to the manifest at its **installation root** (`node_modules/<name>`), never to a
 nearer `package.json`, which a package could plant in any subdirectory. Every named manifest found
@@ -38,6 +40,7 @@ build rather than vanishing. Every installation is validated before duplicates a
 | No licence metadata, or an unparseable expression (legacy `{ type }` and `licenses: []` forms are read, an array as a choice) | refused unless an `OVERRIDES` entry covers it |
 | A licence declaration that is present but unreadable, `license` and `licenses` that disagree, or a manifest `name` / `version` that is not one well-formed token | refused; no override can stand in |
 | A manifest below the installation root that states a name, a version or a licence without identifying a package (a bare `{ "type": "module" }` marker is fine) | refused |
+| A stylesheet `@import` / `@use` / `@forward` that cannot be followed to a file (remote URLs and `sass:` built-ins aside) | refused |
 | An inline worker (`?worker&inline`): Vite embeds it in the importing chunk as a string, so its modules reach no bundle | refused |
 | No non-empty licence / copying file at the package root (a `NOTICE` is reproduced but never stands in; `LICENSE.js` is code) | refused unless an `OVERRIDES` entry supplies the text |
 | One `name@version` installed twice with differing licence content | refused |

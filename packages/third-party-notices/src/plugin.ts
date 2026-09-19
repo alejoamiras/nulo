@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url"
 import { type BundleContents, bundleContents, type OutputBundleLike, workerIdentity } from "./collect.ts"
 import { type GenerateOptions, generateNotices } from "./generate.ts"
 import { POLICY } from "./policy.ts"
-import { inlinedStylesheets, isStylesheet } from "./stylesheets.ts"
+import { type InlinedStylesheets, inlinedStylesheets, isStylesheet } from "./stylesheets.ts"
 
 export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt"
 
@@ -57,7 +57,7 @@ function shipped(main: BundleContents, workers: Iterable<WorkerRecord>): BundleC
 export function thirdPartyNotices(overrides: Partial<GenerateOptions> = {}): { main: NoticesPlugin; worker: NoticesPlugin } {
 	const workers = new Map<string, WorkerRecord>()
 	// Keyed by the importing module, so a rebuild replaces what that stylesheet pulled in.
-	const stylesheets = new Map<string, string[]>()
+	const stylesheets = new Map<string, InlinedStylesheets>()
 	const transform: NoticesPlugin["transform"] = {
 		order: "pre",
 		async handler(code, id) {
@@ -89,7 +89,9 @@ export function thirdPartyNotices(overrides: Partial<GenerateOptions> = {}): { m
 			transform,
 			generateBundle(_options, bundle) {
 				const contents = shipped(bundleContents(bundle), workers.values())
-				contents.moduleIds.push(...[...stylesheets.values()].flat())
+				const styles = [...stylesheets.values()]
+				contents.moduleIds.push(...styles.flatMap((style) => style.files))
+				contents.unfollowedStyles = styles.flatMap((style) => style.unfollowed)
 				this.emitFile({ type: "asset", fileName: NOTICES_FILE, source: generateNotices(contents, options) })
 			},
 		},
