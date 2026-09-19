@@ -19,6 +19,11 @@ export interface LaunchedBrowser {
 	close(): Promise<void>
 }
 
+export interface VirtualAuthenticator {
+	/** Removes every authenticator this setup added. Safe once the pages that held them are gone. */
+	cleanup(): Promise<void>
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -26,6 +31,8 @@ export interface BrowserDriver {
 	launch(opts: LaunchOptions): Promise<LaunchedBrowser>
 	/** `path` starts at the package root: `/src/popup/index.html#/windows/execute`. */
 	extensionUrl(extensionId: string, path: string): string
+	/** Every page the suite opens comes from here: where a browser puts a new tab is not neutral. */
+	newPage(browser: Browser): Promise<Page>
 	/**
 	 * The host part of the extension's own URLs, once it is installed. Chrome derives it from the
 	 * service-worker target; Firefox MV3 runs a background *script* and has no such target, and
@@ -38,6 +45,8 @@ export interface BrowserDriver {
 	 * arrives but strands the `Page` on a dead context — so this cannot be a bare `page.goto`.
 	 */
 	gotoExtensionPage(page: Page, url: string): Promise<void>
+	/** Reload an extension page in place. Over BiDi a reload strands the `Page` just as a navigation does. */
+	reloadExtensionPage(page: Page): Promise<void>
 	/**
 	 * An extension page with `chrome.*` that stays open on a wallet that has not finished onboarding,
 	 * for the launch fixture to settle the extension through. It has to be a driver's job because
@@ -51,6 +60,20 @@ export interface BrowserDriver {
 	 * `waitForTarget` never matches a URL there — while `targets()` does list it, correctly.
 	 */
 	waitForTarget(browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target>
+	/**
+	 * Runs before every scripted click. The suite clicks from inside the page, which — unlike a
+	 * person's click — neither focuses the window nor, on every browser, counts as a user gesture.
+	 */
+	prepareClick(page: Page): Promise<void>
+	/** Answer the file picker that `open` asks for with `filePath`. `open` is a scripted click. */
+	pickFile(page: Page, open: () => Promise<void>, filePath: string): Promise<void>
+	/** A PRF-capable virtual authenticator. `anchorPage` matters where one is scoped to a page. */
+	virtualAuthenticator(browser: Browser, anchorPage: Page): Promise<VirtualAuthenticator>
+	/**
+	 * With no authenticator left, make the next `credentials.get` on `page` stay pending until its
+	 * caller aborts it. Chrome already waits for an authenticator that never comes.
+	 */
+	holdNextCredentialGet(page: Page): Promise<void>
 	/**
 	 * How this driver's protocol words "the window went away under the call", beyond the CDP
 	 * phrases the fixtures already match. An approval window closes itself on the click that
@@ -81,12 +104,24 @@ export const CHROME_ONLY = {
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
 } as const
 
+/** For a helper only a `CHROME_ONLY` file may reach: fail by name, not by waiting out a target. */
+export function assertChromeOnly(capability: keyof typeof CHROME_ONLY, caller: string): void {
+	if (BROWSER !== "chrome") throw new Error(`${caller} is Chrome-only: ${CHROME_ONLY[capability]}`)
+}
+
 export const extensionUrl = (extensionId: string, path: string): string => driver.extensionUrl(extensionId, path)
 export const launchBrowser = (opts: LaunchOptions): Promise<LaunchedBrowser> => driver.launch(opts)
+export const newPage = (browser: Browser): Promise<Page> => driver.newPage(browser)
 export const discoverExtensionId = (browser: Browser): Promise<string> => driver.discoverExtensionId(browser)
 export const gotoExtensionPage = (page: Page, url: string): Promise<void> => driver.gotoExtensionPage(page, url)
+export const reloadExtensionPage = (page: Page): Promise<void> => driver.reloadExtensionPage(page)
 export const isTargetGone = (text: string): boolean => driver.targetGone?.test(text) ?? false
 export const waitForTarget = (browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> =>
 	driver.waitForTarget(browser, predicate, timeout)
 export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
 	driver.openScratchPage(browser, extensionId, opts)
+export const prepareClick = (page: Page): Promise<void> => driver.prepareClick(page)
+export const pickFile = (page: Page, open: () => Promise<void>, filePath: string): Promise<void> => driver.pickFile(page, open, filePath)
+export const virtualAuthenticator = (browser: Browser, anchorPage: Page): Promise<VirtualAuthenticator> =>
+	driver.virtualAuthenticator(browser, anchorPage)
+export const holdNextCredentialGet = (page: Page): Promise<void> => driver.holdNextCredentialGet(page)

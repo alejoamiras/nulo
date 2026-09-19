@@ -1,7 +1,17 @@
 import { existsSync, readdirSync } from "node:fs"
-import { TimeoutError, type Browser, type Page, type ConsoleMessage, type ElementHandle } from "puppeteer"
+import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { discoverExtensionId, extensionUrl, gotoExtensionPage, isFirefox, isTargetGone, launchBrowser, openScratchPage } from "./browser"
+import {
+	discoverExtensionId,
+	extensionUrl,
+	gotoExtensionPage,
+	isTargetGone,
+	launchBrowser,
+	newPage,
+	openScratchPage,
+	pickFile,
+	prepareClick,
+} from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -168,7 +178,7 @@ async function settleLaunchedExtension(
 export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	// Reset onboardingCompleted=false so the onboarding flow runs as on
 	// fresh install (launchExtension seeded it to true by default).
-	const setupPage = await ctx.browser.newPage()
+	const setupPage = await newPage(ctx.browser)
 	patchPagePolling(setupPage)
 	await gotoExtensionPage(setupPage, extensionUrl(ctx.extensionId, "/src/popup/index.html"))
 	await setupPage.evaluate(async () => {
@@ -176,7 +186,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	})
 	await setupPage.close()
 
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
 	await page.setViewport({ width: 720, height: 900 })
 	await page.bringToFront()
@@ -1127,7 +1137,7 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 }
 
 async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	try {
 		return await setUpPopupPage(ctx, page)
 	} catch (err) {
@@ -1348,6 +1358,7 @@ export async function replaceInputValue(page: Page, selector: string, value: str
  *  testids — use this when the target's only stable handle is a class
  *  combo, ARIA role, or other non-testid selector. */
 export async function clickSelector(page: Page, selector: string, timeout = 10_000): Promise<void> {
+	await prepareClick(page)
 	try {
 		await page.waitForFunction(
 			(sel: string) => {
@@ -1381,10 +1392,7 @@ export async function clickSelector(page: Page, selector: string, timeout = 10_0
  *  the right choice for popup chains; matches the same pattern in
  *  `replaceInputValue`. */
 export async function clickByTestId(page: Page, testId: string, timeout = 10_000): Promise<void> {
-	// A person can only click a page they are looking at; this click is scripted and says nothing
-	// about focus. Firefox hosts the PXE in a real window, which headless lets take the foreground,
-	// and it refuses WebAuthn outright from a tab that is not the active one.
-	if (isFirefox) await page.bringToFront().catch(() => {})
+	await prepareClick(page)
 	try {
 		await page.waitForFunction(
 			(id: string) => {
@@ -1420,33 +1428,9 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 	}
 }
 
-/**
- * Click the control that opens a file picker and answer it with `filePath`.
- *
- * The click is programmatic, and only Chrome treats an evaluated script as a user gesture: Firefox
- * refuses to open a picker without one, so no chooser event ever arrives there. The wallet appends
- * its `<input type="file">` to the body before asking for the picker and removes it on `change`,
- * so on Firefox the file goes straight into that pending input.
- */
-export async function pickFileByTestId(page: Page, testId: string, filePath: string): Promise<void> {
-	if (!isFirefox) {
-		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, testId)])
-		await chooser.accept([filePath])
-		return
-	}
-	// The wallet removes an input only on `change`, so an abandoned pick leaves one behind and the
-	// file would go to that dead request instead of this one.
-	await page.evaluate(() => {
-		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
-	})
-	await clickByTestId(page, testId)
-	const pending = 'body > input[type="file"]:not([data-e2e-stale])'
-	// This fixture's `waitForSelector` waits without returning the handle.
-	await page.waitForSelector(pending, { timeout: 10_000 })
-	const input = await page.$(pending)
-	if (!input) throw new Error(`pickFileByTestId: "${testId}" opened no file input`)
-	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
-}
+/** Click the control that opens a file picker and answer it with `filePath`. */
+export const pickFileByTestId = (page: Page, testId: string, filePath: string): Promise<void> =>
+	pickFile(page, () => clickByTestId(page, testId), filePath)
 
 function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []

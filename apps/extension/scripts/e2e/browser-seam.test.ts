@@ -8,11 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const E2E_ROOT = path.resolve(__dirname, "../../tests/e2e")
 
 /**
- * Files allowed to name a browser directly. `fixtures/browser/chrome.ts` IS the seam's Chrome
- * half; `scripts/check-derivation-parity.ts` is a standalone tool that launches its own Chrome,
+ * Files allowed to name a browser directly. `fixtures/browser/{chrome,firefox}.ts` ARE the seam;
+ * `scripts/check-derivation-parity.ts` is a standalone tool that launches its own Chrome,
  * owns no `ExtensionContext` and is never run by a suite, so it has nothing to keep in step.
  */
-const EXEMPT = new Set(["fixtures/browser/chrome.ts", "scripts/check-derivation-parity.ts"])
+const EXEMPT = new Set(["fixtures/browser/chrome.ts", "fixtures/browser/firefox.ts", "scripts/check-derivation-parity.ts"])
 
 const SCHEME = "chrome-extension://"
 const WORKER_TYPE = "service_worker"
@@ -123,16 +123,14 @@ function testsForWorkerTarget(node: ts.Node): boolean {
 /**
  * Direct `browser.waitForTarget` calls left outside the seam, exact and shrink-only. Over BiDi no
  * event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
- * The fixture entry waits for the service worker, which is Chrome-only by nature; the probe calls
- * it on purpose, to measure exactly that.
+ * The fixture entry waits for the service worker, which is Chrome-only by nature.
  */
 const WAIT_DEBT: Record<string, number> = {
 	"fixtures/helpers.ts": 1,
-	"probes/discovery.test.ts": 1,
 }
 
 /** 1-based line numbers of executable seam violations in one file's source. */
-function violations(source: string): { scheme: number[]; close: number[]; worker: number[]; wait: number[] } {
+function violations(source: string): { scheme: number[]; close: number[]; worker: number[]; wait: number[]; page: number[] } {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	// Source the parser could not read is source the scan cannot vouch for: an unterminated regex
 	// swallows whatever follows it, so accepting a partial tree would fail open.
@@ -145,22 +143,91 @@ function violations(source: string): { scheme: number[]; close: number[]; worker
 	const close: number[] = []
 	const worker: number[] = []
 	const wait: number[] = []
+	const page: number[] = []
 	const lineOf = (node: ts.Node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1
+
+	/** Calls the seam owns, by the member name a test would reach for on a browser. */
+	const onBrowser = new Map([
+		["close", close],
+		["waitForTarget", wait],
+		["newPage", page],
+	])
 
 	const visit = (node: ts.Node): void => {
 		if (isSchemeText(node)) scheme.push(lineOf(node))
 		if (testsForWorkerTarget(node)) worker.push(lineOf(node))
 		const member = ts.isCallExpression(node) ? calledMember(node) : undefined
-		if (member && closesABrowser(member.receiver, aliases)) {
-			if (member.name === "close") close.push(lineOf(node))
-			if (member.name === "waitForTarget") wait.push(lineOf(node))
-		}
+		if (member && closesABrowser(member.receiver, aliases)) onBrowser.get(member.name)?.push(lineOf(node))
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
 	const dedupe = (lines: number[]) => [...new Set(lines)].sort((a, b) => a - b)
-	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait) }
+	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait), page: dedupe(page) }
 }
+
+const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
+
+/**
+ * 1-based lines where a file asks which browser it is on. A shared helper that does is a second,
+ * unlisted driver: the behaviour it forks never shows up on `BrowserDriver`, so the next browser —
+ * or the next reader — cannot find it. A test may ask, to skip or to state a real difference.
+ */
+function browserBranches(source: string): number[] {
+	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
+	const flags = new Set([...BROWSER_FLAGS, ...importedFlagAliases(file)])
+	const namespaces = importedNamespaces(file)
+	const lines: number[] = []
+	const visit = (node: ts.Node): void => {
+		if (ts.isImportDeclaration(node)) return
+		const asks = asksTheDriverOrTheEnv(node) || (ts.isIdentifier(node) && flags.has(node.text) && !isMemberName(node, namespaces))
+		if (asks) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+		ts.forEachChild(node, visit)
+	}
+	ts.forEachChild(file, visit)
+	return [...new Set(lines)]
+}
+
+/** `import { isFirefox as ff }` — the local name is the flag for the rest of the file. */
+function importedFlagAliases(file: ts.SourceFile): string[] {
+	return file.statements
+		.filter(ts.isImportDeclaration)
+		.flatMap((declaration) => {
+			const named = declaration.importClause?.namedBindings
+			return named && ts.isNamedImports(named) ? [...named.elements] : []
+		})
+		.filter((spec) => spec.propertyName !== undefined && BROWSER_FLAGS.has(spec.propertyName.text))
+		.map((spec) => spec.name.text)
+}
+
+/** `import * as seam` — `seam.isFirefox` is the flag itself, reached through the module. */
+function importedNamespaces(file: ts.SourceFile): Set<string> {
+	const names = file.statements.filter(ts.isImportDeclaration).flatMap((declaration) => {
+		const bindings = declaration.importClause?.namedBindings
+		return bindings && ts.isNamespaceImport(bindings) ? [bindings.name.text] : []
+	})
+	return new Set(names)
+}
+
+/** `x.BROWSER` and `{ BROWSER: … }` name a member of something else — unless `x` is a module. */
+function isMemberName(node: ts.Identifier, namespaces: Set<string>): boolean {
+	const parent = node.parent
+	if (ts.isPropertyAssignment(parent)) return parent.name === node
+	if (!ts.isPropertyAccessExpression(parent) || parent.name !== node) return false
+	const receiver = unwrap(parent.expression)
+	return !(ts.isIdentifier(receiver) && namespaces.has(receiver.text))
+}
+
+/** The same question put to `driver.kind`, or to the variable the seam itself resolves from. */
+function asksTheDriverOrTheEnv(node: ts.Node): boolean {
+	if (literalText(node) === "NULO_E2E_BROWSER") return true
+	if (!ts.isPropertyAccessExpression(node)) return false
+	if (node.name.text === "NULO_E2E_BROWSER") return true
+	const receiver = unwrap(node.expression)
+	return node.name.text === "kind" && ts.isIdentifier(receiver) && receiver.text === "driver"
+}
+
+const isSharedHelper = (rel: string): boolean =>
+	(rel.startsWith("fixtures/") && !rel.startsWith("fixtures/browser/")) || rel.startsWith("helpers/")
 
 /** String and template *text* only — a comment or a regex literal is never one of these nodes. */
 function isSchemeText(node: ts.Node): boolean {
@@ -190,16 +257,20 @@ function scan() {
 	const close: string[] = []
 	const worker: Record<string, number> = {}
 	const wait: Record<string, number> = {}
+	const page: string[] = []
+	const branch: string[] = []
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
+		if (isSharedHelper(rel)) branch.push(...browserBranches(source).map((n) => `${rel}:${n}`))
 		const found = violations(source)
 		scheme.push(...found.scheme.map((n) => `${rel}:${n}`))
 		close.push(...found.close.map((n) => `${rel}:${n}`))
 		if (found.worker.length) worker[rel] = found.worker.length
 		if (found.wait.length) wait[rel] = found.wait.length
+		page.push(...found.page.map((n) => `${rel}:${n}`))
 	}
-	return { scheme, close, worker, wait, visited }
+	return { scheme, close, worker, wait, page, branch, visited }
 }
 
 /**
@@ -233,6 +304,16 @@ describe("browser seam", () => {
 	test("no new direct browser.waitForTarget — use the seam's waitForTarget()", () => {
 		expect(found.wait).toEqual(WAIT_DEBT)
 	})
+
+	// Firefox puts a new tab in the most recently focused window, which is the wallet's minimized
+	// PXE window: a page opened there is never visible, never animates and cannot run WebAuthn.
+	test("no page is opened outside the seam — use newPage()", () => {
+		expect(found.page).toEqual([])
+	})
+
+	test("no shared helper branches on the browser — put the difference on BrowserDriver", () => {
+		expect(found.branch).toEqual([])
+	})
 })
 
 /** A guard whose scanner silently matched nothing would pass forever; these pin that it bites. */
@@ -240,7 +321,7 @@ describe("browser seam guard", () => {
 	test("flags a scheme literal and a direct close", () => {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: source text under scan, not a template.
 		const src = ["await page.goto(`chrome-extension://${id}/src/popup/index.html`)", "await ctx.browser.close()"].join("\n")
-		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [], wait: [] })
+		expect(violations(src)).toEqual({ scheme: [1], close: [2], worker: [], wait: [], page: [] })
 	})
 
 	// A regex ending in `\//` reads as a line comment to any text-based strip, which silently hid
@@ -256,7 +337,7 @@ describe("browser seam guard", () => {
 	const inAsync = (body: string) => `async function spec() {\n${body}\n}`
 
 	// Each of these reaches the same Browser by a route that changes nothing at runtime, so each
-	// has to reach the same verdict. The type-level wrappers were live bypasses before `unwrap`.
+	// has to reach the same verdict.
 	test.each([
 		["split across lines", "await ctx.browser\n\t.close()"],
 		["optional chaining", "await ctx.browser?.close()"],
@@ -295,6 +376,31 @@ describe("browser seam guard", () => {
 		expect(violations(inAsync(body))[rule].length).toBe(1)
 	})
 
+	test("flags a direct newPage on a browser, and not the seam's own", () => {
+		expect(violations(inAsync("const page = await ctx.browser.newPage()")).page).toEqual([2])
+		expect(violations(inAsync("const page = await newPage(ctx.browser)")).page).toEqual([])
+	})
+
+	test("flags a browser test, and not the import that would feed one", () => {
+		expect(browserBranches('import { isFirefox } from "./browser"\nif (isFirefox) stub()')).toEqual([2])
+		expect(browserBranches('const dir = BROWSER === "firefox" ? a : b')).toEqual([1])
+		expect(browserBranches('import { isFirefox } from "./browser"')).toEqual([])
+	})
+
+	test.each([
+		["an import alias", 'import { isFirefox as ff } from "./browser"\nif (ff) stub()'],
+		["a namespace import", 'import * as seam from "./browser"\nif (seam.isFirefox) stub()'],
+		["the driver's kind", 'import { driver } from "./browser"\nif (driver.kind === "firefox") stub()'],
+		["the env var", 'const b = 1\nif (process.env.NULO_E2E_BROWSER === "firefox") stub()'],
+		["the env var by key", 'const b = 1\nif (process.env["NULO_E2E_BROWSER"] === "firefox") stub()'],
+	])("flags a browser test asked through %s", (_label, body) => {
+		expect(browserBranches(body)).toEqual([2])
+	})
+
+	test("leaves a member that merely shares the flag's name alone", () => {
+		expect(browserBranches("const ports = { BROWSER: 9222 }\nlog(ports.BROWSER)")).toEqual([])
+	})
+
 	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {
 		expect(violations(inAsync("await ctx.browser.waitForTarget((t) => true)")).wait).toEqual([2])
 		expect(violations(inAsync("await waitForTarget(ctx.browser, (t) => true, 1000)")).wait).toEqual([])
@@ -315,12 +421,12 @@ describe("browser seam guard", () => {
 		const src = ["// chrome-extension:// and browser.close()", "/* chrome-extension://", "   browser.close() */", "const ok = 1"].join(
 			"\n",
 		)
-		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [], page: [] })
 	})
 
 	test("does not flag the seam's own call shapes", () => {
 		const src = 'await page.goto(extensionUrl(id, "/src/popup/index.html"))\nawait ctx.close()'
-		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [] })
+		expect(violations(src)).toEqual({ scheme: [], close: [], worker: [], wait: [], page: [] })
 	})
 
 	test("a scheme inside a string still counts, and one inside a regex does not", () => {

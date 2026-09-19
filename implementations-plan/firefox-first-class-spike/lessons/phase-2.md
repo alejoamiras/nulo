@@ -48,3 +48,7 @@ What is actually being asked for, scoped as tightly as it can be:
 `bun run lint` → 0 · `bun run typecheck` → 0 · `vitest run src/manifest.test.ts` → 11 passed (3 new) · `bun run --cwd apps/extension build:firefox` → 0 · `web-ext@10.6.0 lint` → 0 manifest errors, 1 pre-existing `FILE_TOO_LARGE` (see DEVIATION).
 
 `web-ext@10.6.0` published 2026-08-04, comfortably past the 7-day supply-chain gate; pinned exactly on the command line, never added as a dependency.
+
+## Arc 2 boundary — codex fix loop (GPT-6 Astra, `high`) — converged
+
+Round 2 was a conditional approve whose one remaining issue was how the lint deviation was described. `49afcf03` recast it as an explicit exception (above); the same session, resumed with that delta, returned **"approve — no new material findings"**, adding that the recorded filename, byte size and SHA-256 match the artifact and that "the full lint remains failed, and Phase 2 remains incomplete pending explicit owner authorization of the exception". That is the state this file records: the loop is closed, the phase header is not ticked.

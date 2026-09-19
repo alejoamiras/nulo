@@ -1,5 +1,6 @@
 import type { Browser } from "puppeteer"
 import puppeteer from "puppeteer"
+import { cdpVirtualAuthenticator } from "./chrome-webauthn"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
 
 const SCHEME = "chrome-extension://"
@@ -55,11 +56,23 @@ export const chromeDriver: BrowserDriver = {
 	scheme: SCHEME,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
+	newPage: (browser) => browser.newPage(),
 	discoverExtensionId,
 	gotoExtensionPage: async (page, url) => {
 		await page.goto(url, { waitUntil: "domcontentloaded" })
 	},
+	reloadExtensionPage: async (page) => {
+		await page.reload({ waitUntil: "domcontentloaded" })
+	},
 	waitForTarget: (browser, predicate, timeout) => browser.waitForTarget(predicate, { timeout }),
+	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
+	prepareClick: async () => {},
+	pickFile: async (page, open, filePath) => {
+		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), open()])
+		await chooser.accept([filePath])
+	},
+	virtualAuthenticator: cdpVirtualAuthenticator,
+	holdNextCredentialGet: async () => {},
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {

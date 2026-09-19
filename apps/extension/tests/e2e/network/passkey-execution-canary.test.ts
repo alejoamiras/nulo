@@ -25,7 +25,8 @@
  * Every stage asserts an exact outcome — no ok-or-error tolerances. Run prover-ON:
  * `bun run e2e:agent tests/e2e/network/passkey-execution-canary.test.ts`.
  */
-import { expect, inject } from "vitest"
+import { describe, expect, inject } from "vitest"
+import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import {
 	clickByTestId,
@@ -51,208 +52,210 @@ import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
-	if (process.env.E2E_REQUIRE_SETUP === "1") {
-		expect(hasConfig).toBe(true)
-	}
-})
-
-/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
- *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
- *  kill, whose failures propagate. */
-async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
-	if (!findServiceWorkerTarget(ctx)) {
-		console.warn("[passkey-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
-		return
-	}
-	await stopServiceWorker(ctx)
-}
-
-/** Duplicated from frozen-account-canary.test.ts. */
-function txHashOf(resultJson: unknown): string {
-	const candidate =
-		typeof resultJson === "string"
-			? resultJson.replace(/^"(.*)"$/, "$1")
-			: (resultJson as { txHash?: unknown } | null | undefined)?.txHash
-	if (typeof candidate !== "string" || !candidate.startsWith("0x")) {
-		throw new Error(`cannot extract tx hash from result: ${(JSON.stringify(resultJson) ?? "undefined").slice(0, 2_000)}`)
-	}
-	return candidate
-}
-
-/** Duplicated from frozen-account-canary.test.ts. */
-async function setPgInputs(page: import("puppeteer").Page, values: Record<string, string>): Promise<void> {
-	await page.evaluate((entries: Record<string, string>) => {
-		for (const [name, v] of Object.entries(entries)) {
-			const input = document.querySelector<HTMLInputElement>(`[data-testid="pg-input-${name}"]`)
-			if (!input) throw new Error(`pg-input-${name} not present`)
-			const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-			setter?.call(input, v)
-			input.dispatchEvent(new Event("input", { bubbles: true }))
+describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+	test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			expect(hasConfig).toBe(true)
 		}
-	}, values)
-}
+	})
 
-test.skipIf(!hasConfig)(
-	"passkey canary — register via PRF ceremony, ctor-deploy with real proof, authwit consume, SW-restart ceremony re-unlock",
-	// retry: 0 — this is the KDF-change execution gate; a retry-masked failure defeats it.
-	{ timeout: 900_000, retry: 0 },
-	async ({ freshExtensionPerTest }) => {
-		const ctx = freshExtensionPerTest
-		const step = (m: string) => console.log(`[passkey-canary] ${m}`)
+	/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
+	 *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
+	 *  kill, whose failures propagate. */
+	async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
+		if (!findServiceWorkerTarget(ctx)) {
+			console.warn("[passkey-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
+			return
+		}
+		await stopServiceWorker(ctx)
+	}
 
-		// ── Stage 1: passkey profile + second account + dApp connection ──
-		// The anchor popup owns the virtual authenticator's FTN — it stays open until the end.
-		const anchorPopup = await openPopup(ctx)
-		const auth = await setupPasskeyVirtualAuth(ctx.browser, anchorPopup)
-		try {
-			step("registering passkey profile (in-page PRF ceremony)")
-			await registerPasskeyProfile(anchorPopup)
-			await switchToLocalNetwork(anchorPopup)
-			step("creating the second account")
-			await createAccount(anchorPopup, "Second")
+	/** Duplicated from frozen-account-canary.test.ts. */
+	function txHashOf(resultJson: unknown): string {
+		const candidate =
+			typeof resultJson === "string"
+				? resultJson.replace(/^"(.*)"$/, "$1")
+				: (resultJson as { txHash?: unknown } | null | undefined)?.txHash
+		if (typeof candidate !== "string" || !candidate.startsWith("0x")) {
+			throw new Error(`cannot extract tx hash from result: ${(JSON.stringify(resultJson) ?? "undefined").slice(0, 2_000)}`)
+		}
+		return candidate
+	}
 
-			step("connecting the playground")
-			const page = await connectPlayground(ctx)
-			const accountAddresses = await grantCapBundle(ctx, page, "transaction", async (accountIds) => {
-				const granted = accountIds.slice(0, 2).filter((a): a is string => !!a)
-				if (granted.length < 2) {
-					throw new Error(`capabilities popup exposed ${granted.length} account(s); passkey canary needs 2`)
-				}
-				return granted
-			})
-			const [ownerA, callerB] = accountAddresses as [string, string]
-			step(`granted A=${ownerA.slice(0, 12)}… B=${callerB.slice(0, 12)}…`)
+	/** Duplicated from frozen-account-canary.test.ts. */
+	async function setPgInputs(page: import("puppeteer").Page, values: Record<string, string>): Promise<void> {
+		await page.evaluate((entries: Record<string, string>) => {
+			for (const [name, v] of Object.entries(entries)) {
+				const input = document.querySelector<HTMLInputElement>(`[data-testid="pg-input-${name}"]`)
+				if (!input) throw new Error(`pg-input-${name} not present`)
+				const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
+				setter?.call(input, v)
+				input.dispatchEvent(new Event("input", { bubbles: true }))
+			}
+		}, values)
+	}
 
-			// ── Stage 2: A's FIRST tx — frozen ctor + set_authorized, REAL proof, mined ──
-			step("minting to owner A")
-			await mintPublicTokensForAccount(aztecConfig!, ownerA)
-			await setPgInputs(page, {
-				tokenAddress: aztecConfig!.tokenAddress,
-				authwitOwner: ownerA,
-				authwitCaller: callerB,
-				authwitAmount: "1",
-				authwitNonce: "1",
-			})
-			step("granting public authwit as A (A's FIRST tx — ctor + set_authorized)")
-			const seqGrant = await snapshotResultSeq(page)
-			const grantPopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-grantPublicAuthwit")
-			const grantPopup = await grantPopupP
-			await waitForExecuteContent(grantPopup)
-			await approveExecute(grantPopup, { approvableTimeoutMs: 120_000 })
-			const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 300_000)
-			await assertPgOk(page, grantResult, "passkey-canary:grantResult")
-			const grantTxHash = txHashOf(grantResult.resultJson)
-			step(`grant submitted (${grantTxHash.slice(0, 12)}…); waiting for the node to mine it`)
-			await waitForTxMined(aztecConfig!, grantTxHash, 300_000)
-			step("A's ctor-deploy tx MINED — real proof accepted for a passkey-derived account")
+	test.skipIf(!hasConfig)(
+		"passkey canary — register via PRF ceremony, ctor-deploy with real proof, authwit consume, SW-restart ceremony re-unlock",
+		// retry: 0 — this is the KDF-change execution gate; a retry-masked failure defeats it.
+		{ timeout: 900_000, retry: 0 },
+		async ({ freshExtensionPerTest }) => {
+			const ctx = freshExtensionPerTest
+			const step = (m: string) => console.log(`[passkey-canary] ${m}`)
 
-			// ── Stage 3: authwit-CONSUMING tx as the named caller B (B's FIRST tx) ──
-			await page.evaluate((caller: string) => {
-				const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-select-account"]')
-				if (!select) throw new Error("pg-select-account not present")
-				select.value = caller
-				select.dispatchEvent(new Event("change", { bubbles: true }))
-			}, callerB)
-			step("consuming the authwit as B (B's FIRST tx — its own ctor + transfer_from)")
-			const seqConsume = await snapshotResultSeq(page)
-			const consumePopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-consumeAuthwit")
-			const consumePopup = await consumePopupP
-			await waitForExecuteContent(consumePopup)
-			await approveExecute(consumePopup, { approvableTimeoutMs: 120_000 })
-			const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 300_000)
-			await assertPgOk(page, consumeResult, "passkey-canary:consumeResult")
-			await waitForTxMined(aztecConfig!, txHashOf(consumeResult.resultJson), 300_000)
-			step("authwit consumed; B's ctor-deploy tx MINED")
+			// ── Stage 1: passkey profile + second account + dApp connection ──
+			// The anchor popup owns the virtual authenticator's FTN — it stays open until the end.
+			const anchorPopup = await openPopup(ctx)
+			const auth = await setupPasskeyVirtualAuth(ctx.browser, anchorPopup)
+			try {
+				step("registering passkey profile (in-page PRF ceremony)")
+				await registerPasskeyProfile(anchorPopup)
+				await switchToLocalNetwork(anchorPopup)
+				step("creating the second account")
+				await createAccount(anchorPopup, "Second")
 
-			// ── Stage 4: SW restart → ceremony re-unlock in the SAME FTN → still operates ──
-			step("terminating the service worker")
-			await restartServiceWorker(ctx)
+				step("connecting the playground")
+				const page = await connectPlayground(ctx)
+				const accountAddresses = await grantCapBundle(ctx, page, "transaction", async (accountIds) => {
+					const granted = accountIds.slice(0, 2).filter((a): a is string => !!a)
+					if (granted.length < 2) {
+						throw new Error(`capabilities popup exposed ${granted.length} account(s); passkey canary needs 2`)
+					}
+					return granted
+				})
+				const [ownerA, callerB] = accountAddresses as [string, string]
+				step(`granted A=${ownerA.slice(0, 12)}… B=${callerB.slice(0, 12)}…`)
 
-			// The anchor popup stays open (same FTN = same virtual authenticator = same
-			// credential), so it is the extension page the post-stop baseline is read from.
-			await waitForWorkerLiveness(anchorPopup, await readLivenessBaseline(anchorPopup))
-			step("SW rebooted; the anchor popup must lock itself in the SAME FrameTreeNode")
-			// Passkey sessions are never silently restored: the replacement worker holds no
-			// session while this popup's store still says authenticated. Its reconnect boot
-			// resolves `locked` under an auth-required page and enters the locked state on its
-			// own — no Lock click here; the reconnect cleanup hides the header's lock control.
-			await waitForHash(anchorPopup, "#/popup/auth", 60_000)
-			await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
-			await anchorPopup.waitForFunction(
-				() => {
-					const btn = document.querySelector<HTMLButtonElement>('[data-testid="auth-submit"]')
-					return btn !== null && !btn.disabled
-				},
-				{ timeout: 15_000 },
-			)
-			await clickByTestId(anchorPopup, "auth-submit")
-			await waitForHash(anchorPopup, "#/popup/general", 60_000)
-			step("post-restart ceremony unlock ok")
+				// ── Stage 2: A's FIRST tx — frozen ctor + set_authorized, REAL proof, mined ──
+				step("minting to owner A")
+				await mintPublicTokensForAccount(aztecConfig!, ownerA)
+				await setPgInputs(page, {
+					tokenAddress: aztecConfig!.tokenAddress,
+					authwitOwner: ownerA,
+					authwitCaller: callerB,
+					authwitAmount: "1",
+					authwitNonce: "1",
+				})
+				step("granting public authwit as A (A's FIRST tx — ctor + set_authorized)")
+				const seqGrant = await snapshotResultSeq(page)
+				const grantPopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
+				await clickByTestId(page, "pg-btn-grantPublicAuthwit")
+				const grantPopup = await grantPopupP
+				await waitForExecuteContent(grantPopup)
+				await approveExecute(grantPopup, { approvableTimeoutMs: 120_000 })
+				const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 300_000)
+				await assertPgOk(page, grantResult, "passkey-canary:grantResult")
+				const grantTxHash = txHashOf(grantResult.resultJson)
+				step(`grant submitted (${grantTxHash.slice(0, 12)}…); waiting for the node to mine it`)
+				await waitForTxMined(aztecConfig!, grantTxHash, 300_000)
+				step("A's ctor-deploy tx MINED — real proof accepted for a passkey-derived account")
 
-			// Reconnect the dApp and land a post-restart tx as A. The background rebuilds the
-			// account from the re-derived passkey master on this path and hard-throws on address
-			// drift, so an ok result pins BOTH re-derivation and execution.
-			await page.reload({ waitUntil: "domcontentloaded" })
-			await page.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
-			const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-connect")
-			const { approveVerify } = await import("../fixtures/popups")
-			await approveVerify(await verifyP)
-			await page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 })
-			await page.evaluate(() => {
-				const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-				if (!select) throw new Error("pg-bundle-select not present")
-				select.value = "transaction"
-				select.dispatchEvent(new Event("change", { bubbles: true }))
-			})
-			const seqCaps = await snapshotResultSeq(page)
-			await clickByTestId(page, "pg-btn-requestCapabilities")
-			const capsResult = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
-			await assertPgOk(page, capsResult, "passkey-canary:capsResult")
-			await page.waitForFunction(() => document.querySelectorAll('[data-testid="pg-select-account"] option').length >= 2, {
-				timeout: 30_000,
-				polling: 200,
-			})
-			const selected = await page.evaluate((owner: string) => {
-				const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-select-account"]')
-				if (!select) throw new Error("pg-select-account not present")
-				select.value = owner
-				select.dispatchEvent(new Event("change", { bubbles: true }))
-				return select.value
-			}, ownerA)
-			expect(selected).toBe(ownerA)
-			await setPgInputs(page, {
-				tokenAddress: aztecConfig!.tokenAddress,
-				recipient: aztecConfig!.minterAddress,
-				amount: "1",
-			})
-			step("post-restart sendTx as A (re-derived passkey account, non-init path)")
-			const seqFinal = await snapshotResultSeq(page)
-			const finalPopupP = waitForPopup(ctx, "execute", { timeout: 180_000 })
-			await clickByTestId(page, "pg-btn-sendTx-default")
-			const errorSentinel = new Promise<never>((_, reject) => {
-				waitForPgResult(page, "sendTx", seqFinal, 175_000).then(
-					(r) => {
-						if (r.status === "error") {
-							reject(new Error(`post-restart sendTx errored dApp-side: ${formatPgMismatch(r)}`))
-						}
+				// ── Stage 3: authwit-CONSUMING tx as the named caller B (B's FIRST tx) ──
+				await page.evaluate((caller: string) => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-select-account"]')
+					if (!select) throw new Error("pg-select-account not present")
+					select.value = caller
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				}, callerB)
+				step("consuming the authwit as B (B's FIRST tx — its own ctor + transfer_from)")
+				const seqConsume = await snapshotResultSeq(page)
+				const consumePopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
+				await clickByTestId(page, "pg-btn-consumeAuthwit")
+				const consumePopup = await consumePopupP
+				await waitForExecuteContent(consumePopup)
+				await approveExecute(consumePopup, { approvableTimeoutMs: 120_000 })
+				const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 300_000)
+				await assertPgOk(page, consumeResult, "passkey-canary:consumeResult")
+				await waitForTxMined(aztecConfig!, txHashOf(consumeResult.resultJson), 300_000)
+				step("authwit consumed; B's ctor-deploy tx MINED")
+
+				// ── Stage 4: SW restart → ceremony re-unlock in the SAME FTN → still operates ──
+				step("terminating the service worker")
+				await restartServiceWorker(ctx)
+
+				// The anchor popup stays open (same FTN = same virtual authenticator = same
+				// credential), so it is the extension page the post-stop baseline is read from.
+				await waitForWorkerLiveness(anchorPopup, await readLivenessBaseline(anchorPopup))
+				step("SW rebooted; the anchor popup must lock itself in the SAME FrameTreeNode")
+				// Passkey sessions are never silently restored: the replacement worker holds no
+				// session while this popup's store still says authenticated. Its reconnect boot
+				// resolves `locked` under an auth-required page and enters the locked state on its
+				// own — no Lock click here; the reconnect cleanup hides the header's lock control.
+				await waitForHash(anchorPopup, "#/popup/auth", 60_000)
+				await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
+				await anchorPopup.waitForFunction(
+					() => {
+						const btn = document.querySelector<HTMLButtonElement>('[data-testid="auth-submit"]')
+						return btn !== null && !btn.disabled
 					},
-					() => {},
+					{ timeout: 15_000 },
 				)
-			})
-			const finalPopup = await Promise.race([finalPopupP, errorSentinel])
-			await waitForExecuteContent(finalPopup)
-			await approveExecute(finalPopup, { approvableTimeoutMs: 120_000 })
-			const finalResult = await waitForPgResult(page, "sendTx", seqFinal, 300_000)
-			await assertPgOk(page, finalResult, "passkey-canary:finalResult")
-			await waitForTxMined(aztecConfig!, txHashOf(finalResult.resultJson), 300_000)
-			step("post-restart tx mined — passkey-derived account fully operational after ceremony re-unlock")
-		} finally {
-			await auth.cleanup()
-			await anchorPopup.close().catch(() => {})
-		}
-	},
-)
+				await clickByTestId(anchorPopup, "auth-submit")
+				await waitForHash(anchorPopup, "#/popup/general", 60_000)
+				step("post-restart ceremony unlock ok")
+
+				// Reconnect the dApp and land a post-restart tx as A. The background rebuilds the
+				// account from the re-derived passkey master on this path and hard-throws on address
+				// drift, so an ok result pins BOTH re-derivation and execution.
+				await page.reload({ waitUntil: "domcontentloaded" })
+				await page.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
+				const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
+				await clickByTestId(page, "pg-btn-connect")
+				const { approveVerify } = await import("../fixtures/popups")
+				await approveVerify(await verifyP)
+				await page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 })
+				await page.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present")
+					select.value = "transaction"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqCaps = await snapshotResultSeq(page)
+				await clickByTestId(page, "pg-btn-requestCapabilities")
+				const capsResult = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
+				await assertPgOk(page, capsResult, "passkey-canary:capsResult")
+				await page.waitForFunction(() => document.querySelectorAll('[data-testid="pg-select-account"] option').length >= 2, {
+					timeout: 30_000,
+					polling: 200,
+				})
+				const selected = await page.evaluate((owner: string) => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-select-account"]')
+					if (!select) throw new Error("pg-select-account not present")
+					select.value = owner
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+					return select.value
+				}, ownerA)
+				expect(selected).toBe(ownerA)
+				await setPgInputs(page, {
+					tokenAddress: aztecConfig!.tokenAddress,
+					recipient: aztecConfig!.minterAddress,
+					amount: "1",
+				})
+				step("post-restart sendTx as A (re-derived passkey account, non-init path)")
+				const seqFinal = await snapshotResultSeq(page)
+				const finalPopupP = waitForPopup(ctx, "execute", { timeout: 180_000 })
+				await clickByTestId(page, "pg-btn-sendTx-default")
+				const errorSentinel = new Promise<never>((_, reject) => {
+					waitForPgResult(page, "sendTx", seqFinal, 175_000).then(
+						(r) => {
+							if (r.status === "error") {
+								reject(new Error(`post-restart sendTx errored dApp-side: ${formatPgMismatch(r)}`))
+							}
+						},
+						() => {},
+					)
+				})
+				const finalPopup = await Promise.race([finalPopupP, errorSentinel])
+				await waitForExecuteContent(finalPopup)
+				await approveExecute(finalPopup, { approvableTimeoutMs: 120_000 })
+				const finalResult = await waitForPgResult(page, "sendTx", seqFinal, 300_000)
+				await assertPgOk(page, finalResult, "passkey-canary:finalResult")
+				await waitForTxMined(aztecConfig!, txHashOf(finalResult.resultJson), 300_000)
+				step("post-restart tx mined — passkey-derived account fully operational after ceremony re-unlock")
+			} finally {
+				await auth.cleanup()
+				await anchorPopup.close().catch(() => {})
+			}
+		},
+	)
+})

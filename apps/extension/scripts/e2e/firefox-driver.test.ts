@@ -1,36 +1,59 @@
-import { describe, expect, test } from "vitest"
-import { type SilentCloseWatch, newestFirefoxDir, silentlyClosed, uuidFromPrefs } from "../../tests/e2e/fixtures/browser/firefox"
+import { describe, expect, test, vi } from "vitest"
+import {
+	type SilentCloseWatch,
+	abandonSession,
+	firefoxDirFor,
+	silentlyClosed,
+	uuidFromPrefs,
+} from "../../tests/e2e/fixtures/browser/firefox"
 
 /**
  * Puppeteer's own `executablePath({ browser: "firefox" })` composes the Firefox path from the
  * CHROME build id, so it returns a directory that was never installed and geckodriver rejects the
- * session with "binary is not a Firefox executable". The driver resolves from the cache instead,
- * and this is the comparison it resolves with.
+ * session with "binary is not a Firefox executable". The driver resolves from the cache instead.
  */
 describe("firefox cache directory selection", () => {
-	test("picks the newest by version, not lexically", () => {
-		// Lexical order would put 152 after 153 here, and the 9 before the 10.
-		expect(newestFirefoxDir(["linux-stable_152.0.4", "linux-stable_153.0.4"])).toBe("linux-stable_153.0.4")
-		expect(newestFirefoxDir(["linux-stable_9.0.0", "linux-stable_10.0.0"])).toBe("linux-stable_10.0.0")
+	test("picks the locked revision, not the newest a shared cache happens to hold", () => {
+		const dirs = ["linux-stable_152.0.4", "linux-stable_153.0.4", "linux-stable_154.0.1"]
+		expect(firefoxDirFor(dirs, "stable_153.0.4")).toBe("linux-stable_153.0.4")
 	})
 
-	test("compares every component, not just the major", () => {
-		expect(newestFirefoxDir(["linux-stable_153.0.4", "linux-stable_153.0.10"])).toBe("linux-stable_153.0.10")
-		expect(newestFirefoxDir(["linux-stable_153.0.4", "linux-stable_153.1.0"])).toBe("linux-stable_153.1.0")
+	test("a revision that is a suffix of another is not mistaken for it", () => {
+		expect(firefoxDirFor(["linux-nightly_stable_153.0.4x", "linux-xstable_153.0.4"], "stable_153.0.4")).toBeUndefined()
 	})
 
-	test("treats a missing component as zero rather than as newer", () => {
-		expect(newestFirefoxDir(["linux-stable_153", "linux-stable_153.0.1"])).toBe("linux-stable_153.0.1")
+	test("a cache without the locked revision has no answer, so the caller can say what to install", () => {
+		expect(firefoxDirFor(["linux-stable_154.0.1"], "stable_153.0.4")).toBeUndefined()
+		expect(firefoxDirFor([], "stable_153.0.4")).toBeUndefined()
+	})
+})
+
+describe("a session the launch refuses to keep", () => {
+	const record = () => ({
+		marker: "m",
+		pid: 1,
+		ownerPid: 1,
+		ownerStartTime: "1",
+		profileDir: "/profiles/profile-m",
+		ownsProfile: true,
+		label: "t",
+	})
+	const cause = new Error("Firefox did not inherit the launch marker")
+
+	test("is ended, and the launch fails with its original reason", async () => {
+		const owned = record()
+		const disown = vi.fn()
+		await expect(abandonSession({ close: async () => {} }, owned, cause, disown)).rejects.toBe(cause)
+		expect(disown).not.toHaveBeenCalled()
 	})
 
-	test("an empty cache has no answer, so the caller can say what to install", () => {
-		expect(newestFirefoxDir([])).toBeUndefined()
-	})
-
-	test("does not mutate the caller's list", () => {
-		const dirs = ["linux-stable_152.0.4", "linux-stable_153.0.4"]
-		newestFirefoxDir(dirs)
-		expect(dirs).toEqual(["linux-stable_152.0.4", "linux-stable_153.0.4"])
+	// Its Firefox may carry another launch's marker, invisible to this launch's teardown.
+	test("that cannot be ended keeps its profile out of teardown's reach", async () => {
+		const owned = record()
+		const close = () => Promise.reject(new Error("timed out"))
+		const disown = vi.fn()
+		await expect(abandonSession({ close }, owned, cause, disown)).rejects.toThrow(/could not be ended \(timed out\).*left in place/)
+		expect(disown).toHaveBeenCalledWith(owned)
 	})
 })
 
