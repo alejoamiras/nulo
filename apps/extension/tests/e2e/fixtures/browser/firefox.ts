@@ -9,6 +9,7 @@ import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
+	type LaunchOwnership,
 	newLaunchMarker,
 	newProfileDir,
 	ownedByThisRun,
@@ -46,6 +47,24 @@ function contextFor(browser: Browser): LaunchContext {
 }
 
 export const classicSessionFor = (browser: Browser): WebDriverSession => contextFor(browser).session
+
+/**
+ * Ends a session the launch refuses to keep: its Firefox holds this launch's profile. If the
+ * session cannot be ended, that Firefox may carry a marker this launch cannot see, so the profile
+ * is disowned — left on disk — rather than deleted under a live process.
+ */
+export async function abandonSession(session: Pick<WebDriverSession, "close">, record: LaunchOwnership, cause: unknown): Promise<never> {
+	try {
+		await session.close()
+	} catch (closeErr) {
+		record.ownsProfile = false
+		const text = (err: unknown) => (err instanceof Error ? err.message : String(err))
+		throw new Error(`${text(cause)}; the session could not be ended (${text(closeErr)}), so ${record.profileDir} was left in place`, {
+			cause,
+		})
+	}
+	throw cause
+}
 
 /** One sweep per process, before the first launch claims ports or writes a record. */
 let sweep: Promise<string[]> | undefined
@@ -85,9 +104,7 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 			if (ownedProcesses(marker).length < 2)
 				throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
 		} catch (err) {
-			// The session's Firefox holds this launch's profile; end it before the profile is deleted.
-			await session.close().catch(() => {})
-			throw err
+			await abandonSession(session, record, err)
 		}
 		const addonId = await session.installAddon(extensionPath)
 		const attachment = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)

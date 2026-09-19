@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { type SilentCloseWatch, firefoxDirFor, silentlyClosed, uuidFromPrefs } from "../../tests/e2e/fixtures/browser/firefox"
+import {
+	type SilentCloseWatch,
+	abandonSession,
+	firefoxDirFor,
+	silentlyClosed,
+	uuidFromPrefs,
+} from "../../tests/e2e/fixtures/browser/firefox"
 
 /**
  * Puppeteer's own `executablePath({ browser: "firefox" })` composes the Firefox path from the
@@ -19,6 +25,33 @@ describe("firefox cache directory selection", () => {
 	test("a cache without the locked revision has no answer, so the caller can say what to install", () => {
 		expect(firefoxDirFor(["linux-stable_154.0.1"], "stable_153.0.4")).toBeUndefined()
 		expect(firefoxDirFor([], "stable_153.0.4")).toBeUndefined()
+	})
+})
+
+describe("a session the launch refuses to keep", () => {
+	const record = () => ({
+		marker: "m",
+		pid: 1,
+		ownerPid: 1,
+		ownerStartTime: "1",
+		profileDir: "/profiles/profile-m",
+		ownsProfile: true,
+		label: "t",
+	})
+	const cause = new Error("Firefox did not inherit the launch marker")
+
+	test("is ended, and the launch fails with its original reason", async () => {
+		const owned = record()
+		await expect(abandonSession({ close: async () => {} }, owned, cause)).rejects.toBe(cause)
+		expect(owned.ownsProfile).toBe(true)
+	})
+
+	// Its Firefox may carry another launch's marker, invisible to this launch's teardown.
+	test("that cannot be ended keeps its profile out of teardown's reach", async () => {
+		const owned = record()
+		const close = () => Promise.reject(new Error("timed out"))
+		await expect(abandonSession({ close }, owned, cause)).rejects.toThrow(/could not be ended \(timed out\).*left in place/)
+		expect(owned.ownsProfile).toBe(false)
 	})
 })
 
