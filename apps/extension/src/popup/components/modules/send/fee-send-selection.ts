@@ -7,7 +7,10 @@ const SLOTS: readonly TransferSide[] = ["private", "public"]
 
 type Blob = Record<string, unknown>
 
-/** Extension storage is writable by anything that reaches the profile dir: every shape is checked, nothing is cast. */
+/** A label longer than any real FPC name is dropped, not truncated: it only feeds a one-line preview. */
+const MAX_NAME = 64
+
+/** Extension storage is writable by anything that reaches the profile dir: every shape is checked before use. */
 const asObject = (value: unknown): Blob | undefined =>
 	typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Blob) : undefined
 
@@ -16,8 +19,12 @@ function asRecord(value: unknown): SavedRecord | undefined {
 	if (!obj) return undefined
 	if (obj.type === "fj" || obj.type === "private_fpc") return { type: obj.type }
 	if (obj.type !== "fpc") return undefined
-	const id = asObject(obj.fpc)?.id
-	return typeof id === "string" && id.length > 0 ? { type: "fpc", fpc: { id } } : undefined
+	const fpc = asObject(obj.fpc)
+	const id = fpc?.id
+	if (typeof id !== "string" || id.length === 0) return undefined
+	const name = fpc?.name
+	const labelled = typeof name === "string" && name.length > 0 && name.length <= MAX_NAME
+	return { type: "fpc", fpc: labelled ? { id, name } : { id } }
 }
 
 function slotsOf(value: unknown): { private?: SavedRecord; public?: SavedRecord } {

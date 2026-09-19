@@ -1482,6 +1482,17 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			expect(lastEmittedSettings(sponsored)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
 		})
 
+		test("public origin held on a healthy store: nothing selected and no promise of a retry nobody scheduled", async () => {
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: null })
+			const w = mountSend({ network: mainnet, originPrivacy: "public" })
+			await flushPromises()
+			expect(everEmittedSettings(w)).toEqual([])
+			expect(activeType(w)).toBeUndefined()
+			expect(lastNeedsFeeJuice(w)).toBe(false)
+			expect(degradedText(w)).toBeNull()
+		})
+
 		test("public origin → Fee Juice ahead of Private Fee Juice and the sponsor", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: HELD })
@@ -1512,15 +1523,20 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 	})
 
 	describe("the fresh read", () => {
-		test("a private-origin mount forces the balance read; public and null origins do not", async () => {
+		test("every Send mount forces the balance read, whatever its origin; a null origin does not", async () => {
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
 			mountSend()
 			await flushPromises()
 			expect(mocks.getGasBalances).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), true)
 
-			mountSend({ originPrivacy: "public", account: accountB })
+			// The origin can flip to private with no further read, so a public mount may not settle for the TTL.
+			const pub = mountSend({ originPrivacy: "public", account: accountB })
 			await flushPromises()
-			expect(mocks.getGasBalances.mock.calls.at(-1)?.[2]).toBeFalsy()
+			expect(mocks.getGasBalances.mock.calls.at(-1)?.[2]).toBe(true)
+			const reads = mocks.getGasBalances.mock.calls.length
+			await pub.setProps({ originPrivacy: "private" })
+			await flushPromises()
+			expect(mocks.getGasBalances.mock.calls.length).toBe(reads)
 
 			mount(FeeSettingsCard, { props: baseProps({ account: { id: "a3", address: "0xacctC" } }), global: { stubs: STUBS } })
 			await flushPromises()
@@ -1533,6 +1549,37 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			const w = mountSend()
 			await flushPromises()
 			expect(everEmittedSettings(w)).toEqual([{ paymentMethod: { kind: "fpc", fpcId: "p1" } }])
+		})
+	})
+
+	describe("the loading preview", () => {
+		test("a saved sponsor pick is previewed by its saved label before the FPC list exists, and pays nothing", async () => {
+			const gas = deferred<unknown>()
+			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])
+			mocks.getGasBalances.mockReturnValue(gas.promise)
+			storageBacking["nulo:ui:sendFeePaymentMethods"] = {
+				[account.address]: { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } },
+			}
+			const w = mountSend()
+			await flushPromises()
+			expect(activeType(w)).toBe("fpc")
+			expect(activeTitle(w)).toBe("Sponsor")
+			expect(everEmittedSettings(w)).toEqual([])
+
+			gas.resolve({ publicFeeJuice: HELD, privateFeeJuice: HELD })
+			await flushPromises()
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		})
+
+		test("no sponsor preview where sponsors are not offered", async () => {
+			const gas = deferred<unknown>()
+			mocks.getGasBalances.mockReturnValue(gas.promise)
+			storageBacking["nulo:ui:sendFeePaymentMethods"] = {
+				[account.address]: { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } },
+			}
+			const w = mountSend({ network: mainnet })
+			await flushPromises()
+			expect(activeType(w)).toBeUndefined()
 		})
 	})
 
@@ -1620,7 +1667,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			await w.find('[data-testid="pick-fpc"]').trigger("click")
 			await flushPromises()
 			expect(storageBacking[SEND_KEY]).toEqual({
-				[account.address]: { private: { type: "fj" }, public: { type: "fpc", fpc: { id: "s1" } } },
+				[account.address]: { private: { type: "fj" }, public: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } },
 			})
 			expect(FEE_METHOD_LS_KEY in storageBacking).toBe(false)
 			w.unmount()

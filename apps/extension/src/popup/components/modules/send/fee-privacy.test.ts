@@ -1,11 +1,12 @@
 import { describe, expect, test } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import type { FeeMethodOption, GasBalances, RegisteredFpc } from "./fee-helpers"
+import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
 import {
 	applyFpcEdits,
 	type FeeKnowledge,
 	feePayerNotice,
 	isEligible,
+	previewForPick,
 	recordOf,
 	resolveSendSelection,
 	type SendSelection,
@@ -209,10 +210,30 @@ describe("applyFpcEdits", () => {
 	})
 })
 
+describe("previewForPick", () => {
+	const loading = buildFeeMethods([], undefined, { allowSponsored: true })
+
+	test("a row that exists is the preview", () => {
+		expect(previewForPick({ type: "fj" }, loading, true)?.type).toBe("fj")
+		expect(previewForPick({ type: "private_fpc" }, loading, true)?.type).toBe("private_fpc")
+	})
+
+	test("a sponsor pick with no row yet is drawn from its label, and carries nothing to pay with", () => {
+		const preview = previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading, true)
+		expect(preview).toEqual({ type: "fpc", title: "My sponsor", subtitle: "sponsored" })
+		expect(previewForPick({ type: "fpc", fpc: { id: "spon" } }, loading, true)?.title).toBe("Sponsored FPC")
+	})
+
+	test("nothing where sponsors are not offered, or for no pick", () => {
+		expect(previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading, false)).toBeUndefined()
+		expect(previewForPick(undefined, loading, true)).toBeUndefined()
+	})
+})
+
 describe("recordOf", () => {
-	test("stores the semantic key only", () => {
+	test("stores the semantic key, plus the sponsor's label for the loading preview", () => {
 		expect(recordOf(FJ)).toEqual({ type: "fj" })
 		expect(recordOf(PRIV)).toEqual({ type: "private_fpc" })
-		expect(recordOf(SPON)).toEqual({ type: "fpc", fpc: { id: "spon" } })
+		expect(recordOf(SPON)).toEqual({ type: "fpc", fpc: { id: "spon", name: SPON.fpc?.name } })
 	})
 })

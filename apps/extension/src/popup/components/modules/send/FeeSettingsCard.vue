@@ -20,7 +20,7 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
 import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
-import { applyFpcEdits, feePayerNotice, recordOf, resolveSendSelection, rowForPick } from "./fee-privacy"
+import { applyFpcEdits, feePayerNotice, previewForPick, recordOf, resolveSendSelection } from "./fee-privacy"
 import { loadSendSelections, mutateSendSelections, readSendSlots, withSendSlot } from "./fee-send-selection"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
@@ -167,7 +167,7 @@ const sendSelection = computed(() => {
 	if (props.originPrivacy === null) return null
 	const pick = sendPicks[props.account?.address]?.[props.originPrivacy]
 	if (!isInitComplete.value || !scopeIsLiveIdentity(committedScope.value)) {
-		return { kind: "pending", preview: rowForPick(pick, methods.value) }
+		return { kind: "pending", preview: previewForPick(pick, methods.value, allowSponsored.value) }
 	}
 	const know = { fpcs: knownFpcs.value, balances: gasBalances.value, allowSponsored: allowSponsored.value }
 	return resolveSendSelection(props.originPrivacy, know, pick)
@@ -181,7 +181,6 @@ const effectiveMethod = computed(() => {
 /** Set exactly when this send would name the account as its fee payer while its origin is private —
  *  derived from the method that actually pays, so a defaulted and a hand-picked Fee Juice read alike. */
 const payerNotice = computed(() => feePayerNotice(props.originPrivacy, props.destinationPrivacy, effectiveMethod.value))
-/** A private send is paid from private gas; every other card keeps the generic wording. */
 const nudgeCopy = computed(() =>
 	props.originPrivacy === "private"
 		? {
@@ -340,11 +339,11 @@ const FEE_DATA_UNAVAILABLE = "Couldn't load fee data — retrying in the backgro
 const PRIVATE_GAS_UNCHECKED = "Couldn't check your private gas. Pick a fee source to continue."
 
 /** The info row's text. A hold with a healthy store is a read that came back without a balance —
- *  nothing is retrying, so the row says what to do instead of promising a retry. */
+ *  nothing is retrying, so the row never promises a retry: a private origin says what to do, and a
+ *  public origin leaves the trigger's own "select a method" prompt to speak. */
 const statusNotice = computed(() => {
 	if (error.value) return error.value
-	if (sendSelection.value?.kind !== "hold") return ""
-	return props.originPrivacy === "private" ? PRIVATE_GAS_UNCHECKED : FEE_DATA_UNAVAILABLE
+	return sendSelection.value?.kind === "hold" && props.originPrivacy === "private" ? PRIVATE_GAS_UNCHECKED : ""
 })
 
 /** This card's capabilities: both legs, backoff retry while mounted, no
@@ -474,8 +473,9 @@ const ensureLegsSettled = async (scope) => {
 		// account): a snapshot inside the reader's TTL would show the old figure and hold Confirm
 		// off, so a locked mount reads fresh.
 		// A private send defaults to the account's own Fee Juice only on a private balance read as zero,
-		// and a zero from the reader's TTL may predate a receipt — so that mount reads fresh too.
-		const forceRefresh = Boolean(props.lockedMethod) || props.originPrivacy === "private"
+		// and a zero from the reader's TTL may predate a receipt. The origin can flip to private without
+		// another read, so every Send mount reads fresh, whatever its origin is at the time.
+		const forceRefresh = Boolean(props.lockedMethod) || props.originPrivacy !== null
 		await balancesStore.ensure(scope, { legs: ["gas", "fpc"], forceRefresh })
 		return true
 	} catch (e) {

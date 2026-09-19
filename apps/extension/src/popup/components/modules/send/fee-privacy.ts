@@ -3,7 +3,8 @@ import { buildFeeMethods, type FeeMethodOption, type GasBalances, type Registere
 export type TransferSide = "private" | "public"
 
 /** The compact form a pick is stored in — never a presentation row. */
-export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: string } | null }
+/** `fpc.name` only labels the loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
+export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: string; name?: string } | null }
 
 /** The committed snapshot the card holds. `undefined` balances = the gas read failed. */
 export type FeeKnowledge = { fpcs: RegisteredFpc[]; balances: GasBalances | undefined; allowSponsored: boolean }
@@ -101,6 +102,18 @@ export function rowForPick(pick: SavedRecord | undefined, methods: FeeMethodOpti
 	return id ? methods.find((m) => m.type === "fpc" && m.fpc?.id === id) : undefined
 }
 
+/** What the trigger shows before the first snapshot. FPC rows do not exist until the FPC list has
+ *  loaded, so a sponsor pick is drawn from its saved label — display only, it carries no `fpc` to pay with. */
+export function previewForPick(
+	pick: SavedRecord | undefined,
+	methods: FeeMethodOption[],
+	allowSponsored: boolean,
+): FeeMethodOption | undefined {
+	const row = rowForPick(pick, methods)
+	if (row || pick?.type !== "fpc" || !pick.fpc?.id || !allowSponsored) return row
+	return { type: "fpc", title: pick.fpc.name || "Sponsored FPC", subtitle: "sponsored" }
+}
+
 /** A saved pick wins when its row still exists and is eligible; otherwise the default walk. */
 export function resolveSendSelection(origin: TransferSide, know: FeeKnowledge, pick: SavedRecord | undefined): SendSelection {
 	const methods = buildFeeMethods(know.fpcs, know.balances, { allowSponsored: know.allowSponsored })
@@ -140,5 +153,6 @@ export function feePayerNotice(
 
 /** The compact record persisted for a picked row. */
 export function recordOf(method: FeeMethodOption): SavedRecord {
-	return method.type === "fpc" && method.fpc ? { type: "fpc", fpc: { id: method.fpc.id } } : { type: method.type }
+	if (method.type !== "fpc" || !method.fpc) return { type: method.type }
+	return { type: "fpc", fpc: method.fpc.name ? { id: method.fpc.id, name: method.fpc.name } : { id: method.fpc.id } }
 }

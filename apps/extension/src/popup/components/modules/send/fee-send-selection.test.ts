@@ -43,13 +43,22 @@ describe("slot parsing", () => {
 		expect(readSendSlots(raw, "0xC")).toEqual({})
 	})
 
-	test("stores the semantic key only — presentation fields are dropped", () => {
+	test("stores the semantic key and the preview label — everything else is dropped", () => {
 		const raw = withSendSlot(undefined, "0xA", "private", {
 			type: "fpc",
-			fpc: { id: "s1", name: "Sponsor", type: 1 },
+			fpc: { id: "s1", name: "Sponsor", type: 1, address: "0xfpc" },
 			title: "Sponsor",
 		} as never)
-		expect(raw).toEqual({ "0xA": { private: { type: "fpc", fpc: { id: "s1" } } } })
+		expect(raw).toEqual({ "0xA": { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } } })
+	})
+
+	test.each([
+		["a non-string", 7],
+		["an empty string", ""],
+		["an oversized string", "x".repeat(65)],
+	])("a label that is %s is dropped, the pick is kept", (_, name) => {
+		const stored = { "0xA": { private: { type: "fpc", fpc: { id: "s1", name } } } }
+		expect(readSendSlots(stored, "0xA")).toEqual({ private: { type: "fpc", fpc: { id: "s1" } } })
 	})
 
 	test.each<[string, unknown]>([
