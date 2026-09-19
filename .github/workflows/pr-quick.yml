@@ -104,6 +104,12 @@ jobs:
               - 'packages/bridge-core/package.json'
               - 'packages/resolve-asset/src/**'
               - 'packages/resolve-asset/package.json'
+              # The licence texts and the expected-minimum list are build inputs too.
+              - 'packages/third-party-notices/src/**'
+              - 'packages/third-party-notices/package.json'
+              - 'packages/third-party-notices/texts/**'
+              - 'packages/third-party-notices/bin/**'
+              - 'packages/third-party-notices/expected-minimum.txt'
             playground:
               - 'apps/playground/**'
             landing:
@@ -158,6 +164,12 @@ jobs:
               - 'bunfig.toml'
               - '.github/workflows/_build-extension.yml'
               - '.github/actions/setup-bun/**'
+              # The notices are generated per build, and the zip-content assertion runs per target.
+              - 'packages/third-party-notices/src/**'
+              - 'packages/third-party-notices/package.json'
+              - 'packages/third-party-notices/texts/**'
+              - 'packages/third-party-notices/bin/**'
+              - 'packages/third-party-notices/expected-minimum.txt'
       - name: Override for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         id: override

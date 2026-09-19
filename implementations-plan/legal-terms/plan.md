@@ -197,6 +197,7 @@ it is how each phase proves itself, and CI must run it without anyone rememberin
 | S9 About row text shows the accepted version; "Not accepted — Review" when declined | criterion 4 | P6 |
 | N1 network: `stale` ⇒ dApp call rejects `TERMS_ACCEPTANCE_REQUIRED`, wallet send refused, no tx row; accept ⇒ both succeed | the wall, against a real node | P5 |
 | B1 build artifact: both zips contain `THIRD-PARTY-NOTICES.txt` ⊇ expected-minimum list | criterion 5 | P9 |
+| S10 About → Open-source licences opens the file the packed extension shipped | criterion 5 | P9 |
 
 ## Phases
 
@@ -275,11 +276,15 @@ proverless-marked spec without it), `bun run audit:vue`. Extract the seed-export
 `apps/extension/tests/e2e/README.md` and the `e2e-testing` skill with the `legal:` fixture option
 and the pointer-click rule for overlay proofs.
 
-### Arc C — third-party notices (blocked)
+### Arc C — third-party notices (unblocked 2026-09-18)
 
-Blocked until (a) the Presto MIT versions are in `bun.lock` and (b) `@aztec/sqlite3mc-wasm`'s
-provenance is established well enough to write an honest `OVERRIDES` entry. Neither the policy nor
-the allowlist is softened to unblock it.
+Was blocked on (a) the Presto MIT versions reaching `bun.lock` and (b) `@aztec/sqlite3mc-wasm`'s
+provenance. Both cleared: the owner published the MIT versions (taken under a dated min-age
+exclude, his call: "1. temporary exclude"), and the package's own README pins the upstream
+sqlite3mc release archive by SHA-256, which was re-verified byte for byte. Neither the policy nor
+the allowlist was softened. What recon found beyond the plan's assumption: **every** bundled
+`@aztec/*` package lacks licence metadata and a licence file, not only sqlite3mc, so the overrides
+are version-bound groups; see `lessons/arc-c.md`.
 
 **P8 · generator + policy.** Tests: rendered-module extraction from a fixture bundle (a tree-shaken
 module is excluded); owning-package resolution; dedupe; licence-file discovery; SPDX `OR` / `AND` /
@@ -372,6 +377,19 @@ for them:
 - Follow-ups, not done here: privacy-claim pin tests; a Spanish Terms; a release-workflow check that
   refuses a stable publish while `«FILL»` survives; a rendered licences window; opening the wallet
   automatically when a dApp is refused.
+- **Found by Arc C, not fixed here** (each is its own change, outside this plan's scope):
+  - **Test code ships in the production extension.** `vite-plugin-pages` turns every `*.test.ts`
+    under a pages directory into a route, so `vitest`, `chai`, `@vue/test-utils` and
+    `@pinia/testing` render into the bundle (thirteen such files on `dev`, none from this plan). The
+    notices file lists them because they really ship. Fix: exclude `**/*.test.ts` in the Pages
+    config, then drop them from nothing else (the expected-minimum list does not name them).
+  - **The bundled fonts carry no licence notice.** `@nulo/design` vendors Inter, Space Grotesk,
+    JetBrains Mono (OFL-1.1) and Material Symbols (Apache-2.0) as bare `.woff2` files, shipped by
+    all three apps. OFL-1.1 requires its text to travel with the font and is not on the code
+    allowlist; adding it is an owner decision, so the generator does not cover fonts.
+  - **`@aztec/bb.js` declares MIT while the barretenberg tree it is built from is Apache-2.0.** The
+    override reproduces the Apache-2.0 text and acknowledges the declared field; worth raising
+    upstream together with the missing licence files across `@aztec/*`.
 
 ## Deviation from the blueprint skill
 

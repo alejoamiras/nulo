@@ -138,6 +138,15 @@ jobs:
           if [ "$fail" = 0 ]; then echo "✓ no test-only markers in production build"; fi
           exit "$fail"
 
+      # MIT, BSD and Apache-2.0 all require their notice to travel INSIDE the distributed artifact.
+      # The generator already fails the build on a disallowed or unreviewed licence; this catches
+      # the other failure — a file that is absent, or that silently lost a whole class of input
+      # (a worker build, the overrides, the vendored components).
+      - name: Assert the third-party notices shipped
+        env:
+          TARGET: ${{ inputs.target }}
+        run: bun packages/third-party-notices/bin/check-minimum.ts "$TARGET" apps/extension/dist
+
       - name: Upload Chrome build
         id: upload-chrome
         if: inputs.upload_artifacts && (inputs.target == 'chrome' || inputs.target == 'both')
