@@ -30,13 +30,24 @@ describe("composite/AmountCard", () => {
 	})
 
 	test("a keystroke is read from the input, not from a model the parent has not re-rendered yet", async () => {
-		// The prop stays "1": the parent's re-render has not happened when the handler runs.
-		const w = mountCard({ modelValue: "1", token: { symbol: "TT", decimals: 18 } })
+		// The listener is what makes the model parent-owned (without one `defineModel` keeps local
+		// state and a write reads back at once); the prop staying "1" is the re-render not having happened.
+		const w = mountCard({ modelValue: "1", "onUpdate:modelValue": () => {}, token: { symbol: "TT", decimals: 18 } })
 		const input = w.find("input[data-testid='send-amount-input']")
 		;(input.element as HTMLInputElement).value = "1."
 		await input.trigger("input", { data: "." })
 		const emits = w.emitted("update:modelValue")
 		expect(emits?.[emits.length - 1]).toEqual(["1."])
+	})
+
+	test('a first "0" becomes "0." without a clamp hint, even for a token with no decimals', async () => {
+		const w = mountCard({ modelValue: "", "onUpdate:modelValue": () => {}, token: { symbol: "NFT", decimals: 0 } })
+		const input = w.find("input[data-testid='send-amount-input']")
+		;(input.element as HTMLInputElement).value = "0"
+		await input.trigger("input", { data: "0" })
+		const emits = w.emitted("update:modelValue")
+		expect(emits?.[emits.length - 1]).toEqual(["0."])
+		expect(w.find("[data-testid='send-amount-clamp-hint']").exists()).toBe(false)
 	})
 
 	test("renders ONLY the Max action link (Half was dropped in the 1A rework)", () => {

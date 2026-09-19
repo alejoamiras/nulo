@@ -48,13 +48,14 @@ onMounted(() => {
 	if (props.tokenBalanceByType) inputEl.value.focus()
 })
 
-// Works on locals and writes the model once: `model.value` only reflects a write after the
-// parent re-renders, and nothing guarantees a flush between v-model's listener and this one.
+// Works on the input's own value and writes the model once: `model.value` only reflects a write
+// after the parent re-renders, and nothing guarantees a flush between v-model's listener and this one.
 const handleAmountInput = (e) => {
-	const purgedAmount = purgeNumber(e.target.value)
+	const typed = e.target.value
+	const purgedAmount = purgeNumber(typed)
 
 	let next = purgedAmount
-	if (["0", ","].includes(e.data) && next.length === 1) next = "0."
+	if (["0", ","].includes(e.data) && typed.length === 1) next = "0."
 
 	const normalizedAmount = normalizeAmount(purgedAmount)
 	if (typeof normalizedAmount === "string") next = normalizedAmount
@@ -62,12 +63,13 @@ const handleAmountInput = (e) => {
 	// Clamp decimal places to the token's `decimals`. If the typed value
 	// had more, surface a small inline hint so the truncation is visible.
 	if (tokenDecimals.value !== undefined) {
-		const clamped = clampDecimals(next, tokenDecimals.value)
-		wasClamped.value = clamped !== next
-		next = clamped
+		const clamped = clampDecimals(typed, tokenDecimals.value)
+		wasClamped.value = clamped !== typed
+		if (wasClamped.value) next = clamped
 	}
 
 	model.value = next
+	// When `next` equals what the parent already holds, no re-render comes to correct the field.
 	if (e.target.value !== next) e.target.value = next
 }
 
