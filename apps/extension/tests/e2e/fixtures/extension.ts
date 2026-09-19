@@ -1,15 +1,16 @@
 import { existsSync, readdirSync } from "node:fs"
-import { TimeoutError, type Browser, type Page, type ConsoleMessage, type ElementHandle } from "puppeteer"
+import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
 import {
 	discoverExtensionId,
 	extensionUrl,
 	gotoExtensionPage,
-	isFirefox,
 	isTargetGone,
 	launchBrowser,
 	newPage,
 	openScratchPage,
+	pickFile,
+	prepareClick,
 } from "./browser"
 import {
 	captureBalanceBaseline,
@@ -1352,19 +1353,12 @@ export async function replaceInputValue(page: Page, selector: string, value: str
 	)
 }
 
-/**
- * A real click focuses the window it lands in; a scripted one does not. Headless Firefox hands
- * focus to every window the wallet opens, its minimized PXE window included, and refuses WebAuthn
- * from any window but the focused one — so a click that starts a ceremony has to bring its own.
- */
-const focusLikeAClick = (page: Page): Promise<void> => (isFirefox ? page.bringToFront().catch(() => {}) : Promise.resolve())
-
 /** Click a visible, enabled element by an arbitrary CSS selector. Same
  *  in-page synthetic-click pattern as `clickByTestId`, just unscoped from
  *  testids — use this when the target's only stable handle is a class
  *  combo, ARIA role, or other non-testid selector. */
 export async function clickSelector(page: Page, selector: string, timeout = 10_000): Promise<void> {
-	await focusLikeAClick(page)
+	await prepareClick(page)
 	try {
 		await page.waitForFunction(
 			(sel: string) => {
@@ -1398,7 +1392,7 @@ export async function clickSelector(page: Page, selector: string, timeout = 10_0
  *  the right choice for popup chains; matches the same pattern in
  *  `replaceInputValue`. */
 export async function clickByTestId(page: Page, testId: string, timeout = 10_000): Promise<void> {
-	await focusLikeAClick(page)
+	await prepareClick(page)
 	try {
 		await page.waitForFunction(
 			(id: string) => {
@@ -1434,33 +1428,9 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 	}
 }
 
-/**
- * Click the control that opens a file picker and answer it with `filePath`.
- *
- * The click is programmatic, and only Chrome treats an evaluated script as a user gesture: Firefox
- * refuses to open a picker without one, so no chooser event ever arrives there. The wallet appends
- * its `<input type="file">` to the body before asking for the picker and removes it on `change`,
- * so on Firefox the file goes straight into that pending input.
- */
-export async function pickFileByTestId(page: Page, testId: string, filePath: string): Promise<void> {
-	if (!isFirefox) {
-		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, testId)])
-		await chooser.accept([filePath])
-		return
-	}
-	// The wallet removes an input only on `change`, so an abandoned pick leaves one behind and the
-	// file would go to that dead request instead of this one.
-	await page.evaluate(() => {
-		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
-	})
-	await clickByTestId(page, testId)
-	const pending = 'body > input[type="file"]:not([data-e2e-stale])'
-	// This fixture's `waitForSelector` waits without returning the handle.
-	await page.waitForSelector(pending, { timeout: 10_000 })
-	const input = await page.$(pending)
-	if (!input) throw new Error(`pickFileByTestId: "${testId}" opened no file input`)
-	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
-}
+/** Click the control that opens a file picker and answer it with `filePath`. */
+export const pickFileByTestId = (page: Page, testId: string, filePath: string): Promise<void> =>
+	pickFile(page, () => clickByTestId(page, testId), filePath)
 
 function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []

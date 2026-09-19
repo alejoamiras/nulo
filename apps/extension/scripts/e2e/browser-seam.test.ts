@@ -123,12 +123,10 @@ function testsForWorkerTarget(node: ts.Node): boolean {
 /**
  * Direct `browser.waitForTarget` calls left outside the seam, exact and shrink-only. Over BiDi no
  * event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
- * The fixture entry waits for the service worker, which is Chrome-only by nature; the probe calls
- * it on purpose, to measure exactly that.
+ * The fixture entry waits for the service worker, which is Chrome-only by nature.
  */
 const WAIT_DEBT: Record<string, number> = {
 	"fixtures/helpers.ts": 1,
-	"probes/discovery.test.ts": 1,
 }
 
 /** 1-based line numbers of executable seam violations in one file's source. */
@@ -167,6 +165,29 @@ function violations(source: string): { scheme: number[]; close: number[]; worker
 	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait), page: dedupe(page) }
 }
 
+const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
+
+/**
+ * 1-based lines where a file asks which browser it is on. A shared helper that does is a second,
+ * unlisted driver: the behaviour it forks never shows up on `BrowserDriver`, so the next browser —
+ * or the next reader — cannot find it. A test may ask, to skip or to state a real difference.
+ */
+function browserBranches(source: string): number[] {
+	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
+	const lines: number[] = []
+	const visit = (node: ts.Node): void => {
+		if (ts.isImportDeclaration(node)) return
+		if (ts.isIdentifier(node) && BROWSER_FLAGS.has(node.text))
+			lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+		ts.forEachChild(node, visit)
+	}
+	ts.forEachChild(file, visit)
+	return [...new Set(lines)]
+}
+
+const isSharedHelper = (rel: string): boolean =>
+	(rel.startsWith("fixtures/") && !rel.startsWith("fixtures/browser/")) || rel.startsWith("helpers/")
+
 /** String and template *text* only — a comment or a regex literal is never one of these nodes. */
 function isSchemeText(node: ts.Node): boolean {
 	const textual =
@@ -196,9 +217,11 @@ function scan() {
 	const worker: Record<string, number> = {}
 	const wait: Record<string, number> = {}
 	const page: string[] = []
+	const branch: string[] = []
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
+		if (isSharedHelper(rel)) branch.push(...browserBranches(source).map((n) => `${rel}:${n}`))
 		const found = violations(source)
 		scheme.push(...found.scheme.map((n) => `${rel}:${n}`))
 		close.push(...found.close.map((n) => `${rel}:${n}`))
@@ -206,7 +229,7 @@ function scan() {
 		if (found.wait.length) wait[rel] = found.wait.length
 		page.push(...found.page.map((n) => `${rel}:${n}`))
 	}
-	return { scheme, close, worker, wait, page, visited }
+	return { scheme, close, worker, wait, page, branch, visited }
 }
 
 /**
@@ -245,6 +268,10 @@ describe("browser seam", () => {
 	// PXE window: a page opened there is never visible, never animates and cannot run WebAuthn.
 	test("no page is opened outside the seam — use newPage()", () => {
 		expect(found.page).toEqual([])
+	})
+
+	test("no shared helper branches on the browser — put the difference on BrowserDriver", () => {
+		expect(found.branch).toEqual([])
 	})
 })
 
@@ -311,6 +338,12 @@ describe("browser seam guard", () => {
 	test("flags a direct newPage on a browser, and not the seam's own", () => {
 		expect(violations(inAsync("const page = await ctx.browser.newPage()")).page).toEqual([2])
 		expect(violations(inAsync("const page = await newPage(ctx.browser)")).page).toEqual([])
+	})
+
+	test("flags a browser test, and not the import that would feed one", () => {
+		expect(browserBranches('import { isFirefox } from "./browser"\nif (isFirefox) stub()')).toEqual([2])
+		expect(browserBranches('const dir = BROWSER === "firefox" ? a : b')).toEqual([1])
+		expect(browserBranches('import { isFirefox } from "./browser"')).toEqual([])
 	})
 
 	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {

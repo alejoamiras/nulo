@@ -20,7 +20,6 @@
     "test:e2e:network": "bun run --cwd apps/extension vitest run --config vitest.e2e.network.config.ts",
     "test:e2e:all": "bun run --cwd apps/extension vitest run --config vitest.e2e.all.config.ts",
     "e2e:agent": "bash apps/extension/scripts/e2e/agent.sh",
-    "e2e:agent:probes": "NULO_E2E_VITEST_CONFIG=vitest.e2e.probes.config.ts bash apps/extension/scripts/e2e/agent.sh",
     "e2e:reap": "bun apps/extension/tests/e2e/reap.ts",
     "e2e:tools": "bash apps/tools/scripts/e2e/agent.sh",
     "e2e:tools:reap": "bash apps/tools/scripts/e2e/agent.sh reap",

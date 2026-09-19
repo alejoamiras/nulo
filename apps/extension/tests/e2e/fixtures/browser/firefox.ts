@@ -2,10 +2,10 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
-import type { Browser, Page, Target } from "puppeteer"
+import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
 	newLaunchMarker,
@@ -177,8 +177,18 @@ function resolveFirefoxBinary(): string {
 	return path.join(root, newest, "firefox", "firefox")
 }
 
+/**
+ * Artifact mode runs the production bundle, where a resolved quote breaks the fresh-wallet fiat
+ * specs — the Chrome driver's resolver rule has the full reasoning. Only the price host is sent to
+ * a dead port; everything else, the RPC included, stays direct.
+ */
+const PRICE_HOST_BLACKHOLE = `data:text/javascript,${encodeURIComponent(
+	'function FindProxyForURL(url, host) { return host === "api.coingecko.com" ? "PROXY 127.0.0.1:1" : "DIRECT" }',
+)}`
+
 function capabilities({ profileDir, headless }: { profileDir: string; headless: boolean }): Record<string, unknown> {
 	return {
+		...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? { proxy: { proxyType: "pac", proxyAutoconfigUrl: PRICE_HOST_BLACKHOLE } } : {}),
 		// Asks geckodriver for a BiDi endpoint on the session it owns, which is what makes one
 		// browser drivable from both channels at once.
 		webSocketUrl: true,
@@ -291,6 +301,68 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
 	return page
 }
 
+/**
+ * Headless Firefox hands focus to every window the wallet opens, its minimized PXE window
+ * included, and refuses WebAuthn from any window but the focused one. A person's click would have
+ * focused the page; a scripted one has to be given that.
+ */
+const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
+
+const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
+
+/**
+ * Firefox refuses a file picker without a user gesture, and an evaluated click is not one, so no
+ * chooser event ever comes. The wallet appends its `<input type="file">` to the body before asking
+ * for the picker and removes it on `change`, so the file goes straight into that pending input.
+ */
+async function pickFile(page: Page, open: () => Promise<void>, filePath: string): Promise<void> {
+	// An abandoned pick leaves its input behind, and the file would go to that dead request.
+	await page.evaluate(() => {
+		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
+	})
+	await open()
+	await page.waitForSelector(PENDING_FILE_INPUT, { timeout: 10_000 })
+	// Re-queried: the suite's pages replace `waitForSelector` with one that returns no handle.
+	const input = await page.$(PENDING_FILE_INPUT)
+	if (!input) throw new Error("pickFile: the click opened no file input")
+	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
+}
+
+/**
+ * BiDi has no WebAuthn module, so the authenticator is added over the classic channel. It is scoped
+ * to the session rather than to a page, so one serves every window and — unlike Chrome's — a
+ * credential outlives the window that created it.
+ */
+async function virtualAuthenticator(browser: Browser): Promise<VirtualAuthenticator> {
+	const session = classicSessionFor(browser)
+	const authenticatorId = await session.addVirtualAuthenticator({
+		protocol: "ctap2_1",
+		transport: "internal",
+		hasResidentKey: true,
+		hasUserVerification: true,
+		isUserVerified: true,
+		extensions: ["prf"],
+	})
+	return { cleanup: () => session.removeVirtualAuthenticator(authenticatorId).catch(() => {}) }
+}
+
+/**
+ * Firefox answers a request it has no authenticator for at once, and nothing in WebDriver holds a
+ * ceremony open, so the page's own `get` is replaced by one that settles only on the caller's
+ * abort — which is the path a cancel takes.
+ */
+async function holdNextCredentialGet(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		navigator.credentials.get = (options) =>
+			new Promise((_, reject) => {
+				const abort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+				// An aborted signal never fires the event again, so one aborted before this runs is lost.
+				if (options?.signal?.aborted) abort()
+				options?.signal?.addEventListener("abort", abort)
+			})
+	})
+}
+
 /** `targets()` is a synchronous read of Puppeteer's own map, so a tight poll costs no round trip. */
 async function waitForTarget(browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> {
 	const deadline = Date.now() + timeout
@@ -368,6 +440,10 @@ export const firefoxDriver: BrowserDriver = {
 	newPage,
 	openScratchPage,
 	waitForTarget,
+	prepareClick,
+	pickFile,
+	virtualAuthenticator,
+	holdNextCredentialGet,
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext/i,
 }
