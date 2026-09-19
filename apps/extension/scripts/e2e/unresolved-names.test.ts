@@ -20,10 +20,15 @@ const UNRESOLVED = new Set([
 	2724, // … did you mean (exported member)
 	2459, // Declared locally but not exported
 	2614, // No exported member, did you mean a default import
+	18004, // No value exists in scope for the shorthand property
 ])
 
-/** Ambient extension globals: typed for `src/` by packages this standalone program does not load. */
-const AMBIENT = /Cannot find name '(chrome|browser)'/
+/**
+ * `chrome` is typed for `src/` by a package this standalone program does not load, and the tree
+ * uses it inside page callbacks throughout. So a `chrome.*` reached from Node by mistake is the one
+ * unresolved name this scan cannot tell from a legitimate one.
+ */
+const AMBIENT = /Cannot find name 'chrome'/
 
 function* sources(dir: string): Generator<string> {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {

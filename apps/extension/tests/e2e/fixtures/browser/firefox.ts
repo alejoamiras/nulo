@@ -445,5 +445,5 @@ export const firefoxDriver: BrowserDriver = {
 	virtualAuthenticator,
 	holdNextCredentialGet,
 	// Firefox reports a closed window as a missing browsing context, per command.
-	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext/i,
+	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
 }

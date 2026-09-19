@@ -40,11 +40,10 @@ export type PasskeyAuthSetup = VirtualAuthenticator
 /**
  * A PRF-capable virtual authenticator, so `navigator.credentials` resolves without a device.
  *
- * @param anchorPage  A long-lived page in the test browser. Pass the page
- *                    you opened with `openPopup(ctx)` BEFORE driving register
- *                    — Chrome scopes an authenticator to the page it was added
- *                    on, so this one keeps the credential alive while passkey
- *                    popups (register / unlock) come and go.
+ * @param anchorPage  The page the in-page ceremonies will run on — the one from
+ *                    `openPopup(ctx)`, passed BEFORE driving register. Chrome
+ *                    scopes an authenticator to the page it was added on, so a
+ *                    credential made there lives exactly as long as that page.
  */
 export const setupPasskeyVirtualAuth = (browser: Browser, anchorPage: Page): Promise<PasskeyAuthSetup> =>
 	virtualAuthenticator(browser, anchorPage)

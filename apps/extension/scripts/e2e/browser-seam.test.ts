@@ -174,15 +174,43 @@ const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
  */
 function browserBranches(source: string): number[] {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
+	const flags = new Set([...BROWSER_FLAGS, ...importedFlagAliases(file)])
 	const lines: number[] = []
 	const visit = (node: ts.Node): void => {
 		if (ts.isImportDeclaration(node)) return
-		if (ts.isIdentifier(node) && BROWSER_FLAGS.has(node.text))
-			lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+		const asks = asksTheDriverOrTheEnv(node) || (ts.isIdentifier(node) && flags.has(node.text) && !isMemberName(node))
+		if (asks) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
 		ts.forEachChild(node, visit)
 	}
 	ts.forEachChild(file, visit)
 	return [...new Set(lines)]
+}
+
+/** `import { isFirefox as ff }` — the local name is the flag for the rest of the file. */
+function importedFlagAliases(file: ts.SourceFile): string[] {
+	return file.statements
+		.filter(ts.isImportDeclaration)
+		.flatMap((declaration) => {
+			const named = declaration.importClause?.namedBindings
+			return named && ts.isNamedImports(named) ? [...named.elements] : []
+		})
+		.filter((spec) => spec.propertyName !== undefined && BROWSER_FLAGS.has(spec.propertyName.text))
+		.map((spec) => spec.name.text)
+}
+
+/** `x.BROWSER` and `{ BROWSER: … }` name a member of something else, not the seam's flag. */
+function isMemberName(node: ts.Identifier): boolean {
+	const parent = node.parent
+	return (ts.isPropertyAccessExpression(parent) && parent.name === node) || (ts.isPropertyAssignment(parent) && parent.name === node)
+}
+
+/** The same question put to `driver.kind`, or to the variable the seam itself resolves from. */
+function asksTheDriverOrTheEnv(node: ts.Node): boolean {
+	if (literalText(node) === "NULO_E2E_BROWSER") return true
+	if (!ts.isPropertyAccessExpression(node)) return false
+	if (node.name.text === "NULO_E2E_BROWSER") return true
+	const receiver = unwrap(node.expression)
+	return node.name.text === "kind" && ts.isIdentifier(receiver) && receiver.text === "driver"
 }
 
 const isSharedHelper = (rel: string): boolean =>
@@ -344,6 +372,19 @@ describe("browser seam guard", () => {
 		expect(browserBranches('import { isFirefox } from "./browser"\nif (isFirefox) stub()')).toEqual([2])
 		expect(browserBranches('const dir = BROWSER === "firefox" ? a : b')).toEqual([1])
 		expect(browserBranches('import { isFirefox } from "./browser"')).toEqual([])
+	})
+
+	test.each([
+		["an import alias", 'import { isFirefox as ff } from "./browser"\nif (ff) stub()'],
+		["the driver's kind", 'import { driver } from "./browser"\nif (driver.kind === "firefox") stub()'],
+		["the env var", 'const b = 1\nif (process.env.NULO_E2E_BROWSER === "firefox") stub()'],
+		["the env var by key", 'const b = 1\nif (process.env["NULO_E2E_BROWSER"] === "firefox") stub()'],
+	])("flags a browser test asked through %s", (_label, body) => {
+		expect(browserBranches(body)).toEqual([2])
+	})
+
+	test("leaves a member that merely shares the flag's name alone", () => {
+		expect(browserBranches("const ports = { BROWSER: 9222 }\nlog(ports.BROWSER)")).toEqual([])
 	})
 
 	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {

@@ -2,44 +2,17 @@ import type { Browser, CDPSession, Page, Target } from "puppeteer"
 import type { VirtualAuthenticator } from "./index"
 
 /**
- * Wires a Chrome virtual authenticator (CDP `WebAuthn` domain) into the
- * test browser so the wallet's `navigator.credentials.create({ extensions:
- * { prf } })` call resolves without a real device. Without this the call
- * routes to the platform authenticator (Touch ID / Windows Hello / system
- * passkey UI), which is unavailable under headless puppeteer.
+ * Chrome's virtual authenticator, over the CDP `WebAuthn` domain, with `hasPrf` because the wallet
+ * refuses a passkey that returns no PRF output.
  *
- * The wallet hard-requires PRF output (`src/popup/windows/passkey/index.vue:61`
- * throws "Passkey PRF not available" otherwise), so the virtual authenticator
- * is configured with `hasPrf: true`. PRF support landed in Chrome 130 / CDP
- * `devtools-protocol@0.0.1581282` and is exposed in our `puppeteer-core@24.40.0`.
+ * An authenticator is scoped to the frame tree it was added on, not to the browser: a
+ * `chrome.windows.create` popup is a fresh root and sees none of its siblings'. So the anchor page
+ * gets one, and every passkey window gets its own as its target appears. A credential dies with
+ * the window that made it, and PRF state does not survive CDP `getCredentials`/`addCredential` —
+ * see `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`.
  *
- * Architecture
- * ------------
- * Empirically (test run 2026-05-08) virtual authenticators are scoped
- * per-FrameTreeNode, NOT per-BrowserContext — codex's reading of
- * Chromium's `webauthn_handler.cc` was correct. A `chrome.windows.create`
- * popup is a fresh FrameTreeNode root that does NOT inherit
- * authenticators from sibling pages. Each passkey-popup target therefore
- * needs its own `WebAuthn.enable` + `addVirtualAuthenticator` call.
- *
- * Consequence for tests: a credential created during register-passkey
- * lives in the register-popup's authenticator, gets garbage-collected
- * when the popup self-closes via `window.close()` in `finally`, and is
- * NOT discoverable by a subsequent unlock-passkey popup. Combined with
- * PRF state being non-portable via CDP `getCredentials`/`addCredential`,
- * this means lock+unlock and import flows are not e2e-testable today.
- * See `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`.
- *
- * The "anchor" session on the test page is kept around as a no-op for
- * future use (e.g., if Chromium gains BrowserContext-wide authenticator
- * scope, or if we add a test-only PRF-injection product hook).
- *
- * Race-window mitigation: the wallet popup's `onMounted` hook does
- * `passkey.connect()` + `await passkey.getPendingRequest(requestId)` (a SW
- * RPC round-trip, ~50-200ms) BEFORE calling `navigator.credentials.create`.
- * Puppeteer's `targetcreated` fires when the target is registered with the
- * browser, well before that round-trip resolves. Empirically that's enough
- * margin to attach + configure WebAuthn.
+ * Attaching on `targetcreated` wins the race with the ceremony: the window makes a round trip to
+ * the background before it calls `navigator.credentials`.
  */
 
 const PASSKEY_URL_FRAGMENT = "/windows/passkey"
@@ -85,13 +58,8 @@ export async function cdpVirtualAuthenticator(browser: Browser, anchorPage: Page
 
 		try {
 			await session.send("WebAuthn.enable", { enableUI: false })
-			// Each passkey popup gets its OWN authenticator. Empirically
-			// (test run 2026-05-08) the anchor authenticator on a sibling
-			// page is NOT visible to a chrome.windows.create-spawned popup
-			// — codex's per-FrameTreeNode reading was correct. Without
-			// this addVirtualAuthenticator the popup's
-			// `navigator.credentials.create` routes to the platform
-			// authenticator and times out.
+			// Its own authenticator: the anchor's is invisible from here, and without one the
+			// ceremony goes to the platform authenticator and times out.
 			const result = await session.send("WebAuthn.addVirtualAuthenticator", { options: VIRTUAL_AUTH_OPTIONS })
 			perPopupSessions.set(url, session)
 			perPopupAuthIds.set(session, result.authenticatorId)
