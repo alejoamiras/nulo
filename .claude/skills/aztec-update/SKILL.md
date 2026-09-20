@@ -40,7 +40,7 @@ Do not start Phase 1 before the answers; on a reset, do not run any `--broadcast
 - **`@alejoamiras/aztec-standards` + `@alejoamiras/aztec-fee-payment`** (our npm takeover of the Wonderland packages; ~8 pins across 5 packages).
 - **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tag, the root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
-- `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. Date the comment; a follow-up PR removes the excludes after they age past 7 days.
+- `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. They are needed only while `bun install` resolves the new line: once `bun.lock` is final, delete them again in the same PR and prove it with `bun install --frozen-lockfile --force` (locked versions are never re-gated). Keep a dated exclude across PRs only when a later PR of the same bump must re-resolve.
 
 **The lockfile ritual** — `bun install` after editing the pins. Targeted re-resolution holds
 transitives to the min-age gate (Bun ≥ 1.4), so a plain install is the default; `rm bun.lock` is
@@ -58,9 +58,9 @@ version and invites unrelated churn).
   the bare position, so key-prefix matching gives false failures) plus `realpath` resolution
   from every consumer workspace. Anything else on the old line is a missed pin.
 - Fresh publishes are min-age-blocked. Prefer waiting; when a first-party release must land
-  immediately, add ONE dated `minimumReleaseAgeExcludes` entry with the removal date and the
-  provenance you verified (registry signature + npm/SLSA attestation binding the tarball to a
-  repo+commit), and file the removal PR.
+  immediately, add ONE `minimumReleaseAgeExcludes` entry, record the provenance you verified in the PR
+  (registry signature + npm/SLSA attestation binding the tarball to a repo+commit), and delete
+  the entry in the same PR once the lockfile is written.
 - Provenance actually runs like this: build a scratch npm project from the exception-diff's
   resolved `name@version` set, `npm install --ignore-scripts`, THEN `npm audit signatures`.
   `--package-lock-only` makes audit a no-op ("found no dependencies to audit") — which is why
