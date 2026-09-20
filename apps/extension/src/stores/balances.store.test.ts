@@ -299,6 +299,20 @@ describe("balances store — subscriber capabilities drive traffic", () => {
 		sub.release()
 	})
 
+	it("the retry after a failed forced read bypasses the reader's cache too", async () => {
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_FEE)
+		mocks.getGasBalances.mockRejectedValueOnce(new Error("down")).mockResolvedValue(BAL)
+		mocks.getFpcs.mockResolvedValue([])
+		await store.ensure(SCOPE_A, { legs: ["gas"], forceRefresh: true })
+		expect(store.entry(SCOPE_A)?.gas.verified).toBeUndefined()
+		await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+		expect(mocks.getGasBalances.mock.calls.map((c) => c[2])).toEqual([true, true])
+		expect(store.entry(SCOPE_A)?.gas.verified).toEqual(BAL)
+		sub.release()
+	})
+
 	it("an ensure-path success does not clear retry debt — the loop runs to its retry success (D11)", async () => {
 		vi.useFakeTimers()
 		const store = useBalancesStore()

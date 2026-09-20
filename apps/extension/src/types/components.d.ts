@@ -49,6 +49,8 @@ declare module 'vue' {
     Install: typeof import('./../components/install.vue')['default']
     ItemsContainer: typeof import('./../components/ui/Settings/ItemsContainer.vue')['default']
     JsonViewer: typeof import('./../components/JsonViewer/JsonViewer.vue')['default']
+    LegalAcceptanceSheet: typeof import('./../components/LegalAcceptanceSheet.vue')['default']
+    LegalConsent: typeof import('./../components/composite/LegalConsent.vue')['default']
     ListStatusMessage: typeof import('./../components/composite/ListStatusMessage.vue')['default']
     LoadingState: typeof import('@nulo/design')['LoadingState']
     LogsToolbar: typeof import('./../components/JsonViewer/LogsToolbar.vue')['default']

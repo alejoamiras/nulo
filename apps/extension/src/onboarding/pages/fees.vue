@@ -37,7 +37,7 @@ function goSkip() {
 
 <template>
 	<OnboardingExplainer
-		:step="3"
+		:step="4"
 		titleMain="Fees on"
 		titleSub="Aztec"
 		lede="Three things to know about paying for transactions on Aztec."

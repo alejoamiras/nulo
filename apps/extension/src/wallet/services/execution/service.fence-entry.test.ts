@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, test, vi } from "vitest"
-import { SessionEndedError } from "@nulo/extension-messaging/errors"
+import { SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { type LocalTxOrigin, OriginType } from "@/wallet/services/transaction/spec"
 import { ExecutionService } from "./service"
 
@@ -29,19 +29,59 @@ function makeFacade() {
 	const captureExecutionFence = vi.fn(async () => LIVE)
 	const executeSendTransaction = vi.fn(async () => "0xhash")
 	const startNewTask = vi.fn(() => task)
+	const assertCurrent = vi.fn(async () => {})
 	const facade = Object.assign(Object.create(ExecutionService.prototype), {
 		ensureInitialized: async () => {},
 		planner: { extractPrimaryMethod: () => "m" },
 		taskService: { startNewTask },
 		profileService: { captureExecutionFence },
 		dappSendExecutor: { executeSendTransaction },
+		legal: { assertCurrent },
 		logDebug: () => {},
 		logInfo: () => {},
 		logError: () => {},
 	}) as ExecutionService
 	const sentUnder = () => executeSendTransaction.mock.calls[0]?.[3 as never]
-	return { facade, captureExecutionFence, executeSendTransaction, startNewTask, sentUnder }
+	return { facade, captureExecutionFence, executeSendTransaction, startNewTask, sentUnder, assertCurrent }
 }
+
+describe("ExecutionService: no broadcasting entry point runs without a current Terms acceptance", () => {
+	const refused = () => {
+		const made = makeFacade()
+		made.assertCurrent.mockRejectedValue(new TermsAcceptanceRequiredError())
+		return made
+	}
+
+	test("executeSendTransaction refuses before a task exists or an executor is reached", async () => {
+		const { facade, executeSendTransaction, startNewTask } = refused()
+		await expect(facade.executeSendTransaction(SEND_OP, UI, undefined, undefined, FENCE)).rejects.toBeInstanceOf(
+			TermsAcceptanceRequiredError,
+		)
+		expect(startNewTask).not.toHaveBeenCalled()
+		expect(executeSendTransaction).not.toHaveBeenCalled()
+	})
+
+	test.each(["send_transaction", "aztec_sendTx"])("executeOperations refuses a batch holding a %s", async (kind) => {
+		const { facade, executeSendTransaction, startNewTask } = refused()
+		const batch = [
+			{ kind: "aztec_getChainInfo", networkId: "net-1" },
+			{ ...(SEND_OP as object), kind },
+		] as never
+		await expect(facade.executeOperations(batch, DAPP, undefined, undefined, undefined, FENCE)).rejects.toBeInstanceOf(
+			TermsAcceptanceRequiredError,
+		)
+		expect(startNewTask).not.toHaveBeenCalled()
+		expect(executeSendTransaction).not.toHaveBeenCalled()
+	})
+
+	test("executeOperations still serves the wallet's own reads: a batch that broadcasts nothing is not gated", async () => {
+		const { facade, assertCurrent } = refused()
+		Object.assign(facade, { dispatchOperation: vi.fn(async () => "done") })
+		const batch = [{ kind: "aztec_simulateTx", networkId: "net-1", accountAddress: "0xacct" }] as never
+		expect(await facade.executeOperations(batch, UI)).toEqual([{ status: "ok", result: "done" }])
+		expect(assertCurrent).not.toHaveBeenCalled()
+	})
+})
 
 describe("ExecutionService: a send runs under the fence its caller authorized", () => {
 	test.each(["send_transaction", "aztec_sendTx", "register_token", "aztec_createAuthWit"])(
