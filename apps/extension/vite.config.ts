@@ -11,7 +11,9 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
-import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
+import { parseLimitGuard } from "./scripts/parse-limit-guard"
+import { stripArtifactDebugInfo } from "./scripts/strip-artifact-debug-info"
+import { artifactAliases, debugStrippedArtifacts, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	server: {
@@ -84,6 +86,8 @@ export default defineConfig({
 		},
 	},
 	plugins: [
+		stripArtifactDebugInfo(debugStrippedArtifacts),
+		parseLimitGuard(),
 		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
 		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
 		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
@@ -314,6 +318,17 @@ export default defineConfig({
 				popup: "src/popup/index.html",
 				setup: "src/setup/index.html",
 				onboarding: "src/onboarding/index.html",
+			},
+			output: {
+				// Firefox's add-on linter refuses to parse a file of 5 MiB or more, and without a rule
+				// everything the offscreen page imports lands in one ~20 MB chunk. `maxSize` is a target,
+				// not a cap — `parseLimitGuard` is what fails the build. `entriesAware` keeps a module
+				// out of entries that never imported it, so nothing DOM-bound reaches the service worker.
+				// `@aztec/wallet-sdk` is all the content script imports from a package, and whatever
+				// chunk holds it is web-accessible to every page — so it stays out of the group.
+				codeSplitting: {
+					groups: [{ name: "vendor", test: /node_modules\/(?!.*@aztec[+/]wallet-sdk)/, maxSize: 4_000_000, entriesAware: true }],
+				},
 			},
 		},
 	},
