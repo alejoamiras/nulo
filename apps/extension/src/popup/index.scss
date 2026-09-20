@@ -1,7 +1,13 @@
 #app {
 	display: flex;
 
-	height: 100%;
+	// Viewport units, not `100%`: Firefox lays an action popup out to find its preferred height, so
+	// the percentage chain through `html` and `body` is indefinite there and `body` gets its 600px
+	// from `min-height` alone — a `100%` child of that resolves to its content height, and the
+	// bottom nav, pinned to this box, floats wherever the page ends. The viewport is definite on
+	// every surface: the popup, the side panel and the approval windows.
+	height: 100vh;
+	min-height: var(--base-height);
 }
 
 html {

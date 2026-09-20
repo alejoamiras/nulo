@@ -224,6 +224,25 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
    The strip is a production-build guarantee only: the dev server prebundles dependencies through the optimizer, which does not run the plugin's `transform` — this corrects "build and dev server alike" in change 2 above. Nothing the dev server produces is shipped or linted.
 5. **Only `.vue` files are routes** (`usePages({ extensions: ["vue"] })`). The route directories hold 53 helper and test `.ts` modules, and every one was registered as a route and shipped as a lazy chunk — 37 `*.test-*.js` files in the build the linter was reading, on both browsers, on `dev` today. Found because rolldown named vendor chunks after them. No route a user can reach changes.
 
+### Phase 10 — The toolbar popup lays out in a Firefox panel (owner-found, 2026-09-20)
+
+**Why.** The owner, testing the Firefox build by hand: *"the UI looks a little bit broken, like the footer, doesn't stick to the bottom of the extension, it keeps re-adjusting for example when I go to holdings."* No test could have seen it: the suite opens the popup document in a window, and no WebDriver or BiDi command reaches a panel.
+
+**Measured, in the real panel (headless, opened from Firefox's privileged scope).** The panel, `html` and `body` are a steady 360 × 600. `#app` is not: 520 px on Home, 320 on Holdings, 456 on History, 600 on Settings — its content height — and the bottom nav is `position: absolute; bottom: 0` inside it. Firefox lays a panel's document out to find its preferred height, so the `height: 100%` chain through `html` and `body` is indefinite and `body` gets its 600 px from `min-height` alone; a `100%` child of that resolves as `auto`. (The first hypothesis — the panel re-measuring itself per route — was wrong; the measurement is what said so.)
+
+**Changes.**
+1. `src/popup/index.scss` — `#app { height: 100vh; min-height: var(--base-height) }`. The viewport is definite on every surface (popup, side panel, approval windows); the `min-height` keeps today's behaviour in a window shorter than the popup.
+2. `fixtures/browser/webdriver-classic.ts` — `chromeScript` (exclusive; switches the session to Firefox's privileged context and always back) and `listWindows`, which the silent-close watcher now uses so it can never read Firefox's own window list mid-switch and report every page closed.
+3. `fixtures/browser/firefox-action-popup.ts` — `openActionPopup`, `evaluateInActionPopup` (a frame script in the panel).
+4. `tests/e2e/action-popup-layout.test.ts` — Firefox only: on every tab, `#app` and the nav's bottom edge equal the viewport height. `data-testid="bottom-nav"` added to the nav.
+5. `FIREFOX.md` row.
+
+**UI impact:** the popup's bottom nav, on Firefox only, moves from wherever the page's content ended to the popup's bottom edge — where it already is on Chrome. Before/after screenshots of the real panel are attached to the arc's PR. **Chrome:** `100vh` and the old `100%` both resolve to the popup's 600 px; no visual change expected, and the Chrome smoke is the check.
+
+**Owner sign-off.** The bug report above is the owner's; to *"going ahead as arc 8 (surface-detected fixed height, no browser sniffing). Needs your eyes on a headed build afterwards"* the owner answered *"Sounds good. Keep going."* (2026-09-20). The shipped fix is simpler than the one described then (no surface detection — one CSS declaration). **Visual confirmation on a headed Firefox is the owner's, on the PR's build, and is the condition for merging this arc.**
+
+**Validation gate.** `bun run lint && bun run typecheck && bun run test` exit 0; `action-popup-layout.test.ts` **fails** on a Firefox build with the old stylesheet and **passes** with the new one; Firefox and Chrome smoke exit 0; on the arc's PR the three required checks and both Firefox aggregators conclude success.
+
 ## Security & Adversarial Considerations
 
 - **Threat model.** New production surface = the PRF fix and two manifest keys. Everything else is test/CI code. Attackers of interest: supply chain (a swapped geckodriver or Firefox binary inside CI) and another local process on a shared dev host.
@@ -294,6 +313,7 @@ Multi-arc, stacked with `gh stack`. Arcs revert **top-down** (each builds on the
 | 5 | `e2e-firefox-network` | 6 | `test(e2e): run the network suite on firefox` |
 | 6 | `ci-firefox-lanes` | 7, 8 | `ci(firefox): advisory firefox lanes in pr, nightly and release workflows` |
 | 7 | `firefox-offscreen-chunk-split` | 9 (closes 2) | `build(extension): keep every shipped file under the firefox linter's parse limit` |
+| 8 | `firefox-popup-panel-height` | 10 | `fix(popup): keep the bottom nav on the popup's bottom edge in a firefox panel` |
 
 Arc 1 is a user-facing fix and may be merged ahead of the rest at the owner's call. Titles stay ≤ 93 characters. No PR (draft included) opens before every quality loop below has converged. Merging is always the owner's action.
 

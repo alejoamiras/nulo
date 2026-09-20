@@ -49,6 +49,9 @@ function contextFor(browser: Browser): LaunchContext {
 
 export const classicSessionFor = (browser: Browser): WebDriverSession => contextFor(browser).session
 
+/** What reaching the toolbar popup takes: the privileged channel, and the id Firefox files the add-on under. */
+export const actionPopupContext = (browser: Browser): Pick<LaunchContext, "session" | "addonId"> => contextFor(browser)
+
 /**
  * Ends a session the launch refuses to keep: its Firefox holds this launch's profile. If the
  * session cannot be ended, that Firefox may carry a marker this launch cannot see, so the profile
@@ -428,7 +431,7 @@ function watchForSilentCloses(session: WebDriverSession, attachment: BiDiAttachm
 		reading = true
 		try {
 			const open = attachment.openContexts()
-			const handles = new Set(await session.windowHandles())
+			const handles = new Set(await session.listWindows())
 			for (const context of silentlyClosed(watch, open, handles)) attachment.reportClosed(context)
 		} catch {
 			// The session is closing or geckodriver is busy; the next tick reads again.

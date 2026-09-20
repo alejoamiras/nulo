@@ -106,6 +106,29 @@ export class WebDriverSession {
 		return run
 	}
 
+	/** The handle list, read in turn: inside `chromeScript`'s switch it would list Firefox's own windows. */
+	listWindows(): Promise<string[]> {
+		return this.exclusive(() => this.windowHandles())
+	}
+
+	/**
+	 * Run `script` with Firefox's own privileges, in a browser window's scope, and resolve with what
+	 * it passes to its last argument. Needs geckodriver's `--allow-system-access`. The context is a
+	 * property of the whole session, so the switch is exclusive and always undone.
+	 */
+	chromeScript<T>(script: string, args: unknown[] = []): Promise<T> {
+		return this.exclusive(async () => {
+			await this.send("POST", "/moz/context", { context: "chrome" })
+			try {
+				const [handle] = await this.windowHandles()
+				await this.switchToWindow(handle)
+				return (await this.send("POST", "/execute/async", { script, args }, 30_000)) as T
+			} finally {
+				await this.send("POST", "/moz/context", { context: "content" })
+			}
+		})
+	}
+
 	/** Reading a handle's URL requires switching to it, so this leaves the last window focused. */
 	windowsWithUrls(): Promise<WindowWithUrl[]> {
 		return this.exclusive(async () => {
