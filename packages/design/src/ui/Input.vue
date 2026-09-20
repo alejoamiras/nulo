@@ -399,6 +399,11 @@ const handleClear = () => {
 	margin: 0;
 }
 
+/* Firefox has no spin-button pseudo-elements; this is how it drops them. */
+.base input[type="number"] {
+	appearance: textfield;
+}
+
 .left {
 	height: 100%;
 }

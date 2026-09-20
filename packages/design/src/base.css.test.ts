@@ -15,5 +15,8 @@ test("base.css content is pinned (edits must be deliberate + visually re-verifie
 	const hash = createHash("sha256").update(css).digest("hex")
 	// 2026-08-13 (home-refresh): .copyable cursor: copy → pointer. Deliberate; visually re-verified
 	// in the Phase-5 manual pass (the copy cursor is a drag-and-drop signal, wrong for click-to-copy).
-	expect(hash).toBe("c23ee8970a1d4a9abe2220dcd165578e3274638b9ccf574f9635f64ce37475e4")
+	// 2026-09-20 (firefox): `* { scrollbar-width: none }` beside the `::-webkit-scrollbar` rule Firefox
+	// ignores, and `-moz-osx-font-smoothing` on the icon font. Deliberate; re-verified by screenshotting
+	// 16 popup routes in both browsers — Chrome unchanged, Firefox matching it.
+	expect(hash).toBe("fa81d2f7b50e2bcf6b7caafb40055942c5191d44b1e80d2ca60f991ac9485a3f")
 })

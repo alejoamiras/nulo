@@ -12,6 +12,14 @@ No WebDriver or BiDi command reaches a panel's document, and Puppeteer lists no 
 
 One trap: `moz:context` is a property of the whole session, and `watchForSilentCloses` reads the window-handle list every 150 ms. Inside the switch that list is Firefox's *own* windows, so two ticks later the watcher would report every page closed. `chromeScript` and the watcher's read now go through the same exclusive queue.
 
+## The scrollbars, and what the CSS pass found
+
+`*::-webkit-scrollbar { display: none }` was the popup's whole scrollbar policy, and Firefox does not implement the pseudo-element. The standard `scrollbar-width: none` now sits beside it in the shared `base.css`. Headless Firefox here only has overlay (zero-width) scrollbars — an `overflow: scroll` probe measured 0 px even with `ui.useOverlayScrollbars = 0` — so the layout-taking kind the owner saw on macOS could not be reproduced on this machine; the owner's headed check is the evidence for that one.
+
+`base.css` is hash-pinned by `packages/design/src/base.css.test.ts`, and the root `bun run test` runs the extension workspace only — it stayed green with the pin broken. `bun run test:all` is the command that sees it. Worth remembering for any change under `packages/`.
+
+The static inventory is small (14 prefixed constructs, 26 sites) because the design system is mostly standard CSS; the screenshot diff is what gives confidence, and it is cheap: one scratch test that walks 16 routes and `page.screenshot()`s each, run once per browser, plus a canvas diff. Window mode only — panel-only behaviour is the percentage-height class above, which the panel test now covers.
+
 ## Evidence
 
 - `action-popup-layout.test.ts` on a Firefox build with the old stylesheet: **fails** (`expected … to match object { shellHeight: 600, navBottom: 600 }`). With the fix: **passes**, 5 s.
