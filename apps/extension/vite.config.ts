@@ -11,6 +11,7 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { PAGES_OPTIONS } from "./scripts/pages-options"
 import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
@@ -104,30 +105,7 @@ export default defineConfig({
 		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
 		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
-		usePages({
-			dirs: [
-				{
-					dir: "src/pages",
-					baseRoute: "common",
-				},
-				{
-					dir: "src/setup/pages",
-					baseRoute: "setup",
-				},
-				{
-					dir: "src/popup/pages",
-					baseRoute: "popup",
-				},
-				{
-					dir: "src/popup/windows",
-					baseRoute: "windows",
-				},
-				{
-					dir: "src/onboarding/pages",
-					baseRoute: "onboarding",
-				},
-			],
-		}),
+		usePages(PAGES_OPTIONS),
 
 		useAutoImport({
 			imports: [

@@ -40,6 +40,7 @@ import {
 	JobCancelledError,
 	PxeStaleAnchorError,
 	SessionEndedError,
+	TermsAcceptanceRequiredError,
 } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
@@ -88,7 +89,8 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 		error instanceof DuplicateInitializationError ||
 		error instanceof PxeStaleAnchorError ||
 		error instanceof ContractNotRegisteredError ||
-		error instanceof SessionEndedError
+		error instanceof SessionEndedError ||
+		error instanceof TermsAcceptanceRequiredError
 	return {
 		status: "failed",
 		error: errorMessage(error),

@@ -17,15 +17,18 @@ import { LoggerStore } from "@/wallet/logger"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { TaskService, WrappedTask } from "@/wallet/services/task/service"
-import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
+import type { LegalAdmission } from "@/wallet/services/legal/spec"
 import { ExecutionCoordinator, type ProveAndSendContext } from "./execution-coordinator"
 
 const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() } as unknown as WrappedTask
 ;(fakeTask.startSubtask as ReturnType<typeof vi.fn>).mockReturnValue(fakeTask)
 
-function makeCoordinator() {
+const ACCEPTED: LegalAdmission = { assertCurrent: async () => {} }
+
+function makeCoordinator(legal: LegalAdmission = ACCEPTED) {
 	const tasks = { startNewTask: () => fakeTask } as unknown as TaskService
-	return new ExecutionCoordinator(tasks, new LoggerStore(new ConfigStore()))
+	return new ExecutionCoordinator(tasks, new LoggerStore(new ConfigStore()), legal)
 }
 
 function makeHarness(overrides: Partial<ProveAndSendContext> = {}) {
@@ -294,5 +297,64 @@ describe("sendTxTask — duplicate-initialization classification (N-15)", () => 
 		const other = new Error("Node unreachable")
 		const { coordinator, node } = makeSendHarness(other)
 		await expect(coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, true)).rejects.toBe(other)
+	})
+})
+
+describe("sendTxTask — the Terms wall", () => {
+	const refusing: LegalAdmission = {
+		assertCurrent: async () => {
+			throw new TermsAcceptanceRequiredError()
+		},
+	}
+
+	test("without a current acceptance nothing reaches the node and the task fails with the typed error", async () => {
+		const node = { sendTx: vi.fn() } as unknown as AztecNode
+		const assertLive = vi.fn()
+		;(fakeTask.fail as ReturnType<typeof vi.fn>).mockClear()
+		await expect(makeCoordinator(refusing).sendTxTask(node, {} as never, assertLive, fakeTask)).rejects.toBeInstanceOf(
+			TermsAcceptanceRequiredError,
+		)
+		expect(node.sendTx).not.toHaveBeenCalled()
+		expect(assertLive).not.toHaveBeenCalled()
+		expect(fakeTask.fail).toHaveBeenCalledWith(expect.any(TermsAcceptanceRequiredError))
+	})
+
+	test("proveAndSend stops at the wall: proved, never sent, never recorded, never marked succeeded", async () => {
+		const harness = makeHarness()
+		await expect(makeCoordinator(refusing).proveAndSend(harness.ctx)).rejects.toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(harness.calls).toContain("prove")
+		expect(harness.calls).not.toContain("send")
+		expect(harness.ctx.recordTransaction).not.toHaveBeenCalled()
+		expect(harness.ctx.markJournal).not.toHaveBeenCalledWith(expect.objectContaining({ stage: "succeeded" }))
+	})
+
+	test("the acceptance read comes before the liveness check, which still has the last word", async () => {
+		// A session that ends while the storage read is in flight must still stop the send: the read
+		// resolves as accepted, and only then does assertLive run — synchronously, in the send's tick.
+		const order: string[] = []
+		let release!: () => void
+		const held: LegalAdmission = {
+			assertCurrent: () =>
+				new Promise<void>((resolve) => {
+					order.push("legal:start")
+					release = () => {
+						order.push("legal:resolved")
+						resolve()
+					}
+				}),
+		}
+		const node = { sendTx: vi.fn() } as unknown as AztecNode
+		let live = true
+		const assertLive = () => {
+			order.push("assertLive")
+			if (!live) throw new SessionEndedError()
+		}
+		const run = makeCoordinator(held).sendTxTask(node, {} as never, assertLive, fakeTask)
+		await Promise.resolve()
+		live = false
+		release()
+		await expect(run).rejects.toBeInstanceOf(SessionEndedError)
+		expect(order).toEqual(["legal:start", "legal:resolved", "assertLive"])
+		expect(node.sendTx).not.toHaveBeenCalled()
 	})
 })

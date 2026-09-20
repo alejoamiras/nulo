@@ -41,6 +41,7 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
+import type { LegalAdmission } from "@/wallet/services/legal/spec"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import type { ProveBackend } from "@nulo/wallet-core/jobs"
@@ -174,6 +175,8 @@ export class ExecutionCoordinator {
 	public constructor(
 		private readonly tasks: TaskService,
 		readonly _logger: ILogger,
+		/** Required, never defaulted: a coordinator built without it could broadcast unasked. */
+		private readonly legal: LegalAdmission,
 		/** E2E-only proving hold-point. The no-op default never blocks, so
 		 *  production proving is unimpeded. See {@link ProofGate}. */
 		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
@@ -277,7 +280,11 @@ export class ExecutionCoordinator {
 	 *  true, an existing-nullifier rejection is re-thrown as the typed
 	 *  {@link DuplicateInitializationError} BEFORE `task.fail`, so the task
 	 *  carries the honest copy instead of the raw validator text. `assertLive`
-	 *  runs as the statement before the send: nothing may be awaited between. */
+	 *  runs as the statement before the send: nothing may be awaited between.
+	 *
+	 *  This is the only `node.sendTx` in the wallet, so the Terms check here covers every
+	 *  broadcast whatever entry point started it. It is awaited BEFORE `assertLive` for the
+	 *  reason above: a session can end while the storage read is in flight. */
 	public async sendTxTask(
 		node: AztecNode,
 		tx: Tx,
@@ -288,6 +295,7 @@ export class ExecutionCoordinator {
 		const step = new StepContent("Sending transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
 		try {
+			await this.legal.assertCurrent()
 			assertLive()
 			await node.sendTx(tx)
 			task.complete()
