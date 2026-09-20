@@ -43,3 +43,7 @@ Rolldown names an entry-aware chunk after the entries that share it, and names l
 
 - **Round 1 — "no new material findings"**, conditional on the smokes and the WASM proofs, with four Lows, all taken: artifact chunk names could collide across directories (now the whole in-package path); the "package dependencies form a DAG" claim was false and is gone from code, plan and this file; the strip is a production-build guarantee only, not a dev-server one (the optimizer prebundle skips the hook); the fail-closed `buildEnd` had no test. It also confirmed against the installed `@aztec/*` 5.2.0 sources that hashing, class-id verification, registration and PXE serialization never need `debug_symbols`, and that the frozen SchnorrAccount artifact is outside the strip list and must stay there — its guarantee is byte identity, not class-id equivalence.
 - **Round 2 — "no new material findings".** Converged.
+
+## WASM-backend proof per browser
+
+`tests/e2e/network/transfers.test.ts` through `e2e:agent`, on the final commit's code: **Firefox exit 0 (1 passed), Chrome exit 0 (1 passed)**. The backend is established by elimination, because the suite logs no backend name: neither bundle carries the proverless build stamp, neither carries the Presto-required stamp, and nothing listened on the Presto port (the run script refuses to start otherwise) — which leaves the wallet's silent fallback, bb.js WASM: its workers, its `barretenberg*.wasm.gz` assets and the `aztec-bb-js` chunks, exactly what this arc rechunked and what CI's Presto-required lanes never load.
