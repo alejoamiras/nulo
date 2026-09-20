@@ -11,8 +11,10 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
 import { parseLimitGuard } from "./scripts/parse-limit-guard"
 import { stripArtifactDebugInfo } from "./scripts/strip-artifact-debug-info"
+import { vendorChunkGroups } from "./scripts/vendor-chunks"
 import { artifactAliases, debugStrippedArtifacts, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
@@ -88,6 +90,7 @@ export default defineConfig({
 	plugins: [
 		stripArtifactDebugInfo(debugStrippedArtifacts),
 		parseLimitGuard(),
+		chunkCycleGuard(),
 		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
 		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
 		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
@@ -109,6 +112,9 @@ export default defineConfig({
 		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
 		usePages({
+			// The route directories also hold helpers and tests; without this every `.ts` beside a
+			// page becomes a route and ships as a lazy chunk.
+			extensions: ["vue"],
 			dirs: [
 				{
 					dir: "src/pages",
@@ -321,14 +327,10 @@ export default defineConfig({
 			},
 			output: {
 				// Firefox's add-on linter refuses to parse a file of 5 MiB or more, and without a rule
-				// everything the offscreen page imports lands in one ~20 MB chunk. `maxSize` is a target,
-				// not a cap — `parseLimitGuard` is what fails the build. `entriesAware` keeps a module
-				// out of entries that never imported it, so nothing DOM-bound reaches the service worker.
-				// `@aztec/wallet-sdk` is all the content script imports from a package, and whatever
-				// chunk holds it is web-accessible to every page — so it stays out of the group.
-				codeSplitting: {
-					groups: [{ name: "vendor", test: /node_modules\/(?!.*@aztec[+/]wallet-sdk)/, maxSize: 4_000_000, entriesAware: true }],
-				},
+				// everything the offscreen page imports lands in one ~20 MB chunk. `vendorChunkGroups`
+				// says where the cuts go and why they are never by size; `parseLimitGuard` is what
+				// fails the build.
+				codeSplitting: { groups: vendorChunkGroups },
 			},
 		},
 	},
