@@ -27,8 +27,13 @@ describe("artifactChunkName", () => {
 	const token = "/repo/node_modules/@aztec/noir-contracts.js/artifacts/token_contract-Token.json"
 
 	test("gives each json module of a heavy package a chunk of its own", () => {
-		expect(artifactChunkName(token)).toBe("aztec-noir-contracts-js-token-contract-Token")
+		expect(artifactChunkName(token)).toBe("aztec-noir-contracts-js-artifacts-token-contract-Token")
 		expect(artifactChunkName(token.replace("token_contract-Token", "nft_contract-NFT"))).not.toBe(artifactChunkName(token))
+	})
+
+	// Sharing a name would put both in one chunk, and two artifacts are what breaks the limit.
+	test("keeps two artifacts with one base name in different directories apart", () => {
+		expect(artifactChunkName(token.replace("artifacts/", "target/"))).not.toBe(artifactChunkName(token))
 	})
 
 	test("splits a package's modules between the two groups without overlap", () => {

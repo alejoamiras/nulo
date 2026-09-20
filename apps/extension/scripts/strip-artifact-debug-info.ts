@@ -25,6 +25,8 @@ const canonical = (file: string): string => normalizePath(realpathSync(file))
 /**
  * Strips debug info from exactly the given artifact files. Fails the build when one of them was
  * never transformed: a path that stopped matching would otherwise ship the full artifact silently.
+ * A production-build guarantee only — the dev server prebundles dependencies through the
+ * optimizer, which does not run this hook, and its output is never shipped or linted.
  */
 export function stripArtifactDebugInfo(artifactFiles: readonly string[]): Plugin {
 	const targets = new Set(artifactFiles.map(canonical))

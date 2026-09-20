@@ -27,7 +27,8 @@ export function cyclicChunks(imports: ReadonlyMap<string, readonly string[]>): s
  * Fails the build when two chunks statically import each other. ES modules let that load, and the
  * chunk that runs first reads the other's bindings as `undefined` — a bundle that builds, passes
  * every unit test, and throws in the browser. The bundler reports each chunk's static imports
- * exactly, so this reads those rather than the emitted code.
+ * exactly, so this reads those rather than the emitted code. It sees this build's chunks: a worker
+ * comes from a separate build that `vendorChunkGroups` does not apply to, and arrives as finished assets.
  */
 export function chunkCycleGuard(): Plugin {
 	return {

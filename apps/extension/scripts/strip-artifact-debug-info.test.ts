@@ -12,6 +12,18 @@ const read = (file: string) => readFileSync(file, "utf8")
 type Transform = (this: unknown, code: string, id: string) => { code: string } | undefined
 const transformOf = (files: readonly string[]) => stripArtifactDebugInfo(files).transform as unknown as Transform
 
+interface Hooks {
+	configResolved(config: { command: "build" | "serve" }): void
+	transform: Transform
+	buildEnd(this: { error(message: string): never }, error?: Error): void
+}
+const hooksOf = (files: readonly string[]) => stripArtifactDebugInfo(files) as unknown as Hooks
+const failing = {
+	error(message: string): never {
+		throw new Error(message)
+	},
+}
+
 describe("withoutDebugInfo", () => {
 	test("empties file_map and each function's debug_symbols, and leaves every other key as it was", () => {
 		const artifact = {
@@ -44,6 +56,27 @@ describe("stripArtifactDebugInfo", () => {
 	test("ignores a query suffix on the id", () => {
 		const [file] = debugStrippedArtifacts
 		expect(transformOf(debugStrippedArtifacts).call({}, read(file), `${realpathSync(file)}?import`)).toBeDefined()
+	})
+
+	// A path that stopped matching would otherwise ship the full artifact without a word.
+	test("fails the build naming an artifact that was never transformed", () => {
+		const [first, second] = debugStrippedArtifacts
+		const hooks = hooksOf([first, second])
+		hooks.configResolved({ command: "build" })
+		hooks.transform.call({}, read(first), realpathSync(first))
+		expect(() => hooks.buildEnd.call(failing)).toThrow(realpathSync(second))
+	})
+
+	test("says nothing when every artifact was transformed, or when the dev server never asked for one", () => {
+		const [first] = debugStrippedArtifacts
+		const built = hooksOf([first])
+		built.configResolved({ command: "build" })
+		built.transform.call({}, read(first), realpathSync(first))
+		expect(() => built.buildEnd.call(failing)).not.toThrow()
+
+		const served = hooksOf([first])
+		served.configResolved({ command: "serve" })
+		expect(() => served.buildEnd.call(failing)).not.toThrow()
 	})
 
 	test("leaves any other json alone", () => {
