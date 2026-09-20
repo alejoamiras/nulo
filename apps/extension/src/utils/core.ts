@@ -21,6 +21,7 @@
 
 import type { AccountServiceClient } from "@/wallet/services/account/client"
 import { ContactServiceClient } from "@/wallet/services/contact/client"
+import { LegalAcceptanceServiceClient } from "@/wallet/services/legal/client"
 import type { NetworkServiceClient } from "@/wallet/services/network/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
@@ -31,7 +32,7 @@ import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 export const isBackgroundConnected = ref(false)
 
 /**
- * Service-client container. `profile` and `contact` are populated eagerly by
+ * Service-client container. `profile`, `contact` and `legal` are populated eagerly by
  * `initAppServiceContext()` (called at popup boot). `network`, `transaction`,
  * `account` are LAZY: `null` until the popup's unlock flow assigns them (after
  * `bootstrapActiveProfile()` resolves the active profile/network/account).
@@ -53,6 +54,7 @@ export interface AppServices {
 	transaction: TransactionServiceClient | null
 	account: AccountServiceClient | null
 	contact: ContactServiceClient
+	legal: LegalAcceptanceServiceClient
 }
 
 let appServices: AppServices | undefined
@@ -73,6 +75,9 @@ function createAppServices(): AppServices {
 	const contactService = new ContactServiceClient()
 	contactService.connect()
 
+	const legalService = new LegalAcceptanceServiceClient()
+	legalService.connect()
+
 	// `network`, `transaction`, `account` remain `null` until the popup's unlock
 	// flow sets them (see AppServices jsdoc + the require*/get* accessors).
 	return {
@@ -81,6 +86,7 @@ function createAppServices(): AppServices {
 		transaction: null,
 		account: null,
 		contact: contactService,
+		legal: legalService,
 	}
 }
 

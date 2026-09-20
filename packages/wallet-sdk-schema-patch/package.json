@@ -2,6 +2,7 @@
 	"name": "@nulo/wallet-sdk-schema-patch",
 	"private": true,
 	"version": "0.1.0",
+	"license": "Apache-2.0",
 	"type": "module",
 	"exports": {
 		"./apply": "./src/apply.ts",

@@ -142,6 +142,15 @@ Vitest's deterministic SHA-1-of-filename sharder picks the same files locally as
 
 **Manual cleanup of stale state.** Delete `.e2e-state/` in the worktree, then `pkill -f "anvil.*--port"` and `pkill -f "aztec.*start.*--local-network"` if you suspect leftover processes.
 
+## Terms-acceptance state
+
+`launchExtension({ legal })` seeds the device-local acceptance record, built by `@nulo/legal`'s own
+`applyAcceptance`: `current` (default on a fresh profile), `missing`, `stale`, `corrupt`, or `keep`
+(default on a reused `userDataDir`, so a relaunch keeps what the last launch left).
+`openOnboarding(ctx, { legal: "missing" })` gives the gate's specs a real fresh install, and
+`reloadWithLegalState(page, seed)` flips a running wallet. The scenarios live in
+`legal-acceptance.test.ts` (S1–S9) and `network/legal-acceptance-wall.test.ts` (N1).
+
 ## Helper conventions (CDP regression workarounds)
 
 A Puppeteer/Chrome interaction layer regressed somewhere between sandbox ABI versions; e2e helpers in `fixtures/extension.ts` and `fixtures/helpers.ts` work around it. **Do not bypass these helpers** — calling raw `page.click()` / `handle.click()` / `page.waitForFunction()` directly will reintroduce flakes that look like timeouts but are actually CDP / rAF-throttling issues.
@@ -151,6 +160,7 @@ A Puppeteer/Chrome interaction layer regressed somewhere between sandbox ABI ver
 | `clickByTestId(page, id)` / `clickSelector(page, sel)` | `(await page.waitForSelector(...))!.click()` and `handle.click()` | The CDP element-handle click hangs with `Runtime.callFunctionOn timed out`. Synthetic in-page click via `page.evaluate(() => el.click())` bypasses the broken protocol path. |
 | `typeIntoInput` / `replaceInputValue` | `handle.type(text)` | Same CDP path, same hang. The helper sets `value` via the prototype setter and dispatches `input` events. |
 | `patchPagePolling(page)` (auto-applied by `launchExtension`, `openPopup`, `openPlayground`, `waitForPopup`) | manually configuring polling on every `page.waitForFunction` call | Default `'raf'` polling is throttled in offscreen / unfocused tabs. Patch defaults to `polling: 200`. `waitForSelector` (CSS-only) is rerouted through the patched `waitForFunction` for the same reason; prefixed selectors (`text/`, `xpath/`, `aria/`, `pierce/`) are left alone. |
+| `pointerClick(page, testid)` (`helpers/legal-drivers.ts`) | `clickByTestId` when the assertion is "nothing covers this control" | An in-page click reaches a covered element. This one hit-tests the control's centre, fails naming whatever sits on top, then clicks through `page.mouse` (`Input.dispatchMouseEvent`, not the hanging element-handle path). |
 | `closeStuckPopup(page)` | waiting for the popup to unmount after a confirm/submit | Vue `<Transition>` sticks mid-enter / mid-leave under headless Chrome rAF throttling — `slide-enter-from + slide-enter-active` never advances. Helper force-removes the `#popup` teleport children + dim backdrop AFTER asserting the actual post-mutation signal (row appeared, contact deleted, etc.). |
 | `withTimeoutMessage(wait, message)` | `.catch(() => { throw new Error("...") })` around a wait | A bare catch relabels frame detaches, CDP disconnects and page crashes as "the state never settled", burying a real fault under a plausible-looking flake. This converts `TimeoutError` only, rethrows everything else untouched, and keeps the original as `cause`. Pass a function when the message has to read live page state — prefer that form, so the failure says what WAS observed. |
 

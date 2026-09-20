@@ -12,6 +12,7 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
 import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
+import { PAGES_OPTIONS } from "./scripts/pages-options"
 import { parseLimitGuard } from "./scripts/parse-limit-guard"
 import { stripArtifactDebugInfo } from "./scripts/strip-artifact-debug-info"
 import { vendorChunkGroups } from "./scripts/vendor-chunks"
@@ -111,33 +112,7 @@ export default defineConfig({
 		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
 		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
-		usePages({
-			// The route directories also hold helpers and tests; without this every `.ts` beside a
-			// page becomes a route and ships as a lazy chunk.
-			extensions: ["vue"],
-			dirs: [
-				{
-					dir: "src/pages",
-					baseRoute: "common",
-				},
-				{
-					dir: "src/setup/pages",
-					baseRoute: "setup",
-				},
-				{
-					dir: "src/popup/pages",
-					baseRoute: "popup",
-				},
-				{
-					dir: "src/popup/windows",
-					baseRoute: "windows",
-				},
-				{
-					dir: "src/onboarding/pages",
-					baseRoute: "onboarding",
-				},
-			],
-		}),
+		usePages(PAGES_OPTIONS),
 
 		useAutoImport({
 			imports: [

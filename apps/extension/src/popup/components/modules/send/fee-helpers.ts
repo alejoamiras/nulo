@@ -40,7 +40,7 @@ export function buildSettings(
 	return result
 }
 
-interface RegisteredFpc {
+export interface RegisteredFpc {
 	id: string
 	type: FpcType
 	name?: string
