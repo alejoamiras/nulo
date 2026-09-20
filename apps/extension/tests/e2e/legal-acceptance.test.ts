@@ -363,7 +363,7 @@ describe("popup: a passkey wallet that declined", () => {
 		// Read through the extension origin rather than the tab's text/plain rendering.
 		const notices = await page.evaluate(async (url) => (await fetch(url)).text(), expected)
 		expect(notices.startsWith("THIRD-PARTY NOTICES\n")).toBe(true)
-		for (const name of ["@aztec/sqlite3mc-wasm@", "@alejoamiras/presto@", "vue@", "buffer@"]) {
+		for (const name of ["@aztec/sqlite3mc-wasm@", "@alejoamiras/presto@", "@vue/runtime-core@", "buffer@"]) {
 			expect(notices).toContain(`\n${name}`)
 		}
 		await page.close()
