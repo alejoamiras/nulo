@@ -214,6 +214,14 @@ export const VENDORED: readonly Vendored[] = [
 		coveredBy: ["@aztec/sqlite3mc-wasm"],
 	},
 	{
+		trigger: { asset: /^service-worker-loader\.js$/ },
+		components: [],
+		generated: {
+			by: "@crxjs/vite-plugin's service-worker loader",
+			content: /^import '\.\/assets\/[\w.-]+\.js';\s*$/,
+		},
+	},
+	{
 		trigger: { asset: /^assets\/[\w.-]+-loader-[\w-]+\.js$/ },
 		components: [],
 		generated: {

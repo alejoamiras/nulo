@@ -40,7 +40,7 @@ function plugins() {
 	return {
 		worker: (bundle: OutputBundleLike) => worker.generateBundle.call(context, {}, bundle),
 		main: (bundle: OutputBundleLike) => {
-			main.generateBundle.call(context, {}, bundle)
+			main.generateBundle.handler.call(context, {}, bundle)
 			return [...noticeNames(emitted.at(-1) ?? "")]
 		},
 	}
@@ -90,7 +90,7 @@ describe("thirdPartyNotices", () => {
 		await main.transform.handler.call(context, "export default 1", join(root, "src/app.ts"))
 
 		const emitted: string[] = []
-		main.generateBundle.call(
+		main.generateBundle.handler.call(
 			{ emitFile: (file: { source: string }) => emitted.push(file.source) },
 			{},
 			mainBundle([join(root, "src/app.scss")], []),
@@ -99,7 +99,7 @@ describe("thirdPartyNotices", () => {
 
 		// An import nothing can follow refuses the build instead of slipping past attribution.
 		await main.transform.handler.call(context, '@import url(mystery/skin);\n@use "sass:math";', join(root, "src/late.scss"))
-		expect(() => main.generateBundle.call({ emitFile: () => undefined }, {}, mainBundle([], []))).toThrow(
+		expect(() => main.generateBundle.handler.call({ emitFile: () => undefined }, {}, mainBundle([], []))).toThrow(
 			/late\.scss -> mystery\/skin: stylesheet import could not be followed/,
 		)
 	})
@@ -143,5 +143,12 @@ describe("thirdPartyNotices", () => {
 		build.worker(workerBundle("/src/a.worker.ts", "assets/worker-x.js", install("a-dep")))
 		build.worker(workerBundle("/src/b.worker.ts", "assets/worker-x.js", install("b-dep")))
 		expect(build.main(mainBundle([], ["assets/worker-x.js"]))).toEqual(["a-dep", "b-dep"])
+	})
+
+	test("the main hook is ordered post, so code a post-enforced plugin emits late is still checked", () => {
+		// Vite sorts `enforce: "post"` plugins (crx among them) behind the plugin list; only a
+		// hook-level order runs after their emission. Proven on a real build in lessons/c3.md.
+		expect(thirdPartyNotices().main.generateBundle.order).toBe("post")
+		expect(typeof thirdPartyNotices().worker.generateBundle).toBe("function")
 	})
 })

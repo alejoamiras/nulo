@@ -126,4 +126,4 @@ build, which is the moment to decide.
 
 ## Scripts
 
-`bun run test` · `bun run typecheck` · `bun bin/check-minimum.ts <build-dir>…`
+`bun run test` · `bun run typecheck` · `bun bin/check-minimum.ts <chrome|firefox|both> <dist-root>`
