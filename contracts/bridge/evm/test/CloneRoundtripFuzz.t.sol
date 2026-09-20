@@ -63,10 +63,21 @@ contract CloneRoundtripFuzzTest is Test {
         bool withCaller,
         address callerOnL1
     ) public {
+        _withdrawMatchesModel(recipient, amount, withCaller, callerOnL1);
+    }
+
+    /// The fuzzer's dictionary holds every address the run has seen, this contract's included, and
+    /// `setUp` mints it 1e30: a payout is what the recipient GAINED, never what it holds.
+    function test_withdraw_toAnAlreadyFundedRecipient() public {
+        _withdrawMatchesModel(address(this), 1e22, false, address(0x20cE));
+    }
+
+    function _withdrawMatchesModel(address recipient, uint256 amount, bool withCaller, address callerOnL1) internal {
         amount = bound(amount, 1, 1e30);
         recipient = address(uint160(bound(uint160(recipient), 1, type(uint160).max)));
         vm.assume(recipient != address(portal));
         address caller = withCaller ? callerOnL1 : address(0);
+        uint256 heldBefore = token.balanceOf(recipient);
         vm.prank(caller);
         portal.withdraw(recipient, amount, withCaller, Epoch.wrap(7), 3, 42, new bytes32[](0));
 
@@ -76,6 +87,6 @@ contract CloneRoundtripFuzzTest is Test {
         assertEq(m.sender.version, portal.ROLLUP_VERSION(), "sender version");
         assertEq(m.recipient.actor, address(portal), "recipient must be the clone");
         assertEq(m.recipient.chainId, block.chainid, "recipient chain");
-        assertEq(token.balanceOf(recipient), amount, "payout");
+        assertEq(token.balanceOf(recipient) - heldBefore, amount, "payout");
     }
 }
