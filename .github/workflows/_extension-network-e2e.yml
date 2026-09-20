@@ -157,12 +157,12 @@ jobs:
         with:
           # Headless server; bb is fetched per the SDK-requested version
           # (x-aztec-version) and cached in ~/.presto/versions/.
-          version: "1.1.1"
+          version: "1.1.2"
           # Both pins, established from the release assets (the tarball is
           # checked before extraction; the extracted binary on every run,
           # cache hits included). See SECURITY.md "Binary dependencies".
-          expected_tarball_sha256: 48f524b159fe84947f767ca2903e06c82eb555eec99ab46052cb3d92bd1b33ef
-          expected_sha256: 7c866bac4023d480de7a0d6a5ad2069ba23979d01fe248a780daad2f369eecdb
+          expected_tarball_sha256: 1e15aeb478e1cf92d8b69c42eb0cf3117a70efdfa7f80842f8d2a19fc8c27088
+          expected_sha256: 52eb05414908d61c142e22c52cb314989565f38c295abdbcaced0934ba0b58a0
 
       - name: Start presto-server
         if: '${{ !inputs.disable_presto && !inputs.proverless }}'
@@ -176,10 +176,8 @@ jobs:
           # public repository's releases is all this needs, so the default token suffices and
           # a fork PR's read-only one works too. Presto refuses redirects on that request, so
           # the credential reaches api.github.com and nowhere else.
-          # INERT while the pin above is 1.1.1: that build sends the lookup with no
-          # Authorization header and reads no token (support landed on presto's main after the
-          # 1.1.1 tag), so the lookup is still anonymous and still fails intermittently. It
-          # takes effect when the pin moves to the first presto-server release after 1.1.1.
+          # Needs presto-server >= 1.1.2: earlier builds send the lookup with no Authorization
+          # header and ignore this variable, so a pin below that line makes it anonymous again.
           PRESTO_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
@@ -312,7 +310,7 @@ jobs:
             echo "::error::presto-server log missing — startup failure"
             exit 1
           fi
-          # Literals from presto-v1.1.1 packages/presto/core/src/server/prove.rs:283,:475.
+          # Literals from presto-v1.1.2 packages/presto/core/src/server/prove.rs:283,:475.
           PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/presto-server.log || true)
           PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/presto-server.log || true)
           echo "::notice::presto-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"

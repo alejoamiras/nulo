@@ -70,7 +70,8 @@ A brand-new Alpha user sees the private-gas nudge and the "Get private gas" prim
   this had already merged (the start step passes `GITHUB_TOKEN`) — but `presto-server` 1.1.1, the
   pinned build, sends no `Authorization` header: token support is on presto's `main`, after the tag.
   Two halves of one fix, shipped the same day in two repos, that never met. Flake ledger #31 in the
-  `e2e-testing` skill; it stays open until a presto-server release exists and the pin moves.
+  `e2e-testing` skill. Closed 2026-09-20: the owner cut `presto-v1.1.2`, which carries the token
+  support, and the pin (version + both SHA-256s) moved to it.
   Lesson: before writing "unknown", list the run's artifacts.
 
 ## The confidence pass (owner: "do all the things to take you to high")
