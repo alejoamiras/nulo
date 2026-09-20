@@ -19,6 +19,7 @@ status: APPROVED by the owner 2026-09-18 (plan v3) — implementing; no phase gr
 - Tests that kill or reach into the background script stay Chrome-only, skipped on Firefox as whole files.
 - AMO scope = manifest items only (`data_collection_permissions`, gecko id). Source package and submission are out.
 - `/code-review` off.
+- **2026-09-20 — the Phase 2 lint gate is met for real, not excepted.** Offered a narrow exception for the one `FILE_TOO_LARGE` error, the owner chose to shrink the file instead, as a seventh arc on the stack (Phase 9), and chose option A for the Token artifact: strip the embedded Noir debug source at build time rather than load the artifact at runtime. This widens the "manifest items only" AMO scope above by exactly that: the bundle must pass `web-ext lint`. Source package and submission stay out.
 
 Read `recon.md` first: it holds the reuse map, the portability census and the spike findings this plan builds on.
 
@@ -192,6 +193,27 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** `bun run lint` and `bash scripts/check-no-brand.sh` exit 0; every path and command named in new doc text exists (spot check logged in `lessons/phase-8.md`). Layers: lint, path guard.
 
+### Phase 9 — Every shipped file under the linter's parse limit (light amendment, 2026-09-20)
+
+**Why.** `addons-linter` refuses to parse any non-binary file (JS, CSS, HTML, JSON) of 5 MiB or more and reports `FILE_TOO_LARGE` — an error, and a file nobody scanned. The Firefox bundle has one: `assets/offscreen-*.js`, 20.3 MB. Phase 2's gate (`web-ext lint` → 0 errors) cannot pass until it is gone.
+
+**What the spike found (2026-09-20).** Two causes, two fixes:
+1. `vite.config.ts` has no chunking rule, so everything the offscreen page imports lands in one file. Rolldown's `output.codeSplitting` with one `node_modules` group and `maxSize: 4_000_000` turns it into ~4 MB pieces; the build passes.
+2. One piece stays at 6.1 MB because it is a single module: the Wonderland Token artifact (`@wonderland-token-artifact`, 5.3 MB on disk), a JSON import a bundler cannot split. 1.46 MB of it is `file_map` — the Noir source text, used only to print source snippets in simulation error traces. Emptying it (`file_map: {}`) takes the minified artifact from 4.07 MB to 2.63 MB and **leaves the contract class id unchanged** (measured for both aliased artifacts: Token `0x0225da0f…`, PrivateFPC `0x032bc73c…`, identical before and after). `debug_symbols` inside `functions` stay.
+
+**Changes** (all in `apps/extension`; `apps/tools` and the wallet packages are not touched):
+1. `vite.config.ts` — `build.rollupOptions.output.codeSplitting: { groups: [{ name: "vendor", test: /node_modules/, maxSize: 4_000_000 }] }`. Shared config, so Chrome's bundle changes the same way.
+2. `scripts/strip-artifact-file-map.ts` — a `pre` vite plugin that, for exactly the files `artifactAliases` resolves to, returns the JSON with `file_map: {}`. Build and dev server alike; the vitest configs do not load it, so unit tests keep reading the full artifacts.
+3. `scripts/parse-limit-guard.ts` — a vite plugin whose `generateBundle` fails the build when any emitted `.js`/`.mjs`/`.css`/`.html`/`.json` is ≥ 4.5 MiB (the linter's 5 MiB minus headroom), naming the file. In the build itself rather than a workflow step: it runs in every lane and locally, for both browsers, and no workflow file changes. The size rule is a pure function with a unit test.
+4. Tests: the strip plugin (only the aliased files; `file_map` emptied, everything else byte-equal after a JSON round-trip; a non-artifact `.json` untouched), the guard's rule, and one `@vitest-environment node` case pinning that the class id of each aliased artifact is the same with and without `file_map` — the claim this phase rests on, so it cannot silently stop being true on an artifact bump.
+5. Docs: `FIREFOX.md` (the limit, the two mechanisms, what to do when the guard fires), `SECURITY.md` if the bundle-scan statement needs it, `lessons/phase-9.md`.
+
+**UI impact:** none. **Behavioural difference:** a simulation error inside the Wonderland Token or the PrivateFPC no longer carries Noir source snippets in its trace (function names and opcodes remain). Developer-facing log detail only.
+
+**Risks.** (a) A shared vendor chunk reaching the MV3 service worker or a content script: the crx plugin builds those, and the smoke + network suites on both browsers are the proof — the prover-ON canary most of all, since the code that loads barretenberg lived in the file being split. (b) `maxSize` is a target, not a cap: a future single module over the limit defeats it — which is what the guard is for; the answer then is option B (ship that artifact compressed, load it at runtime), recorded here so it is not rediscovered. (c) Chunk count rises (~130 → ~420 files); extension pages load from disk, so no network cost, but the zip's file count grows.
+
+**Validation gate.** `bun run lint && bun run typecheck && bun run test` exit 0; `build:chrome` and `build:firefox` exit 0 with the guard active; `bunx web-ext@10.6.0 lint --source-dir apps/extension/dist/firefox --self-hosted` reports **0 errors** (this is also Phase 2's gate — Phase 2 is ticked on this evidence); locally the Firefox smoke suite and the Chrome prover-ON canary exit 0; on the arc's PR the three required checks and both Firefox aggregators conclude success. Layers: lint, typecheck, unit, build, web-ext lint, smoke + network e2e on both browsers.
+
 ## Security & Adversarial Considerations
 
 - **Threat model.** New production surface = the PRF fix and two manifest keys. Everything else is test/CI code. Attackers of interest: supply chain (a swapped geckodriver or Firefox binary inside CI) and another local process on a shared dev host.
@@ -261,6 +283,7 @@ Multi-arc, stacked with `gh stack`. Arcs revert **top-down** (each builds on the
 | 4 | `firefox-driver-probes` | 4, 5 | `test(e2e): run the smoke suite on firefox` |
 | 5 | `e2e-firefox-network` | 6 | `test(e2e): run the network suite on firefox` |
 | 6 | `ci-firefox-lanes` | 7, 8 | `ci(firefox): advisory firefox lanes in pr, nightly and release workflows` |
+| 7 | `firefox-offscreen-chunk-split` | 9 (closes 2) | `build(extension): keep every shipped file under the firefox linter's parse limit` |
 
 Arc 1 is a user-facing fix and may be merged ahead of the rest at the owner's call. Titles stay ≤ 93 characters. No PR (draft included) opens before every quality loop below has converged. Merging is always the owner's action.
 
