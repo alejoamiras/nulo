@@ -2,8 +2,8 @@ import { buildFeeMethods, type FeeMethodOption, type GasBalances, type Registere
 
 export type TransferSide = "private" | "public"
 
-/** The compact form a pick is stored in — never a presentation row. */
-/** `fpc.name` only labels the loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
+/** The compact form a pick is stored in — never a presentation row. `fpc.name` only labels the
+ *  loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
 export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: string; name?: string } | null }
 
 /** The committed snapshot the card holds. `undefined` balances = the gas read failed. */

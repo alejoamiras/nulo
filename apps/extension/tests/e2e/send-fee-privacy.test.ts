@@ -1,8 +1,14 @@
 /**
- * A private send whose gas balances cannot be read must never be DEFAULTED to the account's own
- * public Fee Juice — that payer names the sender, so the wallet only chooses it on a private
- * balance it positively read as zero. With the node unreachable nothing can be read, which is the
- * cheapest way to put the Send page in that state: no chain, no funded account.
+ * Fail-closed under a dead node: with NOTHING readable, the Send page pays with nothing, never shows
+ * the account's own public Fee Juice as the payer, and never claims "you have no gas" about balances
+ * nobody read.
+ *
+ * What this does NOT prove is the selection rule itself — with both balances unread, Fee Juice is
+ * ineligible under any walk order, so a rule that wrongly defaulted to it on an unread PRIVATE balance
+ * would still pass here. That case (private unread, public held) cannot be staged end to end: the
+ * private leg is a PXE-local simulation, not an interceptable request. It is pinned where it can be —
+ * `fee-privacy.test.ts` and the "by knowledge state" cases in `FeeSettingsCard.test.ts` — and the
+ * funded shapes are covered against a real chain in `network/fee-methods.test.ts`.
  *
  * The smoke build pins the active network to Testnet; its RPC origin is refused at the browser
  * through CDP interception, so the run does not depend on the public endpoint being up or down.
@@ -23,7 +29,7 @@ const SETTLED = `(() => {
 })()`
 
 describe("send fee privacy (dead RPC)", () => {
-	test("a private send with unreadable balances never falls back to the public payer", { timeout: 180_000, retry: 0 }, async ({
+	test("with nothing readable the card pays with nothing and blames no empty balance", { timeout: 180_000, retry: 0 }, async ({
 		registeredExtensionPerTest: ctx,
 	}) => {
 		const interception = await interceptRpc(ctx.browser, ctx.extensionId, TESTNET_RPC_ORIGIN, { kind: "refuse" })

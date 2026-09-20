@@ -283,6 +283,19 @@ async function shot(page: Page, name: string): Promise<void> {
 	if (!dir) return
 	await page.evaluate((s: string) => document.querySelector(s)?.scrollIntoView({ block: "center" }), NOTICE)
 	await page.screenshot({ path: `${dir}/${name}.png` as `${string}.png` })
+	// The other theme too: the row's colours are tokens, and a token that only reads well on one
+	// theme is the kind of thing a row count never sees.
+	const flipped = await page.evaluate(() => {
+		const root = document.documentElement
+		const was = root.getAttribute("theme")
+		root.setAttribute("theme", was === "dark" ? "light" : "dark")
+		return was
+	})
+	await page.screenshot({ path: `${dir}/${name}-${flipped === "dark" ? "light" : "dark"}.png` as `${string}.png` })
+	await page.evaluate((was: string | null) => {
+		if (was === null) document.documentElement.removeAttribute("theme")
+		else document.documentElement.setAttribute("theme", was)
+	}, flipped)
 }
 
 async function fillAndSubmit(page: Page, destination: string, amount: string): Promise<void> {

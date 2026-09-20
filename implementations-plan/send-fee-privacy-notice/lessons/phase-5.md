@@ -64,3 +64,44 @@ A brand-new Alpha user sees the private-gas nudge and the "Get private gas" prim
 - The canary step prints only proof COUNTS; the presto-server log lines for a failed proof are not in
   the job log, so the prover-side reason is unknown. Worth a follow-up: tail the log on any
   `PROVE_COUNT != PROVE_SUCCESS`, not only on zero successes.
+
+## The confidence pass (owner: "do all the things to take you to high")
+
+- **Composition test for D34** — `fee-freshness.integration.test.ts`: the REAL reader behind the REAL
+  store, resolved with the REAL rule, only the chain read faked. Warm a true zero, let private gas
+  arrive with no invalidation, fail the forced read once, let the backoff recover. Mutation-checked:
+  with D34 reverted it fails `privateFeeJuice: Expected "55" / Received "0"`.
+- **E2E mutation checks.**
+  - Over-warning mutant (notice for ANY payer under a private origin): all three new network tests red.
+    The absence assertions are live — worth proving, since one of them had been vacuous earlier (the
+    `{}` trap).
+  - Smoke, artificial mutant (a hold pays with Fee Juice): red. But the independent reviewer showed
+    that a REALISTIC rule mutant (default to Fee Juice on an unread PRIVATE balance) still passes it,
+    because under a dead RPC the public balance is unread too and Fee Juice is ineligible under any
+    order. My mutant proved the test can fail; theirs proved it cannot fail *for the rule*. The test is
+    kept — fail-closed under a dead node is a real property — and relabelled to say exactly what it
+    does and does not prove. "Private unread, public held" is not stageable end to end (the private
+    leg is a PXE-local simulation), so it lives at component level, where it is mutation-checked.
+  - No new real-chain "gas arrives, reopen within the TTL" test: it needs the prefunded-account fixture
+    split in two (+3–4 min on the heaviest shard), while the wire it would prove — a forced read
+    crossing client → service worker → reader — is already exercised on a real chain by
+    `tx-sendTx-selfPay` (the locked-method mount), and the layers above it by the composition test.
+- **Fresh-context review** (top-tier Claude subagent, no plan access, same adversarial ask): **approve,
+  moderate-high**; no reachable path to an un-noticed or un-read Fee Juice default. Process miss: I ran
+  the mutants in the same tree while it was reading — it noticed, and reviewed HEAD regardless. Run
+  reviewers against a quiet tree.
+  - Accepted: the smoke relabel above; a stacked doc-comment in `fee-privacy.ts`.
+  - Owner-decided, not a defect: Fee Juice ahead of an eligible sponsor under a private origin (D30) —
+    the reviewer independently called it the largest privacy cost in the diff, as the driver had at
+    the gate.
+  - **Follow-up, not fixed (unreachable today):** `commitFromEntry` copies `entry.gas.verified`
+    without looking at `entry.stale`. If a forced run is outranked by a newer one, `ensure` still
+    resolves and the card could copy the older figure. That needs a `txRefresh` subscriber mounted
+    alongside Send on the same key; only Home's gas card has one and the routes are exclusive. The
+    naive fix (treat stale as unread) would hold forever, because the card's recovery watch observes
+    `retryVersion` only — so the real fix is a second wake source, which deserves its own change the
+    day such a co-mount exists.
+  - Accepted risk: a forced read taken right after a claim can return `"0"` from a PXE that has not
+    synced the note yet. The send then defaults to Fee Juice **with** the notice — a worse default,
+    never a silent one.
+- **Dark theme**: the network test's opt-in capture now shoots both themes.
