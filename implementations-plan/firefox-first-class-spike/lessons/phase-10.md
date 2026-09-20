@@ -25,3 +25,9 @@ The static inventory is small (14 prefixed constructs, 26 sites) because the des
 - `action-popup-layout.test.ts` on a Firefox build with the old stylesheet: **fails** (`expected … to match object { shellHeight: 600, navBottom: 600 }`). With the fix: **passes**, 5 s.
 - Candidate fixes were tried by injecting CSS into the live panel before any rebuild: `#app{min-height:100vh}` and `#app{height:100vh;min-height:var(--base-height)}` both put the nav at 600 on every tab; the second keeps `#app` a definite height, as it is on Chrome.
 - Before/after screenshots of the real panel (`drawSnapshot` of the panel's browsing context) are on the arc's PR.
+
+## Codex fix loop (GPT-6 Astra, `high`, one session resumed)
+
+- **Round 1** — the fix itself sound; **one Medium**: `vi.waitFor` accepted the *first* good reading, and Firefox re-measures a panel after DOM changes (at once, and again ~100 ms later), so one reading proves nothing. Two Lows: `100vh` ≠ `100%` under a classic horizontal scrollbar; a frame script that threw left its listener registered. All taken. Tightening the test made it catch something real on its own: a just-opened popup passes through `#/popup/auth` while the session restores.
+- A re-proof I ran in between was **invalid** and worth recording: the script took the "old" stylesheet from `HEAD`, which by then already carried the fix, so both the "red" and the "green" run had it. Pin a baseline to a named ref, never to `HEAD`.
+- **Round 2 — "no new material findings".** Two Low follow-ups taken anyway: each evaluation now replies on its own channel (a frame script cannot be cancelled, and a late one could have answered the next call), and every settling sample asserts the hash too. It also confirmed from the specs that `scrollbar-width: none` zeroes a `scrollbar-gutter: stable` gutter (WPT `scrollbar-width-003`), that `revert` in the landing reaches `auto`, and that the `thin` scrollers keep their bars.

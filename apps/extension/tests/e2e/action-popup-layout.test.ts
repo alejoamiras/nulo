@@ -61,7 +61,11 @@ test.skipIf(!isFirefox)("the bottom nav stays on the popup's bottom edge on ever
 		for (const wait of SETTLE_SAMPLES_MS) {
 			await sleep(wait)
 			const layout = await measure()
-			expect(layout, `${tab} +${wait}ms`).toMatchObject({ shellHeight: layout.viewportHeight, navBottom: layout.viewportHeight })
+			expect(layout, `${tab} +${wait}ms`).toMatchObject({
+				hash: `#/popup/${tab}`,
+				shellHeight: layout.viewportHeight,
+				navBottom: layout.viewportHeight,
+			})
 		}
 	}
 })

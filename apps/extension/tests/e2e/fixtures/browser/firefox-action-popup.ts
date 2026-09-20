@@ -9,7 +9,7 @@ import { actionPopupContext } from "./firefox"
  */
 
 const PANEL_BROWSER = ".webextension-popup-browser"
-const REPLY = "nulo-e2e:result"
+let evaluations = 0
 /** Under geckodriver's 30 s script timeout, so a frame script that never answers is reported by name. */
 const REPLY_DEADLINE_MS = 10_000
 
@@ -38,14 +38,16 @@ export async function openActionPopup(browser: Browser): Promise<void> {
 /**
  * Evaluates `body` — the source of a function body whose `content` is the popup's window — inside
  * the open panel, and resolves with the JSON-serialisable value it returns. A `body` that throws
- * rejects with its message; either way the listener is gone before this settles, so a failed
- * evaluation cannot answer the next one.
+ * rejects with its message. Each evaluation replies on a channel of its own: a frame script cannot
+ * be cancelled, and one that outlives its deadline must not be able to answer the next call.
  */
 export async function evaluateInActionPopup<T>(browser: Browser, body: string): Promise<T> {
 	const { session } = actionPopupContext(browser)
+	const channel = `nulo-e2e:result:${++evaluations}`
+	const name = JSON.stringify(channel)
 	const frameScript = `
-		try { sendAsyncMessage(${JSON.stringify(REPLY)}, { value: (function () { ${body} })() }); }
-		catch (err) { sendAsyncMessage(${JSON.stringify(REPLY)}, { error: String(err) }); }`
+		try { sendAsyncMessage(${name}, { value: (function () { ${body} })() }); }
+		catch (err) { sendAsyncMessage(${name}, { error: String(err) }); }`
 	const reply = await session.chromeScript<{ value?: T; error?: string }>(
 		`
 		const [selector, source, channel, deadline, done] = arguments;
@@ -59,7 +61,7 @@ export async function evaluateInActionPopup<T>(browser: Browser, body: string): 
 		mm.addMessageListener(channel, listener);
 		mm.loadFrameScript("data:application/javascript;charset=utf-8," + encodeURIComponent(source), false);
 		`,
-		[PANEL_BROWSER, frameScript, REPLY, REPLY_DEADLINE_MS],
+		[PANEL_BROWSER, frameScript, channel, REPLY_DEADLINE_MS],
 	)
 	if (reply.error !== undefined) throw new Error(`evaluateInActionPopup: ${reply.error}`)
 	return reply.value as T
