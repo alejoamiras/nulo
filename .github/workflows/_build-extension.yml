@@ -135,6 +135,18 @@ jobs:
               fi
             done
           done
+          # Test libraries: a *.test.ts beside a page becomes a route unless the Pages scan excludes
+          # it (scripts/pages-options.ts, whose own test is the primary proof). These three strings
+          # survive minification and were each present in a build made without the exclude.
+          for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
+            [ -d "$d" ] || continue
+            for marker in "Vue Test Utils" "createTestingPinia" "__vitest"; do
+              if grep -rqF --include='*.js' "$marker" "$d"; then
+                echo "::error::test library marker '$marker' found in $d — a test module is being bundled" >&2
+                fail=1
+              fi
+            done
+          done
           if [ "$fail" = 0 ]; then echo "✓ no test-only markers in production build"; fi
           exit "$fail"
 

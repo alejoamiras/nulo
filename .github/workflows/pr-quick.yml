@@ -153,6 +153,7 @@ jobs:
               - 'apps/extension/vite.firefox.config.mts'
               - 'apps/extension/manifest/manifest.config.ts'
               - 'apps/extension/vite.config.ts'
+              - 'apps/extension/scripts/**'
               - 'apps/extension/package.json'
               - 'bun.lock'
               - 'bunfig.toml'
