@@ -37,3 +37,9 @@ Rolldown names an entry-aware chunk after the entries that share it, and names l
 - `web_accessible_resources`: identical to the pre-change lists on both browsers.
 - JS a page must load before it runs (static import closure): popup 6.60 → 4.32 MB, onboarding 1.67 → 1.64 MB, offscreen 48.9 → 42.7 MB.
 - `bun run lint`, `typecheck:all`, `test` (6,625 passed): exit 0.
+- Smoke e2e on smoke-flag builds of the package-boundary split: **Firefox exit 0, 113 passed / 16 skipped; Chrome exit 0, 123 passed / 6 skipped** — the same totals as the gate runs before the split. (Run on `3c9bf2bd`; the commit after it changed artifact chunk *names*, tests and comments only, and was re-checked statically: both builds, 0 cycles, `web-ext lint` 0 errors, web-accessible lists unchanged. CI smokes the final SHA.)
+
+## Codex fix loop (GPT-6 Astra, `high`, one session resumed)
+
+- **Round 1 — "no new material findings"**, conditional on the smokes and the WASM proofs, with four Lows, all taken: artifact chunk names could collide across directories (now the whole in-package path); the "package dependencies form a DAG" claim was false and is gone from code, plan and this file; the strip is a production-build guarantee only, not a dev-server one (the optimizer prebundle skips the hook); the fail-closed `buildEnd` had no test. It also confirmed against the installed `@aztec/*` 5.2.0 sources that hashing, class-id verification, registration and PXE serialization never need `debug_symbols`, and that the frozen SchnorrAccount artifact is outside the strip list and must stay there — its guarantee is byte identity, not class-id equivalence.
+- **Round 2 — "no new material findings".** Converged.
