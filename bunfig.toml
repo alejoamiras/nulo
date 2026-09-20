@@ -29,8 +29,8 @@ linker = "isolated"
 #
 # CVE bypass: when an advisory drops for a package newer than the gate,
 # temporarily add a `minimumReleaseAgeExcludes = ["<name>"]` entry here,
-# install the patched version, open a follow-up PR removing it after the
-# window passes. See SECURITY.md "Dependency policy". No exemption is
+# install the patched version, then delete the entry again in the same PR.
+# See SECURITY.md "Dependency policy". No exemption is
 # active: locked versions are never re-gated, so an exclude is only needed
 # while `bun install` writes the young version into bun.lock, and may come
 # out before the window passes (verified with `--frozen-lockfile --force`).
