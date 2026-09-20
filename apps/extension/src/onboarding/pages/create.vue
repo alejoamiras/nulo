@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
 <template>
 	<OnboardingPage>
 		<OnboardingBackLink testid="onboarding-create-back" />
-		<StepIndicator :current="1" />
+		<StepIndicator :current="2" />
 		<header :class="$style.hero">
 			<BrutalistTitle main="Create" sub="Profile" />
 			<div :class="$style.hero_bar" />

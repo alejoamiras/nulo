@@ -361,7 +361,7 @@ onMounted(async () => {
 		styleText,
 	)
 	// biome-ignore lint/suspicious/noConsole: `_log` is the sniffer's saved original — this banner must reach the real DevTools console, not the log store.
-	console._log("%cYou can report a scam through the form: https://nulo.sh/forms/report-scam", styleText)
+	console._log("%cYou can report a scam by email: hello@nulo.sh", styleText)
 	/****************** */
 
 	intervalId.value = window.setInterval(() => {
@@ -417,6 +417,7 @@ onBeforeUnmount(() => {
 			<GlobalLoader />
 			<MigrationBarrier />
 			<AccountIntegrityBarrier />
+			<LegalAcceptanceSheet />
 		</div>
 
 		<Header />

@@ -40,6 +40,8 @@ import { FpcService } from "@/wallet/services/fpc/service"
 import { TransactionService, TransferType } from "@/wallet/services/transaction/service"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
+import { LegalAcceptanceService } from "@/wallet/services/legal/service"
+import { TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { TaskService } from "@/wallet/services/task/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -144,6 +146,7 @@ async function makeHarness() {
 		return { isParked: () => parked, release: () => release() }
 	}
 
+	const legalAssertCurrent = vi.fn(async () => {})
 	const collection = new ServiceCollection()
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
 	// addTransaction assert against the SAME epoch map (D13 fence wiring).
@@ -211,6 +214,7 @@ async function makeHarness() {
 	collection.add(svc(FpcService.name, { onFpcUpdated: { add: () => {} }, onFpcDeleted: { add: () => {} } }))
 	collection.add(svc(ContactService.name, {}))
 	collection.add(svc(AuthRegistryService.name, { assertWithinCap: async () => {} }))
+	collection.add(svc(LegalAcceptanceService.name, { assertCurrent: legalAssertCurrent }))
 	collection.add(journal)
 	// `cancel` is part of the real WrappedTask surface — classifyOperationCatch
 	// calls task.cancel() on a user-cancel before returning the cancelled result.
@@ -288,6 +292,7 @@ async function makeHarness() {
 		getAccountContract,
 		proveTx,
 		parkJournalWrite,
+		legalAssertCurrent,
 		lane: (service as unknown as { lane: ExecutionLane }).lane,
 		expiryDeferral: () => expiryDeferral,
 	}
@@ -978,5 +983,47 @@ describe("ExecutionService composition — fee-strategy map through real init (Q
 		const ctxOp = spy.mock.calls[0][0].op as { actions: unknown[] }
 		expect(ctxOp).not.toBe(inputOp)
 		expect(ctxOp.actions).not.toBe(inputOp.actions)
+	})
+})
+
+describe("ExecutionService composition — nothing is broadcast without a current Terms acceptance", () => {
+	const transfer = (h: Harness) =>
+		h.service
+			.executeTransfer(
+				h.req.networkId,
+				h.req.accountAddress,
+				h.req.tokenId,
+				h.req.transferType,
+				h.req.recipientAddress,
+				h.req.amount,
+				h.req.feeSettings,
+				h.estimateId,
+			)
+			.catch((e) => e)
+
+	test("no acceptance at entry: refused before a journal row, a proof or a send exists", async () => {
+		const h = await makeHarness()
+		h.legalAssertCurrent.mockRejectedValue(new TermsAcceptanceRequiredError())
+
+		expect(await transfer(h)).toBeInstanceOf(TermsAcceptanceRequiredError)
+
+		expect(h.getJournalId()).toBe("")
+		expect(h.proveTx).not.toHaveBeenCalled()
+		expect(h.sendTx).not.toHaveBeenCalled()
+	})
+
+	test("acceptance lost while proving: the proof is made, the send is not, and the record settles failed", async () => {
+		const h = await makeHarness()
+		const p = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+
+		h.legalAssertCurrent.mockRejectedValue(new TermsAcceptanceRequiredError())
+		h.ctrl.release()
+
+		expect(await p).toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(h.proveTx).toHaveBeenCalledTimes(1)
+		expect(h.sendTx).not.toHaveBeenCalled()
+		expect(h.stages).not.toContain("succeeded")
+		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("failed")
 	})
 })
