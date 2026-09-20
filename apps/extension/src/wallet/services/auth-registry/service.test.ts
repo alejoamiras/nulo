@@ -10,7 +10,7 @@
  * mined→confirm / dropped→remove transitions, the per-scope ceiling, the tuple scoping).
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { SessionEndedError } from "@nulo/extension-messaging/errors"
+import { SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
@@ -238,6 +238,23 @@ describe("AuthRegistryService sends run under the session the user acted in", ()
 		expect(h.captureExecutionFence).toHaveBeenCalledTimes(1)
 		expect(h.executeSendTransaction).toHaveBeenCalledTimes(1)
 		expect(h.executeSendTransaction.mock.calls[0]?.[4]).toMatchObject({ session: 1 })
+	})
+})
+
+describe("AuthRegistryService under a refused Terms acceptance", () => {
+	const FEE = { paymentMethod: { kind: "fj" } } as never
+
+	test("a revoke and a registry toggle surface the typed refusal and change nothing they own", async () => {
+		const h = await makeHarness()
+		await h.service.recordPendingAuthwits(P1, [{ hash: "0xh1", content }], "0xtx1")
+		const before = await h.service.getAuthwits(1, A)
+		h.executeSendTransaction.mockRejectedValue(new TermsAcceptanceRequiredError())
+
+		await expect(h.service.revokeAuthwits("net-1", A, [1], FEE)).rejects.toBeInstanceOf(TermsAcceptanceRequiredError)
+		await expect(h.service.setRegistryEnabled("net-1", A, false, FEE)).rejects.toBeInstanceOf(TermsAcceptanceRequiredError)
+
+		expect(await h.service.getAuthwits(1, A)).toEqual(before)
+		expect(await h.service.getRegistryEnabled(1, A)).toBe(true)
 	})
 })
 

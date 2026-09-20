@@ -100,6 +100,7 @@ function makeServices(discoverImpl: () => Promise<{ approved: boolean }>) {
 		},
 		"operation-journal": {},
 		token: { getTokens: async () => [] },
+		"legal-acceptance": { assertCurrent: async () => undefined },
 	}
 	const services = { get: (name: string) => stubs[name] } as never
 	return { services, sessions }

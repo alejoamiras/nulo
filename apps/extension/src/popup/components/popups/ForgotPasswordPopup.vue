@@ -49,10 +49,9 @@ const handleReset = () => {
 				</ItemsContainer>
 
 				<ItemsContainer>
-					<!-- TODO: Update URL when Nulo domain is ready -->
 					<SettingItem
 						title="Report issue with authorization"
-						to="https://nulo.sh/forms/report-issue"
+						to="mailto:hello@nulo.sh?subject=Nulo%20authorization%20issue"
 						icon="help"
 						external
 						data-testid="forgot-report-btn"

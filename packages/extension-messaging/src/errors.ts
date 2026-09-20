@@ -299,6 +299,20 @@ export class PxeStoreKeyMissingError extends WalletError {
 }
 
 /**
+ * The Terms of Use have not been accepted on this install, or a material revision has not been.
+ * Raised before any transaction is broadcast and before any dApp request is served. Constant message
+ * and no details: it tells a dApp what to ask the user to do and names nothing else.
+ */
+export class TermsAcceptanceRequiredError extends WalletError {
+	public static readonly CODE = "TERMS_ACCEPTANCE_REQUIRED"
+	public static readonly MESSAGE = "Open Nulo and accept the Terms to continue."
+
+	public constructor() {
+		super(TermsAcceptanceRequiredError.CODE, TermsAcceptanceRequiredError.MESSAGE, undefined, "TermsAcceptanceRequiredError")
+	}
+}
+
+/**
  * The session that authorized an operation ended — a lock, an auto-lock, or another unlock, the same
  * profile's included — before the operation reached the network. Constant message and no details:
  * it rides the message-only operation-result channel, and names nothing a dApp could probe.
@@ -463,6 +477,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
 	| { code: typeof SessionEndedError.CODE; message: string; details?: unknown }
+	| { code: typeof TermsAcceptanceRequiredError.CODE; message: string; details?: unknown }
 	| { code: typeof OperationNotRecordedError.CODE; message: string; details?: unknown }
 
 /**
@@ -515,6 +530,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new PxeStoreKeyMissingError(known.message, known.details)
 		case SessionEndedError.CODE:
 			return new SessionEndedError()
+		case TermsAcceptanceRequiredError.CODE:
+			return new TermsAcceptanceRequiredError()
 		case OperationNotRecordedError.CODE:
 			return new OperationNotRecordedError()
 		default:
