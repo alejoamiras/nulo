@@ -224,3 +224,29 @@ describe("fee cards co-mounted on one key", () => {
 		fee.unmount()
 	})
 })
+
+describe("a Send card on hold, co-mounted with the gas card", () => {
+	test("issues no read beyond its own mount read, and leaves the gas card's figure alone", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
+		const pinia = createPinia()
+		const gas = mount(GasBalanceCard, { global: { plugins: [pinia], stubs: STUBS } })
+		const fee = mount(FeeSettingsCard, {
+			props: { profile, network, account, feeEstimate: null, isEstimating: false, embedded: false, originPrivacy: "private" },
+			global: { plugins: [pinia], stubs: STUBS },
+		})
+		await vi.advanceTimersByTimeAsync(0)
+		await flushPromises()
+
+		// Private gas came back unread (null) on a healthy store: the card holds.
+		expect((fee.emitted<unknown[]>("update:modelValue") ?? []).filter((e) => e[0] != null)).toEqual([])
+		expect(fee.find('[data-testid="fee-init-degraded"]').text()).toContain("Couldn't check your private gas")
+		const readsAfterMount = mocks.getGasBalances.mock.calls.length
+
+		await vi.advanceTimersByTimeAsync(10 * 60_000)
+		await flushPromises()
+		expect(mocks.getGasBalances.mock.calls.length).toBe(readsAfterMount)
+		expect(gas.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		gas.unmount()
+		fee.unmount()
+	})
+})

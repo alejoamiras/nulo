@@ -4,18 +4,6 @@
 
 <script setup lang="ts">
 const router = useRouter()
-
-// Open external legal pages in a popup-shaped window — matches the popup
-// register page's `handleOpen` so terms / privacy actually work, not just
-// look like they should.
-const handleOpen = (target: "terms" | "privacy") => {
-	chrome.windows.create({
-		type: "popup",
-		url: `https://nulo.sh/${target}`,
-		width: 480,
-		height: 720,
-	})
-}
 </script>
 
 <template>
@@ -51,13 +39,6 @@ const handleOpen = (target: "terms" | "privacy") => {
 				Import profile
 			</Button>
 		</Flex>
-
-		<Text size="11" color="secondary" align="center" mono :class="$style.footer">
-			By continuing, you are confirming that you read and agree to
-			<span @click="handleOpen('terms')" :class="$style.link">Terms of Use</span>
-			and
-			<span @click="handleOpen('privacy')" :class="$style.link">Privacy Policy</span>
-		</Text>
 	</OnboardingPage>
 </template>
 
@@ -84,29 +65,5 @@ const handleOpen = (target: "terms" | "privacy") => {
 
 .actions {
 	width: 100%;
-}
-
-.footer {
-	margin-top: auto;
-	padding-top: 32px;
-	letter-spacing: 0.08em;
-	max-width: 360px;
-	line-height: 1.6;
-}
-
-.link {
-	color: var(--nulo-secondary);
-	cursor: pointer;
-	border-bottom: 1px solid var(--nulo-border);
-	transition: color 0.2s var(--bezier);
-}
-
-.link:hover {
-	color: var(--txt-primary);
-}
-
-.link:focus-visible {
-	outline: 2px dotted var(--nulo-accent);
-	outline-offset: 2px;
 }
 </style>
