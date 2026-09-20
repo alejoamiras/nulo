@@ -68,6 +68,9 @@ export const ALLOWED: ReadonlySet<string> = new Set([
 	"Zlib",
 ])
 
+/** Every common font container, in any case: an unclaimed `.TTF` must refuse like an unclaimed `.woff2`. */
+export const FONT_ASSET = /\.(woff2?|ttf|otf|eot)$/i
+
 export const FONT_ALLOWED: ReadonlySet<string> = new Set(["OFL-1.1", "Apache-2.0"])
 
 const AZTEC_TAG = "https://github.com/AztecProtocol/aztec-packages/blob/v5.2.0"
@@ -261,7 +264,7 @@ export const VENDORED: readonly Vendored[] = [
 				name: "Space Grotesk",
 				version: "2.000",
 				license: "OFL-1.1",
-				source: "https://github.com/floriankarsten/space-grotesk/blob/master/OFL.txt",
+				source: "https://github.com/floriankarsten/space-grotesk/blob/4a44bc96691ab8f0fd06e3da65224a2ab30afe23/OFL.txt",
 				texts: ["space-grotesk.OFL-1.1.txt"],
 				note: "Font, latin and latin-ext subsets, bundled by @nulo/design. Copyright 2020 The Space Grotesk Project Authors. No Reserved Font Name is declared, so a subset may keep the name.",
 			},
@@ -289,7 +292,7 @@ export const VENDORED: readonly Vendored[] = [
 				name: "Material Symbols Outlined",
 				version: "2.930",
 				license: "Apache-2.0",
-				source: "https://github.com/google/material-design-icons/blob/master/LICENSE",
+				source: "https://github.com/google/material-design-icons/blob/68e015dbbb6b730b5fe4934e8507cd5a465c8a3d/LICENSE",
 				texts: ["material-symbols.Apache-2.0.txt"],
 				note: "Icon font, bundled by @nulo/design. Copyright Google LLC. The upstream repository ships no NOTICE file.",
 			},
@@ -302,5 +305,5 @@ export const POLICY: Policy = {
 	overrides: OVERRIDES,
 	vendored: VENDORED,
 	fontAllowed: FONT_ALLOWED,
-	codeAsset: /\.(wasm(\.gz)?|[cm]?js|woff2?)$/,
+	codeAsset: /\.(wasm(\.gz)?|[cm]?js|woff2?|ttf|otf|eot)$/i,
 }

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { type BundleContents, bundleContents } from "./collect.ts"
 import { generateNotices, NoticesPolicyError, noticeNames } from "./generate.ts"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
-import { ALLOWED, FONT_ALLOWED, type Policy, VENDORED, type Vendored } from "./policy.ts"
+import { ALLOWED, FONT_ALLOWED, FONT_ASSET, type Policy, POLICY, VENDORED, type Vendored } from "./policy.ts"
 
 let root: string
 
@@ -255,6 +255,16 @@ describe("generateNotices", () => {
 			note: "Checked by hand.",
 		}
 
+		test("a reviewed text that has been emptied is refused, for an override and a vendored component alike", () => {
+			write("texts/verified.txt", " \r\n\n")
+			expect(violations(() => run([install("silent", {})], { overrides: [override] }))).toContain(
+				"texts/verified.txt: reviewed licence text is empty",
+			)
+			const host = install("host", { license: "MIT" }, { LICENSE: "x" })
+			const vendored = [{ trigger: { package: "host", reviewedVersion: "1.0.0" }, components: [{ ...override, name: "inner" }] }]
+			expect(violations(() => run([host], { vendored }))).toEqual(["texts/verified.txt: reviewed licence text is empty"])
+		})
+
 		test("supplies licence, source, note and normalised text", () => {
 			const notices = run([install("silent", {})], { overrides: [override] })
 			expect(notices).toContain(
@@ -422,9 +432,17 @@ describe("generateNotices", () => {
 				expect(violations(() => run([pkg]))).toEqual(['typeface-as-code@1.0.0: licence "OFL-1.1" is not allowed'])
 			})
 
+			test.each(["assets/New-abc.ttf", "assets/New-abc.otf", "assets/New-abc.WOFF2", "assets/New-abc.eot"])(
+				"%s is a font whatever its container or case, and refuses under the shipped policy",
+				(asset) => {
+					expect(POLICY.codeAsset.test(asset)).toBe(true)
+					expect(bundleContents({ [asset]: { type: "asset", source: "glyphs" } }).assetSha256[asset]).toBe(sha("glyphs"))
+				},
+			)
+
 			test("every font @nulo/design ships is one of the reviewed files", () => {
 				const dir = resolvePackageAsset("@nulo/design", "src/fonts", { from: import.meta.url })
-				const shippedFonts = readdirSync(dir).filter((file) => /\.woff2?$/.test(file))
+				const shippedFonts = readdirSync(dir).filter((file) => FONT_ASSET.test(file))
 				const reviewed = new Set(VENDORED.flatMap((vendored) => vendored.font?.sha256 ?? []))
 				const unreviewed = shippedFonts.filter((file) => !reviewed.has(sha256File(join(dir, file))))
 				expect(shippedFonts.length).toBe(reviewed.size)

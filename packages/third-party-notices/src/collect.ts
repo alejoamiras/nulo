@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { FONT_ASSET } from "./policy.ts"
 
 /** The slice of a Rollup/Rolldown output bundle this package reads. */
 export type OutputBundleLike = Record<
@@ -54,7 +55,7 @@ function recordAsset(contents: BundleContents, fileName: string, source: string 
 	contents.assets.push(fileName)
 	const text = readableScript(fileName, source)
 	if (text !== undefined) contents.assetText[fileName] = text
-	if (/\.woff2?$/.test(fileName) && source !== undefined)
+	if (FONT_ASSET.test(fileName) && source !== undefined)
 		contents.assetSha256[fileName] = createHash("sha256").update(source).digest("hex")
 }
 

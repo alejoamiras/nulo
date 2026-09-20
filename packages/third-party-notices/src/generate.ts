@@ -76,8 +76,12 @@ function licenceProblem(title: string, license: string, allowed: ReadonlySet<str
 	}
 }
 
-function readTexts(names: readonly string[], textsDir: string) {
-	return names.map((name) => ({ label: name, body: normalise(readFileSync(join(textsDir, name), "utf8")) }))
+function readTexts(names: readonly string[], textsDir: string, violations: string[]) {
+	return names.map((name) => {
+		const body = normalise(readFileSync(join(textsDir, name), "utf8"))
+		if (body.trim() === "") violations.push(`texts/${name}: reviewed licence text is empty`)
+		return { label: name, body }
+	})
 }
 
 function overrideProblems(pkg: InstalledPackage, override: Override, shipsFile: boolean): string[] {
@@ -158,7 +162,7 @@ function packageEntry(pkg: InstalledPackage, options: GenerateOptions, violation
 		label: file,
 		body: normalise(readFileSync(join(pkg.dir, file), "utf8")),
 	}))
-	const verified = readTexts(override?.texts ?? [], options.textsDir)
+	const verified = readTexts(override?.texts ?? [], options.textsDir, violations)
 	return { title, license, source: override?.source, note: override?.note, texts: [...shipped, ...verified] }
 }
 
@@ -182,7 +186,7 @@ function componentEntry(component: VendoredComponent, allowed: ReadonlySet<strin
 	const problem = licenceProblem(title, component.license, allowed)
 	if (problem) violations.push(problem)
 	const { license, source, note } = component
-	return { title, license, source, note, texts: readTexts(component.texts, options.textsDir) }
+	return { title, license, source, note, texts: readTexts(component.texts, options.textsDir, violations) }
 }
 
 const describeTrigger = (vendored: Vendored) =>
