@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "puppeteer"
+import { extensionUrl } from "./fixtures/browser"
 import {
 	clickByTestId,
 	launchExtension,
@@ -173,7 +174,7 @@ describe("popup: declining never locks a person out", () => {
 			await page.close()
 
 			// A relaunch forgets the dismissal and nothing else: still no record, so the sheet asks again.
-			await ctx.browser.close()
+			await ctx.close()
 			ctx = await launchExtension({ userDataDir: profileDir })
 			page = await openPopup(ctx)
 			await ensureUnlocked(page)
@@ -181,7 +182,7 @@ describe("popup: declining never locks a person out", () => {
 			expect(await readLegalRecord(page)).toBeUndefined()
 			await waitForSheet(page, "review")
 		} finally {
-			await ctx.browser.close().catch(() => {})
+			await ctx.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })
 		}
 	}, 240_000)
@@ -214,7 +215,7 @@ describe("popup: declining never locks a person out", () => {
 				// The acceptance record is device-local: a backup must not carry it to another device.
 				expect(JSON.stringify(backup)).not.toContain("nulo:legal:accepted")
 			} finally {
-				await ctx.browser.close().catch(() => {})
+				await ctx.close().catch(() => {})
 			}
 		},
 		480_000,
@@ -356,7 +357,7 @@ describe("popup: a passkey wallet that declined", () => {
 		await page.waitForSelector('[data-testid="legal-about-licences"]', { visible: true, timeout: 15_000 })
 
 		await pointerClick(page, "legal-about-licences")
-		const expected = `chrome-extension://${extension.extensionId}/THIRD-PARTY-NOTICES.txt`
+		const expected = extensionUrl(extension.extensionId, "/THIRD-PARTY-NOTICES.txt")
 		const target = await extension.browser.waitForTarget((candidate) => candidate.url() === expected, { timeout: 15_000 })
 		expect(target.type()).toBe("page")
 
