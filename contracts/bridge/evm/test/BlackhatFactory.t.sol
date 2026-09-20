@@ -12,11 +12,13 @@ pragma solidity >=0.8.27;
 //   [F-6] portal-of-a-portal / factory / implementation as "token" → refused
 //   [F-7] ERC-777-style transfer hook re-entering deposit → rejected, one message, exact reserve
 //   [F-8] guardian pending-ownership hijack → only the pending owner can accept
+//   [F-9] ERC-777-style transfer hook re-entering withdraw → rejected, one payout, exact reserve
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {Test} from "forge-std/Test.sol";
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
+import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {ERC20} from "@oz/token/ERC20/ERC20.sol";
 import {Ownable} from "@oz/access/Ownable.sol";
 import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
@@ -75,10 +77,12 @@ contract MutableMetadataERC20 is ERC20 {
     }
 }
 
-/// `transferFrom` re-enters the portal's deposit from inside the pull (ERC-777 hook shape).
+/// `transferFrom` re-enters the portal's deposit from inside the pull, and `transfer` re-enters
+/// `withdraw` from inside the payout (ERC-777 hook shape).
 contract HookERC20 is ERC20 {
     TokenPortalImpl public portal;
     bytes4 public hookRevert;
+    bytes4 public withdrawHookRevert;
 
     constructor() ERC20("Hook", "HOOK") {}
 
@@ -97,6 +101,18 @@ contract HookERC20 is ERC20 {
                 hookRevert = 0xffffffff;
             } catch (bytes memory reason) {
                 hookRevert = bytes4(reason);
+            }
+        }
+        return ok;
+    }
+
+    function transfer(address to, uint256 value) public override returns (bool) {
+        bool ok = super.transfer(to, value);
+        if (msg.sender == address(portal)) {
+            try portal.withdraw(to, value, false, Epoch.wrap(0), 1, 0, new bytes32[](0)) {
+                withdrawHookRevert = 0xffffffff;
+            } catch (bytes memory reason) {
+                withdrawHookRevert = bytes4(reason);
             }
         }
         return ok;
@@ -261,6 +277,21 @@ contract BlackhatFactoryTest is Test {
         assertEq(t.hookRevert(), ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector, "hook was not rejected");
         assertEq(inbox.sent(), registers + 1, "the nested deposit sent a message");
         assertEq(t.balanceOf(address(portal)), 100, "reserve drifted");
+    }
+
+    /// [F-9] The token's `transfer` re-enters `withdraw` mid-payout. The capturing outbox would
+    /// accept the nested message, so the transient guard is all that refuses it.
+    function test_F9_transferHookReentersWithdraw_rejected() public {
+        HookERC20 t = new HookERC20();
+        TokenPortalImpl portal = TokenPortalImpl(factory.createPortal(address(t)));
+        t.setPortal(portal);
+        t.mint(address(portal), 100);
+
+        portal.withdraw(ALICE, 40, false, Epoch.wrap(0), 1, 0, new bytes32[](0));
+
+        assertEq(t.withdrawHookRevert(), ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector, "hook was not rejected");
+        assertEq(t.balanceOf(ALICE), 40, "the nested withdrawal paid out");
+        assertEq(t.balanceOf(address(portal)), 60, "reserve drifted");
     }
 
     /// [F-8] A pending ownership transfer cannot be accepted by anyone but the nominee, and the

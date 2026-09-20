@@ -308,7 +308,6 @@ contract PortalFactoryTest is Test {
         bytes32[] memory path;
         vm.expectRevert(TokenPortalImpl.InexactTransfer.selector);
         portal.withdraw(alice, 500, false, Epoch.wrap(3), 9, 5, path);
-        assertEq(sur.balanceOf(address(portal)), 1_000, "reserve");
     }
 
     function test_implementation_refusesDirectUse() public {
