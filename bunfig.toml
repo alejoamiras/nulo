@@ -30,9 +30,10 @@ linker = "isolated"
 # CVE bypass: when an advisory drops for a package newer than the gate,
 # temporarily add a `minimumReleaseAgeExcludes = ["<name>"]` entry here,
 # install the patched version, open a follow-up PR removing it after the
-# window passes. See SECURITY.md "Dependency policy". Exactly one exemption
-# is active — see below; the gate is otherwise REAL (the @aztec 5.0.1 /
-# @alejoamiras set aged out ~2026-07-23 and was removed 2026-08-24).
+# window passes. See SECURITY.md "Dependency policy". No exemption is
+# active: locked versions are never re-gated, so an exclude is only needed
+# while `bun install` writes the young version into bun.lock, and may come
+# out before the window passes (verified with `--frozen-lockfile --force`).
 #
 # Bun bug #25305 (`bun update --latest` skipped this gate for transitive
 # deps on 1.3.x) is CLOSED on Bun 1.4.0 — verified 2026-08-24 with a
@@ -47,18 +48,3 @@ linker = "isolated"
 #
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
-
-# TEMPORARY — remove on/after 2026-09-25T22:10Z, when the youngest of the three clears the gate
-# on its own (presto-banners 1.1.0 and presto-core 1.1.0 clear 2026-09-25T22:02Z, presto
-# 5.2.0-revision.3 at 2026-09-25T22:10Z). These are the MIT-relicensed versions: the ones they
-# replace declare AGPL-3.0-only, which the third-party-notices policy refuses. The Presto packages
-# are first-party (published by this repo's owner). Verified before exempting, in an isolated
-# fixture after a real `npm install --ignore-scripts` of the exact versions: `npm audit signatures`
-# reports every tarball registry-signed, and each of the three carries a SLSA v1 provenance
-# attestation.
-# Provenance only proves origin — it does not review the code.
-minimumReleaseAgeExcludes = [
-	"@alejoamiras/presto",
-	"@alejoamiras/presto-core",
-	"@alejoamiras/presto-banners",
-]
