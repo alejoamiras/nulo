@@ -47,3 +47,7 @@ Rolldown names an entry-aware chunk after the entries that share it, and names l
 ## WASM-backend proof per browser
 
 `tests/e2e/network/transfers.test.ts` through `e2e:agent`, on the final commit's code: **Firefox exit 0 (1 passed), Chrome exit 0 (1 passed)**. The backend is established by elimination, because the suite logs no backend name: neither bundle carries the proverless build stamp, neither carries the Presto-required stamp, and nothing listened on the Presto port (the run script refuses to start otherwise) — which leaves the wallet's silent fallback, bb.js WASM: its workers, its `barretenberg*.wasm.gz` assets and the `aztec-bb-js` chunks, exactly what this arc rechunked and what CI's Presto-required lanes never load.
+
+## CI on the arc's PR (#646), and the ticks
+
+`quality-status`, `extension-smoke-e2e-status`, `extension-network-e2e-status` (the three required) and `extension-smoke-e2e-firefox-status`, `extension-network-e2e-firefox-status`: all **pass**, 0 failed jobs. Phase 9 ticked on that. **Phase 2 ticked on the same evidence** — its gate as literally written (`web-ext lint`, no `--self-hosted`) reports 0 errors too, alongside lint, typecheck, `manifest.test.ts` and `build:firefox` at exit 0. It had been open since the day its own gate run surfaced `FILE_TOO_LARGE`.

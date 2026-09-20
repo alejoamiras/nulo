@@ -120,7 +120,7 @@ Fast layers (`bun run lint`, `bun run typecheck`) run after every meaningful ste
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/wallet/utils/passkey-ceremony.test.ts && bun run audit:vue` — all exit 0, the six cases listed as passed. Layers: lint, typecheck, unit, build.
 
-### Phase 2 — Firefox manifest items
+### Phase 2 — Firefox manifest items ✓
 
 `data_collection_permissions: { required: ["none"] }`, `strict_min_version: "153.0"`, gecko id unchanged (`wallet@nulo.sh`) — the owner's answers to A1–A3; `manifest.test.ts` pins all three.
 
@@ -193,7 +193,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** `bun run lint` and `bash scripts/check-no-brand.sh` exit 0; every path and command named in new doc text exists (spot check logged in `lessons/phase-8.md`). Layers: lint, path guard.
 
-### Phase 9 — Every shipped file under the linter's parse limit (light amendment, 2026-09-20)
+### Phase 9 — Every shipped file under the linter's parse limit (light amendment, 2026-09-20) ✓
 
 **Why.** `addons-linter` refuses to parse any non-binary file (JS, CSS, HTML, JSON) of 5 MiB or more and reports `FILE_TOO_LARGE` — an error, and a file nobody scanned. The Firefox bundle has one: `assets/offscreen-*.js`, 20.3 MB. Phase 2's gate (`web-ext lint` → 0 errors) cannot pass until it is gone.
 
@@ -237,7 +237,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 4. `tests/e2e/action-popup-layout.test.ts` — Firefox only: on every tab, `#app` and the nav's bottom edge equal the viewport height. `data-testid="bottom-nav"` added to the nav.
 5. `FIREFOX.md` row.
 
-**UI impact:** the popup's bottom nav, on Firefox only, moves from wherever the page's content ended to the popup's bottom edge — where it already is on Chrome. Before/after screenshots of the real panel are attached to the arc's PR. **Chrome:** `100vh` and the old `100%` both resolve to the popup's 600 px; no visual change expected, and the Chrome smoke is the check.
+**UI impact:** the popup's bottom nav, on Firefox only, moves from wherever the page's content ended to the popup's bottom edge — where it already is on Chrome. Before/after screenshots of the real panel are attached to the arc's PR. **Every other surface:** `100vh` and the old `100%` resolve to the same height in Chrome's popup (600 px), its side panel and the approval windows, so no visual change is expected and the Chrome smoke is the check. They differ in one case: a window a user has dragged narrower than the popup's 360 px minimum on a browser with classic (non-overlay) scrollbars — `100vh` includes the horizontal scrollbar's thickness, so the shell overflows by that much. The wallet creates no window that narrow; accepted.
 
 **Owner sign-off.** The bug report above is the owner's; to *"going ahead as arc 8 (surface-detected fixed height, no browser sniffing). Needs your eyes on a headed build afterwards"* the owner answered *"Sounds good. Keep going."* (2026-09-20). The shipped fix is simpler than the one described then (no surface detection — one CSS declaration). **Visual confirmation on a headed Firefox is the owner's, on the PR's build, and is the condition for merging this arc.**
 
