@@ -95,6 +95,7 @@ contract CloneWithdrawRealOutboxTest is Test {
         bytes32 grownPair = _parent(_leaf(address(portal), makeAddr("carol"), 50, address(0)), bytes32(0));
         // Hashed ahead of the prank: sha256 is a precompile CALL and would consume it.
         bytes32 grownRoot = _parent(_parent(aliceLeaf, bobLeaf), grownPair);
+        assertNotEq(grownRoot, root, "the longer proof must publish a different root");
         vm.prank(address(rollup));
         outbox.insert(EPOCH, CHECKPOINTS + 1, grownRoot);
 
@@ -136,7 +137,8 @@ contract CloneWithdrawRealOutboxTest is Test {
         _expectInvalidRoot(bobLeaf, aliceLeaf, 0);
         portal.withdraw(bob, 300, false, EPOCH, CHECKPOINTS, 0, _path(aliceLeaf, emptyPair));
 
-        // Index 5 walks the same two-level path as index 1 and would own a fresh nullifier.
+        // Index 5 takes index 1's left/right turns under a different leaf id; the Outbox bounds
+        // it, and MerkleLib refuses the leftover high bit behind that.
         vm.expectRevert(abi.encodeWithSelector(Errors.Outbox__LeafIndexOutOfBounds.selector, 5, 2));
         portal.withdraw(bob, 300, false, EPOCH, CHECKPOINTS, 5, _path(aliceLeaf, emptyPair));
 
