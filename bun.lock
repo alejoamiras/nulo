@@ -50,6 +50,7 @@
         "@nulo/extension-messaging": "workspace:*",
         "@nulo/legal": "workspace:*",
         "@nulo/resolve-asset": "workspace:*",
+        "@nulo/third-party-notices": "workspace:*",
         "@nulo/wallet-bridge": "workspace:*",
         "@nulo/wallet-core": "workspace:*",
         "@nulo/wallet-crypto": "workspace:*",

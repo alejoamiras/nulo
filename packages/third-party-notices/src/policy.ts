@@ -117,7 +117,7 @@ export const OVERRIDES: readonly Override[] = [
 		declared: "MIT",
 		source: `${AZTEC_TAG}/barretenberg/LICENSE`,
 		texts: ["barretenberg.Apache-2.0.txt"],
-		note: "The package manifest declares MIT but ships no licence file; the barretenberg tree it and its wasm are built from carries the Apache-2.0 text reproduced here, the stricter of the two.",
+		note: "The package manifest declares MIT but ships no licence file; the barretenberg tree it and its wasm are built from carries the Apache-2.0 text reproduced here. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
 		names: ["@aztec/noir-acvm_js"],
@@ -125,7 +125,7 @@ export const OVERRIDES: readonly Override[] = [
 		license: "MIT",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file.",
+		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
 		names: ["@aztec/noir-noirc_abi"],
@@ -133,7 +133,7 @@ export const OVERRIDES: readonly Override[] = [
 		license: "(MIT OR Apache-2.0)",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt", "noir.Apache-2.0.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file.",
+		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
 		names: ["@aztec/sqlite3mc-wasm"],
@@ -212,6 +212,14 @@ export const VENDORED: readonly Vendored[] = [
 		trigger: { asset: /^assets\/sqlite3-opfs-async-proxy\.js$/ },
 		components: [],
 		coveredBy: ["@aztec/sqlite3mc-wasm"],
+	},
+	{
+		trigger: { asset: /^service-worker-loader\.js$/ },
+		components: [],
+		generated: {
+			by: "@crxjs/vite-plugin's service-worker loader",
+			content: /^import '\.\/assets\/[\w.-]+\.js';\s*$/,
+		},
 	},
 	{
 		trigger: { asset: /^assets\/[\w.-]+-loader-[\w-]+\.js$/ },
