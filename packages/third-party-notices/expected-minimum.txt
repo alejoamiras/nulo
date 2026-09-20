@@ -3,7 +3,9 @@
 # a worker build, the overrides, the vendored components. One name per line.
 
 # main graph
-vue
+# Not `vue`: that package is a re-export facade that renders no bytes of its own, so it is truthfully
+# absent; its code ships as the @vue/* runtime packages.
+@vue/runtime-core
 vue-router
 pinia
 zod
