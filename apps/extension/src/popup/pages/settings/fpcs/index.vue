@@ -25,6 +25,7 @@ import FpcRow from "@/popup/components/modules/settings/fpcs/FpcRow.vue"
 
 /** Helpers */
 import { fpcSortOrder, isSyntheticRow, prepareFpc, PUBLIC_FJ_ROW } from "@/popup/components/modules/settings/fpcs/fpc-helpers"
+import { mutateSendSelections, withoutFpc } from "@/popup/components/modules/send/fee-send-selection"
 
 const { openToast } = useToast()
 
@@ -98,6 +99,7 @@ const handleDelete = (fpc) => {
 			}
 			await storageLocalSet({ [FEE_METHOD_LS_KEY]: fpms })
 		}
+		await mutateSendSelections((raw) => withoutFpc(raw, fpc.id))
 
 		openToast({ label: "FPC is deleted" })
 	}

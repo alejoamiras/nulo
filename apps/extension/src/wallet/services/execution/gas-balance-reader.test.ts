@@ -437,4 +437,55 @@ describe("GasBalanceReader peek (stale-while-revalidate)", () => {
 			stale: false,
 		})
 	})
+
+	test("a forced read that waits out another flight still recomputes when nothing was invalidated", async () => {
+		// Each view call reports the balance as of the moment it was issued; the first flight is held open.
+		let onChain = 0n
+		let releaseFirstFlight!: () => void
+		const firstFlightHeld = new Promise<void>((r) => {
+			releaseFirstFlight = r
+		})
+		let heldCalls = 2
+		bvsMock.mockReset().mockImplementation(async () => {
+			const seen = onChain
+			if (heldCalls-- > 0) await firstFlightHeld
+			return encodedResult(seen)
+		})
+		const reader = new GasBalanceReader(
+			makeDeps({ getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xfpc", isProtocol: true } as never] }),
+		)
+		const plain = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+
+		// Gas arrives, then another document asks for a fresh read — and no invalidation lands between them.
+		onChain = 55n
+		const forced = reader.get("net-1", "0xacc", true)
+		releaseFirstFlight()
+
+		expect((await plain).privateFeeJuice).toBe("0")
+		expect((await forced).privateFeeJuice).toBe("55")
+		expect(bvsMock.mock.calls.length).toBe(4)
+	})
+
+	test("an unforced caller from a later epoch still re-enters unforced and joins the restarted flight", async () => {
+		let resolveFirst!: (v: unknown) => void
+		bvsMock
+			.mockReset()
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						resolveFirst = r
+					}),
+			)
+			.mockResolvedValue(encodedResult(200n))
+		const reader = new GasBalanceReader(makeDeps())
+		const stale = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+		reader.invalidateAccount("0xacc")
+		const [a, b] = [reader.get("net-1", "0xacc"), reader.get("net-1", "0xacc")]
+		resolveFirst(encodedResult(100n))
+		await stale
+		expect(await a).toBe(await b)
+		expect(bvsMock.mock.calls.length).toBe(2)
+	})
 })

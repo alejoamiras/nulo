@@ -229,6 +229,18 @@ as a substitute for closing through the UI). `waitForPopup` matches a NEW `#/win
 URL because every interaction URL carries a unique `requestId`; `callExpectingNoPopup` diffs targets
 by identity because plain popup pages change URL under a lock redirect.
 
+**`waitForFunction` with page-function arguments needs a non-empty options object.** `patchPagePolling`
+finds the options argument by looking for a `timeout` or `polling` key. A bare `{}` has neither, so the
+wrapper splices its own options in at index 1 and your `{}` becomes the page function's FIRST argument
+— `waitForFunction((sel) => !document.querySelector(sel), {}, SEL)` then queries `{}`, matches nothing,
+and an absence-wait passes vacuously while a presence-wait times out. Always write `{ timeout: N }`.
+
+**A Send fee trigger can show a method that is not in effect.** With a saved pick, the card previews
+that pick's row while balances load (`send-fee-method-trigger[data-fee-method]`), and a preview pays
+nothing. To assert the method in effect, wait on something only the effective method produces (the
+`send-fee-privacy-notice` row, an enabled submit), and scope by `fee-settings-card[data-origin]` —
+across an origin flip the trigger attribute alone cannot tell the new origin's method from the last one's.
+
 **The one sanctioned real click: `pointerClick(page, testid)`** (`helpers/legal-drivers.ts`). The
 helpers above dispatch the click in-page, which reaches an element even when an overlay covers it, so
 they cannot prove that nothing does. A lock-out proof (the Terms sheet must never cover an export
