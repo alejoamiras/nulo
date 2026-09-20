@@ -1,7 +1,8 @@
 # third-party-notices — recon
 
 Base: `origin/dev` at `c97edc64` (legal-terms arcs A and B merged). Prior art is the unmerged
-branch `feat/third-party-notices` (draft PR #630): a working generator whose Codex fix loop ran
+branch `feat/third-party-notices` (PR #630, closed; the branch was deleted once #639–#642 merged,
+and its review log is kept at [`../legal-terms/lessons/arc-c.md`](../legal-terms/lessons/arc-c.md)): a working generator whose Codex fix loop ran
 seven engagements against a cap of three. This rework reuses that code; it does not start over.
 One read-only explorer ran; its absence claims carry their search trail.
 
