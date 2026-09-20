@@ -305,5 +305,5 @@ export const POLICY: Policy = {
 	overrides: OVERRIDES,
 	vendored: VENDORED,
 	fontAllowed: FONT_ALLOWED,
-	codeAsset: /\.(wasm(\.gz)?|[cm]?js|woff2?|ttf|otf|eot)$/i,
+	codeAsset: new RegExp(`\\.(wasm(\\.gz)?|[cm]?js)$|${FONT_ASSET.source}`, "i"),
 }

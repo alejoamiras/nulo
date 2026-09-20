@@ -436,6 +436,9 @@ describe("generateNotices", () => {
 				"%s is a font whatever its container or case, and refuses under the shipped policy",
 				(asset) => {
 					expect(POLICY.codeAsset.test(asset)).toBe(true)
+					expect(violations(() => run([], { codeAsset: POLICY.codeAsset }, [asset]))).toEqual([
+						`${asset}: emitted code or font asset with no VENDORED entry`,
+					])
 					expect(bundleContents({ [asset]: { type: "asset", source: "glyphs" } }).assetSha256[asset]).toBe(sha("glyphs"))
 				},
 			)
