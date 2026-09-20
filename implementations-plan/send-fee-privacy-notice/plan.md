@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 harden: not scheduled
-status: rev 7 — APPROVED by the owner 2026-09-18 (walk order changed at the gate, D30; codex approve on the change). Implementation not started
+status: rev 7 — APPROVED by the owner 2026-09-18 (walk order changed at the gate, D30; codex approve on the change). Implemented and merged 2026-09-20 (#631); decisions D31–D34 were added during the post-implementation review.
 base: dev @ b0ebbb40
 ---
 
