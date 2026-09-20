@@ -6,10 +6,6 @@ notice that exists only on GitHub does not satisfy them.
 
 One concern: given what a build rendered, produce the notices or refuse the build.
 
-> **Not wired into a build yet.** This is the policy library, driven by fixture bundles in its tests.
-> The Vite plugin, stylesheet following and the CI check are the next change; the sections below that
-> describe them say how the library is meant to be fed.
-
 ## How it decides what ships
 
 Input is the **rendered** module set of every emitted chunk (`chunk.modules`), not every module the
@@ -69,8 +65,11 @@ a branch). An override cannot launder a licence: its expression goes through the
 | `src/spdx.ts` | SPDX expression parser + allowlist evaluation |
 | `src/packages.ts` | module id → owning package; licence-file discovery |
 | `src/collect.ts` | rendered modules + assets out of an output bundle |
+| `src/stylesheets.ts` | what a stylesheet inlines by `@import` / `@use` / `@forward`, transitively |
 | `src/policy.ts` | `ALLOWED`, `FONT_ALLOWED`, `OVERRIDES`, `VENDORED` — the reviewed records |
 | `src/generate.ts` | policy checks + byte-stable rendering; `noticeNames` parses a rendered file |
+| `src/plugin.ts` | the thin Vite shell (`main` + `worker`) |
+| `src/check-minimum.ts`, `bin/check-minimum.ts` | CI: a built dir's notices ⊇ `expected-minimum.txt` |
 | `texts/` | verbatim upstream licence texts the overrides and vendored components cite |
 
 `src/` is loaded by the Vite config through Node's type stripping: relative imports carry `.ts`, and
@@ -124,6 +123,7 @@ a subset could not keep the name).
 source is available that a notices file does not discharge by itself. A package under it refuses the
 build, which is the moment to decide.
 
+
 ## Scripts
 
-`bun run test` · `bun run typecheck`
+`bun run test` · `bun run typecheck` · `bun bin/check-minimum.ts <build-dir>…`

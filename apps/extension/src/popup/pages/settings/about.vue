@@ -19,7 +19,7 @@ import { currentVersion } from "@nulo/legal"
 import { copyWithToast } from "@/utils/clipboard"
 import { managers } from "@/utils/core"
 import { legalAboutRow } from "@/utils/legal-about"
-import { openLegalDocument } from "@/utils/legal-links"
+import { openLegalDocument, openThirdPartyNotices } from "@/utils/legal-links"
 import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 
 const version = __VERSION__
@@ -118,6 +118,13 @@ onBeforeUnmount(() => legal.dispose())
 					:description="legalRow.privacyUpdated ? 'Privacy Policy updated' : undefined"
 					chevron
 					data-testid="legal-about-privacy"
+				/>
+				<SettingItem
+					@click="openThirdPartyNotices()"
+					size="small"
+					title="Open-source licences"
+					chevron
+					data-testid="legal-about-licences"
 				/>
 				<SettingItem
 					v-if="legalRow.accepted"
