@@ -1,2 +1,8 @@
 dist
 src/generated/release.json
+src/generated/legal-pages.json
+# Written by scripts/build-legal.ts from legal/*.md
+/terms.html
+/privacy.html
+/terms/
+/privacy/

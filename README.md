@@ -5,7 +5,7 @@
 > **Nulo is a demo for evaluation and feedback. It is not a production wallet.**
 >
 > - **No security audit.** The code has not been reviewed by an external security firm.
-> - **Do not use with real funds or mainnet keys.** Aztec testnet only. Treat any key material you import as compromised.
+> - **Aztec mainnet is the default network, and assets on it have real value.** Use only what you can afford to lose entirely. Treat any key material you import as compromised.
 > - **Storage format is unstable.** Profiles, sessions, and on-disk schemas may change between builds. Expect data wipes and full reseeds.
 > - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
 > - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.

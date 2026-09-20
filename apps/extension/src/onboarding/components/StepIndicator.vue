@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Onboarding step indicator. Five-step brutalist row:
- *   [01]     [02]     [03]     [04]     [05]
- *   ━━━━━    ━━━━━    ━━━━━    ─────    ─────
- *   SETUP    AZTEC    FEES     SPEED    DONE
+ * Onboarding step indicator. Six-step brutalist row:
+ *   [01]     [02]     [03]     [04]     [05]     [06]
+ *   ━━━━━    ━━━━━    ━━━━━    ━━━━━    ─────    ─────
+ *   TERMS    SETUP    AZTEC    FEES     SPEED    DONE
  *
  * The 2px bar underneath each cell carries the state:
  *   active:  --nulo-accent (warm off-white)
@@ -11,16 +11,18 @@
  *   future:  --nulo-border (dim, almost-bg)
  *
  * Welcome page intentionally has no indicator — it owns the canvas with
- * its own hero. Indicator appears starting from /create.
+ * its own hero. Indicator appears starting from /terms, so accepting the
+ * Terms reads as the first step of a visible sequence, not a gate in front of one.
  */
-defineProps<{ current: 1 | 2 | 3 | 4 | 5 }>()
+defineProps<{ current: 1 | 2 | 3 | 4 | 5 | 6 }>()
 
 const steps: Array<{ num: string; label: string }> = [
-	{ num: "01", label: "Setup" },
-	{ num: "02", label: "Aztec" },
-	{ num: "03", label: "Fees" },
-	{ num: "04", label: "Speed" },
-	{ num: "05", label: "Done" },
+	{ num: "01", label: "Terms" },
+	{ num: "02", label: "Setup" },
+	{ num: "03", label: "Aztec" },
+	{ num: "04", label: "Fees" },
+	{ num: "05", label: "Speed" },
+	{ num: "06", label: "Done" },
 ]
 </script>
 
@@ -47,7 +49,7 @@ const steps: Array<{ num: string; label: string }> = [
 <style module>
 .row {
 	display: grid;
-	grid-template-columns: repeat(5, 1fr);
+	grid-template-columns: repeat(6, 1fr);
 	gap: 8px;
 	width: 100%;
 	margin: 0 0 16px;

@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
 <template>
 	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
 		<OnboardingBackLink testid="onboarding-import-back" />
-		<StepIndicator :current="1" />
+		<StepIndicator :current="2" />
 		<header :class="$style.hero">
 			<BrutalistTitle main="Import" sub="Profile" />
 			<div :class="$style.hero_bar" />

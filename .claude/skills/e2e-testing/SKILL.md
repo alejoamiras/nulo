@@ -203,6 +203,16 @@ and connected states share one Chrome). Pick by the state you need and the scope
 | `localNetworkExtension` | profile switched to the sandbox network | file |
 | `tokenReadyExtension`, `feeJuiceReadyExtension`, `feeJuiceImportedExtension` | funded token / fee-juice states on the sandbox | file |
 
+**Every launch starts from a Terms-acceptance state.** `launchExtension({ legal })` seeds
+`nulo:legal:accepted` from `@nulo/legal` (never a literal): a fresh profile defaults to `current`, so
+a spec that is not about the gate never meets it, and a reused `userDataDir` defaults to `keep`, so a
+relaunch boots over whatever the previous launch left. `missing`, `stale` (one version behind, which
+drives the real "terms have changed" sheet) and `corrupt` are the other states.
+`openOnboarding(ctx, { legal: "missing" })` is a real fresh install for the gate's own specs;
+`reloadWithLegalState(page, seed)` (`helpers/legal-drivers.ts`) flips an unlocked popup, which is
+what an update shipping newer Terms looks like. The service keeps no cache, so a storage write is
+seen by the very next admission check.
+
 A file-scoped browser is shared by the file's tests, so a test that mutates the profile takes a
 `PerTest` fixture. Shared browsers leak worker memory between files, which is why the unit is the
 file and never the run. Design files order-independent.
@@ -218,6 +228,26 @@ mid-leave under headless rAF throttling — only after asserting the real post-m
 as a substitute for closing through the UI). `waitForPopup` matches a NEW `#/windows/<kind>` target by
 URL because every interaction URL carries a unique `requestId`; `callExpectingNoPopup` diffs targets
 by identity because plain popup pages change URL under a lock redirect.
+
+**`waitForFunction` with page-function arguments needs a non-empty options object.** `patchPagePolling`
+finds the options argument by looking for a `timeout` or `polling` key. A bare `{}` has neither, so the
+wrapper splices its own options in at index 1 and your `{}` becomes the page function's FIRST argument
+— `waitForFunction((sel) => !document.querySelector(sel), {}, SEL)` then queries `{}`, matches nothing,
+and an absence-wait passes vacuously while a presence-wait times out. Always write `{ timeout: N }`.
+
+**A Send fee trigger can show a method that is not in effect.** With a saved pick, the card previews
+that pick's row while balances load (`send-fee-method-trigger[data-fee-method]`), and a preview pays
+nothing. To assert the method in effect, wait on something only the effective method produces (the
+`send-fee-privacy-notice` row, an enabled submit), and scope by `fee-settings-card[data-origin]` —
+across an origin flip the trigger attribute alone cannot tell the new origin's method from the last one's.
+
+**The one sanctioned real click: `pointerClick(page, testid)`** (`helpers/legal-drivers.ts`). The
+helpers above dispatch the click in-page, which reaches an element even when an overlay covers it, so
+they cannot prove that nothing does. A lock-out proof (the Terms sheet must never cover an export
+page) hit-tests the control's centre with `elementFromPoint`, fails naming what covers it, and only
+then clicks through `page.mouse`, which is `Input.dispatchMouseEvent` and not the hanging
+element-handle path. Use it for the control whose reachability IS the assertion; drive the rest of
+the flow with the ordinary helpers.
 
 ### What to assert
 

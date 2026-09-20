@@ -23,6 +23,7 @@ import { AccountService } from "./services/account/service"
 import { AccountStateService } from "./services/account-state/service"
 import { AuthRegistryService } from "./services/auth-registry/service"
 import { ConfigService } from "./services/config/service"
+import { LegalAcceptanceService } from "./services/legal/service"
 import { ContactService } from "./services/contact/service"
 import { DappInteractionService } from "./services/dapp-interaction/service"
 import { DappSessionService } from "./services/dapp-session/service"
@@ -112,8 +113,10 @@ export interface WalletRuntime {
 /** Heartbeat cadence — matches the previous MV3 keepalive cadence (see AUDIT notes). */
 const HEARTBEAT_INTERVAL_MS = 10_000
 
-/** Uninstall URL. Matches nulo.sh brand; documented in SECURITY.md. */
-const UNINSTALL_URL = "https://nulo.sh/forms/uninstall"
+/** Opened by the browser on uninstall. The site root: there is no uninstall
+ *  survey, and the privacy policy states that this URL carries no wallet
+ *  address and no per-installation identifier. */
+const UNINSTALL_URL = "https://nulo.sh"
 
 /** The runtime's closure state. `retrySafe` is the single-flight memo's retry
  *  classification — vetoed at the three points where an in-lifetime re-run is
@@ -457,6 +460,7 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	services.add(new AccountStateService(logger, restoreGate))
 	services.add(new AuthRegistryService(logger, browserApi))
 	services.add(new ConfigService(config, logger))
+	services.add(new LegalAcceptanceService(logger, browserApi))
 	const windowManager = new WindowManager(browserApi.windows, clock, logger)
 	services.add(new ContactService(logger, browserApi, restoreGate))
 	services.add(new DappInteractionService(logger, windowManager))

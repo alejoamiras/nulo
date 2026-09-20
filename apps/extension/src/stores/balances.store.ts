@@ -637,8 +637,10 @@ class BalancesCore {
 		if (!entry || (!entry.gas.retryDebt && !entry.fpc.retryDebt)) return
 		const epoch = this.epochOf(scope.profileId)
 		const legs = retryLegsFor(entry, union.legs)
+		// The retry reads past the reader's TTL: the failed read may have been a forced one, and a cached
+		// figure that predates it would recommit exactly the staleness that read was issued to rule out.
 		await Promise.all([
-			legs.includes("gas") ? this.fetchGas(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
+			legs.includes("gas") ? this.fetchGas(key, scope, epoch, { cause: "retry", forceRefresh: true }) : Promise.resolve(),
 			legs.includes("fpc") ? this.fetchFpc(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
 		])
 		if (this.shouldRearmRetry(key)) this.armRetry(key, scope, attempt + 1)

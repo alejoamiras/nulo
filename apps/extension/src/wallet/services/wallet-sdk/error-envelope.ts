@@ -25,6 +25,7 @@ import {
 	RpcDisconnectedError,
 	RpcTimeoutError,
 	SessionEndedError,
+	TermsAcceptanceRequiredError,
 	TooManyPendingError,
 	DuplicateInitializationError,
 	UnsupportedMethodError,
@@ -62,6 +63,16 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: 4900,
 			message: error.message,
 			data: { walletErrorCode: SessionEndedError.CODE },
+		}
+	}
+	if (error instanceof TermsAcceptanceRequiredError) {
+		// 4100 (unauthorized): the wallet will serve this origin again once the user accepts the
+		// Terms in the wallet itself — nothing the dApp can do but say so. One bit about the install,
+		// disclosed before any method or capability is examined.
+		return {
+			code: 4100,
+			message: error.message,
+			data: { walletErrorCode: TermsAcceptanceRequiredError.CODE },
 		}
 	}
 	if (error instanceof CapabilityNotGrantedError) {
