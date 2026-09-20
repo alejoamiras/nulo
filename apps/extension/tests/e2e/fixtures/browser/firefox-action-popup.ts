@@ -9,6 +9,9 @@ import { actionPopupContext } from "./firefox"
  */
 
 const PANEL_BROWSER = ".webextension-popup-browser"
+const REPLY = "nulo-e2e:result"
+/** Under geckodriver's 30 s script timeout, so a frame script that never answers is reported by name. */
+const REPLY_DEADLINE_MS = 10_000
 
 /** Opens the panel as a toolbar click would, and resolves once its document is the extension's. */
 export async function openActionPopup(browser: Browser): Promise<void> {
@@ -34,22 +37,29 @@ export async function openActionPopup(browser: Browser): Promise<void> {
 
 /**
  * Evaluates `body` — the source of a function body whose `content` is the popup's window — inside
- * the open panel, and resolves with the JSON-serialisable value it returns.
+ * the open panel, and resolves with the JSON-serialisable value it returns. A `body` that throws
+ * rejects with its message; either way the listener is gone before this settles, so a failed
+ * evaluation cannot answer the next one.
  */
 export async function evaluateInActionPopup<T>(browser: Browser, body: string): Promise<T> {
 	const { session } = actionPopupContext(browser)
-	const frameScript = `sendAsyncMessage("nulo-e2e:result", (function () { ${body} })());`
+	const frameScript = `
+		try { sendAsyncMessage(${JSON.stringify(REPLY)}, { value: (function () { ${body} })() }); }
+		catch (err) { sendAsyncMessage(${JSON.stringify(REPLY)}, { error: String(err) }); }`
 	const reply = await session.chromeScript<{ value?: T; error?: string }>(
 		`
-		const [selector, source, done] = arguments;
-		const popup = Services.wm.getMostRecentWindow("navigator:browser").document.querySelector(selector);
+		const [selector, source, channel, deadline, done] = arguments;
+		const win = Services.wm.getMostRecentWindow("navigator:browser");
+		const popup = win.document.querySelector(selector);
 		if (!popup) return done({ error: "the action popup is not open" });
 		const mm = popup.messageManager;
-		const listener = (message) => { mm.removeMessageListener("nulo-e2e:result", listener); done({ value: message.data }); };
-		mm.addMessageListener("nulo-e2e:result", listener);
+		const settle = (reply) => { mm.removeMessageListener(channel, listener); win.clearTimeout(timer); done(reply); };
+		const listener = (message) => settle(message.data);
+		const timer = win.setTimeout(() => settle({ error: "the frame script never answered" }), deadline);
+		mm.addMessageListener(channel, listener);
 		mm.loadFrameScript("data:application/javascript;charset=utf-8," + encodeURIComponent(source), false);
 		`,
-		[PANEL_BROWSER, frameScript],
+		[PANEL_BROWSER, frameScript, REPLY, REPLY_DEADLINE_MS],
 	)
 	if (reply.error !== undefined) throw new Error(`evaluateInActionPopup: ${reply.error}`)
 	return reply.value as T

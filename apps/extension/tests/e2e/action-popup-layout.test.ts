@@ -10,8 +10,8 @@ import { test } from "./fixtures/extension"
 interface Layout {
 	hash: string
 	viewportHeight: number
-	shellHeight: number | null
-	navBottom: number | null
+	shellHeight: number
+	navBottom: number
 }
 
 const MEASURE = `
@@ -26,19 +26,42 @@ const MEASURE = `
 
 const clickTab = (tab: string) => `content.document.querySelector('[data-testid="nav-${tab}"]')?.click(); return null;`
 
+/**
+ * Firefox re-measures a panel after DOM changes, once at once and once ~100 ms later, and a page
+ * keeps growing while its data loads — so one good reading proves nothing. Every reading across
+ * the window has to agree.
+ */
+const SETTLE_SAMPLES_MS = [0, 150, 300, 600, 1_200]
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 test.skipIf(!isFirefox)("the bottom nav stays on the popup's bottom edge on every tab", async ({ registeredExtensionPerTest: ctx }) => {
 	await openActionPopup(ctx.browser)
+	const measure = () => evaluateInActionPopup<Layout>(ctx.browser, MEASURE)
 
-	// Each tab's page is a different height, which is what used to move the nav.
-	for (const tab of ["general", "holdings", "activity", "settings", "general"]) {
-		await evaluateInActionPopup(ctx.browser, clickTab(tab))
+	// A popup that has just opened passes through the lock screen while the session is restored,
+	// so "on this tab" means on it, nav mounted, three readings running.
+	const onTab = async (tab: string) => {
+		let streak = 0
 		await vi.waitFor(
 			async () => {
-				const layout = await evaluateInActionPopup<Layout>(ctx.browser, MEASURE)
-				expect(layout.hash).toBe(`#/popup/${tab}`)
-				expect(layout, tab).toMatchObject({ shellHeight: layout.viewportHeight, navBottom: layout.viewportHeight })
+				const { hash, navBottom } = await measure()
+				streak = hash === `#/popup/${tab}` && navBottom > 0 ? streak + 1 : 0
+				expect(streak, `settling on ${tab}, last seen ${hash}`).toBeGreaterThanOrEqual(3)
 			},
-			{ timeout: 15_000, interval: 250 },
+			{ timeout: 20_000, interval: 250 },
 		)
+	}
+	await onTab("general")
+
+	// Each tab's page is a different height, which is what used to move the nav.
+	for (const tab of ["holdings", "activity", "settings", "general"]) {
+		await evaluateInActionPopup(ctx.browser, clickTab(tab))
+		await onTab(tab)
+
+		for (const wait of SETTLE_SAMPLES_MS) {
+			await sleep(wait)
+			const layout = await measure()
+			expect(layout, `${tab} +${wait}ms`).toMatchObject({ shellHeight: layout.viewportHeight, navBottom: layout.viewportHeight })
+		}
 	}
 })
