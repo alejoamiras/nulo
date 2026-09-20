@@ -24,17 +24,20 @@ import { proxyTickerFor } from "@/wallet/services/price/price-map"
 import { TransferType } from "@/wallet/services/transaction/client"
 
 /** Utils */
+import { managers } from "@/utils/core"
+import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 import { isValidHex } from "@/utils/string"
 import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
-import { transferFailureCopy } from "@/popup/utils/transfer-failure-copy"
+import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
+import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 import { usePrices } from "@/composables/usePrices"
 import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
@@ -203,6 +206,17 @@ const amountValidation = computed(() =>
  *  the SUBMIT GATE lives here (this page owns handleSend) and fails closed. */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
+
+/** Nothing is sent without a current Terms acceptance; the background refuses it too. `loading`
+ *  shows no banner, so an accepted user never sees one flash. */
+const legal = useLegalAcceptance(managers.legal)
+const legalBlocked = computed(() => legal.status.value === "missing" || legal.status.value === "stale")
+/** Clearing the dismissal is what lets the shell's sheet cover this page again. */
+const legalBannerAction = {
+	name: "Review",
+	testId: "send-legal-review",
+	callback: () => chrome.storage.session.remove(LEGAL_DISMISSED_KEY),
+}
 const liveQuote = computed(() => prices.quoteFor(activeToken.value?.chainId, activeToken.value?.contract) ?? null)
 const proxyTicker = computed(() => (liveQuote.value ? (proxyTickerFor(liveQuote.value.coingeckoId) ?? null) : null))
 
@@ -230,6 +244,7 @@ const handleRequote = () => {
 }
 
 const isAllowedToSend = computed(() => {
+	if (!legal.isCurrent.value) return false
 	if (!amountTerm.value) return false
 	if (isBlockedTransfer.value) return false
 	if (!isValidAddress.value) return false
@@ -369,7 +384,8 @@ const handleSend = async () => {
 			if (classifyCancellableRejection(err) === "silent") return
 
 			openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
-			console.error("[send] executeTransfer failed:", err)
+			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
+			else console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {
 			submitInFlight = false
@@ -407,8 +423,13 @@ watch(
 )
 
 watch(
-	[amountTerm, searchTerm, selectedSendType, selectedReceiverType, () => feeSettings.value],
+	[amountTerm, searchTerm, selectedSendType, selectedReceiverType, () => feeSettings.value, () => legal.isCurrent.value],
 	() => {
+		// An estimate simulates against the node: no work for a send the wall would refuse.
+		if (!legal.isCurrent.value) {
+			cancelFeeEstimate()
+			return
+		}
 		// NB: transferType can be 0 (TransferType.Private enum) which is falsy — check against undefined explicitly
 		// or Private → Private is silently dropped here before estimation.
 		if (!isValidAddress.value || transferType.value === undefined || !feeSettings.value) {
@@ -480,6 +501,7 @@ watch(
 
 onMounted(async () => {
 	console.debug(`[send:${sendInstanceId}] mounted`)
+	void legal.refresh()
 	// Route mount fetch through the shared refetch so it inherits the
 	// sequence guard AND the null-triple defense AND the
 	// activeTokenIdx-rebind logic.
@@ -514,6 +536,7 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	legal.dispose()
 	// Only when NO submit is in flight — otherwise executeTransfer's `.finally`
 	// owns the disconnect, and tearing down here would abort the pending RPC.
 	if (!submitInFlight) disconnectExecution()
@@ -537,6 +560,10 @@ onBeforeUnmount(() => {
 <template>
 	<Flex direction="column" :class="$style.wrapper">
 		<SubPageHeader title="Send" :backTo="'/popup/general'" />
+
+		<Banner v-if="legalBlocked" variant="warning" wide :action="legalBannerAction" data-testid="send-legal-banner">
+			Accept the Terms to send
+		</Banner>
 
 		<Flex wide direction="column" justify="between" :class="$style.body">
 			<Flex direction="column" :class="$style.top">
@@ -597,6 +624,8 @@ onBeforeUnmount(() => {
 						:account="appStore.account"
 						:feeEstimate="feeEstimate"
 						:isEstimating="isEstimating"
+						:originPrivacy="selectedSendType"
+						:destinationPrivacy="selectedReceiverType"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 					/>
@@ -611,7 +640,7 @@ onBeforeUnmount(() => {
 					variant="cta"
 					wide
 				>
-					Get Fee Juice
+					{{ selectedSendType === "private" ? "Get private gas" : "Get Fee Juice" }}
 				</Button>
 				<Button
 					v-else

@@ -2,6 +2,7 @@
 	"name": "@nulo/aztec-runtime",
 	"private": true,
 	"version": "0.1.0",
+	"license": "Apache-2.0",
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
@@ -18,7 +19,7 @@
 		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
-		"@alejoamiras/presto": "5.2.0-revision.2",
+		"@alejoamiras/presto": "5.2.0-revision.3",
 		"@aztec/accounts": "5.2.0",
 		"@aztec/aztec.js": "5.2.0",
 		"@aztec/bb.js": "5.2.0",

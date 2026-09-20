@@ -478,13 +478,14 @@ Presto's session-only HTTP downgrade to users;
 `apps/extension/src/presto/presto-policy.test.ts` drives the real client
 and pins that a production configuration never issues an HTTP `/prove`.
 
-**License posture.** The `@alejoamiras/presto` npm SDK is AGPL-3.0-only
-(same author and license as the retired accelerator SDK); the server
-binary inherits the same license. We invoke it as a build/test tool — no
-AGPL §13 (network-access disclosure) trigger is obvious in this
-CI-internal use (no end users reached, no public network endpoint). This
-is not legal advice; if the integration scope ever expands (e.g. exposing
-presto-server in a deployed Nulo service), redo the analysis.
+**License posture.** The `@alejoamiras/presto` npm packages the extension
+bundles are MIT at the pinned versions (relicensed from AGPL-3.0-only;
+`apps/extension/src/presto/presto-licence.test.ts` fails if a pin drifts
+back, and the third-party notices build refuses AGPL outright). The
+`presto-server` binary is a separate artifact that CI invokes as a
+build/test tool and never distributes: check its own release for the
+licence that applies to it before shipping it anywhere. This is not legal
+advice.
 
 **CVE-on-Friday runbook.** When an advisory drops for a package newer than
 the 7-day gate window:
@@ -496,8 +497,16 @@ the 7-day gate window:
    - Run `bun update <pkg>` (or `bun add <pkg>@<version>`).
    - Run `bun run audit:vue` + `bun run test:e2e`.
    - Commit the lockfile + bunfig change.
-4. After the window passes, open a follow-up PR removing the temporary
-   exclude.
+4. **Remove the exclude in the same PR, once `bun.lock` holds the patched
+   version.** The gate only applies while `bun install` RESOLVES a version;
+   a version the lockfile already records is never re-gated, so the exclude
+   has done its whole job the moment the lockfile is written. Prove it
+   before committing: with the exclude deleted,
+   `bun install --frozen-lockfile --force` must still succeed. An exclude
+   left in place "until the window passes" exempts every FUTURE version of
+   that name for days, which is the exposure the gate exists to prevent.
+   (Only keep one across PRs when a later PR in the same series must
+   re-resolve the young version; date it, and remove it in that PR.)
 5. PR description must cite the CVE and link the advisory.
 
 **Bun bug #25305 — closed on Bun 1.4.** On 1.3.x, `bun update --latest`

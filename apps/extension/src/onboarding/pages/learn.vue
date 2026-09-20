@@ -36,7 +36,7 @@ function goSkip() {
 
 <template>
 	<OnboardingExplainer
-		:step="2"
+		:step="3"
 		titleMain="Meet"
 		titleSub="Aztec"
 		lede="Three things to know before your first transaction."

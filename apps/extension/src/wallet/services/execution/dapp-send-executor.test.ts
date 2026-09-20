@@ -1349,6 +1349,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 				taskService: { startNewTask: () => task },
 				profileService: { captureExecutionFence: async () => FENCE },
 				dappSendExecutor: executor,
+				legal: { assertCurrent: async () => {} },
 				logDebug: () => {},
 				logInfo: () => {},
 				logError: () => {},

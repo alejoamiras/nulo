@@ -50,6 +50,7 @@ import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import { TokenService } from "@/wallet/services/token/service"
+import { LegalAcceptanceService, type LegalAdmission } from "@/wallet/services/legal/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
@@ -65,7 +66,7 @@ import {
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
 import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
-import { isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
+import { TermsAcceptanceRequiredError, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
 import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
 import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
@@ -169,6 +170,7 @@ type SdkDeps = {
 	dappSessionService: DappSessionService
 	operationJournal: OperationJournalService
 	tokenService: TokenService
+	legal: LegalAdmission
 	dispatcher: WalletSdkDispatcher
 	logger: ILogger
 }
@@ -182,6 +184,7 @@ function resolveSdkDeps(services: ServiceCollection, logger: ILogger): SdkDeps {
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
 	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
 	const tokenService: TokenService = services.get(TokenService.name)
+	const legal: LegalAcceptanceService = services.get(LegalAcceptanceService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -208,6 +211,7 @@ function resolveSdkDeps(services: ServiceCollection, logger: ILogger): SdkDeps {
 		dappSessionService,
 		operationJournal,
 		tokenService,
+		legal,
 		dispatcher,
 		logger,
 	}
@@ -514,6 +518,7 @@ async function runEstablishedMessage(
 		state.sessionProfiles,
 		state.late.switchEpoch!,
 		deps.logger,
+		deps.legal,
 		{
 			// Bind the baton release into the `onExecutionEnqueued`
 			// slot — fired downstream by ExecutionService the instant
@@ -615,6 +620,7 @@ type DiscoveryDeps = {
 	pendingVerification: Map<string, PendingVerificationEntry>
 	pendingDiscoveryPromises: Map<string, Promise<void>>
 	discoveryQueue: DiscoveryQueue
+	legal: LegalAdmission
 	admission: VerifyAdmissionGate
 	dedupeWaiters: Map<string, number>
 	logger: ILogger
@@ -629,6 +635,7 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 		pendingVerification: state.pendingVerification,
 		pendingDiscoveryPromises: state.pendingDiscoveryPromises,
 		discoveryQueue: state.late.discoveryQueue!,
+		legal: deps.legal,
 		admission: state.admission,
 		dedupeWaiters: state.dedupeWaiters,
 		logger: deps.logger,
@@ -656,6 +663,14 @@ const discoveryDeadline = (discovery: PendingDiscovery): number => discovery.tim
  *    - If no: show connect popup via DappInteractionService
  * 3. On approval, the wallet-sdk proceeds with ECDH key exchange
  */
+/** Fail closed: an answer that cannot be read is "no". */
+async function isLegalCurrent(legal: LegalAdmission): Promise<boolean> {
+	return legal.assertCurrent().then(
+		() => true,
+		() => false,
+	)
+}
+
 async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps): Promise<void> {
 	const { handler, logger } = deps
 	try {
@@ -679,6 +694,10 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 			return
 		}
 
+		// Read BEFORE the session lookup, never after it: the lookup must stay the last yield ahead
+		// of the popup-promise registration below.
+		const legalCurrent = await isLegalCurrent(deps.legal)
+
 		// Check for existing valid session (returning user on this chain → auto-approve).
 		// Lookup is by `(origin, chainId)` so a session remembered on testnet does
 		// NOT silently auto-approve on mainnet (AUDIT plan A12). The lookup is awaited
@@ -687,6 +706,14 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 		const existingSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
 		if (existingSession) {
 			autoApproveExistingSession(discovery, chainId, deps, existingSession.trustedVerification === true)
+			return
+		}
+
+		// A NEW connection is an app request like any other: none without a current Terms
+		// acceptance. An existing session keeps its transport above, which moves nothing and is
+		// what lets that dApp receive the typed refusal for its next call.
+		if (!legalCurrent) {
+			handler.rejectDiscovery(discovery.requestId)
 			return
 		}
 
@@ -1008,7 +1035,7 @@ async function persistAndApprove(
  * and catch paths) to decide whether an unclaimed `queued` record should be
  * transitioned to `failed`.
  */
-async function handleWalletMessage(
+export async function handleWalletMessage(
 	session: ActiveSession,
 	message: WalletMessage,
 	handler: BackgroundConnectionHandler,
@@ -1018,6 +1045,7 @@ async function handleWalletMessage(
 	sessionProfiles: Map<string, string>,
 	switchEpoch: ProfileSwitchEpoch,
 	logger: ILogger,
+	legal: LegalAdmission,
 	hooks?: DispatchHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
@@ -1075,6 +1103,11 @@ async function handleWalletMessage(
 			fence,
 		}
 
+		// Once per top-level request, before the dispatcher sees a method name: no dApp request is
+		// served without a current Terms acceptance. The catch below answers with the typed envelope
+		// and closes any queued journal row, exactly as for every other refusal.
+		await legal.assertCurrent()
+
 		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so
 		// `dispatch("batch", ...)`'s recursive ctx forwarding can't leak them
 		// into batch legs (would let an inner sendTx release the top-level
@@ -1091,12 +1124,14 @@ async function handleWalletMessage(
 		// unit-tested in isolation; everything not recognised collapses to a
 		// string, preserving the original wire contract.
 		response.error = toWalletResponseError(error)
+		const refusedForTerms = error instanceof TermsAcceptanceRequiredError
 		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
 		// logger's redaction, so interpolating it here would smuggle whatever the error carries
 		// (endpoint URLs, argument values) straight into the log store.
+		// A connected dApp polls; an expected refusal at `error` would flood every user's log buffer.
 		logger.log(
 			"wallet-sdk",
-			LogLevel.Error,
+			refusedForTerms ? LogLevel.Debug : LogLevel.Error,
 			`Method ${describeWireMethod(message.type)} failed for session ${describeExternalId(session.sessionId)}`,
 			response.error,
 		)
