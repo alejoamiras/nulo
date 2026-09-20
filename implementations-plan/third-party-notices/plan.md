@@ -85,8 +85,8 @@ live build ──plugin.ts──► BundleContents ──generate.ts──► TH
   the build refuses" is widened from `.wasm` / `.js` to `.woff2`. A font claim carries
   `kind: "font"`, the file's SHA-256, upstream URL, copyright line and licence, and is checked
   against `FONT_ALLOWED = { "OFL-1.1", "Apache-2.0" }` instead of the code allowlist. A changed
-  file changes the hash and refuses. Texts live in `packages/design/src/fonts/licences/`, one copy
-  for all three apps. About 40 lines of code and five records.
+  file changes the hash and refuses. Texts live in the package's `texts/` with every other reviewed
+  text (see `lessons/c2.md` for why not beside the fonts). About 40 lines of code and four records.
 - **MPL-2.0 leaves `ALLOWED`.** Nothing bundled uses it (tally of the built file: 108 MIT,
   21 Apache-2.0, 2 ISC, 2 BSD-3-Clause, three dual expressions). MPL carries a source-availability
   duty the generator does not discharge, so the honest move is that an MPL package refuses the
@@ -145,7 +145,7 @@ recorded in [`follow-ups.md`](follow-ups.md) with the trigger that reopens each,
 | Reconciling every file of the final zip against a claim | The cases it would catch are third-party images or data pulled in through CSS `url()` or `public/`. The extension has none today, and its `public/` and asset directories are first-party. Code and fonts, the two classes that do occur, are covered by claims. Revisit if a third-party asset pack is ever added. |
 | Licence files in package subdirectories; prebundled dependencies without a nested manifest | The generator already refuses a package with no readable licence, so the failure mode here is an *extra* unlisted component inside an already-attributed package, not a missing licence. The 136 current entries were reviewed by hand in rounds 1 to 4. |
 | An MPL-2.0 source-location rule | Replaced by removing MPL-2.0 from the allowlist. |
-| Notices for `apps/landing` and `apps/tools` | Other products; the font texts live in `@nulo/design`, so they are in place when those apps adopt the library. |
+| Notices for `apps/landing` and `apps/tools` | Other products. The font records and texts are reusable as they stand when those apps adopt the library. |
 
 ## Security & adversarial considerations
 
