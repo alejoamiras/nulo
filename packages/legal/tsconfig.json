@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"strict": true,
+		"noEmit": true,
+		"lib": ["ESNext"],
+		"types": ["node"],
+		"isolatedModules": true,
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*.ts"]
+}

@@ -14,6 +14,7 @@ import { waitForPopup, approveCapabilities } from "./popups"
 import { TEST_PASSWORD } from "./constants"
 import type { AztecTestConfig } from "./aztec"
 import { PRESTO_HTTP_HEALTH_URL, PRESTO_HTTPS_HEALTH_URL } from "./presto"
+import { LEGAL_ACCEPTANCE_KEY, type LegalSeed, legalSeedValue } from "./legal"
 
 export interface ExtensionContext {
 	browser: Browser
@@ -46,8 +47,14 @@ function isPrestoProbeNoise(msg: ConsoleMessage): boolean {
  *  update/crash paths (CDP `Runtime.terminateExecution` leaves an
  *  unrevivable zombie SW — see migration.test.ts). `waitForLiveness: false`
  *  skips the liveness gate for boots expected to park or fail before the
- *  heartbeat starts (a held or failing storage migration). */
-export async function launchExtension(opts: { userDataDir?: string; waitForLiveness?: boolean } = {}): Promise<ExtensionContext> {
+ *  heartbeat starts (a held or failing storage migration).
+ *
+ *  `legal` is the Terms-acceptance state the launch starts from. A fresh profile defaults to
+ *  `current`, so a spec that is not about the gate never meets it; a reused profile defaults to
+ *  `keep`, so whatever the previous launch left is what the relaunch boots over. */
+export async function launchExtension(
+	opts: { userDataDir?: string; waitForLiveness?: boolean; legal?: LegalSeed } = {},
+): Promise<ExtensionContext> {
 	const { userDataDir, waitForLiveness = true } = opts
 	const extensionPath = inject("extensionPath")
 	// Read before Chrome writes the profile: `onInstalled` fires with reason "install" — the only
@@ -101,7 +108,11 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	})
 
 	try {
-		const extensionId = await settleLaunchedExtension(browser, { freshProfile, waitForLiveness })
+		const extensionId = await settleLaunchedExtension(browser, {
+			freshProfile,
+			waitForLiveness,
+			legal: opts.legal ?? (freshProfile ? "current" : "keep"),
+		})
 		return { browser, extensionId, consoleErrors: [], pageErrors: [] }
 	} catch (err) {
 		// Nothing else holds this browser yet; an escaping error would strand its Chrome.
@@ -114,7 +125,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
  *  complete. Returns the extension id. */
 async function settleLaunchedExtension(
 	browser: Browser,
-	{ freshProfile, waitForLiveness }: { freshProfile: boolean; waitForLiveness: boolean },
+	{ freshProfile, waitForLiveness, legal }: { freshProfile: boolean; waitForLiveness: boolean; legal: LegalSeed },
 ): Promise<string> {
 	// Discover extension ID from service worker target
 	const workerTarget = await browser.waitForTarget(
@@ -200,17 +211,30 @@ async function settleLaunchedExtension(
 	await blankPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
+	if (legal !== "keep") await seedLegalAcceptance(blankPage, legal)
 
 	await blankPage.close()
 
 	return extensionId
 }
 
+/** Put the acceptance record in the named state, from any extension page. The service reads storage
+ *  on every call, so a write here is seen by the very next admission check. */
+export async function seedLegalAcceptance(page: Page, seed: Exclude<LegalSeed, "keep">): Promise<void> {
+	await page.evaluate(
+		async ({ key, value }: { key: string; value: unknown }) => {
+			if (value === undefined) await chrome.storage.local.remove(key)
+			else await chrome.storage.local.set({ [key]: value })
+		},
+		{ key: LEGAL_ACCEPTANCE_KEY, value: legalSeedValue(seed) },
+	)
+}
+
 /** Open the onboarding tab directly. Use in tests that exercise the tab
  *  flow; complementary to `openPopup` which targets the popup HTML.
  *  Clears the `onboardingCompleted` flag first so the redirect predicates
  *  in register/import/profile-new behave as they would on a fresh install. */
-export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
+export async function openOnboarding(ctx: ExtensionContext, opts: { legal?: Exclude<LegalSeed, "keep"> } = {}): Promise<Page> {
 	// Reset onboardingCompleted=false so the onboarding flow runs as on
 	// fresh install (launchExtension seeded it to true by default).
 	const setupPage = await ctx.browser.newPage()
@@ -219,6 +243,9 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	await setupPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 	})
+	// A real fresh install has no acceptance; specs that are about the gate ask for that. Left alone,
+	// the launch's `current` seed stands and a spec about a later step can still jump to it.
+	if (opts.legal) await seedLegalAcceptance(setupPage, opts.legal)
 	await setupPage.close()
 
 	const page = await ctx.browser.newPage()
@@ -850,7 +877,14 @@ export const test = base.extend<{
 						// Self-mint to the TEST wallet's account: each forced block must
 						// not add to the extension account, whose balance is asserted
 						// EXACTLY by the fail-hard row wait below.
-						mintPublicTokens(wallet, aztecConfig.tokenAddress, minterAddress, 1n, minterAddress, feeOptions),
+						mintPublicTokens(
+							wallet,
+							aztecConfig.tokenAddress,
+							minterAddress.toString(),
+							1n,
+							aztecConfig.minterAddress,
+							feeOptions,
+						),
 					90_000,
 				)
 

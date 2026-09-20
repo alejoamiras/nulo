@@ -37,3 +37,13 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
 - **Independent ship.** Builds and deploys (Cloudflare Pages, from `main`) without the extension. CI lints, typechecks and unit-tests this package on every PR but does not build it; run `bun run --cwd apps/landing build` locally before opening a PR.
+
+## Legal pages
+
+`/terms`, `/privacy` and a permalink per version (`/terms/v1.0/`) are generated from
+[`legal/*.md`](../../legal/README.md) by `scripts/build-legal.ts`, which `predev` and `prebuild` run.
+The outputs (`terms.html`, `privacy.html`, `terms/`, `privacy/`, `src/generated/legal-pages.json`)
+are gitignored; `vite.config.ts` reads the JSON list as its extra HTML entries. Rendering rules —
+raw HTML rejected, `.md` links rewritten, DRAFT banner + `noindex` while a placeholder survives — are
+in `scripts/legal-pages.ts` and pinned by `scripts/legal-pages.test.ts`. `quality-status` builds the
+landing on every PR that touches it or `legal/`.
