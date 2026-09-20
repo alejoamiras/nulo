@@ -26,14 +26,10 @@ describe("the Pages route scan", () => {
 		expect(colocatedTests.length).toBeGreaterThan(0)
 	})
 
-	test("the plugin's own defaults would route them", async () => {
-		const routed = await routedFiles({ dirs: PAGES_OPTIONS.dirs })
-		expect(routed.filter((file) => TEST_MODULE.test(file)).length).toBeGreaterThan(0)
-	})
-
-	test("the configured scan routes none of them and still routes the pages", async () => {
-		const routed = await routedFiles(PAGES_OPTIONS)
-		expect(routed.filter((file) => TEST_MODULE.test(file))).toEqual([])
-		expect(routed.some((file) => file.endsWith("src/popup/pages/index.vue"))).toBe(true)
+	test("the configured scan drops exactly the test modules the defaults would route", async () => {
+		const byDefault = await routedFiles({ dirs: PAGES_OPTIONS.dirs })
+		const configured = await routedFiles(PAGES_OPTIONS)
+		expect(byDefault.filter((file) => TEST_MODULE.test(file)).length).toBeGreaterThan(0)
+		expect(configured.toSorted()).toEqual(byDefault.filter((file) => !TEST_MODULE.test(file)).toSorted())
 	})
 })
