@@ -176,6 +176,10 @@ jobs:
           # public repository's releases is all this needs, so the default token suffices and
           # a fork PR's read-only one works too. Presto refuses redirects on that request, so
           # the credential reaches api.github.com and nowhere else.
+          # INERT while the pin above is 1.1.1: that build sends the lookup with no
+          # Authorization header and reads no token (support landed on presto's main after the
+          # 1.1.1 tag), so the lookup is still anonymous and still fails intermittently. It
+          # takes effect when the pin moves to the first presto-server release after 1.1.1.
           PRESTO_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
@@ -312,6 +316,15 @@ jobs:
           PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/presto-server.log || true)
           PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/presto-server.log || true)
           echo "::notice::presto-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"
+          # A request that did not end in a proof is a failed TEST on a prover-required build, and
+          # the reason is in the server's own WARN/ERROR lines, not in the counts or the log's tail.
+          PROVE_UNFINISHED=$((PROVE_COUNT - PROVE_SUCCESS))
+          PROVE_PROBLEMS=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/presto-server.log | grep -E ' (WARN|ERROR) ' | grep -vE 'Running with --allow-all|bb stderr:' | cut -c1-400 | tail -20 || true)
+          if [ "$PROVE_UNFINISHED" -gt 0 ] && [ -n "$PROVE_PROBLEMS" ]; then
+            echo "::group::presto-server WARN/ERROR lines (${PROVE_UNFINISHED} request(s) without a proof)"
+            echo "$PROVE_PROBLEMS"
+            echo "::endgroup::"
+          fi
           echo "PROVE_SUCCESS=${PROVE_SUCCESS}"
           {
             echo "### presto-server activity"
@@ -322,6 +335,12 @@ jobs:
             echo '```'
             tail -5 /tmp/presto-server.log
             echo '```'
+            if [ "$PROVE_UNFINISHED" -gt 0 ] && [ -n "$PROVE_PROBLEMS" ]; then
+              echo "- requests without a proof: ${PROVE_UNFINISHED} — the server's WARN/ERROR lines:"
+              echo '```'
+              echo "$PROVE_PROBLEMS"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$PROVE_SUCCESS" -eq 0 ] && [ "$SHARD_LABEL" = "canary" ]; then
             echo "::error::canary lane finished with ZERO successful native proofs — the native proving lane was bypassed."

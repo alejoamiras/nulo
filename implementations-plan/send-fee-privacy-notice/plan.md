@@ -689,6 +689,13 @@ Fee Juice read `"0"` or unread? Informational; it does not gate.
 | D33 | Sponsor pick keeps its label for the loading preview | post-implementation codex pass (P3) | FPC rows do not exist before the FPC list loads, so a saved sponsor pick previewed as nothing — a regression against the UI-impact table's "unchanged". The record now carries `fpc.name` (string, ≤ 64, else dropped) used ONLY by `previewForPick`; resolution stays by `fpc.id` against fresh rows, and the preview row has no `fpc`, so it cannot yield settings. Not shown where sponsors are not offered. |
 | D34 | The store's retry reads past the reader's TTL | post-implementation codex pass, round 2 (P1, reproduced) | A forced mount read that FAILS is recovered by the store's backoff loop, which read unforced: with a TTL-valid cached `"0"` in the reader, recovery recommitted the stale zero and Send defaulted to Fee Juice despite private gas. `runRetry`'s gas read now passes `forceRefresh: true` (its cause stays `retry`, so `retryVersion`/debt semantics and the home card's `forcedVersion` overlay are untouched). Stateless on purpose: a retry only follows a failed read, where one uncached read is the honest cost; tracking "was the failed read forced" per key would add fence-sensitive state for no gain. Also closes the same gap for the dApp window's locked-method mount. |
 
+**D30, addendum (after merge).** Both post-implementation reviewers called Fee Juice ahead of an
+eligible sponsor the largest privacy cost in the diff. It is moot in production today: a Sponsored row
+is offered only where `allowSponsored` is true, which excludes Alpha (mainnet) — there is no funded
+sponsor there — so under a private origin on mainnet the walk is Private Fee Juice → Fee Juice and the
+branch in question cannot run. It decides anything only on test networks. Revisit the order the day a
+funded sponsor ships on mainnet; until then there is nothing to trade.
+
 Still disputed: nothing open. D4's cost (a hold where a fallback would have been correct, on a network
 without a registrable PrivateFPC) and D10 are the two calls a fresh reviewer should re-attack.
 
