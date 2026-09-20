@@ -31,3 +31,8 @@ The static inventory is small (14 prefixed constructs, 26 sites) because the des
 - **Round 1** — the fix itself sound; **one Medium**: `vi.waitFor` accepted the *first* good reading, and Firefox re-measures a panel after DOM changes (at once, and again ~100 ms later), so one reading proves nothing. Two Lows: `100vh` ≠ `100%` under a classic horizontal scrollbar; a frame script that threw left its listener registered. All taken. Tightening the test made it catch something real on its own: a just-opened popup passes through `#/popup/auth` while the session restores.
 - A re-proof I ran in between was **invalid** and worth recording: the script took the "old" stylesheet from `HEAD`, which by then already carried the fix, so both the "red" and the "green" run had it. Pin a baseline to a named ref, never to `HEAD`.
 - **Round 2 — "no new material findings".** Two Low follow-ups taken anyway: each evaluation now replies on its own channel (a frame script cannot be cancelled, and a late one could have answered the next call), and every settling sample asserts the hash too. It also confirmed from the specs that `scrollbar-width: none` zeroes a `scrollbar-gutter: stable` gutter (WPT `scrollbar-width-003`), that `revert` in the landing reaches `auto`, and that the `thin` scrollers keep their bars.
+
+## Gate closed (2026-09-20)
+
+- PR #650: `quality-status`, `extension-smoke-e2e-status`, `extension-network-e2e-status` and both Firefox aggregators concluded success; every Firefox network lane ran (none skipped).
+- Owner, on a headed Firefox with the second build of this branch: the scrollbars are gone — *"Nice! fixed."* The height had been confirmed on the first build — *"Height bug is now fixed."*
