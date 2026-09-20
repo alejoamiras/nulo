@@ -22,6 +22,7 @@ import {
     NonAsciiNameERC20,
     PlainERC20,
     ReentrantNameERC20,
+    SenderSurchargeERC20,
     StringDecimalsERC20,
     WeirdDecimalsERC20
 } from "./mocks/MetadataERC20s.sol";
@@ -290,6 +291,24 @@ contract PortalFactoryTest is Test {
         assertEq(m.content, Hash.sha256ToField(abi.encodeWithSignature("withdraw(address,uint256,address)", alice, uint256(200), address(this))));
         assertEq(usdc.balanceOf(alice), 200);
         assertEq(usdc.balanceOf(address(portal)), 300);
+    }
+
+    /// The mirror of the deposit check: a token that debits the reserve by more than the message
+    /// authorised would bleed every other holder's backing, one withdrawal at a time.
+    function test_clone_withdraw_rejectsOverDebit() public {
+        SenderSurchargeERC20 sur = new SenderSurchargeERC20(100);
+        TokenPortalImpl portal = TokenPortalImpl(factory.createPortal(address(sur)));
+        sur.mint(alice, 1_010);
+        vm.startPrank(alice);
+        sur.approve(address(portal), 1_000);
+        portal.depositToAztecPublic(bytes32(uint256(1)), 1_000, bytes32(0));
+        vm.stopPrank();
+        assertEq(sur.balanceOf(address(portal)), 1_000, "the deposit itself is exact");
+
+        bytes32[] memory path;
+        vm.expectRevert(TokenPortalImpl.InexactTransfer.selector);
+        portal.withdraw(alice, 500, false, Epoch.wrap(3), 9, 5, path);
+        assertEq(sur.balanceOf(address(portal)), 1_000, "reserve");
     }
 
     function test_implementation_refusesDirectUse() public {
