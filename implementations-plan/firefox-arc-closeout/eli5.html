@@ -1,0 +1,218 @@
+<title>Firefox Arc Closeout</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F7F8F5; --surface: #FFFFFF; --ink: #1B211E; --muted: #5C6661; --line: #DCE1DB;
+    --accent: #0F6E5B; --accent-soft: #E3F1ED; --warn: #A8590B; --warn-soft: #FBF0E1; --bad: #9B2C2C;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #121614; --surface: #1A201D; --ink: #E6EBE7; --muted: #9AA59F; --line: #2A322E;
+      --accent: #4FC3A8; --accent-soft: #16302A; --warn: #E0A155; --warn-soft: #33260F; --bad: #F08A8A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #121614; --surface: #1A201D; --ink: #E6EBE7; --muted: #9AA59F; --line: #2A322E;
+    --accent: #4FC3A8; --accent-soft: #16302A; --warn: #E0A155; --warn-soft: #33260F; --bad: #F08A8A;
+  }
+  body {
+    background: var(--ground); color: var(--ink);
+    font: 400 1.0625rem/1.65 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 20px; padding-block: 40px 72px;
+  }
+  .page { max-width: 44rem; margin-inline: auto; display: flex; flex-direction: column; gap: 3rem; }
+  section { display: flex; flex-direction: column; gap: 1rem; }
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif; text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2rem, 6vw, 2.9rem); font-weight: 650; letter-spacing: -0.02em; }
+  h2 { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.01em; }
+  h3 { font-size: 1.08rem; font-weight: 650; }
+  p, ul, ol, dl { margin: 0; }
+  ul, ol { padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; }
+  .eyebrow { font: 500 0.78rem/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  .lede { font-size: 1.2rem; line-height: 1.55; }
+  .muted { color: var(--muted); }
+  code, pre { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+  code { background: var(--accent-soft); padding: 0.08em 0.35em; border-radius: 3px; }
+
+  /* the seconds scale */
+  .scale { display: flex; flex-direction: column; gap: 0.9rem; padding: 1.25rem 1.25rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+  .row { display: grid; grid-template-columns: 5.2rem 1fr; gap: 0.75rem; align-items: center; }
+  .row .who { font: 500 0.8rem/1.2 "IBM Plex Mono", monospace; color: var(--muted); }
+  .track { position: relative; height: 1.5rem; background: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 20%); border-right: 1px solid var(--line); }
+  .bar { position: absolute; inset-block: 0.25rem; left: 0; border-radius: 2px; }
+  .bar.today { width: 100%; background: var(--bad); opacity: 0.8; }
+  .bar.after { width: 3.4%; min-width: 6px; background: var(--accent); }
+  .mark { position: absolute; top: -0.15rem; bottom: -0.15rem; left: 70%; border-left: 2px dashed var(--ink); }
+  .note { position: absolute; left: calc(3.4% + 0.6rem); top: 50%; transform: translateY(-50%); font-size: 0.85rem; color: var(--ink); white-space: nowrap; }
+  .ticks { display: grid; grid-template-columns: 5.2rem 1fr; gap: 0.75rem; }
+  .ticks div { display: flex; justify-content: space-between; font: 400 0.72rem/1 "IBM Plex Mono", monospace; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .caption { font-size: 0.88rem; color: var(--muted); }
+
+  .phases { list-style: none; padding: 0; gap: 0; border-top: 1px solid var(--line); }
+  .phases li { display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.25rem 0.75rem; padding-block: 1rem; border-bottom: 1px solid var(--line); }
+  .phases .n { font: 500 0.95rem/1.5 "IBM Plex Mono", monospace; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .phases .body { display: flex; flex-direction: column; gap: 0.35rem; }
+  .proof { font-size: 0.92rem; color: var(--muted); }
+  .proof b { color: var(--ink); font-weight: 600; }
+  .arc { font: 500 0.78rem/1 "IBM Plex Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding-top: 0.5rem; }
+
+  dl { display: grid; grid-template-columns: minmax(7rem, 11rem) 1fr; gap: 0.6rem 1.25rem; }
+  dt { font-weight: 600; }
+  dd { margin: 0; color: var(--muted); }
+  @media (max-width: 560px) { dl { grid-template-columns: 1fr; gap: 0.15rem; } dd { margin-bottom: 0.7rem; } }
+
+  .stops { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 0.7rem; border-radius: 0 6px 6px 0; }
+  .stops h3 { color: var(--warn); }
+  .approve { background: var(--accent-soft); padding: 1.25rem 1.4rem; border-radius: 6px; display: flex; flex-direction: column; gap: 0.8rem; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 0.55rem 0.75rem 0.55rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font: 500 0.75rem/1.2 "IBM Plex Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: 0; }
+  .pick { font: 500 0.75rem/1 "IBM Plex Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+  .warnline { color: var(--warn); font-weight: 600; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+
+  <section>
+    <span class="eyebrow">Blueprint · mid · for your approval</span>
+    <h1>Closing the Firefox arc</h1>
+    <p class="lede">Three loose ends came out of the last Firefox pull request. This plan ties off two, consciously drops the third, and — your main ask — adds the tests that stop any of it from quietly breaking again on either browser.</p>
+    <p class="muted">Nothing a user sees changes. No new permissions, no stored keys, no new dependencies. Roughly a hundred lines of wallet code; the rest is tests, CI lists and documentation.</p>
+  </section>
+
+  <section>
+    <h2>The one real bug, to scale</h2>
+    <p>If the wallet's background process dies while a dApp is waiting on a transaction, the dApp is never told. It just waits. We measured 210 seconds of silence on Chrome and on Firefox and stopped watching; the dApp's own give-up timer is 300 seconds.</p>
+    <div class="scale" role="img" aria-label="Seconds a dApp waits after the wallet's background dies: about 300 today, about 10 after the fix">
+      <div class="row"><span class="who">today</span>
+        <div class="track"><div class="bar today"></div><div class="mark" title="210 s — where we stopped measuring"></div></div></div>
+      <div class="row"><span class="who">after</span>
+        <div class="track"><div class="bar after"></div><span class="note">≈ 10 s, then "reconnect"</span></div></div>
+      <div class="ticks"><span></span><div><span>0 s</span><span>60</span><span>120</span><span>180</span><span>240</span><span>300 s</span></div></div>
+      <p class="caption">Dashed line: 210 s, where the earlier measurement ended. Target after the fix: 15 s or less, measured; the test itself fails hard at 30 s.</p>
+    </div>
+    <p><strong>Why it hangs.</strong> The encrypted link between a dApp and the wallet lives only in the background's memory. A restarted background has no memory of it, so when the dApp asks "are you there?" every five seconds, the new background doesn't recognise the question and says nothing.</p>
+    <p><strong>The fix.</strong> The Aztec SDK already has a "you've been disconnected" message that needs no encryption, and dApps already react to it by failing every pending call at once. Nobody sends it after a restart. So: when a message names a link this background has never heard of, reply "disconnected" — to that tab only. The dApp shows "disconnected", the person reconnects, and carries on.</p>
+  </section>
+
+  <section>
+    <h2>Words you'll meet</h2>
+    <dl>
+      <dt>Background</dt><dd>The wallet's always-on engine. The browser may kill it at any time; the wallet then locks itself on purpose.</dd>
+      <dt>Heartbeat</dt><dd>The dApp's "are you there?" every 5 seconds while it waits for an answer.</dd>
+      <dt>Canary</dt><dd>A long end-to-end test that creates accounts and sends real transactions, to catch an Aztec upgrade that would break people's accounts. There are two: one for normal accounts, one for passkey accounts.</dd>
+      <dt>Real proving</dt><dd>Generating actual cryptographic proofs — slow, so most tests skip it ("proverless"). A canary is only meaningful with it on.</dd>
+      <dt>Lane</dt><dd>A CI pipeline: Chrome on pull requests, Firefox on pull requests, and each browser nightly. Four in all.</dd>
+      <dt>Fence / pin</dt><dd>A small test whose only job is to turn red if a specific fact stops being true.</dd>
+      <dt>Mutation check</dt><dd>Breaking the code on purpose to confirm the test really does go red. A test that can't fail protects nothing.</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>What recon turned up that you didn't ask for</h2>
+    <p><strong>The passkey canary has never run with real proving in CI.</strong> It isn't listed in any pipeline, so it falls into the fast no-proving pool by accident — green every time, proving nothing. You chose to fix it here. The plan also adds a pin so <em>no</em> canary can land in the wrong pool again, in any of the four lanes.</p>
+    <p><strong>The passkey canary can run on Firefox after all.</strong> On Chrome a test passkey dies with the popup that made it, so that test keeps a popup open while it kills the background — which Firefox refuses to do. But on Firefox a test passkey outlives its window, so there the test can close the popup first. That difference goes where every browser difference goes: on the driver, not in the test.</p>
+  </section>
+
+  <section>
+    <h2>The seven phases</h2>
+    <ol class="phases">
+      <li style="border-bottom:0;padding-bottom:0"><span></span><span class="arc">Pull request 1 — the fix</span></li>
+      <li><span class="n">1</span><div class="body"><h3>Catch the bug on camera</h3>
+        <p>A permanent test with three cases: a send parked halfway when the background dies; a dApp that was idle and whose next call has to wake a sleeping background; and an idle dApp calling a background that is already back up — that last one must fail within 3 seconds, faster than a heartbeat, so a heartbeat can't cover for broken wiring. All three then reconnect <em>on the same page</em> — no reload, because a reload would hide a broken reconnect.</p>
+        <p class="proof"><b>Proves itself by:</b> failing on today's code, for the right reason, on both browsers — before any fix exists. It also records what actually wakes Firefox, with a control run, because a background timer can wake it too and would otherwise take the credit.</p></div></li>
+      <li><span class="n">2</span><div class="body"><h3>The fix and its fences</h3>
+        <p>The reply itself, plus a test that drives the <em>real</em> message path with the <em>real</em> SDK: a healthy link is never disconnected, a frame inside a page gets nothing, another tab's link is untouchable. Two alarms on the SDK itself: one if Aztec renames the message, one proving a page you never approved learns nothing.</p>
+        <p class="proof"><b>Proves itself by:</b> the whole unit suite; phase 1's test now green, unchanged, on both browsers; seven existing kill-and-reconnect tests on both; each new test mutation-checked; the measured seconds written down.</p></div></li>
+      <li><span class="n">3</span><div class="body"><h3>Write it down</h3>
+        <p>The architecture doc gains what a dApp sees when the background dies, and the four honest limits (below).</p>
+        <p class="proof"><b>Proves itself by:</b> the full pre-PR gate, then an independent codex review loop on this pull request's diff.</p></div></li>
+      <li style="border-bottom:0;padding-bottom:0"><span></span><span class="arc">Pull request 2 — the canaries, stacked on 1</span></li>
+      <li><span class="n">4</span><div class="body"><h3>Normal-account canary on Firefox</h3>
+        <p>It is already written the Firefox-safe way; it only needs un-skipping.</p>
+        <p class="proof"><b>Proves itself by:</b> real proving, both browsers, every step run, nothing skipped; time recorded.</p></div></li>
+      <li><span class="n">5</span><div class="body"><h3>Passkey canary on Firefox</h3>
+        <p>The driver learns one fact — "a test passkey outlives its window" — and the test follows it.</p>
+        <p class="proof"><b>Proves itself by:</b> real proving, both browsers, all four stages. On Chrome it behaves exactly as today.</p></div></li>
+      <li><span class="n">6</span><div class="body"><h3>CI lists and the pool pins</h3>
+        <p>Both canaries join the real-proving job in all four lanes and leave the fast pool. Pins: every canary sits in a real-proving job everywhere; Firefox runs exactly Chrome's files; no job can fail behind a green summary check. And a new CI step reads the test run's own results: if a canary's real test — named, not just "something in that file" — did not pass, or anything was skipped, the job goes red. Today nothing would notice — another test's proofs would keep the check green.</p>
+        <p class="proof"><b>Proves itself by:</b> the CI-rules suite and the workflow linter, with five mutation checks; the new step tried against a real run on both browsers, including one with a canary deliberately skipped, before it is trusted. If the job would run past 22 of its 30 minutes it is split in two — and both ways a split could have weakened a check are closed in the same commit.</p></div></li>
+      <li><span class="n">7</span><div class="body"><h3>The rule, everywhere, and the closing ledger</h3>
+        <p>Nine documents state the old "canaries are Chrome-only" rule; they change together with the pins. New written rule: on an Aztec upgrade, a red Firefox canary holds the upgrade just as a red Chrome one does. A closing ledger lists what is done, what was consciously accepted, and what is only waiting on the calendar.</p>
+        <p class="proof"><b>Proves itself by:</b> a checklist of every place the rule lives plus a search for leftovers; the full gates; a second codex loop, then one across both pull requests.</p></div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Honest limits — documented, not fixed</h2>
+    <ul>
+      <li>On Firefox, a call that has to <em>wake</em> a sleeping background is itself lost — the wallet's cold-start code only keeps connection requests, by design. The dApp's heartbeat, five seconds later, is what gets the "disconnected" answer. Still seconds, not minutes.</li>
+      <li>A dApp built on an old SDK with no heartbeat still waits out its own timer; a later call fails at once.</li>
+      <li>A tab in the background has its timers slowed by the browser, so "seconds" means a visible tab.</li>
+      <li>If the extension itself is reloaded or updated under an open page, that page must be refreshed — as today.</li>
+      <li>A connection that was still being set up when the background died times out on the dApp's side, as today.</li>
+    </ul>
+    <p class="muted">Dropped on your call: the few-millisecond window in the Firefox kill helper. The reviewer rated it acceptable for a test tool; closing it would need lines only you can write. The ledger records it as accepted.</p>
+  </section>
+
+  <section>
+    <div class="stops">
+      <h3>Three places the work stops and comes to you</h3>
+      <p>Coverage is never reduced on the session's own say-so. Each of these is decided in advance as a stop, not a judgement call:</p>
+      <ul>
+        <li>The measured rejection takes more than 15 seconds on either browser. Proposed remedy: also answer during start-up — it edits the delicate cold-start code, so it's yours to allow.</li>
+        <li>On Firefox, the dApp's traffic turns out <em>not</em> to wake the background — seen twice, not once. No wallet-side design can help then; the success criterion would be restated per browser.</li>
+        <li>The passkey canary's last stage can't pass on Firefox. No skip lands without your decision.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>How hard this plan was pushed</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Reviewer</th><th>Verdict</th><th>What it changed</th></tr></thead>
+      <tbody>
+        <tr><td>Codex, first draft</td><td>Reject</td><td>Two tests I called fences didn't run the code being changed; my test reloaded the page and would have hidden a broken reconnect; a job split would have escaped the "real proofs happened" check; a fallback of mine cut coverage without asking you.</td></tr>
+        <tr><td>Independent Claude planner, first draft</td><td>Conditional approve</td><td>A second hole in the split (a job failing behind a green summary); the 15-second assertion had no margin in a required lane; stale builds could turn the smoke gate green on old code.</td></tr>
+        <tr><td>Codex, fresh eyes, second draft</td><td>Reject</td><td>My "idle dApp fails at once" claim was false on Firefox (the cold-start code drops the waking call); nothing in CI would notice a canary that quietly stops running; a live background doesn't prove the heartbeat woke it; a page can pick its own session id, so my security reasoning leaned on the wrong thing. It also ruled on the one reviewer disagreement: removing the guard was right.</td></tr>
+        <tr><td>Codex, same session, third draft</td><td>Conditional approve</td><td>Three conditions, all met in the fourth draft: the "did it really run" step must name the actual canary test, because each canary file has a small setup check that would keep passing even if the canary were deleted; the 3-second test must wait for a signal that really means "the wallet is listening again"; and I must not claim to know <em>what</em> wakes Firefox — only that the dApp gets its answer in time.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">Every finding was checked against the code before it was adopted, and all of them were adopted — 21 recorded decisions. Every review kept the chosen design. Two rejections on the way here is the process doing its job: each one was a bug that would otherwise have surfaced during implementation, or not at all.</p>
+  </section>
+
+  <section>
+    <h2>Why "mid"</h2>
+    <p>One of six risk dimensions is high — blast radius: every dApp connection on both browsers passes through the changed code. Security and SDK coupling are medium; novelty, irreversibility and migration are low. The risk is contained by fences rather than by more planning, so: one plan plus a competing outline, two independent audits, a decision ledger, a final fresh audit. <code>/code-review</code> stays off, per your standing instruction.</p>
+  </section>
+
+  <section>
+    <div class="approve">
+      <h2>What I need from you</h2>
+      <ul>
+        <li><strong>One real choice — the cold-start code.</strong> Recommended: leave it alone. It is the fix that made first-connection work after a cold start, and it is pinned by tests; the price is the first honest limit above (one heartbeat of delay on Firefox). The alternative edits that code so even the waking call is answered instantly — a few seconds faster, in the most delicate file in this area. The plan is written for "leave it alone".</li>
+        <li><strong>Scope:</strong> the fix, both canaries on Firefox with the passkey CI gap closed, the "did it really run" CI step, the bump rule, the closeout; the kill-helper window dropped.</li>
+        <li><strong>Validation:</strong> every phase gated on both browsers; real proving for the canaries; CI's full suites, both Firefox lanes included, as the bar for merging.</li>
+        <li><strong>Delivery:</strong> two stacked pull requests, opened only after the review loops converge. You merge; the session never does.</li>
+        <li><strong>The three stops</strong> above, as written.</li>
+        <li><strong>Hardening:</strong> no <code>/harden</code> pass scheduled; this touches a trust boundary, so it is worth including in the next pre-release one.</li>
+      </ul>
+      <p>Answer with <strong>approve</strong>, <strong>conditional approve</strong> (say the conditions), or <strong>reject</strong> (say what blocks).</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Implementation seeds <span class="muted" style="font-weight:400">— draft until you approve</span></h2>
+    <p>Two ways to drive the work unattended. <span class="warnline">Use exactly one per session — setting one replaces the other.</span> Run it inside the plan's worktree (<code>agent-worktree resume firefox-arc-closeout</code>).</p>
+    <p class="pick">Recommended — everything here is visible in the transcript</p>
+<pre>/goal All seven phases marked ✓ in implementations-plan/firefox-arc-closeout/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript, on BOTH browsers wherever the gate says so, with the stated passed counts and no skip the gate does not name; for each phase `LESSONS_FILE=implementations-plan/firefox-arc-closeout/lessons/phase-N.md` printed; every new pin's mutation check recorded in lessons; `/code-review` NOT run (code_review: off); the codex fix loop converged for arc 1 (after phase 3, before `gh stack add`), for arc 2 (after phase 7) and for the fresh cross-arc pass — each evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript, hard stop at 3 rounds with the call put to the owner; the two stacked PRs exist on GitHub, created only AFTER all loops converged (`gh stack view` in the transcript), with quality-status, extension-smoke-e2e-status, extension-network-e2e-status and both Firefox aggregators green on both; `bun run audit:vue`, `bun run test:ci-gating` and `bun run lint:actions` exit 0. Never merged. The three pre-declared stops in plan.md go to the owner, never to codex. No test, stage or browser skipped or narrowed to get green; no red check made advisory; no timeout raised; `content-message-relay.ts`, the manifest, `apps/tools/**` and `packages/bridge-core/**` untouched; the privileged Firefox script body neither authored nor edited, nor delegated.</pre>
+    <p class="pick" style="color:var(--muted)">Alternative</p>
+<pre>/loop 15m Drive implementations-plan/firefox-arc-closeout forward. Never idle waiting for my input. Each firing: (1) read plan.md and lessons/ — they are the state, not the chat; rebuild the task list from plan.md's phase headers if empty; `git status`, `git log --oneline -5`; if PRs exist, `gh stack view`. (2) A detached e2e run in flight? Let it finish — never edit src/**, fixtures or a running spec meanwhile; e2e runs alone on the host, --retry=0, from a detached script + Monitor. (3) No task in hand? Take the next pending step; after each meaningful edit run `bun run lint` and the touched unit tests; commit signed, conventional, small. (4) A decision I'd normally make? Consult /codex at high under tmux (never alongside audit:vue; CODEX_ACCOUNT=best if the login is out of headroom), log the consult and verdict in lessons — EXCEPT the three pre-declared stops in plan.md, which always come to me. (5) Same step failed 5 times? Stop retrying and reassess with codex. (6) Phase green = its validation gate in plan.md passes, both browsers where it says so; paste the result, mark ✓ in plan.md, write lessons, print `LESSONS_FILE=…/lessons/phase-N.md`. After phase 3: arc 1's codex loop to convergence (3-round hard stop → me), THEN `gh stack add firefox-arc-closeout-canaries`. (7) All ✓: arc 2's codex loop, then a FRESH codex pass over the net diff from 60da5d66 for cross-arc issues; only then `gh stack submit --auto --open`, edit both PR bodies, watch the five aggregators on both PRs, apply the 22-minute rule to the canary job. Report and stop. Hard limits: never merge, never push to dev/main, never widen scope, never skip or narrow a test to get green, never make a red check advisory, never raise a timeout, never author, edit or delegate the privileged Firefox script body.</pre>
+    <p class="muted">The full engineering plan, both audit transcripts and the recon map live in the repository at <code>implementations-plan/firefox-arc-closeout/</code>.</p>
+  </section>
+
+</div>
