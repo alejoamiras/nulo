@@ -66,7 +66,9 @@ one script and produces a tree that must match the submitted add-on byte for byt
 
 ## Resources
 
-- Peak resident memory of `source-rebuild.sh` (install + build): **«MEASURED» GB** on x86_64
-  (`/usr/bin/time -v`, see the workflow's job summary for the ARM64 figure of the latest run).
-- Wall time: about «MEASURED» minutes on 12 cores; longer on the reviewer machine's 6.
-- Disk: the archive is about 80 MB unpacked; dependencies add about 3 GB.
+- Peak resident memory of `source-rebuild.sh` (install + build): **2.3 GB** on x86_64
+  (`/usr/bin/time -v` Maximum resident set size; the workflow's job summary carries the ARM64
+  figure of the latest run). Well under the reviewer machine's 10 GB.
+- Wall time: «MEASURED» minutes on a GitHub-hosted 4-core runner with a cold package cache; the
+  install dominates, the build itself takes under ten seconds.
+- Disk: the archive is about 80 MB unpacked; dependencies add about 2.1 GB.
