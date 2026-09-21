@@ -6,7 +6,6 @@
  * and the number of handshakes parked behind one popup is bounded.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { EventHandler } from "@nulo/wallet-core/utils"
 import { DISCOVERY_STALE_MS } from "@nulo/wallet-bridge"
 
 type Callbacks = {
@@ -52,8 +51,8 @@ vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))
 import { initWalletSdkHandler } from "./background"
 import { RECONNECT_REFILL_MS } from "./verify-admission"
 import { fakeSdkPorts } from "./test-ports"
+import { FAKE_DAPP_ORIGIN as ORIGIN, fakeSdkServices } from "./test-services"
 
-const ORIGIN = "https://dapp.example"
 const noopLogger = { log: () => {} } as never
 
 function deferred<T>() {
@@ -81,34 +80,7 @@ function boot(opts: { remembered?: { trusted: boolean }; popup?: () => Promise<{
 		setTimeout: (fn, ms) => setTimeout(fn, ms),
 		clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
 	}
-	const rows = new Map<string, { id: string; profileId: string; trustedVerification: boolean }>()
-	if (opts.remembered) rows.set(`${ORIGIN}|0`, { id: "row-1", profileId: "p1", trustedVerification: opts.remembered.trusted })
-	const services = {
-		get: (name: string) =>
-			({
-				network: {},
-				account: {},
-				execution: {},
-				profile: { onActiveProfileChanged: new EventHandler<unknown>(), getActiveProfile: async () => ({ id: "p1" }) },
-				"dapp-interaction": { discover: opts.popup ?? (async () => ({ approved: true })) },
-				"dapp-session": {
-					onDappSessionDeleted: new EventHandler<unknown>(),
-					tryGetDappSessionByOriginAndChain: async (origin: string, chainId: string) => rows.get(`${origin}|${chainId}`),
-					addDappSession: async (_m: unknown, _p: unknown, _a: unknown, _l: unknown, chainId: string) => {
-						const row = { id: `row-${rows.size + 1}`, profileId: "p1", trustedVerification: false }
-						rows.set(`${ORIGIN}|${chainId}`, row)
-						return row
-					},
-					setCapabilityGrants: async () => undefined,
-					deleteDappSession: async () => undefined,
-					setVerificationHash: async () => undefined,
-				},
-				"operation-journal": {},
-				token: { getTokens: async () => [] },
-				"legal-acceptance": { assertCurrent: opts.legal ?? (async () => undefined) },
-			})[name],
-	} as never
-	initWalletSdkHandler(services, noopLogger, ports)
+	initWalletSdkHandler(fakeSdkServices(opts).services, noopLogger, ports)
 	const discover = (requestId: string, over: Record<string, unknown> = {}) =>
 		captured?.onPendingDiscovery({
 			requestId,

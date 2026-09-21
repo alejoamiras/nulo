@@ -28,10 +28,16 @@
 import "@nulo/wallet-sdk-schema-patch/register"
 
 import logoDataUri from "@/assets/logo.png?inline"
-import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import {
+	BackgroundConnectionHandler,
+	type BackgroundTransport,
+	type PendingDiscovery,
+	type ActiveSession,
+} from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"
-import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
+import { type ContentScriptMessageEnvelope, isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
+import { sessionDisconnectedMessage, sessionKnownTo, staleSessionVerdict } from "./stale-session"
 import { SESSION_INVALID_ERROR, toWalletResponseError } from "./error-envelope"
 import { toJsonSafe } from "./to-json-safe"
 import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
@@ -119,7 +125,7 @@ export function initWalletSdkHandler(
 			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
 			logger: NOOP_LOGGER,
 		},
-		buildContentTransport(logger),
+		buildContentTransport(logger, (sessionId) => sessionKnownTo(state.late.handler, sessionId)),
 		buildHandlerCallbacks(deps, state, ports.windows),
 	)
 	state.late.handler = handler
@@ -289,16 +295,25 @@ function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
 	}
 }
 
-function buildContentTransport(logger: ILogger): ConstructorParameters<typeof BackgroundConnectionHandler>[1] {
+/** What the content wrapper needs besides the SDK's listener. */
+type ContentWrapperDeps = {
+	logger: ILogger
+	/** Answers for the handler that exists right now; asked only for a session-bound message. */
+	sessionKnown: (sessionId: string) => boolean
+	sendToTab: BackgroundTransport["sendToTab"]
+}
+
+function buildContentTransport(logger: ILogger, sessionKnown: ContentWrapperDeps["sessionKnown"]): BackgroundTransport {
+	// The handler's `sendToTab` returns void, so the send's rejection is nobody's to observe. A
+	// tab that navigated away (or lost its content script) has nowhere to deliver to; every
+	// other failure still surfaces as an unhandled rejection.
+	const sendToTab: BackgroundTransport["sendToTab"] = (tabId, message) => {
+		chrome.tabs.sendMessage(tabId, message).catch((err: unknown) => {
+			if (!isReceiverGoneRejection(err)) throw err
+		})
+	}
 	return {
-		// The handler's `sendToTab` returns void, so the send's rejection is nobody's to observe. A
-		// tab that navigated away (or lost its content script) has nowhere to deliver to; every
-		// other failure still surfaces as an unhandled rejection.
-		sendToTab: (tabId, message) => {
-			chrome.tabs.sendMessage(tabId, message).catch((err: unknown) => {
-				if (!isReceiverGoneRejection(err)) throw err
-			})
-		},
+		sendToTab,
 		addContentListener: (listener) => {
 			// The chrome.runtime.onMessage registration lives in the module-scope
 			// content-message-relay (cold-wake fix): registering a SECOND chrome
@@ -307,57 +322,88 @@ function buildContentTransport(logger: ILogger): ConstructorParameters<typeof Ba
 			// duplicate secure-message double-journals a sendTx. Attach to the
 			// relay instead; buffered cold-wake messages flush through this same
 			// validated wrapper.
-			// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
-			attachContentListener((message: any, sender: chrome.runtime.MessageSender) => {
-				// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
-				// attributes origin via `sender.tab?.url` (top-frame URL), so an
-				// iframe at https://evil.com/x.html embedded in https://app.example.com
-				// would be credited to https://app.example.com — inheriting any
-				// grants the user gave to the parent page.
-				//
-				// Nulo-side defense-in-depth: reject content-script messages
-				// from subframes at the wrapper layer. `sender.frameId === 0`
-				// is the top frame; any other value (or undefined for
-				// non-tab senders) is a subframe.
-				//
-				// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
-				// disables this check. Default is "reject subframes" because
-				// research found NO legitimate iframe-dApp use cases in the
-				// Nulo ecosystem. If a counterexample surfaces, set the env
-				// var rather than removing this check.
-				//
-				// Frame-targeted send replies (F-002 full fix) require upstream
-				// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
-				// in `BackgroundConnectionHandler`'s sendToTab signature —
-				// upstream's `(tabId, msg)` interface doesn't pass frameId
-				// through, so this remains an upstream coordination item.
-				if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
-					logger.log(
-						"wallet-sdk-bg",
-						LogLevel.Debug,
-						// The tab and sender URLs are the user's browsing history, and any subframe on any
-						// page can trigger this line. The frame identity is what diagnoses the rejection.
-						`Rejected content-script message from subframe (frameId=${sender.frameId}, tabId=${sender.tab?.id}) — F-001 defense-in-depth`,
-					)
-					return undefined
-				}
-
-				// Zod-validate content-script-originated envelopes before
-				// forwarding to the upstream handler. `passthrough` lets
-				// non-content-script messages through (ServiceClient
-				// responses, offscreen pings, etc.) — the upstream handler
-				// filters those by `origin`. `invalid` drops adversarial /
-				// malformed envelopes early with a structured debug log.
-				const verdict = validateContentScriptMessage(message)
-				if (verdict.kind === "invalid") {
-					logger.log("wallet-sdk-bg", LogLevel.Debug, "Dropping malformed content-script envelope", verdict.reason)
-					return undefined
-				}
-				listener(message, sender)
-				return undefined
-			})
+			attachContentListener(admitContentMessage(listener, { logger, sessionKnown, sendToTab }))
 		},
 	}
+}
+
+/**
+ * The checks every content-script message passes before the SDK handler sees it, in this order:
+ * top frame, envelope schema, then a session this background knows.
+ */
+function admitContentMessage(
+	listener: Parameters<BackgroundTransport["addContentListener"]>[0],
+	deps: ContentWrapperDeps,
+): (message: unknown, sender: chrome.runtime.MessageSender) => undefined {
+	const { logger } = deps
+	return (message, sender) => {
+		// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
+		// attributes origin via `sender.tab?.url` (top-frame URL), so an
+		// iframe at https://evil.com/x.html embedded in https://app.example.com
+		// would be credited to https://app.example.com — inheriting any
+		// grants the user gave to the parent page.
+		//
+		// Nulo-side defense-in-depth: reject content-script messages
+		// from subframes at the wrapper layer. `sender.frameId === 0`
+		// is the top frame; any other value (or undefined for
+		// non-tab senders) is a subframe.
+		//
+		// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
+		// disables this check. Default is "reject subframes" because
+		// research found NO legitimate iframe-dApp use cases in the
+		// Nulo ecosystem. If a counterexample surfaces, set the env
+		// var rather than removing this check.
+		//
+		// Frame-targeted send replies (F-002 full fix) require upstream
+		// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
+		// in `BackgroundConnectionHandler`'s sendToTab signature —
+		// upstream's `(tabId, msg)` interface doesn't pass frameId
+		// through, so this remains an upstream coordination item.
+		if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
+			logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Debug,
+				// The tab and sender URLs are the user's browsing history, and any subframe on any
+				// page can trigger this line. The frame identity is what diagnoses the rejection.
+				`Rejected content-script message from subframe (frameId=${sender.frameId}, tabId=${sender.tab?.id}) — F-001 defense-in-depth`,
+			)
+			return undefined
+		}
+
+		// Zod-validate content-script-originated envelopes before
+		// forwarding to the upstream handler. `passthrough` lets
+		// non-content-script messages through (ServiceClient
+		// responses, offscreen pings, etc.) — the upstream handler
+		// filters those by `origin`. `invalid` drops adversarial /
+		// malformed envelopes early with a structured debug log.
+		const verdict = validateContentScriptMessage(message)
+		if (verdict.kind === "invalid") {
+			logger.log("wallet-sdk-bg", LogLevel.Debug, "Dropping malformed content-script envelope", verdict.reason)
+			return undefined
+		}
+		if (verdict.kind === "valid" && replyIfStale(verdict.message, sender.tab?.id, deps)) return undefined
+		listener(message, sender)
+		return undefined
+	}
+}
+
+/**
+ * A validated message for a session this background does not know is answered with the SDK's
+ * own disconnect instead of being forwarded: the handler would drop it in silence, and the page
+ * would wait out its 300 s ceiling for a background that forgot it (see `stale-session.ts`).
+ * Returns whether the message was answered here.
+ */
+function replyIfStale(envelope: ContentScriptMessageEnvelope, tabId: number | undefined, deps: ContentWrapperDeps): boolean {
+	const stale = staleSessionVerdict(envelope, tabId, deps.sessionKnown)
+	if (stale === "forward") return false
+	// A connected page repeats this every heartbeat until it reconnects; debug keeps it out of
+	// every user's log buffer.
+	deps.logger.log("wallet-sdk-bg", LogLevel.Debug, "Answering a message for a session this background does not know", {
+		type: envelope.type,
+		session: describeExternalId(stale.sessionId),
+	})
+	deps.sendToTab(stale.disconnectTab, sessionDisconnectedMessage(stale.sessionId))
+	return true
 }
 
 function buildHandlerCallbacks(
