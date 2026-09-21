@@ -1,8 +1,8 @@
 import { inject, expect } from "vitest"
 import { test, openPopup, waitForHash, replaceInputValue, clickByTestId } from "../fixtures/extension"
 import {
-	type FeeMethodSubtitle,
 	PXE_ANCHOR_SYNC_WORKAROUND_MS,
+	fillSendForm,
 	refreshBalances,
 	sendTransfer,
 	selectFeeMethod,
@@ -10,6 +10,23 @@ import {
 	waitForToast,
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
+import {
+	openReviewFromStrip,
+	openSend,
+	readReview,
+	readSendInputs,
+	type SendAction,
+	shotSend,
+	submitSend,
+	waitForFee,
+	waitForReview,
+	waitForReviewClosed,
+	waitForReviewReady,
+	waitForSendGone,
+	waitForTag,
+} from "../fixtures/send-page"
+import { pointerClick } from "../helpers/legal-drivers"
+import { coveredAt, tabAround, waitForFocus } from "../helpers/pointer-probes"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import type { Page } from "puppeteer"
 
@@ -55,6 +72,7 @@ test.skipIf(!hasConfig)("transfer with sponsored FPC fee", { timeout: 180_000 },
 		toType: "public",
 		amount: "1",
 		destination: tokenReadyExtension.accountAddress,
+		expect: "send",
 	})
 	console.log("✓ Transfer with Sponsored FPC submitted")
 	await page.close()
@@ -219,17 +237,16 @@ test.skipIf(!hasConfig)("gas balance card shows non-zero FeeJuice", { timeout: 1
 	await reopened.close()
 })
 
-// ── The fee source follows the transfer's origin, and warns when it names the sender ──────────────
+// ── The fee source follows the transfer's origin, and the page says what the fee publishes ────────
 //
 // Three funding shapes, one fixture each: no gas (tokenReady), public gas only (feeJuiceReady),
 // both (feeJuiceImported). Send keeps its fee picks under its own storage key; the fixtures are
 // file-scoped and earlier tests pick methods, so every test here starts by clearing that key and
-// can therefore assert DEFAULTS, not leftovers.
+// can therefore assert DEFAULTS, not leftovers. Every state a walk visits is read whole — the tag,
+// the footer's action and the strip's `you` must agree (`waitForFee` / `waitForTag`) — and every
+// send names what the footer must offer, so a real send is also a check on the gate.
 
 const SEND_PICKS_KEY = "nulo:ui:sendFeePaymentMethods"
-const NOTICE = '[data-testid="send-fee-privacy-notice"]'
-
-type FeeView = { method: string | null; noticeShape: string | null; remedyHref: string | null; origin: string | null }
 
 async function clearSendPicks(page: Page): Promise<void> {
 	await page.evaluate((key: string) => chrome.storage.local.remove(key), SEND_PICKS_KEY)
@@ -239,92 +256,28 @@ async function readSendPicks(page: Page): Promise<unknown> {
 	return page.evaluate(async (key: string) => (await chrome.storage.local.get(key))[key], SEND_PICKS_KEY)
 }
 
-async function openSend(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		;(document.querySelector('[data-testid="actions-send"]') as HTMLElement)?.click()
-	})
-	await page.waitForSelector('[data-testid="send-from-type"]', { timeout: 10_000 })
-}
-
-async function feeView(page: Page): Promise<FeeView> {
-	return page.evaluate((noticeSelector: string) => {
-		const notice = document.querySelector(noticeSelector)
-		return {
-			method: document.querySelector('[data-testid="send-fee-method-trigger"]')?.getAttribute("data-fee-method") ?? null,
-			noticeShape: notice?.getAttribute("data-notice-shape") ?? null,
-			remedyHref: document.querySelector('[data-testid="send-fee-privacy-remedy"]')?.getAttribute("href") ?? null,
-			origin: document.querySelector('[data-testid="fee-settings-card"]')?.getAttribute("data-origin") ?? null,
-		}
-	}, NOTICE)
-}
-
-/** Waits until the card, under `origin`, has settled on `method` — a default takes a balance read to
- *  land, so this is the signal, never a sleep. On timeout the error carries what the card showed. */
-async function waitForFee(page: Page, origin: "private" | "public", method: FeeMethodSubtitle, timeout = 90_000): Promise<FeeView> {
-	try {
-		await page.waitForFunction(
-			({ o, m }: { o: string; m: string }) =>
-				document.querySelector('[data-testid="fee-settings-card"]')?.getAttribute("data-origin") === o &&
-				document.querySelector('[data-testid="send-fee-method-trigger"]')?.getAttribute("data-fee-method") === m,
-			{ timeout, polling: 250 },
-			{ o: origin, m: method },
-		)
-	} catch (e) {
-		throw new Error(`fee card never settled on ${method} under a ${origin} origin; it shows ${JSON.stringify(await feeView(page))}`, {
-			cause: e,
-		})
-	}
-	return feeView(page)
-}
-
-/** Opt-in capture of the popup (`NULO_E2E_SHOT_DIR`): a popup-surface change ships with a picture of it. */
-async function shot(page: Page, name: string): Promise<void> {
-	const dir = process.env.NULO_E2E_SHOT_DIR
-	if (!dir) return
-	await page.evaluate((s: string) => document.querySelector(s)?.scrollIntoView({ block: "center" }), NOTICE)
-	await page.screenshot({ path: `${dir}/${name}.png` as `${string}.png` })
-	// The other theme too: the row's colours are tokens, and a token that only reads well on one
-	// theme is the kind of thing a row count never sees.
-	const flipped = await page.evaluate(() => {
-		const root = document.documentElement
-		const was = root.getAttribute("theme")
-		root.setAttribute("theme", was === "dark" ? "light" : "dark")
-		return was
-	})
-	await page.screenshot({ path: `${dir}/${name}-${flipped === "dark" ? "light" : "dark"}.png` as `${string}.png` })
-	await page.evaluate((was: string | null) => {
-		if (was === null) document.documentElement.removeAttribute("theme")
-		else document.documentElement.setAttribute("theme", was)
-	}, flipped)
-}
-
-async function fillAndSubmit(page: Page, destination: string, amount: string): Promise<void> {
-	await page.waitForFunction(
-		() => {
-			const input = document.querySelector('[data-testid="send-amount-input"]') as HTMLInputElement
-			return input && !input.disabled
-		},
-		{ timeout: 60_000, polling: 2_000 },
-	)
-	await replaceInputValue(page, '[data-testid="send-amount-input"]', amount)
-	await replaceInputValue(page, '[data-testid="send-destination-field"] input', destination)
-	await page.waitForFunction(
-		() => {
-			const btn = document.querySelector('[data-testid="send-submit"]') as HTMLElement
-			return btn && getComputedStyle(btn).pointerEvents !== "none"
-		},
-		{ timeout: 180_000, polling: 3_000 },
-	)
-	await new Promise((r) => setTimeout(r, PXE_ANCHOR_SYNC_WORKAROUND_MS))
-	await page.evaluate(() => document.querySelector('[data-testid="send-submit"]')?.scrollIntoView({ block: "center" }))
-	await clickByTestId(page, "send-submit")
+async function fillAndSubmit(page: Page, destination: string, amount: string, expect: SendAction): Promise<void> {
+	await fillSendForm(page, { amount, destination })
+	await submitSend(page, { expect })
 	await waitForToast(page, "Transaction submitted", 60_000)
+	await waitForSendGone(page)
+}
+
+/** Still on the Send page with no submission toast after `dwellMs` — what a first click on "Review send" must leave behind. */
+async function expectNothingSent(page: Page, dwellMs: number): Promise<void> {
+	await new Promise((r) => setTimeout(r, dwellMs))
+	const state = await page.evaluate(() => ({
+		onSend: Boolean(document.querySelector('[data-testid="send-destination-field"]')),
+		toast: (document.body.textContent ?? "").toLowerCase().includes("transaction submitted"),
+	}))
+	expect(state).toEqual({ onSend: true, toast: false })
 }
 
 test.skipIf(!hasConfig)(
-	"no gas at all: both origins default to the sponsor, and nothing warns",
-	{ timeout: 180_000 },
+	"no gas at all: both origins default to the sponsor, nothing warns, and the optional review sends at once",
+	{ timeout: 300_000 },
 	async ({ tokenReadyExtension }) => {
+		const self = tokenReadyExtension.accountAddress
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
 		await clearSendPicks(page)
@@ -332,25 +285,45 @@ test.skipIf(!hasConfig)(
 
 		// Private is the page's default origin. Both balances read as zero, so the walk ends on the sponsor.
 		const privateOrigin = await waitForFee(page, "private", "sponsored")
-		expect(privateOrigin.noticeShape).toBeNull()
+		expect(privateOrigin).toMatchObject({ tag: null, action: "send", strip: { you: "hidden", to: "hidden", amount: "hidden" } })
+		await shotSend(page, "strip-all-hidden")
 
 		await setActiveSendType(page, "send-from-type", "public")
 		const publicOrigin = await waitForFee(page, "public", "sponsored")
-		expect(publicOrigin.noticeShape).toBeNull()
+		expect(publicOrigin).toMatchObject({ tag: null, action: "send", strip: { you: "public", to: "hidden", amount: "public" } })
 
 		// Nothing was picked, so nothing was remembered.
 		expect(await readSendPicks(page)).toBeUndefined()
+
+		// A send nobody gated, reviewed anyway: the sheet opened from the strip is armed at once.
+		await setActiveSendType(page, "send-to-type", "public")
+		await shotSend(page, "strip-public-send")
+		await fillSendForm(page, { amount: "1", destination: self })
+		await openReviewFromStrip(page)
+		expect(await readReview(page)).toMatchObject({
+			you: "public",
+			to: "public",
+			amount: "public",
+			payer: "contract",
+			ready: true,
+			remedyHref: null,
+		})
+		await shotSend(page, "sheet-not-gated", "send-review-submit")
+		await pointerClick(page, "send-review-submit")
+		await waitForToast(page, "Transaction submitted", 60_000)
+		await waitForSendGone(page)
+		await waitForTxConfirmation(page, { amount: "1", fromType: "public", toType: "public", timeout: 120_000 })
 		await page.close()
 	},
 )
 
 test.skipIf(!hasConfig)(
-	"public gas only: a private send is defaulted to Fee Juice, warns in both wordings, and still sends",
+	"public gas only: a private send is defaulted to Fee Juice, tagged in both wordings, and sends only through the sheet",
 	{ timeout: 600_000 },
 	async ({ feeJuiceReadyExtension }) => {
 		const self = feeJuiceReadyExtension.accountAddress
 
-		// A public-origin send already names the sender: Fee Juice is the matched default, silently.
+		// A public-origin send already names the sender: Fee Juice is the matched default, silently, one tap.
 		{
 			const page = await openPopup(feeJuiceReadyExtension)
 			await waitForHash(page, "#/popup/general")
@@ -359,11 +332,10 @@ test.skipIf(!hasConfig)(
 			await setActiveSendType(page, "send-from-type", "public")
 			await setActiveSendType(page, "send-to-type", "private")
 			const shield = await waitForFee(page, "public", "public")
-			expect(shield.noticeShape).toBeNull()
+			expect(shield).toMatchObject({ tag: null, action: "send", strip: { you: "public", to: "hidden", amount: "public" } })
 
 			// Shield 100 so there is a private balance to send from — paid with that same default.
-			await fillAndSubmit(page, self, "100")
-			await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
+			await fillAndSubmit(page, self, "100", "send")
 			await waitForTxConfirmation(page, { amount: "100", fromType: "public", toType: "private", timeout: 120_000 })
 			await page.close()
 		}
@@ -378,36 +350,65 @@ test.skipIf(!hasConfig)(
 
 			// THE case: private gas read as zero, public gas held. Nobody picked anything.
 			const defaulted = await waitForFee(page, "private", "public")
-			expect(defaulted.noticeShape).toBe("private-private")
-			expect(defaulted.remedyHref).toMatch(/^https:\/\//)
+			expect(defaulted).toMatchObject({
+				tag: "private-private",
+				action: "review",
+				strip: { you: "exposed", to: "hidden", amount: "hidden" },
+			})
 			expect(await readSendPicks(page)).toBeUndefined()
-			await shot(page, "notice-private-private")
+			await shotSend(page, "tag-private-private", "send-fee-privacy-notice")
+			await shotSend(page, "strip-fee-payer")
 
 			await setActiveSendType(page, "send-to-type", "public")
-			await page.waitForFunction(
-				(s: string) => document.querySelector(s)?.getAttribute("data-notice-shape") === "private-public",
-				{ timeout: 30_000 },
-				NOTICE,
-			)
-			expect((await feeView(page)).method).toBe("public")
-			await shot(page, "notice-private-public")
+			const toPublic = await waitForTag(page, "private-public")
+			expect(toPublic).toMatchObject({
+				method: "public",
+				action: "review",
+				strip: { you: "exposed", to: "public", amount: "public" },
+			})
+			await shotSend(page, "tag-private-public", "send-fee-privacy-notice")
 
 			await setActiveSendType(page, "send-to-type", "private")
-			await page.waitForFunction(
-				(s: string) => document.querySelector(s)?.getAttribute("data-notice-shape") === "private-private",
-				{ timeout: 30_000 },
-				NOTICE,
-			)
+			await waitForTag(page, "private-private")
 
-			// A sponsor that does not name the account is one tap away, and silences the row.
+			// A sponsor that does not name the account is one tap away, and lifts the gate with the tag.
 			await selectFeeMethod(page, "sponsored")
-			await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 30_000 }, NOTICE)
+			expect(await waitForTag(page, null)).toMatchObject({ action: "send", strip: { you: "hidden" } })
 			await selectFeeMethod(page, "public")
-			await page.waitForSelector(NOTICE)
+			await waitForTag(page, "private-private")
 
-			// Warn-and-allow: the send goes through, paid by the account.
-			await fillAndSubmit(page, self, "10")
-			await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
+			// The gated send: the footer reads "Review send" and only opens the sheet. Nothing goes out,
+			// and while the sheet is up the footer is under it — nothing stays clickable below a modal.
+			await fillSendForm(page, { amount: "10", destination: self })
+			await pointerClick(page, "send-submit")
+			await waitForReview(page, true)
+			await expectNothingSent(page, 1_500)
+			expect(await coveredAt(page, "send-submit")).not.toBeNull()
+			const review = await readReview(page)
+			expect(review).toMatchObject({ you: "exposed", shape: "private-private", to: "hidden", amount: "hidden", payer: "account" })
+			expect(review.remedyHref).toMatch(/^https:\/\//)
+			await shotSend(page, "sheet-gated", "send-review-submit")
+
+			// The trap: Tab never leaves the sheet; Escape closes it and hands focus back to the opener.
+			const visited = await tabAround(page, 12)
+			expect(visited).toContain("send-review-submit")
+			expect(visited).not.toContain("send-submit")
+			expect(visited).not.toContain("send-publish-strip")
+			expect(visited).not.toContain("send-amount-input")
+			await page.keyboard.press("Escape")
+			await waitForReviewClosed(page)
+			await waitForFocus(page, "send-submit")
+
+			// The form survived the round trip, gate included.
+			expect(await readSendInputs(page)).toEqual({ amount: "10", destination: self })
+			expect((await waitForTag(page, "private-private")).action).toBe("review")
+
+			// Reopened from the strip, armed after the wait, sent from the sheet alone — paid by the account.
+			await openReviewFromStrip(page)
+			await waitForReviewReady(page)
+			await pointerClick(page, "send-review-submit")
+			await waitForToast(page, "Transaction submitted", 60_000)
+			await waitForSendGone(page)
 			await waitForTxConfirmation(page, { amount: "10", fromType: "private", toType: "private", timeout: 120_000 })
 			await page.close()
 		}
@@ -415,7 +416,7 @@ test.skipIf(!hasConfig)(
 )
 
 test.skipIf(!hasConfig)(
-	"both gases held: each origin defaults to its own, a hand-picked Fee Juice warns, and the pick is kept per origin",
+	"both gases held: each origin defaults to its own, a hand-picked sponsor sends in one tap, a hand-picked Fee Juice through the sheet, and the pick is kept per origin",
 	{ timeout: 600_000 },
 	async ({ feeJuiceImportedExtension }) => {
 		const self = feeJuiceImportedExtension.accountAddress
@@ -427,20 +428,20 @@ test.skipIf(!hasConfig)(
 			await openSend(page)
 
 			const privateDefault = await waitForFee(page, "private", "private")
-			expect(privateDefault.noticeShape).toBeNull()
+			expect(privateDefault).toMatchObject({ tag: null, action: "send", strip: { you: "hidden" } })
 
 			await setActiveSendType(page, "send-from-type", "public")
 			const publicDefault = await waitForFee(page, "public", "public")
-			expect(publicDefault.noticeShape).toBeNull()
+			expect(publicDefault).toMatchObject({ tag: null, action: "send", strip: { you: "public" } })
 
-			// Shield so the private send below has something to spend (public origin → its default payer).
+			// Shield so the private sends below have something to spend (public origin → its default payer).
 			await setActiveSendType(page, "send-to-type", "private")
-			await fillAndSubmit(page, self, "100")
-			await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
+			await fillAndSubmit(page, self, "100", "send")
 			await waitForTxConfirmation(page, { amount: "100", fromType: "public", toType: "private", timeout: 120_000 })
 			await page.close()
 		}
 
+		// A hand-picked sponsor: HIDDEN, one tap, the sheet never opens.
 		{
 			const page = await openPopup(feeJuiceImportedExtension)
 			await waitForHash(page, "#/popup/general")
@@ -451,53 +452,69 @@ test.skipIf(!hasConfig)(
 			await waitForFee(page, "private", "private")
 
 			await selectFeeMethod(page, "sponsored")
-			expect((await feeView(page)).noticeShape).toBeNull()
-
-			await selectFeeMethod(page, "public")
-			await page.waitForSelector(NOTICE)
-			expect((await feeView(page)).noticeShape).toBe("private-private")
-
-			await setActiveSendType(page, "send-to-type", "public")
-			await page.waitForFunction(
-				(s: string) => document.querySelector(s)?.getAttribute("data-notice-shape") === "private-public",
-				{ timeout: 30_000 },
-				NOTICE,
-			)
-
-			// A public origin has no sender left to protect: the row goes, and that origin keeps its own default.
-			await setActiveSendType(page, "send-from-type", "public")
-			const asPublic = await waitForFee(page, "public", "public")
-			expect(asPublic.noticeShape).toBeNull()
-
-			// Back to private: the pick made under THIS origin returns, and the row with it.
-			await setActiveSendType(page, "send-from-type", "private")
-			await setActiveSendType(page, "send-to-type", "private")
-			const back = await waitForFee(page, "private", "public")
-			expect(back.noticeShape).toBe("private-private")
-
-			expect(await readSendPicks(page)).toEqual({ [self]: { private: { type: "fj" } } })
-
-			await fillAndSubmit(page, self, "10")
-			await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
-			await waitForTxConfirmation(page, { amount: "10", fromType: "private", toType: "private", timeout: 120_000 })
+			expect(await waitForTag(page, null)).toMatchObject({ method: "sponsored", action: "send", strip: { you: "hidden" } })
+			await fillAndSubmit(page, self, "5", "send")
+			await waitForTxConfirmation(page, { amount: "5", fromType: "private", toType: "private", timeout: 120_000 })
 			await page.close()
 		}
 
-		// A fresh popup: the pick survived, per origin, and still warns.
+		// A hand-picked Fee Juice: the tag, then the private → public wording, sent through the sheet.
+		{
+			const page = await openPopup(feeJuiceImportedExtension)
+			await waitForHash(page, "#/popup/general")
+			await refreshBalances(page)
+			await openSend(page)
+			await setActiveSendType(page, "send-from-type", "private")
+			await setActiveSendType(page, "send-to-type", "private")
+			// The pick survived: the sponsor, previewed while balances load and then in effect.
+			await waitForFee(page, "private", "sponsored")
+			await waitForTag(page, null)
+
+			await selectFeeMethod(page, "public")
+			expect(await waitForTag(page, "private-private")).toMatchObject({ action: "review", strip: { you: "exposed" } })
+
+			await setActiveSendType(page, "send-to-type", "public")
+			await waitForTag(page, "private-public")
+
+			await fillSendForm(page, { amount: "10", destination: self })
+			await pointerClick(page, "send-submit")
+			await waitForReview(page, true)
+			expect(await readReview(page)).toMatchObject({
+				you: "exposed",
+				shape: "private-public",
+				to: "public",
+				amount: "public",
+				payer: "account",
+			})
+			await waitForReviewReady(page)
+			await pointerClick(page, "send-review-submit")
+			await waitForToast(page, "Transaction submitted", 60_000)
+			await waitForSendGone(page)
+			await waitForTxConfirmation(page, { amount: "10", fromType: "private", toType: "public", timeout: 120_000 })
+			await page.close()
+		}
+
+		// A fresh popup: the pick survived, per origin, and still gates.
 		{
 			const page = await openPopup(feeJuiceImportedExtension)
 			await waitForHash(page, "#/popup/general")
 			await openSend(page)
 			// The trigger previews the saved pick while balances load, and a preview pays nothing — so the
-			// row, not the trigger, is the signal that Fee Juice is the method in effect.
+			// tag, not the trigger, is the signal that Fee Juice is the method in effect.
 			await waitForFee(page, "private", "public")
-			await page.waitForFunction(
-				(s: string) => document.querySelector(s)?.getAttribute("data-notice-shape") === "private-private",
-				{ timeout: 90_000 },
-				NOTICE,
-			)
+			expect(await waitForTag(page, "private-private", 90_000)).toMatchObject({ action: "review" })
+
+			// A public origin has no sender left to protect: the tag goes, and that origin keeps its own default.
 			await setActiveSendType(page, "send-from-type", "public")
-			expect((await waitForFee(page, "public", "public")).noticeShape).toBeNull()
+			expect(await waitForFee(page, "public", "public")).toMatchObject({ tag: null, action: "send", strip: { you: "public" } })
+
+			// Back to private: the pick made under THIS origin returns, and the tag with it.
+			await setActiveSendType(page, "send-from-type", "private")
+			await setActiveSendType(page, "send-to-type", "private")
+			await waitForFee(page, "private", "public")
+			await waitForTag(page, "private-private")
+			expect(await readSendPicks(page)).toEqual({ [self]: { private: { type: "fj" } } })
+
 			await clearSendPicks(page)
 			await page.close()
 		}

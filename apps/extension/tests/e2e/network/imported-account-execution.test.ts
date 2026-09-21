@@ -65,7 +65,7 @@ test.skipIf(!hasConfig)(
 		{
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general", 30_000)
-			await sendTransfer(page, { fromType: "public", toType: "public", amount: "10", destination: sourceAddress })
+			await sendTransfer(page, { fromType: "public", toType: "public", amount: "10", destination: sourceAddress, expect: "send" })
 			await waitForTxConfirmation(page, { amount: "10", fromType: "public", toType: "public" })
 			console.log("✓ Source account deployed via its first self-transfer")
 
@@ -98,7 +98,7 @@ test.skipIf(!hasConfig)(
 
 			// The signature under this transfer comes from the imported key, unsealed from B's
 			// DEK-rooted row. Real proof, node acceptance, confirmed row — no tolerated failure.
-			await sendTransfer(page, { fromType: "public", toType: "public", amount: "5", destination: sourceAddress })
+			await sendTransfer(page, { fromType: "public", toType: "public", amount: "5", destination: sourceAddress, expect: "send" })
 			await waitForTxConfirmation(page, { amount: "5", fromType: "public", toType: "public" })
 			console.log("✓ Imported account executed a real-proved transfer in the second profile")
 
@@ -170,7 +170,13 @@ test.skipIf(!hasConfig)(
 				// profile has (account export is password-gated by design). ──
 				await importToken(anchorPopup, aztecConfig!.tokenAddress)
 				await switchAccountByAddress(anchorPopup, sourceAddress)
-				await sendTransfer(anchorPopup, { fromType: "public", toType: "public", amount: "3", destination: sourceAddress })
+				await sendTransfer(anchorPopup, {
+					fromType: "public",
+					toType: "public",
+					amount: "3",
+					destination: sourceAddress,
+					expect: "send",
+				})
 				await waitForTxConfirmation(anchorPopup, { amount: "3", fromType: "public", toType: "public" })
 				console.log("✓ Imported account executed a real-proved transfer inside a passkey profile")
 

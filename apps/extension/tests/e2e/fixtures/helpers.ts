@@ -4,6 +4,7 @@ import type { CDPSession, Page, Target } from "puppeteer"
 import { assertChromeOnly, reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
+import { type SendAction, submitSend } from "./send-page"
 
 /**
  * Selector contract for tests in this directory.
@@ -1051,6 +1052,10 @@ export interface SendTransferOptions {
 	toType: "public" | "private"
 	amount: string
 	destination: string
+	/** What the footer must offer this send: "send" at once, or "review" through the sheet because
+	 *  the fee names the account. The other offer fails the send (`submitSend`) — a real send is a
+	 *  check on the gate, never a detour around it. */
+	expect?: SendAction
 }
 
 /** Toggle a send-type pair (send-from-type or send-to-type) until the
@@ -1116,6 +1121,20 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	await setActiveSendType(page, "send-from-type", opts.fromType)
 	await setActiveSendType(page, "send-to-type", opts.toType)
 
+	await fillSendForm(page, opts)
+	await submitSend(page, { expect: opts.expect ?? "send" })
+
+	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
+	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
+	// especially the shield (public→private) path — so give it real headroom there. Proverless
+	// bulk shards stay tight to keep failures honest-fast.
+	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
+	// Wait for popup to fully close
+	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
+}
+
+/** Fills the open Send form and waits until the footer is clickable — the fee estimate landed. */
+export async function fillSendForm(page: Page, opts: { amount: string; destination: string }): Promise<void> {
 	// Wait for amount input to become ENABLED
 	// AmountCard has :disabled="!tokenBalanceByType" — disabled when balance for selected type is 0/loading
 	await page.waitForFunction(
@@ -1162,22 +1181,6 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	}
 
 	await new Promise((r) => setTimeout(r, PXE_ANCHOR_SYNC_WORKAROUND_MS))
-
-	// Submit — scroll into view via page.evaluate (the button may be below the
-	// fold in PopupCard) then trigger via clickByTestId, which uses an
-	// in-page synthetic click (the elementHandle path hangs on this stack).
-	await page.evaluate(() => {
-		document.querySelector('[data-testid="send-submit"]')?.scrollIntoView({ block: "center" })
-	})
-	await clickByTestId(page, "send-submit")
-
-	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
-	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
-	// especially the shield (public→private) path — so give it real headroom there. Proverless
-	// bulk shards stay tight to keep failures honest-fast.
-	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
-	// Wait for popup to fully close
-	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
 }
 
 /** Map a (fromType, toType) pair to the user-visible transfer-type label

@@ -476,7 +476,7 @@ Every gate includes the fast layers. "Green" means the gate below, pasted in the
 `payerNoticeShape` prop → `FeeMethodSelector` tag; delete the block, `payerNotice` and `feePayerNotice`; re-point the card's and the selector's tests (T8); T11 gains the tag half of its invariant and "no token → no tag".
 **Validation gate** — commands: `bun run --cwd apps/extension test src/popup/components/modules/send src/popup/pages` · `bun run audit:vue`. Pass: exit 0. Layers: lint/typecheck · unit · component · page integration · build.
 
-### Phase 5 — e2e, mutation pass, screenshots
+### Phase 5 — e2e, mutation pass, screenshots ✓
 `fixtures/send-page.ts`; helpers with an explicit `expect` + the DOM invariant (T17) and an `expect` at every `sendTransfer` call site; `fee-methods.test.ts` walks and sends (T16); smoke (T15, T19); every mutant of the table (M1–M19, M10b); screenshots (T18); lane timing (I3).
 **Validation gate** — commands:
 `bun run test:e2e tests/e2e/send-fee-privacy.test.ts tests/e2e/legal-acceptance.test.ts tests/e2e/popup-stack.test.ts --retry=0` ·

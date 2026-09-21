@@ -69,6 +69,7 @@ test.skipIf(!hasConfig)(
 				toType: "public",
 				amount: "10",
 				destination: tokenReadyExtension.accountAddress,
+				expect: "send",
 			})
 			console.log("✓ Public → Public submitted")
 			await waitForTxConfirmation(page, { amount: "10", fromType: "public", toType: "public" })
@@ -85,6 +86,7 @@ test.skipIf(!hasConfig)(
 				toType: "private",
 				amount: "100",
 				destination: tokenReadyExtension.accountAddress,
+				expect: "send",
 			})
 			console.log("✓ Public → Private (shield) submitted")
 			await waitForTxConfirmation(page, { amount: "100", fromType: "public", toType: "private" })
@@ -113,6 +115,7 @@ test.skipIf(!hasConfig)(
 				toType: "public",
 				amount: "50",
 				destination: tokenReadyExtension.accountAddress,
+				expect: "send",
 			})
 			console.log("✓ Private → Public (unshield) submitted")
 			await waitForTxConfirmation(page, { amount: "50", fromType: "private", toType: "public" })
@@ -129,6 +132,7 @@ test.skipIf(!hasConfig)(
 				toType: "private",
 				amount: "10",
 				destination: tokenReadyExtension.accountAddress,
+				expect: "send",
 			})
 			console.log("✓ Private → Private submitted")
 			await waitForTxConfirmation(page, { amount: "10", fromType: "private", toType: "private" })

@@ -29,7 +29,7 @@ const toggleReveal = () => {
 </script>
 
 <template>
-	<Flex direction="column" gap="10" :class="$style.card" data-testid="recipient-card">
+	<Flex direction="column" gap="10" :class="$style.card" data-testid="recipient-card" :data-address="address">
 		<Flex align="center" justify="between" gap="10" wide>
 			<Flex align="center" gap="10" :class="$style.identity">
 				<AccountAvatar :name="name" :size="36" />
