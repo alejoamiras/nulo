@@ -20,7 +20,7 @@ import {
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 } from "./helpers"
-import { snapshotResultSeq, waitForPgResult } from "./playground"
+import { type PgBundle, selectPgBundle, snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import { TEST_PASSWORD } from "./constants"
 import type { AztecTestConfig } from "./aztec"
@@ -422,15 +422,10 @@ async function setupConnectedPlayground(
 export async function grantCapBundle(
 	ctx: ExtensionContext,
 	playgroundPage: Page,
-	bundle: "accounts" | "transaction" | "transaction-contracts",
+	bundle: PgBundle,
 	pick: (accountIds: (string | null)[], capPopup: Page) => Promise<string[]>,
 ): Promise<string[]> {
-	await playgroundPage.evaluate((b) => {
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-		if (!select) throw new Error("pg-bundle-select not present on playground page")
-		select.value = b
-		select.dispatchEvent(new Event("change", { bubbles: true }))
-	}, bundle)
+	await selectPgBundle(playgroundPage, bundle)
 	const seqGrant = await snapshotResultSeq(playgroundPage)
 	const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
 	await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")

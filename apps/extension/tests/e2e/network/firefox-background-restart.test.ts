@@ -2,12 +2,10 @@ import type { Browser, Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
 import { isFirefox, pxeHostState, stopBackground } from "../fixtures/browser"
 import { type BackgroundIdentity, backgroundIdentity } from "../fixtures/browser/firefox"
-import { TEST_PASSWORD } from "../fixtures/constants"
-import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked, waitForLockScreen } from "../fixtures/helpers"
-import { assertPgOk, openPlayground, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveVerify, waitForPopup } from "../fixtures/popups"
-import { sendDefaultTx } from "../fixtures/send"
+import { openPopup, test, type ExtensionContext } from "../fixtures/extension"
+import { unlockAfterBackgroundDeath } from "../fixtures/helpers"
+import { openPlayground } from "../fixtures/playground"
+import { reconnectPlayground, sendDefaultTx } from "../fixtures/send"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -26,35 +24,12 @@ async function waitForNewBackground(browser: Browser, previous: BackgroundIdenti
 	}
 }
 
-/**
- * Assert the lock on `popup`, unlock, open a fresh dApp page, connect, and re-request the granted
- * bundle. The lock is asserted first because `ensureUnlocked` succeeds on an already-unlocked wallet,
- * which is the regression this spec exists to catch. An approved origin is auto-approved at discovery;
- * the verify window re-fires only when the session was not trusted, so both endings are accepted.
- */
+/** Assert the lock on `popup`, unlock, open a fresh dApp page, connect, and re-request the granted bundle. */
 async function unlockAndReconnect(ctx: ExtensionContext, popup: Page): Promise<Page> {
-	await waitForLockScreen(popup, 60_000)
-	await ensureUnlocked(popup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
-	await popup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
+	await unlockAfterBackgroundDeath(popup)
 	await popup.close()
-
 	const page = await openPlayground(ctx)
-	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 }).catch(() => undefined)
-	const connected = page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 60_000 })
-	await clickByTestId(page, "pg-btn-connect")
-	const verify = await Promise.race([verifyP, connected.then(() => undefined)])
-	if (verify) await approveVerify(verify)
-	await connected
-
-	await page.evaluate(() => {
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-		if (!select) throw new Error("pg-bundle-select not present")
-		select.value = "transaction"
-		select.dispatchEvent(new Event("change", { bubbles: true }))
-	})
-	const seq = await snapshotResultSeq(page)
-	await clickByTestId(page, "pg-btn-requestCapabilities")
-	await assertPgOk(page, await waitForPgResult(page, "requestCapabilities", seq, 60_000), "firefox-background-restart:caps")
+	await reconnectPlayground(ctx, page, "transaction", "firefox-background-restart:caps")
 	return page
 }
 

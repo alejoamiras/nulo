@@ -104,6 +104,18 @@ export async function waitForLockScreen(page: Page, timeoutMs = 60_000): Promise
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
 
+/**
+ * The lock a background death leaves behind, then the unlock. Strict mode drops the session on any
+ * background death, on both browsers, so the lock is asserted first — `ensureUnlocked` alone passes
+ * on a wallet that never locked, which is the regression the callers exist to catch. The budgets
+ * cover a successor's cold boot.
+ */
+export async function unlockAfterBackgroundDeath(page: Page): Promise<void> {
+	await waitForLockScreen(page, 60_000)
+	await ensureUnlocked(page, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
+	await page.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
+}
+
 /** If the wallet is locked, re-enter the password; if it is already unlocked,
  *  do nothing. Defaults to the standard test password; pass a different one if
  *  a prior test rotated it via change-password.
