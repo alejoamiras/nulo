@@ -18,11 +18,11 @@ A running extension lives in four browser contexts:
    │            │ chrome.runtime.connect / chrome.runtime.sendMessage│
    │            │                                                    │
    │  ┌─────────▼──────────────┐    ┌─────────────────────────────┐  │
-   │  │  Offscreen document    │    │  Content script             │  │
-   │  │  (PXE host)            │    │  src/content-script/        │  │
-   │  │  src/offscreen/        │    │  Injects in-page bridge for │  │
-   │  │  Runs Aztec PXE inside │    │  dApp discovery + RPC.      │  │
-   │  │  hidden window/document│    └──────────┬──────────────────┘  │
+   │  │  PXE host              │    │  Content script             │  │
+   │  │  src/offscreen/        │    │  src/content-script/        │  │
+   │  │  Chrome: offscreen doc │    │  Injects in-page bridge for │  │
+   │  │  Firefox: a frame of   │    │  dApp discovery + RPC.      │  │
+   │  │  the background page   │    └──────────┬──────────────────┘  │
    │  └────────────────────────┘               │ window.postMessage  │
    │                                           ▼                     │
    └─────────────────────────────────────┐  ┌─────────────────────┐  │
@@ -133,13 +133,13 @@ A throw never advances the version; the next boot **restores the backup, then re
 
 ## 6. Offscreen lifecycle
 
-The offscreen document hosts the Aztec PXE. The service worker creates and supervises it via `apps/extension/src/wallet/utils/offscreen.ts`:
+The Aztec PXE runs in a page of its own: Chrome's offscreen document, or — Firefox MV3 has no `chrome.offscreen` — the same `src/offscreen/index.html` loaded as a frame of the background page. The background creates and supervises it via `apps/extension/src/wallet/utils/offscreen.ts`:
 
-- `ensureOffscreenRunning()` is the entry point. It first checks `isOffscreenAlreadyRunning()` (Chromium: `chrome.runtime.getContexts`; Firefox: a module-local `firefoxOffscreenWindowId`).
-- If a document exists, it pings it via `isOffscreenHealthy()`. A non-responsive ("zombie") offscreen is torn down and recreated.
+- `ensureOffscreenRunning()` is the entry point. It first checks `isOffscreenAlreadyRunning()` (Chromium: `chrome.runtime.getContexts`; Firefox: the tracked frame is still attached).
+- If a document exists, it pings it via `isOffscreenHealthy()`. A non-responsive ("zombie") offscreen is torn down and recreated. On Firefox a READY or PONG counts only when the sender's URL carries the live frame's `?instance=` generation, so a frame removed on timeout cannot open its successor's gate or pass its health check.
 - A creation in flight is shared — concurrent callers all await the same `offscreenPromise`. A `READY_TIMEOUT_MS` watchdog converts a stuck create into a thrown error.
 
-Firefox MV3 has no `chrome.offscreen` API, so the implementation falls back to a hidden `chrome.windows` window. SW restart on Firefox resets the in-memory tracker; rediscovery would require a `tabs` permission, which the manifest deliberately avoids. The trade-off is documented in `offscreen.ts`.
+**Why a frame, and its lifetime.** Firefox clamps a hidden document's timers to one per second, and the PXE's node client waits on a zero-delay timer per RPC batch — hosted in a minimized window, a dApp `sendTx` took 18–28 s against 1.5–5 s framed (`implementations-plan/pxe-timer-throttling/`). A frame inherits the background page's `visible` state. It lives at most as long as the background page: the 10 s `storage.session` heartbeat keeps the event page from Firefox's 30 s idle suspension while the background is up, and when the background ends anyway (a browser or extension restart, a crash) the wallet comes back locked — strict security mode drops the session on any background death, on both browsers — and the PXE cold-starts on the first request after the unlock. Chrome differs only in that its offscreen document survives a worker restart. `tests/e2e/network/pxe-host-state.test.ts` holds both browsers to one `visible` host; `firefox-background-restart.test.ts` pins the locked-then-recovered path after an extension reload ends the background.
 
 ## 7. Profile + session model
 
@@ -228,7 +228,7 @@ The private-cold-start fee-payment path (private mint + pay-fee combined for an 
 
 ## 13. Build artifacts
 
-`bun run build` produces a Chrome MV3 bundle at `apps/extension/dist/chrome/`. `bun run build:firefox` produces a Firefox MV3 bundle at `dist/firefox/`. Manifests are configured per-target in `apps/extension/manifest/`; the Firefox manifest drops the `offscreen` permission (no Chromium offscreen API) and substitutes a hidden-window strategy.
+`bun run build` produces a Chrome MV3 bundle at `apps/extension/dist/chrome/`. `bun run build:firefox` produces a Firefox MV3 bundle at `dist/firefox/`. Manifests are configured per-target in `apps/extension/manifest/`; the Firefox manifest drops the `offscreen` permission (no Chromium offscreen API) and the PXE page is hosted as a frame of the background page instead.
 
 Vite env propagation: e2e network suites pass `VITE_LOCAL_NETWORK_RPC_URL=http://localhost:<aztec-port>` so the wallet's "Local Network" preset points at the per-worktree sandbox. The build wrapper greps the bundle for the URL and fails fast if the env didn't substitute.
 

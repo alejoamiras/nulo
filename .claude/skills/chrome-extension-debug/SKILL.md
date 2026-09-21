@@ -57,15 +57,18 @@ What differs from Chrome when probing by hand:
   alone is not enough: a BiDi `navigate` or `reload` of a `moz-extension://` page strands the page
   ("no such frame"), so extension pages are navigated over the classic channel
   (`gotoExtensionPage` / `reloadExtensionPage`), and geckodriver needs `--allow-system-access`.
-- A new tab lands in the most recently focused window, which is the wallet's minimized PXE window:
-  the page is hidden, gets no animation frames and cannot run WebAuthn. Open a window instead
+- A new tab lands in the most recently focused window, which can be one the wallet opened: the
+  page may be hidden, get no animation frames and cannot run WebAuthn. Open a window instead
   (`newPage`), and bring a page to the front before a click that starts a ceremony.
 - `page.evaluateOnNewDocument` monkeypatching is a no-op (Xray wrappers), and page consoles stay
   empty because the extension routes `console.*` into the logger. The oracle is the logger ring
   buffer: turn on Developer Mode (Settings → Advanced) so it persists, then read
   `chrome.storage.session.get("nulo:logs")` from any extension page.
-- No `chrome.offscreen`: the PXE host is a minimized window at
-  `src/offscreen/index.html?instance=<token>` (`chrome.windows.getAll({ populate: true })` lists it).
+- No `chrome.offscreen`: the PXE host is a frame of the background page, at
+  `src/offscreen/index.html?instance=<generation>`, and dies with it. A hidden document's timers are
+  clamped to 1 Hz, so when sends slow down check the host's `visible` state before the node or the
+  prover. From the suite, `pxeHostState(page)` reads the frames; in the background page's console,
+  `document.querySelectorAll("iframe")`.
 - No `chrome.sidePanel`: guard every use. An unguarded call at popup boot aborted the popup's
   settings apply loop, so the handlers after it (`disableAnimations`, `defaultExplorer`) silently
   kept their defaults on Firefox.

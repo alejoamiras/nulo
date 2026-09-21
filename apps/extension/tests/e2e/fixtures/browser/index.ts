@@ -36,6 +36,15 @@ export interface ArmedInterception {
 	stop: () => Promise<void>
 }
 
+/**
+ * The documents hosting the PXE — Chrome's offscreen document, Firefox's background-page frame —
+ * and each one's own `visibilityState`. Visibility is what keeps a document's timers unthrottled.
+ */
+export interface PxeHostState {
+	count: number
+	visibility: string[]
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -100,6 +109,11 @@ export interface BrowserDriver {
 	 */
 	holdNextCredentialGet(page: Page): Promise<void>
 	/**
+	 * Read from an open extension page. The count comes from the browser (`runtime.getContexts` on
+	 * Chrome, the background page's frames on Firefox), the visibility from each host document.
+	 */
+	pxeHostState(page: Page): Promise<PxeHostState>
+	/**
 	 * How this driver's protocol words "the window went away under the call", beyond the CDP
 	 * phrases the fixtures already match. An approval window closes itself on the click that
 	 * resolves it, so that error is the expected end of a click there, not a failure.
@@ -158,3 +172,4 @@ export const pickFile = (page: Page, open: () => Promise<void>, filePath: string
 export const virtualAuthenticator = (browser: Browser, anchorPage: Page): Promise<VirtualAuthenticator> =>
 	driver.virtualAuthenticator(browser, anchorPage)
 export const holdNextCredentialGet = (page: Page): Promise<void> => driver.holdNextCredentialGet(page)
+export const pxeHostState = (page: Page): Promise<PxeHostState> => driver.pxeHostState(page)

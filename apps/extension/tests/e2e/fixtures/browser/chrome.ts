@@ -1,10 +1,28 @@
-import type { Browser } from "puppeteer"
+import type { Browser, Page } from "puppeteer"
 import puppeteer from "puppeteer"
 import { cdpInterceptRpc } from "./chrome-rpc-intercept"
 import { cdpVirtualAuthenticator } from "./chrome-webauthn"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, PxeHostState } from "./index"
 
 const SCHEME = "chrome-extension://"
+
+/** The offscreen document is a target of its own, so its visibility is read in it over CDP. */
+async function pxeHostState(page: Page): Promise<PxeHostState> {
+	const count = await page.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] })).length)
+	const documentUrl = `${SCHEME}${new URL(page.url()).hostname}/src/offscreen/index.html`
+	const visibility: string[] = []
+	for (const target of page.browser().targets()) {
+		if (target.url().split("?")[0] !== documentUrl) continue
+		const session = await target.createCDPSession()
+		try {
+			const { result } = await session.send("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true })
+			visibility.push(String(result.value))
+		} finally {
+			await session.detach().catch(() => {})
+		}
+	}
+	return { count, visibility }
+}
 
 async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): Promise<LaunchedBrowser> {
 	// Headless `true` supports MV3 extensions — offscreen documents, the service worker,
@@ -78,6 +96,7 @@ export const chromeDriver: BrowserDriver = {
 	},
 	virtualAuthenticator: cdpVirtualAuthenticator,
 	holdNextCredentialGet: async () => {},
+	pxeHostState,
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {

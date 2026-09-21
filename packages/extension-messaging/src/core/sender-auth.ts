@@ -22,15 +22,16 @@ export function isTrustedInternalSender(sender: chrome.runtime.MessageSender | u
 	return sender.url === undefined || sender.url.startsWith(chrome.runtime.getURL(""))
 }
 
-/** `sender.url` without its query and fragment — the DOCUMENT identity. A Firefox hidden-window
- *  offscreen carries `?instance=<token>`; the page is the same. */
+/** `sender.url` without its query and fragment — the DOCUMENT identity. The Firefox PXE frame
+ *  carries `?instance=<generation>`; the page is the same. */
 function senderPath(sender: chrome.runtime.MessageSender): string | undefined {
 	return sender.url?.split(/[?#]/, 1)[0]
 }
 
 /**
  * True iff `sender` is THIS extension's context at exactly `documentUrl` (query/fragment
- * ignored). `sender.tab` is NOT a discriminator: a Firefox hidden-window offscreen is tab-hosted.
+ * ignored). `sender.tab` is NOT a discriminator: an extension page can be tab-hosted (above), and
+ * the Firefox PXE frame reports neither `tab` nor `frameId`.
  * Used for the two directions where a specific document is the only legitimate peer — an
  * offscreen response/READY/PONG must come from the offscreen document itself, or a
  * compromised same-extension page that observed `{from, requestId}` could settle a pending

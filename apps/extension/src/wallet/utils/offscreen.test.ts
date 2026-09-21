@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest"
 import {
 	ensureOffscreenRunning,
-	isSupersededByAdopt,
-	OFFSCREEN_ADOPT_INSTANCE,
 	OFFSCREEN_PING,
 	OFFSCREEN_PONG,
 	OFFSCREEN_READY_MESSAGE,
+	offscreenUrl,
 	shouldRespondPong,
 } from "./offscreen"
 
@@ -13,39 +12,12 @@ const sw = { id: "nulo-ext-id" } as chrome.runtime.MessageSender
 const OFFSCREEN_URL = "chrome-extension://test/src/offscreen/index.html"
 const offscreenDoc = { id: "nulo-ext-id", url: OFFSCREEN_URL } as chrome.runtime.MessageSender
 const popupDoc = { id: "nulo-ext-id", url: "chrome-extension://test/src/popup/index.html" } as chrome.runtime.MessageSender
-const tabSender = { id: "nulo-ext-id", tab: { id: 1 } } as unknown as chrome.runtime.MessageSender
 const foreign = { id: "other-ext" } as chrome.runtime.MessageSender
-const adopt = (token: string) => ({ type: OFFSCREEN_ADOPT_INSTANCE, token })
 
 beforeEach(() => {
 	// biome-ignore lint/suspicious/noExplicitAny: ensure chrome.runtime.id without clobbering the shared stub
 	const c = ((globalThis as any).chrome ??= {})
 	c.runtime = { ...c.runtime, id: "nulo-ext-id" }
-})
-
-describe("isSupersededByAdopt (F-10 stale-offscreen self-close)", () => {
-	test("two stale windows are superseded by a fresh instance; the fresh one is not", () => {
-		// SW's current instance token is "fresh"; two stale windows hold old tokens.
-		expect(isSupersededByAdopt(adopt("fresh"), sw, "stale-1")).toBe(true)
-		expect(isSupersededByAdopt(adopt("fresh"), sw, "stale-2")).toBe(true)
-		expect(isSupersededByAdopt(adopt("fresh"), sw, "fresh")).toBe(false) // matching token → stays
-	})
-
-	test("Chrome (no instance token) is never superseded", () => {
-		expect(isSupersededByAdopt(adopt("fresh"), sw, null)).toBe(false)
-	})
-
-	test("ignores an ADOPT from a tab-bound or foreign sender (spoof defense)", () => {
-		expect(isSupersededByAdopt(adopt("fresh"), tabSender, "stale")).toBe(false)
-		expect(isSupersededByAdopt(adopt("fresh"), foreign, "stale")).toBe(false)
-		expect(isSupersededByAdopt(adopt("fresh"), undefined, "stale")).toBe(false)
-	})
-
-	test("ignores non-ADOPT messages", () => {
-		expect(isSupersededByAdopt("OFFSCREEN_PING", sw, "stale")).toBe(false)
-		expect(isSupersededByAdopt({ type: "SOMETHING_ELSE", token: "x" }, sw, "stale")).toBe(false)
-		expect(isSupersededByAdopt(null, sw, "stale")).toBe(false)
-	})
 })
 
 describe("shouldRespondPong (B-17 readiness gate)", () => {
@@ -141,7 +113,7 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 		deliver(OFFSCREEN_READY_MESSAGE, sw)
 		await settleMicrotasks()
 		expect(resolved).toBe(false)
-		// The legitimate Firefox hidden-window shape: exact URL WITH ?instance= and a tab.
+		// The exact document path is the discriminator: neither a query string nor a tab changes it.
 		deliver(OFFSCREEN_READY_MESSAGE, { id: "nulo-ext-id", url: `${OFFSCREEN_URL}?instance=t`, tab: { id: 2 } } as never)
 		await p
 		expect(resolved).toBe(true)
@@ -340,13 +312,43 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 	})
 })
 
-describe("ensureOffscreenRunning — Firefox hidden-window path (B-17 pass fence)", () => {
-	let listeners: Array<(m: unknown) => void>
-	let windowsCreate: Mock
-	let windowsRemove: Mock
+describe("ensureOffscreenRunning — Firefox background-page frame", () => {
+	let listeners: Array<(m: unknown, sender?: chrome.runtime.MessageSender) => void>
+	let sendMessage: Mock
+	// `offscreenUrl()` memoizes the first getURL it saw (the Chrome suite's scheme); the path
+	// equality and the generation are what these cases test, not the scheme.
+	const frameUrl = () => offscreenUrl()
+
+	const frames = () => [...document.querySelectorAll("iframe")]
+	const liveGeneration = () => {
+		const src = frames().at(-1)?.src
+		if (!src) throw new Error("no frame attached")
+		return new URL(src).searchParams.get("instance") ?? ""
+	}
+	// The sender shape Firefox delivers for a message from the frame: no `tab`, no `frameId`.
+	const frameSender = (generation: string) =>
+		({
+			contextId: "c",
+			documentId: "d",
+			envType: "addon_child",
+			id: "nulo-ext-id",
+			origin: "moz-extension://test",
+			url: `${frameUrl()}?instance=${generation}`,
+		}) as never
+	const deliver = (message: unknown, sender: chrome.runtime.MessageSender) => {
+		for (const l of [...listeners]) l(message, sender)
+	}
+	const settleMicrotasks = () => new Promise((r) => setTimeout(r, 0))
+	const readyAndAwait = async (p: Promise<void>) => {
+		deliver(OFFSCREEN_READY_MESSAGE, frameSender(liveGeneration()))
+		await p
+	}
 
 	beforeEach(() => {
 		listeners = []
+		// A previous test's frame is detached with the body, which is exactly what the tracker
+		// must notice: every test starts from "no live frame" without reaching into module state.
+		document.body.innerHTML = ""
 		// biome-ignore lint/suspicious/noExplicitAny: augmenting the shared chrome stub for the Firefox surface
 		const c = (globalThis as any).chrome
 		c.runtime.getURL = (p: string) => `moz-extension://test/${p}`
@@ -357,44 +359,160 @@ describe("ensureOffscreenRunning — Firefox hidden-window path (B-17 pass fence
 				if (i >= 0) listeners.splice(i, 1)
 			},
 		}
-		c.runtime.sendMessage = vi.fn(async () => {})
-		// Firefox MV3 ships NO chrome.offscreen → hasOffscreenApi() is false and the
-		// hidden-window branch runs. isOffscreenAlreadyRunning trusts the in-memory
-		// firefoxOffscreenWindowId (null at cold start).
+		sendMessage = vi.fn(async () => {})
+		c.runtime.sendMessage = sendMessage
+		// Firefox MV3 ships NO chrome.offscreen → hasOffscreenApi() is false and the frame branch runs.
 		c.offscreen = undefined
-		windowsCreate = vi.fn()
-		windowsRemove = vi.fn(async () => {})
-		c.windows = { create: windowsCreate, remove: windowsRemove }
+		c.windows = { create: vi.fn(), remove: vi.fn() }
 	})
 
-	test("a superseded pass's late windows.create closes the orphan instead of clobbering the tracked window", async () => {
+	test("creates exactly one frame of the offscreen page and no window; READY from that frame opens the gate", async () => {
+		const p = ensureOffscreenRunning()
+		await settleMicrotasks()
+		expect(frames()).toHaveLength(1)
+		expect(frames()[0]?.src).toBe(`${frameUrl()}?instance=${liveGeneration()}`)
+		expect(chrome.windows.create).not.toHaveBeenCalled()
+		await readyAndAwait(p)
+		expect(frames()).toHaveLength(1)
+	})
+
+	test("a frame whose page never sends READY (404, init failure) is removed at the gate; the next pass creates a fresh one", async () => {
 		vi.useFakeTimers()
 		try {
-			// Pass A's windows.create hangs past the 10s ready-gate → the pass times
-			// out and passSeq advances. When A's create finally resolves, the pass is
-			// stale: without the fence it would overwrite firefoxOffscreenWindowId
-			// with A's orphan window and broadcast adoption, stranding the successor's
-			// live window. With the fence it closes the orphan and bails.
-			let resolveCreateA!: (w: { id: number }) => void
-			windowsCreate.mockImplementationOnce(
-				() =>
-					new Promise((r) => {
-						resolveCreateA = r
-					}),
-			)
-
 			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(0)
+			const first = liveGeneration()
 			await vi.advanceTimersByTimeAsync(10_000)
 			expect(await pA).toBe("Offscreen is not responding")
+			expect(frames()).toHaveLength(0)
 
-			// A's create resolves LATE (pass already superseded).
-			resolveCreateA({ id: 100 })
+			const pB = ensureOffscreenRunning()
 			await vi.advanceTimersByTimeAsync(0)
-
-			// Fenced: the orphan window is closed; no adoption broadcast for it.
-			expect(windowsRemove).toHaveBeenCalledWith(100)
+			expect(frames()).toHaveLength(1)
+			expect(liveGeneration()).not.toBe(first)
+			await readyAndAwait(pB)
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	test("a frame detached behind the tracker's back is not running: no health ping, a new frame is created", async () => {
+		const p1 = ensureOffscreenRunning()
+		await settleMicrotasks()
+		await readyAndAwait(p1)
+		frames()[0]?.remove()
+
+		const p2 = ensureOffscreenRunning()
+		await settleMicrotasks()
+		expect(sendMessage).not.toHaveBeenCalledWith(OFFSCREEN_PING)
+		expect(frames()).toHaveLength(1)
+		await readyAndAwait(p2)
+	})
+
+	test("a connected frame that fails its health PING is removed and recreated", async () => {
+		vi.useFakeTimers()
+		try {
+			const p1 = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			const first = liveGeneration()
+			await readyAndAwait(p1)
+
+			const p2 = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(3_100)
+			expect(sendMessage).toHaveBeenCalledWith(OFFSCREEN_PING)
+			expect(frames()).toHaveLength(1)
+			expect(liveGeneration()).not.toBe(first)
+			await readyAndAwait(p2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a healthy frame is reused: PONG carrying the live generation short-circuits without a new frame", async () => {
+		const p1 = ensureOffscreenRunning()
+		await settleMicrotasks()
+		const generation = liveGeneration()
+		await readyAndAwait(p1)
+		sendMessage.mockImplementation(async (m: unknown) => {
+			if (m === OFFSCREEN_PING) queueMicrotask(() => deliver(OFFSCREEN_PONG, frameSender(generation)))
+		})
+
+		await ensureOffscreenRunning()
+		expect(frames()).toHaveLength(1)
+		expect(liveGeneration()).toBe(generation)
+	})
+
+	test("READY carrying a PREVIOUS generation does not open the live gate", async () => {
+		vi.useFakeTimers()
+		try {
+			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(0)
+			const stale = liveGeneration()
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(await pA).toBe("Offscreen is not responding")
+
+			const pB = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			let resolved = false
+			pB.then(() => (resolved = true))
+			// The removed frame's READY lands late: by URL alone a legitimate offscreen sender.
+			deliver(OFFSCREEN_READY_MESSAGE, frameSender(stale))
+			await vi.advanceTimersByTimeAsync(0)
+			expect(resolved).toBe(false)
+			await readyAndAwait(pB)
+			expect(resolved).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("PONG carrying a PREVIOUS generation does not pass the health check: the frame is replaced", async () => {
+		vi.useFakeTimers()
+		try {
+			const p1 = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			const generation = liveGeneration()
+			await readyAndAwait(p1)
+			sendMessage.mockImplementation(async (m: unknown) => {
+				if (m === OFFSCREEN_PING) queueMicrotask(() => deliver(OFFSCREEN_PONG, frameSender("a-generation-that-was-removed")))
+			})
+
+			const p2 = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(3_100)
+			expect(liveGeneration()).not.toBe(generation)
+			await readyAndAwait(p2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a READY with no URL, a generation-less copy of the page or a foreign sender is refused without throwing", async () => {
+		const p = ensureOffscreenRunning()
+		await settleMicrotasks()
+		let resolved = false
+		p.then(() => (resolved = true))
+		deliver(OFFSCREEN_READY_MESSAGE, { id: "nulo-ext-id" } as chrome.runtime.MessageSender)
+		deliver(OFFSCREEN_READY_MESSAGE, { id: "nulo-ext-id", url: "not a url" } as chrome.runtime.MessageSender)
+		// The page opened in a tab by hand carries no generation: refused on Firefox even at the exact path.
+		deliver(OFFSCREEN_READY_MESSAGE, { id: "nulo-ext-id", url: frameUrl(), tab: { id: 3 } } as never)
+		deliver(OFFSCREEN_READY_MESSAGE, {
+			id: "other-ext",
+			url: `${frameUrl()}?instance=${liveGeneration()}`,
+		} as chrome.runtime.MessageSender)
+		await settleMicrotasks()
+		expect(resolved).toBe(false)
+		await readyAndAwait(p)
+		expect(resolved).toBe(true)
+	})
+
+	test("a PING from the Firefox background page (no tab, page URL) gets a PONG; one relayed through a web page does not", () => {
+		const backgroundPage = {
+			id: "nulo-ext-id",
+			url: "moz-extension://test/_generated_background_page.html",
+		} as chrome.runtime.MessageSender
+		expect(shouldRespondPong(OFFSCREEN_PING, true, backgroundPage)).toBe(true)
+		expect(shouldRespondPong(OFFSCREEN_PING, true, { id: "nulo-ext-id", url: "https://dapp.example/", tab: { id: 1 } } as never)).toBe(
+			false,
+		)
 	})
 })
