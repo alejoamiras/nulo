@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: DRAFT v3 — 2026-09-21, codex r1 conditional approve (6 blocking, 5 non-blocking) + r2 conditional approve (3 corrections) folded in, none rejected; awaiting owner approval. ELI5 Artifact: https://claude.ai/artifact/2quNqEZdVVPJiEsyFQmfEC (source: eli5.html in this dir — the durable copy; the first publish at a different URL was deleted server-side minutes later; republish the same path to update)
+status: DRAFT v4 — 2026-09-21, codex r1 conditional approve (6 blocking, 5 non-blocking) + r2 conditional approve (3 corrections) folded in, none rejected; owner answers 2026-09-21: A2 = move, A3 = yes, and **the 7-day age gate is bypassed for `vitest` and `jsdom` at the owner's explicit direction** ("let's install both and use both, don't leave anything scheduled for later") — nothing waits for 09-24; A1 still at the default (10); codex r3 on this revision: conditional approve, its five points folded (ledger R3-1..R3-5); awaiting owner approval. ELI5 Artifact: https://claude.ai/artifact/2quNqEZdVVPJiEsyFQmfEC (source: eli5.html in this dir — the durable copy; the first publish at a different URL was deleted server-side minutes later; republish the same path to update)
 baseline: 25062c06 (dev, after #657)
 worktree: .claude/worktrees/vitest-5-bump · branch worktree-vitest-5-bump
 ---
@@ -17,21 +17,24 @@ Every unit/component suite in this repo runs `bun --bun vitest run` on vitest **
 debt: `vitest.base.ts` sets `deps: { interopDefault: false }` because vitest 4's CJS interop mistakes Bun's
 ES-module namespaces for CJS and drops named exports (zod's `z`). Upstream fixed that in vitest-dev/vitest#10363,
 shipped in **5.0.0**; the stopgap's own comment names its retirement: delete the key and re-run the Bun soak
-matrix. vitest 5.0.1 (2026-09-15) and jsdom 30.1.0 (2026-09-17) are the current majors; both clear the repo's
-7-day age gate this week (vitest on **09-22**, jsdom on **09-24**).
+matrix. vitest 5.0.1 (2026-09-15) and jsdom 30.1.0 (2026-09-17) are the current majors; they would clear the
+repo's 7-day age gate on **09-22** and **09-24** — the owner has directed that the gate be bypassed for both
+now (the documented exclude mechanism, with the exclude gone from the PR), so the whole plan runs today.
 
 This plan bumps vitest 4→5 and jsdom 29→30 across all 14 vitest-bearing workspaces (14 `vitest` pins, 6
 `jsdom` pins), deletes the stopgap, folds the one workspace that never joined the Bun-runtime convention
 (`packages/resolve-asset`) into it, and re-records the runtime-parity evidence on vitest 5 with the existing
-fail-closed soak tool — **16 suites × 2 engines** at one matrix commit, 10 runs per suite as this bump's
-owner-approved exception to the 30-run bar (and 30 for the one suite whose *runtime* changes). Along the way
+fail-closed soak tool — **16 suites × 2 engines** at one matrix commit, 10 runs per suite as the plan's
+default pending A1 (an exception to the 30-run bar, recorded as such; 30 for the one suite whose *runtime*
+changes). Along the way
 it keeps what vitest 5 gives for free (mock clearing between tests, unawaited-assertion failures, a GitHub job
 summary, `configDefaults.reporters`), adopts `vi.when()` where a mock keys on its arguments, and lets
 `vitest doctor` *measure* `isolate: false` / `fsModuleCache` — this PR records the numbers; a runtime-config
 change, if the numbers ever justify one, is a follow-up under the 30-run bar. One PR; no product code moves;
 no UI surface changes.
 
-**Done** = vitest 5.0.1 + jsdom 30.1.0 locked with a clean-gate install; no `interopDefault` anywhere and
+**Done** = vitest 5.0.1 + jsdom 30.1.0 locked through the owner-authorized age-gate exception (A4), with no
+exclude in any commit and `bun install --frozen-lockfile --force` clean; no `interopDefault` anywhere and
 `vitest.base.ts` gone with its 15 spreads and its `biome.json` include; `packages/resolve-asset` runs
 `bun --bun vitest run` through a `vitest.config.ts` of its own; the soak matrix (16 suites, both engines, one commit, after a frozen install) compares green
 with the compacts committed under the tool's baseline home; `test:all` ×5, `audit:vue`, the Node smoke e2e and
@@ -46,7 +49,8 @@ Novelty LOW (the repo did vitest 3→4 + Vite 8 in `vitest-vite8-dedupe`, and bu
 `vitest-on-bun`), blast radius MED-LOW (a bad bump reds `quality-status` for every PR, but it is one revert
 of 20 manifest lines + the lockfile), irreversibility LOW, migration cost LOW (13 grep-verified breaking
 changes, 0 needing product-code rewrites, one with unknown test fallout — #10373), external coupling LOW (two
-dev-only packages), security LOW (supply-chain only, handled by the age gate + `bun pm diff`). Zero HIGH →
+dev-only packages), security LOW-MED (supply-chain only; the age gate is bypassed by owner decision A4 and
+the residual is worked with provenance inspection, a scripts-off first install and `bun pm diff`). Zero HIGH →
 `light`, confirmed. Budget: recon 1 agent (done), `/code-review` off, codex at `high`.
 
 ## Recon → design (see [recon.md](recon.md))
@@ -66,7 +70,7 @@ dev-only packages), security LOW (supply-chain only, handled by the age gate + `
 - The evidence home moves with the tool: `scripts/ci-cd/test-soak/baselines/` (`BASELINES_DIR` points there;
   `compare`'s dirty-tree exclusion follows it). The 4.1.10 compacts stay in git history under
   `implementations-plan/vitest-on-bun/lessons/baselines/`, replaced by a pointer file naming the commit that
-  holds them; the two stale `faucet*.json` names become `tools*.json`. (Owner's call, A2.)
+  holds them; the two stale `faucet*.json` names become `tools*.json`. (A2 — decided: move.)
 - The vitest-5 renames of `$var` test titles (12 sites) shift inventory ids — harmless once both sides are
   recorded on v5, and the reason the old inventories are only a name-diff reference.
 
@@ -78,9 +82,22 @@ dev-only packages), security LOW (supply-chain only, handled by the age gate + `
    `packages/{aztec-runtime,bridge-core,design,extension-messaging,legal,resolve-asset,third-party-notices,wallet-bridge,wallet-core,wallet-crypto,wallet-sdk-schema-patch}`);
    `jsdom: "^30.1.0"` in the 6 that declare it (`apps/{extension,tools}`,
    `packages/{design,extension-messaging,wallet-core,wallet-crypto}`). `vite` stays (8.2.1 satisfies v5's
-   peer). No `@vitest/*` package is added. The install runs **after** the gate dates with no
-   `minimumReleaseAgeExcludes` edit anywhere, committed or local; `bun pm diff` on the lockfile lists the new
-   transitives for review.
+   peer). No `@vitest/*` package is added. **The install bypasses the 7-day gate on the owner's direction**,
+   through the mechanism CLAUDE.md § Dependency policy documents: `minimumReleaseAgeExcludes` names exactly
+   `vitest`, `jsdom`, and only those transitives the gate refuses **and** these two versions actually require
+   (each listed in `lessons/phase-1.md` with its resolved version, publish date and dependency chain — not
+   every name the resolver mentions). The first install runs with **`--ignore-scripts`**; the lock is checked
+   to resolve exactly `5.0.1` / `30.1.0` (the carets admit a later release published meanwhile — a different
+   version is a STOP, not a shrug); `bun pm diff` on the lockfile is read for new transitives, changed
+   maintainers, any new or changed lifecycle script and any `trustedDependencies` change (the repo declares
+   none, so Bun runs no dependency scripts outside its built-in default-trusted list — `bun pm
+   default-trusted`); only then the real `bun install`. The exclude is **deleted before the commit** — the PR
+   carries no exclude, and `bun install --frozen-lockfile --force` proves a frozen install never re-gates the
+   locked versions. The two tarballs' npm provenance attestations are **inspected, not cryptographically
+   verified** by us (no npm lockfile for `npm audit signatures`, no sigstore CLI on the host): the registry's
+   attestation record for each tarball is fetched, its subject digest compared to the lockfile's integrity
+   hash, and its source repository / workflow read for `vitest-dev/vitest` and `jsdom/jsdom` — a
+   registry-asserted binding, stated as such.
 
 2. **`vitest.base.ts`** — delete `deps: { interopDefault: false }` and its comment. Nothing else is adopted
    into `sharedTest` in this PR (D4), so the object is empty: the file, its **15** `...sharedTest` spreads
@@ -144,13 +161,22 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
 
 ## Security & Adversarial Considerations
 
-- **Supply chain — the gate is not bent, not even locally.** Two dev-only majors, installed only after the
-  7-day gate (vitest 5.0.1 ≥ 2026-09-22 08:49 UTC, jsdom 30.1.0 ≥ 2026-09-24 00:57 UTC). The early probe
-  (Phase 1a) uses only versions already past the gate (vitest 5.0.0, jsdom 29.1.1 kept) — executing
-  young code on a dev host is precisely the exposure the gate exists to prevent, and a discarded lockfile
-  does not undo an install script or a test run (codex r1 #3). `bun pm diff` on the lock is read for new
-  transitive packages and maintainers (vitest 5 *bundles* its own dependencies — #10685 — so the transitive
-  set should shrink; a growth is a finding). `bun audit` runs in CI.
+- **Supply chain — the gate is bypassed, deliberately and narrowly, on the owner's direction.** The 7-day
+  gate exists for the window between a compromised publish and its discovery (the 2026-05 `@tanstack/*` worm
+  was live for minutes and caught within days); vitest 5.0.1 is 6 days old and jsdom 30.1.0 is 4 days old at
+  install time, so this bump forgoes 1 and 3 days of that window respectively. Codex r1 objected to running
+  young code even on a throwaway lockfile (B3); the owner has since decided the trade-off the other way, and
+  the decision is recorded here as the owner's, not the plan's. What limits the exposure: the exclude names
+  the packages exactly and lives only until the install (never in the PR); both tarballs carry npm
+  **provenance attestations** whose registry record is inspected before install — subject digest against the
+  lockfile integrity, source repository against the expected project; a missing, mismatched or foreign-repo
+  attestation is a STOP — and this is metadata inspection of a registry-asserted binding, not a signature
+  verification performed here; the first install is scripts-off (`--ignore-scripts`) and `bun pm diff` on
+  the lock is read for new transitive packages, maintainers, lifecycle scripts and `trustedDependencies`
+  (none declared; Bun runs dependency scripts only for those and its built-in default-trusted list) before
+  the real install (vitest 5 *bundles* its own dependencies — #10685 — so the transitive set should shrink;
+  a growth is a finding); the resolved versions are checked to be exactly 5.0.1 / 30.1.0; `bun audit` runs
+  in CI.
 - **`.vitest/` must never be committed.** The JSON/JUnit reporters and attachments land there in v5; a
   reporter file can carry console output, and the logging policy forbids payloads in logs precisely because
   they leak into bug reports. Gitignored at the root before the first v5 run.
@@ -179,8 +205,9 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
   Node e2e configs, `packages/resolve-asset` (no config) and `audit/bugs/…/proofs/vitest.config.ts` — a historical
   artifact outside `test:all` — do not); `biome.json` `includes` names `vitest.base.ts` explicitly.
 - F2 vitest 5.0.1 published 2026-09-15 08:49 UTC; jsdom 30.1.0 published 2026-09-17 00:57 UTC (`bun pm view … time`);
-  `minimumReleaseAge = 604800` → gate dates as above. vitest 5.0.0 (2026-09-03) is already past the gate. jsdom 30.0.x
-  has the `querySelectorAll` regression fixed in 30.1.0.
+  `minimumReleaseAge = 604800` → they would clear on 09-22 / 09-24 (bypassed per A4). jsdom 30.0.x has the
+  `querySelectorAll` regression fixed in 30.1.0. Both tarballs carry npm provenance attestations
+  (`bun pm view vitest@5.0.1 dist --json` / `jsdom@30.1.0`: `attestations.provenance` present, 2026-09-21).
 - F3 vitest 5.0.1 peers: `vite ^6.4.0 || ^7 || ^8` (locked 8.2.1), `@types/node ^22 || >=24`; engines Node ≥ 22.12
   (host 24.12.0). jsdom 30 engines `^22.22.2 || ^24.15.0 || >=26`. CI: only `setup-aztec` pins Node (`setup-node@v7`,
   `node-version: 24` — resolves a cached or latest 24.x, not guaranteed newest); `_unit-tests.yml` (Bun) and the
@@ -215,7 +242,7 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
 
 - I1 `bun --bun vitest run` on 5.0.1 works on Bun 1.4.2 for every suite once the stopgap is gone. vitest 5 bundles its
   dependencies (#10685) and changed how warm modules reach workers (#10708/#10742, Node compile cache opt-in).
-  Phase 1a/1's single run per suite is the first test; the matrix is the proof.
+  Phase 1's single run per suite is the first test; the matrix is the proof.
 - I2 `experimental.viteModuleRunner` still exists in 5.0.1 and defaults `true` (codex r1: verified in tagged v5
   source); the never-flip rule stays true because Bun still lacks `module.registerHooks`.
 - I3 The `Reporter` (`onTestCaseResult`) and `globalSetup` (`TestProject.provide`, default-export teardown)
@@ -225,58 +252,51 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
 
 **Asks (owner decisions surfaced at the gate)**
 
-- A1 **Run count.** The Phase 0 answer chose "10 runs, Bun vs stored Node baselines"; the tool cannot compare
-  across versions (F4), so both engines are re-recorded. Default: **10 runs as this bump's recorded exception**
-  (≈ 50 min unattended; detection power per F13), 30 for `resolve-asset` (a runtime flip), and the standing
-  30-run bar in CLAUDE.md untouched. Say `30` for the whole matrix (≈ 2 h 30 min, unattended).
-- A2 **Baseline home move** (`scripts/ci-cd/test-soak/baselines/`, D2). Default: move (a small, optional
-  cleanup — codex r1). Say "stay" to keep `implementations-plan/vitest-on-bun/lessons/baselines/` and only
-  rename/add files there.
-- A3 **Host Node ≥ 24.15**: installed via `nvm` on this host before Phase 1 (a machine-local action, not a repo
-  change; the resolved version is recorded). Default: yes.
+- A1 **Run count** — *open*. "Runs" = how many times each suite is executed per engine at the matrix commit;
+  more runs, better odds of catching an intermittent test (F13). The Phase 0 answer chose "10 runs, Bun vs
+  stored Node baselines"; the tool cannot compare across versions (F4), so both engines are re-recorded.
+  Default: **10 runs as this bump's recorded exception** (≈ 50 min unattended), 30 for `resolve-asset` (a
+  runtime flip), the standing 30-run bar in CLAUDE.md untouched. Say `30` for the whole matrix (≈ 2 h 30 min,
+  unattended) — the driver's recommendation, since the host is otherwise idle.
+- A2 **Baseline home move** — **decided 2026-09-21: move** to `scripts/ci-cd/test-soak/baselines/` (D2).
+- A3 **Host Node ≥ 24.15** — **decided 2026-09-21: yes**, installed via `nvm` before Phase 1; the resolved
+  version is recorded.
+- A4 **Age gate** — **decided 2026-09-21: bypass** for `vitest` and `jsdom` now (Implementation §1, Security).
 
 ## Phases and validation gates
 
-`RUNS=10` unless A1 changes it (`resolve-asset`: 30). Every command runs from the worktree root.
+`RUNS=10` unless A1 changes it (`resolve-asset`: 30). Every command runs from the worktree root. There is no
+early probe: the owner's gate decision (A4) makes the real install available today, and a two-step install
+(vitest first, jsdom second, `bun run test:all` between them) gives the same vitest-vs-jsdom split of the
+fallout at no extra cost.
 
-### Phase 1a (optional, now) — early probe on versions already past the gate
+### Phase 1 (now) — the bump commit
 
-Purpose: learn what vitest 5 breaks before the jsdom gate opens, on a disposable lockfile, **without any
-age-gate exception**: `vitest ^5.0.0` (past the gate since 09-10), `jsdom` left at 29.1.1. This also separates
-vitest fallout from jsdom fallout.
+Preconditions: Node ≥ 24.15 on PATH (A3), versions recorded (`node --version`, `bun --version`); the two
+tarballs' provenance records inspected and quoted in `lessons/phase-1.md`.
 
-1. Edit the 14 `vitest` pins to `^5.0.0`; `bun install` (the gate passes on its own; if it names anything
-   younger than 7 days, stop — that is a finding, not something to exclude); delete the stopgap key;
-   `bun run test:all`, `bun run typecheck:all`, `bun run lint`.
-2. Record every failure with its taxonomy class in `lessons/phase-1.md`; note the candidate test-bug fixes
-   (in the scratchpad, not committed yet — the #655 lesson).
-3. **Roll the probe back completely**: restore the 14 manifests, `bun.lock` **and** the stopgap key
-   (`git checkout -- bun.lock vitest.base.ts` + the manifests), then `bun install --frozen-lockfile` so the
-   installed tree matches the restored lockfile again.
-4. Only now apply the candidate fixes and prove them **on vitest 4** (`bun run test:all`); commit them on
-   their own, with none of the probe's edits in the diff. Phase 1 re-does the install at the final pins.
-
-Gate: nothing to prove; the phase ends with a written list of what Phase 1 will hit, split vitest-vs-jsdom.
-
-### Phase 1 (≥ 2026-09-24 01:00 UTC) — the bump commit
-
-Preconditions: Node ≥ 24.15 on PATH (A3), versions recorded (`node --version`, `bun --version`).
-
-1. Pins as in Implementation §1; `bun install` (no excludes); `bun pm diff` review noted in `lessons/phase-1.md`.
-2. `vitest.base.ts`: delete the stopgap key, then the file, its 15 spreads + imports and the `biome.json` include (D1).
-3. `packages/resolve-asset`: script + config. `.gitignore`: `.vitest/`.
-4. Targeted probes before the full run: the #10373 sites (F12), the `Object.defineProperty(window…)` sites, the
+1. **Before any v5 run**, so the first run is the real target and not a third variable: `.gitignore` gets
+   `.vitest/`; `vitest.base.ts` loses the stopgap key, then the file, its 15 spreads + imports and the
+   `biome.json` include go (D1); `packages/resolve-asset` gets its script + config.
+2. Pins as in Implementation §1, **in two steps**: (a) the 14 `vitest` pins + the local exclude →
+   `bun install --ignore-scripts` → `bun pm diff` + resolved-version check → `bun install` →
+   `bun run test:all` (vitest fallout, recorded, and it must be green — after the taxonomy — before jsdom is
+   added); (b) the 6 `jsdom` pins + the exclude → the same four steps (jsdom fallout, recorded). Then
+   **delete the exclude**, `bun install --frozen-lockfile --force` (proves the lock holds without it); the
+   exclusion list, chains and diff review noted in `lessons/phase-1.md`.
+3. Targeted probes before each full run: the #10373 sites (F12), the `Object.defineProperty(window…)` sites, the
    discover/approval-window lifecycle tests, `wallet-crypto`'s KATs, the tools `useTheme`/`matchMedia` tests —
    each run alone first so its fallout is read in isolation. Then the taxonomy for every red: test-assumption
    bug → fix; a vitest-5 or jsdom-30 behavior change the test correctly relied on → adapt the test to the new
    contract and say which change; Bun-only divergence → STOP for the owner; never `skipIf(process.versions.bun)`,
    never `clearMocks: false`, never `deps.interopDefault`.
-5. Verify I2 against `node_modules/.bun/vitest@5.0.1/…/dist` types and the `fsModuleCache` path claim; quote both
+4. Verify I2 against `node_modules/.bun/vitest@5.0.1/…/dist` types and the `fsModuleCache` path claim; quote both
    in `lessons/phase-1.md`.
 
-Gate: `bun install --frozen-lockfile` clean · `bun run lint` · `bun run typecheck:all` · `bun run test:all`
-(all 14 workspaces on Bun, one run each) · `bun run test:ci-gating` (its soak fixtures run on both engines) ·
-`bun --bun vitest --version` prints 5.0.1 in a workspace · `git status` shows no `.vitest/`.
+Gate: `git diff -- bunfig.toml` empty and `bun install --frozen-lockfile --force` clean (no exclude, no
+re-gate) · `bun run lint` · `bun run typecheck:all` · `bun run test:all` (all 14 workspaces on Bun, one run
+each) · `bun run test:ci-gating` (its soak fixtures run on both engines) · `bun --bun vitest --version` prints
+5.0.1 in a workspace · `git status` shows no `.vitest/`.
 
 ### Phase 2 — harvest, measured
 
@@ -381,7 +401,8 @@ carry the merged SHA.
 | D4 | `isolate` / `fsModuleCache` / pool | **measure only**; adoption is a follow-up under the 30-run bar | a runtime change needs the runtime-change bar, not a bump's exception (codex r1 #2/#4) |
 | D5 | Matrix size | 16 suites, both engines; 10 runs (A1) except `resolve-asset` at 30 | the four never-soaked suites cost minutes; the runtime flip gets the flip's bar |
 | D6 | Root `projects` topology | out of scope | a different evidence shape; its own plan |
-| D7 | Early probe | vitest 5.0.0 + jsdom 29.1.1, both past the gate; no exclude | the gate protects the dev host too (codex r1 #3) |
+| D7 | Early probe | **dropped** (v4) — superseded by A4: the real install runs now, in two steps for the vitest/jsdom split | the owner bypassed the gate; a probe on top of that is pure duplication |
+| D9 | Age gate (A4) | bypass for `vitest` + `jsdom`, exclude local-only, deleted before the commit, provenance read first | owner's decision 2026-09-21, recorded as such; codex r1 B3's objection stands on the record |
 | D8 | Review-loop order | codex loop before `gh pr create` | repo rule; the prior protocol's order (codex r1 #5) |
 
 ### Codex round 1 (GPT-6 Astra, high) — `conditional approve`
@@ -390,7 +411,7 @@ carry the merged SHA.
 |---|---|---|
 | B1 | 16 suites / 32 compacts, 14 vitest pins, not 15/30/12; the stored 12 omitted `test:components` | **folded** — counts fixed throughout; `extension-components` added to the matrix |
 | B2 | 10 runs must not become a standing rule; `resolve-asset` is a runtime flip; D4 would be a runtime change; power at 10 is 65 %/40 % | **folded** — 10 is this bump's recorded exception, CLAUDE.md's bar stays 30, `resolve-asset` at 30, D4 → measure only (F13) |
-| B3 | Phase 1a executes young code; discarding the lockfile does not undo the exposure | **folded** — probe on vitest 5.0.0 + jsdom 29.1.1 (both past the gate), no exclude anywhere (D7) |
+| B3 | Phase 1a executes young code; discarding the lockfile does not undo the exposure | **folded in v2/v3** (probe on gate-cleared versions, no exclude), then **overridden by the owner in v4** (A4/D9): the gate is bypassed for `vitest` + `jsdom` by explicit direction; the objection stays on the record, the mitigations are in Security |
 | B4 | D4's threshold is insufficient (warm measurements, extension-only, no order variation); the wall-clock lines cannot show v4→v5 | **folded** — D4 measure-only; speedup claim removed; v4 comparison labelled indicative |
 | B5 | Restore the full evidence procedure: frozen install at the matrix commit, full compare output, no edits during the matrix, strict resume, Node-reference disposition, review before PR | **folded** — Phase 3 preconditions/dispositions/gate; Phase 4 reordered (D8) |
 | B6 | #10373 (DOM assignments propagate to the jsdom window) has concrete exposure; do not presume test bugs | **folded** — F12, recon table row, Phase 1 step 4 targeted probes + classification |
@@ -405,6 +426,17 @@ carry the merged SHA.
 | # | Finding | Disposition |
 |---|---|---|
 | R2-1 | B5 folded incorrectly: a red Node reference was auto-classified as a flaky test; it may be a deterministic regression, an environment failure or a product defect | **folded** — Phase 3 dispositions: reproduce + classify first; test bug → fix + new matrix; anything else → owner disposition; assertions never adapted for green |
-| R2-2 | Phase 1a's rollback restored manifests + lockfile but not the stopgap, and did not reinstall — fixes "proven on v4" would have run on a mismatched tree | **folded** — Phase 1a steps 3–4: restore `vitest.base.ts` too, `bun install --frozen-lockfile`, then prove the fixes on v4 before committing them alone |
+| R2-2 | Phase 1a's rollback restored manifests + lockfile but not the stopgap, and did not reinstall — fixes "proven on v4" would have run on a mismatched tree | **folded in v3**, then **moot in v4**: Phase 1a was dropped when the owner bypassed the gate (D7/D9) |
 | R2-3 | D1 bookkeeping: 15 spreads, not 17 (driver re-counted: 15); their imports and the `biome.json` `includes` entry go too; the Done criterion still had `resolve-asset` spreading the deleted seam | **folded** — counts fixed in plan + recon; F1; Done; Implementation §2–3 |
 | — | B1–B4, B6, N1–N4 folded satisfactorily; D1 (delete) and D2 (move, owner's call) need no reversal | noted |
+
+### Codex round 3 (resumed, high) — plan v4 (owner's gate bypass) → `conditional approve`, five points
+
+| # | Finding | Disposition |
+|---|---|---|
+| R3-1 | Exclude only the transitives these versions require, with resolved version, date and chain; check the lock resolves exactly 5.0.1 / 30.1.0 (carets admit a later release) | **folded** — Implementation §1, Phase 1 step 2 |
+| R3-2 | The script mitigation came after the first test run: install with `--ignore-scripts` first, inspect changed lifecycle scripts, then permit | **folded** — scripts-off first install + `bun pm diff` before the real install; the repo declares no `trustedDependencies` (driver-verified), so Bun runs dependency scripts only for its built-in default-trusted list |
+| R3-3 | Attestation presence/fields is metadata inspection, not cryptographic verification — verify, or say so | **folded** — stated as registry-asserted binding (digest vs lockfile integrity, source repo), not verification; `npm audit signatures` is unavailable without an npm lockfile and no sigstore CLI is on the host |
+| R3-4 | Retire the stopgap and add `.vitest/` to `.gitignore` before the first vitest-only run, not after both installs | **folded** — Phase 1 step 1 |
+| R3-5 | Stale claims: "clean-gate install" (Done), "handled by the age gate" (tier), "owner-approved" ten runs while A1 is open | **folded** — all three rewritten |
+| — | Dropping Phase 1a loses nothing given the two-step install; the exclude-free final gate is correct; no 09-24 wait remains | noted |

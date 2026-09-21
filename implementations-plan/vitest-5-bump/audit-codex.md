@@ -78,3 +78,31 @@ for objection (D1 delete the empty seam; D2 move as the default under A2).
 **Disposition.** All three folded into plan v3 (ledger rows R2-1..R2-3). The driver re-counted the spreads
 (15: every unit/component config; `biome.json` `includes` names `vitest.base.ts` at line 10) before folding.
 The conditions were procedural and bookkeeping corrections, each verified locally; no third round was run.
+
+## Round 3 — plan v4 (the owner's age-gate bypass) → `conditional approve`, five points
+
+**Prompt (summary).** Only what v4 changed: the owner's decision to bypass the 7-day gate for `vitest` and
+`jsdom` (exclude local-only, deleted before the commit, provenance read, `bun pm diff`, Phase 1a dropped for
+a two-step install), A2 = move, A3 = yes, A1 open. Asked: is the bypass the narrowest correct form of the
+documented exception and is any cheap real mitigation missing; does dropping Phase 1a lose anything; any
+v3→v4 leftovers.
+
+**Response (verbatim, paths rewritten).**
+
+> conditional approve
+>
+> **(a) The owner-authorized mechanism is correct; tighten its execution (high confidence).** Limit transitive exclusions to packages actually required by these target versions; record exact resolved versions, publish dates, and dependency chains — not merely every package a resolver mentions. Check the lock resolves **5.0.1/30.1.0 before execution**, since the caret ranges permit later releases.
+>
+> The script mitigation currently comes too late: step 1 installs and runs tests before reviewing the diff. First install with `--ignore-scripts`, inspect changed lifecycle scripts — including existing scripts whose contents changed — then permit execution. Bun documents that flag as suppressing project and dependency lifecycle scripts.
+>
+> Attestation presence and reading its fields are metadata inspection, not cryptographic verification. Either verify the attestation and its binding to the downloaded tarball, or describe the mitigation accurately without asserting authenticated build provenance.
+>
+> **(b) Dropping Phase 1a loses nothing necessary**, provided the Vitest-only stage passes before adding jsdom. Move stopgap retirement before that first run; currently the plan removes it after both installs, introducing a third variable after the intended diagnostic split. Add `.vitest/` to `.gitignore` before the first run too.
+>
+> **(c) Two stale claims remain:** the Done criterion says "clean-gate install"; the tier rubric says supply-chain risk is "handled by the age gate." Replace these with the authorized-exception procedure. The summary also calls ten runs "owner-approved" while A1 remains open. The exclude-free final gate is correct; no operative September 24 waiting requirement remains.
+
+**Disposition.** All five folded (ledger R3-1..R3-5). Driver-verified before folding: the repo declares no
+`trustedDependencies` (so Bun runs dependency lifecycle scripts only for its built-in default-trusted list);
+`npm` 11.6.2 is on the host but `npm audit signatures` needs an npm lockfile the repo does not have — the
+attestation check is therefore described as registry-metadata inspection. The gate-bypass decision itself is
+the owner's (A4/D9) and is not re-litigated.
