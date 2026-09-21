@@ -402,18 +402,47 @@ export interface BackgroundStopper {
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-/** Whether `before` was SEEN gone by `until`. A probe that fails proves nothing either way — the
- *  page unloads asynchronously after the termination resolves — so it is noted and asked again. */
-async function seenGone(stopper: BackgroundStopper, before: number, until: () => boolean, note: (err: unknown) => void): Promise<boolean> {
-	while (!until()) {
-		try {
-			if ((await stopper.identity()) !== before) return true
-		} catch (err) {
-			note(err)
+interface StopProgress {
+	expired: boolean
+	lastError?: unknown
+}
+
+/** `unknown` is a probe that failed: the page unloads asynchronously after the termination resolves,
+ *  so a failure proves nothing either way. */
+type Sighting = "same" | "gone" | "unknown"
+
+async function sight(stopper: BackgroundStopper, before: number, progress: StopProgress): Promise<Sighting> {
+	try {
+		return (await stopper.identity()) === before ? "same" : "gone"
+	} catch (err) {
+		progress.lastError = err
+		return "unknown"
+	}
+}
+
+async function askToEnd(stopper: BackgroundStopper): Promise<void> {
+	const outcome = await stopper.terminate()
+	if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
+}
+
+/**
+ * Every ask directly follows a sighting of the SAME page: an ask made on a stale or failed read could
+ * land on a successor an add-on event woke in between, and the test would see two deaths for one.
+ */
+async function endObserved(stopper: BackgroundStopper, progress: StopProgress): Promise<void> {
+	const before = await stopper.identity()
+	if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
+	let askAt = 0
+	let sighting: Sighting = "same"
+	while (!progress.expired && sighting !== "gone") {
+		if (sighting === "same" && Date.now() >= askAt) {
+			await askToEnd(stopper)
+			askAt = Date.now() + stopper.retryEveryMs
 		}
 		await pause(stopper.pollEveryMs)
+		sighting = await sight(stopper, before, progress)
 	}
-	return false
+	if (sighting !== "gone") throw new Error("stopBackground: the budget ran out before the background page was seen gone")
 }
 
 /**
@@ -424,30 +453,12 @@ async function seenGone(stopper: BackgroundStopper, before: number, until: () =>
  * outlast it; a step already in flight cannot be recalled, but none starts after expiry.
  */
 export async function stopBackgroundWith(stopper: BackgroundStopper): Promise<void> {
-	let expired = false
-	let lastError: unknown
-	const attempts = async (): Promise<void> => {
-		const before = await stopper.identity()
-		if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
-		while (!expired) {
-			const outcome = await stopper.terminate()
-			if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
-			const retryAt = Date.now() + stopper.retryEveryMs
-			const gone = await seenGone(
-				stopper,
-				before,
-				() => expired || Date.now() >= retryAt,
-				(err) => {
-					lastError = err
-				},
-			)
-			if (gone) return
-		}
-	}
+	const progress: StopProgress = { expired: false }
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const budget = new Promise<never>((_, reject) => {
 		timer = setTimeout(() => {
-			expired = true
+			progress.expired = true
+			const { lastError } = progress
 			const probe =
 				lastError === undefined ? "" : ` (last probe: ${lastError instanceof Error ? lastError.message : String(lastError)})`
 			reject(
@@ -458,9 +469,9 @@ export async function stopBackgroundWith(stopper: BackgroundStopper): Promise<vo
 		}, stopper.budgetMs)
 	})
 	try {
-		await Promise.race([attempts(), budget])
+		await Promise.race([endObserved(stopper, progress), budget])
 	} finally {
-		expired = true
+		progress.expired = true
 		if (timer) clearTimeout(timer)
 	}
 }

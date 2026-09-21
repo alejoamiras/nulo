@@ -60,6 +60,23 @@ Round-1 gate — every Firefox caller of the rewritten loop, proverless, `--retr
 | Firefox network: restart spec + the three ports | 4 files, 4 passed (28.6 s, 22.4 s, 21.8 s, 8.3 s) |
 | Firefox smoke: the three ports | 3 files, 5 passed, 2 skipped (`sw-resilience` case 2, and its strict-mode-off case, a plain `test.skip` on both browsers) |
 
+### Round 2 — conditional, one new finding
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| M4 | Medium | A re-ask could land on a **successor**: round 1's wait could see the old page, sleep across the retry time and ask again without looking, and a window of nothing but probe errors licensed a re-ask too. If the old page died and an add-on event woke a new one in between, the spec would exercise two background deaths while asserting one | Fixed: one loop in which every ask directly follows a sighting of the *same* page; a failed probe (`unknown`) never licenses one. Two unit cases pin it — a successor appearing between two sightings is never asked to end, and a run of failed probes longer than the retry interval produces no further ask |
+
+Residual, stated rather than hidden: between the sighting and the privileged call there is still one
+classic-channel round trip. Closing it entirely means making the termination itself conditional on the
+page's identity inside the privileged script — codex's preferred fix. That script is the one piece of this
+change the owner placed in the tree by hand and this session does not author or edit its body, so the
+window is narrowed to that round trip and recorded here. For it to matter, the old page must die *and* an
+add-on event must wake a successor inside those few milliseconds, with every extension page already closed.
+
+Round-2 gate (same shape as round 1's): unit 3 files / 64 passed, the driver file 5× with no flake;
+`bun run lint` exit 0; Firefox network 4 files / 4 passed (29.2 s, 22.6 s, 21.4 s, 8.5 s); Firefox smoke
+3 files / 5 passed, 2 skipped.
+
 ## Gate
 
 | Command | Result |

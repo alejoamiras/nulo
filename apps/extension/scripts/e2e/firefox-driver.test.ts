@@ -176,6 +176,39 @@ describe("stopping the background", () => {
 		expect(identity).toHaveBeenCalledTimes(3)
 	})
 
+	// An add-on event can wake a successor at any moment. An ask made on a stale sighting would end
+	// that successor too, and the spec would exercise two background deaths while asserting one.
+	test("a successor that appears between two sightings is never asked to end", async () => {
+		let current = OLD
+		const endedWhile: number[] = []
+		const terminate = async () => {
+			endedWhile.push(current)
+			return "terminated"
+		}
+		const wake = setTimeout(() => {
+			current = OLD + 1
+		}, 50)
+		try {
+			await stopBackgroundWith(stopper({ terminate, identity: async () => current, retryEveryMs: 40, pollEveryMs: 30 }))
+		} finally {
+			clearTimeout(wake)
+		}
+		expect(endedWhile).toEqual([OLD])
+	})
+
+	test("a failed probe licenses no further ask, however long it keeps failing", async () => {
+		let probes = 0
+		const identity = async () => {
+			probes++
+			if (probes === 1) return OLD
+			if (probes < 15) throw new Error("the frame script never answered")
+			return undefined
+		}
+		const terminate = vi.fn(async () => "terminated")
+		await stopBackgroundWith(stopper({ terminate, identity }))
+		expect(terminate).toHaveBeenCalledTimes(1)
+	})
+
 	test("a probe that keeps failing rejects with its error, at the budget", async () => {
 		let first = true
 		const identity = async () => {
