@@ -468,7 +468,7 @@ Every gate includes the fast layers. "Green" means the gate below, pasted in the
 `publish-mark.module.css`, `PublishStrip.vue` + story, `SendReviewSheet.vue`, `Popup.vue` fixes, `popup.store` compaction + tests (T5–T7, T10b).
 **Validation gate** — commands: `bun run --cwd apps/extension test src/components/composite/send src/components/Popup src/stores/popup.store.test.ts src/popup/components/modules/send/SendReviewSheet.test.ts` · `bun run --cwd apps/extension build-storybook` · `bun run lint` · `bun run typecheck`. Pass: exit 0. Layers: lint/typecheck · component · storybook build.
 
-### Phase 3 — the money path, then the gate (nothing is removed yet)
+### Phase 3 — the money path, then the gate (nothing is removed yet) ✓
 3a characterization tests for today's submit (T9, green on the untouched page). 3b extract `send-submit.ts`. 3c `payer` model on the card; footer, `submit()`, the sheet on the stack; T8 (model half), T10–T14 (T11 with its phase-3 invariant — the tag half arrives in phase 4).
 **Validation gate** — commands: `bun run --cwd apps/extension test src/popup/pages src/popup/components/modules/send src/composables/useSendReview.test.ts` · `bun run lint` · `bun run typecheck` · `bun run build:chrome`, then the built popup by hand in both themes: I1 (Escape in the real action popup), I2, I4. Pass: exit 0; I1/I2/I4 recorded in `lessons/phase-3.md` as true, or their stated outcome taken (I1: drop Escape; I2, I4: stop and revise / bring to the owner). Layers: lint/typecheck · unit · page integration · build.
 

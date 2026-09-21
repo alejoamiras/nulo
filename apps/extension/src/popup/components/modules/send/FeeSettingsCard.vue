@@ -67,6 +67,11 @@ const settings = defineModel()
  *  "get fee juice" CTA takeover. */
 const needsFeeJuiceOut = defineModel("needsFeeJuice", { type: Boolean, default: false })
 
+/** One-way child→parent: the method that pays, as `{ type, fpcId, isProtocol }`, or null while none
+ *  does (pending, held, none). The parent reads the payer off the submitted settings; this only says
+ *  whether the contract those settings name is one the wallet vouches for. */
+const payerOut = defineModel("payer", { default: null })
+
 const methodId = getRandomHex(6)
 
 /**
@@ -250,6 +255,13 @@ watch(
 watch(derivedSettings, (val) => {
 	settings.value = val
 })
+watch(
+	effectiveMethod,
+	(m) => {
+		payerOut.value = m ? { type: m.type, fpcId: m.fpc?.id, isProtocol: m.fpc?.isProtocol === true } : null
+	},
+	{ immediate: true },
+)
 
 /**
  * Persist the user's explicit selection. Idempotent: re-saving the same

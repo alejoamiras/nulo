@@ -2019,3 +2019,79 @@ describe("FeeSettingsCard — Send: the fee-payer notice", () => {
 		expect(pub.find('[data-testid="send-fee-get-juice"]').text()).toBe("Get fee juice")
 	})
 })
+
+describe("FeeSettingsCard — Send: the payer model", () => {
+	const HELD = "1000000000000000000"
+	const PRIVATE_FPC = { id: "p1", type: 2, name: "Private FPC", isProtocol: true }
+	const SPONSOR = { id: "s1", type: 1, name: "Sponsor", isProtocol: true }
+	const HAND_ADDED = { id: "s2", type: 1, name: "Mine", isProtocol: false }
+	const accountB = { id: "a2", address: "0xacctB" }
+
+	const mountSend = (over: Record<string, unknown> = {}) =>
+		mount(FeeSettingsCard, {
+			props: baseProps({ originPrivacy: "private", destinationPrivacy: "private", ...over }),
+			global: { stubs: STUBS },
+		})
+	/** The model's value as the parent sees it: its `null` default until the first emission. */
+	const payer = (w: ReturnType<typeof mount>) => (w.emitted<unknown[]>("update:payer") ?? []).at(-1)?.[0] ?? null
+
+	test("null while the balances are pending, then the method that pays — its contract and whether the wallet vouches for it", async () => {
+		const gas = deferred<unknown>()
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])
+		mocks.getGasBalances.mockReturnValue(gas.promise)
+		const w = mountSend()
+		await flushPromises()
+		expect(payer(w)).toBeNull()
+
+		gas.resolve({ publicFeeJuice: HELD, privateFeeJuice: HELD })
+		await flushPromises()
+		expect(payer(w)).toEqual({ type: "private_fpc", fpcId: "p1", isProtocol: true })
+		await w.find('[data-testid="pick-fj"]').trigger("click")
+		expect(payer(w)).toEqual({ type: "fj", fpcId: undefined, isProtocol: false })
+		await w.find('[data-testid="pick-fpc"]').trigger("click")
+		expect(payer(w)).toEqual({ type: "fpc", fpcId: "s1", isProtocol: true })
+	})
+
+	test("null on a hold and on none: a walk that selects nothing names no payer", async () => {
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: null })
+		const hold = mountSend()
+		await flushPromises()
+		expect(lastEmittedSettings(hold)).toBeUndefined()
+		expect(payer(hold)).toBeNull()
+		hold.unmount()
+
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
+		const none = mountSend({ account: accountB })
+		await flushPromises()
+		expect(none.find('[data-testid="send-fee-nudge"]').exists()).toBe(true)
+		expect(payer(none)).toBeNull()
+	})
+
+	test("a hand-added sponsor is reported unvouched; an identity switch withdraws the payer until the new read lands", async () => {
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, HAND_ADDED])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
+		const w = mountSend()
+		await flushPromises()
+		expect(payer(w)).toEqual({ type: "fpc", fpcId: "s2", isProtocol: false })
+
+		const gas = deferred<unknown>()
+		mocks.getGasBalances.mockReturnValue(gas.promise)
+		await w.setProps({ account: accountB })
+		await flushPromises()
+		expect(w.emitted<unknown[]>("update:payer")?.at(-1)?.[0]).toBeNull()
+
+		gas.resolve({ publicFeeJuice: "0", privateFeeJuice: "0" })
+		await flushPromises()
+		expect(payer(w)).toEqual({ type: "fpc", fpcId: "s2", isProtocol: false })
+	})
+
+	test("the dApp windows' card reports its one pick the same way", async () => {
+		mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: HELD, privateFeeJuice: HELD })
+		storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: { type: "fj" } }
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(payer(w)).toEqual({ type: "fj", fpcId: undefined, isProtocol: false })
+	})
+})

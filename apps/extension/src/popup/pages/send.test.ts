@@ -1,6 +1,7 @@
 /**
- * The Send page with its cards stubbed: what the footer does with a click, and what the submit
- * tail does with the promise. The fee card's real behaviour is `send.integration.test.ts`.
+ * The Send page with its cards stubbed: what the footer does with a click, what the review sheet
+ * authorises, and what the submit tail does with the promise. The fee card's real behaviour, and
+ * the tag ⇔ gate ⇔ strip equivalence it feeds, is `send.integration.test.ts`.
  */
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
@@ -112,10 +113,12 @@ vi.mock("vue-router", () => ({
 	RouterLink: { template: "<a><slot /></a>" },
 }))
 
-import { TransferType } from "@/wallet/services/transaction/client"
+import { REVIEW_ARM_MS } from "@/composables/useSendReview"
 import { TRANSFER_FAILED_COPY, TRANSFER_TERMS_COPY } from "@/popup/utils/transfer-failure-copy"
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { usePopupStore } from "@/stores/popup.store"
+import { TransferType } from "@/wallet/services/transaction/client"
 import { installChromeStorage } from "../../../tests/helpers/chrome-storage-mock"
 import Send from "./send.vue"
 
@@ -157,13 +160,31 @@ const STUBS = {
 			"destinationPrivacy",
 			"modelValue",
 			"needsFeeJuice",
+			"payer",
 		],
-		emits: ["update:modelValue", "update:needsFeeJuice"],
+		emits: ["update:modelValue", "update:needsFeeJuice", "update:payer"],
+	},
+	// The popup family under the real review sheet: what the sheet hands it, without trap or teleport.
+	Popup: {
+		name: "Popup",
+		template: '<div v-if="show" data-testid="stub-popup" :data-order="displaceIdx"><slot /></div>',
+		props: { show: Boolean, displaceIdx: Number, closeOnEscape: Boolean, initialFocus: [String, Boolean] },
+		emits: ["onClose"],
+	},
+	PopupCard: { template: '<div data-testid="stub-card" :data-depth="displaceIdx"><slot /></div>', props: ["displaceIdx"] },
+	PopupHeader: {
+		template:
+			'<div><slot name="title" /><button v-if="closable" data-testid="popup-close-btn" @click="$emit(\'onClose\')">x</button></div>',
+		props: { closable: { type: Boolean, default: false } },
+		emits: ["onClose"],
 	},
 }
 
 type W = ReturnType<typeof mount>
-const FJ_SETTINGS = { paymentMethod: { kind: "fj" } }
+/** The account's own Fee Juice: the one payer that names it. */
+const FJ = { settings: { paymentMethod: { kind: "fj" } }, payer: { type: "fj", isProtocol: false } }
+/** A protocol sponsor: hidden, one tap. */
+const SPONSOR = { settings: { paymentMethod: { kind: "fpc", fpcId: "s1" } }, payer: { type: "fpc", fpcId: "s1", isProtocol: true } }
 
 async function mountSend() {
 	installChromeStorage()
@@ -174,21 +195,34 @@ async function mountSend() {
 	appStore.network = { id: "n1", chainId: TOKEN.chainId } as never
 	appStore.account = { address: ACCOUNT } as never
 	const cacheStore = useCacheStore(pinia)
-	const w = mount(Send, { attachTo: document.body, global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } } })
+	const popupStore = usePopupStore(pinia)
+	const w = mount(Send, {
+		attachTo: document.body,
+		global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+	})
 	await flushPromises()
-	return { w, appStore, cacheStore }
+	return { w, appStore, cacheStore, popupStore }
 }
 
-/** A complete, sendable form: recipient, amount, and the card's settings. */
-async function fillForm(w: W, settings: unknown = FJ_SETTINGS) {
-	// `null`, not `undefined`, is the "no settings" input: `undefined` would select the default.
-	await w.get('[data-testid="stub-recipient"]').setValue(DESTINATION)
-	await w.get('[data-testid="stub-amount"]').setValue("1.5")
-	w.findComponent({ name: "FeeSettingsCard" }).vm.$emit("update:modelValue", settings)
+/** What the fee card would hand the page for a resolved method. */
+async function feeCard(w: W, method: { settings: unknown; payer: unknown } | null) {
+	const card = w.findComponent({ name: "FeeSettingsCard" }).vm
+	card.$emit("update:payer", method?.payer ?? null)
+	card.$emit("update:modelValue", method?.settings ?? null)
 	await nextTick()
 }
 
+/** A complete, sendable form — a sponsor pays unless told otherwise, so nothing needs review. */
+async function fillForm(w: W, method: { settings: unknown; payer: unknown } | null = SPONSOR) {
+	await w.get('[data-testid="stub-recipient"]').setValue(DESTINATION)
+	await w.get('[data-testid="stub-amount"]').setValue("1.5")
+	await feeCard(w, method)
+}
+
 const submit = (w: W) => w.get('[data-testid="send-submit"]')
+const strip = (w: W) => w.find('[data-testid="send-publish-strip"]')
+const sheetOpen = (w: W) => w.get('[data-testid="send-review-sheet"]').attributes("data-open") === "true"
+const sendNow = (w: W) => w.get('[data-testid="send-review-submit"]')
 const awaitingIds = (store: ReturnType<typeof useAppStore>) => store.awaitingTransactions.map((row) => row.id)
 
 /** A transfer the test settles by hand. */
@@ -217,6 +251,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllMocks()
 	vi.restoreAllMocks()
+	vi.useRealTimers()
 	document.body.innerHTML = ""
 })
 
@@ -225,6 +260,7 @@ describe("send page — the submit tail", () => {
 		const { w, appStore } = await mountSend()
 		await fillForm(w)
 		expect(submit(w).attributes("disabled")).toBeUndefined()
+		expect(submit(w).text()).toBe("Confirm Transaction")
 
 		await submit(w).trigger("click")
 
@@ -236,7 +272,7 @@ describe("send page — the submit tail", () => {
 			TransferType.Private,
 			DESTINATION,
 			1_500_000n,
-			FJ_SETTINGS,
+			SPONSOR.settings,
 			undefined,
 		)
 		expect(appStore.awaitingTransactions).toHaveLength(1)
@@ -246,13 +282,12 @@ describe("send page — the submit tail", () => {
 		w.unmount()
 	})
 
-	test("a second activation while the first is in flight sends nothing more", async () => {
+	test("two activations in the same tick, before the button is patched disabled, send once", async () => {
 		const { w } = await mountSend()
 		await fillForm(w)
 		pendingTransfer()
-		// Both land before Vue patches `disabled` onto the button: only the handler's own guard can stop the second.
-		submit(w).element.click()
-		submit(w).element.click()
+		;(submit(w).element as HTMLButtonElement).click()
+		;(submit(w).element as HTMLButtonElement).click()
 		await flushPromises()
 		expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
 		w.unmount()
@@ -350,6 +385,228 @@ describe("send page — the footer", () => {
 		await nextTick()
 		expect(w.find('[data-testid="send-submit"]').exists()).toBe(false)
 		expect(w.get('[data-testid="send-get-fee-juice"]').text()).toBe("Get private gas")
+		w.unmount()
+	})
+
+	test("no sendable token: no strip, and the action is never review, whatever the card says", async () => {
+		mocks.getTokens.mockResolvedValue([])
+		mocks.getTokenBalances.mockResolvedValue([])
+		const { w } = await mountSend()
+		await feeCard(w, FJ)
+		expect(strip(w).exists()).toBe(false)
+		expect(submit(w).attributes("data-action")).toBe("send")
+		expect(submit(w).text()).toBe("Confirm Transaction")
+		w.unmount()
+	})
+
+	test("the strip carries the facts and opens the sheet on an unfinished form", async () => {
+		const { w } = await mountSend()
+		await feeCard(w, FJ)
+		const el = strip(w)
+		expect(el.attributes("data-you")).toBe("exposed")
+		expect(el.attributes("data-to")).toBe("hidden")
+		expect(el.attributes("data-amount")).toBe("hidden")
+		await el.trigger("click")
+		expect(sheetOpen(w)).toBe(true)
+		expect(sendNow(w).attributes("disabled")).toBeDefined()
+		expect(w.get('[data-testid="send-review-amount"]').text()).toBe("—")
+		w.unmount()
+	})
+
+	test("the card's payer reading and the origin flip the action together", async () => {
+		const { w } = await mountSend()
+		await fillForm(w, FJ)
+		expect(submit(w).attributes("data-action")).toBe("review")
+		expect(submit(w).text()).toBe("Review send")
+		await feeCard(w, SPONSOR)
+		expect(submit(w).attributes("data-action")).toBe("send")
+		await feeCard(w, FJ)
+		await w.get('[data-testid="send-from-type"]').trigger("click")
+		expect(submit(w).attributes("data-action")).toBe("send")
+		expect(strip(w).attributes("data-you")).toBe("public")
+		w.unmount()
+	})
+})
+
+describe("send page — consent", () => {
+	test("gated: the primary button opens the sheet and sends nothing", async () => {
+		const { w } = await mountSend()
+		await fillForm(w, FJ)
+		await submit(w).trigger("click")
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+		expect(sheetOpen(w)).toBe(true)
+		expect(w.get('[data-testid="send-review-row-you"]').attributes("data-visibility")).toBe("exposed")
+		expect(w.get('[data-testid="send-review-row-you"]').attributes("data-notice-shape")).toBe("private-private")
+		w.unmount()
+	})
+
+	test("gated: Send now before the wait sends nothing, after it sends once — the slot closed before leaving", async () => {
+		vi.useFakeTimers()
+		const { w, popupStore } = await mountSend()
+		await fillForm(w, FJ)
+		await submit(w).trigger("click")
+		expect(sendNow(w).attributes("data-ready")).toBe("false")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+		const closeSpy = vi.spyOn(popupStore, "close")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
+		expect(mocks.executeTransfer.mock.calls[0]?.[6]).toEqual(FJ.settings)
+		expect(closeSpy.mock.invocationCallOrder[0]).toBeLessThan(mocks.routerReplace.mock.invocationCallOrder[0] as number)
+		expect(sheetOpen(w)).toBe(false)
+		w.unmount()
+	})
+
+	test("not gated: the optional sheet, opened from the strip, sends at once", async () => {
+		const { w } = await mountSend()
+		await fillForm(w)
+		await strip(w).trigger("click")
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
+		w.unmount()
+	})
+
+	test("turning gated while the sheet is open starts the wait; turning back makes it sendable at once", async () => {
+		vi.useFakeTimers()
+		const { w } = await mountSend()
+		await fillForm(w)
+		await strip(w).trigger("click")
+		await feeCard(w, FJ)
+		expect(sendNow(w).attributes("data-ready")).toBe("false")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+		vi.advanceTimersByTime(REVIEW_ARM_MS - 1)
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("false")
+
+		await feeCard(w, SPONSOR)
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
+		w.unmount()
+	})
+
+	test.each([
+		["gated", FJ],
+		["not gated", SPONSOR],
+	])("the sheet's send event while its slot is closed sends nothing (%s, wait elapsed)", async (_name, method) => {
+		vi.useFakeTimers()
+		const { w } = await mountSend()
+		await fillForm(w, method)
+		await strip(w).trigger("click")
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		await w.get('[data-testid="popup-close-btn"]').trigger("click")
+		expect(sheetOpen(w)).toBe(false)
+		w.findComponent({ name: "SendReviewSheet" }).vm.$emit("send")
+		await flushPromises()
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+		w.unmount()
+	})
+
+	test("the primary button never sends a gated transfer, even with the sheet open and ready", async () => {
+		vi.useFakeTimers()
+		const { w } = await mountSend()
+		await fillForm(w, FJ)
+		await strip(w).trigger("click")
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+		;(submit(w).element as HTMLButtonElement).click()
+		await flushPromises()
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+		w.unmount()
+	})
+})
+
+describe("send page — the sheet on the popup stack", () => {
+	test("a popup opened on top gets the higher order; the sheet is displaced behind it", async () => {
+		const { w, popupStore } = await mountSend()
+		await fillForm(w)
+		await strip(w).trigger("click")
+		expect(w.get('[data-testid="stub-popup"]').attributes("data-order")).toBe("0")
+		expect(w.get('[data-testid="stub-card"]').attributes("data-depth")).toBe("1")
+		popupStore.open("confirm")
+		await nextTick()
+		expect(popupStore.popups.confirm?.order).toBe(1)
+		expect(w.get('[data-testid="stub-popup"]').attributes("data-order")).toBe("0")
+		expect(w.get('[data-testid="stub-card"]').attributes("data-depth")).toBe("2")
+		w.unmount()
+	})
+
+	test("closing the sheet underneath a newer popup keeps orders unique; opening twice does not renumber", async () => {
+		const { w, popupStore } = await mountSend()
+		await fillForm(w)
+		await strip(w).trigger("click")
+		popupStore.open("confirm")
+		await strip(w).trigger("click")
+		expect(popupStore.popups.send_review?.order).toBe(0)
+		await w.get('[data-testid="popup-close-btn"]').trigger("click")
+		expect(popupStore.popups.confirm?.order).toBe(0)
+		expect(popupStore.len).toBe(1)
+		w.unmount()
+	})
+
+	test("closeAll (lock) closes it; unmounting releases the slot; a reopen takes a fresh one", async () => {
+		const { w, popupStore } = await mountSend()
+		await fillForm(w)
+		await strip(w).trigger("click")
+		popupStore.closeAll()
+		await nextTick()
+		expect(sheetOpen(w)).toBe(false)
+		await strip(w).trigger("click")
+		expect(sheetOpen(w)).toBe(true)
+		w.unmount()
+		expect(popupStore.isOpened("send_review")).toBe(false)
+	})
+
+	test.each([
+		["account switch", (store: ReturnType<typeof useAppStore>) => (store.account = { address: "0xother" } as never)],
+		["network switch", (store: ReturnType<typeof useAppStore>) => (store.network = { id: "n2", chainId: TOKEN.chainId } as never)],
+	])("an %s while the sheet is open closes it and sends nothing", async (_name, switchIdentity) => {
+		const { w, appStore } = await mountSend()
+		await fillForm(w, FJ)
+		await submit(w).trigger("click")
+		expect(sheetOpen(w)).toBe(true)
+		switchIdentity(appStore)
+		await flushPromises()
+		expect(sheetOpen(w)).toBe(false)
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+		w.unmount()
+	})
+
+	test("a token switch while the sheet is open closes it", async () => {
+		const other = { ...TOKEN, id: 8, contract: `0x${"d".repeat(64)}` }
+		mocks.getTokens.mockResolvedValue([TOKEN, other])
+		const { w, cacheStore } = await mountSend()
+		await fillForm(w, FJ)
+		await submit(w).trigger("click")
+		cacheStore.activeTokenIdx = other.id
+		await nextTick()
+		expect(sheetOpen(w)).toBe(false)
+		w.unmount()
+	})
+
+	test.each([
+		["header close", async (w: W) => w.get('[data-testid="popup-close-btn"]').trigger("click")],
+		["backdrop / Escape", async (w: W) => w.findComponent({ name: "Popup" }).vm.$emit("onClose")],
+	])("closing by %s leaves the form intact", async (_name, close) => {
+		const { w } = await mountSend()
+		await fillForm(w, FJ)
+		await w.get('[data-testid="send-to-type"]').trigger("click")
+		await submit(w).trigger("click")
+		expect(sheetOpen(w)).toBe(true)
+		await close(w)
+		await nextTick()
+		expect(sheetOpen(w)).toBe(false)
+		expect((w.get('[data-testid="stub-amount"]').element as HTMLInputElement).value).toBe("1.5")
+		expect((w.get('[data-testid="stub-recipient"]').element as HTMLInputElement).value).toBe(DESTINATION)
+		expect(strip(w).attributes("data-to")).toBe("public")
+		expect(submit(w).attributes("data-action")).toBe("review")
 		w.unmount()
 	})
 })
