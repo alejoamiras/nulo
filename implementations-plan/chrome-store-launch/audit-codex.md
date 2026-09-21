@@ -192,3 +192,186 @@ VERDICT: reject (with blocking findings: tag-only protection would block existin
 ## Round 3 — VERDICT: approve
 
 Resumed session over the plan at `162994ca`: "No remaining material findings in the revised implementation plan. Confidence: high. Approval covers repo implementation; the documented account and policy prerequisites still apply before submission."
+
+
+---
+
+# Revision 2 — round 4 (GPT-6 Astra, high, 2026-09-21)
+
+Prompt: adversarial audit of the revised plan (Firefox joins, keyless Chrome publish) against the repo on `dev` at `2540271a`. Disposition of every finding: `plan.md` § Audit.
+
+reject
+
+1. **Blocking — The release tag can select untrusted code inside both credential jobs.**  
+   **Claim:** Checking out `resolve.outputs.sha` while dispatching from `main` establishes the credential boundary (`plan.md:55,127–130`).  
+   **Evidence:** `.github/workflows/release.yml:169–181` checks only that the tag exists. It never proves its commit belongs to `main`. A tag pointing at another branch can therefore supply the publisher script while OIDC still says `refs/heads/main`. Environment approval does not change that distinction.  
+   **Smallest fix:** Before executing release-commit code, require the resolved SHA to be an ancestor of the dispatch’s trusted `main` SHA. The existing full-history `resolve` checkout can perform this check. Show the resolved tag and SHA to the approver.
+
+2. **Blocking — The documented source installation fails outside a Git repository.**  
+   **Claim:** Extract the source archive, then run `PUPPETEER_SKIP_DOWNLOAD=1 bun install --frozen-lockfile` (`plan.md:51`).  
+   **Evidence:** Root `package.json:42` defines `prepare: git config core.hooksPath .githooks`. `git archive` excludes `.git`; that command fails in a standalone extracted archive. Extracting underneath an existing checkout can conceal the defect by configuring the parent repository instead.  
+   **Smallest fix:** Make `prepare` conditional on a `.git` entry existing in the project root. Test the archive outside every checkout. Keep Puppeteer’s download suppression.
+
+3. **Blocking — Phase 5’s new workflow cannot initially be dispatched as written.**  
+   **Claim:** Dispatch `source-rebuild.yml --ref worktree-chrome-store-launch-firefox` before opening the stacked PRs (`plan.md:112,188`).  
+   **Evidence:** The file is new and absent from the default branch, `dev`. GitHub requires it on the default branch before its initial `workflow_dispatch`; supplying another ref does not bootstrap it. [GitHub dispatch requirements](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).  
+   **Smallest fix:** Give this secret-free workflow a narrowly scoped feature-branch `push` trigger for pre-PR validation, retaining dispatch/schedule for subsequent use. Record the exact run ID rather than relying on an ambiguous `gh run watch`.
+
+4. **Blocking — Chrome always polls a field that need not exist after a successful upload.**  
+   **Claim:** Upload, then poll `fetchStatus.lastAsyncUploadState` until `SUCCEEDED`; missing means failure (`plan.md:47`).  
+   **Evidence:** Upload itself returns `uploadState`. `lastAsyncUploadState` describes an asynchronous upload within the preceding 24 hours; Google instructs clients to poll when upload returns an in-progress state. An immediate successful upload need not populate it. [Upload/poll instructions](https://developer.chrome.com/docs/webstore/using-api), [status response](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/fetchStatus).  
+   **Smallest fix:** Branch on the upload response: `SUCCEEDED` proceeds; either documented in-progress spelling polls; everything else fails. Validate returned item identity and manifest version before proceeding. Add the immediate-success/missing-async-field case.
+
+5. **Blocking — The reproducibility gate proves the wrong equality and permits failure.**  
+   **Claim:** Two archive rebuilds demonstrate equivalence to the shipped artifact; documented differences may pass (`plan.md:53,109–113`).  
+   **Evidence:** Neither rebuild consumes the release artifact. `_build-extension.yml:60–71` also modifies the extension version before building, which a plain archive rebuild does not reproduce unless the committed version already matches. Mozilla requires matching output; documenting differing files is not an exemption. [Source submission requirements](https://extensionworkshop.com/documentation/publish/source-code-submission/).  
+   **Smallest fix:** Compare the archive rebuild against the actual unsigned Firefox release ZIP for the same SHA/version, as well as comparing architectures. Require an empty content diff. Assert committed-version equality or reproduce the release’s version override explicitly. Give architecture artifacts distinct names.
+
+6. **Blocking — Disclosure does not establish compliance with Mozilla’s modified-library rule.**  
+   **Claim:** The rule “is met by disclosure of the four patches” (`plan.md:134`).  
+   **Evidence:** Mozilla explicitly prohibits modified third-party libraries; its linked guidance does not create a disclosure exception. The repo has four patch entries for **two package names**, plus browser-build substitutions and artifact transformations in `apps/extension/vite.config.ts:61–108`. [Add-on policies](https://extensionworkshop.com/documentation/publish/add-on-policies/), [library guidance](https://extensionworkshop.com/documentation/publish/third-party-library-usage/).  
+   **Smallest fix:** Replace the compliance claim with an unresolved review prerequisite. Explain that the Noir patches alter package resolution metadata, disclose the other substitutions accurately, and obtain Mozilla’s assessment or remove the disallowed modifications. Disclosure remains necessary evidence, not permission.
+
+7. **Blocking — The remote-code decision still rests on an unsupported default.**  
+   **Claim:** Contract bytecode cannot reach the network; unanswered support correspondence eventually becomes “No remote code” (`plan.md:45,164`).  
+   **Evidence:** Installed `@aztec/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts:536–547` lets contract execution cause node storage requests through an oracle. Direct arbitrary networking and mediated RPC access are different claims. The host also uses `chrome.runtime` (`apps/extension/src/offscreen/index.ts:108`). Google expressly addresses remote interpreters; Mozilla separately prohibits remote-code execution. [Chrome policy](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements), [Mozilla policy](https://extensionworkshop.com/documentation/publish/add-on-policies/).  
+   **Smallest fix:** Describe the precise direct/mediated capabilities and keep classification evidence-dependent. Support silence is not evidence for “No.” Reconcile the resulting explanation with `legal/privacy.md:48–49,324–326`, which already makes unconditional claims.
+
+8. **Should-fix — WIF protects an environment/ref, not this particular publisher workflow or step.**  
+   **Claim:** The condition and step-scoped token provide the stated narrow publishing boundary (`plan.md:56,127–128`).  
+   **Evidence:** Another approved workflow on `main` using the same environment and `id-token: write` satisfies the condition. A similarly configured job in `release.yml` does too. Every step in the authorized job can request OIDC, including before `auth`; skipping `auth` does not revoke that capability. Ordinary fork and `pull_request` runs fail the stated claims, but a suitably configured `pull_request_target` workflow can run with the base ref. [GitHub OIDC claims and permissions](https://docs.github.com/en/actions/reference/security/oidc).  
+   **Smallest fix:** Add exact `workflow_ref` and `event_name == 'workflow_dispatch'` conditions. Document that all steps/actions in the approved job remain trusted; step-scoped AMO secrets likewise do not isolate them from earlier malicious code persisting in that job.
+
+9. **Should-fix — Chrome’s version and warning contracts need precise definitions.**  
+   **Claim:** Refuse a published/submitted version “not lower than ours,” and report bounded warnings (`plan.md:47,96`).  
+   **Evidence:** The repo emits four-part `manifest.version`, while `VERSION` matches semver `version_name` (`manifest.config.ts:12–18`). Store versions occur inside each revision’s `distributionChannels[]`. String ordering is wrong for values such as `0.9.0.0` and `0.10.0.0`; ordinary semver parsers may reject four components. With `blockOnWarnings: true`, warnings arrive through `error.details`; successful-response warnings use `warningInfo.warnings`. [Version comparison](https://developer.chrome.com/docs/extensions/reference/manifest/version), [publish response](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/publish).  
+   **Smallest fix:** Compare validated integer tuples, padded to four components, against the ZIP’s `manifest.version`; examine every distribution channel. Specify valid absent revisions versus malformed present ones, reject unknown states, and test the actual warning envelopes.
+
+10. **Should-fix — AMO partial failure has no recovery procedure.**  
+    **Claim:** Creating a version and failing its source patch is adequately handled by printing the version ID (`plan.md:49,121`).  
+    **Evidence:** That leaves a real version behind. Re-running the whole job encounters consumed-upload/duplicate-version constraints; deleting a version does not free its number. A timed-out create can also succeed remotely without returning its ID. [AMO API](https://mozilla.github.io/addons-server/topics/api/addons.html), [duplicate-version validation](https://raw.githubusercontent.com/mozilla/addons-server/master/src/olympia/versions/utils.py).  
+    **Smallest fix:** Document recovery by inspecting the existing version and attaching the matching source through Developer Hub or PATCH, without recreating/deleting it. Read and validate the reviewer-notes block **before** upload. Require a valid version ID and matching returned version/channel before patching. Mask derived JWTs as well as the key, and include them in log-leak tests.
+
+11. **Should-fix — The proposed disclosure answers omit existing data handling.**  
+    **Claim:** Chrome needs only financial/authentication categories; transmissions go only to the node, CoinGecko and approved apps; Firefox’s financial category settles the inventory (`plan.md:43,163,165`).  
+    **Evidence:** Contacts contain names and addresses (`contact/spec.ts:9–17`); connected-app records contain URLs (`dapp-session/spec.ts:35–50`). Google includes local processing and visited/interacted-with domains in disclosure scope. The policy also describes local-prover transmission and proving-parameter requests (`legal/privacy.md:220–237`). [Google’s data definitions](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq).  
+    **Smallest fix:** Include Chrome web-history handling for connected-site URLs and assess personally identifying information for contacts/profile names. Describe each actual destination separately. For Firefox, financial information is defensible, but explicitly assess authentication, browsing and website activity against **outbound** flows; local password handling alone does not justify copying Chrome’s categories. [Firefox taxonomy](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/). **Confidence: moderate on final category classification.**
+
+12. **Should-fix — Archive and checksum acceptance are underspecified.**  
+    **Claim:** Check bare source paths and use `sha256sum --ignore-missing` to verify the selected ZIP (`plan.md:49–55`).  
+    **Evidence:** The source archive prefixes every path with `nulo-${VERSION}/`. The release artifact contains both ZIPs and their checksums (`release.yml:306–324`); a checksum invocation can succeed for the other ZIP without establishing that the selected ZIP had a checksum entry.  
+    **Smallest fix:** Check the exact prefixed source entries. Require one checksum entry for the exact selected filename and verify it from the correct directory. Require the release manifest’s numeric version as well as `version_name`, and validate the settled Firefox declaration rather than merely accepting any nonempty array—including `["none"]`.
+
+13. **Should-fix — The account-session “proof” skips authentication, and its legal gate cannot pass.**  
+    **Claim:** The dry run proves setup; filling `BEFORE-LAUNCH.md` §1 removes the DRAFT banner (`plan.md:195,200`).  
+    **Evidence:** Dry run deliberately skips Google authentication and all store requests. Separately, `legal/privacy.md:3` still contains the effective-date placeholder, scheduled in §3, while Terms listing URLs are deferred until afterwards. Rendering marks each document draft while placeholders remain (`apps/landing/scripts/legal-pages.ts:155–161`).  
+    **Smallest fix:** Call the dry run an artifact/wiring check. During the owner session, separately mint credentials and perform read-only store requests. Resolve the privacy effective date before submission and explicitly sequence Terms listing URLs instead of promising every banner disappears after §1 alone.
+
+14. **Should-fix — Phase 3 unnecessarily references an unconfigured Firefox environment.**  
+    **Claim:** Move the still-failing Firefox stub into `environment: firefox-add-ons`, while environment creation waits for the account session (`plan.md:92,129`).  
+    **Evidence:** GitHub documents automatic creation of referenced missing environments without protection rules. Enabling the stub before setup can therefore create precisely the unprotected environment the plan warns about. Whether an entirely skipped job causes registration was not established here. [Environment creation semantics](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).  
+    **Smallest fix:** Split the inputs in Arc 1, but add Firefox’s environment reference with its real publisher in Arc 2. Verify protections even if an environment already exists.
+
+15. **Should-fix — Phase 1 mixes a production build with the ordinary smoke configuration.**  
+    **Claim:** `build:full && … && test:e2e` is the complete renamed-build smoke gate (`plan.md:79`).  
+    **Evidence:** The smoke command never builds. CI distinguishes production-artifact mode from fixture builds: `_extension-smoke-e2e.yml:45,95–106`; the Chrome driver suppresses the live price host only in artifact mode (`fixtures/browser/chrome.ts:51`). `FIREFOX.md` explicitly documents the required fixture flags.  
+    **Smallest fix:** For the production bundle, invoke the smoke suite with the existing `NULO_E2E_ARTIFACT_RUN=1` mode. Use the documented fixture build separately when fixture-dependent coverage is intended. Keep local browser runs exclusive as already required.
+
+16. **Nit — Correct the remaining factual imprecision.**  
+    **Claim/evidence:** Fact 1 says “up to four integers”; `manifest.config.ts:17` always emits four. Fact 6 suggests extension transmission to the passkey host; `legal/privacy.md:152–155` expressly says it does not fetch that page. Fact 8 calls four patch entries four packages; `package.json:55–59` names two packages at two versions. The out-of-scope `/forms/*` links are stale: Settings now uses `mailto:` (`settings/about.vue:87,95,103`).  
+    **Smallest fix:** Correct those sentences. Label Fact 3’s linter result as recorded evidence, not a fresh run. Fact 5’s live environment settings and Fact 8’s release-asset sizes remain **unverified in this audit** because GitHub API reads could not connect.
+
+17. **Nit — Simplify documentation machinery and preserve only useful comments.**  
+    **Claim:** Extract shell commands from Markdown and test parity (`plan.md:53,108`).  
+    **Evidence:** This creates a second representation of the rebuild procedure without testing whether it reproduces the release. Existing comments in touched areas also contain expendable history: `release.yml:184–190`; the declaration comment at `manifest.test.ts:119–120` will become stale.  
+    **Smallest fix:** Make `source-rebuild.sh` canonical and have the document invoke it; drop extraction/parity machinery. Replace stale declaration commentary and shorten the workflow comment to the skipped-ancestor invariant. Add one concise comment explaining that dispatch ref protection does not authenticate the checked-out tag SHA.
+
+Checked and found correct:
+
+- Facts 1–4, 6–9 otherwise match the cited repository files; those files are unchanged from `2540271a`. The archive measured **27,571,417 bytes**. Generated extension declarations are tracked; landing-generated files are not extension build inputs. ARM64 determinism and 10 GB memory suitability remain experiments, not established facts.
+- The proposed `always() && !cancelled()` guards, explicit successful dependencies, stable-only gate, artifact name and status-aggregator wiring are sound. A shallow checkout contains the tree needed by `git archive "$SHA"`. Older tags lacking publisher scripts fail as documented.
+- Owner self-review works when prevention is disabled; public personal repositories support the protections. `--ref main` supplies the branch checked by deployment rules. [GitHub environment rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+- Google auth’s specified inputs support access-token output without a credentials file; the action masks that output. A missing token must remain acceptable before the dry-run return. [Action implementation](https://raw.githubusercontent.com/google-github-actions/auth/v3/src/main.ts).
+- Pending-review refusal, both in-progress spellings, staged publication and its 30-day window are reasonable. AMO’s HS256/60-second JWT and create-then-source-PATCH sequence are valid; manually created listed add-ons can receive API versions and inherit their previous license.
+- The updated plan’s `unzip -p`/`unzip -Z1` approach resolves ZIP inspection without installing dependencies. Arc 1 otherwise has no necessary compile-time dependency on Arc 2.
+
+**Confidence: high on repository and workflow findings; moderate on store classification outcomes; unknown on inaccessible account settings and unmeasured rebuild behavior.** No files modified, builds run, or tests executed.
+
+---
+
+# Revision 2 — round 5
+
+reject
+
+1. **Blocking — `store_check` still performs release writes and deployments.**  
+   **Claim:** The credential-check dispatch uploads nothing (`plan.md:57,204`).  
+   **Evidence:** With `store_check=true` and `dry_run=false`, existing `.github/workflows/release.yml:351–359` uploads assets with `--clobber` and overwrites release notes; `:379,416` permit deployment hooks. Conversely, combining both flags skips Chrome authentication and returns before either credential check.  
+   **Smallest fix:** Suppress release uploads, note edits and deployment hooks when `store_check=true`. Reject `store_check=true && dry_run=true` early, preserving the promise that dry runs never authenticate.
+
+2. **Blocking — Chrome’s credential check rejects the very submission it should inspect.**  
+   **Claim:** `MODE=check` stops after publish preflight (`plan.md:49`), immediately after the manual first submission (`:200,204`).  
+   **Evidence:** That preflight rejects pending review and any equal-or-higher store version. The manually submitted version will be pending or already equal. Both runners also require publish artifacts before reaching their read-only check.  
+   **Smallest fix:** Branch into check mode after validating mode, identity and credentials. Perform the GET, validate its response and report state without applying publish eligibility rules. ZIP, source, reviewer notes and proposed version should not be required for this mode. Keep those checks on the publish path.
+
+3. **Blocking — The proposed `reference` job cannot have both described implementations.**  
+   **Claim:** One job downloads a release when `tag` exists, otherwise calls `_build-extension.yml` (`plan.md:55`).  
+   **Evidence:** A reusable-workflow caller cannot also contain ordinary steps. Moreover, `_build-extension.yml:15,36` defaults to building both browsers and uploading no artifacts; its Firefox artifact is named `extension-firefox` (`:177`). [GitHub’s supported caller-job syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#supported-keywords-for-jobs-that-call-a-reusable-workflow).  
+   **Smallest fix:** Use mutually exclusive download-reference and build-reference jobs. Pass `target: firefox`, `upload_artifacts: true` and the resolved SHA explicitly. Make comparison require the selected reference job’s success despite the other being skipped. Define that `tag` resolves the archive SHA too; an independently supplied `ref` must not silently select another tree.
+
+4. **Blocking — Phase 6’s dry-run gate depends on a release that cannot yet exist.**  
+   **Claim:** Test the new runner against “the v release’s Firefox zip” before completing Arc 2 (`plan.md:122`).  
+   **Evidence:** Existing builds declare `["none"]` (`apps/extension/manifest/manifest.firefox.config.ts:31–32`); the new runner explicitly rejects that. A release containing Phase 4’s declaration arrives only after implementation and merge (`plan.md:197`). The command also omits `LISTING_PATH`; both dry-run commands omit `MODE`, without defining defaults.  
+   **Smallest fix:** Package the Firefox output already validated in Phase 5, using its committed package version and matching source archive. Supply `LISTING_PATH` and `MODE=publish` explicitly; supply `MODE` in Phase 3’s command too. This gate needs no published release.
+
+5. **Should-fix — Firefox’s numeric-version validation remains unspecified.**  
+   **Claim:** The create response must contain “our version string” (`plan.md:51,123`).  
+   **Evidence:** Firefox preflight only specifies checking `version_name`. The manifest generator produces `version: "0.27.0.0"` and `version_name: "0.27.0"` (`apps/extension/manifest/manifest.config.ts:12–18`). AMO uses the manifest version, so comparing its response with `VERSION` would fail after creating the version. [AMO version/upload response fields](https://mozilla.github.io/addons-server/topics/api/addons.html).  
+   **Smallest fix:** Explicitly validate and retain `manifest.version` before uploading; compare AMO’s version fields against that value. Keep `VERSION` for release naming and the `version_name` check.
+
+6. **Should-fix — AMO’s selected GET does not establish publishing access.**  
+   **Claim:** Reading `/addons/addon/wallet@nulo.sh/` proves the configured credentials (`plan.md:51,204`).  
+   **Evidence:** Once public, add-on detail is publicly readable. Valid credentials belonging to another account can therefore pass this check. [AMO detail versus authenticated author-list endpoints](https://mozilla.github.io/addons-server/topics/api/addons.html).  
+   **Smallest fix:** Read the authenticated author-only add-on list and require `wallet@nulo.sh` in the results. Fail rather than accepting public visibility as evidence of access.
+
+7. **Should-fix — The data inventory still contradicts the implementation, and Ask 3 contradicts the inventory.**  
+   **Claim:** Passkey material and profile names are “local only”; Firefox excludes other categories on that basis (`plan.md:45,167`). Ask 3 still names only financial/payment and authentication categories (`:165`).  
+   **Evidence:** `passkey-ceremony.ts:45–55` passes the profile-derived label and identifier to the authenticator. `legal/privacy.md:157–160` explicitly describes possible provider synchronization. Meanwhile, `plan.md:45` also requires Chrome’s PII and web-history boxes.  
+   **Smallest fix:** Add the browser/authenticator-mediated flow to the inventory and qualify “local only.” Reassess the Firefox categories against that flow before freezing the constant; the exact classification remains a policy question. Rewrite Ask 3 from the same inventory, including all four Chrome categories and accurate per-destination disclosures.
+
+8. **Should-fix — Fact 8’s modification inventory is incomplete.**  
+   **Claim:** The exact inventory lists the Noir patches, `function-bind`, `bb.js` and artifact stripping; Ask 9 describes two substituted modules (`plan.md:45,150,171`).  
+   **Evidence:** `apps/extension/vite.config.ts:54–58` also replaces `detect-node` with `src/shims/detect-node.ts`, whose implementation is `export default false` (`:6`). This changes dependency behavior to select browser logging.  
+   **Smallest fix:** Add that substitution and its reason to Fact 8, reviewer notes and Ask 9. Keeping Mozilla’s acceptance unresolved is correct; the submitted inventory must still be complete.
+
+9. **Should-fix — The revised legal sequence omits required companion changes.**  
+   **Claim:** Set the privacy effective date, deploy, then remove Terms’ draft status by filling listing URLs (`plan.md:168,198,205`).  
+   **Evidence:** `packages/legal/src/manifest.test.ts:42–46` requires the document date to match `LEGAL_MANIFEST`; both entries remain `null` (`manifest.ts:16–17`). `BEFORE-LAUNCH.md:35–42` also requires coordinated history/manifest updates. Terms retains its own effective-date placeholder (`legal/terms.md:3`).  
+   **Smallest fix:** Make the owner checklist explicitly update each affected document’s header, history and manifest entry together. Schedule Terms’ effective date as well as its URLs, and reconcile the changed timing with `BEFORE-LAUNCH.md` §3. These can remain owner work outside implementation scope.
+
+10. **Should-fix — The approver cannot see a protected job’s first-step output before approving it.**  
+    **Claim:** Echoing tag and SHA in the first publish-job step lets the approver see the release target (`plan.md:57`).  
+    **Evidence:** Environment protection blocks the job before its steps execute. [GitHub deployment protection semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).  
+    **Smallest fix:** Print tag, resolved SHA and `on_main` in `resolve`’s summary, which exists before approval. Including the tag in the protected job’s display name is also useful.
+
+11. **Should-fix — Phase 4’s installation procedure will not show the required consent prompt.**  
+    **Claim:** Manually install `dist/firefox` in Firefox ≥153 and capture the install prompt (`plan.md:106`).  
+    **Evidence:** Temporary loading of an unpacked extension silently grants install-time permissions. Testing that prompt requires a packaged extension and, before signing, Nightly/Developer Edition with signature enforcement disabled in the test profile. [Mozilla’s permission-testing procedure](https://extensionworkshop.com/documentation/develop/test-permission-requests/).  
+    **Smallest fix:** Specify packaging `apps/extension/dist/firefox` and installing through **Install Add-on From File** in a separate qualifying test profile. Do not use temporary loading for this gate.
+
+12. **Should-fix — Phase 5 can watch the wrong run and return success for a failed run.**  
+    **Claim:** Select the latest branch run, then `gh run watch <run id>`; exit zero proves the gate (`plan.md:114–115`).  
+    **Evidence:** The selector does not constrain commit or event. The three-path trigger also excludes a subsequent fix confined to `vite.config.ts` or root `package.json`, so the latest matching run can remain an older one. `gh run watch` needs `--exit-status` to propagate failure. [Run selection](https://cli.github.com/manual/gh_run_list), [watch exit behavior](https://cli.github.com/manual/gh_run_watch).  
+    **Smallest fix:** Select with the pushed commit SHA and `--event push`, require a matching run, then watch with `--exit-status`. Record SHA alongside run ID. Ensure the pre-merge trigger can cover actual rebuild fixes without accepting an earlier run.
+
+Checked and found correct:
+
+- The ancestry check addresses the original tag-trust gap. Full-history checkout supplies the ancestry needed on automatic `push: main`; publishing remains opt-in. Emit a boolean for a non-ancestor rather than letting Git’s status `1` abort `resolve`.
+- The added `workflow_ref` and `event_name` conditions close the other-workflow route. Another job in the same workflow with the same environment and `id-token: write` would still qualify; trusting all steps is correctly stated. [OIDC claims](https://docs.github.com/en/actions/reference/security/oidc).
+- Owner self-approval, selected `main` deployment branches, bypass disabled, and creating environments beforehand are sound. Moving Firefox’s environment key to Arc 2 fixes that sequencing concern. [Environment rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments), [environment creation](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+- Google auth’s inputs support access-token output without a credentials file. The dependency-free runner plus system `unzip` is viable. [Auth action](https://github.com/google-github-actions/auth).
+- Chrome’s synchronous/asynchronous split is corrected. In particular, `crxVersion` is legitimately absent during an asynchronous upload. Tuple comparison and both warning envelopes are appropriate. [Upload response](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/media/upload), [publish response](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/publish).
+- The non-git install guard, extraction outside a checkout, exact checksum filename, canonical rebuild script, strict content comparison and AMO partial-failure recovery are substantive fixes.
+- The new push trigger can run before merge. It also runs on matching merges into `dev` and `main`, launching the rebuild comparison again; the path filter imposes no branch restriction.
+- The planned comment edits preserve useful invariants and remove historical narration. Dropping doc-parity machinery is appropriate.
+
+**Confidence: high** on the concrete workflow, gate and repository findings; **moderate** on Firefox’s final data classification. Other repo-backed Assumptions remain consistent with the inspected files. Live GitHub settings and release-asset sizes could not be independently reconfirmed because API reads failed. No files modified; no builds or tests run.
