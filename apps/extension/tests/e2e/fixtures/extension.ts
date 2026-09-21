@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
-import { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
+import { TimeoutError, type Browser, type Page, type ConsoleMessage, type ElementHandle } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { extensionUrl, launchBrowser } from "./browser"
+import { discoverExtensionId, extensionUrl, gotoExtensionPage, isFirefox, isTargetGone, launchBrowser, openScratchPage } from "./browser"
 import {
 	captureBalanceBaseline,
 	createAccount,
@@ -90,12 +90,7 @@ async function settleLaunchedExtension(
 	browser: Browser,
 	{ freshProfile, waitForLiveness, legal }: { freshProfile: boolean; waitForLiveness: boolean; legal: LegalSeed },
 ): Promise<string> {
-	// Discover extension ID from service worker target
-	const workerTarget = await browser.waitForTarget(
-		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
-		{ timeout: 30_000 },
-	)
-	const extensionId = new URL(workerTarget.url()).hostname
+	const extensionId = await discoverExtensionId(browser)
 
 	// The scratch page is ours, not `pages()[0]`: puppeteer can hand back a page
 	// whose frame is half-initialized and detaches during the first navigation
@@ -107,11 +102,8 @@ async function settleLaunchedExtension(
 	for (let attempt = 1; ; attempt++) {
 		let candidate: Page | undefined
 		try {
-			candidate = await browser.newPage()
+			candidate = await openScratchPage(browser, extensionId, { freshProfile })
 			patchPagePolling(candidate)
-			await candidate.goto(extensionUrl(extensionId, "/src/popup/index.html"), {
-				waitUntil: "domcontentloaded",
-			})
 			blankPage = candidate
 			break
 		} catch (err) {
@@ -202,7 +194,7 @@ export async function openOnboarding(ctx: ExtensionContext, opts: { legal?: Excl
 	// fresh install (launchExtension seeded it to true by default).
 	const setupPage = await ctx.browser.newPage()
 	patchPagePolling(setupPage)
-	await setupPage.goto(extensionUrl(ctx.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(setupPage, extensionUrl(ctx.extensionId, "/src/popup/index.html"))
 	await setupPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 	})
@@ -255,7 +247,7 @@ export async function openOnboarding(ctx: ExtensionContext, opts: { legal?: Excl
 	})
 
 	const url = extensionUrl(ctx.extensionId, "/src/onboarding/index.html#/onboarding/welcome")
-	await page.goto(url, { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(page, url)
 	// Wait for Vue mount: welcome CTA must render.
 	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
 	return page
@@ -329,7 +321,7 @@ export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 			return await fn()
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
-			throw new Error(`connectPlayground:${name} — ${msg}`)
+			throw new Error(`connectPlayground:${name} — ${msg}`, { cause: err })
 		}
 	}
 
@@ -1264,7 +1256,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 	// counting fallback occurrences in CI artifacts).
 	const FAST_PATH_BUDGET_MS = 2_000
 	const t0 = Date.now()
-	await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
+	await gotoExtensionPage(page, popupUrl)
 	let path: "fast" | "fallback" = "fast"
 	try {
 		await page.waitForFunction(
@@ -1275,7 +1267,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		if (!(err instanceof TimeoutError)) throw err
 		path = "fallback"
 		await page.goto("about:blank")
-		await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
+		await gotoExtensionPage(page, popupUrl)
 		await page.waitForFunction(
 			() => window.location.hash !== "#/" && window.location.hash !== "" && !document.querySelector('[data-testid="global-loader"]'),
 			{ timeout: 30_000, polling: 200 },
@@ -1423,6 +1415,10 @@ export async function clickSelector(page: Page, selector: string, timeout = 10_0
  *  the right choice for popup chains; matches the same pattern in
  *  `replaceInputValue`. */
 export async function clickByTestId(page: Page, testId: string, timeout = 10_000): Promise<void> {
+	// A person can only click a page they are looking at; this click is scripted and says nothing
+	// about focus. Firefox hosts the PXE in a real window, which headless lets take the foreground,
+	// and it refuses WebAuthn outright from a tab that is not the active one.
+	if (isFirefox) await page.bringToFront().catch(() => {})
 	try {
 		await page.waitForFunction(
 			(id: string) => {
@@ -1458,6 +1454,34 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 	}
 }
 
+/**
+ * Click the control that opens a file picker and answer it with `filePath`.
+ *
+ * The click is programmatic, and only Chrome treats an evaluated script as a user gesture: Firefox
+ * refuses to open a picker without one, so no chooser event ever arrives there. The wallet appends
+ * its `<input type="file">` to the body before asking for the picker and removes it on `change`,
+ * so on Firefox the file goes straight into that pending input.
+ */
+export async function pickFileByTestId(page: Page, testId: string, filePath: string): Promise<void> {
+	if (!isFirefox) {
+		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, testId)])
+		await chooser.accept([filePath])
+		return
+	}
+	// The wallet removes an input only on `change`, so an abandoned pick leaves one behind and the
+	// file would go to that dead request instead of this one.
+	await page.evaluate(() => {
+		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
+	})
+	await clickByTestId(page, testId)
+	const pending = 'body > input[type="file"]:not([data-e2e-stale])'
+	// This fixture's `waitForSelector` waits without returning the handle.
+	await page.waitForSelector(pending, { timeout: 10_000 })
+	const input = await page.$(pending)
+	if (!input) throw new Error(`pickFileByTestId: "${testId}" opened no file input`)
+	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
+}
+
 function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []
 	let current: unknown = err
@@ -1469,5 +1493,5 @@ function isTargetDetachError(err: unknown): boolean {
 	}
 	const stack = err instanceof Error && typeof err.stack === "string" ? err.stack : ""
 	const haystack = `${messages.join(" ")} ${stack}`
-	return /Target ?Close(d)?|frame was detached|frame got detached|Session closed/i.test(haystack)
+	return /Target ?Close(d)?|frame was detached|frame got detached|Session closed/i.test(haystack) || isTargetGone(haystack)
 }

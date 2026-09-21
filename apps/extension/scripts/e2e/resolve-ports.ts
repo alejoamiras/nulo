@@ -41,7 +41,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createServer } from "node:net"
 
-interface PortReservation {
+export interface PortReservation {
 	port: number
 	release: () => Promise<void>
 }
@@ -135,7 +135,7 @@ function reserveEphemeral(): Promise<PortReservation> {
  * already-held siblings so the pack stays distinct. Falls back to an
  * OS-assigned ephemeral port when the static path can't apply.
  */
-async function reservePort(): Promise<PortReservation> {
+export async function reservePort(): Promise<PortReservation> {
 	const floor = await ephemeralFloor()
 	const hi = Math.max(STATIC_LO + 256, floor - FLOOR_GUARD)
 	const span = hi - STATIC_LO

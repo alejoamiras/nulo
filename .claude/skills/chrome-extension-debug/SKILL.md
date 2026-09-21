@@ -45,9 +45,9 @@ The logger captures service worker logs that are otherwise not directly visible.
 
 Playwright cannot load extensions into Firefox; Puppeteer over WebDriver BiDi can
 (`puppeteer.launch({ browser: "firefox", protocol: "webDriverBiDi" })` then
-`browser.installExtension("dist/firefox")`). `bun run --cwd apps/extension smoke:firefox` walks
-install → create profile → home → offscreen window → lock → unlock. It needs `bun run build:firefox`
-and a Firefox Puppeteer can find (`bunx puppeteer browsers install firefox`, or `FIREFOX_PATH`).
+`browser.installExtension("dist/firefox")`). `NULO_E2E_BROWSER=firefox bun run test:e2e` runs the
+smoke suite on it. It needs `bun run build:firefox`, geckodriver (`GECKODRIVER`, or on `PATH`) and
+a Firefox Puppeteer can find (`bunx puppeteer browsers install firefox`, or `FIREFOX_PATH`).
 
 What differs from Chrome when probing by hand:
 

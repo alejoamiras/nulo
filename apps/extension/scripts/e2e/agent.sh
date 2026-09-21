@@ -18,17 +18,25 @@ cd "$(dirname "$0")/../.."
 # fail as an inscrutable multi-minute timeout instead of an error). Those
 # files carry a formal `@requires-proverless` marker line; running any of
 # them unarmed is refused HERE, before a single port or build cycle is spent.
+VITEST_CONFIG="${NULO_E2E_VITEST_CONFIG:-vitest.e2e.network.config.ts}"
+# With no file arguments the run executes whatever the config includes, so the scan has to follow
+# the config. Scanning the network tree for a probes run aborts it over files it will never run.
+case "$VITEST_CONFIG" in
+  vitest.e2e.probes.config.ts) default_scan_target=tests/e2e/probes ;;
+  *) default_scan_target=tests/e2e/network ;;
+esac
+
 if [ "${NULO_E2E_PROVERLESS:-}" != "1" ]; then
   if [ "$#" -gt 0 ]; then
     marker_scan_targets=("$@")
   else
-    marker_scan_targets=(tests/e2e/network)
+    marker_scan_targets=("$default_scan_target")
   fi
   marked_files=$(grep -rls "@requires-proverless" "${marker_scan_targets[@]}" 2>/dev/null || true)
   if [ -n "$marked_files" ]; then
     echo "[e2e:agent] FATAL: this run includes proverless-gated test file(s) but NULO_E2E_PROVERLESS is not set:" >&2
     while IFS= read -r marked; do echo "[e2e:agent]   $marked" >&2; done <<< "$marked_files"
-    echo "[e2e:agent] Re-run as: NULO_E2E_PROVERLESS=1 bun run e2e:agent ${*:-}" >&2
+    echo "[e2e:agent] Re-run the same command with NULO_E2E_PROVERLESS=1 set." >&2
     exit 2
   fi
 fi
@@ -61,7 +69,14 @@ ANVIL_URL=$(jq -r .anvilUrl "$PORTS_JSON")
 AZTEC_NODE_URL=$(jq -r .aztecUrl "$PORTS_JSON")
 PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 
-echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
+# One run drives one browser, and everything downstream follows from it: which build runs, which
+# bundle the assertion greps, and which extension the suite loads. A Firefox run must not be able
+# to silently exercise a Chrome build.
+BROWSER="${NULO_E2E_BROWSER:-chrome}"
+DIST_DIR="dist/$BROWSER"
+export EXTENSION_PATH="$PWD/$DIST_DIR"
+
+echo "[e2e:agent] building $BROWSER wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
 # VITE_NULO_E2E_DEFAULT_NET=testnet pins the SEEDED-ACTIVE network: fresh-extension import flows
 # bootstrap on the default before any fixture can switch, and CI cannot reliably reach the Alpha
 # mainnet RPC (each blocked call eats the node client's 60s-abort x retry envelope).
@@ -89,7 +104,7 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 \
   VITE_NULO_E2E_PROVERLESS=1 \
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
-    bun run build:chrome
+    bun run "build:$BROWSER"
 else
   # Scrub any inherited proverless flags so a non-proverless build (e.g. the
   # prover-ON canary job) can't silently build proverless from leaked runner
@@ -102,13 +117,13 @@ else
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_TOKEN_SEEDS=1 \
   VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 \
-    bun run build:chrome
+    bun run "build:$BROWSER"
 fi
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
 # tests waste cycles. This catches the silent failure mode where vi.stubEnv-
 # style mistakes leave the default URL hardcoded in the bundle.
-if ! grep -rq "$AZTEC_NODE_URL" dist/chrome 2>/dev/null; then
+if ! grep -rq "$AZTEC_NODE_URL" "$DIST_DIR" 2>/dev/null; then
   echo "[e2e:agent] FATAL: built bundle does not contain $AZTEC_NODE_URL" >&2
   echo "[e2e:agent] vite env did not propagate; check vite.config.ts for VITE_* exposure." >&2
   exit 2
@@ -118,8 +133,8 @@ echo "[e2e:agent] bundle contains $AZTEC_NODE_URL ✓"
 # Positive fixture-stamp assertion: the backup-migration round-trip spec FAILS
 # (never skips) when the runner declares the fixture armed but the build lacks
 # it — catch the propagation failure here, before tests waste cycles.
-if ! grep -rq "nulo:e2e:backup-mig-fixture" dist/chrome 2>/dev/null; then
-  echo "[e2e:agent] FATAL: migration-fixture stamp did not propagate (backup fixture marker absent from dist/chrome)" >&2
+if ! grep -rq "nulo:e2e:backup-mig-fixture" "$DIST_DIR" 2>/dev/null; then
+  echo "[e2e:agent] FATAL: migration-fixture stamp did not propagate (backup fixture marker absent from $DIST_DIR)" >&2
   exit 2
 fi
 echo "[e2e:agent] bundle contains the backup-migration fixture ✓"
@@ -132,8 +147,8 @@ echo "[e2e:agent] bundle contains the backup-migration fixture ✓"
 # armed build (see price-map.ts), which would make the release grep a
 # false-negative guard.
 for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
-  if ! grep -rq "$marker" dist/chrome 2>/dev/null; then
-    echo "[e2e:agent] FATAL: token-seed source did not propagate ($marker absent from dist/chrome)" >&2
+  if ! grep -rq "$marker" "$DIST_DIR" 2>/dev/null; then
+    echo "[e2e:agent] FATAL: token-seed source did not propagate ($marker absent from $DIST_DIR)" >&2
     exit 2
   fi
 done
@@ -147,8 +162,8 @@ echo "[e2e:agent] bundle contains the e2e token-seed source ✓"
 # offscreen/index.ts. Only enforced when the env var is set (CI required-mode);
 # locally the var is unset and the assertion is skipped.
 if [ "${VITE_NULO_PRESTO_REQUIRED:-}" = "1" ]; then
-  if ! grep -rq "NULO_PRESTO_REQUIRED_BUILD_STAMP" dist/chrome 2>/dev/null; then
-    echo "[e2e:agent] FATAL: VITE_NULO_PRESTO_REQUIRED=1 but build stamp absent from dist/chrome" >&2
+  if ! grep -rq "NULO_PRESTO_REQUIRED_BUILD_STAMP" "$DIST_DIR" 2>/dev/null; then
+    echo "[e2e:agent] FATAL: VITE_NULO_PRESTO_REQUIRED=1 but build stamp absent from $DIST_DIR" >&2
     echo "[e2e:agent] env didn't propagate; Layer 2 enforcement would silently disappear" >&2
     exit 2
   fi
@@ -161,8 +176,8 @@ fi
 # masking the proverless path entirely. Emitted by src/e2e/config.ts, pinned
 # by offscreen/index.ts.
 if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
-  if ! grep -rq "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome 2>/dev/null; then
-    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS=1 but proverless build stamp absent from dist/chrome" >&2
+  if ! grep -rq "NULO_E2E_PROVERLESS_BUILD_STAMP" "$DIST_DIR" 2>/dev/null; then
+    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS=1 but proverless build stamp absent from $DIST_DIR" >&2
     echo "[e2e:agent] double-opt-in flags didn't propagate; suite would silently run with real proving" >&2
     exit 2
   fi
@@ -176,7 +191,7 @@ fi
 # state. Asserting the bundle contains `parseFloat(\`<value>\`)` proves
 # Vite statically substituted the env var.
 if [ -n "${VITE_NULO_FEE_MULTIPLIER:-}" ]; then
-  if ! grep -rq "parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`)" dist/chrome 2>/dev/null; then
+  if ! grep -rq "parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`)" "$DIST_DIR" 2>/dev/null; then
     echo "[e2e:agent] FATAL: VITE_NULO_FEE_MULTIPLIER=${VITE_NULO_FEE_MULTIPLIER} but bundle does not contain parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`)" >&2
     echo "[e2e:agent] env didn't propagate into Vite; gas-envelope widening would silently disappear" >&2
     exit 2
@@ -204,7 +219,7 @@ AZTEC_ADMIN_PORT="$AZTEC_ADMIN_PORT" \
 AZTEC_P2P_PORT="$AZTEC_P2P_PORT" \
 PLAYGROUND_URL="$PLAYGROUND_URL" \
 PLAYGROUND_PORT="$PLAYGROUND_PORT" \
-  bun run vitest run --config vitest.e2e.network.config.ts "$@"
+  bun run vitest run --config "$VITEST_CONFIG" "$@"
 VITEST_EXIT=$?
 set -e
 
