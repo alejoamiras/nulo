@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (repo + store APIs) · codex high · code-review off
-status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — awaiting owner approval
+status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21, in execution
 ---
 
 # Store launch — Chrome Web Store and Firefox Add-ons, the repo half
@@ -75,7 +75,7 @@ Everything the two store submissions need that lives in the repo: the store name
 
 Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases 4–6 (Firefox).
 
-### Phase 1 — Icons and store name
+### Phase 1 — Icons and store name ✓
 - `displayName: "Nulo V5"`, `description` within 132 chars; `store-icons.ts` + test; both manifests' icon maps.
 
 **Validation gate**
