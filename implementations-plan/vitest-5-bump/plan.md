@@ -1,4 +1,4 @@
-# vitest-5-bump — vitest 5.0.1 + jsdom 30.1.0, the interop stopgap retired, the harvest measured
+# vitest-5-bump — vitest 5.0.1 (jsdom held at 29.1.1), the interop stopgap retired, the harvest measured
 
 ---
 tier: light
@@ -6,7 +6,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex at high)
-status: DRAFT v4 — 2026-09-21, codex r1 conditional approve (6 blocking, 5 non-blocking) + r2 conditional approve (3 corrections) folded in, none rejected; owner answers 2026-09-21: A2 = move, A3 = yes, and **the 7-day age gate is bypassed for `vitest` and `jsdom` at the owner's explicit direction** ("let's install both and use both, don't leave anything scheduled for later") — nothing waits for 09-24; A1 still at the default (10); codex r3 on this revision: conditional approve, its five points folded (ledger R3-1..R3-5); awaiting owner approval. ELI5 Artifact: https://claude.ai/artifact/2quNqEZdVVPJiEsyFQmfEC (source: eli5.html in this dir — the durable copy; the first publish at a different URL was deleted server-side minutes later; republish the same path to update)
+status: v5 — 2026-09-21, approved (`/goal` set), **Phase 1 ✓**. **jsdom 30.1.0 is held back at 29.1.1**: under `bun --bun vitest` every jsdom-environment worker dies at setup (`'addEventListener' called on an object that is not a valid instance of EventTarget`) because Bun's `vm.createContext(vm.constants.DONT_CONTEXTIFY)` returns an object that is not the context's `this` — jsdom 30 stamps its new private-field wrapper brand on the one and hands out the other as `window` (jsdom 29's symbol-keyed brand crossed the proxy; a private field cannot). Reproduced standalone without vitest, and with pure `node:vm`; Node 24.21 is unaffected. Upstream: oven-sh/bun#43671 (filed 2026-09-21, reproduced by the maintainers' bot), fix PR oven-sh/bun#34623 open since 2026-07-18, unmerged. Per the Phase 1 taxonomy (Bun-only divergence → STOP) the owner decided 2026-09-21: hold jsdom, ship vitest 5.0.1; jsdom 30 is a follow-up keyed to a Bun release that contains the fix (D10; evidence in `lessons/phase-1.md`). Every "jsdom 30" below is the original scope, left for the record. Earlier: DRAFT v4 — 2026-09-21, codex r1 conditional approve (6 blocking, 5 non-blocking) + r2 conditional approve (3 corrections) folded in, none rejected; owner answers 2026-09-21: A2 = move, A3 = yes, and **the 7-day age gate is bypassed for `vitest` and `jsdom` at the owner's explicit direction** ("let's install both and use both, don't leave anything scheduled for later") — nothing waits for 09-24; A1 still at the default (10); codex r3 on this revision: conditional approve, its five points folded (ledger R3-1..R3-5); awaiting owner approval. ELI5 Artifact: https://claude.ai/artifact/2quNqEZdVVPJiEsyFQmfEC (source: eli5.html in this dir — the durable copy; the first publish at a different URL was deleted server-side minutes later; republish the same path to update)
 baseline: 25062c06 (dev, after #657)
 worktree: .claude/worktrees/vitest-5-bump · branch worktree-vitest-5-bump
 ---
@@ -33,7 +33,7 @@ summary, `configDefaults.reporters`), adopts `vi.when()` where a mock keys on it
 change, if the numbers ever justify one, is a follow-up under the 30-run bar. One PR; no product code moves;
 no UI surface changes.
 
-**Done** = vitest 5.0.1 + jsdom 30.1.0 locked through the owner-authorized age-gate exception (A4), with no
+**Done** = vitest 5.0.1 locked through the owner-authorized age-gate exception (A4) — jsdom stays 29.1.1 (v5, D10) — with no
 exclude in any commit and `bun install --frozen-lockfile --force` clean; no `interopDefault` anywhere and
 `vitest.base.ts` gone with its 15 spreads and its `biome.json` include; `packages/resolve-asset` runs
 `bun --bun vitest run` through a `vitest.config.ts` of its own; the soak matrix (16 suites, both engines, one commit, after a frozen install) compares green
@@ -81,7 +81,9 @@ the residual is worked with provenance inspection, a scripts-off first install a
 1. **Manifests** — `vitest: "^5.0.1"` in the 14 workspaces that declare it (`apps/{extension,landing,tools}`,
    `packages/{aztec-runtime,bridge-core,design,extension-messaging,legal,resolve-asset,third-party-notices,wallet-bridge,wallet-core,wallet-crypto,wallet-sdk-schema-patch}`);
    `jsdom: "^30.1.0"` in the 6 that declare it (`apps/{extension,tools}`,
-   `packages/{design,extension-messaging,wallet-core,wallet-crypto}`). `vite` stays (8.2.1 satisfies v5's
+   `packages/{design,extension-messaging,wallet-core,wallet-crypto}`) — **v5: attempted, then reverted to
+   `^29.1.1` in all six after the Bun finding (status line, D10); the lockfile was restored from the baseline
+   before re-resolving so no jsdom transitive drifted along**. `vite` stays (8.2.1 satisfies v5's
    peer). No `@vitest/*` package is added. **The install bypasses the 7-day gate on the owner's direction**,
    through the mechanism CLAUDE.md § Dependency policy documents: `minimumReleaseAgeExcludes` names exactly
    `vitest`, `jsdom`, and only those transitives the gate refuses **and** these two versions actually require
@@ -195,7 +197,8 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
   execution in this plan (the soak fixtures in `test:ci-gating`, doctor on Node if it comes to that, the Node
   reference side, the Node smoke e2e) runs on a Node that satisfies it, and the actual versions — host, and
   what CI's runners resolved — are recorded in `lessons/phase-1.md`. A reference recorded on one supported
-  Node version proves Bun-vs-that-Node parity; it does not prove another Node version.
+  Node version proves Bun-vs-that-Node parity; it does not prove another Node version. (v5: with jsdom
+  held at 29.1.1 no engines range needs the floor any more; the Node side still runs on the recorded 24.21.0.)
 
 ## Assumptions
 
@@ -260,8 +263,11 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
   unattended) — the driver's recommendation, since the host is otherwise idle.
 - A2 **Baseline home move** — **decided 2026-09-21: move** to `scripts/ci-cd/test-soak/baselines/` (D2).
 - A3 **Host Node ≥ 24.15** — **decided 2026-09-21: yes**, installed via `nvm` before Phase 1; the resolved
-  version is recorded.
+  version is recorded (24.21.0; v5: no longer required by any engines range, kept as the Node reference version).
 - A4 **Age gate** — **decided 2026-09-21: bypass** for `vitest` and `jsdom` now (Implementation §1, Security).
+  Executed for `vitest` (+ `@vitest/mocker`, `@vitest/spy`, the chain the gate named); the `jsdom` exclude
+  served the attempt and left with the revert. Every exclude was local-only and is gone (`lessons/phase-1.md`).
+- A5 **jsdom 30 under Bun** — **decided 2026-09-21: hold at 29.1.1**, ship vitest 5.0.1 (status line, D10).
 
 ## Phases and validation gates
 
@@ -270,7 +276,7 @@ early probe: the owner's gate decision (A4) makes the real install available tod
 (vitest first, jsdom second, `bun run test:all` between them) gives the same vitest-vs-jsdom split of the
 fallout at no extra cost.
 
-### Phase 1 (now) — the bump commit
+### Phase 1 ✓ — the bump commit (2026-09-21; step 2(b) attempted and reverted — `lessons/phase-1.md`)
 
 Preconditions: Node ≥ 24.15 on PATH (A3), versions recorded (`node --version`, `bun --version`); the two
 tarballs' provenance records inspected and quoted in `lessons/phase-1.md`.
@@ -364,7 +370,7 @@ soak tool, `biome.json`) is a new matrix commit and repeats this phase in full.
    unawaited-assertion / #10373 fallout hidden, does the evidence bind to HEAD, did the harvest change semantics.
    Apply what holds, rebut what doesn't in the ledger; hard stop at 3 rounds → surface. **Any executable fix
    re-runs Phase 3** before the next round.
-2. Then `gh pr create` (title ≤ 93 chars, e.g. `chore(deps): bump vitest 5.0.1 and jsdom 30.1.0, retire the interop stopgap`),
+2. Then `gh pr create` (title ≤ 93 chars, e.g. `chore(deps): bump vitest 5.0.1, retire the interop stopgap; jsdom 30 held (bun#43671)`),
    then labels `e2e:extension-network` and `e2e:tools` **after** the PR exists (a label at create time cancels the
    sibling run and leaves a red check).
 
@@ -404,6 +410,7 @@ carry the merged SHA.
 | D7 | Early probe | **dropped** (v4) — superseded by A4: the real install runs now, in two steps for the vitest/jsdom split | the owner bypassed the gate; a probe on top of that is pure duplication |
 | D9 | Age gate (A4) | bypass for `vitest` + `jsdom`, exclude local-only, deleted before the commit, provenance read first | owner's decision 2026-09-21, recorded as such; codex r1 B3's objection stands on the record |
 | D8 | Review-loop order | codex loop before `gh pr create` | repo rule; the prior protocol's order (codex r1 #5) |
+| D10 | jsdom 30.1.0 under Bun (v5) | **held at 29.1.1**; vitest 5.0.1 ships alone; jsdom 30 re-attempted when a Bun release carries oven-sh/bun#34623 | Bun-only divergence per the Phase 1 taxonomy (oven-sh/bun#43671); 30.0.1 runs on Bun but carries the `querySelectorAll` regression 30.1.0 fixed; disabling jsdom's vm context via `environmentOptions` is an engine workaround baked into six configs — both rejected; owner's call 2026-09-21 |
 
 ### Codex round 1 (GPT-6 Astra, high) — `conditional approve`
 

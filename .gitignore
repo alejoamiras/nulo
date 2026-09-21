@@ -56,3 +56,6 @@ packages/bridge-core/sandbox-deploy/
 apps/tools/public/testnet-bridge.candidate.json
 apps/tools/public/testnet-bridge.journal*.jsonl
 apps/tools/.e2e-state/
+
+# vitest 5 writes reporter output, attachments and blob reports here by default.
+.vitest/
