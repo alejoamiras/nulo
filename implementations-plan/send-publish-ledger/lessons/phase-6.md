@@ -33,6 +33,8 @@ Looked for and not found (codex): a footer bypass of the gate, a double submissi
 
 Same session, the fix diff and the three dispositions. Codex accepted the selector rejection (the wrapper-scoped descendant lookup follows the existing `Input` convention) and probed the new `isTop` source with file-free assertions against the composable and the store: compaction when a popup beneath the sheet closes keeps the final order right and the transient state only restarts the arm (never grants early); a covering popup opened and closed in one tick cancels the old arm and requires the full wait; a closed sheet's default order can never make `ready` true because `isOpen` gates it; `closeAll` clears readiness and the timer; the CTA and `authorises` consume the same state. Loop closed at two rounds.
 
+**Follow-up (owner, 2026-09-21):** after Escape closes the sheet, focus returns to "Review send" and the design system's keyboard-focus ring (`Button.vue` `.wrapper:focus-visible`, `outline: 2px solid var(--nulo-accent)`) paints white over the orange CTA on the dark theme — correct a11y behaviour (only a keyboard close shows it; a mouse close returns focus silently), but the owner wants the ring restyled. That is a `@nulo/design` token/variant decision touching every button, not this plan.
+
 **Follow-up (not this plan):** registry popups without `closeOnEscape` release their trap on Escape and stay visible with the keyboard on whatever is beneath — a product decision on every popup, for the owner.
 
 ## Delivery

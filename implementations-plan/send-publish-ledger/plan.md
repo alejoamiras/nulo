@@ -14,9 +14,9 @@ base: dev @ 06010c9b
 
 ## Outcome
 
-- **Date**: 2026-09-21. **Status**: implemented, PR [#660](https://github.com/alejoamiras/nulo/pull/660) open into `dev` — merge is the owner's call.
+- **Date**: 2026-09-21. **Status**: implemented, PR [#660](https://github.com/alejoamiras/nulo/pull/660) into `dev`; CI 46 pass / 0 fail; owner-tested in a real Chrome (*"I tested it and it works fine."*).
 - **Delivered**: phases 1–6 as planned; 11 commits (+ the `origin/dev` merge for the Biome 2.5.13 bump). The one addition beyond the plan is D22 (a covered sheet cannot send), from the codex post-implementation round.
-- **Dropped**: nothing. **I1 verified by the owner** in a real Chrome (Escape closes the sheet, the popup stays). **Deferred to the owner**: the Escape-without-close behaviour of registry popups (`lessons/phase-6.md`).
+- **Dropped**: nothing. **I1 verified by the owner** in a real Chrome (Escape closes the sheet, the popup stays). **Follow-ups the owner asked for** (`lessons/phase-6.md`): (1) the CTA's keyboard-focus ring on the dark theme — after Escape closes the sheet, focus returns to "Review send" and `Button.vue`'s `:focus-visible` outline paints `--nulo-accent`, white on dark, over the orange button; the owner wants a restyle, a `@nulo/design` decision; (2) the Escape-without-close behaviour of registry popups.
 - **Gates at delivery**: `audit:vue` (6 996 unit + component tests, build) · `test:ci-gating` 132/132 · smoke 15/15 · network 10/10 at retry 0 · mutation pass 23/24 killed, 1 equivalent · codex: conditional approve → approve in two rounds.
 - **Seeds retired**: the `/goal` + `/loop` seeds below are spent; nothing to resume.
 
