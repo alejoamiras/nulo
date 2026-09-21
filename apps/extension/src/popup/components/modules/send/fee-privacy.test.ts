@@ -5,13 +5,11 @@ import { buildFeeMethods, type FeeMethodOption, type GasBalances, type Registere
 import {
 	applyFpcEdits,
 	type FeeKnowledge,
-	feePayerNotice,
 	isEligible,
 	previewForPick,
 	recordOf,
 	resolveSendSelection,
 	type SendSelection,
-	type TransferSide,
 } from "./fee-privacy"
 
 const PRIVATE_FPC: RegisteredFpc = { id: "pfpc", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
@@ -36,40 +34,6 @@ const outcome = (s: SendSelection): string => {
 const FJ: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
 const PRIV: FeeMethodOption = { type: "private_fpc", title: "Private Fee Juice", subtitle: "private", fpc: PRIVATE_FPC }
 const SPON: FeeMethodOption = { type: "fpc", title: "Sponsored FPC", subtitle: "sponsored", fpc: SPONSOR }
-
-describe("feePayerNotice", () => {
-	const sides: (TransferSide | null)[] = ["private", "public", null]
-	const methods: (FeeMethodOption | undefined)[] = [FJ, PRIV, SPON, undefined]
-
-	test("yields a notice in exactly the private-origin Fee Juice cells", () => {
-		for (const origin of sides) {
-			for (const destination of sides) {
-				for (const method of methods) {
-					const notice = feePayerNotice(origin, destination, method)
-					const expected = origin === "private" && method === FJ
-					expect(notice !== null, `${origin}→${destination} ${method?.type}`).toBe(expected)
-				}
-			}
-		}
-	})
-
-	test("the destination picks the wording; a null destination reads as private → private", () => {
-		expect(feePayerNotice("private", "private", FJ)?.shape).toBe("private-private")
-		expect(feePayerNotice("private", null, FJ)?.shape).toBe("private-private")
-		expect(feePayerNotice("private", "public", FJ)?.shape).toBe("private-public")
-	})
-
-	test("pins the approved copy", () => {
-		expect(feePayerNotice("private", "private", FJ)).toEqual({
-			shape: "private-private",
-			title: "Your address pays this fee",
-			body: "This send hides the amount and the recipient, but the fee names your account publicly. Anyone watching the chain learns this account sent something, and when.",
-		})
-		expect(feePayerNotice("private", "public", FJ)?.body).toBe(
-			"The recipient and amount on this send are already public. Paying from public Fee Juice adds your address to them, and the whole transfer becomes readable as yours.",
-		)
-	})
-})
 
 describe("payerKindOf — on the settings the card really submits", () => {
 	const HAND_ADDED: RegisteredFpc = { id: "hand", type: FpcType.DefaultSponsoredFpc, name: "Mine", isProtocol: false }

@@ -70,6 +70,7 @@ declare module 'vue' {
     PopupHeader: typeof import('./../components/ui/Popup/PopupHeader.vue')['default']
     PrestoStatusCard: typeof import('./../components/PrestoStatusCard.vue')['default']
     ProcessingErrorNote: typeof import('./../components/composite/ProcessingErrorNote.vue')['default']
+    PublishStrip: typeof import('./../components/composite/send/PublishStrip.vue')['default']
     RecipientCard: typeof import('./../components/composite/send/RecipientCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

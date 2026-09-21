@@ -240,6 +240,7 @@ async function fillForm(w: W) {
 
 const submit = (w: W) => w.get('[data-testid="send-submit"]')
 const strip = (w: W) => w.get('[data-testid="send-publish-strip"]')
+const tag = (w: W) => w.find('[data-testid="send-fee-privacy-notice"]')
 const sheetOpen = (w: W) => w.get('[data-testid="send-review-sheet"]').attributes("data-open") === "true"
 const closeSheet = (w: W) => w.get('[data-testid="popup-close-btn"]').trigger("click")
 const feeTrigger = (w: W) => w.get('[data-testid="send-fee-method-trigger"]').attributes("data-fee-method")
@@ -250,11 +251,12 @@ const setSide = async (w: W, side: "from" | "to", want: TransferSide) => {
 	if (want === "public") await w.get(`[data-testid="send-${side}-type"]`).trigger("click")
 }
 
-/** The one reading a settled state must give everywhere at once. */
+/** The one reading a settled state must give everywhere at once: the tag, the footer's action and the strip's `you`. */
 function settled(w: W) {
 	const action = submit(w).attributes("data-action")
 	const you = strip(w).attributes("data-you")
 	expect(action === "review").toBe(you === "exposed")
+	expect(tag(w).exists()).toBe(you === "exposed")
 	return { action, you, to: strip(w).attributes("data-to"), amount: strip(w).attributes("data-amount") }
 }
 
@@ -319,6 +321,7 @@ describe.each(SWEEP)("send page with the real fee card — %s, %s origin", (fund
 			expect(mocks.executeTransfer).not.toHaveBeenCalled()
 			expect(sheetOpen(w)).toBe(true)
 			expect(w.get('[data-testid="send-review-row-you"]').attributes("data-notice-shape")).toBe(`private-${destination}`)
+			expect(tag(w).attributes("data-notice-shape")).toBe(`private-${destination}`)
 		} else {
 			expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
 			expect(submittedFee()).toMatchObject(fee)
@@ -329,11 +332,12 @@ describe.each(SWEEP)("send page with the real fee card — %s, %s origin", (fund
 })
 
 describe("send page with the real fee card — nothing to send", () => {
-	test("no sendable token with funded Fee Juice: no strip, and the action is never review", async () => {
+	test("no sendable token with funded Fee Juice: no strip, no tag, and the action is never review", async () => {
 		mocks.getTokens.mockResolvedValue([])
 		mocks.getTokenBalances.mockResolvedValue([])
 		const { w } = await mountSend(FUNDING["public Fee Juice only"])
 		expect(w.find('[data-testid="send-publish-strip"]').exists()).toBe(false)
+		expect(tag(w).exists()).toBe(false)
 		expect(submit(w).attributes("data-action")).toBe("send")
 		expect(submit(w).attributes("disabled")).toBeDefined()
 		w.unmount()
@@ -350,10 +354,11 @@ describe("send page with the real fee card — nothing to send", () => {
 })
 
 describe("send page with the real fee card — transitions", () => {
-	test("balances still pending: —, nothing sendable; the read landing settles it", async () => {
+	test("balances still pending: —, no tag, nothing sendable; the read landing settles it", async () => {
 		const { w, gas } = await mountSend(FUNDING["public Fee Juice only"], { holdGas: true })
 		await fillForm(w)
 		expect(strip(w).attributes("data-you")).toBe("unknown")
+		expect(tag(w).exists()).toBe(false)
 		expect(submit(w).attributes("data-action")).toBe("send")
 		expect(submit(w).attributes("disabled")).toBeDefined()
 		expect(feeTrigger(w)).toBeUndefined()
@@ -459,6 +464,7 @@ describe("send page with the real fee card — transitions", () => {
 
 		await w.get('[data-testid="send-to-type"]').trigger("click")
 		expect(settled(w)).toEqual({ action: "review", you: "exposed", to: "public", amount: "public" })
+		expect(tag(w).attributes("data-notice-shape")).toBe("private-public")
 		await strip(w).trigger("click")
 		expect(w.get('[data-testid="send-review-row-you"]').attributes("data-notice-shape")).toBe("private-public")
 		await closeSheet(w)

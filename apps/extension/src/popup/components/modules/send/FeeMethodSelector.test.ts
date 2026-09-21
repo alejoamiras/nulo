@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
+import mark from "@/components/composite/send/publish-mark.module.css"
 import FeeMethodSelector from "./FeeMethodSelector.vue"
 
 const STUBS = {
@@ -76,6 +77,22 @@ describe("FeeMethodSelector", () => {
 		})
 		await w.find('[data-testid="send-fee-method-public"]').trigger("click")
 		expect(w.emitted("update:modelValue")).toBeUndefined()
+	})
+
+	test("no tag until told; the tag carries the shape and the approved words", async () => {
+		const w = factory({ modelValue: baseMethods[0] })
+		const TAG = '[data-testid="send-fee-privacy-notice"]'
+		expect(w.find(TAG).exists()).toBe(false)
+
+		await w.setProps({ payerNoticeShape: "private-public" })
+		expect(w.find(TAG).attributes("data-notice-shape")).toBe("private-public")
+		expect(w.find(TAG).text()).toBe("NAMES YOUR ADDRESS")
+		expect(w.find(TAG).classes()).toContain(mark.exposed)
+		expect(w.find(`${TAG} i`).classes()).toEqual(expect.arrayContaining([mark.mark, mark.filled]))
+		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Fee Juice")
+
+		await w.setProps({ payerNoticeShape: null })
+		expect(w.find(TAG).exists()).toBe(false)
 	})
 
 	test("Dropdown onOpen / onClose are forwarded as 'open' / 'close'", () => {

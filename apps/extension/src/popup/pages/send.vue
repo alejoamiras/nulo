@@ -648,6 +648,7 @@ onBeforeUnmount(() => {
 						:isEstimating="isEstimating"
 						:originPrivacy="selectedSendType"
 						:destinationPrivacy="selectedReceiverType"
+						:payerNoticeShape="facts.noticeShape"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 						v-model:payer="payer"

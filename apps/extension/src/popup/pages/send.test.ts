@@ -158,6 +158,7 @@ const STUBS = {
 			"isEstimating",
 			"originPrivacy",
 			"destinationPrivacy",
+			"payerNoticeShape",
 			"modelValue",
 			"needsFeeJuice",
 			"payer",
@@ -424,6 +425,21 @@ describe("send page — the footer", () => {
 		await w.get('[data-testid="send-from-type"]').trigger("click")
 		expect(submit(w).attributes("data-action")).toBe("send")
 		expect(strip(w).attributes("data-you")).toBe("public")
+		w.unmount()
+	})
+
+	test("the card is handed the tag's shape exactly while the send is gated", async () => {
+		const { w } = await mountSend()
+		const shape = () => w.findComponent({ name: "FeeSettingsCard" }).props("payerNoticeShape")
+		await fillForm(w, FJ)
+		expect(shape()).toBe("private-private")
+		await w.get('[data-testid="send-to-type"]').trigger("click")
+		expect(shape()).toBe("private-public")
+		await feeCard(w, SPONSOR)
+		expect(shape()).toBeNull()
+		await feeCard(w, FJ)
+		await w.get('[data-testid="send-from-type"]').trigger("click")
+		expect(shape()).toBeNull()
 		w.unmount()
 	})
 })

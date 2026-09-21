@@ -472,7 +472,7 @@ Every gate includes the fast layers. "Green" means the gate below, pasted in the
 3a characterization tests for today's submit (T9, green on the untouched page). 3b extract `send-submit.ts`. 3c `payer` model on the card; footer, `submit()`, the sheet on the stack; T8 (model half), T10–T14 (T11 with its phase-3 invariant — the tag half arrives in phase 4).
 **Validation gate** — commands: `bun run --cwd apps/extension test src/popup/pages src/popup/components/modules/send src/composables/useSendReview.test.ts` · `bun run lint` · `bun run typecheck` · `bun run build:chrome`, then the built popup by hand in both themes: I1 (Escape in the real action popup), I2, I4. Pass: exit 0; I1/I2/I4 recorded in `lessons/phase-3.md` as true, or their stated outcome taken (I1: drop Escape; I2, I4: stop and revise / bring to the owner). Layers: lint/typecheck · unit · page integration · build.
 
-### Phase 4 — notice row → tag
+### Phase 4 — notice row → tag ✓
 `payerNoticeShape` prop → `FeeMethodSelector` tag; delete the block, `payerNotice` and `feePayerNotice`; re-point the card's and the selector's tests (T8); T11 gains the tag half of its invariant and "no token → no tag".
 **Validation gate** — commands: `bun run --cwd apps/extension test src/popup/components/modules/send src/popup/pages` · `bun run audit:vue`. Pass: exit 0. Layers: lint/typecheck · unit · component · page integration · build.
 

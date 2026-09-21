@@ -1,4 +1,4 @@
-import { type NoticeShape, noticeBodyFor, type TransferSide } from "@/components/composite/send/publish-facts"
+import type { TransferSide } from "@/components/composite/send/publish-facts"
 import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
 
 export type { TransferSide }
@@ -19,9 +19,6 @@ export type SendSelection =
 	/** Every applicable payer was positively read and none can pay — the only state that may say "you have none". */
 	| { kind: "none" }
 
-export type FeePayerNotice = { shape: NoticeShape; title: string; body: string }
-
-const NOTICE_TITLE = "Your address pays this fee"
 /** A balance counts only when it was actually read: `null`, `undefined` and a missing property are all unread. */
 const isRead = (balance: string | null | undefined): balance is string => typeof balance === "string"
 const canPay = (balance: string | null | undefined): boolean => isRead(balance) && balance !== "0"
@@ -129,20 +126,6 @@ export function applyFpcEdits<T extends { id: string }>(fpcs: T[], edits: Readon
 		if (edit) out.push(edit)
 	}
 	return out
-}
-
-/**
- * Non-null exactly when the origin is private and the method is the account's own Fee Juice —
- * the one payer that names the account. A null destination takes the private → private wording.
- */
-export function feePayerNotice(
-	origin: TransferSide | null,
-	destination: TransferSide | null,
-	method: FeeMethodOption | undefined,
-): FeePayerNotice | null {
-	if (origin !== "private" || method?.type !== "fj") return null
-	const shape: NoticeShape = destination === "public" ? "private-public" : "private-private"
-	return { shape, title: NOTICE_TITLE, body: noticeBodyFor(shape) }
 }
 
 /** The compact record persisted for a picked row. */
