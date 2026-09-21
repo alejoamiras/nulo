@@ -91,7 +91,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; `file` reports three 360×600 captures, one 440×280 tile, three 1280×800 frames; the listing test is green (permission coverage for both manifests, parity with `legal/privacy.md` § 6, caps, privacy URL); every file reference in `remote-code.md` resolves (`scripts/store-listing.test.ts` checks `path:line` citations exist).
 - Layers: unit · smoke e2e (opt-in file) · lint · landing build · a look at the PNGs.
 
-### Phase 3 — Chrome publish job
+### Phase 3 — Chrome publish job ✓
 - `publish-chrome-store{,.test,-run,-run.test}.ts`; `store-check.yml` with its Chrome job; `release.yml`: the two inputs, `resolve`'s `on_main` output, the Chrome job, and the Firefox stub moved to `publish_firefox` with the full `if` and **no** `environment:` key (so enabling Chrome can never trip it and no unprotected environment is created); the comment at `release.yml:184-190` shrinks to the skipped-ancestor invariant, and one new comment on `on_main` says that the dispatch ref does not authenticate the checked-out tag; `CI.md`, `CLAUDE.md`.
 
 **Validation gate**
