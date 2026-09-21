@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon inline + 4 sonnet research agents (owner-requested); foreign reviewer at high; code-review off (standing owner directive)
-status: IN PROGRESS 2026-09-21 — phases 1–2 ✓, phase 3 pending
+status: IMPLEMENTED 2026-09-21 — phases 1–3 ✓; codex fix loop + PR pending
 ---
 
 # The Firefox PXE host: a frame of the background page, not a throttled window
@@ -205,7 +205,7 @@ in the step; the fallback is counting offscreen targets through the existing CDP
   owner rather than re-masked.
 - Layers: unit (guards) · smoke e2e · network e2e (full, proverless) · network e2e (one real proof).
 
-### Phase 3 — Docs, index, follow-ups
+### Phase 3 — Docs, index, follow-ups ✓ (2026-09-21, [lessons](./lessons/phase-3.md))
 
 Steps: `ARCHITECTURE.md` (§1 label, §6 host + lifetime rule, builds paragraph); `FIREFOX.md` (the throttling
 row goes; the tab-placement and focus rows say what they now guard against); the debug skill's host line;
