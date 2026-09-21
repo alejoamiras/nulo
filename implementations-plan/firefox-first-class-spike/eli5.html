@@ -1,0 +1,196 @@
+<title>Firefox First-Class Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F3F5F8; --surface: #FFFFFF; --ink: #16202B; --muted: #586574;
+    --rule: #D5DBE3; --accent: #B93D0B; --accent-soft: #FCE9DD; --code: #E9EDF2;
+    --ok: #1F6F4A; --ok-soft: #DFF1E8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #10161D; --surface: #18212B; --ink: #E6ECF2; --muted: #93A1B0;
+      --rule: #2A3643; --accent: #FF8A4C; --accent-soft: #3A2418; --code: #0B1016;
+      --ok: #6FD3A2; --ok-soft: #14301F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #10161D; --surface: #18212B; --ink: #E6ECF2; --muted: #93A1B0;
+    --rule: #2A3643; --accent: #FF8A4C; --accent-soft: #3A2418; --code: #0B1016;
+    --ok: #6FD3A2; --ok-soft: #14301F;
+  }
+  body {
+    background: var(--ground); color: var(--ink);
+    font: 400 17px/1.62 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 20px; padding-block: 48px 72px;
+  }
+  main { max-width: 68ch; margin-inline: auto; display: flex; flex-direction: column; gap: 56px; }
+  section { display: flex; flex-direction: column; gap: 16px; }
+  h1, h2, h3 { font-family: "Archivo", "Arial Narrow", system-ui, sans-serif; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2rem, 6vw, 2.9rem); font-weight: 800; font-stretch: 112%; line-height: 1.04; letter-spacing: -0.015em; }
+  h2 { font-size: 1.45rem; font-weight: 700; font-stretch: 108%; line-height: 1.15; }
+  h3 { font-size: 1.05rem; font-weight: 700; line-height: 1.25; }
+  p, ul, ol { margin: 0; }
+  ul, ol { padding-left: 1.2em; display: flex; flex-direction: column; gap: 8px; }
+  .eyebrow { font: 500 0.78rem/1.2 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); }
+  .lede { font-size: 1.14rem; line-height: 1.55; }
+  .muted { color: var(--muted); }
+  code, pre { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+  code { background: var(--code); padding: 0.08em 0.34em; border-radius: 3px; }
+  pre { background: var(--code); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.5; font-size: 0.8rem; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .arcs { list-style: none; padding: 0; gap: 0; border-top: 1px solid var(--rule); }
+  .arcs > li { display: grid; grid-template-columns: 3.2rem 1fr; gap: 4px 12px; padding-block: 20px; border-bottom: 1px solid var(--rule); }
+  .arcs .n { font: 800 1.9rem/1 "Archivo", sans-serif; font-stretch: 100%; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .arcs .body { display: flex; flex-direction: column; gap: 8px; }
+  .proof { font-size: 0.93rem; color: var(--muted); }
+  .proof b { color: var(--ink); font-weight: 600; }
+  .asks { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 4px; padding: 24px; gap: 18px; }
+  .asks ol { gap: 16px; }
+  .asks li b { font-weight: 600; }
+  .found { background: var(--ok-soft); border-radius: 4px; padding: 18px 20px; }
+  .found h3 { color: var(--ok); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  .scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font: 500 0.74rem/1.2 "IBM Plex Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .warn { color: var(--accent); font-weight: 600; }
+  .pick { border: 1px solid var(--accent); border-radius: 6px; padding: 18px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+  .tag { align-self: flex-start; font: 500 0.72rem/1 "IBM Plex Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; background: var(--accent-soft); color: var(--accent); padding: 6px 8px; border-radius: 3px; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main>
+  <header>
+    <section>
+      <span class="eyebrow">Blueprint · mid tier · approved 2026-09-18</span>
+      <h1>Firefox, tested like Chrome</h1>
+      <p class="lede">Today the Firefox build of the Nulo extension is built and shipped with every release, but nothing ever runs it. This plan makes Firefox a real test target: the same smoke and network test suites that guard Chrome also run against Firefox, on every pull request, every night, and before every release. It also fixes a bug we found on the way: creating a profile with a passkey fails on Firefox.</p>
+    </section>
+  </header>
+
+  <section>
+    <h2>What the trial run already proved</h2>
+    <div class="found">
+      <h3>Four things worked on a real headless Firefox</h3>
+      <ul>
+        <li>Our test tool (Puppeteer) can see and click inside the approval windows the extension opens. An older note said this was impossible; it was our own popup closing itself when no profile existed.</li>
+        <li>Firefox can be given a fake passkey device for tests, the same way Chrome can. It needs a second helper program (geckodriver) and two browser settings switched on.</li>
+        <li>With that fake device, the wallet's real passkey math (the "PRF" secret it derives keys from) works inside the extension on Firefox.</li>
+        <li>The passkey bug is real and the fix works: after it, the actual "create profile with passkey" screen reaches the home screen.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why "mid" tier</h2>
+    <p>The work is contained (one app, its tests, its CI) and mostly reversible. Of the six risk dimensions, one scores high: <b>external coupling</b> (Firefox, geckodriver and a browser protocol we do not control). Novelty is moderate, not high, because the risky unknowns were already run. Blast radius is the thing to watch: the shared test helpers guard Chrome's required checks, so the plan never rewrites Chrome's side, it only moves it behind a switch.</p>
+    <p class="muted">The plan went through three hostile reviews. The first draft was rejected by one reviewer and conditionally approved by the other; they agreed on the problems. A fresh reviewer then rejected the second draft on three narrower points: a guard test placed where it would never run, a missing permission on the new workflows, and calling the plan finished before the nightly and release jobs had been seen green. All of it is fixed in this version. The biggest change since the first draft: it rewrote how Chrome's tests find windows. Now Chrome's code is left exactly as it is.</p>
+  </section>
+
+  <section>
+    <h2>The six steps, each its own pull request</h2>
+    <p class="muted">They stack: each builds on the one before. Steps 1 and 2 can also land on their own.</p>
+    <ol class="arcs">
+      <li><span class="n">1</span><div class="body">
+        <h3>Fix passkey profile creation on Firefox</h3>
+        <p>When a passkey is created, Chrome hands back the secret straight away. Firefox says "this passkey supports it" but hands nothing back until you ask a second time. Our code treated that as an error. The fix asks the second time, checks the answer came from the passkey we just made, and keeps the profile's identity intact.</p>
+        <p class="proof"><b>Proves itself by:</b> six new unit tests covering each branch, plus the full typecheck, test, lint and build gate.</p>
+      </div></li>
+      <li><span class="n">2</span><div class="body">
+        <h3>Firefox manifest housekeeping</h3>
+        <p>Mozilla now requires new add-ons to declare what data they collect and which Firefox versions they support. We add both, and settle the add-on's permanent ID. The values are your call (questions 1 to 3 below).</p>
+        <p class="proof"><b>Proves itself by:</b> the manifest unit test, a Firefox build, and Mozilla's own add-on linter reporting zero errors.</p>
+      </div></li>
+      <li><span class="n">3</span><div class="body">
+        <h3>Put the browser behind a switch, Chrome only</h3>
+        <p>The test helpers assume Chrome in about fifty places: how the browser starts, what the extension's address looks like, how a test closes the browser. This step moves those behind one switch without adding any Firefox code and without changing what Chrome does. A small guard test stops the old patterns creeping back.</p>
+        <p class="proof"><b>Proves itself by:</b> the full Chrome smoke suite locally, then the complete Chrome CI run (all five network shards, the heavy lanes, the canaries) on the branch.</p>
+      </div></li>
+      <li><span class="n">4</span><div class="body">
+        <h3>The Firefox driver, five make-or-break checks, then the smoke suite</h3>
+        <p>We build the Firefox side of the switch, then run five short checks before investing further: can tests find windows the usual way, does a real dApp approval window work, does a confirm window work, can the Firefox build send a real proved transaction, and does closing and reopening the browser keep the wallet's data. <span class="warn">If the approval window or the proved transaction fails, the network suite on Firefox is not achievable and we stop and ask you.</span> Then the smoke suite runs on Firefox.</p>
+        <p class="proof"><b>Proves itself by:</b> all five checks printing PASS, then the Firefox smoke suite green twice in a row, Chrome smoke still green, and no leftover browser processes.</p>
+      </div></li>
+      <li><span class="n">5</span><div class="body">
+        <h3>The network suite on Firefox</h3>
+        <p>The same network tests Chrome runs: the five fast shards, plus the slow lanes that produce real cryptographic proofs. Ten test files stay Chrome-only because they work by killing Chrome's background worker or by a Chrome-only interception trick; each says why when it is skipped.</p>
+        <p class="proof"><b>Proves itself by:</b> every shard and every portable lane green on Firefox, run locally one at a time.</p>
+      </div></li>
+      <li><span class="n">6</span><div class="body">
+        <h3>CI lanes and docs, all advisory</h3>
+        <p>Firefox gets its own workflow files for pull requests, plus jobs in the nightly run and the release chain. "Advisory" means a red Firefox job is visible but cannot block a merge or a release. The runbook gets dated switches for promoting them to required later: the release smoke after one clean release, PR smoke after 14 green nights, PR network after 30.</p>
+        <p class="proof"><b>Proves itself by:</b> the workflow linter and the CI-gating tests before the PR; then the Firefox lanes going green on this step's own pull request. The nightly and release jobs can only be confirmed after merge, so they are a short checklist for you. Until you tick both, the plan is "delivered", not "completed".</p>
+      </div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Background you need for the decisions</h2>
+    <ul>
+      <li><b>Why two helper programs.</b> Puppeteer talks to Firefox over a newer protocol that has no "fake passkey device" command. The older protocol does, and geckodriver speaks it. We run both against the same browser. One extra process per test run.</li>
+      <li><b>Why Chrome's required checks are safe.</b> The two workflow files that produce the required checks are not edited at all. Firefox results can never appear under a required check's name, and a test pins that.</li>
+      <li><b>Why the nightly and release jobs cannot be tested before merge.</b> The nightly workflow always builds the <code>dev</code> branch whatever you point it at, and the release workflow can reach the production environment. Running either from a feature branch tests the wrong code and risks side effects, so the plan forbids it.</li>
+      <li><b>What "same treatment" costs.</b> On every pull request that touches network code, Firefox adds roughly five shard jobs plus the slow proving lanes, each doing a full extension build. This is the option you chose over a thin canary. The account-wide run-start throttle has bitten us before; draft PRs are skipped to soften it.</li>
+      <li><b>A known local-machine trade-off.</b> geckodriver listens on a local port with no password. Any program on the same machine could drive the test browser. We accept that, the same way we already do for Chrome's debugging port and the local Aztec node, and only local test keys are ever loaded.</li>
+    </ul>
+  </section>
+
+  <section class="asks">
+    <span class="eyebrow">Approved by the owner · 2026-09-18</span>
+    <h2>The six decisions, as answered</h2>
+    <ol>
+      <li><b>Add-on ID.</b> <code>wallet@nulo.sh</code> stays.</li>
+      <li><b>Data collection declaration.</b> "None".</li>
+      <li><b>Minimum Firefox version.</b> 153. That is above the version where passkeys start working, so no extra hiding logic is needed. The add-on will not install on older Firefox, including the long-term-support release, and the test launcher refuses to run on anything below 153.</li>
+      <li><b>Two canaries stay Chrome-only.</b> Accepted for now; no follow-up scheduled.</li>
+      <li><b>CI cost.</b> Confirmed. Firefox and Chrome lanes run side by side as separate workflows, so Firefox adds job starts and runner minutes, not waiting time, as long as runners are free.</li>
+      <li><b>Two passkey prompts.</b> Accepted as is; no extra dialog copy.</li>
+    </ol>
+    <p>Also approved: the six-PR split, the validation plan, and no whole-codebase hardening pass.</p>
+  </section>
+
+  <section>
+    <h2>Open questions the work itself will answer</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Unknown</th><th>Answered by</th><th>If the answer is no</th></tr></thead>
+        <tbody>
+          <tr><td>Tests can find Firefox windows the same way as Chrome's</td><td>Check T, step 4</td><td>Firefox gets its own window-finding code behind the same function names</td></tr>
+          <tr><td>A temporary add-on gets its site permissions without a click</td><td>Check 1, step 4</td><td>Stop and ask you</td></tr>
+          <tr><td>The Firefox build can prove a transaction natively</td><td>Check 3, step 4</td><td>Stop and ask you</td></tr>
+          <tr><td>Wallet data survives a browser restart in tests</td><td>Check R, step 4</td><td>The one migration test becomes Chrome-only, with your approval</td></tr>
+          <tr><td>Real passkey devices behave like the fake one</td><td>Nothing here</td><td>The fix is correct either way</td></tr>
+          <tr><td>GitHub's throttle tolerates the extra jobs</td><td>Living with it</td><td>Narrow the Firefox lanes' triggers; they are advisory, so nothing blocks</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Implementation seeds <span class="muted">(final)</span></h2>
+    <p>Two ways to drive the work in an autonomous session. Start that session <b>inside the plan's worktree</b> (<code>agent-worktree resume firefox-first-class-spike</code>), in the permission mode you intend.</p>
+    <p class="warn">Use exactly one per session. They do not compose: setting one replaces the other.</p>
+
+    <div class="pick">
+      <span class="tag">Recommended for this plan</span>
+      <h3>/goal</h3>
+      <p class="muted">Every finish line here shows up in the transcript: gate output, codex verdicts, PR listings.</p>
+<pre><code>/goal All 8 phases marked ✓ in implementations-plan/firefox-first-class-spike/plan.md (the per-phase headers in the file, not the chat, not the task list), each ✓ backed by that phase's Validation gate as written in plan.md reported passing in the transcript, including for Phase 3 the two dispatched Chrome CI runs' status jobs concluding success on the arc's final SHA and for Phase 4 the five PROBE lines; the owner's answers in plan.md are implemented exactly (gecko id wallet@nulo.sh, data_collection_permissions required ["none"], strict_min_version 153.0 with a launch-time Firefox >= 153 assertion, no extra passkey dialog copy, both canaries Chrome-only); for each phase the agent has printed `LESSONS_FILE=implementations-plan/firefox-first-class-spike/lessons/phase-N.md` in the transcript; /code-review was NOT run (code_review: off); the codex fix loop converged for EVERY arc at its boundary (6 arcs) plus the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the 6-PR stack exists on GitHub, created only AFTER all loops converged (`gh stack view` output in the transcript), with `extension-smoke-e2e-firefox-status` and `extension-network-e2e-firefox-status` concluding success on the top PR and the three required checks green; `bun run audit:vue`, `bun run lint:actions` and `bun run test:ci-gating` all report exit 0 in the transcript; implementations-plan/index.md reads "delivered — awaiting nightly + release evidence" and the owner post-merge checklist has been printed. Never merged, never dispatched release.yml or nightly.yml from a branch, no required workflow file edited, no Chrome-only file added beyond the ten in plan.md and no Firefox lane trigger narrowed without the owner.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+<pre><code>/loop 15m Drive implementations-plan/firefox-first-class-spike forward. Never idle waiting for my input. Each firing:
+1. Reality check: read plan.md and lessons/ (authoritative state, not the chat); task list empty? rebuild it from plan.md, one task per remaining phase + one per arc loop + the cross-arc pass + Delivery; run `git status` and `git log --oneline -5`. If PRs exist, `gh stack view` and `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI (Phase 3's dispatched Chrome runs, or PR checks) is fine: confirm it is progressing (`gh run watch &lt;id&gt;` up to 10 minutes; stuck past that → read logs, log it as blocked in lessons). Use the wait to review the diff or prep the next phase. Do not start work that conflicts with the in-flight change.
+3. No task in hand? Take the next pending step from plan.md. After each meaningful edit run `bun run lint` + `bun run typecheck` + the touched unit tests. E2E runs go solo on the host, with an absolute `cd` prefix, never alongside audit:vue or codex. Commit (conventional, signed) → `gh stack push`.
+4. Stuck, or facing a decision you would bring to me? Call `/codex high` with full context (tell it: do not run any vitest e2e config or build), argue it out, act on the defensible answer, log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge; never publish or deploy; never dispatch release.yml or nightly.yml from a branch; never edit, rename or weaken a required check or its workflow file; never add a Chrome-only file, narrow a Firefox lane trigger or shrink scope without me. Failed probes in Phase 4 are surfaced, not worked around.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" = that phase's Validation gate in plan.md passes. Run it, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/firefox-first-class-spike/lessons/phase-N.md`, update `agent-worktree status firefox-first-class-spike "phase N green: &lt;next&gt;"`. Arc boundary crossed (Delivery table)? Run the arc's codex loop FIRST (/code-review is off): `/codex high` with the arc diff, plan.md + ledger, the arc map, the adversarial ask and the no-over-engineering + comment-quality rules verbatim; apply accepted fixes, commit, RESUME the same session; repeat until a round yields nothing material (3 rounds still material → surface and stop). THEN `gh stack add &lt;next-arc-branch&gt;`.
+7. All phases ✓? Final cross-arc pass: a FRESH `/codex high` over the net diff from the plan baseline asking for seams between arcs, duplication across arcs and drift from the plan, same rules, loop until clean. Then Delivery, the FIRST time any PR opens: `gh stack sync` if dev moved, `gh stack submit --auto --open`, `gh pr edit` bodies, `gh pr checks --watch`; CI-only fixes land on arc 6. Then write the wrap-up: what shipped, every contested decision with its ELI5 context, the owner post-merge checklist, open items. Surface and stop.
+
+Keep the task list current (TaskUpdate as steps start and finish; plan.md stays the source of truth).</code></pre>
+  </section>
+
+  <p class="muted">The engineering detail (architecture, file map, security notes, the 19-row decision ledger and both audit transcripts) lives in <code>implementations-plan/firefox-first-class-spike/plan.md</code> in the repo.</p>
+</main>

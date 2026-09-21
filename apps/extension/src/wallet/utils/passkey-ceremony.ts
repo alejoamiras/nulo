@@ -106,21 +106,21 @@ async function runCreate(userHandle: string, name: string, signal?: AbortSignal)
 	const ext = credential.getClientExtensionResults()
 	if (!ext.prf) throw new Error("Passkey PRF not available")
 
-	if (ext.prf.enabled) {
-		if (!ext.prf.results) throw new Error("Passkey PRF has no results")
+	const id = asBase64CredentialId(encodeBase64(credential.rawId))
+	if (ext.prf.results) {
 		return {
-			id: asBase64CredentialId(encodeBase64(credential.rawId)),
+			id,
 			prf: asBase64SecretPrf(encodeBase64(ext.prf.results.first)),
 			userHandle: asHexUserHandle(userHandle),
 		}
 	}
 
-	// Fallback path: some authenticators only return PRF on `get`, not on
-	// `create`. Re-prompt with a get to fetch the PRF for the just-created
-	// credential. Mirrors the original `windows/passkey/index.vue:74-77`
-	// behavior.
-	const rawIdB64 = encodeBase64(credential.rawId)
-	return await runGet(rawIdB64, signal)
+	// Some authenticators expose PRF only on assertion. Pin the re-prompt to the credential just
+	// created and keep the registration handle: a pinned assertion may legally omit `userHandle`,
+	// and a missing one would mint a second profile identity.
+	const fallback = await runGet(id, signal)
+	if (fallback.id !== id) throw new Error("Passkey PRF fallback returned a different credential")
+	return { ...fallback, userHandle: asHexUserHandle(userHandle) }
 }
 
 async function runGet(credentialId: string | undefined, signal?: AbortSignal): Promise<PasskeyCredentialData> {
