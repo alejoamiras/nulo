@@ -44,6 +44,13 @@
 Codex's own unit run executed zero tests (its worker start-up timed out in the read-only sandbox); the
 gates here are the authority. Not adopted: nothing.
 
+**Round 2 (resume, on the fix diff `bff2a617`) — conditional approve, converged.** Quoted: "No new
+material findings. The fixes are correct and targeted; the matcher checks and Biome check passed." The
+one unresolved condition is the coverage gap the reload mechanism leaves (background-only termination),
+with the smallest resolution named as "record the owner's explicit acceptance of deferring that gate, or
+add the background-only regression before merge" — which is the owner ask already recorded in phase 2's
+§ Deviation and in the PR body. Nothing else to fold in; the loop stops here at two rounds.
+
 **A trap that cost a re-run:** two parallel Bash calls that each `cd` somewhere race on the tool shell's
 one working directory — a vitest run meant for `apps/extension` executed from the repo root, picked
 the root config (no jsdom), and failed every `document`-using case. Run cwd-sensitive commands one per

@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon inline + 4 sonnet research agents (owner-requested); foreign reviewer at high; code-review off (standing owner directive)
-status: IMPLEMENTED 2026-09-21 — phases 1–3 ✓; codex fix loop + PR pending
+status: IN REVIEW 2026-09-21 — phases 1–3 ✓; codex loop converged (2 rounds, conditional approve — the restart mechanism is the owner's call); PR open
 ---
 
 # The Firefox PXE host: a frame of the background page, not a throttled window
