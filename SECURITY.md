@@ -543,9 +543,6 @@ for them — see `renovate.json` `packageRules`.
   per Renovate semantics).
 - `@types/node` capped via `allowedVersions: "<25"` — patch/minor on
   24.x still flow.
-- `puppeteer`, `puppeteer-core`, `@puppeteer/browsers`, `chromium-bidi`
-  carry a temporary disable mirroring `bunfig.toml`
-  `minimumReleaseAgeExcludes`; remove this rule on/after 2026-05-19.
 - `baseBranchPatterns: ["dev"]` — PRs target `dev`, but Renovate
   always reads its config from the **default branch** (`main`). The
   config must reach `main` (via the standard dev → main promotion PR)
