@@ -373,6 +373,31 @@ will move `bun.lock` to `lockfileVersion: 2`, unreadable by Bun ≤1.3.
 opacity. Migrated from `bun.lockb` once Bun 1.3.13's text-lockfile
 behavior was validated against the install + typecheck gates.
 
+## GitHub Actions
+
+Every third-party action is pinned to a **full commit SHA**, with its release
+in a trailing comment (`uses: actions/checkout@3d3c42e… # v7.0.1`). A tag is a
+mutable pointer held by the action's maintainers, or by whoever takes over
+their account: `@v4` re-resolves on every run, so a moved tag runs new code
+with the job's token and secrets and leaves no diff to review. A SHA is
+content-addressed, so an upgrade is a reviewed line in a PR.
+
+- **Enforced** by `scripts/ci-cd/action-pins.test.ts` (in `test:ci-gating`):
+  a tag or branch ref, a SHA without its `# vX.Y.Z` comment, or two
+  different SHAs for one action all fail CI.
+- **Resolve the SHA from the action's own repository**, never from a search
+  result or a fork: `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, and
+  when `.object.type` is `tag` (annotated), follow it once more through
+  `git/tags/<sha>` to the commit. GitHub serves fork commits under the
+  parent's URL, so a SHA that was not read off a tag of the real repo
+  proves nothing.
+- **The 7-day age gate applies here too.** Pin the newest release at least
+  7 days old, not what the major tag currently points at; the two differ
+  whenever an action shipped this week.
+- **Renovate keeps them fresh**: `helpers:pinGitHubActionDigests` pins any
+  new tag ref it finds and proposes digest bumps that update the SHA and
+  the version comment together, behind the same age gate.
+
 ## Binary dependencies
 
 `presto-server` (Linux x86_64 binary from

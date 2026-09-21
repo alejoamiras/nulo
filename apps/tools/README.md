@@ -120,7 +120,7 @@ bun run --cwd apps/tools build:mainnet   # → dist/ for tools.nulo.sh (placehol
 Static output. Hosting is **Cloudflare Pages**, one project per target:
 
 - Project root: `apps/tools`; install `bun install --frozen-lockfile`; build `bun run build:<target>`; output `dist`.
-- Env (Production AND Preview): `BUN_VERSION=1.4.0` (the image defaults to Bun 1.2.15, which cannot read
+- Env (Production AND Preview): `BUN_VERSION=1.4.2` (the image defaults to Bun 1.2.15, which cannot read
   the repo's v2 lockfile) and `NODE_VERSION=24` (vite loads its config under the ambient Node; the
   config imports raw `.ts` from `@nulo/resolve-asset`).
 

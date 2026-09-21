@@ -16,7 +16,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.browser == 'chrome'
       with:
         path: ~/.cache/puppeteer
@@ -26,7 +26,7 @@ runs:
 
     # Keyed on the lockfile, which is what fixes the Puppeteer version and so the Firefox revision;
     # no restore prefix, because a stale revision restored here would never be the one launched.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.browser == 'firefox'
       with:
         path: ~/.cache/puppeteer/firefox

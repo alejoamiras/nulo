@@ -62,7 +62,7 @@ jobs:
       needs-tools-build: ${{ steps.compute.outputs.needs-tools-build }}
       needs-landing-build: ${{ steps.compute.outputs.needs-landing-build }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: paths-filter needs the merge-base with the comparison
           # branch. On a shallow clone it falls back to a `fetch --deepen` loop,
@@ -70,7 +70,7 @@ jobs:
           # whenever the merge-base sits beyond the initial depth (structural on
           # long-running branches ~100+ commits from the base).
           fetch-depth: 0
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
@@ -225,7 +225,7 @@ jobs:
     timeout-minutes: 5
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-bun
@@ -322,7 +322,7 @@ jobs:
     steps:
       # The head sha, not the merge commit the default checkout gives a pull_request run: the version
       # printed must be the one the builds (also checked out at head.sha) stamped.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           sparse-checkout: |
@@ -333,7 +333,7 @@ jobs:
       # The script has no dependencies, so no `bun install` (and no setup-bun composite, which
       # always installs). The Bun line is read from root package.json's `packageManager` — not a
       # third pin site.
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
       - name: Upsert the preview comment
@@ -376,7 +376,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
       - uses: ./.github/actions/setup-bun

@@ -27,7 +27,7 @@ jobs:
     outputs:
       smoke-surface: ${{ steps.override.outputs.full || steps.filter.outputs.smoke-surface }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: paths-filter needs the merge-base with the comparison
           # branch. On a shallow clone it falls back to a `fetch --deepen` loop,
@@ -35,7 +35,7 @@ jobs:
           # whenever the merge-base sits beyond the initial depth (structural on
           # long-running branches ~100+ commits from the base).
           fetch-depth: 0
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
