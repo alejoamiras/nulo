@@ -77,7 +77,7 @@ Round-2 gate (same shape as round 1's): unit 3 files / 64 passed, the driver fil
 `bun run lint` exit 0; Firefox network 4 files / 4 passed (29.2 s, 22.6 s, 21.4 s, 8.5 s); Firefox smoke
 3 files / 5 passed, 2 skipped.
 
-### Round 3 — conditional, two new findings; the loop stops here
+### Round 3 — conditional, two new findings; the plan's three-round stop
 
 Codex accepted the round-2 residual as documented ("acceptable for this harness") and raised:
 
@@ -89,11 +89,21 @@ Codex accepted the round-2 residual as documented ("acceptable for this harness"
 Round-3 gate: unit 3 files / 65 passed (the driver file 3× with no flake); `bun run lint` exit 0; Firefox
 network 4 files / 4 passed (29.3 s, 22.3 s, 22.1 s, 8.5 s); Firefox smoke 3 files / 5 passed, 2 skipped.
 
-**Not converged.** The plan's hard stop is three rounds, and the third still had findings, so no fourth pass
-was run and the owner decides: one more confirmation pass on these two small fixes, or the PR as it stands.
+**Not converged at the limit.** The plan's hard stop is three rounds, and the third still had findings, so the
+session did not run a fourth pass on its own: it put the call to the owner — one more confirmation pass on
+these two small fixes, or the PR as it stood.
 The shape of the loop, for that call: 5 findings → 1 → 2. All six Mediums sit inside the one Firefox
 `stopBackground` loop and its unit file; round 1's two Lows were wording. Nothing was ever raised on Chrome,
 the seam, the ported specs or the debt maps. All eight adopted, none refuted.
+
+### Round 4 — approve (converged)
+
+The owner, asked at the three-round stop, chose one more pass scoped to round 3's two fixes ("4th codex pass").
+Codex's whole reply, same session:
+
+> Approve.
+>
+> no new material findings
 
 ## Gate
 
