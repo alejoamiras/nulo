@@ -49,3 +49,9 @@ Also hardened while there: `distributionChannels` entries that are not objects o
 | # | Finding | Verified | Fix |
 |---|---|---|---|
 | M5 | The round-1 hardening turned a present non-array `distributionChannels` into `[]`, so `{ state: "PUBLISHED", distributionChannels: { crxVersion: "99.0.0.0" } }` let `0.27.0.0` upload and publish | yes: reproduced with the runner harness | a present non-array fails preflight ("unreadable distributionChannels"); pure test on both revisions, runner test asserts `fetchStatus` only |
+
+### Round 3 — approve
+
+> verdict: approve — confidence: high; the round-2 finding is resolved at `feb03368`, all earlier fixes remain intact, and no material findings remain; 120 release tests and icon drift checks pass, while store unit tests remain unverified after prior worker timeouts, alongside live WIF/environment protections, store acceptance, builds and E2E.
+
+Arc 1 loop converged (three rounds; transcripts in `audit-codex.md` under "Arc 1 implementation"). The store unit tests codex could not start (vitest workers timed out in its sandbox) were run here: `bun run --cwd apps/extension test -- scripts/store` is green.
