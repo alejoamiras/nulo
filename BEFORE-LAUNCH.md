@@ -67,5 +67,6 @@ re-accept. `git diff <last release tag> -- legal/` answers whether any of this a
 
 - `main`'s required-check cut-over, pending before the next promote:
   [`CLAUDE.md` § Release runbook](./CLAUDE.md#release-runbook), step 1.
-- Firefox `data_collection_permissions` and the Firefox 150+ minimum: tracked in
-  [`legal/README.md`](./legal/README.md), owned by another worktree.
+- Firefox `data_collection_permissions` (`financialAndPaymentInfo`) and the Firefox 153 minimum
+  are settled and pinned by `apps/extension/src/manifest.test.ts`; the reasoning is in
+  `apps/extension/store/listing.md` § Data collection declaration.
