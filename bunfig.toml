@@ -30,10 +30,12 @@ linker = "isolated"
 # CVE bypass: when an advisory drops for a package newer than the gate,
 # temporarily add a `minimumReleaseAgeExcludes = ["<name>"]` entry here,
 # install the patched version, then delete the entry again in the same PR.
-# See SECURITY.md "Dependency policy". No exemption is
-# active: locked versions are never re-gated, so an exclude is only needed
-# while `bun install` writes the young version into bun.lock, and may come
-# out before the window passes (verified with `--frozen-lockfile --force`).
+# See SECURITY.md "Dependency policy". No exemption is active: a frozen
+# install never re-gates, so the exclude comes out as soon as bun.lock holds
+# the young version (verified with `--frozen-lockfile --force`). The cost,
+# until that version is 7 days old: a package.json edit in a workspace that
+# reaches it re-gates it and fails. Wait, or add the exclude locally and do
+# not commit it.
 #
 # Bun bug #25305 (`bun update --latest` skipped this gate for transitive
 # deps on 1.3.x) is CLOSED on Bun 1.4.0 — verified 2026-08-24 with a
