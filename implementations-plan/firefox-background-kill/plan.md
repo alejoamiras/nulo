@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: none (owner asked for a follow-up PR, not a blueprint run)
 code_review: off
 budget: no recon agents (the terrain is mapped in pxe-timer-throttling); foreign reviewer at high; code-review off (standing owner directive)
-status: IMPLEMENTED 2026-09-21 — phases 1–3 ✓ (the owner placed the spike's helper in the tree, so the scoping session carried on); codex fix loop, then the PR
+status: IMPLEMENTED 2026-09-21 — phases 1–3 ✓ (the owner placed the spike's helper in the tree, so the scoping session carried on); codex fix loop stopped at its three-round limit with all eight findings adopted (lessons/phase-3.md) — the owner decides: a fourth pass, or the PR
 ---
 
 # Kill the Firefox background alone: the privileged termination behind the seam, and the port

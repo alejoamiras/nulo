@@ -102,3 +102,6 @@ the seam, the ported specs or the debt maps. All eight adopted, none refuted.
 | `bun run test:ci-gating` | exit 0 |
 | `bun run lint:actions` | exit 0 |
 | `bun run audit:vue` | exit 0 — typecheck:all, extension tests 542 files passed / 3 skipped (6845 tests), lint, then the build |
+
+Re-run after the three codex fix commits, all exit 0: `test:ci-gating`, `lint:actions`, `audit:vue` (542 files
+passed / 3 skipped, 6854 tests — the nine new driver cases — then the build).
