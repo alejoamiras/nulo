@@ -61,9 +61,18 @@ A brand-new Alpha user sees the private-gas nudge and the "Get private gas" prim
   reads `3 /prove requests, 1 successful proofs`; with `VITE_NULO_PRESTO_REQUIRED=1` there is no
   fallback, so each failed proof is a failed test. Attempt 2, same commit: `8 /prove requests, 8
   successful proofs`, 3/3 files green. Shard 3's test never opens Send and passed on the re-run.
-- The canary step prints only proof COUNTS; the presto-server log lines for a failed proof are not in
-  the job log, so the prover-side reason is unknown. Worth a follow-up: tail the log on any
-  `PROVE_COUNT != PROVE_SUCCESS`, not only on zero successes.
+- ~~The prover-side reason is unknown.~~ **Wrong, and corrected two days later.** The workflow
+  already uploads `presto-server.log` as a failure artifact; I never looked. It reads `Failed to fetch
+  release metadata … status=403 Forbidden` → `Cannot verify bb v5.2.0: no digest available from GitHub
+  API` on the first two `/prove` requests, and a clean download + proof on the third, five minutes
+  later. Presto verifies `bb` against the GitHub API before running it; the call is anonymous
+  (60/hour per source address, shared between runners) and was rate-limited. The token fix for exactly
+  this had already merged (the start step passes `GITHUB_TOKEN`) — but `presto-server` 1.1.1, the
+  pinned build, sends no `Authorization` header: token support is on presto's `main`, after the tag.
+  Two halves of one fix, shipped the same day in two repos, that never met. Flake ledger #31 in the
+  `e2e-testing` skill. Closed 2026-09-20: the owner cut `presto-v1.1.2`, which carries the token
+  support, and the pin (version + both SHA-256s) moved to it.
+  Lesson: before writing "unknown", list the run's artifacts.
 
 ## The confidence pass (owner: "do all the things to take you to high")
 

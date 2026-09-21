@@ -347,7 +347,11 @@ const statusNotice = computed(() => {
 })
 
 /** This card's capabilities: both legs, backoff retry while mounted, no
- *  tx-settle refresh and no peek — exactly its pre-store traffic. */
+ *  tx-settle refresh and no peek — exactly its pre-store traffic.
+ *  `txRefresh` must stay off for every subscriber sharing this key while the card is mounted: a
+ *  settle-triggered forced read can outrank the mount's forced read, which then returns without
+ *  committing, and `commitFromEntry` copies `gas.verified` without reading `entry.stale` — so Send
+ *  could resolve on the pre-refresh figure. Turning it on needs a wake on the newer run's commit. */
 const CARD_CAPS = { legs: ["gas", "fpc"], retry: true, txRefresh: false, peek: false }
 
 // Identity of the last fully-committed snapshot. Lets a background refresh

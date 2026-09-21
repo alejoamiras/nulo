@@ -25,7 +25,7 @@ inputs:
       presto-server release version. The tag is `presto-v${version}` and the
       asset is `presto-server-${version}-linux-x86_64.tar.gz`.
     required: false
-    default: "1.1.1"
+    default: "1.1.2"
   expected_tarball_sha256:
     description: |
       Repo-pinned SHA-256 of the release tarball, checked before extraction.
