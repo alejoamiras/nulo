@@ -1,13 +1,13 @@
-<title>Chrome Store Launch Plan</title>
+<title>Store Launch Plan</title>
 <style>
 :root{--bg:#f4f1ea;--panel:#fbf9f4;--ink:#171410;--mute:#6b645b;--rule:#d9d2c6;--acc:#8a5a2b;--acc-ink:#fff;--tag:#ece5d9;--mo:"JetBrains Mono",ui-monospace,Menlo,monospace;--sg:"Space Grotesk",system-ui,sans-serif;--in:"Inter",system-ui,sans-serif}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0c0b0a;--panel:#14120f;--ink:#ece6da;--mute:#9a9184;--rule:#2a2622;--acc:#d1a56a;--acc-ink:#0c0b0a;--tag:#1f1b16}}
 :root[data-theme="dark"]{--bg:#0c0b0a;--panel:#14120f;--ink:#ece6da;--mute:#9a9184;--rule:#2a2622;--acc:#d1a56a;--acc-ink:#0c0b0a;--tag:#1f1b16}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--in);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
-main{max-width:760px;margin:0 auto;padding:48px 24px 96px}
+main{max-width:760px;margin:0 auto;padding:48px 16px 96px}
 h1,h2,h3{font-family:var(--sg);letter-spacing:-.02em;text-wrap:balance;margin:0}
-h1{font-size:38px;line-height:1.05;margin-bottom:12px}
+h1{font-size:clamp(28px,6vw,38px);line-height:1.05;margin-bottom:12px}
 h2{font-size:22px;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--rule)}
 h3{font-size:17px;margin:0 0 6px}
 p{margin:0 0 12px}
@@ -15,72 +15,93 @@ p{margin:0 0 12px}
 .phase{padding:16px 18px;border:1px solid var(--rule);background:var(--panel);margin:12px 0;border-radius:3px}
 .phase .gate{font-size:14px;color:var(--mute);margin:8px 0 0}
 .phase .gate b{color:var(--ink);font-weight:600}
+.arc{font-family:var(--mo);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--acc);margin:22px 0 4px}
 ul,ol{padding-left:20px;margin:0 0 12px}
 li{margin:4px 0}
 .approval{padding:18px 20px;border-left:3px solid var(--acc);background:var(--panel);margin:16px 0}
 .ask{padding:14px 16px;border:1px solid var(--rule);background:var(--panel);margin:10px 0;border-radius:3px}
 .ask b{font-family:var(--sg)}
-.tag{display:inline-block;font-family:var(--mo);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--tag);color:var(--mute);padding:4px 8px;border-radius:2px;margin-right:6px}
+.ask.new{border-color:var(--acc)}
+.tag{display:inline-block;font-family:var(--mo);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--tag);color:var(--mute);padding:4px 8px;border-radius:2px;margin:0 6px 6px 0}
 .tag.hi{background:var(--acc);color:var(--acc-ink)}
 pre{font-family:var(--mo);font-size:12.5px;line-height:1.55;background:var(--panel);border:1px solid var(--rule);padding:14px 16px;white-space:pre-wrap;word-break:break-word;border-radius:3px;overflow-x:auto}
 .warn{font-weight:600;color:var(--acc)}
 .rec{border-color:var(--acc)}
 .muted{color:var(--mute);font-size:14px}
-code{font-family:var(--mo);font-size:.92em}
+code{font-family:var(--mo);font-size:.92em;word-break:break-word}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 4px;font-family:var(--mo);font-size:12px}
+.flow span{border:1px solid var(--rule);background:var(--panel);padding:6px 9px;border-radius:2px}
+.flow i{color:var(--mute);font-style:normal}
 </style>
 <main>
-<p class="eb">blueprint · light · chrome-store-launch · 2026-09-07</p>
-<h1>Getting Nulo V5 onto the Chrome Web Store</h1>
-<p>This plan does the half that lives in the repo: the store name, real icons, the promo tile and screenshots, the listing text with honest answers to Google's questions, a privacy page on nulo.sh, and a publish button in the release workflow that talks to the store's current API. The half that needs you in the room (creating the Workspace account, paying the fee, the first upload, the API credentials, locking down the GitHub environment) is written up as a checklist at the end, for the session where I drive the browser and you supply the codes.</p>
+<p class="eb">blueprint · light · chrome-store-launch · revision 2 · 2026-09-21</p>
+<h1>Getting Nulo V5 onto the Chrome Web Store and Firefox Add-ons</h1>
+<p>This plan does the half that lives in the repo: the store name, real icons, the promo tile and screenshots, one listing text for both stores, an honest Firefox data declaration, a source package Mozilla's reviewers can rebuild, and two publish buttons in the release workflow. The half that needs you in the room (the first upload to each store, the Google Cloud setup, the GitHub environments) is a checklist at the end.</p>
 
-<p><span class="tag hi">tier · light</span><span class="tag">recon 1 agent</span><span class="tag">codex: reject, reject, approve</span><span class="tag">code-review off</span><span class="tag">one PR to dev</span></p>
+<p><span class="tag hi">tier · light</span><span class="tag">recon 2 agents</span><span class="tag" id="codex-tag">codex: see below</span><span class="tag">code-review off</span><span class="tag">two stacked PRs to dev</span></p>
 
-<h2>Why light</h2>
-<p>Every piece is bounded and reversible: a rename, generated images, text files, a static page, and one workflow job that stays switched off until you flip it. The one genuinely dangerous thing, the store credential, is handled by the plan's security section and the checklist, not by more ceremony.</p>
+<h2>What changed since the plan you last saw</h2>
+<ul>
+<li><b>Firefox joined.</b> The Firefox build became first-class on dev on 2026-09-21, and you asked for it to be part of this plan.</li>
+<li><b>Chrome publishing needs no stored secret.</b> GitHub proves who it is to Google for a few minutes at a time, and Google lets it act as a service account that is linked to your store publisher. MetaMask publishes this way. Nothing long-lived sits in GitHub to steal.</li>
+<li><b>The privacy page already exists.</b> Another branch shipped <code>nulo.sh/privacy</code> and <code>/terms</code> from <code>legal/</code>. This plan only links them from the home page and tests that the store listing never disagrees with the policy.</li>
+<li><b>Done on the account side:</b> <code>alejo@nulo.sh</code> with a passkey, Advanced Protection and the third-party app block; the <code>hello@nulo.sh</code> group; the Chrome developer account as a non-trader; nulo.sh verified; the Firefox developer account with two-step sign-in.</li>
+</ul>
+
+<div class="flow" aria-label="How the Chrome publish job authenticates"><span>GitHub job on main, in a locked environment</span><i>→</i><span>short-lived GitHub identity token</span><i>→</i><span>Google checks repo, branch, workflow, environment</span><i>→</i><span>10-minute store token</span><i>→</i><span>upload + submit for review</span></div>
+<p class="muted">Firefox has no equivalent. Mozilla's API takes a key and a secret, so those two values live in their own locked GitHub environment.</p>
 
 <h2>Phases</h2>
-<div class="phase"><h3>1 · Icons and the name</h3><p>The extension becomes "Nulo V5" (that name is what the store shows) and gets a proper 16/32/48/128 icon set generated from the existing 512px mark, with a test that fails if the files ever drift from the generator.</p><p class="gate"><b>Proves itself by:</b> typecheck, lint, the icon test, a production build whose manifest shows the new name and four icons, and the smoke test suite green on the renamed build.</p></div>
-<div class="phase"><h3>2 · Pictures and words</h3><p>Real screenshots of the popup (Home, Send, Settings) taken by the existing test harness, framed at the store's 1280×800, plus a 440×280 promo tile, plus the listing text: title, summary, description, why each permission exists, and Google's data-use answers written from what the wallet actually does.</p><p class="gate"><b>Proves itself by:</b> the files exist at the exact sizes, and a test checks the listing covers every permission in the manifest and stays inside the store's length limits.</p></div>
-<div class="phase"><h3>3 · Privacy page</h3><p><code>nulo.sh/privacy</code>: what stays on your device, what leaves it (the node you use, the price lookup and how to turn it off), what we never collect, backups, passkeys, how to delete everything, how to reach us.</p><p class="gate"><b>Proves itself by:</b> the landing's checks plus a build, and a browser load of the page under the real security policy with no errors.</p></div>
-<div class="phase"><h3>4 · The publish button</h3><p>A small script, no third-party package, that uploads the exact zip from the GitHub Release to the store's v2 API, waits for the upload to process, and submits it for review. A dry-run mode makes no network calls. It only runs when you tick "publish_chrome" on a release; Firefox stays parked.</p><p class="gate"><b>Proves itself by:</b> unit tests (including "no secret ever appears in the output" and "dry run makes zero requests"), lint, actionlint, and a real dry run against a local zip.</p></div>
+<p class="arc">Arc 1 · first PR · shared assets and Chrome</p>
+<div class="phase"><h3>1 · Icons and the name</h3><p>The extension becomes "Nulo V5" and gets real 16/32/48/96/128 icons generated from the 512px mark, with a test that fails if the files drift from the generator. This also clears four icon warnings from Mozilla's linter.</p><p class="gate"><b>Proves itself by:</b> typecheck, lint, the icon test, both production builds, Mozilla's linter at zero errors, and the Chrome smoke suite on the real production bundle.</p></div>
+<div class="phase"><h3>2 · Pictures, words, and the remote-code note</h3><p>Real popup screenshots framed at 1280×800, a 440×280 promo tile, and one listing file with a section per store. Its answers come from a data inventory: what each kind of data is, where it lives, and where it goes. A cited technical note describes exactly what contract bytecode from apps can and cannot reach. The home page gets links to the privacy policy and terms.</p><p class="gate"><b>Proves itself by:</b> exact image sizes, and a test that the listing covers every permission in both manifests and matches the privacy policy's own permission table.</p></div>
+<div class="phase"><h3>3 · The Chrome publish button</h3><p>A small script with no third-party packages uploads the exact zip from the GitHub Release, waits for processing, and submits it for review. It refuses a tag whose commit is not on main, refuses the Firefox zip, and fails closed on any state it does not recognise. A separate, read-only "store check" workflow signs in and reads the item's state without uploading anything.</p><p class="gate"><b>Proves itself by:</b> unit tests (the token never appears in output, a dry run makes zero requests, every unknown state stops before publishing), lint, actionlint, and a dry run against a real release zip.</p></div>
+<p class="arc">Arc 2 · second PR, stacked on the first · Firefox</p>
+<div class="phase"><h3>4 · The Firefox data declaration</h3><p>The manifest stops saying the wallet transmits no data, which contradicts the privacy policy, and declares what it does send. The install prompt is checked in a real Firefox.</p><p class="gate"><b>Proves itself by:</b> tests, the linter at zero errors, and a screenshot of the consent line from a packaged install.</p></div>
+<div class="phase"><h3>5 · A source package reviewers can rebuild</h3><p>Mozilla rebuilds bundled add-ons from source on an ARM64 Ubuntu machine and requires byte-identical output. The plan ships one rebuild script plus a reviewer document, fixes an install hook that currently fails outside a git checkout, and adds a workflow that rebuilds from the source archive on x86 and on ARM and compares both with the build the release ships. Nobody knows yet whether the build is reproducible, or fits in the reviewers' 10 GB. This phase finds out.</p><p class="gate"><b>Proves itself by:</b> three local rebuilds with no differences, measured peak memory, and both CI rebuilds identical to the reference. Any difference fails.</p></div>
+<div class="phase"><h3>6 · The Firefox publish button</h3><p>Same shape as Chrome's, talking to Mozilla's API directly. It uploads the release zip, waits for Mozilla's validation, creates the version with the reviewer notes, and attaches the source archive. If anything fails after the version exists, the error message carries the recovery steps and says not to re-run.</p><p class="gate"><b>Proves itself by:</b> unit tests (neither the secret nor any token derived from it appears in output, wrong zips and an unsettled data declaration are refused before any request), lint, actionlint, and a dry run.</p></div>
 
-<h2>What codex caught (and what changed)</h2>
-<p>Codex rejected the first two drafts, and it was right both times. The store API the draft used is being shut off on 15 October 2026, and I had misread its status words; the plan now uses the current API. The dry-run flag was read from a place that doesn't carry it, which could have published during a dry run; fixed. Turning on "publish" would also have fired the still-stubbed Firefox job and failed the release; Chrome now has its own switch. The publish job would have run whatever code was on the branch you dispatched from; it now runs the script from the release commit itself. "Collects no user data" was not an honest answer for a wallet; the answers now describe the real data flows. Round two caught that locking the shared "production" environment would have blocked normal releases (hence the dedicated environment), that the publish job would have been silently skipped on manual runs without the workflow's <code>always()</code> guard, that the upload polling had no time limit, and that my "only after you approve" claim about remote code was wrong for capability-approved calls. Two questions turned out to be yours, not mine (below).</p>
+<h2>What codex caught this time</h2>
+<p id="codex-summary">Codex rejected the first two drafts of this revision, and every finding held up when I checked it against the repo. The ones that mattered most: a release tag on another branch could have supplied the script that runs with the store credential, so both publish jobs now require the tagged commit to be on main. The source install fails outside a git checkout, which I reproduced, so Mozilla's reviewers could not have rebuilt anything. My rebuild check compared two rebuilds with each other instead of with what ships, and tolerated "documented" differences that Mozilla does not. The Chrome script waited on a status field that need not exist after a fast upload. My credential check lived inside the release workflow, where it would have re-uploaded release assets and fired deploy hooks, and it would have rejected the very submission it was meant to read. I had written that disclosing our patched libraries satisfies Mozilla's rule against modified libraries. It does not. And my remote-code default turned silence from Google's support into a "No".</p>
 
 <h2>Decisions I need from you</h2>
-<div class="ask"><b>1. A separate, locked GitHub environment for the store credentials.</b> The existing "production" environment has no reviewer and admins can bypass it, and it also serves the automatic release path, so locking it would stall normal releases. The plan creates a dedicated <code>chrome-web-store</code> environment that holds only the store secrets, with you as required reviewer, deployments allowed from <code>main</code> only, bypass off. <span class="muted">Default: required before the switch is ever used.</span></div>
-<div class="ask"><b>2. How we answer Google's data questions.</b> Draft: the wallet handles sign-in data and financial data on your device; it sends transactions and balance queries to the network node (our default nodes, or yours) and one fixed price lookup to CoinGecko while unlocked (you can turn it off); we run no servers and collect nothing; nothing is sold or reused. <span class="muted">Confirm this framing.</span></div>
-<div class="ask"><b>3. The "remote code" question is not settled yet.</b> Google forbids extensions that run code fetched from elsewhere. Nulo runs contract bytecode that apps send it, inside the bundled Aztec simulator; some calls run without a per-request confirmation once an app has been granted the capability. Whether Google counts that as "remote code" is a policy call, and the honest technical description has to be written first (the plan adds a cited note, <code>store/remote-code.md</code>, describing exactly what that bytecode can and cannot reach). Options: (a) submit with "No remote code" plus that note, or (b) ask Chrome Web Store developer support for a policy read before the first submission. <span class="muted">Default: (b); a rejection there costs a full review cycle.</span></div>
-<div class="ask"><b>4. Distribution stays Unlisted</b> for the first release; the API keeps whatever visibility the dashboard has. <span class="muted">Default: yes.</span></div>
-<p class="muted">Already decided in chat, not re-asked: the name "Nulo V5"; the Workspace account; publish stays opt-in. One caveat for later: Google rejects duplicate extensions, so the V6 listing will need to state its distinct purpose (a different Aztec regime, not interoperable); a "V6" suffix alone isn't a guarantee.</p>
+<div class="ask"><b>1. Two locked GitHub environments</b>, <code>chrome-web-store</code> and <code>firefox-add-ons</code>: you as required reviewer, main only, admin bypass off. The shared <code>production</code> environment stays as it is. <span class="muted">Default: yes.</span></div>
+<div class="ask new"><b>2. Staged or direct publishing on Chrome.</b> Staged means that after Google approves a version, nothing reaches users until you click Publish in the dashboard, within 30 days. Direct goes live on approval. <span class="muted">Default: staged. It is one setting to change later.</span></div>
+<div class="ask"><b>3. Chrome's data answers.</b> Google's form covers data handled on the device, not only data sent. The draft ticks financial information, authentication information, personal information (contact names) and web history (the sites you connect to), and names each destination: your node, CoinGecko, approved apps, the optional local prover, the proving-parameter hosts, and your passkey provider. <span class="muted">Default: as drafted.</span></div>
+<div class="ask"><b>4. Remote code, both stores.</b> Google lists "building an interpreter to run complex commands fetched from a remote source" as a violation, and exempts code isolated from extension APIs. Nulo runs contract bytecode from apps inside a bundled virtual machine. The bytecode reaches nothing directly, but through the wallet it can cause reads from your node. Phase 2 writes this down precisely. <span class="muted">Default: send that note to both stores' support, then you choose the declaration with their replies in hand. Silence is not a "No". The privacy policy's two "loads no remote code" sentences must end up saying the same thing.</span></div>
+<div class="ask new"><b>5. The Firefox data declaration.</b> "None" means the add-on transmits no data, and the policy says transactions and balance queries go to a node. <span class="muted">Default: declare financial information, which Firefox shows at install. One judgment call: passkey profiles hand a profile label to your authenticator. I read that as the browser acting, not the add-on, and left authentication information out. You can add it.</span></div>
+<div class="ask new"><b>6. The draft banner on the legal pages.</b> Both stores need a reachable privacy policy, and today's has a DRAFT banner and blanks only you can fill. <span class="muted">Default: fill the blanks and set the privacy policy's date before the first submission. The terms stay draft until the listing links exist. None of it blocks the repo work.</span></div>
+<div class="ask new"><b>7. Signed uploads on Chrome: defer.</b> They would stop a hijacked Google login from uploading by hand, but every upload would need a signing key stored as a secret, which undoes the keyless setup, and a lost key costs up to a week. <span class="muted">Default: revisit after the first public listing.</span></div>
+<div class="ask new"><b>8. How Firefox lists it.</b> Firefox has no link-only listing. The choice is a public page with the "experimental" flag, which reduces visibility, or a signed file you host yourself. <span class="muted">Default: public page, experimental flag.</span></div>
+<div class="ask new"><b>9. Mozilla's rule against modified libraries.</b> The build patches two Noir packages and swaps three small modules so the bundle runs under a browser's security policy. Telling reviewers is necessary, but it is not permission. <span class="muted">Default: list the changes exactly and ask Mozilla in the same message as decision 4. If they say no, the fix is upstream work, outside this plan. It blocks only the Firefox submission.</span></div>
+<p class="muted">Already decided: the name "Nulo V5"; Chrome starts Unlisted; publishing stays opt-in; you sign in as alejo@ and hello@ is the public contact; non-trader on Chrome; the Firefox add-on ID and minimum Firefox 153.</p>
 
 <div class="approval">
 <h2 style="border:0;margin:0 0 8px;padding:0">Approval needed from you</h2>
 <ul>
-<li>Scope: the four phases above; nothing on the account side happens in this PR.</li>
-<li>Tier: light; codex rejected twice, approved the third draft.</li>
-<li>Validation: per-phase gates above; the smoke suite runs on the renamed build.</li>
-<li>Delivery: one PR to dev; I watch checks; you merge.</li>
-<li>The four decisions above.</li>
-<li><code>/harden security</code> is recommended before the listing goes public (not scheduled here).</li>
+<li>Scope: the six phases above; nothing on the account side happens in these PRs.</li>
+<li>Tier: light; codex's verdict is recorded in the plan.</li>
+<li>Delivery: two stacked PRs to dev; I watch checks; you merge.</li>
+<li>The nine decisions above. "Approve with defaults" covers them all.</li>
+<li><code>/harden security</code> is recommended before either listing goes public.</li>
 <li>Reply with: approve · conditional approve (conditions) · reject (blocking findings).</li>
 </ul>
 </div>
 
-<h2>After the merge: the session where I need you (~20 min)</h2>
+<h2>After the merges: the session where I need you</h2>
 <ol>
-<li>Google Workspace for nulo.sh (your card; a DNS record I can add on Cloudflare) → <code>hello@nulo.sh</code>.</li>
-<li>Chrome Web Store developer account on that identity: $5 fee, 2FA, identity/trader declaration.</li>
-<li>First item: upload the next release zip, paste the listing, upload the art, set the privacy URL, Unlisted, submit. Note the Publisher ID and Item ID.</li>
-<li>Google Cloud: enable the Web Store API, create an OAuth client, mint a refresh token.</li>
-<li>GitHub: create the <code>chrome-web-store</code> environment from decision 1, then its five secrets.</li>
-<li>A dry run of the publish job (checking the job actually ran, not just that the workflow was green), then the real one on the following release.</li>
+<li>Legal: fill the blanks in <code>BEFORE-LAUNCH.md</code> and the privacy policy's date. Send the remote-code note and the library list to both stores.</li>
+<li>Chrome, by hand: a new item from the next release's zip, the listing and art from <code>store/</code>, Unlisted, submit. Note the two IDs.</li>
+<li>Google Cloud: a small project, a service account with no permissions, the GitHub identity link with its conditions, then add the service account to your store publisher.</li>
+<li>GitHub: create both locked environments. Chrome's holds five plain settings and no secret.</li>
+<li>Firefox, by hand: submit the zip plus the source archive, paste the listing and reviewer notes, then create the API key and paste it into the Firefox environment yourself. I never see it.</li>
+<li>Prove it in two steps: a dry run, which checks wiring only, then the store check, which signs in to each store and reads the item. The first real publish is the next stable release.</li>
 </ol>
 
 <h2>Implementation seeds (draft until approval)</h2>
 <div class="phase rec"><h3>Recommended: /goal</h3>
-<pre>/goal All four phases marked ✓ in implementations-plan/chrome-store-launch/plan.md, each ✓ backed by its validation gate reported passing in the transcript; `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-N.md` printed for each phase; `/code-review` NOT run (code_review is off); the codex fix loop converged on the net diff, evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; one PR from worktree-chrome-store-launch to dev exists (`gh pr view` in the transcript), created only after the loop converged; `gh pr checks` reports every required check green in the transcript; `bun run test` and `bun run lint` both report exit 0 in the transcript.</pre></div>
+<pre>/goal All six phases marked ✓ in implementations-plan/chrome-store-launch/plan.md, each ✓ backed by its validation gate reported passing in the transcript; `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-N.md` printed for each phase; `/code-review` NOT run (code_review is off); the codex fix loop converged once per arc and once across the stack, each evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; two stacked PRs into dev exist (`gh stack view` in the transcript), created only after the loops converged; `gh pr checks` reports every required check green on both PRs in the transcript; `bun run test` and `bun run lint` both report exit 0 in the transcript.</pre></div>
 <h3>Alternative: /loop 15m</h3>
-<pre>/loop 15m Drive implementations-plan/chrome-store-launch forward. Never idle waiting for my input. Each firing: 1. Reality check: read plan.md and lessons/; rebuild the task list from plan.md if empty; `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. 2. Waiting on CI is fine — confirm it is progressing; review the diff meanwhile. 3. No task in hand? Take the next pending phase; after each meaningful edit run `bun run lint` and the touched package's tests; commit and push. 4. Stuck or facing a decision? Call `/codex high`, decide, log it in lessons/phase-N.md; never merge, publish, deploy, touch secrets, or expand scope. 5. Same step failed 5 times? Reassess with codex. 6. Phase green (its validation gate as written in plan.md)? Paste the result, mark ✓, write lessons, print `LESSONS_FILE=…`, advance. 7. All phases ✓? Run the codex fix loop from plan.md's Post-implementation section until a round yields nothing material, then `gh pr create` to dev, `gh pr checks --watch`, write the wrap-up, surface and stop.</pre>
+<pre>/loop 15m Drive implementations-plan/chrome-store-launch forward. Never idle waiting for my input. Each firing: 1. Reality check: read plan.md and lessons/; rebuild the task list from plan.md if empty; `git status`, `git log --oneline -5`; if PRs exist, `gh pr view --json statusCheckRollup`. 2. Waiting on CI is fine — confirm it is progressing; review the diff meanwhile. 3. No task in hand? Take the next pending phase; after each meaningful edit run `bun run lint` and the touched package's tests; commit. 4. Stuck or facing a decision? Call `/codex high`, decide, log it in lessons/phase-N.md; never merge, publish, deploy, touch secrets, or expand scope. 5. Same step failed 3 times? Stop and surface. 6. Phase green (its validation gate as written in plan.md)? Paste the result, mark ✓, write lessons, print `LESSONS_FILE=…`, advance. 7. Arc complete? Run the codex fix loop from plan.md's Post-implementation section until a round yields nothing material. 8. Both arcs ✓? One more codex pass across the stack, then `gh stack submit --auto --open`, `gh pr checks --watch`, write the wrap-up, surface and stop.</pre>
 <p class="warn">Use exactly one per session.</p>
 </main>

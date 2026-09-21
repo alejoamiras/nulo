@@ -375,3 +375,41 @@ Checked and found correct:
 - The planned comment edits preserve useful invariants and remove historical narration. Dropping doc-parity machinery is appropriate.
 
 **Confidence: high** on the concrete workflow, gate and repository findings; **moderate** on Firefox’s final data classification. Other repo-backed Assumptions remain consistent with the inspected files. Live GitHub settings and release-asset sizes could not be independently reconfirmed because API reads failed. No files modified; no builds or tests run.
+
+---
+
+# Revision 2 — round 6
+
+conditional approve
+
+1. **Should-fix — Arc 1 advertises checks it cannot perform.**  
+   **Claim:** `store-check.yml` accepts `chrome | firefox | both`, but Arc 1 contains only its Chrome job ([plan.md:61](implementations-plan/chrome-store-launch/plan.md:61), `:69,95`).  
+   **Evidence:** A Firefox selection has no corresponding job; `both` can complete having checked only Chrome. The account checklist also supplies only the two-store commands (`:205`).  
+   **Smallest fix:** Arc 1 should accept only `chrome`. Add `firefox` and `both` with the Firefox job in Arc 2. Include the Chrome-only account commands and state that `both` requires both environments to be configured.
+
+2. **Should-fix — Trigger-removal timing contradicts itself and leaves evidence transfer unspecified.**  
+   **Claim:** Architecture removes the push trigger in the last Arc 2 commit; Phase 5 removes it in that phase’s last commit ([plan.md:55](implementations-plan/chrome-store-launch/plan.md:55), `:115`).  
+   **Evidence:** Removing it after Phase 5 prevents subsequent implementation/audit fixes from exercising the pre-merge gate. Removing it after the final successful run also produces a different final SHA. A trigger-only change does **not** invalidate the build comparison, but the recorded run does not directly test that final commit.  
+   **Smallest fix:** Keep the trigger through the final fix loop. Remove it in an isolated, trigger-only commit; record that its diff changes no build inputs and rerun actionlint. Any intervening build-input change requires another rebuild run before removal. Reconcile both sections accordingly.
+
+3. **Should-fix — Ask 5 still excludes PII using a contradicted premise.**  
+   **Claim:** `personallyIdentifyingInfo` is excluded because profile names stay local; the remaining passkey judgment concerns only `authenticationInfo` ([plan.md:168](implementations-plan/chrome-store-launch/plan.md:168)).  
+   **Evidence:** The corrected inventory at `:45` acknowledges the exception. `passkey-label.ts:51–53` incorporates the normalized profile name, and `legal/privacy.md:157–160` describes possible authenticator-provider synchronization. Mozilla’s PII category includes names and identifiers. [Mozilla’s taxonomy](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/#taxonomy).  
+   **Smallest fix:** Remove the unconditional “profile names stay local” rationale. Assess both PII and authentication categories under the same browser/authenticator judgment. This does not establish that either category must be added; it establishes that the current exclusion argument is incomplete.
+
+4. **Should-fix — Firefox’s success message assumes an unobserved review state.**  
+   **Claim:** Always print “awaiting review,” because a wallet goes to human review ([plan.md:51](implementations-plan/chrome-store-launch/plan.md:51)).  
+   **Evidence:** Mozilla describes risk-based escalation to human reviewers, not mandatory human review for every wallet submission. AMO exposes distinct version states. [Mozilla’s wallet-review explanation](https://blog.mozilla.org/addons/2025/05/30/crypto-wallet-scams-thwarting-a-new-threat/), [AMO version states](https://mozilla.github.io/addons-server/topics/api/addons.html#version-detail).  
+   **Smallest fix:** Report “version submitted; source attached; check Developer Hub,” or report the actual returned state. Remove the guaranteed-human-review explanation; no additional polling is needed.
+
+Checked and found correct:
+
+- **CEL:** `assertion.workflow_ref in ['…', '…']` is valid list membership in a WIF attribute condition. The surrounding repository, owner, environment, ref and event restrictions remain intact. [WIF conditions](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines#define_an_attribute_condition), [CEL list operators](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md#list-operators).
+- **Check workflow:** Separating it from `release.yml` removes release uploads and deployment hooks. Explicit `MODE`, early check-mode branching and artifact-free checks resolve the previous defects.
+- **Checkout:** Using the triggering `main` commit is appropriate for a credential check with no independent tag input. Default checkout uses the triggering event’s ref/SHA; no release ancestry check is needed there. [Checkout behavior](https://github.com/actions/checkout).
+- **Missing environment:** After Arc 2, selecting `both` with one environment missing can create that environment unprotected, then fail for missing configuration. It does not gain missing credentials. The existing create-and-protect-before-dispatch prerequisite remains essential; no new environment-management layer is necessary. [GitHub behavior](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+- **Reproducibility:** One resolved SHA, mutually exclusive reference jobs, explicit reusable-workflow inputs, distinct artifacts and comparison against the selected reference are coherent.
+- **Gates and sequencing:** Phase 6 no longer needs a future release. The packaged Firefox consent check, legal-date coordination, pre-approval release summary and commit-filtered `--exit-status` watch are substantive fixes.
+- **Facts and comments:** No further contradiction found in the repo-backed Assumptions; the cited implementation files remain unchanged from the previously inspected baseline. The planned comment edits are useful and concise.
+
+**Confidence: high** on workflow and repository findings; **moderate** on Firefox’s ultimate passkey classification. No new blocking credential-boundary defect found. Live account settings and actual rebuild results remain unverified. No files modified, builds run or tests run.
