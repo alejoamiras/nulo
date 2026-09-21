@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon inline + 4 sonnet research agents (owner-requested); foreign reviewer at high; code-review off (standing owner directive)
-status: IN PROGRESS 2026-09-21 — phase 1 ✓, phases 2–3 pending
+status: IN PROGRESS 2026-09-21 — phases 1–2 ✓, phase 3 pending
 ---
 
 # The Firefox PXE host: a frame of the background page, not a throttled window
@@ -179,7 +179,7 @@ reaches a same-page frame (Fact 3); no other module imports the deleted exports 
   so this gate proves the host works, not yet that it is fast.
 - Layers: lint/typecheck · unit · network e2e (one spec, both browsers).
 
-### Phase 2 — Stop masking the throttling
+### Phase 2 — Stop masking the throttling ✓ (2026-09-21, [lessons](./lessons/phase-2.md))
 
 Steps: delete the three prefs; add the guard assertion to `firefox-driver.test.ts`; add `pxeHostState()` to
 the driver and the host-state spec; add `terminateBackground()` and the Firefox background-restart spec (both
@@ -286,7 +286,7 @@ index row; record the follow-ups below in `lessons/phase-3.md`.
 **Asks** (answered at the approval gate, 2026-09-21; the owner's words quoted)
 - A1. Sign-off on the UI impact: the minimized Nulo window disappears on Firefox. — Owner: "so it looks like chrome?" Answered yes: Chrome's offscreen document never had a window, taskbar or dock entry, and Firefox now matches it. Owner: "approved then". **Signed off** — the PR body quotes this exchange.
 - A2. Tier `light` and the fix shape "frame host, window path deleted (no fallback)". — Owner: "Everything else ok". **Approved.**
-- A3. The Firefox background-restart spec and `terminateBackground()` driver method ride in this plan; porting the other background-kill specs stays a follow-up. — Owner: "Everything else ok". **Approved.**
+- A3. The Firefox background-restart spec and `terminateBackground()` driver method ride in this plan; porting the other background-kill specs stays a follow-up. — Owner: "Everything else ok". **Approved.** *Implementation note (Phase 2):* the spec ends the background with the public `runtime.reload()` rather than the privileged termination call — see [`lessons/phase-2.md`](./lessons/phase-2.md) § Deviation; the assertions are as planned, and the mechanism is an open ask for the owner.
 - A4. Accept the lifetime contract and the platform gap (no Windows measurement). — Owner: "yes, sure... But when would that background page close?" **Accepted**; the question is answered in § Non-obvious mechanics ("When the background page ends").
 
 ## Delivery

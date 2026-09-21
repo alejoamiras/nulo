@@ -6,8 +6,9 @@ import * as puppeteer from "puppeteer"
 import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
+import { LOCATE_BACKGROUND_PAGE, evaluateViaFrameScript } from "./firefox-frame-script"
 import { observeAndRefuse } from "./firefox-rpc-intercept"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, PxeHostState, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
 	type LaunchOwnership,
@@ -229,6 +230,18 @@ const PRICE_HOST_BLACKHOLE = `data:text/javascript,${encodeURIComponent(
 	'function FindProxyForURL(url, host) { return host === "api.coingecko.com" ? "PROXY 127.0.0.1:1" : "DIRECT" }',
 )}`
 
+/**
+ * Every pref the suite launches Firefox with. Exported so a unit test can hold the list to what the
+ * wallet's users run with: a pref that masks timer throttling would hide the slowdown the PXE host
+ * is placed in the background page to avoid.
+ */
+export const FIREFOX_LAUNCH_PREFS = {
+	// Without both of these the virtual authenticator is never consulted and
+	// `credentials.create` never settles — it does not fail, it hangs.
+	"security.webauth.webauthn_enable_softtoken": true,
+	"security.webauth.webauthn_enable_usbtoken": false,
+}
+
 function capabilities({ profileDir, headless }: { profileDir: string; headless: boolean }): Record<string, unknown> {
 	return {
 		...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? { proxy: { proxyType: "pac", proxyAutoconfigUrl: PRICE_HOST_BLACKHOLE } } : {}),
@@ -238,18 +251,7 @@ function capabilities({ profileDir, headless }: { profileDir: string; headless: 
 		"moz:firefoxOptions": {
 			binary: resolveFirefoxBinary(),
 			args: ["-profile", profileDir, ...(headless ? ["-headless"] : [])],
-			prefs: {
-				// Without both of these the virtual authenticator is never consulted and
-				// `credentials.create` never settles — it does not fail, it hangs.
-				"security.webauth.webauthn_enable_softtoken": true,
-				"security.webauth.webauthn_enable_usbtoken": false,
-				// The PXE lives in a minimized window, and Firefox clamps a background window's
-				// timers to one a second and then budgets them further. The Chrome driver turns
-				// the same behaviour off with its backgrounding flags.
-				"dom.min_background_timeout_value": 4,
-				"dom.min_background_timeout_value_without_budget_throttling": 4,
-				"dom.timeout.enable_budget_timer_throttling": false,
-			},
+			prefs: FIREFOX_LAUNCH_PREFS,
 		},
 	}
 }
@@ -322,10 +324,10 @@ async function reloadExtensionPage(page: Page): Promise<void> {
 }
 
 /**
- * A new *tab* goes into the most recently focused window, and once the wallet has started its PXE
- * that is the minimized window hosting it. A page in there is never visible: no animation frames,
- * so every Vue transition freezes half-way, and it is not the active tab, which WebAuthn requires.
- * A window of its own is visible whatever the wallet has opened.
+ * A new *tab* goes into the most recently focused window, which can be one the wallet opened — an
+ * approval window — rather than the suite's own. A page there is not the active tab, which WebAuthn
+ * requires, and may never be visible: no animation frames, so every Vue transition freezes
+ * half-way. A window of its own is visible whatever the wallet has opened.
  */
 const newPage = (browser: Browser): Promise<Page> => browser.newPage({ type: "window" })
 
@@ -345,11 +347,39 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
 }
 
 /**
- * Headless Firefox hands focus to every window the wallet opens, its minimized PXE window
- * included, and refuses WebAuthn from any window but the focused one. A person's click would have
- * focused the page; a scripted one has to be given that.
+ * Headless Firefox hands focus to every window the wallet opens and refuses WebAuthn from any
+ * window but the focused one. A person's click would have focused the page; a scripted one has to
+ * be given that.
  */
 const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
+
+/** Evaluates `body` (a function body; `content` is the background window) in the background page. */
+export function evaluateInBackgroundPage<T>(browser: Browser, body: string): Promise<T> {
+	const { session, addonId } = contextFor(browser)
+	return evaluateViaFrameScript<T>(
+		session,
+		{ addonId, locate: LOCATE_BACKGROUND_PAGE, missing: "the background page is not running" },
+		body,
+	)
+}
+
+/** The PXE host is a frame of the background page: how many, and each frame's own visibility. */
+const PXE_HOST_STATE = `
+	const frames = [...content.document.querySelectorAll("iframe")];
+	return { count: frames.length, visibility: frames.map((frame) => frame.contentDocument?.visibilityState ?? "unloaded") };`
+
+export interface BackgroundIdentity {
+	/** The background page's own `performance.timeOrigin`: a new value is a new page. */
+	timeOrigin: number
+	/** The `src` of every PXE host frame; the generation in its query names the frame. */
+	hosts: string[]
+}
+
+const BACKGROUND_IDENTITY = `
+	return { timeOrigin: content.performance.timeOrigin, hosts: [...content.document.querySelectorAll("iframe")].map((frame) => frame.src) };`
+
+/** Rejects while the background page is not running. */
+export const backgroundIdentity = (browser: Browser): Promise<BackgroundIdentity> => evaluateInBackgroundPage(browser, BACKGROUND_IDENTITY)
 
 const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
 
@@ -499,6 +529,7 @@ export const firefoxDriver: BrowserDriver = {
 	pickFile,
 	virtualAuthenticator,
 	holdNextCredentialGet,
+	pxeHostState: (page) => evaluateInBackgroundPage<PxeHostState>(page.browser(), PXE_HOST_STATE),
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
 }

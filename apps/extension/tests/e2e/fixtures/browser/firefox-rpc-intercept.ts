@@ -11,7 +11,7 @@ interface Tally {
 
 /**
  * Firefox's counterpart of the CDP interception. One observer in the parent process sees every
- * HTTP channel the browser opens — the background script's, the PXE window's, a popup's — before
+ * HTTP channel the browser opens — the background script's, the PXE frame's, a popup's — before
  * it connects, so there is no target to arm and no first request to race. The observer is held by
  * the browser window privileged scripts run in, which outlives every window a test opens.
  *

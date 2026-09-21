@@ -1,11 +1,20 @@
 import { describe, expect, test, vi } from "vitest"
 import {
+	FIREFOX_LAUNCH_PREFS,
 	type SilentCloseWatch,
 	abandonSession,
 	firefoxDirFor,
 	silentlyClosed,
 	uuidFromPrefs,
 } from "../../tests/e2e/fixtures/browser/firefox"
+
+/** The PXE host is placed where Firefox's timer throttling cannot reach it; the suite must run under
+ *  that throttling, as its users do, so a regression shows as a slow send rather than staying hidden. */
+describe("launch prefs", () => {
+	test("no pref masks timer throttling", () => {
+		expect(Object.keys(FIREFOX_LAUNCH_PREFS).filter((key) => /timeout|throttl/i.test(key))).toEqual([])
+	})
+})
 
 /**
  * Puppeteer's own `executablePath({ browser: "firefox" })` composes the Firefox path from the

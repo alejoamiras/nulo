@@ -350,8 +350,8 @@ describe("browser seam", () => {
 		expect(found.wait).toEqual(WAIT_DEBT)
 	})
 
-	// Firefox puts a new tab in the most recently focused window, which is the wallet's minimized
-	// PXE window: a page opened there is never visible, never animates and cannot run WebAuthn.
+	// Firefox puts a new tab in the most recently focused window, which can be one the wallet
+	// opened: a page opened there can be hidden, never animate and cannot run WebAuthn.
 	test("no page is opened outside the seam — use newPage()", () => {
 		expect(found.page).toEqual([])
 	})
