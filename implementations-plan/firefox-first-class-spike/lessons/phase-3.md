@@ -57,3 +57,7 @@ The first local run of `bun run test:e2e` failed one case — `fixture-arming co
 Full Chrome smoke, against a build made with `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 build:chrome` and run with `NULO_E2E_MIGRATION_FIXTURE=1`: **32 files passed, 1 skipped; 123 tests passed, 6 skipped, 0 failed.**
 
 The two Chrome CI dispatches are held until the arc's review findings are applied, since the plan binds their acceptance to an exact SHA and any later commit on this arc invalidates them.
+
+## Arc 3 boundary — codex fix loop (GPT-6 Astra, `high`) — converged
+
+Round 2 was a conditional approve on two conditions: close the transparent-wrapper bypasses (done in `52d1d7b3`) and have both Chrome workflows green on the arc's own final SHA. Resumed with the fix: **"no new material findings in `52d1d7b3`"** — seven wrapper probes pass, malformed source throws, 158 non-exempt files scan clean — with the CI condition still open, because the follow-up cited arc 4's runs by mistake. The evidence was on the right SHA all along: `firefox-browser-seam` ends at `026eb7ea` (one docs commit over `52d1d7b3`, code identical), and `Extension smoke e2e` and `Extension network e2e` both concluded `success` there by `workflow_dispatch`. Resumed once more with that: **"approve … the condition is satisfied. no new material findings."**

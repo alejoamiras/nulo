@@ -1,7 +1,7 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { CDPSession, Page, Target } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./browser"
+import { assertChromeOnly, reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 
@@ -99,7 +99,7 @@ export async function waitForLockScreen(page: Page, timeoutMs = 60_000): Promise
 	// If the redirect lost the race, reload: a fresh popup derives the locked
 	// state from storage and routes to /popup/auth (the real reopen path).
 	if (!(await page.evaluate(() => window.location.hash.includes("/popup/auth")))) {
-		await page.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(page)
 	}
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
@@ -987,7 +987,7 @@ export async function seedUsdQuoteAndReload(page: Page): Promise<void> {
 		const state = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
 	})
-	await page.reload({ waitUntil: "domcontentloaded" })
+	await reloadExtensionPage(page)
 	await page.waitForFunction(() => window.location.hash === "#/popup/general", { timeout: 15_000 })
 }
 
@@ -2005,7 +2005,7 @@ export function findServiceWorkerTarget(ext: ExtensionContext): Target | undefin
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	// Without this the target wait below would burn its whole budget and report a worker that was
 	// slow to appear, when the truth is that the file should never have run on this browser.
-	if (isFirefox) throw new Error(`stopServiceWorker is Chrome-only: ${CHROME_ONLY.backgroundKill}`)
+	assertChromeOnly("backgroundKill", "stopServiceWorker")
 	const isExtensionWorker = (t: Target) => isServiceWorkerTarget(ext, t)
 	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
 	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)

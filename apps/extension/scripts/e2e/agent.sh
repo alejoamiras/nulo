@@ -18,19 +18,11 @@ cd "$(dirname "$0")/../.."
 # fail as an inscrutable multi-minute timeout instead of an error). Those
 # files carry a formal `@requires-proverless` marker line; running any of
 # them unarmed is refused HERE, before a single port or build cycle is spent.
-VITEST_CONFIG="${NULO_E2E_VITEST_CONFIG:-vitest.e2e.network.config.ts}"
-# With no file arguments the run executes whatever the config includes, so the scan has to follow
-# the config. Scanning the network tree for a probes run aborts it over files it will never run.
-case "$VITEST_CONFIG" in
-  vitest.e2e.probes.config.ts) default_scan_target=tests/e2e/probes ;;
-  *) default_scan_target=tests/e2e/network ;;
-esac
-
 if [ "${NULO_E2E_PROVERLESS:-}" != "1" ]; then
   if [ "$#" -gt 0 ]; then
     marker_scan_targets=("$@")
   else
-    marker_scan_targets=("$default_scan_target")
+    marker_scan_targets=(tests/e2e/network)
   fi
   marked_files=$(grep -rls "@requires-proverless" "${marker_scan_targets[@]}" 2>/dev/null || true)
   if [ -n "$marked_files" ]; then
@@ -219,7 +211,7 @@ AZTEC_ADMIN_PORT="$AZTEC_ADMIN_PORT" \
 AZTEC_P2P_PORT="$AZTEC_P2P_PORT" \
 PLAYGROUND_URL="$PLAYGROUND_URL" \
 PLAYGROUND_PORT="$PLAYGROUND_PORT" \
-  bun run vitest run --config "$VITEST_CONFIG" "$@"
+  bun run vitest run --config vitest.e2e.network.config.ts "$@"
 VITEST_EXIT=$?
 set -e
 

@@ -10,7 +10,7 @@ import {
 	MIGRATION_FIXTURE_ROOT,
 	MIGRATION_FIXTURE_VERSION,
 } from "@/e2e/migration-fixture"
-import { extensionUrl, gotoExtensionPage } from "./fixtures/browser"
+import { extensionUrl, gotoExtensionPage, newPage } from "./fixtures/browser"
 import { type ExtensionContext, launchExtension, openPopup } from "./fixtures/extension"
 
 /**
@@ -130,7 +130,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 	 *  a connected app. */
 	async function relaunch(): Promise<Page> {
 		ctx = await launchExtension({ userDataDir: profileDir, waitForLiveness: false })
-		const page = await ctx.browser.newPage()
+		const page = await newPage(ctx.browser)
 		await gotoExtensionPage(page, extensionUrl(ctx.extensionId, "/src/popup/index.html"))
 		return page
 	}

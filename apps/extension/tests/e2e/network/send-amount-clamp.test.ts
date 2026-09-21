@@ -77,7 +77,7 @@ test.skipIf(!hasConfig)(
 		const clamped = await page.evaluate(() => (document.querySelector('[data-testid="send-amount-input"]') as HTMLInputElement)?.value)
 		expect(clamped.length).toBeLessThan("1.1234567890123456789".length)
 		// Sanity: the clamp leaves a valid decimal-form string.
-		expect(/^\d+(\.\d+)?$/.test(clamped)).toBe(true)
+		expect(clamped).toMatch(/^\d+(\.\d+)?$/)
 
 		// Hint is rendered when clamping fired.
 		await page.waitForSelector('[data-testid="send-amount-clamp-hint"]', { visible: true, timeout: 5_000 })

@@ -328,7 +328,6 @@ async function reconcilePriorLock(): Promise<"reused" | "fresh"> {
 				weStartedAnvil = false
 				weStartedNode = false
 				weStartedPlayground = false
-				weStartedTools = false
 				AZTEC_DATA_DIR = priorLock.aztecDataDir
 				return "reused"
 			}

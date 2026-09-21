@@ -35,7 +35,7 @@ export const newLaunchMarker = (): string => randomUUID()
 
 export interface LaunchOwnership {
 	marker: string
-	/** The process we spawned. Names the record file and the log line; never an identity. */
+	/** The process we spawned. For the log line only; never an identity. */
 	pid: number
 	/** The test run that spawned it. A record whose owner is still alive belongs to a run in
 	 *  progress — possibly another agent's — and is never an orphan. Pid plus start time is sound
@@ -164,6 +164,13 @@ function recordFiles(): string[] {
 	} catch {
 		return []
 	}
+}
+
+/** Persisted, not just set: a sweep reads the record from disk, and a run that dies before its
+ *  own cleanup would otherwise leave one that still authorises deleting the profile. */
+export function disownProfile(record: LaunchOwnership): void {
+	record.ownsProfile = false
+	recordLaunch(record)
 }
 
 /** Every well-formed record on disk, this run's and other runs'. */

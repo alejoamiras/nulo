@@ -2,12 +2,15 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
-import type { Browser, Page, Target } from "puppeteer"
+import * as puppeteer from "puppeteer"
+import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
+	type LaunchOwnership,
+	disownProfile,
 	newLaunchMarker,
 	newProfileDir,
 	ownedByThisRun,
@@ -46,6 +49,29 @@ function contextFor(browser: Browser): LaunchContext {
 
 export const classicSessionFor = (browser: Browser): WebDriverSession => contextFor(browser).session
 
+/**
+ * Ends a session the launch refuses to keep: its Firefox holds this launch's profile. If the
+ * session cannot be ended, that Firefox may carry a marker this launch cannot see, so the profile
+ * is disowned — left on disk — rather than deleted under a live process.
+ */
+export async function abandonSession(
+	session: Pick<WebDriverSession, "close">,
+	record: LaunchOwnership,
+	cause: unknown,
+	disown: (record: LaunchOwnership) => void = disownProfile,
+): Promise<never> {
+	try {
+		await session.close()
+	} catch (closeErr) {
+		disown(record)
+		const text = (err: unknown) => (err instanceof Error ? err.message : String(err))
+		throw new Error(`${text(cause)}; the session could not be ended (${text(closeErr)}), so ${record.profileDir} was left in place`, {
+			cause,
+		})
+	}
+	throw cause
+}
+
 /** One sweep per process, before the first launch claims ports or writes a record. */
 let sweep: Promise<string[]> | undefined
 
@@ -75,11 +101,17 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 		record.label = `geckodriver:${base}`
 		recordLaunch(record)
 
-		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }))
-		assertVersion(session.capabilities.browserVersion)
-		// Teardown owns a process by the marker in its environment. A Firefox that did not inherit
-		// it would outlive every release unnoticed, so that is a launch failure, not a later leak.
-		if (ownedProcesses(marker).length < 2) throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
+		const running = () => gecko.exitCode === null && gecko.signalCode === null
+		const session = await WebDriverSession.open(base, capabilities({ profileDir, headless }), running)
+		try {
+			assertVersion(session.capabilities.browserVersion)
+			// Teardown owns a process by the marker in its environment. A Firefox that did not inherit
+			// it would outlive every release unnoticed, so that is a launch failure, not a later leak.
+			if (ownedProcesses(marker).length < 2)
+				throw new Error("Firefox did not inherit the launch marker, so teardown could not own it")
+		} catch (err) {
+			await abandonSession(session, record, err)
+		}
 		const addonId = await session.installAddon(extensionPath)
 		const attachment = await attachPuppeteerOverBiDi(session.capabilities, session.sessionId)
 		const { browser } = attachment
@@ -106,8 +138,9 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 }
 
 /**
- * The reservations are held until the moment before spawn: geckodriver binds both ports
- * immediately, so there is no gap for the kernel to hand one to an outgoing connection.
+ * The reservations are held until the moment before spawn. Another launch can still win a port in
+ * that window; geckodriver then exits on the failed bind, which `WebDriverSession.open` reports
+ * instead of opening a session on the winner's geckodriver.
  */
 async function spawnGeckodriver(marker: string): Promise<{ gecko: ChildProcess & { pid: number }; base: string }> {
 	const reserved = [await reservePort()]
@@ -146,17 +179,18 @@ function geckodriverPath(): string {
 	return configured ?? "geckodriver"
 }
 
-/** Newest first, by the version digits in a Puppeteer cache directory name. */
-export function newestFirefoxDir(dirs: readonly string[]): string | undefined {
-	const digits = (dir: string): number[] => (dir.match(/\d+/g) ?? []).map(Number)
-	return [...dirs].sort((a, b) => {
-		const [va, vb] = [digits(a), digits(b)]
-		for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-			const delta = (vb[i] ?? 0) - (va[i] ?? 0)
-			if (delta !== 0) return delta
-		}
-		return 0
-	})[0]
+/** Cache directories are `<platform>-<revision>`. The cache is shared by every checkout on the
+ *  host, so "newest" would let another worktree's install change this one's browser. */
+export const firefoxDirFor = (dirs: readonly string[], revision: string): string | undefined =>
+	dirs.find((dir) => dir.endsWith(`-${revision}`))
+
+/** The revision the locked Puppeteer installs. Exported at runtime but absent from the typings,
+ *  so an upgrade that moves it fails here by name rather than as "no Firefox installed". */
+function lockedFirefoxRevision(): string {
+	const revision = (puppeteer as unknown as { PUPPETEER_REVISIONS?: { firefox?: string } }).PUPPETEER_REVISIONS?.firefox
+	if (!revision)
+		throw new Error("puppeteer no longer exports PUPPETEER_REVISIONS.firefox — set FIREFOX_PATH, or update lockedFirefoxRevision")
+	return revision
 }
 
 /**
@@ -172,13 +206,28 @@ function resolveFirefoxBinary(): string {
 	}
 	const root = path.join(process.env.PUPPETEER_CACHE_DIR ?? path.join(homedir(), ".cache", "puppeteer"), "firefox")
 	const installed = (existsSync(root) ? readdirSync(root) : []).filter((dir) => existsSync(path.join(root, dir, "firefox", "firefox")))
-	const newest = newestFirefoxDir(installed)
-	if (!newest) throw new Error(`no Firefox installed under ${root} — run \`bunx puppeteer browsers install firefox\` or set FIREFOX_PATH`)
-	return path.join(root, newest, "firefox", "firefox")
+	const revision = lockedFirefoxRevision()
+	const pinned = firefoxDirFor(installed, revision)
+	if (!pinned) {
+		throw new Error(
+			`Firefox ${revision} is not installed under ${root} — run \`bun x puppeteer browsers install firefox\` from apps/extension, or set FIREFOX_PATH`,
+		)
+	}
+	return path.join(root, pinned, "firefox", "firefox")
 }
+
+/**
+ * Artifact mode runs the production bundle, where a resolved quote breaks the fresh-wallet fiat
+ * specs — the Chrome driver's resolver rule has the full reasoning. Only the price host is sent to
+ * a dead port; everything else, the RPC included, stays direct.
+ */
+const PRICE_HOST_BLACKHOLE = `data:text/javascript,${encodeURIComponent(
+	'function FindProxyForURL(url, host) { return host === "api.coingecko.com" ? "PROXY 127.0.0.1:1" : "DIRECT" }',
+)}`
 
 function capabilities({ profileDir, headless }: { profileDir: string; headless: boolean }): Record<string, unknown> {
 	return {
+		...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? { proxy: { proxyType: "pac", proxyAutoconfigUrl: PRICE_HOST_BLACKHOLE } } : {}),
 		// Asks geckodriver for a BiDi endpoint on the session it owns, which is what makes one
 		// browser drivable from both channels at once.
 		webSocketUrl: true,
@@ -190,6 +239,12 @@ function capabilities({ profileDir, headless }: { profileDir: string; headless: 
 				// `credentials.create` never settles — it does not fail, it hangs.
 				"security.webauth.webauthn_enable_softtoken": true,
 				"security.webauth.webauthn_enable_usbtoken": false,
+				// The PXE lives in a minimized window, and Firefox clamps a background window's
+				// timers to one a second and then budgets them further. The Chrome driver turns
+				// the same behaviour off with its backgrounding flags.
+				"dom.min_background_timeout_value": 4,
+				"dom.min_background_timeout_value_without_budget_throttling": 4,
+				"dom.timeout.enable_budget_timer_throttling": false,
 			},
 		},
 	}
@@ -258,6 +313,18 @@ async function gotoExtensionPage(page: Page, url: string): Promise<void> {
 	await classicSessionFor(page.browser()).navigateWindow(contextIdOf(page), url)
 }
 
+async function reloadExtensionPage(page: Page): Promise<void> {
+	await classicSessionFor(page.browser()).refreshWindow(contextIdOf(page))
+}
+
+/**
+ * A new *tab* goes into the most recently focused window, and once the wallet has started its PXE
+ * that is the minimized window hosting it. A page in there is never visible: no animation frames,
+ * so every Vue transition freezes half-way, and it is not the active tab, which WebAuthn requires.
+ * A window of its own is visible whatever the wallet has opened.
+ */
+const newPage = (browser: Browser): Promise<Page> => browser.newPage({ type: "window" })
+
 /**
  * The popup closes itself when onboarding is unfinished and no profile exists, and Firefox honours
  * that `window.close()` where Chrome ignores it on a tab no script opened. Preload scripts do not
@@ -267,10 +334,72 @@ async function gotoExtensionPage(page: Page, url: string): Promise<void> {
  * launch, which is the state where the popup stays and the onboarding page would not.
  */
 async function openScratchPage(browser: Browser, extensionId: string, { freshProfile }: { freshProfile: boolean }): Promise<Page> {
-	const page = await browser.newPage()
+	const page = await newPage(browser)
 	const path = freshProfile ? "/src/onboarding/index.html" : "/src/popup/index.html"
 	await gotoExtensionPage(page, `${SCHEME}${extensionId}${path}`)
 	return page
+}
+
+/**
+ * Headless Firefox hands focus to every window the wallet opens, its minimized PXE window
+ * included, and refuses WebAuthn from any window but the focused one. A person's click would have
+ * focused the page; a scripted one has to be given that.
+ */
+const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
+
+const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
+
+/**
+ * Firefox refuses a file picker without a user gesture, and an evaluated click is not one, so no
+ * chooser event ever comes. The wallet appends its `<input type="file">` to the body before asking
+ * for the picker and removes it on `change`, so the file goes straight into that pending input.
+ */
+async function pickFile(page: Page, open: () => Promise<void>, filePath: string): Promise<void> {
+	// An abandoned pick leaves its input behind, and the file would go to that dead request.
+	await page.evaluate(() => {
+		for (const stale of document.querySelectorAll('body > input[type="file"]')) stale.setAttribute("data-e2e-stale", "")
+	})
+	await open()
+	await page.waitForSelector(PENDING_FILE_INPUT, { timeout: 10_000 })
+	// Re-queried: the suite's pages replace `waitForSelector` with one that returns no handle.
+	const input = await page.$(PENDING_FILE_INPUT)
+	if (!input) throw new Error("pickFile: the click opened no file input")
+	await (input as ElementHandle<HTMLInputElement>).uploadFile(filePath)
+}
+
+/**
+ * BiDi has no WebAuthn module, so the authenticator is added over the classic channel. It is scoped
+ * to the session rather than to a page, so one serves every window and — unlike Chrome's — a
+ * credential outlives the window that created it.
+ */
+async function virtualAuthenticator(browser: Browser): Promise<VirtualAuthenticator> {
+	const session = classicSessionFor(browser)
+	const authenticatorId = await session.addVirtualAuthenticator({
+		protocol: "ctap2_1",
+		transport: "internal",
+		hasResidentKey: true,
+		hasUserVerification: true,
+		isUserVerified: true,
+		extensions: ["prf"],
+	})
+	return { cleanup: () => session.removeVirtualAuthenticator(authenticatorId).catch(() => {}) }
+}
+
+/**
+ * Firefox answers a request it has no authenticator for at once, and nothing in WebDriver holds a
+ * ceremony open, so the page's own `get` is replaced by one that settles only on the caller's
+ * abort — which is the path a cancel takes.
+ */
+async function holdNextCredentialGet(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		navigator.credentials.get = (options) =>
+			new Promise((_, reject) => {
+				const abort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+				// An aborted signal never fires the event again, so one aborted before this runs is lost.
+				if (options?.signal?.aborted) abort()
+				options?.signal?.addEventListener("abort", abort)
+			})
+	})
 }
 
 /** `targets()` is a synchronous read of Puppeteer's own map, so a tight poll costs no round trip. */
@@ -346,8 +475,14 @@ export const firefoxDriver: BrowserDriver = {
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
 	discoverExtensionId,
 	gotoExtensionPage,
+	reloadExtensionPage,
+	newPage,
 	openScratchPage,
 	waitForTarget,
+	prepareClick,
+	pickFile,
+	virtualAuthenticator,
+	holdNextCredentialGet,
 	// Firefox reports a closed window as a missing browsing context, per command.
-	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext/i,
+	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
 }

@@ -11,6 +11,7 @@ process.env.NULO_E2E_DATA_ROOT = ROOT
 
 const {
 	LAUNCH_ENV,
+	disownProfile,
 	listOwnedLaunches,
 	newLaunchMarker,
 	newProfileDir,
@@ -57,7 +58,9 @@ async function until(condition: () => boolean, timeoutMs = 3_000): Promise<void>
 	while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
-describe("webdriver launch ownership", () => {
+// Ownership is read from `/proc/<pid>/environ`, so the Firefox driver — and these cases — are
+// Linux-only. The unit suite still has to pass for a Chrome-only developer elsewhere.
+describe.skipIf(process.platform !== "linux")("webdriver launch ownership", () => {
 	afterAll(() => {
 		for (const pid of markers.flatMap((marker) => ownedProcesses(marker))) {
 			try {
@@ -140,6 +143,17 @@ describe("webdriver launch ownership", () => {
 		expect(await reapOrphanLaunches()).toContain("orphan")
 		expect(ownedProcesses(marker)).toEqual([])
 		expect(existsSync(profileDir)).toBe(false)
+	})
+
+	test("a disowned profile survives the sweep of a run that died before its own cleanup", async () => {
+		const marker = launchMarker()
+		const profileDir = newProfileDir(marker)
+		const record = orphaned({ marker, pid: 0, profileDir, ownsProfile: true, label: "disowned" })
+		recordLaunch(record)
+		disownProfile(record)
+		expect(await reapOrphanLaunches()).toContain("disowned")
+		expect(existsSync(profileDir)).toBe(true)
+		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
 	})
 
 	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.

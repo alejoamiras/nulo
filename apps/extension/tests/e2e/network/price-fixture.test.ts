@@ -12,6 +12,7 @@
  */
 
 import { expect, inject } from "vitest"
+import { reloadExtensionPage } from "../fixtures/browser"
 import { test, openPopup, waitForHash } from "../fixtures/extension"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -36,7 +37,7 @@ test.skipIf(!hasConfig)(
 		})
 
 		// Remount so usePrices' stale-on-connect read picks the cache up.
-		await page.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(page)
 		await waitForHash(page, "#/popup/general")
 
 		// Non-zero public FJ (fixture pre-funds) + usable quote → fiat line.
