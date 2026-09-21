@@ -32,7 +32,7 @@ const navigationLinks = [
 </script>
 
 <template>
-	<nav :class="$style.wrapper">
+	<nav :class="$style.wrapper" data-testid="bottom-nav">
 		<RouterLink
 			v-for="link in navigationLinks"
 			:to="link.path"

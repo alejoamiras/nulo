@@ -19,6 +19,10 @@ body {
 	-webkit-user-select: text;
 }
 
+* {
+	scrollbar-width: revert;
+}
+
 *::-webkit-scrollbar {
 	display: revert;
 }

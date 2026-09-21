@@ -120,7 +120,7 @@ Fast layers (`bun run lint`, `bun run typecheck`) run after every meaningful ste
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/wallet/utils/passkey-ceremony.test.ts && bun run audit:vue` — all exit 0, the six cases listed as passed. Layers: lint, typecheck, unit, build.
 
-### Phase 2 — Firefox manifest items
+### Phase 2 — Firefox manifest items ✓
 
 `data_collection_permissions: { required: ["none"] }`, `strict_min_version: "153.0"`, gecko id unchanged (`wallet@nulo.sh`) — the owner's answers to A1–A3; `manifest.test.ts` pins all three.
 
@@ -193,7 +193,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** `bun run lint` and `bash scripts/check-no-brand.sh` exit 0; every path and command named in new doc text exists (spot check logged in `lessons/phase-8.md`). Layers: lint, path guard.
 
-### Phase 9 — Every shipped file under the linter's parse limit (light amendment, 2026-09-20)
+### Phase 9 — Every shipped file under the linter's parse limit (light amendment, 2026-09-20) ✓
 
 **Why.** `addons-linter` refuses to parse any non-binary file (JS, CSS, HTML, JSON) of 5 MiB or more and reports `FILE_TOO_LARGE` — an error, and a file nobody scanned. The Firefox bundle has one: `assets/offscreen-*.js`, 20.3 MB. Phase 2's gate (`web-ext lint` → 0 errors) cannot pass until it is gone.
 
@@ -223,6 +223,26 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 4. **The size cut (`maxSize`) is gone — it broke the offscreen page at runtime.** Three of the pieces it cut imported each other, and the one that ran first read `l1ContractsConfigMappings` as `undefined` (`can't access property "aztecSlotDuration", e is undefined`, 27 times in the Firefox smoke; the wallet never started). The bundle built, linted and passed every unit test. Rolldown's own answer, `output.strictExecutionOrder`, is unusable here: it wraps every module, and @crxjs 2.7.1 decodes its manifest by taking the last string literal of the manifest chunk, which the wrapper's runtime import then is. So the cut is structural instead (`scripts/vendor-chunks.ts`): one chunk per package for the proving/simulation/contract scopes (`@aztec/`, `@noir-lang/`, `@aztec-foundation/`, `@alejoamiras/`), each JSON module of those packages cut out first into a chunk of its own, everything else left to the bundler. A JSON module imports nothing, and package boundaries cross far fewer import cycles than a size cut does — but that is no proof: packages can depend on each other, and a group carries its modules' dependencies along. So the grouping is not what holds the line; a new build guard is: `scripts/chunk-cycle-guard.ts`, fails either build when chunks sit on a static import cycle — read from the bundler's own `chunk.imports`. Proven both ways: 0 cycles in the pre-change build and in the final one; the size-cut build fails naming its three chunks.
    The strip is a production-build guarantee only: the dev server prebundles dependencies through the optimizer, which does not run the plugin's `transform` — this corrects "build and dev server alike" in change 2 above. Nothing the dev server produces is shipped or linted.
 5. **Only `.vue` files are routes** (`usePages({ extensions: ["vue"] })`). The route directories hold 53 helper and test `.ts` modules, and every one was registered as a route and shipped as a lazy chunk — 37 `*.test-*.js` files in the build the linter was reading, on both browsers, on `dev` today. Found because rolldown named vendor chunks after them. No route a user can reach changes.
+
+### Phase 10 — The toolbar popup lays out in a Firefox panel (owner-found, 2026-09-20) ✓
+
+**Why.** The owner, testing the Firefox build by hand: *"the UI looks a little bit broken, like the footer, doesn't stick to the bottom of the extension, it keeps re-adjusting for example when I go to holdings."* No test could have seen it: the suite opens the popup document in a window, and no WebDriver or BiDi command reaches a panel.
+
+**Measured, in the real panel (headless, opened from Firefox's privileged scope).** The panel, `html` and `body` are a steady 360 × 600. `#app` is not: 520 px on Home, 320 on Holdings, 456 on History, 600 on Settings — its content height — and the bottom nav is `position: absolute; bottom: 0` inside it. Firefox lays a panel's document out to find its preferred height, so the `height: 100%` chain through `html` and `body` is indefinite and `body` gets its 600 px from `min-height` alone; a `100%` child of that resolves as `auto`. (The first hypothesis — the panel re-measuring itself per route — was wrong; the measurement is what said so.)
+
+**Changes.**
+1. `src/popup/index.scss` — `#app { height: 100vh; min-height: var(--base-height) }`. The viewport is definite on every surface (popup, side panel, approval windows); the `min-height` keeps today's behaviour in a window shorter than the popup.
+2. `fixtures/browser/webdriver-classic.ts` — `chromeScript` (exclusive; switches the session to Firefox's privileged context and always back) and `listWindows`, which the silent-close watcher now uses so it can never read Firefox's own window list mid-switch and report every page closed.
+3. `fixtures/browser/firefox-action-popup.ts` — `openActionPopup`, `evaluateInActionPopup` (a frame script in the panel).
+4. `tests/e2e/action-popup-layout.test.ts` — Firefox only: on every tab, `#app` and the nav's bottom edge equal the viewport height. `data-testid="bottom-nav"` added to the nav.
+5. `FIREFOX.md` row.
+6. **Scrollbars, and a CSS pass** (owner, same day: *"the horizontal scroll-bar on Settings … appears on firefox, it does not appear on Chrome"*, then *"Shared base.css -- but I guess this means we need to do a review of the extension's general CSS"*). The popup's only scrollbar rule was `*::-webkit-scrollbar { display: none }` — Chromium/WebKit syntax Firefox ignores. `packages/design/src/base.css` gains the standard `* { scrollbar-width: none }` beside it (hash pin updated deliberately), and the landing's `overrides.css` restores it next to the webkit restore it already had. The tools app inherits `base.css` unoverridden, so on Firefox it now hides scrollbars as it already does on Chrome — the owner chose the shared file knowing that. The pass itself: every vendor-prefixed or Chromium-only construct in `apps/extension/src` + `packages/design/src` was inventoried (14 kinds, 26 sites). Two more needed a Firefox twin — `-moz-osx-font-smoothing` on the icon font, `appearance: textfield` beside the WebKit spin-button rule. The rest already had one or are inert (`-webkit-line-clamp`, which Firefox implements; `-webkit-user-drag` on a canvas; doubled `transform-style`/`backface-visibility`; CodeMirror's scrollbar theme, which sets `scrollbarWidth` too). Then 16 popup routes were screenshotted at 360×600 in both browsers and diffed: layout is pixel-tight; what differs is a uniform ~1 px text baseline (font metrics) and the side-panel row Firefox hides by design.
+
+**UI impact:** on Firefox only — scrollbars disappear from the popup and the onboarding tab, as on Chrome; and the popup's bottom nav moves from wherever the page's content ended to the popup's bottom edge — where it already is on Chrome. Before/after screenshots of the real panel are attached to the arc's PR. **Every other surface:** `100vh` and the old `100%` resolve to the same height in Chrome's popup (600 px), its side panel and the approval windows, so no visual change is expected and the Chrome smoke is the check. They differ in one case: a window a user has dragged narrower than the popup's 360 px minimum on a browser with classic (non-overlay) scrollbars — `100vh` includes the horizontal scrollbar's thickness, so the shell overflows by that much. The wallet creates no window that narrow; accepted.
+
+**Owner sign-off.** The bug report above is the owner's; to *"going ahead as arc 8 (surface-detected fixed height, no browser sniffing). Needs your eyes on a headed build afterwards"* the owner answered *"Sounds good. Keep going."* (2026-09-20). The shipped fix is simpler than the one described then (no surface detection — one CSS declaration). **Visual confirmation on a headed Firefox is the owner's.** Height: confirmed 2026-09-20 on a build of this branch — *"Height bug is now fixed."* Scrollbars: confirmed 2026-09-20 on the next build — *"Nice! fixed."* The rounded corners the owner also noticed are Firefox's own panel chrome (every toolbar popup has them); an extension cannot change that, and nothing here tries.
+
+**Validation gate.** `bun run lint && bun run typecheck && bun run test` exit 0; `action-popup-layout.test.ts` **fails** on a Firefox build with the old stylesheet and **passes** with the new one; Firefox and Chrome smoke exit 0; on the arc's PR the three required checks and both Firefox aggregators conclude success.
 
 ## Security & Adversarial Considerations
 
@@ -294,6 +314,7 @@ Multi-arc, stacked with `gh stack`. Arcs revert **top-down** (each builds on the
 | 5 | `e2e-firefox-network` | 6 | `test(e2e): run the network suite on firefox` |
 | 6 | `ci-firefox-lanes` | 7, 8 | `ci(firefox): advisory firefox lanes in pr, nightly and release workflows` |
 | 7 | `firefox-offscreen-chunk-split` | 9 (closes 2) | `build(extension): keep every shipped file under the firefox linter's parse limit` |
+| 8 | `firefox-popup-panel-height` | 10 | `fix(popup): keep the bottom nav on the popup's bottom edge in a firefox panel` |
 
 Arc 1 is a user-facing fix and may be merged ahead of the rest at the owner's call. Titles stay ≤ 93 characters. No PR (draft included) opens before every quality loop below has converged. Merging is always the owner's action.
 
