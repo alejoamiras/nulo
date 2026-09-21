@@ -48,8 +48,9 @@ dApp page left alone, then a popup opened to wake a successor. One run per brows
 | dApp's pending `sendTx`, 150 s untouched | unsettled | unsettled |
 | …and 60 s after a popup woke the new background (210 s total) | unsettled | unsettled |
 
-So it is not a Firefox matter and not a PXE-host matter: **a dApp call in flight when the background dies is
-never answered on either browser** — no rejection, no timeout the wallet owns. The previous plan saw
+So it is not a Firefox matter and not a PXE-host matter: **a dApp call in flight when the background died
+remained unanswered for 210 seconds, in one run per browser** — no rejection, no timeout the wallet owns
+inside that window; whether it would ever settle was not measured. The previous plan saw
 120–180 s on Firefox only because it never ran Chrome. A product question (reject pending calls on boot, or
 leave the dApp's own timeout to it) for its own plan; nothing here changes it.
 

@@ -92,8 +92,9 @@ Chrome body moves, it does not change); anything under `apps/tools/**`, `package
 - **`backgroundIdentity` throws while no background view exists** (the frame script finds no
   `viewType === "background"` view). `waitForNewBackground` in the restart spec already tolerates that by
   catching and polling; a `backgroundAlive` driver method should return `false` there, never throw.
-- **A live popup outlives the kill on Firefox as on Chrome** (it is its own extension page); its port to the
-  background drops and it reconnects to the new one. `sw-resilience` case 2 is the spec for that.
+- **A live popup outlives the kill on Chrome only.** There its port to the worker drops and it reconnects to
+  the new one (`sw-resilience` case 2). On Firefox an open extension page keeps the event page busy and the
+  termination is declined (next bullet), so that case cannot be exercised there and stays Chrome's alone.
 - **`runtime.reload()` keeps the temporary add-on's UUID; so does a termination.** `extensionId` in the
   fixtures stays valid across both.
 - **The privileged channel needs geckodriver's `--allow-system-access`** — already on in `firefox.ts`'s launch.
@@ -182,13 +183,16 @@ Silence on an ask = the default; the fresh session does not wait on them.
   extension's attack surface, `web_accessible_resources` and the PXE host's generation check are exactly what
   #659 landed. `bun run test:ci-gating` and the build's negative bundle-grep still prove no fixture reaches a
   production bundle.
-- **The kill is a crash simulation, not a new capability for a page.** A web page cannot call it; a
-  same-extension page could not either (it is a parent-process call). The spec shows what the wallet does
-  when the background dies without warning — the security-relevant property is that it *locks* (strict mode),
-  and every ported case asserts recovery *through* the lock, never around it.
+- **The kill is a test-harness call, not a new capability for a page.** A web page cannot call it; a
+  same-extension page could not either (it is a parent-process call). On Chrome it is abrupt; on Firefox it is
+  the browser's own suspension of an idle event page (`runtime.onSuspend` fires), not a crash. Either way the
+  security-relevant property is that the wallet *locks* (strict mode), and every ported case asserts recovery
+  *through* the lock, never around it.
 - **Fail closed in the harness.** `stopBackground` throws by name when the browser lists no background (as
-  `stopServiceWorker` does today), never waits out a budget to report a slow browser; `backgroundAlive`
-  returns `false` rather than throwing, so a wait on it ends at its own deadline with its own message.
+  `stopServiceWorker` did), and on Firefox only an *observation* of the old page gone ends its wait — a
+  termination Firefox declined is asked again inside one outer budget, and a probe error is never read as
+  "gone". `backgroundAlive` answers `false` only for "no background is running"; any other probe failure
+  rethrows, so a broken probe cannot pass for a dead background.
 - **Ownership.** The Firefox launch is still torn down through `ctx.close()` / `ownership.ts` by marker; the
   termination touches only the add-on under test, found by its `addonId`, never a process.
 - **Guards that must stay green:** `firefox-driver.test.ts` (no pref matching `timeout` or `throttl`),

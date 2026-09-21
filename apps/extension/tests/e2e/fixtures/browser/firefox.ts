@@ -389,30 +389,95 @@ async function backgroundTimeOrigin(browser: Browser): Promise<number | undefine
 	}
 }
 
-const STOP_BACKGROUND_BUDGET_MS = 15_000
+export interface BackgroundStopper {
+	/** The running background's identity, or undefined while none runs. */
+	identity(): Promise<number | undefined>
+	/** Asks Firefox to end it, and resolves with Firefox's outcome word. */
+	terminate(): Promise<string>
+	/** The whole call, first read included. */
+	budgetMs: number
+	retryEveryMs: number
+	pollEveryMs: number
+}
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/** Whether `before` was SEEN gone by `until`. A probe that fails proves nothing either way — the
+ *  page unloads asynchronously after the termination resolves — so it is noted and asked again. */
+async function seenGone(stopper: BackgroundStopper, before: number, until: () => boolean, note: (err: unknown) => void): Promise<boolean> {
+	while (!until()) {
+		try {
+			if ((await stopper.identity()) !== before) return true
+		} catch (err) {
+			note(err)
+		}
+		await pause(stopper.pollEveryMs)
+	}
+	return false
+}
+
+/**
+ * The termination is a polite suspension: Firefox returns early — reporting success — while a
+ * listener's promise is pending or an extension page keeps the background busy. So it is asked again
+ * for as long as the same page is observed, and only an observation ends the wait: the page absent,
+ * or a different one running. The budget is enforced from outside because a frame-script probe can
+ * outlast it; a step already in flight cannot be recalled, but none starts after expiry.
+ */
+export async function stopBackgroundWith(stopper: BackgroundStopper): Promise<void> {
+	let expired = false
+	let lastError: unknown
+	const attempts = async (): Promise<void> => {
+		const before = await stopper.identity()
+		if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
+		while (!expired) {
+			const outcome = await stopper.terminate()
+			if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
+			const retryAt = Date.now() + stopper.retryEveryMs
+			const gone = await seenGone(
+				stopper,
+				before,
+				() => expired || Date.now() >= retryAt,
+				(err) => {
+					lastError = err
+				},
+			)
+			if (gone) return
+		}
+	}
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const budget = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			expired = true
+			const probe =
+				lastError === undefined ? "" : ` (last probe: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+			reject(
+				new Error(
+					`stopBackground: the background page was still alive ${stopper.budgetMs / 1000}s after termination — close every extension page first${probe}`,
+				),
+			)
+		}, stopper.budgetMs)
+	})
+	try {
+		await Promise.race([attempts(), budget])
+	} finally {
+		expired = true
+		if (timer) clearTimeout(timer)
+	}
+}
 
 /**
  * Ends the event page alone: every other extension page, the content scripts and `storage.session`
  * stay. Firefox starts a new one only on the add-on's next event, so this resolves on "the old page
- * is gone" and never waits for a successor — the caller's next step is what wakes one. It is a
- * polite suspension, not a crash: with an extension page open the page is left running.
+ * is gone" and never waits for a successor — the caller's next step is what wakes one.
  */
-async function stopBackground(browser: Browser): Promise<void> {
-	const before = await backgroundTimeOrigin(browser)
-	if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
-	const outcome = await terminateBackground(browser)
-	if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
-	const deadline = Date.now() + STOP_BACKGROUND_BUDGET_MS
-	while (Date.now() < deadline) {
-		if ((await backgroundTimeOrigin(browser)) !== before) return
-		await new Promise((resolve) => setTimeout(resolve, 100))
-	}
-	// Firefox reports the call done either way: it leaves an event page running while an open
-	// extension page holds it busy, and says nothing.
-	throw new Error(
-		`stopBackground: the background page was still alive ${STOP_BACKGROUND_BUDGET_MS / 1000}s after termination — close every extension page first`,
-	)
-}
+const stopBackground = (browser: Browser): Promise<void> =>
+	stopBackgroundWith({
+		identity: () => backgroundTimeOrigin(browser),
+		terminate: () => terminateBackground(browser),
+		budgetMs: 15_000,
+		retryEveryMs: 2_000,
+		pollEveryMs: 100,
+	})
 
 const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
 

@@ -15,8 +15,8 @@
 
 ## Follow-ups (recorded, not done)
 
-1. **A dApp call in flight when the background dies is never answered**, on either browser (phase 2's
-   table). A product decision — reject pending calls when the new background boots, or leave it to the dApp's
+1. **A dApp call in flight when the background died remained unanswered for 210 seconds**, in one run per
+   browser (phase 2's table). A product decision — reject pending calls when the new background boots, or leave it to the dApp's
    own timeout — for its own plan.
 2. **The canaries on Firefox** (Ask A1): the seam makes it mechanical, the cost is a second real-proving
    canary per PR, and `behavior-gating.test.ts`'s `CHROME_ONLY_CANARY` plus the Firefox canary job's file list
@@ -24,6 +24,41 @@
 3. **A crash, as opposed to a polite termination**, is still not reproducible on Firefox: the two Chrome-only
    "kill under an open page" pins (`sw-resilience` case 2, `backup-restore-sw-restart`) would need a way to end
    the extension process itself. Not needed by anything today.
+
+## Codex fix loop
+
+Foreign reviewer: codex (GPT-6 Astra, `high`, read-only), one session resumed across rounds. Told not to run
+the vitest e2e configs, builds or workflows. `/code-review` not run (owner directive).
+
+### Round 1 — conditional approve
+
+No Chrome drift (stop body and worker probe match the base but for the error prefix), no production change,
+the un-skips are honest, the debt maps only shrink. Findings, all on Firefox's `stopBackground`:
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| M1 | Medium | Firefox's termination returns early — reporting success — while a listener promise is pending, and the helper only observed for 15 s; a brief refusal became a permanent failure | Fixed: the termination is asked again every 2 s while the same identity is observed |
+| M2 | Medium | The page unloads asynchronously, so the first identity probe after the call can fail during teardown and rejected a kill that worked | Fixed: a probe error during confirmation is noted and the probe repeated; only an *observation* (absent, or a newer `timeOrigin`) ends the wait, and a persistent error is carried in the rejection |
+| M3 | Medium | The 15 s budget was a loop condition, not a deadline — a probe started just before expiry could add its own 10 s | Fixed: one outer deadline races the attempts; nothing starts after it expires |
+| L1 | Low | plan.md still said an open popup outlives the kill on Firefox; its Security section misstated `backgroundAlive`; the restart spec's comment implied crash equivalence (Firefox runs `runtime.onSuspend`) | Fixed in all three |
+| L2 | Low | "never answered" claimed more than one 210 s run per browser measured | Reworded here, in phase 2 and in the index |
+
+M1–M3 became `stopBackgroundWith(stopper)` — the loop with its identity probe, termination call and clocks
+injected — so `scripts/e2e/firefox-driver.test.ts` pins each behaviour without a browser: a declined
+termination asked again, a successor counted as gone, a teardown probe failure never read as gone, a
+persistent failure rejected with its error, a never-settling probe bounded by the budget, the two by-name
+rejections. Codex's own unit run executed nothing (its sandbox's workers timed out); the local run is the
+authority.
+
+Round-1 gate — every Firefox caller of the rewritten loop, proverless, `--retry=0`, alone on the host
+(Chrome's driver is untouched by the fix and was not re-run):
+
+| Command | Result |
+|---|---|
+| unit: `firefox-driver`, `browser-seam`, `unresolved-names` | 3 files, 62 passed |
+| `bun run lint` | exit 0 |
+| Firefox network: restart spec + the three ports | 4 files, 4 passed (28.6 s, 22.4 s, 21.8 s, 8.3 s) |
+| Firefox smoke: the three ports | 3 files, 5 passed, 2 skipped (`sw-resilience` case 2, and its strict-mode-off case, a plain `test.skip` on both browsers) |
 
 ## Gate
 

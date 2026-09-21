@@ -64,7 +64,8 @@ async function unlockAndReconnect(ctx: ExtensionContext, popup: Page): Promise<P
  * death, on both browsers, by design), and the first request after the unlock builds exactly one new
  * host. Chrome's offscreen document survives a worker restart, so there is nothing of this to pin there.
  *
- * Only the background is ended, as a crash or memory pressure would end it. A key left in
+ * Only the background is ended, the way Firefox suspends an idle event page (`runtime.onSuspend`
+ * runs) — a suspension, not a crash. A key left in
  * `storage.session` is the witness: an add-on reload wipes that area, a background death does not,
  * so the lock that follows is strict mode's and not the wipe's. Firefox starts no successor on its
  * own; the popup opened after the kill is what wakes one.

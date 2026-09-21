@@ -1,10 +1,12 @@
 import { describe, expect, test, vi } from "vitest"
 import {
+	type BackgroundStopper,
 	FIREFOX_LAUNCH_PREFS,
 	type SilentCloseWatch,
 	abandonSession,
 	firefoxDirFor,
 	silentlyClosed,
+	stopBackgroundWith,
 	uuidFromPrefs,
 } from "../../tests/e2e/fixtures/browser/firefox"
 
@@ -122,5 +124,86 @@ describe("silent window closes", () => {
 		silentlyClosed(watch, ["a"], new Set())
 		expect(silentlyClosed(watch, ["a"], new Set(["a"]))).toEqual([])
 		expect(silentlyClosed(watch, ["a"], new Set())).toEqual([])
+	})
+})
+
+/**
+ * Firefox's termination is a polite suspension that returns early, reporting success, while the
+ * background is busy — and the page unloads asynchronously when it does go. Only an observation of
+ * the page gone may end the wait; a kill that silently did nothing would let every spec built on it
+ * pass against a background that never died.
+ */
+describe("stopping the background", () => {
+	const OLD = 1_000
+	const stopper = (over: Partial<BackgroundStopper>): BackgroundStopper => ({
+		identity: async () => OLD,
+		terminate: async () => "terminated",
+		budgetMs: 400,
+		retryEveryMs: 40,
+		pollEveryMs: 5,
+		...over,
+	})
+
+	test("a declined termination is asked again until the page is seen gone", async () => {
+		let asked = 0
+		const terminate = vi.fn(async () => {
+			asked++
+			return "terminated"
+		})
+		await stopBackgroundWith(stopper({ terminate, identity: async () => (asked < 2 ? OLD : undefined) }))
+		expect(terminate).toHaveBeenCalledTimes(2)
+	})
+
+	test("a successor already running counts as gone", async () => {
+		let asked = false
+		const terminate = async () => {
+			asked = true
+			return "terminated"
+		}
+		await expect(stopBackgroundWith(stopper({ terminate, identity: async () => (asked ? OLD + 1 : OLD) }))).resolves.toBeUndefined()
+	})
+
+	test("a probe that fails during teardown is asked again, never read as gone", async () => {
+		const answers: Array<() => number | undefined> = [
+			() => OLD,
+			() => {
+				throw new Error("the frame script never answered")
+			},
+			() => undefined,
+		]
+		const identity = vi.fn(async () => (answers.shift() ?? (() => undefined))())
+		await stopBackgroundWith(stopper({ identity }))
+		expect(identity).toHaveBeenCalledTimes(3)
+	})
+
+	test("a probe that keeps failing rejects with its error, at the budget", async () => {
+		let first = true
+		const identity = async () => {
+			if (first) {
+				first = false
+				return OLD
+			}
+			throw new Error("can't access dead object")
+		}
+		await expect(stopBackgroundWith(stopper({ identity }))).rejects.toThrow(/still alive 0\.4s.*last probe: can't access dead object/)
+	})
+
+	test("a probe that never settles cannot outlast the budget", async () => {
+		let first = true
+		const identity = () => {
+			if (!first) return new Promise<number | undefined>(() => {})
+			first = false
+			return Promise.resolve(OLD)
+		}
+		const started = Date.now()
+		await expect(stopBackgroundWith(stopper({ identity }))).rejects.toThrow(/still alive/)
+		expect(Date.now() - started).toBeLessThan(1_500)
+	})
+
+	test("no background, or an outcome other than terminated, rejects by name without waiting", async () => {
+		const terminate = vi.fn(async () => "no-extension")
+		await expect(stopBackgroundWith(stopper({ terminate, identity: async () => undefined }))).rejects.toThrow(/runs no background page/)
+		expect(terminate).not.toHaveBeenCalled()
+		await expect(stopBackgroundWith(stopper({ terminate }))).rejects.toThrow(/did not terminate the background page \(no-extension\)/)
 	})
 })
