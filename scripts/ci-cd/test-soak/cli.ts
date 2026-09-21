@@ -5,6 +5,10 @@
 //   bun scripts/ci-cd/test-soak/cli.ts soak --cwd <ws> [--script test] [--runtime script|node] --runs N --out <full.json> [--timeout <min>] [-- <vitest filters>]
 //   bun scripts/ci-cd/test-soak/cli.ts compare <reference-full.json> <candidate-full.json>
 //   bun scripts/ci-cd/test-soak/cli.ts compact <full.json> --out <compact.json>
+//
+// Committed compacts live under scripts/ci-cd/test-soak/baselines/{node,bun}; full reports under
+// baselines/full are gitignored. `vitest run --repeats N` re-runs each test in-process and is the cheap
+// first probe for a suspected flake; this driver is the cross-process soak that follows it.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -36,7 +40,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url))
 export const REPORTER_PATH = join(here, "runtime-reporter.mjs")
 const RESOLVER_PATH = join(here, "resolve-esm.mjs")
-const BASELINES_DIR = "implementations-plan/vitest-on-bun/lessons/baselines"
+const BASELINES_DIR = "scripts/ci-cd/test-soak/baselines"
 
 export interface RunOnceOptions {
 	/** Full argv of the command that starts vitest; the enforced flags are appended after it. */

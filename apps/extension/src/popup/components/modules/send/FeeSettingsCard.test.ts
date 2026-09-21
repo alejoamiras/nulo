@@ -1050,9 +1050,10 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			mocks.getGasBalances
 				.mockImplementationOnce(() => new Promise((r) => (resolveOldGas = r)))
 				.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
-			mocks.getFpcs.mockImplementation(async (chainId: number) => [
-				{ id: chainId === 11155111 ? "s-old" : "s-new", type: 1, name: "Sponsor" },
-			])
+			mocks.getFpcs.mockResolvedValue([{ id: "s-new", type: 1, name: "Sponsor" }])
+			vi.when(mocks.getFpcs)
+				.calledWith(11155111)
+				.thenResolve([{ id: "s-old", type: 1, name: "Sponsor" }])
 
 			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 			await vi.advanceTimersByTimeAsync(0)

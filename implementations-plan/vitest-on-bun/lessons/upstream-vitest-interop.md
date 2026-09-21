@@ -34,3 +34,5 @@ test("named export that is a module namespace survives externalized import", () 
 ```
 
 vitest 4.1.10: Node passes; Bun 1.4.0 fails with `typeof z = undefined` (namespace keys `object,string`; `"__esModule" in ns.default === true`). Expected to pass on both once #10363 is in the installed vitest — that is the retirement check.
+
+**Retired by vitest-5-bump, 2026-09-21, `06a404d8`.** vitest 5.0.1 carries #10363; the key, `vitest.base.ts` and its 15 spreads are gone, and `bun run test:all` is green on Bun with zod's `z` imported across the extension and tools suites. The repro above was not re-run (its fixture was never committed); the suites are the check.

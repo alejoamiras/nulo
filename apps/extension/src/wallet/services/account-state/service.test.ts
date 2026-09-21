@@ -140,11 +140,9 @@ describe("AccountStateService.getSendersAcrossActiveNetworks", () => {
 		networkService.networks = [makeNetwork("net-a", 1), makeNetwork("net-b", 2)]
 		networkService.statuses.set("net-a", NodeStatus.Active)
 		networkService.statuses.set("net-b", NodeStatus.Active)
-		vi.spyOn(accountStateService, "getSenders").mockImplementation(async (id: string) => {
-			if (id === "net-a") return ["0xalice", "0xbob"]
-			if (id === "net-b") return ["0xbob", "0xcarol"]
-			return []
-		})
+		const getSenders = vi.spyOn(accountStateService, "getSenders").mockResolvedValue([])
+		vi.when(getSenders).calledWith("net-a").thenResolve(["0xalice", "0xbob"])
+		vi.when(getSenders).calledWith("net-b").thenResolve(["0xbob", "0xcarol"])
 
 		const result = await accountStateService.getSendersAcrossActiveNetworks()
 		expect(new Set(result)).toEqual(new Set(["0xalice", "0xbob", "0xcarol"]))
@@ -155,12 +153,10 @@ describe("AccountStateService.getSendersAcrossActiveNetworks", () => {
 		networkService.statuses.set("net-a", NodeStatus.Active)
 		networkService.statuses.set("net-b", NodeStatus.Inactive)
 		networkService.statuses.set("net-c", NodeStatus.Active)
-		const getSendersSpy = vi.spyOn(accountStateService, "getSenders").mockImplementation(async (id: string) => {
-			if (id === "net-a") return ["0xalice"]
-			if (id === "net-b") return ["0xbob"]
-			if (id === "net-c") return ["0xcarol"]
-			return []
-		})
+		const getSendersSpy = vi.spyOn(accountStateService, "getSenders").mockResolvedValue([])
+		vi.when(getSendersSpy).calledWith("net-a").thenResolve(["0xalice"])
+		vi.when(getSendersSpy).calledWith("net-b").thenResolve(["0xbob"])
+		vi.when(getSendersSpy).calledWith("net-c").thenResolve(["0xcarol"])
 
 		const result = await accountStateService.getSendersAcrossActiveNetworks()
 		expect(new Set(result)).toEqual(new Set(["0xalice", "0xcarol"]))
@@ -171,11 +167,9 @@ describe("AccountStateService.getSendersAcrossActiveNetworks", () => {
 		networkService.networks = [makeNetwork("net-a", 1), makeNetwork("net-b", 2)]
 		networkService.statuses.set("net-a", NodeStatus.Active)
 		networkService.statuses.set("net-b", NodeStatus.Active)
-		vi.spyOn(accountStateService, "getSenders").mockImplementation(async (id: string) => {
-			if (id === "net-a") return ["0xalice"]
-			if (id === "net-b") throw new Error("PXE flake")
-			return []
-		})
+		const getSenders = vi.spyOn(accountStateService, "getSenders").mockResolvedValue([])
+		vi.when(getSenders).calledWith("net-a").thenResolve(["0xalice"])
+		vi.when(getSenders).calledWith("net-b").thenReject(new Error("PXE flake"))
 
 		const result = await accountStateService.getSendersAcrossActiveNetworks()
 		// net-b is silently skipped; the user gets a partial truth.
