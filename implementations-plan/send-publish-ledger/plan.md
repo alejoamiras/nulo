@@ -6,11 +6,19 @@ eli5_mode: artifact
 code_review: off
 harden: not scheduled
 budget: recon 2 agents; codex at high; code-review off (owner, Phase 0)
-status: rev 4 — APPROVED by the owner (2026-09-21), A1–A9 as recommended; implementation in progress. Rev 1: codex reject, fable conditional approve. Rev 2: fresh-context codex pass → reject. Rev 3: codex closure check → conditional approve; its five conditions are folded into rev 4 (§ Decision ledger, § Audit verdicts).
+status: implemented 2026-09-21 — PR #660 open into dev; rev 4 APPROVED by the owner (2026-09-21), A1–A9 as recommended. Rev 1: codex reject, fable conditional approve. Rev 2: fresh-context codex pass → reject. Rev 3: codex closure check → conditional approve; its five conditions are folded into rev 4 (§ Decision ledger, § Audit verdicts).
 base: dev @ 06010c9b
 ---
 
 # send-publish-ledger
+
+## Outcome
+
+- **Date**: 2026-09-21. **Status**: implemented, PR [#660](https://github.com/alejoamiras/nulo/pull/660) open into `dev` — merge is the owner's call.
+- **Delivered**: phases 1–6 as planned; 11 commits (+ the `origin/dev` merge for the Biome 2.5.13 bump). The one addition beyond the plan is D22 (a covered sheet cannot send), from the codex post-implementation round.
+- **Dropped**: nothing. **Deferred to the owner**: I1 (Escape in a real Chrome action popup — one manual check), and the Escape-without-close behaviour of registry popups (`lessons/phase-6.md`).
+- **Gates at delivery**: `audit:vue` (6 996 unit + component tests, build) · `test:ci-gating` 132/132 · smoke 15/15 · network 10/10 at retry 0 · mutation pass 23/24 killed, 1 equivalent · codex: conditional approve → approve in two rounds.
+- **Seeds retired**: the `/goal` + `/loop` seeds below are spent; nothing to resume.
 
 Tell the sender, at the button, what a send puts on the public chain — always, in one line — and
 make the one send that names them against their intent pass through an explicit review.
@@ -555,6 +563,7 @@ Chosen outline: **A** (this plan), with two pieces of **B** adopted (D3, D9).
 | D19 | HIDDEN's trust scope proven by test (same-id address change, late network switch); scope binding added only if a test fails | codex final Medium | Adding scope fields speculatively |
 | D20 | `submit` accepts the sheet's event only while the sheet is open, and the footer's only while it is not — unconditionally, gated or not | codex closure Medium | Rejecting a closed-sheet event only for gated sends: a murkier event contract, and the test claimed more than the handler did |
 | D21 | T11's invariant grows by phase (tag half in phase 4); a real-browser stacked-popup smoke test (T19) + "footer covered" probe (T16b); M17 by same-tick activations | codex closure Medium ×3 | Moving the notice replacement into phase 3 (a commit with the gate half-wired and no warning); claiming modal containment from z-index assertions alone |
+| D22 | `ready` also requires the sheet's slot to be the top of the popup stack; a covered sheet disables its CTA and authorises nothing, and re-arms once uncovered | codex post-implementation round 1 (Medium) | Checking only open ∧ ready: a popup whose trap releases on Escape without closing hands the keyboard back to the sheet beneath a visible prompt |
 
 Rejected findings: **codex — cover `refreshSession()` rejection in `Popup.vue`**: pre-existing for
 every popup including the token picker on this page; unchanged exposure; out of scope (lock during
