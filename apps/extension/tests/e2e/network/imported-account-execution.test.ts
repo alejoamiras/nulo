@@ -104,7 +104,7 @@ test.skipIf(!hasConfig)(
 
 			expect(target.pageErrors.filter((e) => !e.message.includes("Client disconnected"))).toEqual([])
 		} finally {
-			await target.browser.close()
+			await target.close()
 		}
 	},
 )
@@ -179,7 +179,7 @@ test.skipIf(!hasConfig)(
 				await auth.cleanup()
 			}
 		} finally {
-			await target.browser.close()
+			await target.close()
 		}
 	},
 )

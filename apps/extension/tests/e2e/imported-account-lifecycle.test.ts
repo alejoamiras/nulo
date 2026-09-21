@@ -55,7 +55,7 @@ test("imported account survives lock/unlock, a REAL SW kill, and a password chan
 			await waitForHash(donorPage, "#/popup/general", 30_000)
 			foreignBody = await exportAccountBody(donorPage, "Account", false)
 		} finally {
-			await donor.browser.close()
+			await donor.close()
 		}
 	}
 

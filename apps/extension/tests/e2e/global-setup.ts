@@ -16,9 +16,15 @@ import {
 } from "./fixtures/aztec"
 import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, newAztecDataDir, readLock, writeLock } from "./lockfile"
 import { markBootReady, markBootStarted } from "./sentinel"
+import { resolveBrowserKind } from "./fixtures/browser/selection"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
+// Resolved here so an unusable selector fails before this file boots anvil, a node and a
+// playground — the workers would otherwise reject it minutes later.
+const BROWSER = resolveBrowserKind()
+// `EXTENSION_PATH` points the run at a build other than `dist/chrome` — another browser's, or an
+// artifact unzipped somewhere else.
+const EXTENSION_PATH = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────
@@ -233,7 +239,7 @@ export async function setup(project: TestProject) {
 	// Guard: ensure extension is built
 	const manifest = path.join(EXTENSION_PATH, "manifest.json")
 	if (!fs.existsSync(manifest)) {
-		throw new Error(`Extension not found at ${EXTENSION_PATH}\nRun "bun run build" or "bun run dev" first.`)
+		throw new Error(`No ${BROWSER} extension at ${EXTENSION_PATH}\nRun "bun run build" or "bun run dev" first.`)
 	}
 	project.provide("extensionPath", EXTENSION_PATH)
 

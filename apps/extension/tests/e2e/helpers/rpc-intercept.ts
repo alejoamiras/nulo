@@ -1,4 +1,5 @@
 import type { Browser, CDPSession } from "puppeteer"
+import { extensionUrl } from "../fixtures/browser"
 
 export type RpcInterception = { kind: "refuse" } | { kind: "redirect"; to: string }
 
@@ -62,8 +63,7 @@ export async function interceptRpc(
 		else fail(`${msg}: ${e}`)
 	}
 
-	const isExtensionWorker = (info: TargetInfo) =>
-		info.type === "service_worker" && info.url.startsWith(`chrome-extension://${extensionId}/`)
+	const isExtensionWorker = (info: TargetInfo) => info.type === "service_worker" && info.url.startsWith(extensionUrl(extensionId, "/"))
 
 	const arm = async (session: CDPSession, label: string, info: TargetInfo) => {
 		sessions.add(session)

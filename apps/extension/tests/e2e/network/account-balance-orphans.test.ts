@@ -98,7 +98,7 @@ test.skipIf(!hasConfig)(
 				await waitForHash(donorPage, "#/popup/general", 30_000)
 				foreignBody = await exportAccountBody(donorPage, "Account", false)
 			} finally {
-				await donor.browser.close()
+				await donor.close()
 			}
 		}
 
@@ -228,7 +228,7 @@ test.skipIf(!hasConfig)(
 
 			expect(ctx2.pageErrors.filter((e) => !e.message.includes("Client disconnected"))).toEqual([])
 		} finally {
-			await ctx2.browser.close()
+			await ctx2.close()
 			rmSync(profileDir, { recursive: true, force: true })
 			// The doctored file embeds the wallet's REAL (local-chain test) master key —
 			// never leave it in the temp dir.

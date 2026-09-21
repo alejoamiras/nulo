@@ -1,4 +1,5 @@
 import { expect, inject } from "vitest"
+import { extensionUrl } from "../fixtures/browser"
 import { clickByTestId, test, waitForHash } from "../fixtures/extension"
 import { createAndActivateProfile } from "../fixtures/helpers"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
@@ -33,7 +34,7 @@ test.skipIf(!hasConfig)(
 
 		// ── In-session switch: lock → pick "new profile" from auth → create B ──
 		const wallet = await ctx.browser.newPage()
-		await wallet.goto(`chrome-extension://${ctx.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+		await wallet.goto(extensionUrl(ctx.extensionId, "/src/popup/index.html"), { waitUntil: "domcontentloaded" })
 		await waitForHash(wallet, "#/popup/general")
 		// Creation activates B — this is the switch. The wallet lands home.
 		await createAndActivateProfile(wallet, "Profile B", PROFILE_B_PASSWORD)
