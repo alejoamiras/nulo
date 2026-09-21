@@ -1,0 +1,162 @@
+<title>Vitest 5 Bump</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F7F6F2; --ink: #1F2328; --muted: #61706F; --line: #D9DBD6;
+    --accent: #0B6E69; --accent-soft: #E3F0EE; --warn: #8A4B00; --warn-soft: #F8EBD8;
+    --panel: #FFFFFF; --code-bg: #EEF0EC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #15181A; --ink: #E7E9E6; --muted: #98A4A2; --line: #2F3538;
+      --accent: #5FC4BC; --accent-soft: #15302E; --warn: #E0A15A; --warn-soft: #33240F;
+      --panel: #1C2023; --code-bg: #22272A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #15181A; --ink: #E7E9E6; --muted: #98A4A2; --line: #2F3538;
+    --accent: #5FC4BC; --accent-soft: #15302E; --warn: #E0A15A; --warn-soft: #33240F;
+    --panel: #1C2023; --code-bg: #22272A;
+  }
+  body { background: var(--ground); color: var(--ink); font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 40px 64px; }
+  main { max-width: 68ch; margin: 0 auto; display: grid; gap: 40px; }
+  h1, h2, h3 { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: 2rem; line-height: 1.15; }
+  h2 { font-size: 1.3rem; }
+  h3 { font-size: 1.05rem; }
+  p, li { margin: 0; }
+  section { display: grid; gap: 14px; }
+  .eyebrow { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .lede { font-size: 1.08rem; }
+  .tier { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .tier div { border: 1px solid var(--line); padding: 10px 12px; font-size: 0.9rem; }
+  .tier b { display: block; font-weight: 500; color: var(--muted); font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .phases { display: grid; gap: 12px; }
+  .phase { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; display: grid; gap: 6px; }
+  .proves { color: var(--muted); font-size: 0.92rem; }
+  ul { padding-left: 1.2rem; display: grid; gap: 8px; }
+  .approval { background: var(--accent-soft); padding: 18px 20px; display: grid; gap: 12px; }
+  .verdict { background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; display: grid; gap: 8px; font-size: 0.95rem; }
+  .verdict b { font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+  .warn { background: var(--warn-soft); color: var(--warn); padding: 10px 14px; font-weight: 500; font-size: 0.95rem; }
+  pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.84rem; line-height: 1.5; margin: 0; }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.9em; background: var(--code-bg); padding: 1px 5px; }
+  pre code { background: none; padding: 0; }
+  .seed { display: grid; gap: 8px; }
+  .seed.rec h3::after { content: "recommended"; font-family: "IBM Plex Sans", sans-serif; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-left: 10px; vertical-align: middle; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .calendar { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+  .calendar b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
+  table { border-collapse: collapse; font-size: 0.92rem; width: 100%; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .scroll { overflow-x: auto; }
+</style>
+<main>
+  <section>
+    <p class="eyebrow">Blueprint · light · codex conditional approve, folded in · your call</p>
+    <h1>New test runner, the old patch removed, and proof it still runs clean on Bun</h1>
+    <p class="lede">Every unit test in the repo runs on <strong>vitest</strong>, driven by Bun. A year's worth of vitest is now out (version 5) and it contains the fix for the one Bun problem we had to patch around ourselves last month. This plan takes the new version, deletes our patch, and re-runs the same "does Bun behave like Node?" measurement we built for the original switch — on the new runner, at one commit, both engines — so the upgrade is proved rather than assumed. On the way it keeps the few things vitest 5 improves for free and measures, instead of guessing, whether its speed options are worth turning on here.</p>
+  </section>
+
+  <section>
+    <h2>Why this is "light"</h2>
+    <div class="tier">
+      <div><b>Novelty</b>low — we did vitest 3→4 and built the soak tool already</div>
+      <div><b>Blast radius</b>medium-low — a bad bump reds every PR's unit check, undone by one revert</div>
+      <div><b>Irreversible</b>no — dev-only packages, one PR</div>
+      <div><b>Migration</b>none — 12 breaking changes checked, none needs a rewrite</div>
+      <div><b>External coupling</b>low — two test-only packages</div>
+      <div><b>Security</b>low — supply chain only, age-gated</div>
+    </div>
+    <p class="muted">Zero high-risk dimensions → light: one plan, one codex audit, one PR. Budget: one recon agent, code-review off, codex at high.</p>
+  </section>
+
+  <section>
+    <h2>Human context</h2>
+    <p><strong>The patch.</strong> When we moved the tests onto Bun in August, one thing broke: vitest 4 looked at how Bun describes a module and wrongly treated it as old-style CommonJS, so a library like zod lost its named exports mid-test. We turned that heuristic off with a single config line and wrote next to it: "delete this when vitest ships the fix, and re-run the Bun soak". vitest 5.0 ships the fix (their PR #10363). This plan is that sentence, executed.</p>
+    <p><strong>The calendar.</strong> The repo refuses to install anything younger than seven days (a supply-chain rule). vitest 5.0.1 becomes installable on <strong>Monday 22 Sep</strong>, jsdom 30.1.0 (the fake browser the DOM tests run in — its 30.0.x has a selector bug fixed only in 30.1.0) on <strong>Wednesday 24 Sep, 01:00 UTC</strong>. Nothing bends the rule, not even on this machine: the codex audit pointed out that a "throwaway" early install still <em>runs</em> week-old code on the dev box, which is exactly what the rule prevents. So the optional dry run uses vitest 5.0.0 — already past the gate — with the old jsdom, which also tells vitest fallout apart from jsdom fallout. The real install waits for Wednesday.</p>
+    <p><strong>The proof.</strong> The soak tool runs a suite N times on Node and N times on Bun at the same commit and refuses to say "same" unless every single test has the identical pass/skip record on both sides. It also refuses to compare two runs made on different vitest versions or commits — so the August measurements can't serve as the Node side; both sides are recorded fresh. You asked for ten runs instead of thirty. Ten runs catch a test that flakes one time in ten with 65 % probability (thirty: 96 %); one in twenty, 40 % (thirty: 79 %). At ten the matrix is about 50 minutes unattended; at thirty, about 2½ hours. The plan records ten as <em>this bump's</em> exception — the standing thirty-run bar in CLAUDE.md stays as it is — and uses thirty for the one small package whose runtime actually changes (<code>resolve-asset</code> moves from Node to Bun; it takes a second per run). The matrix covers sixteen suites, four more than last time: three small packages added since, and the extension's component subset, which the original twelve missed.</p>
+    <p><strong>The harvest.</strong> vitest 5 clears mock call-counts between tests by default (the extension's tests already did this by hand; the other packages now get it), and fails a test that forgot to <code>await</code> an async assertion — both are things we want, so nothing is switched off. It adds <code>vi.when()</code>, a cleaner way to say "when called with X, return Y" — the plan rewrites the seventeen mocks that branch on their arguments only where that reads better and behaves the same. It exports the default reporter list, which lets the e2e configs drop a hand-written "re-add the GitHub annotations" line. It also adds <code>vitest doctor</code>, which runs your suite under alternative settings and reports the measured speed — this PR <em>records</em> those numbers and changes nothing: a speed setting is a runtime change, and a runtime change gets the thirty-run bar in its own follow-up, if the numbers ever justify one.</p>
+    <p><strong>One change that might bite.</strong> vitest 5 makes an assignment like <code>window.addEventListener = spy</code> reach the fake browser's real window (it used to stop at a shim). Two extension tests do exactly that. The plan runs them first, alone, and reads what happens — a red there is classified, not waved off as "an old test bug".</p>
+  </section>
+
+  <section>
+    <h2>Calendar</h2>
+    <div class="calendar">
+      <b>now</b><span>plan approval; optional dry run on vitest 5.0.0 + the current jsdom, both already past the gate (Phase 1a)</span>
+      <b>Mon 22 Sep</b><span>vitest 5.0.1 clears the 7-day gate</span>
+      <b>Wed 24 Sep</b><span>jsdom 30.1.0 clears the gate → the real bump commit (Phase 1), harvest (Phase 2), the matrix (Phase 3, ~50 min at 10 runs), review loop then PR (Phase 4)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Phases</h2>
+    <div class="phases">
+      <div class="phase">
+        <h3>1a · Dry run (optional, now)</h3>
+        <p>Install vitest 5.0.0 (past the gate since 10 Sep) with jsdom unchanged, run everything once, write down what breaks and why. Then roll the probe back completely — pins, lockfile and the patch — reinstall from the restored lockfile, and only then prove the genuine test-bug fixes on vitest 4 and commit them on their own. No age-gate exception, anywhere.</p>
+        <p class="proves">Proves nothing by design; produces the list Phase 1 will hit, split vitest-vs-jsdom.</p>
+      </div>
+      <div class="phase">
+        <h3>1 · The bump</h3>
+        <p>Point the 14 vitest and 6 jsdom pins at 5.0.1 / 30.1.0, install through the gate, delete the interop patch (and the now-empty shared config file), bring the one straggler package (<code>resolve-asset</code>) onto the Bun convention, ignore vitest 5's new <code>.vitest/</code> output folder. Run the known-sensitive tests first, alone; then classify every red — a test bug, a test that must follow the new contract, or a Bun-only difference (that one stops and comes to you). Never by turning a vitest 5 behavior off, never by skipping a test on Bun.</p>
+        <p class="proves">Proves itself by: frozen install clean, lint, typecheck, every workspace's suite green on Bun once, the soak tool's own tests green (they run on both engines, so this host's Node must be ≥ 24.15 first).</p>
+      </div>
+      <div class="phase">
+        <h3>2 · The harvest, measured</h3>
+        <p>Run <code>vitest doctor</code> on every suite and record the numbers (nothing adopted here). Rewrite the argument-keyed mocks with <code>vi.when</code> where clearer. Put the e2e reporter list on vitest's exported defaults. Update CLAUDE.md (vitest 5, the patch gone, this bump's ten-run exception named, the thirty-run bar unchanged) and close the loop in the August lessons file.</p>
+        <p class="proves">Proves itself by: lint, typecheck, all suites, <code>audit:vue</code>, the Node smoke e2e (it exercises the custom reporter and global-setup contracts on Node).</p>
+      </div>
+      <div class="phase">
+        <h3>3 · The matrix</h3>
+        <p>At one committed tree, after a frozen install, on an idle host, touching no file until the last run finishes: 16 suites × Node and Bun × 10 runs (30 for <code>resolve-asset</code>), each pair compared, the summaries committed under the soak tool's baseline folder. Then the CI-shaped concurrent run five times, and a manual CI dispatch bound to that exact commit. A red on the Node side is reproduced and classified before anything else: a real test bug gets fixed and the matrix restarts at the new commit; a regression in the new versions, an environment problem or a product defect comes to you.</p>
+        <p class="proves">Proves itself by: 16 × <code>COMPARE OK</code> with the full reports kept, five green fan-outs, the dispatch green at the matrix SHA. Any later change to a test, config or lockfile re-runs the whole phase.</p>
+      </div>
+      <div class="phase">
+        <h3>4 · Review loop, then the PR</h3>
+        <p>Codex reviews the whole diff first (any fix that touches code re-runs the matrix); only then one PR into <code>dev</code>, with the network and tools e2e labels added after it exists (adding them at creation cancels the sibling run). Merge is yours.</p>
+        <p class="proves">Proves itself by: the loop converged, then quality, smoke, network and tools statuses green; the new vitest job summary visible on the unit job.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open questions (defaults apply if you say nothing)</h2>
+    <ul>
+      <li><strong>A1 · Runs.</strong> Your Phase 0 answer assumed the August Node runs could be reused; the tool forbids that, so both engines are recorded fresh. Default <strong>10 runs as this bump's recorded exception</strong> (~50 min; 65 % / 40 % detection of a 1-in-10 / 1-in-20 flake), 30 for <code>resolve-asset</code>, the 30-run bar in CLAUDE.md untouched. Say <code>30</code> for the whole matrix (~2½ h, unattended, 96 % / 79 %).</li>
+      <li><strong>A2 · Where the evidence lives.</strong> Default: move the baseline folder next to the tool (<code>scripts/ci-cd/test-soak/baselines/</code>) and leave a pointer in the August plan. Say <code>stay</code> to keep it where it is.</li>
+      <li><strong>A3 · Host Node.</strong> jsdom 30 declares Node ≥ 24.15; this host has 24.12. Every Node run in the plan (the soak tool's own tests, the Node reference side, the smoke e2e) happens on a newer Node installed via nvm first (machine-local, not a repo change), and the versions actually used — here and on CI — are written down. Default: yes.</li>
+    </ul>
+  </section>
+
+  <section class="approval">
+    <h2>What you are approving</h2>
+    <ul>
+      <li>Scope: vitest 5.0.1 + jsdom 30.1.0 in every workspace, the interop patch deleted, <code>resolve-asset</code> on the Bun convention, the soak evidence re-recorded, the harvest as measured — no runtime-setting change; no product code, no UI surface.</li>
+      <li>Tier: light — one codex audit, one PR into <code>dev</code>, merge is yours.</li>
+      <li>Validation: lint + typecheck + all suites on every phase; <code>audit:vue</code> + Node smoke e2e locally; the 16-suite matrix at one commit after a frozen install; network + tools e2e in CI.</li>
+      <li>No <code>/harden</code> pass — no trust boundary moves; no <code>/code-review</code> (your Phase 0 answer).</li>
+    </ul>
+    <div class="verdict" id="codex-verdict">
+      <span class="eyebrow">Codex audit (GPT-6 Astra, high)</span>
+      <p>Round 1: <b>conditional approve</b> — six blocking findings (the suite/pin arithmetic, the ten-run exception being written as policy, the early probe running week-old code, a speed setting adopted on warm numbers, gaps in the evidence procedure, a missed DOM breaking change with real exposure) and five smaller ones; all eleven folded in, none rejected.</p>
+      <p>Round 2 on the revision: <b>conditional approve</b> — three corrections (a red Node run must be classified, not presumed flaky; the dry run's rollback had to restore the patch and reinstall; the shared-config bookkeeping was off by two); all folded in. Its "looks fine" list: the comparator was read correctly, deleting the empty config file, keeping mock-clearing on, the gated dry run, review before the PR, one PR.</p>
+    </div>
+    <p>Reply <code>approve</code>, <code>conditional approve (with conditions: …)</code> or <code>reject (with blocking findings: …)</code>.</p>
+  </section>
+
+  <section>
+    <h2>Implementation seeds <span class="muted">(draft — finalised after approval)</span></h2>
+    <p class="warn">Use exactly one per session — they don't compose. Run it inside the plan's worktree (<code>agent-worktree resume vitest-5-bump</code>).</p>
+    <div class="seed rec">
+      <h3>/goal</h3>
+      <pre><code>/goal Phases 1–4 marked ✓ in implementations-plan/vitest-5-bump/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its validation gate as written in plan.md reported passing in the transcript; Phase 1's install happened on or after 2026-09-24 01:00 UTC with bunfig.toml untouched (no minimumReleaseAgeExcludes edit anywhere, committed or local, at any point); no runtime-config key (`isolate`, `pool`, `fsModuleCache`, `deps.interopDefault`, `clearMocks`) was added to any vitest config; Phase 3's evidence is 16 `COMPARE OK` full reports at ONE matrix commit after `bun install --frozen-lockfile` (both engines, 10 runs each and 30 for resolve-asset, quoted in the transcript), the 32 compacts committed, `bun run test:all` ×5 exit 0, and a `pr-quick.yml` workflow_dispatch whose `headSha` equals the matrix commit with every job green; every executable change after the matrix re-ran Phase 3 (or none happened — say which); for each phase the agent printed `LESSONS_FILE=implementations-plan/vitest-5-bump/lessons/phase-N.md`; plan.md says `code_review: off`, so `/code-review` was NOT run; the codex fix loop converged over the whole diff from 25062c06 BEFORE the PR was created, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; exactly one PR into dev exists for branch worktree-vitest-5-bump, labelled `e2e:extension-network` and `e2e:tools` AFTER creation, and `gh pr checks` shows quality-status, extension-smoke-e2e-status, extension-network-e2e-status and tools-e2e-status green.</code></pre>
+    </div>
+    <div class="seed">
+      <h3>/loop 15m</h3>
+      <pre><code>/loop 15m Drive implementations-plan/vitest-5-bump forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative), rebuild the task list from plan.md if empty, `git status`, `git log --oneline -5`; if a PR exists `gh pr view --json statusCheckRollup`. (2) Before 2026-09-24 01:00 UTC only Phase 1a (vitest 5.0.0 + the current jsdom — both already past the gate — then a full rollback: pins, lockfile AND the stopgap restored, `bun install --frozen-lockfile`) and test-bug fixes proven on vitest 4 after that rollback may proceed; the Phase 1 install waits for the gate — never write a bunfig.toml exclude, committed or local. (3) Waiting on the soak or CI is fine — launch soaks detached (`setsid nohup … &`) on an idle host with Node ≥ 24.15 on PATH, touch no tracked file until the matrix ends, monitor, use the wait to review the diff. (4) No task in hand? take the next pending step; after each edit run `bun run lint` + the touched workspace's `test`; commit (signed, `SSH_AUTH_SOCK=` if the agent hangs), push. (5) A red test: classify it (test-assumption bug → fix; a vitest-5/jsdom-30 contract change the test relied on → adapt and name the change; Bun-only divergence → STOP and report; a red Node reference → fix the test, new matrix commit); never `clearMocks: false`, never `skipIf(process.versions.bun)`, never a runtime-config key. (6) Stuck or facing a decision you'd bring to me? `/codex high`, decide, log the consult in lessons/phase-N.md; hard limits: never merge, publish, deploy, widen scope, or touch bunfig's age gate. (7) Same step failed 5 times → reassess with codex. (8) Phase green = its validation gate in plan.md passes: paste the result, mark ✓, print `LESSONS_FILE=…/lessons/phase-N.md`. (9) Any executable change after Phase 3 → Phase 3 again in full. (10) Phases 1–3 ✓ → Phase 4: codex loop over the whole diff (`code_review: off`) until clean, THEN `gh pr create`, add the two e2e labels, `gh pr checks --watch`, wrap-up report, stop.</code></pre>
+    </div>
+    <p class="muted">Full plan: <code>implementations-plan/vitest-5-bump/plan.md</code> in the worktree.</p>
+  </section>
+</main>
