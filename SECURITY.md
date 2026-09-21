@@ -498,15 +498,25 @@ the 7-day gate window:
    - Run `bun run audit:vue` + `bun run test:e2e`.
    - Commit the lockfile + bunfig change.
 4. **Remove the exclude in the same PR, once `bun.lock` holds the patched
-   version.** The gate only applies while `bun install` RESOLVES a version;
-   a version the lockfile already records is never re-gated, so the exclude
-   has done its whole job the moment the lockfile is written. Prove it
-   before committing: with the exclude deleted,
+   version.** The gate applies whenever `bun install` RESOLVES a version.
+   A frozen install never resolves, so CI and deploys need no exclude:
+   prove it before committing, with the exclude deleted,
    `bun install --frozen-lockfile --force` must still succeed. An exclude
    left in place "until the window passes" exempts every FUTURE version of
    that name for days, which is the exposure the gate exists to prevent.
-   (Only keep one across PRs when a later PR in the same series must
-   re-resolve the young version; date it, and remove it in that PR.)
+
+   **What removing it costs, until the version is 7 days old:** editing the
+   `package.json` of a workspace re-resolves that workspace's dependency
+   tree, and a young version in it is gated again even though it is locked
+   — the install fails with `was published within minimum release age`
+   (verified on Bun 1.4.2: a one-line edit to `apps/extension/package.json`
+   three days after the Presto 1.1.0 bump). Workspaces that do not reach
+   the young version are unaffected, and so is an install that changes
+   nothing. So for that week, a dependency change in an affected workspace
+   either waits, or is resolved with the exclude added **locally and not
+   committed**: the lockfile it writes is the same, and the frozen install
+   proves it. Commit an exclude across PRs only when a later PR of the same
+   series must re-resolve the young version; date it, and remove it there.
 5. PR description must cite the CVE and link the advisory.
 
 **Bun bug #25305 — closed on Bun 1.4.** On 1.3.x, `bun update --latest`
