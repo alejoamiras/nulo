@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (repo + store APIs) · codex high · code-review off
-status: revision 2 (Firefox joins; keyless Chrome publish) — draft, codex re-audit pending
+status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — awaiting owner approval
 ---
 
 # Store launch — Chrome Web Store and Firefox Add-ons, the repo half
@@ -215,9 +215,11 @@ Revision 1 (2026-09-07): round 1 reject, round 2 reject, round 3 approve; findin
 
 **Round 6: conditional approve.** "No new blocking credential-boundary defect found." Four should-fix, all adopted: `store-check.yml`'s `store` options grow with the jobs that exist (Arc 1 offers only `chrome`); the rebuild trigger stays through Arc 2's fix loop and leaves in an isolated, trigger-only final commit; Ask 5's exclusion of `personallyIdentifyingInfo` rested on "profile names stay local", which the passkey label contradicts, so the judgment call now covers both categories; the Firefox summary reports the state AMO returned rather than assuming human review. Codex confirmed the `workflow_ref in [...]` condition is valid CEL.
 
+**Round 7: approve.** "All four round-6 findings are resolved and no material plan findings remain; confidence is **high** in this plan review, while implementation correctness, CI execution, cross-architecture reproducibility and memory use, live credentials/environment protections, and store-policy acceptance remain unverified."
+
 ## Seeds
 
-ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it: `https://claude.ai/artifact/NYRzcqVkJ4iWXCuvhC5Z22`, `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j` and `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM` (republish the same file to each to update it).
+ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it. **Revision 2** is at `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j`. The copies under the other logins still show revision 1 until the same file is republished from each: `https://claude.ai/artifact/NYRzcqVkJ4iWXCuvhC5Z22`, `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM`.
 
 Recommended: `/goal`.
 

@@ -413,3 +413,11 @@ Checked and found correct:
 - **Facts and comments:** No further contradiction found in the repo-backed Assumptions; the cited implementation files remain unchanged from the previously inspected baseline. The planned comment edits are useful and concise.
 
 **Confidence: high** on workflow and repository findings; **moderate** on Firefox’s ultimate passkey classification. No new blocking credential-boundary defect found. Live account settings and actual rebuild results remain unverified. No files modified, builds run or tests run.
+
+---
+
+# Revision 2 — round 7
+
+approve
+
+All four round-6 findings are resolved and no material plan findings remain; confidence is **high** in this plan review, while implementation correctness, CI execution, cross-architecture reproducibility and memory use, live credentials/environment protections, and store-policy acceptance remain unverified.
