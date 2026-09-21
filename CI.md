@@ -80,6 +80,12 @@ A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`)
 
 **Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/e2e-proverless-stub/`](./implementations-plan/e2e-proverless-stub/plan.md).
 
+### `pr-extension-smoke-e2e-firefox.yml` / `pr-extension-network-e2e-firefox.yml`
+
+The two extension suites again, on Firefox. Each is a twin of its Chrome caller — same paths filter (re-pointed at its own file, plus `.github/actions/setup-geckodriver/**`), same labels, same shard / heavy / canary shape — calling the same reusable workflow with `browser: firefox`, which adds [`setup-geckodriver`](./.github/actions/setup-geckodriver/action.yml) (SHA-256-pinned tarball + binary), installs the Firefox revision the locked Puppeteer pins, builds `dist/firefox` and runs the suite with `NULO_E2E_BROWSER=firefox`. Differences from the Chrome callers, all deliberate: **draft PRs skip** (the gate's first test; `ready_for_review` re-runs it), `pull-requests: read` is granted to the `changes` job only, and the canary omits `frozen-account-canary` — one of the ten files that are Chrome-only by capability (they kill the MV3 service worker or arm CDP Fetch; Firefox has neither) and skip whole-file on Firefox. Aggregators: `extension-smoke-e2e-firefox-status`, `extension-network-e2e-firefox-status`, the same exact-state shape.
+
+**Advisory.** Neither is in a required set, and `nightly.yml` / `release.yml` run their Firefox jobs (`network-e2e*-firefox`, `smoke-firefox-against-artifact`) outside every aggregator's and publish step's `needs`. A red advisory job still turns the *run* red — read the `status` job. Advisory is not free: on a PR that trips both filters the two workflows start fifteen more jobs (nine suites, six control) that queue against the required lanes for the same runners, and `release.yml`'s Firefox smoke holds the `release` concurrency slot until it ends (a 20-minute execution timeout; time queued for a runner is on top), so it can delay the *next* release, never fail this one. `scripts/ci-cd/behavior-gating.test.ts` pins the parity with the Chrome lanes (filters, file lists, retry, matrix), the absence of any Firefox job from a `needs`, the `chrome` default of the shared `browser` input, and that the two browser caches share no key prefix; `decide-gate.test.ts` executes the draft rule. Promotion is staged (CLAUDE.md § Staged-rollout switches). How the suite drives Firefox and what differs: [`apps/extension/tests/e2e/FIREFOX.md`](./apps/extension/tests/e2e/FIREFOX.md).
+
 ### `bridge-contracts.yml`
 
 The any-ERC-20 bridge's PR gate: `contracts` paths-filter → `_bridge-contracts.yml` (forge hermetic suite, halmos proofs, keystone nargo vectors, hub artifact parity, the sole-consumer static guard, the `integration` job — `packages/bridge-core`'s sandbox suite on a fresh anvil + local network, its node and anvil logs uploaded on failure — and the `txe` job, the hub's Noir tests under the TXE oracle) → `bridge-contracts-status`. Same exact-state aggregator shape as the extension gates. Not in the required set yet.
@@ -126,8 +132,8 @@ The repo's only scheduled workflow: every night at 03:23 UTC it builds current `
 
 | Label | Effect |
 |---|---|
-| `e2e:extension-smoke` | Force-run smoke e2e on this PR. |
-| `e2e:extension-network` | Force-run network e2e on this PR. |
+| `e2e:extension-smoke` | Force-run smoke e2e on this PR — Chrome and (unless the PR is a draft) Firefox. |
+| `e2e:extension-network` | Force-run network e2e on this PR — Chrome and (unless the PR is a draft) Firefox. |
 
 Adding the label triggers a fresh run; removing it re-evaluates the gate (so a stale failing check goes green if the filter doesn't trip).
 
@@ -221,7 +227,7 @@ Composite actions (step-level reuse):
 
 - **Extension smoke e2e is required on both `dev` and `main`** (as `extension-smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
 - **Extension network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
-- **Marketplace publishing (Chrome Web Store, Firefox AMO)** is stubbed in `release.yml`. Enabling it requires wiring `CWS_*` + `AMO_JWT_*` secrets and replacing the Firefox `gecko.id` placeholder.
+- **Marketplace publishing (Chrome Web Store, Firefox AMO)** is stubbed in `release.yml`. Enabling it requires wiring `CWS_*` + `AMO_JWT_*` secrets (the Firefox `gecko.id`, `wallet@nulo.sh`, is already final).
 
 ## See also
 

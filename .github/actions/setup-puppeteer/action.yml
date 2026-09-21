@@ -1,12 +1,39 @@
 name: Setup Puppeteer
-description: Restore ~/.cache/puppeteer so the bundled Chromium does not redownload on every run.
+description: |
+  Restore the browser Puppeteer drives so it does not redownload on every run.
+
+  Chrome arrives with `bun install` (Puppeteer's postinstall); Firefox is installed here, at the
+  revision the locked Puppeteer pins. The two caches share NO key prefix: Chrome restores by
+  prefix, so a Firefox key beginning `<os>-puppeteer-` could be restored into a Chrome lane. (The
+  repository's cache quota is still shared: Firefox entries count toward its eviction.)
+
+inputs:
+  browser:
+    description: chrome | firefox
+    required: false
+    default: chrome
 
 runs:
   using: composite
   steps:
     - uses: actions/cache@v6
+      if: inputs.browser == 'chrome'
       with:
         path: ~/.cache/puppeteer
         key: ${{ runner.os }}-puppeteer-${{ hashFiles('apps/extension/package.json') }}
         restore-keys: |
           ${{ runner.os }}-puppeteer-
+
+    # Keyed on the lockfile, which is what fixes the Puppeteer version and so the Firefox revision;
+    # no restore prefix, because a stale revision restored here would never be the one launched.
+    - uses: actions/cache@v6
+      if: inputs.browser == 'firefox'
+      with:
+        path: ~/.cache/puppeteer/firefox
+        key: ${{ runner.os }}-firefox-for-puppeteer-${{ hashFiles('bun.lock') }}
+
+    - name: Install the Firefox revision Puppeteer pins
+      if: inputs.browser == 'firefox'
+      shell: bash
+      working-directory: apps/extension
+      run: bun x puppeteer browsers install firefox

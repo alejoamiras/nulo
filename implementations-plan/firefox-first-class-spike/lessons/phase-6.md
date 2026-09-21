@@ -39,7 +39,7 @@ Two wrong fixes came first and were both reverted: treating `browsingContext is 
 | heavy-concurrent | exit 0 — 1 passed |
 | canary (real proving) | exit 0 — 2 passed; 5 `Proving succeeded` in the presto-server log |
 
-Skips are the six Chrome-only network files in `recon.md`, whole-file. Zero leftover geckodriver/Firefox processes after each lane.
+The table is the final battery, run after the review loop's last fix: every lane on one SHA, the two proverless runners side by side and the canary alone. Skips are the six Chrome-only network files in `recon.md`, whole-file. Zero leftover geckodriver/Firefox processes after each lane.
 
 ## Quality round (owner request: fewer monkey-patches, fewer footguns)
 

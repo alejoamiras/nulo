@@ -87,6 +87,13 @@ on:
         required: false
         type: string
         default: ""
+      browser:
+        description: |
+          chrome | firefox. Firefox adds geckodriver and the Firefox build; every name a run
+          publishes (logs artifact, browser cache) carries the browser so lanes never collide.
+        required: false
+        type: string
+        default: chrome
     secrets:
       SPONSORED_FPC_SALT:
         required: false
@@ -100,6 +107,7 @@ jobs:
     # unsharded job; that ceiling no longer applies.
     timeout-minutes: 30
     env:
+      NULO_E2E_BROWSER: ${{ inputs.browser }}
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
       # Baked into the wallet build at `bun run build:chrome` time (via the
@@ -146,7 +154,23 @@ jobs:
         with:
           skip_cli: ${{ inputs.aztec_node_url != 'http://localhost:8080' }}
 
+      # The suite rejects an unknown browser too, but only after the sandbox has been paid for.
+      - name: Validate the browser input
+        id: browser
+        env:
+          BROWSER: ${{ inputs.browser }}
+        run: |
+          case "$BROWSER" in
+            chrome|firefox) ;;
+            *) echo "::error::browser must be chrome or firefox, got '$BROWSER'"; exit 1 ;;
+          esac
+
       - uses: ./.github/actions/setup-puppeteer
+        with:
+          browser: ${{ inputs.browser }}
+
+      - uses: ./.github/actions/setup-geckodriver
+        if: inputs.browser == 'firefox'
 
       # Install + verify + start presto-server. Skipped when the rollback
       # flag is set; in that case the wallet build's VITE_NULO_PRESTO_REQUIRED
@@ -277,16 +301,19 @@ jobs:
       # when `inputs.probe == '1'` because slow-test investigation builds
       # legitimately contain probe strings.
       - name: Verify no probe code in shipped bundle
-        if: always() && inputs.probe != '1'
+        # Gated on the validation: `always()` would otherwise put a rejected value into a path.
+        if: always() && steps.browser.outcome == 'success' && inputs.probe != '1'
         shell: bash
+        env:
+          BROWSER: ${{ inputs.browser }}
         run: |
           cd apps/extension
           # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
           # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
-          HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
+          HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' "dist/${BROWSER}" 2>/dev/null || true; } | wc -l | tr -d ' ')
           if [ "$HITS" -gt 0 ]; then
             echo "::error::Probe strings found in built bundle ($HITS hits)."
-            grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome | head -20
+            grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' "dist/${BROWSER}" | head -20
             exit 1
           fi
           echo "Bundle clean: no probe strings."
@@ -345,7 +372,7 @@ jobs:
         with:
           # Use shard_label (e.g. "1-of-5") not shard ("1/5") — upload-artifact
           # rejects `/` in names (actions/upload-artifact#647).
-          name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
+          name: network-e2e-logs-${{ inputs.browser != 'chrome' && format('{0}-', inputs.browser) || '' }}${{ inputs.shard_label || 'full' }}
           path: |
             apps/extension/.e2e-state
             /tmp/aztec-*.log

@@ -20,6 +20,16 @@ the ledger of every flake this repo has root-caused. Boundaries:
 Every rule below names the code that carries it. If a name here does not resolve on the tree, the
 tree wins — fix the skill in the same PR.
 
+## 0. Two browsers
+
+Every suite runs on Chrome (default) and on Firefox (`NULO_E2E_BROWSER=firefox`). The reference for Firefox — the geckodriver + BiDi hybrid, each behaviour that differs and where it is absorbed, the debugging order — is [`apps/extension/tests/e2e/FIREFOX.md`](../../../apps/extension/tests/e2e/FIREFOX.md). What this skill needs you to hold:
+
+- **A browser difference goes on `BrowserDriver`** (`fixtures/browser/index.ts`), with a Chrome implementation next to the Firefox one. `scripts/e2e/browser-seam.test.ts` rejects a scheme literal, a direct `browser.close()` / `newPage()` / `waitForTarget()`, and any `isFirefox`/`BROWSER` branch under `fixtures/**` or `helpers/**`. A test file may use `isFirefox` to skip itself whole (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`) or to state a real difference in an expectation.
+- **Open, navigate, reload and click through the helpers**: `newPage`, `gotoExtensionPage`, `reloadExtensionPage`, `clickByTestId`/`clickSelector`, `pickFileByTestId`. Each hides a Firefox failure mode that does not look like its cause (a page in the minimized PXE window, a stranded context, a missing user gesture, an unfocused window).
+- **A Chrome-only file is a capability statement, not a quarantine.** The set is the ten files that kill the MV3 service worker or arm CDP Fetch. Adding one is the owner's call.
+- **The e2e tree is outside `bun run typecheck`.** `scripts/e2e/unresolved-names.test.ts` catches a missing import or stale identifier in 3 s; anything subtler is proven by running the file.
+- **Red on Firefox only?** Read `document.visibilityState` and `document.hasFocus()` in the page before touching a fixture.
+
 ## 1. Run it
 
 ### The three configs
