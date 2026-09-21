@@ -160,7 +160,7 @@ Single arc, one PR `worktree-chrome-store-launch` → `dev`: `feat(store): chrom
 
 ## Seeds
 
-ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as identical private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it: `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j` and `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM` (republish the same file to each to update it).
+ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as identical private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it: `https://claude.ai/artifact/NYRzcqVkJ4iWXCuvhC5Z22`, `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j` and `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM` (republish the same file to each to update it).
 
 Recommended: `/goal`.
 
