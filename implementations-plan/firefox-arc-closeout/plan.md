@@ -358,7 +358,7 @@ nothing to the page for a `session-disconnected` whose port it does not hold, an
 - Smoke (build first), both browsers: `sw-resilience` (its two known skips named), `sw-restart-network`.
 - The measured time-to-rejection per browser is recorded; above 15 s on either → stop, owner, alternative C.
 
-### Phase 3 — docs for the behaviour
+### Phase 3 ✓ — docs for the behaviour
 
 `ARCHITECTURE.md` (session model: what a dApp sees when the background dies, the four stated limits, why this
 differs from F-B16), the e2e skill's ledger, `FIREFOX.md` if a Firefox nuance was learned.
