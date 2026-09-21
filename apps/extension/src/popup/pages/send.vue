@@ -274,6 +274,7 @@ const reviewDepth = computed(() => popupStore.len - reviewOrder.value)
 const { ready: reviewReady, authorises } = useSendReview({
 	isGated: () => facts.value.requiresReview,
 	isOpen: () => reviewOpen.value,
+	isTop: () => reviewOrder.value === popupStore.len - 1,
 })
 const openReview = () => {
 	if (!reviewOpen.value) popupStore.open(REVIEW_KEY)
@@ -372,11 +373,8 @@ const submit = (source) => {
 	submitInFlight = true
 	submitTransfer(submitDeps, snapshotTransfer())
 
-	// Navigate away immediately. Progress is visible on the general page
-	// via the durable operation journal, which survives popup close/reopen
-	// and SW restart. The previous 700ms sleep tried to "hold the button
-	// so the click felt received" and to catch fast-reject errors — both
-	// jobs are now done by the journal + toast.
+	// Leave at once: the durable operation journal shows progress on the general page and survives
+	// popup close and SW restart; a fast rejection reaches the user as a toast.
 	if (cancelled) return
 	leaveSend()
 }

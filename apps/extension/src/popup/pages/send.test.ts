@@ -524,6 +524,33 @@ describe("send page — consent", () => {
 		w.unmount()
 	})
 
+	test("a popup opened over the armed sheet takes its consent; closed again, the wait starts over", async () => {
+		vi.useFakeTimers()
+		const { w, popupStore } = await mountSend()
+		await fillForm(w, FJ)
+		await submit(w).trigger("click")
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+
+		popupStore.open("confirm")
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("false")
+		expect(sendNow(w).attributes("disabled")).toBeDefined()
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).not.toHaveBeenCalled()
+
+		popupStore.close("confirm")
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("false")
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		await nextTick()
+		expect(sendNow(w).attributes("data-ready")).toBe("true")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).toHaveBeenCalledTimes(1)
+		w.unmount()
+	})
+
 	test("the primary button never sends a gated transfer, even with the sheet open and ready", async () => {
 		vi.useFakeTimers()
 		const { w } = await mountSend()

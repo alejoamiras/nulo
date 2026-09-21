@@ -5,6 +5,7 @@ import { REVIEW_ARM_MS, useSendReview } from "./useSendReview"
 function setup(initial: { gated: boolean; open?: boolean }) {
 	const gated = ref(initial.gated)
 	const open = ref(initial.open ?? false)
+	const top = ref(true)
 	/** Reads recomputed without changing must not restart the wait; this counts as such a read. */
 	const noise = ref(0)
 	const scope = effectScope()
@@ -15,10 +16,11 @@ function setup(initial: { gated: boolean; open?: boolean }) {
 				return gated.value
 			},
 			isOpen: () => open.value,
+			isTop: () => top.value,
 		}),
 	)
 	if (!review) throw new Error("scope did not run")
-	return { gated, open, noise, scope, review }
+	return { gated, open, top, noise, scope, review }
 }
 
 describe("composables/useSendReview", () => {
@@ -118,6 +120,35 @@ describe("composables/useSendReview", () => {
 		vi.advanceTimersByTime(REVIEW_ARM_MS - 1)
 		expect(review.ready.value).toBe(false)
 		vi.advanceTimersByTime(1)
+		expect(review.ready.value).toBe(true)
+	})
+
+	test("covered by a newer popup: ready drops in the same tick; back on top, a gated sheet waits the full time again", () => {
+		const { open, top, review } = setup({ gated: true })
+		open.value = true
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		expect(review.ready.value).toBe(true)
+
+		top.value = false
+		expect(review.ready.value).toBe(false)
+		expect(review.authorises("review")).toBe(false)
+		vi.advanceTimersByTime(REVIEW_ARM_MS)
+		expect(review.ready.value).toBe(false)
+
+		top.value = true
+		vi.advanceTimersByTime(REVIEW_ARM_MS - 1)
+		expect(review.ready.value).toBe(false)
+		vi.advanceTimersByTime(1)
+		expect(review.ready.value).toBe(true)
+	})
+
+	test("not gated: ready follows the top slot", () => {
+		const { open, top, review } = setup({ gated: false })
+		open.value = true
+		expect(review.ready.value).toBe(true)
+		top.value = false
+		expect(review.ready.value).toBe(false)
+		top.value = true
 		expect(review.ready.value).toBe(true)
 	})
 
