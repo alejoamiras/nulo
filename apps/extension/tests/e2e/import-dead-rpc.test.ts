@@ -31,10 +31,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { CHROME_ONLY, interceptRpc, isFirefox, type RpcInterception } from "./fixtures/browser"
 import { LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { clickByTestId, type ExtensionContext, launchExtension, test, waitForHash, pickFileByTestId } from "./fixtures/extension"
-import { interceptRpc, type RpcInterception } from "./helpers/rpc-intercept"
 import {
 	buildSyntheticBackup,
 	deriveNuloAccountAddress,
@@ -249,7 +248,7 @@ async function continueThroughErrorsScreen(page: Page, errorsScreenBudgetMs: num
 
 async function withFreshExtension(
 	mode: RpcInterception,
-	fn: (page: Page, ctx: ExtensionContext, intercepted: () => number) => Promise<void>,
+	fn: (page: Page, ctx: ExtensionContext, intercepted: () => Promise<number>) => Promise<void>,
 	intercept: typeof interceptRpc = interceptRpc,
 ): Promise<{ profileDir: string }> {
 	const profileDir = mkdtempSync(join(tmpdir(), "nulo-dead-rpc-"))
@@ -263,7 +262,7 @@ async function withFreshExtension(
 		await fn(page, ctx, armed.hits)
 		// A target the helper could not arm may have dialed the real seed endpoint: the scenario's
 		// outcome proves nothing then, whichever way it came out.
-		expect(armed.failures(), "rpc interception failures").toEqual([])
+		expect(await armed.failures(), "rpc interception failures").toEqual([])
 	} finally {
 		await armed?.stop()
 		await ctx.close()
@@ -282,7 +281,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.cdpFetch, () => {
 			await submitBackup(page, writeBackupToTemp(backup, "refused.json"))
 			await continueThroughErrorsScreen(page, 60_000)
 			// The refusal must be the interception's, not whatever happens to listen on the seed's port.
-			expect(intercepted()).toBeGreaterThan(0)
+			expect(await intercepted()).toBeGreaterThan(0)
 		})
 	})
 

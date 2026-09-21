@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "puppeteer"
-import { extensionUrl, waitForTarget } from "./fixtures/browser"
+import { extensionUrl, reloadExtensionPage, waitForOpenedUrl } from "./fixtures/browser"
 import {
 	clickByTestId,
 	launchExtension,
@@ -271,7 +271,7 @@ describe("popup: declining never locks a person out", () => {
 		await lockWallet(page)
 		await waitForLockScreen(page)
 		await page.evaluate(() => chrome.storage.session.remove("nulo:legal:dismissed"))
-		await page.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(page)
 		await waitForLockScreen(page)
 		expect(await isSheetPresent(page)).toBe(false)
 		await page.close()
@@ -317,7 +317,7 @@ describe("popup: declining never locks a person out", () => {
 /** The register screen with no acceptance stored, as a fresh install has it. */
 async function reloadRegisterWithoutRecord(page: Page): Promise<void> {
 	await page.evaluate((key) => chrome.storage.local.remove(key), "nulo:legal:accepted")
-	await page.reload({ waitUntil: "domcontentloaded" })
+	await reloadExtensionPage(page)
 	await waitForHash(page, "#/popup/register", 30_000)
 }
 
@@ -358,8 +358,7 @@ describe("popup: a passkey wallet that declined", () => {
 
 		await pointerClick(page, "legal-about-licences")
 		const expected = extensionUrl(extension.extensionId, "/THIRD-PARTY-NOTICES.txt")
-		const target = await waitForTarget(extension.browser, (candidate) => candidate.url() === expected, 15_000)
-		expect(target.type()).toBe("page")
+		await waitForOpenedUrl(extension.browser, expected, 15_000)
 
 		// Read through the extension origin rather than the tab's text/plain rendering.
 		const notices = await page.evaluate(async (url) => (await fetch(url)).text(), expected)

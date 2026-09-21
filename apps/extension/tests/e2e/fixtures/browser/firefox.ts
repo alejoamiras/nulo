@@ -6,6 +6,7 @@ import * as puppeteer from "puppeteer"
 import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
+import { observeAndRefuse } from "./firefox-rpc-intercept"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
@@ -416,6 +417,16 @@ async function waitForTarget(browser: Browser, predicate: (target: Target) => bo
 	throw new Error(`waitForTarget: no matching target after ${timeout}ms`)
 }
 
+async function waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void> {
+	const session = classicSessionFor(browser)
+	const deadline = Date.now() + timeout
+	while (Date.now() < deadline) {
+		if ((await session.windowsWithUrls()).some((window) => window.url === url)) return
+		await new Promise((resolve) => setTimeout(resolve, 250))
+	}
+	throw new Error(`waitForOpenedUrl: nothing is showing ${url} after ${timeout}ms`)
+}
+
 /**
  * A window that closes itself — every approval window does — is never reported over BiDi, so
  * Puppeteer would keep it in `targets()` and keep its page "open" for good. The classic handle
@@ -482,6 +493,8 @@ export const firefoxDriver: BrowserDriver = {
 	newPage,
 	openScratchPage,
 	waitForTarget,
+	waitForOpenedUrl,
+	interceptRpc: (browser, _extensionId, fromOrigin, mode) => observeAndRefuse(classicSessionFor(browser), fromOrigin, mode),
 	prepareClick,
 	pickFile,
 	virtualAuthenticator,

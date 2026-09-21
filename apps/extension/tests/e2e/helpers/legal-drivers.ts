@@ -1,4 +1,5 @@
 import type { Page } from "puppeteer"
+import { reloadExtensionPage } from "../fixtures/browser"
 import { clickByTestId, seedLegalAcceptance, waitForHash } from "../fixtures/extension"
 import { LEGAL_ACCEPTANCE_KEY, type LegalSeed } from "../fixtures/legal"
 
@@ -46,7 +47,7 @@ export async function reloadWithLegalState(page: Page, seed: Exclude<LegalSeed, 
 	await page.evaluate(() => {
 		window.location.hash = "#/popup/general"
 	})
-	await page.reload({ waitUntil: "domcontentloaded" })
+	await reloadExtensionPage(page)
 	await waitForHash(page, "#/popup/general", 30_000)
 }
 

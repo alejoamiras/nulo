@@ -10,12 +10,12 @@
  * `fee-privacy.test.ts` and the "by knowledge state" cases in `FeeSettingsCard.test.ts` — and the
  * funded shapes are covered against a real chain in `network/fee-methods.test.ts`.
  *
- * The smoke build pins the active network to Testnet; its RPC origin is refused at the browser
- * through CDP interception, so the run does not depend on the public endpoint being up or down.
+ * The smoke build pins the active network to Testnet; its RPC origin is refused inside the
+ * browser, so the run does not depend on the public endpoint being up or down.
  */
 import { describe, expect } from "vitest"
+import { interceptRpc } from "./fixtures/browser"
 import { clickByTestId, openPopup, test, waitForHash } from "./fixtures/extension"
-import { interceptRpc } from "./helpers/rpc-intercept"
 
 /** Origin of the Testnet seed (`DEFAULT_SEEDS` in the network service). */
 const TESTNET_RPC_ORIGIN = "https://lb.drpc.live"
@@ -60,8 +60,8 @@ describe("send fee privacy (dead RPC)", () => {
 			// Either a payer that does not name the account, or no payer plus the reason why.
 			expect(state.method !== null || state.explained).toBe(true)
 
-			expect(interception.failures()).toEqual([])
-			expect(interception.hits()).toBeGreaterThan(0)
+			expect(await interception.failures()).toEqual([])
+			expect(await interception.hits()).toBeGreaterThan(0)
 			await page.close()
 		} finally {
 			await interception.stop()

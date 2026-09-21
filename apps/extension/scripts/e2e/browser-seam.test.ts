@@ -27,7 +27,7 @@ const WORKER_LOADER = "service-worker-loader"
 const WORKER_DEBT: Record<string, number> = {
 	"fixtures/helpers.ts": 2,
 	"fixtures/journal.ts": 1,
-	"helpers/rpc-intercept.ts": 1,
+	"fixtures/browser/chrome-rpc-intercept.ts": 1,
 	"network/cold-wake-discovery.test.ts": 1,
 }
 
@@ -165,6 +165,38 @@ function violations(source: string): { scheme: number[]; close: number[]; worker
 	return { scheme: dedupe(scheme), close: dedupe(close), worker: dedupe(worker), wait: dedupe(wait), page: dedupe(page) }
 }
 
+/** `chrome.runtime.reload()` restarts the add-on and `location.reload()` runs inside the page: neither is a driver's reload. */
+const IN_PAGE_RELOADERS = new Set(["runtime", "location"])
+
+/**
+ * Direct `page.reload()` calls left outside the seam, exact and shrink-only. Over BiDi a reload of
+ * an extension page strands the `Page` on a dead context, and the spec then waits out a 30 s
+ * navigation timeout. What remains reloads a dApp's web page, or sits in a Chrome-only file.
+ */
+const RELOAD_DEBT: Record<string, number> = {
+	"imported-account-lifecycle.test.ts": 1,
+	"network/frozen-account-canary.test.ts": 1,
+	"network/passkey-execution-canary.test.ts": 1,
+	"network/session-reconnect.test.ts": 1,
+}
+
+/** 1-based lines of `x.reload(...)` calls made from the test process. */
+function directReloads(source: string): number[] {
+	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
+	const lines: number[] = []
+	const visit = (node: ts.Node): void => {
+		const member = ts.isCallExpression(node) ? calledMember(node) : undefined
+		if (member?.name === "reload") {
+			const receiver = unwrap(member.receiver)
+			const name = ts.isPropertyAccessExpression(receiver) ? receiver.name.text : ts.isIdentifier(receiver) ? receiver.text : ""
+			if (!IN_PAGE_RELOADERS.has(name)) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+		}
+		ts.forEachChild(node, visit)
+	}
+	ts.forEachChild(file, visit)
+	return lines
+}
+
 const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
 
 /**
@@ -259,6 +291,7 @@ function scan() {
 	const wait: Record<string, number> = {}
 	const page: string[] = []
 	const branch: string[] = []
+	const reload: Record<string, number> = {}
 	const visited: string[] = []
 	for (const { rel, source } of e2eSources(E2E_ROOT)) {
 		visited.push(rel)
@@ -269,8 +302,10 @@ function scan() {
 		if (found.worker.length) worker[rel] = found.worker.length
 		if (found.wait.length) wait[rel] = found.wait.length
 		page.push(...found.page.map((n) => `${rel}:${n}`))
+		const reloads = directReloads(source).length
+		if (reloads) reload[rel] = reloads
 	}
-	return { scheme, close, worker, wait, page, branch, visited }
+	return { scheme, close, worker, wait, page, branch, reload, visited }
 }
 
 /**
@@ -313,6 +348,10 @@ describe("browser seam", () => {
 
 	test("no shared helper branches on the browser — put the difference on BrowserDriver", () => {
 		expect(found.branch).toEqual([])
+	})
+
+	test("no new direct page.reload — use the seam's reloadExtensionPage()", () => {
+		expect(found.reload).toEqual(RELOAD_DEBT)
 	})
 })
 
@@ -404,6 +443,13 @@ describe("browser seam guard", () => {
 	test("flags a direct waitForTarget on a browser, and not the seam's own", () => {
 		expect(violations(inAsync("await ctx.browser.waitForTarget((t) => true)")).wait).toEqual([2])
 		expect(violations(inAsync("await waitForTarget(ctx.browser, (t) => true, 1000)")).wait).toEqual([])
+	})
+
+	test("flags a direct reload of a page, and not the add-on's or the document's own", () => {
+		expect(directReloads(inAsync('await page.reload({ waitUntil: "domcontentloaded" })'))).toEqual([2])
+		expect(directReloads(inAsync("await reloadExtensionPage(page)"))).toEqual([])
+		expect(directReloads(inAsync("await page.evaluate(() => chrome.runtime.reload())"))).toEqual([])
+		expect(directReloads(inAsync("await page.evaluate(() => window.location.reload())"))).toEqual([])
 	})
 
 	test("leaves the words alone outside a target test", () => {

@@ -11,6 +11,7 @@
  */
 import { expect, inject } from "vitest"
 import { LEGAL_MANIFEST } from "@nulo/legal"
+import { reloadExtensionPage } from "../fixtures/browser"
 import { clickByTestId, openPopup, seedLegalAcceptance, test, waitForHash } from "../fixtures/extension"
 import { navigateByHash } from "../fixtures/helpers"
 import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
@@ -64,7 +65,7 @@ test.skipIf(!hasConfig)(
 		expect(await txRows()).toBe(rowsBefore)
 
 		// ── The wallet's own Send says why, and cannot submit. ─────────────
-		await wallet.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(wallet)
 		await waitForHash(wallet, "#/popup/general", 30_000)
 		await waitForSheet(wallet, "changed")
 		await pointerClick(wallet, "legal-sheet-not-now")
