@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents; foreign reviewer at high; code-review off (standing owner directive)
-status: APPROVED by the owner 2026-09-18 (plan v3) — implementing; no phase green yet
+status: MERGED to dev 2026-09-21 as stack #638 (#632–#637, #646, #650, #652; dev at eec649f0) — delivered, awaiting nightly + release evidence
 ---
 
 # Firefox as a first-class target

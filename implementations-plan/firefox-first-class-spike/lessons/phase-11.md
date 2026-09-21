@@ -50,3 +50,11 @@ All nine branches pushed as plain fast-forwards, in three batches half an hour a
 - **Top PR #652**: `extension-smoke-e2e-firefox-status` and `extension-network-e2e-firefox-status` both green — all eight Firefox network lanes, the real-proving canary included.
 - **As predicted**, the advisory Firefox lanes are red on #637, #646 and #650 (heads without this arc): smoke on dev's two new files, and network shard 4/5 on `legal-acceptance-wall.test.ts` alone (`Navigation timeout of 30000 ms`, 16 of 17 files passed). The same shard is green on #652.
 - Two reruns, both genuine and both diagnosed before rerunning: `webdriver-ownership.test.ts` timed out at the runner's 5 s default on a loaded unit job while `releaseLaunch` was inside its own 5 s + 2 s grace — the suite now has 20 s, so it is fixed, not just rerun; and `network/send-picker.test.ts` on Firefox (#652, shard 2/5) waited out 15 s for a picker row — nothing this arc touches, green on the same dev code at #637 and #646, green on rerun.
+
+## Merged (2026-09-21)
+
+The owner authorized the merge explicitly; `gh stack merge 638 --yes --squash` landed all nine PRs on `dev` atomically (`a7eaba73` … `eec649f0`). `dev`'s tree is byte-identical to the verified head of #652. Nothing runs on a push to `dev`, so the first evidence on `dev` itself is the next scheduled nightly.
+
+**Owner, same day, on a headed Firefox:** the passkey unlock check that headless runs could not vouch for (`prepareClick` brings the window to the front and could hide a focus bug) — *"ive tested it works."*
+
+**Still open (owner's post-merge checklist, `CLAUDE.md` § Staged-rollout switches):** the first scheduled nightly shows `smoke-firefox-against-artifact` and the four `network-e2e-*-firefox` jobs green; the first release shows `smoke-firefox-against-artifact` green. The index flips to completed only then.
