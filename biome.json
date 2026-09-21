@@ -8,6 +8,7 @@
 			"infra/**",
 			"packages/**",
 			"scripts/ci-cd/test-soak/**",
+			"!scripts/ci-cd/test-soak/baselines",
 			"!**/node_modules",
 			"!**/dist",
 			"!**/target",

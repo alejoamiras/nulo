@@ -1,4 +1,5 @@
-import { createRequire } from "node:module"
+import { readFileSync } from "node:fs"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { describe, expect, test } from "vitest"
 
 /**
@@ -8,8 +9,9 @@ import { describe, expect, test } from "vitest"
  */
 describe("@alejoamiras/presto-core", () => {
 	test("declares no @aztec dependency", () => {
-		const require = createRequire(import.meta.url)
-		const pkg = require("@alejoamiras/presto-core/package.json") as {
+		// The manifest is not in the package's exports map, so it is read as a file, not resolved as a subpath.
+		const manifest = resolvePackageAsset("@alejoamiras/presto-core", "package.json", { from: import.meta.url })
+		const pkg = JSON.parse(readFileSync(manifest, "utf8")) as {
 			dependencies?: Record<string, string>
 			peerDependencies?: Record<string, string>
 			optionalDependencies?: Record<string, string>
