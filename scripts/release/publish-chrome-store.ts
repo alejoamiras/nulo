@@ -113,8 +113,12 @@ export function interpretPreflight(status: ItemStatus, itemId: string, version: 
 		["submitted", submitted],
 	] as const) {
 		if (revision.kind !== "known") continue
-		const channels = Array.isArray(revision.revision.distributionChannels) ? revision.revision.distributionChannels : []
-		for (const channel of channels) {
+		const { distributionChannels } = revision.revision
+		// Absent is "no channel"; present-but-not-a-list is a shape this script cannot read, so it fails.
+		if (distributionChannels !== undefined && !Array.isArray(distributionChannels)) {
+			return { ok: false, reason: `${label} revision carries an unreadable distributionChannels ${str(distributionChannels)}` }
+		}
+		for (const channel of distributionChannels ?? []) {
 			const crx = typeof channel === "object" && channel !== null ? channel.crxVersion : undefined
 			const theirs = typeof crx === "string" ? parseStoreVersion(crx) : null
 			if (!theirs) return { ok: false, reason: `${label} revision carries an unreadable crxVersion ${str(crx)}` }

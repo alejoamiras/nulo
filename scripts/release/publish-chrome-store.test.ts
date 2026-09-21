@@ -72,6 +72,10 @@ describe("preflight", () => {
 		}
 		expect(interpretPreflight(status({ publishedItemRevisionStatus: null }), ITEM, ours)).toMatchObject({ ok: false })
 		expect(interpretPreflight(status({ publishedItemRevisionStatus: { state: "PUBLISHED", distributionChannels: [null] } }), ITEM, ours)).toMatchObject({ ok: false })
+		// A present non-array must not be read as "no channels": that would let a higher version through.
+		const object = { state: "PUBLISHED", distributionChannels: { crxVersion: "99.0.0.0" } }
+		expect(interpretPreflight(status({ publishedItemRevisionStatus: object }), ITEM, ours)).toMatchObject({ ok: false, reason: expect.stringContaining("distributionChannels") })
+		expect(interpretPreflight(status({ submittedItemRevisionStatus: { state: "STAGED", distributionChannels: "0.26.0.0" } }), ITEM, ours)).toMatchObject({ ok: false })
 	})
 
 	test("accepts every documented non-pending state at a lower version", () => {

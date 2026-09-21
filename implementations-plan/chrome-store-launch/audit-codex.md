@@ -445,3 +445,20 @@ Prompt: the net diff of Phases 1–3 (`git diff 2540271a..HEAD`), adversarial, r
 - [apps/extension/store/remote-code.md:35](apps/extension/store/remote-code.md:35) — **The oracle-boundary citation points to unrelated code.** `acir_callback.ts:8–10` defines `UnavailableOracleError`; it does not construct or restrict the foreign-call handler. The relevant implementation starts at line 21. A reviewer following the citation cannot verify the claimed boundary, while the citation test passes because it checks only file length.
 
 verdict: reject — confidence: high. Release tests: 116 passed; icon drift and both manifests’ permission coverage passed. Store unit tests remained unverified because workers timed out; live WIF/environment protections, store acceptance, builds and E2E remain unverified.
+
+
+---
+
+# Arc 1 implementation — round 2
+
+Confirmed at `03dcda52`: **M1, M2, M3, M4, S1 and S2 are resolved**, including the corrected loader and oracle citations.
+
+**Must-fix**
+
+- [scripts/release/publish-chrome-store.ts:116](scripts/release/publish-chrome-store.ts:116) — **Malformed channel data now bypasses preflight.** The new fallback converts every non-array `distributionChannels` into `[]`. Reproduced with `publishedItemRevisionStatus: { state: "PUBLISHED", distributionChannels: { crxVersion: "99.0.0.0" } }`: publishing `0.27.0.0` proceeds through `fetchStatus → upload → publish` and exits 0. Previously this malformed object stopped execution. Reject present, non-array values instead of treating them as absent; add a runner test asserting no upload.
+
+**Should-fix:** None newly identified.
+
+Validation: 120 release tests passed; icon drift, both manifests’ permission coverage and 17 citation ranges passed separate checks.
+
+verdict: reject — confidence: high; store unit tests timed out starting workers, and live WIF/environment protections, store acceptance, builds and E2E remain unverified.

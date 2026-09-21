@@ -43,3 +43,9 @@ Phase 3 gate: **pass**.
 | S2 | `acir_callback.ts:8-10` cites `UnavailableOracleError`, not the callback builder | yes | cites `buildACIRCallback` at `:21-36` and says what it does |
 
 Also hardened while there: `distributionChannels` entries that are not objects or carry a non-string `crxVersion` fail preflight; `describe()` in check mode tolerates malformed revisions.
+
+### Round 2 — reject (1 must-fix); the six round-1 fixes confirmed
+
+| # | Finding | Verified | Fix |
+|---|---|---|---|
+| M5 | The round-1 hardening turned a present non-array `distributionChannels` into `[]`, so `{ state: "PUBLISHED", distributionChannels: { crxVersion: "99.0.0.0" } }` let `0.27.0.0` upload and publish | yes: reproduced with the runner harness | a present non-array fails preflight ("unreadable distributionChannels"); pure test on both revisions, runner test asserts `fetchStatus` only |

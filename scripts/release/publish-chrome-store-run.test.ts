@@ -182,9 +182,15 @@ describe("publish flow", () => {
 	})
 
 	test("preflight refusals make no upload", async () => {
-		const h = harness([status({ takenDown: true })])
-		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
-		expect(h.calls.map(kind)).toEqual(["fetchStatus"])
+		const refusals = [
+			status({ takenDown: true }),
+			status({ publishedItemRevisionStatus: { state: "PUBLISHED", distributionChannels: { crxVersion: "99.0.0.0" } } }),
+		]
+		for (const response of refusals) {
+			const h = harness([response])
+			expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
+			expect(h.calls.map(kind)).toEqual(["fetchStatus"])
+		}
 	})
 
 	test("PUBLISHED and REJECTED are reported distinctly; warnings from both envelopes reach the output", async () => {
