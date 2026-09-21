@@ -14,6 +14,7 @@ import {
 	type ApiRequest,
 	type ItemStatus,
 	PUBLISH_TYPES,
+	type RevisionStatus,
 	type PublishResponse,
 	type PublishType,
 	type UploadResponse,
@@ -60,7 +61,16 @@ const fail = (io: RunIO, reason: string): RunResult => {
 	return { exit: 1 }
 }
 
+/** Nothing raw reaches the log: an unexpected throw anywhere below is reported by its class name only. */
 export async function runPublishChromeStore(env: Record<string, string | undefined>, io: RunIO): Promise<RunResult> {
+	try {
+		return await run(env, io)
+	} catch (e) {
+		return fail(io, `unexpected failure (${e instanceof Error ? e.name : typeof e})`)
+	}
+}
+
+async function run(env: Record<string, string | undefined>, io: RunIO): Promise<RunResult> {
 	const mode = env.MODE
 	if (mode !== "publish" && mode !== "check") return fail(io, `MODE must be "publish" or "check" (got ${JSON.stringify(mode ?? null)})`)
 	const publisherId = env.CWS_PUBLISHER_ID ?? ""
@@ -132,7 +142,7 @@ async function pollUpload(io: RunIO, publisherId: string, itemId: string, token:
 		await io.sleep(POLL_INTERVAL_MS)
 		const res = await call(io, statusRequest(publisherId, itemId, token))
 		if (!res.ok) return { kind: "fail" as const, reason: res.reason }
-		const outcome = interpretAsyncUploadState(res.json as ItemStatus)
+		const outcome = interpretAsyncUploadState(res.json as ItemStatus, itemId)
 		if (outcome.kind !== "poll") return outcome
 	}
 	return { kind: "fail" as const, reason: `upload still in progress after ${UPLOAD_DEADLINE_MS / 1000}s; not publishing` }
@@ -174,8 +184,14 @@ function readManifest(io: RunIO, zipPath: string, version: string): { ok: true; 
 	return { ok: true, storeVersion }
 }
 
-const describe = (r: ItemStatus["publishedItemRevisionStatus"]) =>
-	r === undefined ? "none" : `${r.state ?? "<no state>"} (${(r.distributionChannels ?? []).map((c) => c.crxVersion ?? "?").join(", ") || "no channels"})`
+const describe = (r: unknown) => {
+	if (r === undefined) return "none"
+	if (typeof r !== "object" || r === null) return `<malformed ${JSON.stringify(r)}>`
+	const { state, distributionChannels } = r as RevisionStatus
+	const channels = Array.isArray(distributionChannels) ? distributionChannels : []
+	const versions = channels.map((c) => (typeof c === "object" && c !== null && typeof c.crxVersion === "string" ? c.crxVersion : "?"))
+	return `${typeof state === "string" ? state : "<no state>"} (${versions.join(", ") || "no channels"})`
+}
 
 /** Bun.Archive reads tar only, so the zip is read through `unzip`, present on GitHub's Ubuntu images. */
 export const unzipReader: ZipReader = {

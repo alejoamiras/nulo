@@ -19,8 +19,9 @@ Nulo is a self-custody wallet for the Aztec network.
 
 Your keys stay on your device. A password profile is protected by a password-derived key; a passkey
 profile is protected by your authenticator and has no recovery phrase. Nulo has no server, no
-account system and no telemetry: the extension talks only to the Aztec node you configure, to the
-price service you can turn off, and to the applications you approve.
+account system and no telemetry. The extension talks to the Aztec node you configure, to the price
+service you can turn off, to the public hosts that serve proving parameters, to a local proving
+application if you install one, and to the applications you approve — and to nothing else.
 
 Aztec transactions can be private. Nulo proves them in your browser, or through an optional local
 proving application on your own machine when one is installed. Nothing about a private transaction

@@ -65,9 +65,20 @@ describe("preflight", () => {
 		expect(interpretPreflight(status({ submittedItemRevisionStatus: staged }), ITEM, "0.11.0.0")).toMatchObject({ ok: true })
 	})
 
-	test("refuses a present revision with a missing or unknown state", () => {
+	test("refuses a present revision with a missing, undocumented, unspecified or malformed state", () => {
 		expect(interpretPreflight(status({ publishedItemRevisionStatus: {} }), ITEM, ours)).toMatchObject({ ok: false, reason: expect.stringContaining("unknown state") })
-		expect(interpretPreflight(status({ submittedItemRevisionStatus: { state: "SOMETHING_NEW" } }), ITEM, ours)).toMatchObject({ ok: false })
+		for (const state of ["SOMETHING_NEW", "DEPLOYING", "UNPUBLISHED", "TAKEN_DOWN", "ITEM_STATE_UNSPECIFIED"]) {
+			expect(interpretPreflight(status({ submittedItemRevisionStatus: { state } }), ITEM, ours).ok, state).toBe(false)
+		}
+		expect(interpretPreflight(status({ publishedItemRevisionStatus: null }), ITEM, ours)).toMatchObject({ ok: false })
+		expect(interpretPreflight(status({ publishedItemRevisionStatus: { state: "PUBLISHED", distributionChannels: [null] } }), ITEM, ours)).toMatchObject({ ok: false })
+	})
+
+	test("accepts every documented non-pending state at a lower version", () => {
+		for (const state of ["STAGED", "PUBLISHED", "PUBLISHED_TO_TESTERS", "REJECTED", "CANCELLED"]) {
+			const revision = { state, distributionChannels: [{ crxVersion: "0.26.0.0" }] }
+			expect(interpretPreflight(status({ publishedItemRevisionStatus: revision }), ITEM, ours).ok, state).toBe(true)
+		}
 	})
 })
 
@@ -79,18 +90,25 @@ describe("upload", () => {
 	})
 
 	test("both in-progress spellings poll; FAILED, NOT_FOUND, unspecified and unknown fail", () => {
-		expect(interpretUpload({ uploadState: "IN_PROGRESS" }, ITEM, "0.27.0.0")).toEqual({ kind: "poll" })
-		expect(interpretUpload({ uploadState: "UPLOAD_IN_PROGRESS" }, ITEM, "0.27.0.0")).toEqual({ kind: "poll" })
+		expect(interpretUpload({ itemId: ITEM, uploadState: "IN_PROGRESS" }, ITEM, "0.27.0.0")).toEqual({ kind: "poll" })
+		expect(interpretUpload({ itemId: ITEM, uploadState: "UPLOAD_IN_PROGRESS" }, ITEM, "0.27.0.0")).toEqual({ kind: "poll" })
 		for (const s of ["FAILED", "NOT_FOUND", "UPLOAD_STATE_UNSPECIFIED", "WHATEVER", undefined]) {
-			expect(interpretUpload({ uploadState: s }, ITEM, "0.27.0.0").kind).toBe("fail")
+			expect(interpretUpload({ itemId: ITEM, uploadState: s }, ITEM, "0.27.0.0").kind).toBe("fail")
 		}
 	})
 
+	// An async answer for another item must never lead to polling — and then publishing — ours.
+	test("an upload response or a poll for another item fails, whatever its state", () => {
+		expect(interpretUpload({ itemId: "other", uploadState: "IN_PROGRESS" }, ITEM, "0.27.0.0")).toMatchObject({ kind: "fail" })
+		expect(interpretUpload({ uploadState: "IN_PROGRESS" }, ITEM, "0.27.0.0")).toMatchObject({ kind: "fail" })
+		expect(interpretAsyncUploadState({ itemId: "other", lastAsyncUploadState: "SUCCEEDED" }, ITEM)).toMatchObject({ kind: "fail" })
+	})
+
 	test("while polling, a missing lastAsyncUploadState is a failure, not a wait", () => {
-		expect(interpretAsyncUploadState({})).toMatchObject({ kind: "fail" })
-		expect(interpretAsyncUploadState({ lastAsyncUploadState: "IN_PROGRESS" })).toEqual({ kind: "poll" })
-		expect(interpretAsyncUploadState({ lastAsyncUploadState: "SUCCEEDED" })).toEqual({ kind: "done" })
-		expect(interpretAsyncUploadState({ lastAsyncUploadState: "FAILED" })).toMatchObject({ kind: "fail" })
+		expect(interpretAsyncUploadState({ itemId: ITEM }, ITEM)).toMatchObject({ kind: "fail" })
+		expect(interpretAsyncUploadState({ itemId: ITEM, lastAsyncUploadState: "IN_PROGRESS" }, ITEM)).toEqual({ kind: "poll" })
+		expect(interpretAsyncUploadState({ itemId: ITEM, lastAsyncUploadState: "SUCCEEDED" }, ITEM)).toEqual({ kind: "done" })
+		expect(interpretAsyncUploadState({ itemId: ITEM, lastAsyncUploadState: "FAILED" }, ITEM)).toMatchObject({ kind: "fail" })
 	})
 })
 

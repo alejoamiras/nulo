@@ -155,6 +155,32 @@ describe("publish flow", () => {
 		}
 	})
 
+	test("an async upload answered for another item is never polled to a publish", async () => {
+		const h = harness([
+			status(),
+			ok({ itemId: "different", uploadState: "IN_PROGRESS" }),
+			status({ itemId: "different", lastAsyncUploadState: "SUCCEEDED" }),
+			ok({ state: "PUBLISHED" }),
+		])
+		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
+		expect(h.calls.map(kind)).toEqual(["fetchStatus", "upload"])
+	})
+
+	test("a malformed 200 body and a throwing zip reader are reported by class, never raw", async () => {
+		const malformed = harness([status({ publishedItemRevisionStatus: null })])
+		expect((await runPublishChromeStore(env(), malformed.io)).exit).toBe(1)
+		expect(malformed.calls.map(kind)).toEqual(["fetchStatus"])
+		expect(malformed.output()).toContain("unknown state")
+
+		const boom = harness([status()])
+		boom.io.zip.bytes = () => {
+			throw new Error(`disk says ${TOKEN}`)
+		}
+		expect((await runPublishChromeStore(env(), boom.io)).exit).toBe(1)
+		expect(boom.output()).toContain("unexpected failure (Error)")
+		expect(boom.output()).not.toContain("disk says")
+	})
+
 	test("preflight refusals make no upload", async () => {
 		const h = harness([status({ takenDown: true })])
 		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)

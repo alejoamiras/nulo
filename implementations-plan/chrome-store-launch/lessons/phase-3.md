@@ -28,3 +28,18 @@
 Tests cover every item the plan lists: dry run makes zero fetch calls with an injected fetch that throws and no token; `DRY_RUN=maybe` and an unknown `CWS_PUBLISH_TYPE` exit 1; a Firefox zip is refused; `TOKEN-A1B2` reaches the output only as the mask directive, which precedes every request-derived line; preflight refuses a wrong `itemId`, `takenDown`, a pending review, a not-lower version in any channel (`0.10.0.0` vs `0.9.0.0` included) and a revision with an unknown state, and accepts absent revisions; unset `MODE` exits 1; `MODE=check` needs no zip, makes one GET, passes a pending review at an equal version and fails a foreign `itemId`; `SUCCEEDED` publishes without polling with no `lastAsyncUploadState`; `IN_PROGRESS` → `SUCCEEDED` and `UPLOAD_IN_PROGRESS` → `SUCCEEDED`; `crxVersion` mismatch; `FAILED`, `NOT_FOUND`, unspecified; deadline exhausted with no publish; `PENDING_REVIEW`, `STAGED`, `PUBLISHED` distinct and `REJECTED`; warnings in `warningInfo.warnings` and in a 4xx `error.details`; non-JSON 502; per-request timeout. `release.yml` has no `publish_marketplaces`; both publish `if`s start with `always() && !cancelled()`.
 
 Phase 3 gate: **pass**.
+
+## Arc 1 codex fix loop
+
+### Round 1 — reject (4 must-fix, 2 should-fix), all verified against the repo and fixed
+
+| # | Finding | Verified | Fix |
+|---|---|---|---|
+| M1 | An async upload answered for another item (`itemId: "different", uploadState: "IN_PROGRESS"`) was polled and then published for ours | yes: `interpretUpload` checked the id only on `SUCCEEDED`; polling never checked it | the id is checked on every upload response and on every poll (`interpretAsyncUploadState(status, itemId)`); runner test "an async upload answered for another item is never polled to a publish" |
+| M2 | Preflight allowed `DEPLOYING`, `UNPUBLISHED`, `TAKEN_DOWN`, `ITEM_STATE_UNSPECIFIED`, none with known semantics for an upload | yes: the set was wider than Google's documented `ItemState` | the set is exactly `PENDING_REVIEW, STAGED, PUBLISHED, PUBLISHED_TO_TESTERS, REJECTED, CANCELLED`; each undocumented value now fails in a test |
+| M3 | The long description said the extension talks *only* to the node, the price service and approved apps — the CRS hosts and the local prover are missing | yes: `legal/privacy.md` § 5.8–5.9 and the inventory two rows down say otherwise | the sentence names all five destinations |
+| M4 | `remote-code.md` presented the CSP as proving the WASM is bundled; `'wasm-unsafe-eval'` allows compiling bytes from anywhere and there is no `connect-src` | yes | bundling is now stated as a property of the loaders (`acvm_js.js:924` module-relative URL; `bb-fetch-code.ts:15-18` extension-origin fetch), with the CSP's actual reach and its limit spelled out |
+| S1 | `publishedItemRevisionStatus: null` threw a raw `TypeError` out of the CLI | yes | `revisionState()` treats anything present-but-not-an-object as unknown; the runner wraps the whole run and reports an unexpected throw by class name only (tested with a zip reader that throws a message containing the token) |
+| S2 | `acir_callback.ts:8-10` cites `UnavailableOracleError`, not the callback builder | yes | cites `buildACIRCallback` at `:21-36` and says what it does |
+
+Also hardened while there: `distributionChannels` entries that are not objects or carry a non-string `crxVersion` fail preflight; `describe()` in check mode tolerates malformed revisions.

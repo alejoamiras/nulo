@@ -22,17 +22,24 @@ offscreen document, or a frame of the background page on Firefox,
 `apps/extension/src/wallet/utils/offscreen.ts:36-42`). The PXE feeds each function's bytecode to
 the ACVM, a virtual machine compiled to WebAssembly and bundled in the package
 (`@aztec/simulator/src/private/acvm_wasm.ts:71-79`;
-`@aztec/pxe/src/contract_function_simulator/oracle/private_execution.ts:48`). The extension's
-content security policy is `script-src 'self' 'wasm-unsafe-eval'`
-(`apps/extension/manifest/manifest.config.ts:46-48`): bundled scripts and bundled WASM only, no
-`eval`, no `Function()` — the one upstream package that built a function from a string is replaced
-by a stub for that reason (`apps/extension/src/shims/function-bind-stub.cjs:1-28`).
+`@aztec/pxe/src/contract_function_simulator/oracle/private_execution.ts:48`). That the WASM is
+the bundled copy is a property of the loaders, not of the policy: the ACVM glue instantiates
+`acvm_js_bg.wasm` from its own module URL (`@aztec/noir-acvm_js/web/acvm_js.js:924`, an asset
+Vite emits next to it), and the prover's loader is replaced by a shim that fetches
+`/assets/barretenberg.wasm.gz` from the extension's own origin
+(`apps/extension/src/shims/bb-fetch-code.ts:15-18`). The content security policy,
+`script-src 'self' 'wasm-unsafe-eval'` (`apps/extension/manifest/manifest.config.ts:46-48`), forbids
+remote scripts, `eval` and `Function()` — the one upstream package that built a function from a
+string is replaced by a stub for that reason (`apps/extension/src/shims/function-bind-stub.cjs:1-28`)
+— but `'wasm-unsafe-eval'` permits compiling WASM bytes from any source and the policy sets no
+`connect-src`, so it does not by itself prove where the bytes came from; the loaders above do.
 
 ## What the bytecode can reach
 
 **Directly: nothing outside the VM.** The ACVM interprets an arithmetic circuit; a Brillig
-opcode can request a *foreign call*, and the only foreign-call handler is the wallet's own oracle
-(`@aztec/pxe/src/contract_function_simulator/oracle/acir_callback.ts:8-10`).
+opcode can request a *foreign call*, and the only foreign-call handler is the one built over the
+wallet's own oracle: `buildACIRCallback` maps each registered oracle name to a method of the handler
+it is given and nothing else (`@aztec/pxe/src/contract_function_simulator/oracle/acir_callback.ts:21-36`).
 
 **Through the oracle, the calls it serves.** Utility functions get the methods of
 `@aztec/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts` (the public

@@ -421,3 +421,27 @@ Checked and found correct:
 approve
 
 All four round-6 findings are resolved and no material plan findings remain; confidence is **high** in this plan review, while implementation correctness, CI execution, cross-architecture reproducibility and memory use, live credentials/environment protections, and store-policy acceptance remain unverified.
+
+---
+
+# Arc 1 implementation — round 1
+
+Prompt: the net diff of Phases 1–3 (`git diff 2540271a..HEAD`), adversarial, read-only; findings ranked must-fix / should-fix / note with `path:line`.
+
+**Must-fix**
+
+- [scripts/release/publish-chrome-store.ts:155](scripts/release/publish-chrome-store.ts:155) — **Async uploads bypass item identity validation.** An upload returning `itemId: "different", uploadState: "IN_PROGRESS"`, followed by status for that different item with `SUCCEEDED`, reaches `publish` for the configured item. Reproduced with injected responses. Validate identity on the initial async response and every poll.
+
+- [scripts/release/publish-chrome-store.ts:81](scripts/release/publish-chrome-store.ts:81) — **Preflight accepts states whose semantics are unknown.** The allowlist includes `DEPLOYING`, `UNPUBLISHED`, and `TAKEN_DOWN`, absent from Google’s documented [ItemState enum](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/ItemState), plus its unused unspecified value. A `DEPLOYING` revision reached upload and publish in reproduction. These must fail closed.
+
+- [apps/extension/store/listing.md:22](apps/extension/store/listing.md:22) — **The public description falsely limits outbound destinations.** Browser proving with an empty CRS cache downloads from `crs.aztec-cdn.foundation`, with `crs.aztec-labs.com` as fallback (`@aztec/bb.js/src/crs/browser/cached_net_crs.ts:35`, `src/crs/net_crs.ts:4`). Neither belongs to the description’s exhaustive “only” list. The inventory at line 47 already contradicts it.
+
+- [apps/extension/store/remote-code.md:27](apps/extension/store/remote-code.md:27) — **The note overstates CSP enforcement.** `'wasm-unsafe-eval'` permits compilation of supplied WASM bytes; it does not establish that those bytes came from bundled files. The manifest also has no `connect-src` or `default-src` restriction. Fetched WASM bytes therefore are not excluded by this policy. Describe bundling as a property of the actual loaders, rather than a CSP guarantee. [WebAssembly CSP semantics](https://github.com/WebAssembly/content-security-policy/blob/main/proposals/CSP.md).
+
+**Should-fix**
+
+- [scripts/release/publish-chrome-store-run.ts:110](scripts/release/publish-chrome-store-run.ts:110) — **Malformed responses escape the logging boundary.** A successful HTTP response containing `publishedItemRevisionStatus: null` throws an uncaught `TypeError`; the CLI’s top-level await prints the raw exception. Reproduced. Validate response shapes and catch failures around interpretation and ZIP reads.
+
+- [apps/extension/store/remote-code.md:35](apps/extension/store/remote-code.md:35) — **The oracle-boundary citation points to unrelated code.** `acir_callback.ts:8–10` defines `UnavailableOracleError`; it does not construct or restrict the foreign-call handler. The relevant implementation starts at line 21. A reviewer following the citation cannot verify the claimed boundary, while the citation test passes because it checks only file length.
+
+verdict: reject — confidence: high. Release tests: 116 passed; icon drift and both manifests’ permission coverage passed. Store unit tests remained unverified because workers timed out; live WIF/environment protections, store acceptance, builds and E2E remain unverified.

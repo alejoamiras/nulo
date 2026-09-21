@@ -78,18 +78,16 @@ export interface RevisionStatus {
 	[k: string]: unknown
 }
 
-const KNOWN_REVISION_STATES = new Set([
-	"ITEM_STATE_UNSPECIFIED",
-	"PENDING_REVIEW",
-	"STAGED",
-	"PUBLISHED",
-	"PUBLISHED_TO_TESTERS",
-	"REJECTED",
-	"TAKEN_DOWN",
-	"CANCELLED",
-	"DEPLOYING",
-	"UNPUBLISHED",
-])
+/** Google's documented ItemState values whose meaning for an upload is known; anything else fails closed. */
+const KNOWN_REVISION_STATES = new Set(["PENDING_REVIEW", "STAGED", "PUBLISHED", "PUBLISHED_TO_TESTERS", "REJECTED", "CANCELLED"])
+
+/** A revision object as the API sent it: absent is valid, anything present must be an object with a known state. */
+function revisionState(revision: unknown): { kind: "absent" } | { kind: "known"; revision: RevisionStatus } | { kind: "unknown"; state: unknown } {
+	if (revision === undefined) return { kind: "absent" }
+	if (typeof revision !== "object" || revision === null) return { kind: "unknown", state: revision }
+	const r = revision as RevisionStatus
+	return typeof r.state === "string" && KNOWN_REVISION_STATES.has(r.state) ? { kind: "known", revision: r } : { kind: "unknown", state: r.state }
+}
 
 export type Verdict = { ok: true; summary: string } | { ok: false; reason: string }
 
@@ -103,32 +101,30 @@ export function interpretPreflight(status: ItemStatus, itemId: string, version: 
 	if (status.takenDown === true) return { ok: false, reason: "the item is taken down; resolve that in the dashboard first" }
 	const ours = parseStoreVersion(version)
 	if (!ours) return { ok: false, reason: `version ${version} is not a store version (1–4 integers)` }
-	const submitted = status.submittedItemRevisionStatus
-	if (submitted !== undefined) {
-		if (typeof submitted.state !== "string" || !KNOWN_REVISION_STATES.has(submitted.state)) {
-			return { ok: false, reason: `submitted revision has an unknown state ${str(submitted.state)}` }
-		}
-		if (submitted.state === "PENDING_REVIEW") {
-			return { ok: false, reason: "a submitted revision is pending review; cancel it in the dashboard or wait for the verdict" }
-		}
+	const submitted = revisionState(status.submittedItemRevisionStatus)
+	if (submitted.kind === "unknown") return { ok: false, reason: `submitted revision has an unknown state ${str(submitted.state)}` }
+	if (submitted.kind === "known" && submitted.revision.state === "PENDING_REVIEW") {
+		return { ok: false, reason: "a submitted revision is pending review; cancel it in the dashboard or wait for the verdict" }
 	}
-	const published = status.publishedItemRevisionStatus
-	if (published !== undefined && (typeof published.state !== "string" || !KNOWN_REVISION_STATES.has(published.state))) {
-		return { ok: false, reason: `published revision has an unknown state ${str(published.state)}` }
-	}
+	const published = revisionState(status.publishedItemRevisionStatus)
+	if (published.kind === "unknown") return { ok: false, reason: `published revision has an unknown state ${str(published.state)}` }
 	for (const [label, revision] of [
 		["published", published],
 		["submitted", submitted],
 	] as const) {
-		for (const channel of revision?.distributionChannels ?? []) {
-			const theirs = channel.crxVersion === undefined ? null : parseStoreVersion(channel.crxVersion)
-			if (!theirs) return { ok: false, reason: `${label} revision carries an unreadable crxVersion ${str(channel.crxVersion)}` }
+		if (revision.kind !== "known") continue
+		const channels = Array.isArray(revision.revision.distributionChannels) ? revision.revision.distributionChannels : []
+		for (const channel of channels) {
+			const crx = typeof channel === "object" && channel !== null ? channel.crxVersion : undefined
+			const theirs = typeof crx === "string" ? parseStoreVersion(crx) : null
+			if (!theirs) return { ok: false, reason: `${label} revision carries an unreadable crxVersion ${str(crx)}` }
 			if (compareStoreVersions(theirs, ours) >= 0) {
-				return { ok: false, reason: `${label} revision is at ${channel.crxVersion}, not lower than ${version}` }
+				return { ok: false, reason: `${label} revision is at ${crx}, not lower than ${version}` }
 			}
 		}
 	}
-	return { ok: true, summary: `preflight ok: published ${published?.state ?? "none"}, submitted ${submitted?.state ?? "none"}` }
+	const describe = (r: ReturnType<typeof revisionState>) => (r.kind === "known" ? r.revision.state : "none")
+	return { ok: true, summary: `preflight ok: published ${describe(published)}, submitted ${describe(submitted)}` }
 }
 
 export interface UploadResponse {
@@ -140,11 +136,15 @@ export interface UploadResponse {
 
 export type UploadOutcome = { kind: "done" } | { kind: "poll" } | { kind: "fail"; reason: string }
 
-/** The docs spell the in-progress state two ways; both mean "poll `fetchStatus.lastAsyncUploadState`". */
+/**
+ * The docs spell the in-progress state two ways; both mean "poll `fetchStatus.lastAsyncUploadState`".
+ * Every upload response must name our item, whatever its state: an async answer for another item
+ * must never lead to polling — and then publishing — ours.
+ */
 export function interpretUpload(res: UploadResponse, itemId: string, version: string): UploadOutcome {
+	if (res.itemId !== itemId) return { kind: "fail", reason: `upload answered for item ${str(res.itemId)}, expected ${itemId}` }
 	switch (res.uploadState) {
 		case "SUCCEEDED": {
-			if (res.itemId !== itemId) return { kind: "fail", reason: `upload answered for item ${str(res.itemId)}, expected ${itemId}` }
 			const theirs = res.crxVersion === undefined ? null : parseStoreVersion(res.crxVersion)
 			const ours = parseStoreVersion(version)
 			if (!theirs || !ours || compareStoreVersions(theirs, ours) !== 0) {
@@ -165,7 +165,8 @@ export function interpretUpload(res: UploadResponse, itemId: string, version: st
 }
 
 /** `lastAsyncUploadState` exists only after an async upload; a missing field while polling is a failure, not "keep waiting". */
-export function interpretAsyncUploadState(status: ItemStatus): UploadOutcome {
+export function interpretAsyncUploadState(status: ItemStatus, itemId: string): UploadOutcome {
+	if (status.itemId !== itemId) return { kind: "fail", reason: `fetchStatus answered for item ${str(status.itemId)}, expected ${itemId}` }
 	switch (status.lastAsyncUploadState) {
 		case "SUCCEEDED":
 			return { kind: "done" }
