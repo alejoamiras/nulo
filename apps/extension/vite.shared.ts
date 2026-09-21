@@ -39,6 +39,12 @@ export const artifactAliases: Record<string, string> = {
 	"@wonderland-token-artifact": resolvePackageFile("@aztec-foundation/aztec-standards", "artifacts/target/token_contract-Token.json"),
 }
 
+/** The artifacts the build ships without debug info — see `scripts/strip-artifact-debug-info.ts`. */
+export const debugStrippedArtifacts: readonly string[] = [
+	...Object.values(artifactAliases),
+	resolvePackageFile("@aztec/noir-contracts.js", "artifacts/token_contract-Token.json"),
+]
+
 /**
  * Force the node variant of the noir wasm wrappers. The patched `exports.node`
  * field works for Node's native resolver but vite's SSR bundler picks the

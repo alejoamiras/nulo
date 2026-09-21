@@ -11,8 +11,12 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
 import { PAGES_OPTIONS } from "./scripts/pages-options"
-import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
+import { parseLimitGuard } from "./scripts/parse-limit-guard"
+import { stripArtifactDebugInfo } from "./scripts/strip-artifact-debug-info"
+import { vendorChunkGroups } from "./scripts/vendor-chunks"
+import { artifactAliases, debugStrippedArtifacts, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	server: {
@@ -85,6 +89,9 @@ export default defineConfig({
 		},
 	},
 	plugins: [
+		stripArtifactDebugInfo(debugStrippedArtifacts),
+		parseLimitGuard(),
+		chunkCycleGuard(),
 		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
 		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
 		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
@@ -292,6 +299,13 @@ export default defineConfig({
 				popup: "src/popup/index.html",
 				setup: "src/setup/index.html",
 				onboarding: "src/onboarding/index.html",
+			},
+			output: {
+				// Firefox's add-on linter refuses to parse a file of 5 MiB or more, and without a rule
+				// everything the offscreen page imports lands in one ~20 MB chunk. `vendorChunkGroups`
+				// says where the cuts go and why they are never by size; `parseLimitGuard` is what
+				// fails the build.
+				codeSplitting: { groups: vendorChunkGroups },
 			},
 		},
 	},

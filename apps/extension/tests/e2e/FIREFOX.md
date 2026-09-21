@@ -59,3 +59,7 @@ A Firefox launch owns more than a browser process: geckodriver, the Firefox it s
 ## CI
 
 `pr-extension-{smoke,network}-e2e-firefox.yml` are twins of the Chrome callers with `browser: firefox`; `nightly.yml` and `release.yml` carry Firefox jobs too. All are **advisory** — in no required set, in no `needs` of an aggregator or publish step. Advisory is not free: the PR lanes start fifteen more jobs on a PR that trips both filters and queue against the required lanes for the same runners, and `release.yml`'s Firefox smoke holds the `release` concurrency slot until it ends (a 20-minute execution timeout; time queued for a runner is on top). `scripts/ci-cd/behavior-gating.test.ts` pins the advisory wiring and the parity with the Chrome lanes. geckodriver is pinned by tarball and binary SHA-256 in `.github/actions/setup-geckodriver`; Firefox itself is whatever the locked Puppeteer pins. Promotion to required is the owner's call (root `CLAUDE.md`, staged-rollout switches).
+
+## The add-on linter's parse limit
+
+`web-ext lint` (the AMO validator) refuses to parse a file of 5 MiB or more and reports it as an error. The build keeps every parsed file under 4.5 MiB and fails, naming the file, when one is not — the mechanisms and what to do when the guard fires are in [`apps/extension/README.md`](../../README.md) § Key invariants. Check a build with `bunx web-ext@10.6.0 lint --source-dir apps/extension/dist/firefox --self-hosted`: zero errors is the bar; warnings are reviewed, not counted.
