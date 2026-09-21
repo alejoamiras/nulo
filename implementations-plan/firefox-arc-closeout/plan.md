@@ -270,7 +270,7 @@ worktree root, `EXT` = `apps/extension`.
 - Firefox needs `GECKODRIVER` set. A gate's pass line is `Test Files N passed (N)` with the stated test counts;
   **no skip is allowed unless the gate names it**.
 
-### Phase 1 — reproduce the hang as a permanent spec (red first)
+### Phase 1 ✓ — reproduce the hang as a permanent spec (red first)
 
 `network/inflight-call-background-death.test.ts` (`@requires-proverless`, no browser skip), three tests:
 
@@ -302,22 +302,23 @@ worktree root, `EXT` = `apps/extension`.
   unchanged, never as a red commit.
 - **What wakes Firefox — a recorded diagnosis, not an assertion.** A successor being alive does not prove the
   heartbeat woke it: the price alarm is registered at module scope and wakes the background too
-  (`src/wallet/index.ts:96`). So the Firefox red run records, over the **whole 30 s budget** and not one sample:
-  (i) test 1 — in flight, heartbeat running — the time at which a new background identity first appears; (ii) a
-  control — idle dApp, nothing in flight, nothing opened, same window — whether one appears at all. The alarm
-  is periodic (3 min, first fire one period after boot — `price/service.ts:27,258`), so recording its period is
-  not enough: **both diagnostic kills must land with their whole 30 s window before the alarm's first fire**,
-  and the run logs background boot time, kill time and the margin; a run whose setup overran the margin is
-  repeated, not interpreted. Alive in (i) and not in (ii), both inside the margin → the dApp's traffic is the
-  likely cause — recorded as *suggestive*, since no criterion rests on it. Anything else → inconclusive, and
-  said so; the rejection assertion in Phase 2 is the evidence that counts.
+  (`src/wallet/index.ts:96`), and so does the journal reaper's, every minute — so no 30 s window sits reliably
+  clear of an alarm, and "land before the first fire" cannot be arranged. Instead the spec's kill helper runs
+  `chrome.alarms.clearAll()` in the last extension page before closing it and stopping the background
+  (codex's first-listed option, `cold-wake-discovery` precedent): during the budget there is no alarm, and with
+  nothing opened the dApp's traffic is the only waker left. The Firefox red run then records (i) test 1 — in
+  flight, heartbeat running — whether a new background identity is alive at the end of the budget; (ii) test 2
+  — idle dApp, nothing in flight, nothing opened — the same. Alive in both → the dApp's traffic wakes the event
+  page — recorded as *suggestive*, since no criterion rests on it (the spec samples once, at the timeout; the
+  first-appearance time is not recorded). Anything else → inconclusive, and said so; the rejection assertion in
+  Phase 2 is the evidence that counts.
 - **Pre-decided Firefox branch:** if in (i) no successor appears within the budget, **reproduced on a second
   run** — the dApp's traffic does not wake an event page — no wallet-side design can help, because nothing
   boots. Stop and tell the owner; the proposed disposition is that the Firefox leg wakes the successor by
   opening the popup and asserts rejection within the budget *of that wake*, with criterion 2 restated per
   browser.
 
-### Phase 2 — the reply, its fences, the spec green
+### Phase 2 ✓ — the reply, its fences, the spec green
 
 `stale-session.ts` + its table test (unknown + `ping` → disconnect verdict; unknown + `secure-message` → same;
 known → forward; `discovery-request` / `key-exchange-request` / `disconnect-request` → forward; no tab id →
@@ -555,7 +556,7 @@ rev 3:
 |---|---|---|
 | D15 | **High.** The relay drops every pre-attach non-discovery message, so on Firefox an idle dApp's first call wakes the background and is discarded; "rejected at once" and the no-heartbeat limit were wrong, and the idle test could pass through a PING | Adopted. The contract is split: *attached* → at once, tested under the heartbeat interval (3 s < 5 s) so only `secure-message` can answer; *cold* → heartbeat-dependent, tested in the seconds budget. The relay stays untouched (the driver's recommendation — the cold-wake fix is pinned and hard-won); the choice against alternative C is **shown to the owner at the approval gate**, not left for the implementer to discover |
 | D16 | **High.** `PROVE_SUCCESS` is job-wide; a future `skipIf` on one canary passes every placement pin while another spec supplies the proofs | Adopted: the `Assert canary results` step (vitest's own `json` report → every listed file ran, ≥ 1 passed, 0 skipped), unit-tested script, pin (e), mutation checks, proven on a real report first. Supersedes D8's "no new CI assertion" |
-| D17 | **Medium.** A live successor does not prove the heartbeat woke it (the price alarm wakes too); one absent sample does not prove it cannot | Adopted: whole-budget observation, an idle control, the alarm period recorded; the owner stop needs a reproduced absence. The permanent spec asserts the rejection, not the waker |
+| D17 | **Medium.** A live successor does not prove the heartbeat woke it (the price alarm wakes too); one absent sample does not prove it cannot | Adopted: an idle control, the alarms removed for the budget, the owner stop needs a reproduced absence. The permanent spec asserts the rejection, not the waker. *Implemented as `chrome.alarms.clearAll()` before the kill — the reaper's one-minute alarm made a clear margin impossible; `lessons/phase-1.md`* |
 | D18 | **Medium.** A page *can* choose its session id (it is the discovery `requestId`); **Low:** the frozen canary gate said `1 passed` for a two-test file | Adopted: the security argument rebuilt on approval + browser tab id + port match; chosen-id cases in the transport test; the pre-existing SDK question noted for the closing ledger, not widened into scope. Gate counts corrected for both canaries |
 
 **Re-verdict on rev 3, the same session — conditional approve**, three conditions, each verified in the tree
@@ -565,7 +566,7 @@ and adopted as written (rev 4):
 |---|---|---|
 | D19 | **High.** "≥ 1 passed per file" still accepts a deleted canary, because each canary file's setup-contract test keeps passing | Adopted: the step requires each **named** substantive test `passed` (`canary-expectations.json`), with pins tying the names to the spec sources and to the job lists, and a fixture for exactly that mutation |
 | D20 | **Medium.** The popup's locked screen does not imply the content listener is attached — service RPCs go live in `services.start()`, the SDK handler later | Adopted: test 3 waits on `waitForWorkerLiveness` (written after `initWalletSdkHandler`) before starting its 3 s clock; the inference is replaced by Fact 16 |
-| D21 | **Medium.** Recording the alarm's period does not control when it fires; two 30 s windows can straddle it | Adopted: both diagnostic kills land wholly before the alarm's first fire, margins logged, overruns repeated; the result is labelled suggestive and **criterion 2 no longer claims what woke Firefox** |
+| D21 | **Medium.** Recording the alarm's period does not control when it fires; two 30 s windows can straddle it | Adopted: no alarm exists during the budget (`chrome.alarms.clearAll()` before the kill — the plan's "before the first fire" margin was infeasible next to the one-minute reaper alarm); the result is labelled suggestive and **criterion 2 no longer claims what woke Firefox** |
 
 Rejected alternatives: B, C, D, E (above). Unresolved between the auditors: none — D1 is ruled. Codex's
 standing verdict: **conditional approve, all three conditions met in rev 4.**
