@@ -8,6 +8,7 @@
  * summary, the reveal is for 100% certainty (select the text to copy if needed).
  */
 import { computed, ref } from "vue"
+import { maskAddress } from "./masked-address"
 
 /** Macros */
 const props = defineProps<{
@@ -19,13 +20,7 @@ const emit = defineEmits<{ change: [] }>()
 /** Reactive state */
 const revealed = ref(false)
 
-const masked = computed(() => {
-	const a = props.address ?? ""
-	if (a.length <= 16) return a
-	// Single ellipsis glyph (baseline-aligned) — matches how addresses are truncated
-	// across the app; the spaced `***` rendered misaligned in the mono font.
-	return `${a.slice(0, 8)}…${a.slice(-8)}`
-})
+const masked = computed(() => maskAddress(props.address))
 
 /** Handlers */
 const toggleReveal = () => {

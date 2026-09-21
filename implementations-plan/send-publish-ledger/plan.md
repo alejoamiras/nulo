@@ -464,7 +464,7 @@ Every gate includes the fast layers. "Green" means the gate below, pasted in the
 `publish-facts.ts`, `useSendReview.ts` + tests (T1–T4). The notice copy moves into `publish-facts.ts`; `fee-privacy.ts` keeps `feePayerNotice` as a thin caller until phase 4 so every commit stays green.
 **Validation gate** — commands: `bun run --cwd apps/extension test src/components/composite/send/publish-facts.test.ts src/composables/useSendReview.test.ts src/popup/components/modules/send/fee-privacy.test.ts` · `bun run lint` · `bun run typecheck`. Pass: exit 0. Layers: lint/typecheck · unit.
 
-### Phase 2 — strip, sheet, `Popup.vue`
+### Phase 2 — strip, sheet, `Popup.vue` ✓
 `publish-mark.module.css`, `PublishStrip.vue` + story, `SendReviewSheet.vue`, `Popup.vue` fixes, `popup.store` compaction + tests (T5–T7, T10b).
 **Validation gate** — commands: `bun run --cwd apps/extension test src/components/composite/send src/components/Popup src/stores/popup.store.test.ts src/popup/components/modules/send/SendReviewSheet.test.ts` · `bun run --cwd apps/extension build-storybook` · `bun run lint` · `bun run typecheck`. Pass: exit 0. Layers: lint/typecheck · component · storybook build.
 

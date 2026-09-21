@@ -99,6 +99,11 @@ export function publishFacts(origin: TransferSide, destination: TransferSide, pa
 	}
 }
 
+export function factWord(cell: FactCell, facts: PublishFacts): string {
+	if (cell === "you") return FACT_WORDS.you[facts.you]
+	return FACT_WORDS[cell][facts[cell]]
+}
+
 export function noticeBodyFor(shape: NoticeShape): string {
 	return NOTICE_BODY[shape]
 }

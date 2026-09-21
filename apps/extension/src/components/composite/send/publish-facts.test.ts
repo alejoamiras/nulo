@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import {
 	FACT_SENTENCES,
 	FACT_WORDS,
+	factWord,
 	NO_FACTS,
 	noticeBodyFor,
 	PAID_BY,
@@ -103,6 +104,15 @@ describe("copy", () => {
 			contract: "paid by the fee contract",
 			sponsor: "paid by the sponsor",
 		})
+	})
+
+	test("each cell's word is the one for its visibility", () => {
+		const gated = publishFacts("private", "public", "account")
+		expect([factWord("you", gated), factWord("recipient", gated), factWord("amount", gated)]).toEqual(["FEE PAYER", "PUBLIC", "PUBLIC"])
+		const hidden = publishFacts("private", "private", "contract")
+		expect([factWord("you", hidden), factWord("recipient", hidden), factWord("amount", hidden)]).toEqual(["HIDDEN", "HIDDEN", "HIDDEN"])
+		expect(factWord("you", publishFacts("public", "private", null))).toBe("SENDER")
+		expect(factWord("you", NO_FACTS)).toBe("—")
 	})
 
 	test("the notice bodies are the shipped ones, word for word", () => {
