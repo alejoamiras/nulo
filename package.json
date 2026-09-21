@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*", "infra/*"
+    "packages/*",
+    "infra/*"
   ],
   "scripts": {
     "dev": "bun run --cwd apps/extension dev",
@@ -47,7 +48,7 @@
     "@commitlint/config-conventional": "^21.0.2"
   },
   "packageManager": "bun@1.4.2",
-  "version": "0.27.0",
+  "version": "0.28.0-rc.0",
   "license": "Apache-2.0",
   "overrides": {
     "vite": "^8.0.0"
