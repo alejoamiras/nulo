@@ -21,10 +21,10 @@
  */
 import { describe, expect } from "vitest"
 import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, stopServiceWorker, waitForToast } from "./fixtures/helpers"
+import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, waitForToast } from "./fixtures/helpers"
 import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 
 const NEW_PASSWORD = "changed-password-9"
@@ -82,7 +82,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		// silent-restore bearer leg is integration-covered — the strict-OFF settings toggle has a
 		// documented post-unlock stall, see sw-resilience's skipped test.)
 		await page.close()
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 		const page2 = await openPopup(registeredExtension)
 		await ensureUnlocked(page2)
 		await waitForHash(page2, "#/popup/general", 30_000)

@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: none (owner asked for a follow-up PR, not a blueprint run)
 code_review: off
 budget: no recon agents (the terrain is mapped in pxe-timer-throttling); foreign reviewer at high; code-review off (standing owner directive)
-status: DRAFT 2026-09-21 — scoped by the pxe-timer-throttling session, handed to a fresh session; not started
+status: IMPLEMENTING 2026-09-21 — phase 1 ✓; the owner placed the spike's helper in the tree, so the scoping session carried on
 ---
 
 # Kill the Firefox background alone: the privileged termination behind the seam, and the port
@@ -79,6 +79,10 @@ Chrome body moves, it does not change); anything under `apps/tools/**`, `package
   Firefox, and the spec decides what wakes it (opening the popup is the natural wake, and it is also what the
   recovery recipe does first). Whether the 10 s liveness heartbeat is an alarm (which would wake it) or an
   interval (which dies with it) is a fact to establish in phase 1 and write into `FIREFOX.md`.
+- **Firefox declines the termination — silently — while an extension page is open** (established in phase 1:
+  the helper reports `terminated`, the page keeps its `timeOrigin`). It is a polite suspension, not a crash.
+  Close every popup first; a dApp page's content script does not hold it. "A popup open across the kill" is
+  therefore a Chrome-only case.
 - **`storage.session` survives a background-only termination on both browsers; only a reload clears it.**
   The wallet still comes back locked: strict security mode drops the session on any background death
   (`sw-resilience` case 3 proves it on Chrome, where the storage also survived). `waitForLockScreen` ("record
@@ -106,7 +110,7 @@ host, `--retry=0`, proverless** (`bun run e2e:agent <files>` from `apps/extensio
 for the Firefox leg). Never edit `src/**`, fixtures or the running spec while a detached run is in its build
 step. Never run two cwd-changing shell calls in parallel.
 
-### Phase 1 — the seam method and the restart spec
+### Phase 1 — the seam method and the restart spec ✓ (2026-09-21, [lessons](./lessons/phase-1.md))
 
 - `BrowserDriver.stopBackground(ext)`: Chrome = today's `stopServiceWorker` body moved into `chrome.ts`
   (the `assertChromeOnly` line goes; behaviour and budgets identical); Firefox = the spike's privileged
@@ -215,11 +219,13 @@ Silence on an ask = the default; the fresh session does not wait on them.
 
 Single arc, one branch (`worktree-firefox-background-kill`, from dev `2540271a`), one PR into `dev`.
 
-## Handoff — why a fresh session runs this
+## Handoff — how the helper got into the tree
 
 The pxe-timer-throttling session was stopped by a safety filter when it read the spike's privileged termination
-script and did not work around the stop; it wrote this plan and cannot write the helper. Start a **new** session
-in this worktree (`agent-worktree resume firefox-background-kill`, or `claude` from the worktree) and seed it with:
+script, and did not work around the stop. The owner then placed the spike's own helper in
+`fixtures/browser/firefox.ts` themselves (one `sed` over `spike/spike.patch`, 2026-09-21) and told the session to
+carry on; the session wired the driver method around it and never retyped its body. The seed below is what a
+fresh session would have been given, and is still the definition of done:
 
 ```
 /goal All three phases marked ✓ in implementations-plan/firefox-background-kill/plan.md (the per-phase headers in the file), each ✓ backed by that phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/firefox-background-kill/lessons/phase-N.md`; `/code-review` was NOT run; the codex fix loop converged over the whole diff, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; one PR into dev exists, created only AFTER the loop converged, its body quoting the owner's instruction recorded in plan.md (`gh pr view` output in the transcript), with quality-status, extension-smoke-e2e-status, extension-network-e2e-status and both Firefox aggregators green; `bun run audit:vue`, `bun run test:ci-gating` and `bun run lint:actions` report exit 0. Never merged; apps/extension/src/**, apps/tools/**, packages/bridge-core/** and every workflow file untouched; no launch pref added; the canaries untouched unless Ask A1 says port; every e2e send asserted with assertPgOk; the seam debt maps only shrink; no red check made advisory.

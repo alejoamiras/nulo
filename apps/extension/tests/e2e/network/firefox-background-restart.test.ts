@@ -1,6 +1,6 @@
 import type { Browser, Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { isFirefox, pxeHostState } from "../fixtures/browser"
+import { isFirefox, pxeHostState, stopBackground } from "../fixtures/browser"
 import { type BackgroundIdentity, backgroundIdentity } from "../fixtures/browser/firefox"
 import { TEST_PASSWORD } from "../fixtures/constants"
 import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
@@ -27,13 +27,12 @@ async function waitForNewBackground(browser: Browser, previous: BackgroundIdenti
 }
 
 /**
- * Assert the lock, unlock, open a fresh dApp page, connect, and re-request the granted bundle. The
- * lock is asserted first because `ensureUnlocked` succeeds on an already-unlocked wallet, which is
- * the regression this spec exists to catch. An approved origin is auto-approved at discovery; the
- * verify window re-fires only when the session was not trusted, so both endings are accepted.
+ * Assert the lock on `popup`, unlock, open a fresh dApp page, connect, and re-request the granted
+ * bundle. The lock is asserted first because `ensureUnlocked` succeeds on an already-unlocked wallet,
+ * which is the regression this spec exists to catch. An approved origin is auto-approved at discovery;
+ * the verify window re-fires only when the session was not trusted, so both endings are accepted.
  */
-async function unlockAndReconnect(ctx: ExtensionContext): Promise<Page> {
-	const popup = await openPopup(ctx)
+async function unlockAndReconnect(ctx: ExtensionContext, popup: Page): Promise<Page> {
 	await waitForLockScreen(popup, 60_000)
 	await ensureUnlocked(popup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
 	await popup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
@@ -66,10 +65,13 @@ async function unlockAndReconnect(ctx: ExtensionContext): Promise<Page> {
  * host. Chrome's offscreen document survives a worker restart; its restart path is covered by the
  * `CHROME_ONLY.backgroundKill` files.
  *
- * The background is ended with `runtime.reload()` from an extension page, which ends every other
- * extension page too (the dApp page is a web page and stays) — so what this pins is the locked state
- * and the recovery on a fresh background, not that the host alone dies with a terminated background.
+ * Only the background is ended, as a crash or memory pressure would end it. A key left in
+ * `storage.session` is the witness: an add-on reload wipes that area, a background death does not,
+ * so the lock that follows is strict mode's and not the wipe's. Firefox starts no successor on its
+ * own; the popup opened after the kill is what wakes one.
  */
+const SURVIVOR_KEY = "nulo-e2e:survives-background-kill"
+
 describe.skipIf(!isFirefox)("firefox — the PXE host dies with the background page", () => {
 	test.skipIf(!hasConfig)(
 		"firefox-background-restart — new background, no host, then unlock → reconnect → send on exactly one new host",
@@ -80,15 +82,18 @@ describe.skipIf(!isFirefox)("firefox — the PXE host dies with the background p
 			const before = await backgroundIdentity(ctx.browser)
 			expect(before.hosts).toHaveLength(1)
 
-			const popup = await openPopup(ctx)
-			// The page this runs in dies with the reload, so the evaluation itself never returns cleanly.
-			await popup.evaluate(() => chrome.runtime.reload()).catch(() => {})
-			await popup.close().catch(() => {})
-			const after = await waitForNewBackground(ctx.browser, before, 60_000)
-			expect(after.hosts).toEqual([])
+			const marker = await openPopup(ctx)
+			await marker.evaluate((key: string) => chrome.storage.session.set({ [key]: true }), SURVIVOR_KEY)
+			await marker.close()
+
+			await stopBackground(ctx)
 
 			await ctx.playgroundPage.close().catch(() => {})
-			const page = await unlockAndReconnect(ctx)
+			const popup = await openPopup(ctx)
+			const after = await waitForNewBackground(ctx.browser, before, 60_000)
+			expect(after.hosts).toEqual([])
+			expect(await popup.evaluate(async (key: string) => (await chrome.storage.session.get(key))[key], SURVIVOR_KEY)).toBe(true)
+			const page = await unlockAndReconnect(ctx, popup)
 			await sendDefaultTx(ctx, page, aztecConfig!, "firefox-background-restart:after", { popupTimeoutMs: 180_000 })
 
 			const recovered = await backgroundIdentity(ctx.browser)

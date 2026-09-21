@@ -353,14 +353,12 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
  */
 const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
 
+const BACKGROUND_NOT_RUNNING = "the background page is not running"
+
 /** Evaluates `body` (a function body; `content` is the background window) in the background page. */
 export function evaluateInBackgroundPage<T>(browser: Browser, body: string): Promise<T> {
 	const { session, addonId } = contextFor(browser)
-	return evaluateViaFrameScript<T>(
-		session,
-		{ addonId, locate: LOCATE_BACKGROUND_PAGE, missing: "the background page is not running" },
-		body,
-	)
+	return evaluateViaFrameScript<T>(session, { addonId, locate: LOCATE_BACKGROUND_PAGE, missing: BACKGROUND_NOT_RUNNING }, body)
 }
 
 /** The PXE host is a frame of the background page: how many, and each frame's own visibility. */
@@ -380,6 +378,41 @@ const BACKGROUND_IDENTITY = `
 
 /** Rejects while the background page is not running. */
 export const backgroundIdentity = (browser: Browser): Promise<BackgroundIdentity> => evaluateInBackgroundPage(browser, BACKGROUND_IDENTITY)
+
+/** The running background page's `timeOrigin`, or undefined while none runs. Any other failure is thrown. */
+async function backgroundTimeOrigin(browser: Browser): Promise<number | undefined> {
+	try {
+		return (await backgroundIdentity(browser)).timeOrigin
+	} catch (err) {
+		if (err instanceof Error && err.message === BACKGROUND_NOT_RUNNING) return undefined
+		throw err
+	}
+}
+
+const STOP_BACKGROUND_BUDGET_MS = 15_000
+
+/**
+ * Ends the event page alone: every other extension page, the content scripts and `storage.session`
+ * stay. Firefox starts a new one only on the add-on's next event, so this resolves on "the old page
+ * is gone" and never waits for a successor — the caller's next step is what wakes one. It is a
+ * polite suspension, not a crash: with an extension page open the page is left running.
+ */
+async function stopBackground(browser: Browser): Promise<void> {
+	const before = await backgroundTimeOrigin(browser)
+	if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
+	const outcome = await terminateBackground(browser)
+	if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
+	const deadline = Date.now() + STOP_BACKGROUND_BUDGET_MS
+	while (Date.now() < deadline) {
+		if ((await backgroundTimeOrigin(browser)) !== before) return
+		await new Promise((resolve) => setTimeout(resolve, 100))
+	}
+	// Firefox reports the call done either way: it leaves an event page running while an open
+	// extension page holds it busy, and says nothing.
+	throw new Error(
+		`stopBackground: the background page was still alive ${STOP_BACKGROUND_BUDGET_MS / 1000}s after termination — close every extension page first`,
+	)
+}
 
 const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
 
@@ -530,6 +563,26 @@ export const firefoxDriver: BrowserDriver = {
 	virtualAuthenticator,
 	holdNextCredentialGet,
 	pxeHostState: (page) => evaluateInBackgroundPage<PxeHostState>(page.browser(), PXE_HOST_STATE),
+	stopBackground,
+	backgroundAlive: async (browser) => (await backgroundTimeOrigin(browser)) !== undefined,
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
+}
+
+/** Resolves with the outcome in one word — `terminated`, `no-extension` — or `error: …`. */
+async function terminateBackground(browser: Browser): Promise<string> {
+	const { session, addonId } = contextFor(browser)
+	return session.chromeScript<string>(
+		`const [id, done] = arguments;
+		(async () => {
+			try {
+				const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
+				const extension = ExtensionParent.GlobalManager.getExtension(id);
+				if (!extension) return done("no-extension");
+				await extension.terminateBackground({ ignoreDevToolsAttached: true });
+				done("terminated");
+			} catch (err) { done("error: " + err); }
+		})();`,
+		[addonId],
+	)
 }

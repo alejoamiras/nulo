@@ -25,7 +25,6 @@ const WORKER_LOADER = "service-worker-loader"
  * The counts are exact and only shrink: a new site fails this test instead of joining the list.
  */
 const WORKER_DEBT: Record<string, number> = {
-	"fixtures/helpers.ts": 2,
 	"fixtures/journal.ts": 1,
 	"fixtures/browser/chrome-rpc-intercept.ts": 1,
 	"network/cold-wake-discovery.test.ts": 1,
@@ -121,13 +120,10 @@ function testsForWorkerTarget(node: ts.Node): boolean {
 }
 
 /**
- * Direct `browser.waitForTarget` calls left outside the seam, exact and shrink-only. Over BiDi no
- * event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
- * The fixture entry waits for the service worker, which is Chrome-only by nature.
+ * Direct `browser.waitForTarget` calls outside the seam: none are left, and none may come back. Over
+ * BiDi no event reports the URL a new window loads, so a URL predicate there waits out its whole timeout.
  */
-const WAIT_DEBT: Record<string, number> = {
-	"fixtures/helpers.ts": 1,
-}
+const WAIT_DEBT: Record<string, number> = {}
 
 /** 1-based line numbers of executable seam violations in one file's source. */
 function violations(source: string): { scheme: number[]; close: number[]; worker: number[]; wait: number[]; page: number[] } {

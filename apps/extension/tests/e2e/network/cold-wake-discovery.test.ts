@@ -1,9 +1,9 @@
 import type { Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "../fixtures/helpers"
+import { ensureUnlocked, readLivenessBaseline, waitForWorkerLiveness } from "../fixtures/helpers"
 import { clickPgButton, openPlayground } from "../fixtures/playground"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
 
@@ -51,7 +51,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 			const dappPage = await openPlayground(ext)
 			await popupPage.close()
 
-			await stopServiceWorker(ext)
+			await stopBackground(ext)
 
 			// Wake isolation: the SW must be genuinely dead at click time.
 			const swAlive = ext.browser.targets().some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId))

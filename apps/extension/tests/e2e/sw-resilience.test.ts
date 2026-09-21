@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest"
 import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
 import {
@@ -9,13 +9,12 @@ import {
 	lockWallet,
 	navigateByHash,
 	readLivenessBaseline,
-	stopServiceWorker,
 	waitForWorkerLiveness,
 } from "./fixtures/helpers"
 
 // Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
 // respawns it cold — is where storage migrations, service init and cold-boot
-// races actually break. `stopServiceWorker` (fixtures/helpers.ts) is what makes
+// races actually break. `stopBackground` (fixtures/helpers.ts) is what makes
 // these tests mean anything: a kill that leaves the worker running lets every
 // test here pass against a worker that never died.
 describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
@@ -26,7 +25,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await lockWallet(page)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		// Open a fresh popup. The popup app's SW client will trigger the SW to
 		// spawn cold, write the liveness heartbeat, and serve the locked-state
@@ -69,7 +68,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await ensureUnlocked(page)
 		await waitForHash(page, "#/popup/general")
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		await waitForWorkerLiveness(page, await readLivenessBaseline(page))
 		await waitForHash(page, "#/popup/auth", 30_000)
@@ -90,7 +89,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		// Note: deliberately NO lockWallet() call. Strict mode is the lock.
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		const page2 = await openPopup(registeredExtension)
 		await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
@@ -181,7 +180,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await waitForHash(page, "#/popup/general", 10_000)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		const page2 = await openPopup(registeredExtension)
 		await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
@@ -231,7 +230,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		const beforeLiveness = await readLivenessBaseline(page)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		// Clock starts at the KILL, not after `openPopup` — which already waits for
 		// the background to be connected, i.e. for the very write being timed. Timing

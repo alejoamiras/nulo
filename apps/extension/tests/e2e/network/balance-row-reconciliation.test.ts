@@ -13,10 +13,10 @@
  */
 
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
 import { clickByTestId, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import { TEST_PASSWORD } from "../fixtures/constants"
-import { stopServiceWorker, waitForFreshBalanceRow, waitForTokenCardAmount } from "../fixtures/helpers"
+import { waitForFreshBalanceRow, waitForTokenCardAmount } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -55,7 +55,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 			expect(remaining).toBe(0)
 
 			await page.close()
-			await stopServiceWorker(tokenReadyExtension)
+			await stopBackground(tokenReadyExtension)
 
 			// Killing the worker drops the session, so the popup wakes it and lands on
 			// auth. The wallet is locked at that point, so it is the UNLOCK — via

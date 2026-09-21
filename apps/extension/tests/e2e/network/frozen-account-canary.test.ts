@@ -22,19 +22,11 @@
  */
 import { Buffer } from "node:buffer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { CHROME_ONLY, backgroundAlive, isFirefox, stopBackground } from "../fixtures/browser"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import {
-	ensureUnlocked,
-	findServiceWorkerTarget,
-	getAccountAddress,
-	readLivenessBaseline,
-	revealSeedPhrase,
-	stopServiceWorker,
-	waitForWorkerLiveness,
-} from "../fixtures/helpers"
+import { ensureUnlocked, getAccountAddress, readLivenessBaseline, revealSeedPhrase, waitForWorkerLiveness } from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -53,11 +45,11 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 	 *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
 	 *  kill, whose failures propagate. */
 	async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
-		if (!findServiceWorkerTarget(ctx)) {
+		if (!(await backgroundAlive(ctx))) {
 			console.warn("[frozen-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
 			return
 		}
-		await stopServiceWorker(ctx)
+		await stopBackground(ctx)
 	}
 
 	/** `grantPublicAuthwit` resolves to a bare tx-hash string; `sendTx` (NO_WAIT) resolves to

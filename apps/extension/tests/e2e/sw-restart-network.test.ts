@@ -1,9 +1,9 @@
 import { describe, expect } from "vitest"
 import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
-import { lockWallet, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "./fixtures/helpers"
+import { lockWallet, readLivenessBaseline, waitForWorkerLiveness } from "./fixtures/helpers"
 
 // The active chain (`Network.id`) and the chain's primary endpoint
 // (`Network.primaryEndpointId`) live in `chrome.storage.local`. SW
@@ -32,7 +32,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await lockWallet(page)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		const page2 = await openPopup(registeredExtension)
 		await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))

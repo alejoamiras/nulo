@@ -1,9 +1,9 @@
 import type { Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked, lockWallet, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "../fixtures/helpers"
+import { ensureUnlocked, lockWallet, readLivenessBaseline, waitForWorkerLiveness } from "../fixtures/helpers"
 import { openPlayground } from "../fixtures/playground"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -51,7 +51,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 
 			// Kill the SW for real.
 			await popupPage.close()
-			await stopServiceWorker(ext)
+			await stopBackground(ext)
 
 			// Re-open the popup (wakes the replacement worker) and wait for its boot.
 			const popupPage2 = await openPopup(ext)
