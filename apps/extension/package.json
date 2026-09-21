@@ -96,7 +96,7 @@
 		"@vitejs/plugin-vue": "^6.0.7",
 		"@vue/compiler-sfc": "^3.5.38",
 		"@vue/test-utils": "^2.4.11",
-		"@webext-core/fake-browser": "^1.5.2",
+		"@webext-core/fake-browser": "^2.0.1",
 		"chrome-types": "^0.1.429",
 		"cross-env": "^10.1.0",
 		"fast-check": "^4.9.0",

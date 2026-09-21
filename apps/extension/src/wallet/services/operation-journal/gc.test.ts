@@ -201,6 +201,7 @@ describe("JournalGC.sweep", () => {
 			name: "nulo:journal:gc",
 			scheduledTime: Date.now(),
 			periodInMinutes: 60,
+			persistAcrossSessions: false,
 		})
 		// Yield for the fire-and-forget catch chain inside onAlarmFired.
 		await Promise.resolve()
@@ -213,6 +214,7 @@ describe("JournalGC.sweep", () => {
 			name: "nulo:journal:gc",
 			scheduledTime: Date.now(),
 			periodInMinutes: 60,
+			persistAcrossSessions: false,
 		})
 		await Promise.resolve()
 		expect(sweepSpy).toHaveBeenCalledTimes(2)
