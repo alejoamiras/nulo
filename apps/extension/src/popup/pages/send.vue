@@ -31,8 +31,7 @@ import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helper
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
-import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
-import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
+import { submitTransfer } from "@/popup/pages/send-submit"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
@@ -328,12 +327,20 @@ const handleSend = async () => {
 
 	isSending.value = true
 
-	const amountToSend = amountValidation.value.integerized
+	submitInFlight = true
+	submitTransfer(submitDeps, snapshotTransfer())
 
-	// Snapshot reactive values — the component may unmount before the promise
-	// settles, at which point the reactive refs no longer carry meaningful state.
-	const destination = searchTerm.value
-	const contract = activeToken.value.contract
+	// Navigate away immediately. Progress is visible on the general page
+	// via the durable operation journal, which survives popup close/reopen
+	// and SW restart. The previous 700ms sleep tried to "hold the button
+	// so the click felt received" and to catch fast-reject errors — both
+	// jobs are now done by the journal + toast.
+	if (cancelled) return
+	leaveSend()
+}
+
+/** Reactive values read once: the page unmounts before the transfer settles. */
+function snapshotTransfer() {
 	// Pass the cached estimate id when available so the SW can skip the
 	// redundant `buildAndEstimateTxRequest` round-trip and reuse the
 	// pre-built TxRequest. The SW validates a snapshot (base fee, primary
@@ -346,59 +353,27 @@ const handleSend = async () => {
 	// cancel) for the full TTL.
 	const precomputedEstimateId = feeEstimate.value?.estimateId
 	if (precomputedEstimateId) handoffFeeEstimate()
-	const transferArgs = [
-		appStore.network.id,
-		appStore.account.address,
-		activeToken.value.id,
-		transferType.value,
-		destination,
-		amountToSend,
-		feeSettings.value,
+	return {
+		networkId: appStore.network.id,
+		accountAddress: appStore.account.address,
+		tokenId: activeToken.value.id,
+		transferType: transferType.value,
+		destination: searchTerm.value,
+		amount: amountValidation.value.integerized,
+		feeSettings: feeSettings.value,
 		precomputedEstimateId,
-	]
+		contract: activeToken.value.contract,
+	}
+}
 
-	// Unique id captured with the placeholder's full scope so the rejection path
-	// removes exactly THIS placeholder — not a by-destination/contract search that
-	// could remove a same-recipient sibling or another account's row after a switch.
-	const awaitingId = crypto.randomUUID()
-	appStore.addAwaitingTransaction({
-		id: awaitingId,
-		account: appStore.account.address,
-		destination,
-		contract,
-	})
-
-	submitInFlight = true
-	executionService
-		.executeTransfer(...transferArgs)
-		.then(() => {
-			openToast({ label: "Transaction submitted", icon: "check-circle" })
-		})
-		.catch((err) => {
-			appStore.removeAwaitingTransaction(awaitingId)
-
-			// User-initiated cancel: the terminal card in RecentActivityView
-			// already says "Cancelled" — a failure toast would be a wrong
-			// signal. See `popup/utils/cancellable-rejection.ts` for the
-			// shared classifier used by every cancellable popup.
-			if (classifyCancellableRejection(err) === "silent") return
-
-			openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
-			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
-			else console.error("[send] executeTransfer failed:", err)
-		})
-		.finally(() => {
-			submitInFlight = false
-			disconnectExecution()
-		})
-
-	// Navigate away immediately. Progress is visible on the general page
-	// via the durable operation journal, which survives popup close/reopen
-	// and SW restart. The previous 700ms sleep tried to "hold the button
-	// so the click felt received" and to catch fast-reject errors — both
-	// jobs are now done by the journal + toast.
-	if (cancelled) return
-	leaveSend()
+const submitDeps = {
+	executeTransfer: (...args) => executionService.executeTransfer(...args),
+	awaiting: { add: appStore.addAwaitingTransaction, remove: appStore.removeAwaitingTransaction },
+	openToast,
+	onSettled: () => {
+		submitInFlight = false
+		disconnectExecution()
+	},
 }
 
 watch(

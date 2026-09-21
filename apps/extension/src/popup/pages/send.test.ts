@@ -207,8 +207,6 @@ function pendingTransfer() {
 
 beforeEach(() => {
 	document.body.innerHTML = '<div id="popup"></div>'
-	// The page reads it as an auto-imported global; the test provides it the way the build would.
-	vi.stubGlobal("TOAST_DURATION", { DEFAULT: 2000, LONG: 4000 })
 	mocks.getTokens.mockResolvedValue([TOKEN])
 	mocks.getTokenBalances.mockResolvedValue([BALANCE])
 	mocks.executeTransfer.mockResolvedValue(undefined)
@@ -219,7 +217,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllMocks()
 	vi.restoreAllMocks()
-	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
 })
 
