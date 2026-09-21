@@ -34,6 +34,11 @@
 		{ "matchPackageNames": ["/^@codemirror/"], "groupName": "codemirror" },
 		{ "matchPackageNames": ["/^@commitlint/"], "groupName": "commitlint" },
 		{ "matchPackageNames": ["typescript", "vue-tsc"], "groupName": "typescript" },
+		{
+			"description": "Held below 7: TypeScript 7 no longer ships the JS compiler entry (typescript/lib/tsc) that vue-tsc loads, so every Vue typecheck dies with ERR_PACKAGE_PATH_NOT_EXPORTED (tried 7.0.2 with vue-tsc 3.3.10; plain tsc packages pass). Lift when a vue-tsc release supports it.",
+			"matchPackageNames": ["typescript"],
+			"allowedVersions": "<7"
+		},
 		{ "matchPackageNames": ["/^@storybook/", "storybook"], "groupName": "storybook" },
 		{
 			"matchPackageNames": ["webextension-polyfill", "@types/webextension-polyfill"],
