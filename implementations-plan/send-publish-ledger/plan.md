@@ -460,7 +460,7 @@ the dev box — the advisory Firefox lanes run the same files in CI).
 
 Every gate includes the fast layers. "Green" means the gate below, pasted in the transcript.
 
-### Phase 1 — facts, copy, review state
+### Phase 1 — facts, copy, review state ✓
 `publish-facts.ts`, `useSendReview.ts` + tests (T1–T4). The notice copy moves into `publish-facts.ts`; `fee-privacy.ts` keeps `feePayerNotice` as a thin caller until phase 4 so every commit stays green.
 **Validation gate** — commands: `bun run --cwd apps/extension test src/components/composite/send/publish-facts.test.ts src/composables/useSendReview.test.ts src/popup/components/modules/send/fee-privacy.test.ts` · `bun run lint` · `bun run typecheck`. Pass: exit 0. Layers: lint/typecheck · unit.
 

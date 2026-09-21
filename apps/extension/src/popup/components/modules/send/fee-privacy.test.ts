@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
+import { type PayerDescriptor, payerKindOf } from "@/components/composite/send/publish-facts"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
+import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc, settingsForMethod } from "./fee-helpers"
 import {
 	applyFpcEdits,
 	type FeeKnowledge,
@@ -67,6 +68,36 @@ describe("feePayerNotice", () => {
 		expect(feePayerNotice("private", "public", FJ)?.body).toBe(
 			"The recipient and amount on this send are already public. Paying from public Fee Juice adds your address to them, and the whole transfer becomes readable as yours.",
 		)
+	})
+})
+
+describe("payerKindOf — on the settings the card really submits", () => {
+	const HAND_ADDED: RegisteredFpc = { id: "hand", type: FpcType.DefaultSponsoredFpc, name: "Mine", isProtocol: false }
+	const HAND: FeeMethodOption = { type: "fpc", title: "Mine", subtitle: "sponsored", fpc: HAND_ADDED }
+	const funded = balances("5", "5")
+	const describe_ = (row: RegisteredFpc): PayerDescriptor => ({
+		type: row === PRIVATE_FPC ? "private_fpc" : "fpc",
+		fpcId: row.id,
+		isProtocol: row.isProtocol === true,
+	})
+
+	test("each method type reads as the kind its settings name, with the card's descriptor agreeing", () => {
+		expect(payerKindOf(settingsForMethod(FJ, "normal", funded), { type: "fj", isProtocol: false })).toBe("account")
+		expect(payerKindOf(settingsForMethod(PRIV, "normal", funded), describe_(PRIVATE_FPC))).toBe("contract")
+		expect(payerKindOf(settingsForMethod(SPON, "normal", funded), describe_(SPONSOR))).toBe("contract")
+		expect(payerKindOf(settingsForMethod(HAND, "normal", funded), describe_(HAND_ADDED))).toBe("unvouched")
+	})
+
+	test("a descriptor for another row, or none, withholds the answer; fee juice needs none", () => {
+		expect(payerKindOf(settingsForMethod(PRIV, "normal", funded), describe_(SPONSOR))).toBeNull()
+		expect(payerKindOf(settingsForMethod(SPON, "normal", funded), null)).toBeNull()
+		expect(payerKindOf(settingsForMethod(FJ, "normal", funded), null)).toBe("account")
+	})
+
+	test("settings the card refuses to produce read as no payer", () => {
+		expect(payerKindOf(settingsForMethod(FJ, "normal", balances("0", "5")), { type: "fj", isProtocol: false })).toBeNull()
+		expect(payerKindOf(settingsForMethod(PRIV, "normal", balances("5", null)), describe_(PRIVATE_FPC))).toBeNull()
+		expect(payerKindOf(settingsForMethod(undefined, "normal", funded), describe_(SPONSOR))).toBeNull()
 	})
 })
 

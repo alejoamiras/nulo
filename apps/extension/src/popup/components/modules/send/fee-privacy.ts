@@ -1,6 +1,7 @@
+import { type NoticeShape, noticeBodyFor, type TransferSide } from "@/components/composite/send/publish-facts"
 import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
 
-export type TransferSide = "private" | "public"
+export type { TransferSide }
 
 /** The compact form a pick is stored in — never a presentation row. `fpc.name` only labels the
  *  loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
@@ -18,16 +19,9 @@ export type SendSelection =
 	/** Every applicable payer was positively read and none can pay — the only state that may say "you have none". */
 	| { kind: "none" }
 
-export type FeePayerNotice = { shape: "private-private" | "private-public"; title: string; body: string }
+export type FeePayerNotice = { shape: NoticeShape; title: string; body: string }
 
 const NOTICE_TITLE = "Your address pays this fee"
-const NOTICE_BODY: Record<FeePayerNotice["shape"], string> = {
-	"private-private":
-		"This send hides the amount and the recipient, but the fee names your account publicly. Anyone watching the chain learns this account sent something, and when.",
-	"private-public":
-		"The recipient and amount on this send are already public. Paying from public Fee Juice adds your address to them, and the whole transfer becomes readable as yours.",
-}
-
 /** A balance counts only when it was actually read: `null`, `undefined` and a missing property are all unread. */
 const isRead = (balance: string | null | undefined): balance is string => typeof balance === "string"
 const canPay = (balance: string | null | undefined): boolean => isRead(balance) && balance !== "0"
@@ -147,8 +141,8 @@ export function feePayerNotice(
 	method: FeeMethodOption | undefined,
 ): FeePayerNotice | null {
 	if (origin !== "private" || method?.type !== "fj") return null
-	const shape = destination === "public" ? "private-public" : "private-private"
-	return { shape, title: NOTICE_TITLE, body: NOTICE_BODY[shape] }
+	const shape: NoticeShape = destination === "public" ? "private-public" : "private-private"
+	return { shape, title: NOTICE_TITLE, body: noticeBodyFor(shape) }
 }
 
 /** The compact record persisted for a picked row. */
