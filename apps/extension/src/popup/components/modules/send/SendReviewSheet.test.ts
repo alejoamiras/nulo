@@ -24,7 +24,10 @@ const STUBS = {
 		props: { show: Boolean, displaceIdx: Number, closeOnEscape: Boolean, initialFocus: [String, Boolean] },
 		emits: ["onClose"],
 	},
-	PopupCard: { template: '<div data-testid="stub-card" :data-depth="displaceIdx"><slot /></div>', props: ["displaceIdx"] },
+	PopupCard: {
+		template: '<div data-testid="stub-card" :data-depth="displaceIdx" :data-fit="fit"><slot /></div>',
+		props: { displaceIdx: Number, fit: Boolean },
+	},
 	PopupHeader: {
 		template:
 			'<div><slot name="title" /><button v-if="closable" data-testid="popup-close-btn" @click="$emit(\'onClose\')">x</button></div>',
@@ -89,6 +92,7 @@ describe("modules/send/SendReviewSheet", () => {
 		expect(popup.attributes("data-escape")).toBe("true")
 		expect(popup.attributes("data-focus")).toBe("#send-review-title")
 		expect(w.get('[data-testid="stub-card"]').attributes("data-depth")).toBe("3")
+		expect(w.get('[data-testid="stub-card"]').attributes("data-fit")).toBe("true")
 		expect(w.get("#send-review-title").attributes("tabindex")).toBe("-1")
 		const dialog = w.get('[role="dialog"]')
 		expect(dialog.attributes("aria-modal")).toBe("true")
@@ -109,6 +113,11 @@ describe("modules/send/SendReviewSheet", () => {
 		expect(w.get('[data-testid="send-review-recipient"]').text()).toBe("to Ana · 0xaaaaaa…12345678")
 	})
 
+	test("a recipient with no name is just its masked address", () => {
+		w = mountSheet({ recipientName: undefined })
+		expect(w.get('[data-testid="send-review-recipient"]').text()).toBe("to 0xaaaaaa…12345678")
+	})
+
 	test("an unfinished form reads — and cannot send", () => {
 		w = mountSheet({
 			amount: undefined,
@@ -120,7 +129,7 @@ describe("modules/send/SendReviewSheet", () => {
 			payerType: undefined,
 		})
 		expect(w.get('[data-testid="send-review-amount"]').text()).toBe("—")
-		expect(w.get('[data-testid="send-review-recipient"]').text()).toBe("to — · —")
+		expect(w.get('[data-testid="send-review-recipient"]').text()).toBe("to —")
 		expect(w.get('[data-testid="send-review-fee"]').text()).toBe("Fee · —")
 		expect(w.get('[data-testid="send-review-fee"]').attributes("data-payer")).toBe("none")
 		expect(submit(w).attributes("disabled")).toBeDefined()

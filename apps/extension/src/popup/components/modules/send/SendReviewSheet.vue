@@ -44,6 +44,10 @@ const ROWS: { cell: FactCell; id: string; name: string }[] = [
 ]
 
 const masked = computed(() => maskAddress(props.recipientAddress))
+const toLine = computed(() => {
+	const address = masked.value || "—"
+	return props.recipientName ? `to ${props.recipientName} · ${address}` : `to ${address}`
+})
 const paid = computed(() => paidBy(props.payerKind, props.payerType))
 const sendable = computed(() => props.show && props.canSend && props.ready && !props.sending)
 
@@ -71,7 +75,7 @@ const handleSend = () => {
 <template>
 	<div data-testid="send-review-sheet" :data-open="show" hidden />
 	<Popup :show="show" :displaceIdx="order" close-on-escape initial-focus="#send-review-title" @onClose="emit('close')">
-		<PopupCard :displaceIdx="depth">
+		<PopupCard :displaceIdx="depth" fit>
 			<div role="dialog" aria-modal="true" aria-labelledby="send-review-title">
 				<PopupHeader closable @onClose="emit('close')">
 					<template #title>
@@ -84,7 +88,7 @@ const handleSend = () => {
 						<span :class="$style.amount" data-testid="send-review-amount">
 							{{ amount || "—" }}<small v-if="amount && symbol">{{ symbol }}</small>
 						</span>
-						<span :class="$style.to" data-testid="send-review-recipient">to {{ recipientName || "—" }} · {{ masked || "—" }}</span>
+						<span :class="$style.to" data-testid="send-review-recipient">{{ toLine }}</span>
 					</div>
 
 					<div :class="$style.rows">

@@ -40,3 +40,13 @@ Same session, the fix diff and the three dispositions. Codex accepted the select
 ## Delivery
 
 Pushed `worktree-send-publish-ledger`; `gh pr create` into `dev` with no labels, title `feat(send): say what a send publishes; review the one that names you`, the UI-impact table, the sign-off quotes, the 14 screenshots (raw links into the branch), the codex summary and the two owner items. PR [#660](https://github.com/alejoamiras/nulo/pull/660). The path filters tripped both extension e2e suites on their own (`Detect changes` ×5 queued), so no label was added.
+
+## Owner review in a real Chrome (post-PR)
+
+Three observations, all on the sheet:
+
+1. **Escape closes the sheet and the popup stays** — I1 verified, A6 stands.
+2. **The sheet is far taller than its content.** Not the sheet's layout: `PopupCard` takes `flex: 10` whenever `showPopupFullscreen` is on, which is the config default and is forced on any window taller than 600 px (`fullscreenPopupSetting.start`), so the card stretches to the popup's bottom with an empty band under "Send now" — visible in `sheet-gated.png` all along, read as "room under the CTA" in phase 5 (I4) instead of as a defect. Fix: `PopupCard` gains `fit` (content height; the handle still expands it for that open) and the sheet is its only user. The lesson for the next sheet: a bottom sheet on this stack must opt out of the fullscreen fill explicitly, and a screenshot's empty band is a question, not a margin.
+3. **`to — · 0x…` for a recipient without a name.** The line composed name and address with fixed separators; it now reads `to 0x…` when there is no name (`toLine`).
+
+Plus the focus-ring follow-up above. Sheet screenshots regenerated from the walks (`-t gas`); the PR body carries the two rows and the owner's words.
