@@ -29,8 +29,14 @@ Find every one: `git grep -n "«FILL" -- legal/`. What each one needs is describ
 | Firefox Add-ons listing URL | `legal/terms.md` § 1 |
 
 Also at this point, not a placeholder but the same deadline: the **Chrome trader disclosure**
-decision ([`legal/README.md`](./legal/README.md), blocker 5). If the trader path applies, Chrome
+([`legal/README.md`](./legal/README.md), blocker 5) is declared non-trader as of 2026-09-21; it
+must be re-declared before any funding, revenue or entity. If the trader path applies, Chrome
 displays a verified address and phone number publicly, and no clause can waive that.
+
+The store dashboards are filled from `apps/extension/store/listing.md` (one source for both stores;
+`scripts/store-listing.test.ts` holds it to the manifests and to the privacy policy). Before the
+first submission the privacy page must have lost its DRAFT banner: every `«FILL»` in § 1 above is
+read by a reviewer who opens `nulo.sh/privacy`.
 
 ## 3. The day v1.0.0 ships — in the `release: promote dev → main` PR that carries it
 

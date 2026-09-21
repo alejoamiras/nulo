@@ -83,7 +83,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; both built manifests have `name: "Nulo V5"` and five distinct icon paths whose files `file` reports at 16/32/48/96/128; `web-ext lint` reports 0 errors and no `ICON_SIZE_INVALID`; the Chrome smoke suite is green on the renamed build. (Firefox smoke runs in CI's advisory lane on the PR.)
 - Layers: typecheck · lint · unit · build ×2 · add-on linter · smoke e2e.
 
-### Phase 2 — Captures, art, listing, remote-code note, footer links
+### Phase 2 — Captures, art, listing, remote-code note, footer links ✓
 - `store-captures.test.ts` run with `STORE_CAPTURES=1`; `store-art.ts`; `listing.md`; `store-listing.test.ts`; `remote-code.md`; landing footer links; `legal/README.md` blocker 5.
 
 **Validation gate**

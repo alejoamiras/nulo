@@ -66,10 +66,13 @@ These came out of the two-round review and are **not** fixed by editing the docu
    noir wasm are attributed to the projects that publish them, under their licences; what they
    compile in is not itemised, because upstream publishes no inventory (the notices file says so,
    and `implementations-plan/third-party-notices/follow-ups.md` records what would reopen it).
-5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
-   "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
-   verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
-   This is the one blocker a clause genuinely cannot route around; see § Identity below.
+5. **Chrome trader disclosure — declared non-trader (2026-09-21).** The developer account answered
+   Chrome's trader question as a non-trader (no revenue, no entity, no professional activity), so the
+   listing shows no address or phone number. A natural person acting professionally can still be a
+   trader, and "solo / free / open source" does not settle it: revisit the declaration before any
+   funding, revenue or entity, because if the trader path applies Chrome requires a verified address
+   and phone number displayed publicly — which a clause in these Terms cannot waive. See § Identity
+   below.
 
 Owned elsewhere, tracked here so nothing falls between worktrees:
 
@@ -105,9 +108,10 @@ it:
   several regimes, Argentina included.
 - **Chrome's trader disclosure is the one exposure a clause cannot route around.** If the listing is
   classed as a trader listing, Chrome requires a verified name, address and phone number displayed
-  publicly. Check the developer account's trader declaration before submitting 1.0: if it forces
-  disclosure, the address becomes public without any of the liability separation an entity would have
-  provided, which is the worst of both outcomes and the trigger to revisit this.
+  publicly. The account is declared non-trader (2026-09-21, blocker 5 above); re-check that
+  declaration before any funding, revenue or entity, because if it flips the address becomes public
+  without any of the liability separation an entity would have provided, which is the worst of both
+  outcomes and the trigger to revisit this.
 
 **Language.** Ley 24.240 Art. 10 expects consumer contracts to be in Spanish. These documents are
 English-only. For an Argentine consumer that is a real weakness; a Spanish version of at least the

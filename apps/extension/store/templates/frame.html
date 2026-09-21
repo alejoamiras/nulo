@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Nulo V5 — screenshot frame</title>
+		<style>
+			@font-face {
+				font-family: "Space Grotesk";
+				font-weight: 300 700;
+				src: url("{{font}}") format("woff2");
+			}
+			html,
+			body {
+				margin: 0;
+				width: 1280px;
+				height: 800px;
+				overflow: hidden;
+			}
+			body {
+				background: #0a0908;
+				color: #f5f0e6;
+				font-family: "Space Grotesk", sans-serif;
+				display: grid;
+				grid-template-columns: 1fr 360px;
+				align-items: center;
+				padding: 0 120px 0 140px;
+				box-sizing: border-box;
+				column-gap: 100px;
+			}
+			.copy h1 {
+				margin: 0 0 22px;
+				font-size: 52px;
+				font-weight: 600;
+				line-height: 1.08;
+				letter-spacing: -0.01em;
+			}
+			.copy p {
+				margin: 0;
+				font-size: 22px;
+				font-weight: 400;
+				line-height: 1.45;
+				color: #a39d94;
+				max-width: 520px;
+			}
+			.shot {
+				width: 360px;
+				height: 600px;
+				border-radius: 18px;
+				overflow: hidden;
+				box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+				border: 1px solid #2a2724;
+			}
+			.shot img {
+				display: block;
+				width: 360px;
+				height: 600px;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="copy">
+			<h1>{{title}}</h1>
+			<p>{{caption}}</p>
+		</div>
+		<div class="shot"><img src="{{capture}}" alt="" /></div>
+	</body>
+</html>
