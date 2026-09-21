@@ -219,7 +219,7 @@ Revision 1 (2026-09-07): round 1 reject, round 2 reject, round 3 approve; findin
 
 ## Seeds
 
-ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it. **Revision 2** is at `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j`. The copies under the other logins still show revision 1 until the same file is republished from each: `https://claude.ai/artifact/NYRzcqVkJ4iWXCuvhC5Z22`, `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM`.
+ELI5 companion: published from `implementations-plan/chrome-store-launch/eli5.html` as private Artifacts, one per Claude login, because an Artifact is visible only to the account that published it. **Revision 2** is at `https://claude.ai/artifact/NYRzcqVkJ4iWXCuvhC5Z22` and `https://claude.ai/artifact/8RKKawHnuRo5keCqHw9h9j`. The copies under the other two logins still show revision 1 until the same file is republished from each: `https://claude.ai/artifact/UPandz4MLPB9tJXmszKviD`, `https://claude.ai/artifact/MK5oyd6kRSQAuezpEEzaNM`.
 
 Recommended: `/goal`.
 
