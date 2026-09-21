@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon inline + 4 sonnet research agents (owner-requested); foreign reviewer at high; code-review off (standing owner directive)
-status: APPROVED 2026-09-21 — not started
+status: IN PROGRESS 2026-09-21 — phase 1 ✓, phases 2–3 pending
 ---
 
 # The Firefox PXE host: a frame of the background page, not a throttled window
@@ -161,7 +161,7 @@ riskier change with no user value.
 One arc. Local Firefox runs need `GECKODRIVER=<path to geckodriver>` and
 `bun x puppeteer browsers install firefox`; every e2e command below is run with `--retry=0`, alone on the host.
 
-### Phase 1 — Host the PXE page in a frame of the background page
+### Phase 1 — Host the PXE page in a frame of the background page ✓ (2026-09-21, [lessons](./lessons/phase-1.md))
 
 Steps: rewrite the three Firefox branches; make the token per-frame and match READY against it; delete the
 adopt broadcast and its listener; rewrite the unit suite (failure modes listed in the change map); correct the

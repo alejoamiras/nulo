@@ -6,7 +6,7 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
 import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
-import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
+import { OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
 import { isClientDisconnectRejection } from "@nulo/extension-messaging/errors"
 
 // B-17: a PONG must mean "PXE services are up", not just "document loaded". The
@@ -21,21 +21,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 	}
 	return false
 })
-
-// F-10 (Firefox only): a hidden-window offscreen carries its owning SW
-// instance's token in its URL (`?instance=<token>`). When a newer SW instance
-// adopts a fresh offscreen it broadcasts OFFSCREEN_ADOPT_INSTANCE with the new
-// token; a window whose token differs is a stale leftover leaked across a SW
-// restart and self-closes, so only one offscreen answers PXE requests. Chrome
-// documents carry no `?instance` (chrome.offscreen already prevents
-// duplicates), so `myInstanceToken` is null and this listener is never armed.
-const myInstanceToken = new URLSearchParams(location.search).get("instance")
-if (myInstanceToken !== null) {
-	chrome.runtime.onMessage.addListener((message: unknown, sender: chrome.runtime.MessageSender) => {
-		if (isSupersededByAdopt(message, sender, myInstanceToken)) window.close()
-		return false
-	})
-}
 
 // catch console
 const logger = documentLogger("offscreen")
