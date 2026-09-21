@@ -114,6 +114,17 @@ export interface BrowserDriver {
 	 */
 	pxeHostState(page: Page): Promise<PxeHostState>
 	/**
+	 * End the extension's background — Chrome's service worker, Firefox's event page — and resolve
+	 * once THAT instance is gone; every other extension page and `storage.session` stay. Chrome starts
+	 * a successor within milliseconds, Firefox only on the add-on's next event, so a caller that needs
+	 * one running waits for it (`waitForWorkerLiveness`) after doing something that wakes it.
+	 * Close every extension page first: Firefox will not end an event page that one keeps busy.
+	 * Rejects by name when no background runs, or when it outlives the call.
+	 */
+	stopBackground(browser: Browser, extensionId: string): Promise<void>
+	/** Whether a background instance runs right now. Both browsers reap an idle one. */
+	backgroundAlive(browser: Browser, extensionId: string): Promise<boolean>
+	/**
 	 * How this driver's protocol words "the window went away under the call", beyond the CDP
 	 * phrases the fixtures already match. An approval window closes itself on the click that
 	 * resolves it, so that error is the expected end of a click there, not a failure.
@@ -137,15 +148,18 @@ export const BROWSER: BrowserKind = driver.kind
 export const EXTENSION_SCHEME = driver.scheme
 export const isFirefox = BROWSER === "firefox"
 
-/** Why a whole file cannot run on Firefox. A capability the browser lacks, never a failing test. */
+/** Why a whole file does not run on Firefox: a capability the browser lacks, or a gate pinned to
+ *  Chrome by rule — never a failing test. */
 export const CHROME_ONLY = {
-	backgroundKill: "kills the MV3 service worker over CDP; Firefox exposes no background context",
+	backgroundKillUnderPage: "ends the background under an open extension page; Firefox will not end an event page one keeps busy",
+	canary: "an execution canary pinned to Chrome, where it gates every @aztec bump under real proving",
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
 } as const
 
-/** For a helper only a `CHROME_ONLY` file may reach: fail by name, not by waiting out a target. */
-export function assertChromeOnly(capability: keyof typeof CHROME_ONLY, caller: string): void {
-	if (BROWSER !== "chrome") throw new Error(`${caller} is Chrome-only: ${CHROME_ONLY[capability]}`)
+/** The launch a background call is made against; every `ExtensionContext` is one. */
+export interface BackgroundOwner {
+	browser: Browser
+	extensionId: string
 }
 
 export const extensionUrl = (extensionId: string, path: string): string => driver.extensionUrl(extensionId, path)
@@ -173,3 +187,5 @@ export const virtualAuthenticator = (browser: Browser, anchorPage: Page): Promis
 	driver.virtualAuthenticator(browser, anchorPage)
 export const holdNextCredentialGet = (page: Page): Promise<void> => driver.holdNextCredentialGet(page)
 export const pxeHostState = (page: Page): Promise<PxeHostState> => driver.pxeHostState(page)
+export const stopBackground = (owner: BackgroundOwner): Promise<void> => driver.stopBackground(owner.browser, owner.extensionId)
+export const backgroundAlive = (owner: BackgroundOwner): Promise<boolean> => driver.backgroundAlive(owner.browser, owner.extensionId)
