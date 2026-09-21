@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (done); codex high (GPT-6 Astra); fable leg = Plan agent; no /code-review (owner's standing directive)
 base: dev 60da5d66
-status: DRAFT rev 4 — awaiting owner approval. Audits: fable conditional approve; codex reject (rev 1) → reject (fresh, rev 2) → conditional approve (rev 3), its three conditions met in rev 4
+status: APPROVED by the owner 2026-09-21 (rev 4) — implementing. Audits: fable conditional approve; codex reject (rev 1) → reject (fresh, rev 2) → conditional approve (rev 3), its three conditions met in rev 4
 ---
 
 # firefox-arc-closeout
@@ -516,10 +516,11 @@ superseded here.
 
 **Asks** — resolved by the owner on 2026-09-21: fail fast + reconnect; both canaries on the PR lane and
 nightly; fix the passkey CI gap here; a red Firefox canary holds a bump; drop the residual; tier `mid`;
-housekeeping as chosen. **One put to the owner at the approval gate (D15):** leave the cold-start relay
-untouched and accept that recovery from a *cold* background rides on the dApp's heartbeat (recommended), or
-allow alternative C's edit to the relay for an unconditional immediate rejection. The plan is written for the
-recommended answer. Three *conditional* owner calls are pre-declared as stops, not assumed: rejection measured
+housekeeping as chosen. **The approval gate, 2026-09-21** — the owner, verbatim: *"(1) leave it alone. (2)
+sounds good. (3) yes. (4) ok. approved"* — that is: (1) D15, the cold-start relay stays untouched and recovery
+from a *cold* background rides on the dApp's heartbeat (alternative C is not taken); (2) the scope as listed;
+(3) validation on both browsers and two stacked PRs the owner merges; (4) the three pre-declared stops. **None
+open.** Three *conditional* owner calls are pre-declared as stops, not assumed: rejection measured
 above 15 s (→ C); the dApp's traffic does not wake Firefox, twice (→ per-browser criterion); passkey stage 4
 fails on Firefox (→ disposition).
 
@@ -620,10 +621,11 @@ re-run once if a genuine flake, fixed if breakage, never made advisory. **Mergin
 
 ## Seeds
 
-**DRAFT until the owner approves.** Use exactly one per session — setting one replaces the other. Run inside
-this worktree (`agent-worktree resume firefox-arc-closeout`). The ELI5 carries the same two strings.
+**Final — the owner approved on 2026-09-21 and chose `/goal`.** Use exactly one per session — setting one
+replaces the other. Run inside this worktree (`agent-worktree resume firefox-arc-closeout`). The ELI5 carries
+the same two strings.
 
-**Recommended — `/goal`** (every condition is checkable from the transcript):
+**Chosen — `/goal`** (every condition is checkable from the transcript):
 
 ```
 /goal All seven phases marked ✓ in implementations-plan/firefox-arc-closeout/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript, on BOTH browsers wherever the gate says so, with the stated passed counts and no skip the gate does not name; for each phase `LESSONS_FILE=implementations-plan/firefox-arc-closeout/lessons/phase-N.md` printed; every new pin's mutation check recorded in lessons; `/code-review` NOT run (code_review: off); the codex fix loop converged for arc 1 (after phase 3, before `gh stack add`), for arc 2 (after phase 7) and for the fresh cross-arc pass — each evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript, hard stop at 3 rounds with the call put to the owner; the two stacked PRs exist on GitHub, created only AFTER all loops converged (`gh stack view` in the transcript), with quality-status, extension-smoke-e2e-status, extension-network-e2e-status and both Firefox aggregators green on both; `bun run audit:vue`, `bun run test:ci-gating` and `bun run lint:actions` exit 0. Never merged. The three pre-declared stops in plan.md go to the owner, never to codex. No test, stage or browser skipped or narrowed to get green; no red check made advisory; no timeout raised; `content-message-relay.ts`, the manifest, `apps/tools/**` and `packages/bridge-core/**` untouched; the privileged Firefox script body neither authored nor edited, nor delegated.

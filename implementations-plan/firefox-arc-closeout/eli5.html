@@ -78,7 +78,7 @@
 <div class="page">
 
   <section>
-    <span class="eyebrow">Blueprint · mid · for your approval</span>
+    <span class="eyebrow">Blueprint · mid · approved 21 Sep 2026</span>
     <h1>Closing the Firefox arc</h1>
     <p class="lede">Three loose ends came out of the last Firefox pull request. This plan ties off two, consciously drops the third, and — your main ask — adds the tests that stop any of it from quietly breaking again on either browser.</p>
     <p class="muted">Nothing a user sees changes. No new permissions, no stored keys, no new dependencies. Roughly a hundred lines of wallet code; the rest is tests, CI lists and documentation.</p>
@@ -192,23 +192,24 @@
 
   <section>
     <div class="approve">
-      <h2>What I need from you</h2>
+      <h2>What you approved</h2>
+      <p>Your words, 21 September: <em>"(1) leave it alone. (2) sounds good. (3) yes. (4) ok. approved."</em></p>
       <ul>
-        <li><strong>One real choice — the cold-start code.</strong> Recommended: leave it alone. It is the fix that made first-connection work after a cold start, and it is pinned by tests; the price is the first honest limit above (one heartbeat of delay on Firefox). The alternative edits that code so even the waking call is answered instantly — a few seconds faster, in the most delicate file in this area. The plan is written for "leave it alone".</li>
+        <li><strong>The cold-start code — you chose: leave it alone.</strong> It is the fix that made first-connection work after a cold start, and it is pinned by tests; the price is the first honest limit above (one heartbeat of delay on Firefox). The alternative edits that code so even the waking call is answered instantly — a few seconds faster, in the most delicate file in this area. The plan is written for "leave it alone".</li>
         <li><strong>Scope:</strong> the fix, both canaries on Firefox with the passkey CI gap closed, the "did it really run" CI step, the bump rule, the closeout; the kill-helper window dropped.</li>
         <li><strong>Validation:</strong> every phase gated on both browsers; real proving for the canaries; CI's full suites, both Firefox lanes included, as the bar for merging.</li>
         <li><strong>Delivery:</strong> two stacked pull requests, opened only after the review loops converge. You merge; the session never does.</li>
         <li><strong>The three stops</strong> above, as written.</li>
         <li><strong>Hardening:</strong> no <code>/harden</code> pass scheduled; this touches a trust boundary, so it is worth including in the next pre-release one.</li>
       </ul>
-      <p>Answer with <strong>approve</strong>, <strong>conditional approve</strong> (say the conditions), or <strong>reject</strong> (say what blocks).</p>
+      <p>Merging stays yours: the session opens the two pull requests and never merges them.</p>
     </div>
   </section>
 
   <section>
-    <h2>Implementation seeds <span class="muted" style="font-weight:400">— draft until you approve</span></h2>
+    <h2>Implementation seeds <span class="muted" style="font-weight:400">— final</span></h2>
     <p>Two ways to drive the work unattended. <span class="warnline">Use exactly one per session — setting one replaces the other.</span> Run it inside the plan's worktree (<code>agent-worktree resume firefox-arc-closeout</code>).</p>
-    <p class="pick">Recommended — everything here is visible in the transcript</p>
+    <p class="pick">Chosen — everything here is visible in the transcript</p>
 <pre>/goal All seven phases marked ✓ in implementations-plan/firefox-arc-closeout/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript, on BOTH browsers wherever the gate says so, with the stated passed counts and no skip the gate does not name; for each phase `LESSONS_FILE=implementations-plan/firefox-arc-closeout/lessons/phase-N.md` printed; every new pin's mutation check recorded in lessons; `/code-review` NOT run (code_review: off); the codex fix loop converged for arc 1 (after phase 3, before `gh stack add`), for arc 2 (after phase 7) and for the fresh cross-arc pass — each evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript, hard stop at 3 rounds with the call put to the owner; the two stacked PRs exist on GitHub, created only AFTER all loops converged (`gh stack view` in the transcript), with quality-status, extension-smoke-e2e-status, extension-network-e2e-status and both Firefox aggregators green on both; `bun run audit:vue`, `bun run test:ci-gating` and `bun run lint:actions` exit 0. Never merged. The three pre-declared stops in plan.md go to the owner, never to codex. No test, stage or browser skipped or narrowed to get green; no red check made advisory; no timeout raised; `content-message-relay.ts`, the manifest, `apps/tools/**` and `packages/bridge-core/**` untouched; the privileged Firefox script body neither authored nor edited, nor delegated.</pre>
     <p class="pick" style="color:var(--muted)">Alternative</p>
 <pre>/loop 15m Drive implementations-plan/firefox-arc-closeout forward. Never idle waiting for my input. Each firing: (1) read plan.md and lessons/ — they are the state, not the chat; rebuild the task list from plan.md's phase headers if empty; `git status`, `git log --oneline -5`; if PRs exist, `gh stack view`. (2) A detached e2e run in flight? Let it finish — never edit src/**, fixtures or a running spec meanwhile; e2e runs alone on the host, --retry=0, from a detached script + Monitor. (3) No task in hand? Take the next pending step; after each meaningful edit run `bun run lint` and the touched unit tests; commit signed, conventional, small. (4) A decision I'd normally make? Consult /codex at high under tmux (never alongside audit:vue; CODEX_ACCOUNT=best if the login is out of headroom), log the consult and verdict in lessons — EXCEPT the three pre-declared stops in plan.md, which always come to me. (5) Same step failed 5 times? Stop retrying and reassess with codex. (6) Phase green = its validation gate in plan.md passes, both browsers where it says so; paste the result, mark ✓ in plan.md, write lessons, print `LESSONS_FILE=…/lessons/phase-N.md`. After phase 3: arc 1's codex loop to convergence (3-round hard stop → me), THEN `gh stack add firefox-arc-closeout-canaries`. (7) All ✓: arc 2's codex loop, then a FRESH codex pass over the net diff from 60da5d66 for cross-arc issues; only then `gh stack submit --auto --open`, edit both PR bodies, watch the five aggregators on both PRs, apply the 22-minute rule to the canary job. Report and stop. Hard limits: never merge, never push to dev/main, never widen scope, never skip or narrow a test to get green, never make a red check advisory, never raise a timeout, never author, edit or delegate the privileged Firefox script body.</pre>
