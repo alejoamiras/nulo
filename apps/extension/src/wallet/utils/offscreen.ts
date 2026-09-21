@@ -60,11 +60,11 @@ function senderGeneration(sender: chrome.runtime.MessageSender): string | null {
 }
 
 /**
- * True iff `sender` is the offscreen document THIS module currently tracks. On Firefox that is the
- * connected frame with the matching generation: a frame removed on READY timeout or a failed health
- * check can still have a READY or PONG in flight, and by URL alone that message would open its
- * successor's gate, or pass the successor's health check and let a request reach a document whose
- * PXE is not up. Chrome's `chrome.offscreen` allows one document, so the URL check is the whole test.
+ * Accepts READY and PONG only from the current PXE document: on Firefox the connected frame whose
+ * generation the sender's URL carries, on Chrome any sender at the offscreen URL (`chrome.offscreen`
+ * allows one document). A frame removed on READY timeout or a failed health check can still have a
+ * message in flight, and by URL alone it would open its successor's gate or pass its health check.
+ * This rejects previous generations; it does not authenticate a document against same-extension code.
  */
 function isLiveOffscreenSender(sender: chrome.runtime.MessageSender | undefined): boolean {
 	if (!isOffscreenDocumentSender(sender) || sender === undefined) return false
@@ -144,15 +144,7 @@ function trackedClose(): Promise<void> {
  *  the new pass's loading document (the cross-caller kill, resurrected). */
 let passSeq = 0
 
-/**
- * Check if the existing offscreen document is responsive.
- * Sends a ping and waits for a pong within HEALTH_CHECK_TIMEOUT_MS.
- * Returns true if healthy, false if zombie/unresponsive.
- *
- * Browser-agnostic: both the Chromium offscreen document and the Firefox
- * frame listen on `chrome.runtime.onMessage`, so the ping/pong path is
- * identical.
- */
+/** PING the PXE document and wait HEALTH_CHECK_TIMEOUT_MS for its PONG; false is a zombie to replace. */
 async function isOffscreenHealthy(): Promise<boolean> {
 	return new Promise<boolean>((resolve) => {
 		const timer = setTimeout(() => {

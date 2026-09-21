@@ -29,6 +29,26 @@
    `vue-tsc` over `tests/e2e/**` shows 341 pre-existing errors). Not this plan's scope; noted because a
    fixture change gets only lint and the run as gates.
 
+## Post-implementation — codex fix loop (Astra, `high`, read-only, under tmux)
+
+**Round 1 — conditional approve.** Three Medium, two Low; all adopted, one as wording.
+
+| Finding | What changed |
+|---|---|
+| M — the manifest guard compares slashless `src/offscreen/index.html`, and Firefox reports `web_accessible_resources` patterns with a leading `/` | the matcher strips leading slashes; positive and negative controls in the spec |
+| M — `runtime.reload()` ends every context, so "zero hosts" cannot show the old host died *with the background*; `backgroundIdentity` counts only the new background's frames | wording: the spec header, `ARCHITECTURE.md` §6 and `FIREFOX.md` say it pins the locked state and the recovery after a reload; the mechanism stays the owner's ask (§ Deviation, phase 2) |
+| M — "comes back locked" was never asserted: `ensureUnlocked` succeeds on an already-unlocked wallet | `waitForLockScreen` (record gone, popup on `/popup/auth`) before the unlock |
+| L — the debug skill turned a 20 s send into a diagnosis | "check the host's `visible` state before the node or the prover" |
+| L — `isLiveOffscreenSender`'s doc claimed document identity a same-extension page copying the URL also has; `isOffscreenHealthy`'s doc narrated; the host-state header repeated itself | the doc states "rejects previous generations; does not authenticate a document against same-extension code"; one-line health doc; header halved |
+
+Codex's own unit run executed zero tests (its worker start-up timed out in the read-only sandbox); the
+gates here are the authority. Not adopted: nothing.
+
+**A trap that cost a re-run:** two parallel Bash calls that each `cd` somewhere race on the tool shell's
+one working directory — a vitest run meant for `apps/extension` executed from the repo root, picked
+the root config (no jsdom), and failed every `document`-using case. Run cwd-sensitive commands one per
+call, or chain them in a single call.
+
 ## Gate
 
 | Command | Result |

@@ -4,7 +4,7 @@ import { isFirefox, pxeHostState } from "../fixtures/browser"
 import { type BackgroundIdentity, backgroundIdentity } from "../fixtures/browser/firefox"
 import { TEST_PASSWORD } from "../fixtures/constants"
 import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked } from "../fixtures/helpers"
+import { ensureUnlocked, waitForLockScreen } from "../fixtures/helpers"
 import { assertPgOk, openPlayground, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveVerify, waitForPopup } from "../fixtures/popups"
 import { sendDefaultTx } from "../fixtures/send"
@@ -27,12 +27,14 @@ async function waitForNewBackground(browser: Browser, previous: BackgroundIdenti
 }
 
 /**
- * Unlock, open a fresh dApp page, connect, and re-request the granted bundle. An approved origin is
- * auto-approved at discovery; the verify window re-fires only when the session was not trusted, so
- * both endings are accepted.
+ * Assert the lock, unlock, open a fresh dApp page, connect, and re-request the granted bundle. The
+ * lock is asserted first because `ensureUnlocked` succeeds on an already-unlocked wallet, which is
+ * the regression this spec exists to catch. An approved origin is auto-approved at discovery; the
+ * verify window re-fires only when the session was not trusted, so both endings are accepted.
  */
 async function unlockAndReconnect(ctx: ExtensionContext): Promise<Page> {
 	const popup = await openPopup(ctx)
+	await waitForLockScreen(popup, 60_000)
 	await ensureUnlocked(popup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
 	await popup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
 	await popup.close()
@@ -58,14 +60,15 @@ async function unlockAndReconnect(ctx: ExtensionContext): Promise<Page> {
 }
 
 /**
- * The PXE host's lifetime rule on Firefox: it lives at most as long as the background page. Ending
- * the background ends the host with it; the wallet comes back locked (strict security mode drops
- * the session on any background death, on both browsers, by design); and the first request after
- * the unlock builds exactly one new host. Chrome's offscreen document survives a worker restart,
- * and its restart path is covered by the `CHROME_ONLY.backgroundKill` files.
+ * The PXE host's lifetime rule on Firefox: it lives at most as long as the background page. After the
+ * background ends the wallet is locked (strict security mode drops the session on any background
+ * death, on both browsers, by design), and the first request after the unlock builds exactly one new
+ * host. Chrome's offscreen document survives a worker restart; its restart path is covered by the
+ * `CHROME_ONLY.backgroundKill` files.
  *
- * The background is ended with `runtime.reload()` from an extension page — the public API that
- * ends it — which also ends every other extension page; the dApp page is a web page and stays.
+ * The background is ended with `runtime.reload()` from an extension page, which ends every other
+ * extension page too (the dApp page is a web page and stays) — so what this pins is the locked state
+ * and the recovery on a fresh background, not that the host alone dies with a terminated background.
  */
 describe.skipIf(!isFirefox)("firefox — the PXE host dies with the background page", () => {
 	test.skipIf(!hasConfig)(

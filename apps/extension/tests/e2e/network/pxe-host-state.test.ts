@@ -9,25 +9,19 @@ const hasConfig = aztecConfig !== undefined
 
 const PXE_PAGE = "src/offscreen/index.html"
 
-/** A `web_accessible_resources` pattern as a matcher: `*` is the only wildcard. */
-const patternToRegExp = (pattern: string): RegExp =>
-	new RegExp(
-		`^${pattern
-			.split("*")
-			.map((literal) => literal.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-			.join(".*")}$`,
-	)
+/** Whether a `web_accessible_resources` pattern reaches the PXE page. `*` is the only wildcard;
+ *  Firefox reports patterns with a leading `/`, Chrome without, so neither side keeps one. */
+const reachesPxePage = (pattern: string): boolean => {
+	const literals = pattern.replace(/^\/+/, "").split("*")
+	return new RegExp(`^${literals.map((literal) => literal.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(PXE_PAGE)
+}
 
 /**
- * The PXE host after a real send: exactly one, and `visible`. Visibility is what keeps a document's
- * timers unthrottled — Firefox clamps a hidden document's timers to one a second, and the node
- * client waits on a zero-delay timer per RPC batch — so this is the property that fails if a change
- * hides the host again, with no wall-clock threshold to flake on. A guard against that regression,
- * not a speed guarantee.
- *
- * The same run reads the BUILT manifest: the build emits `web_accessible_resources` for the
- * content-script chunks that the source manifest never declares, and the PXE page must not be
- * reachable from a web page through any of them.
+ * After a real send: exactly one PXE host, and it is `visible` — the property that keeps its timers
+ * unthrottled (a hidden document's are clamped to one a second, and the node client waits on a
+ * zero-delay timer per RPC batch). A guard against hiding the host again, not a speed guarantee.
+ * The same run reads the BUILT manifest: the build emits `web_accessible_resources` the source
+ * manifest never declares, and none may reach the PXE page.
  */
 test.skipIf(!hasConfig)(
 	"pxe-host-state — one visible PXE host after a send; the PXE page is not web-accessible",
@@ -44,7 +38,12 @@ test.skipIf(!hasConfig)(
 				const entries = (chrome.runtime.getManifest().web_accessible_resources ?? []) as Array<string | { resources: string[] }>
 				return entries.flatMap((entry) => (typeof entry === "string" ? [entry] : entry.resources))
 			})
-			expect(patterns.filter((pattern) => patternToRegExp(pattern).test(PXE_PAGE))).toEqual([])
+			// Controls: the matcher sees the page through every shape a manifest can carry, and only those.
+			expect(
+				["src/offscreen/index.html", "/src/offscreen/index.html", "/src/*", "*", "src/offscreen/*.html"].every(reachesPxePage),
+			).toBe(true)
+			expect(["src/offscreen/index.htm", "/assets/*", "src/*/other.html"].some(reachesPxePage)).toBe(false)
+			expect(patterns.filter(reachesPxePage)).toEqual([])
 		} finally {
 			await popup.close().catch(() => {})
 		}

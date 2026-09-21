@@ -66,8 +66,8 @@ What differs from Chrome when probing by hand:
   `chrome.storage.session.get("nulo:logs")` from any extension page.
 - No `chrome.offscreen`: the PXE host is a frame of the background page, at
   `src/offscreen/index.html?instance=<generation>`, and dies with it. A hidden document's timers are
-  clamped to 1 Hz — a send that takes 20 s means the host lost its `visible` state. From the suite,
-  `pxeHostState(page)` reads the frames; in the background page's console,
+  clamped to 1 Hz, so when sends slow down check the host's `visible` state before the node or the
+  prover. From the suite, `pxeHostState(page)` reads the frames; in the background page's console,
   `document.querySelectorAll("iframe")`.
 - No `chrome.sidePanel`: guard every use. An unguarded call at popup boot aborted the popup's
   settings apply loop, so the handlers after it (`disableAnimations`, `defaultExplorer`) silently
