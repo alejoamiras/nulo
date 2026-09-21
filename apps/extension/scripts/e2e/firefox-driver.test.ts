@@ -179,21 +179,44 @@ describe("stopping the background", () => {
 	// An add-on event can wake a successor at any moment. An ask made on a stale sighting would end
 	// that successor too, and the spec would exercise two background deaths while asserting one.
 	test("a successor that appears between two sightings is never asked to end", async () => {
-		let current = OLD
-		const endedWhile: number[] = []
-		const terminate = async () => {
-			endedWhile.push(current)
-			return "terminated"
-		}
-		const wake = setTimeout(() => {
-			current = OLD + 1
-		}, 50)
+		vi.useFakeTimers()
 		try {
-			await stopBackgroundWith(stopper({ terminate, identity: async () => current, retryEveryMs: 40, pollEveryMs: 30 }))
+			let current = OLD
+			const endedWhile: number[] = []
+			const terminate = async () => {
+				endedWhile.push(current)
+				return "terminated"
+			}
+			const stopping = stopBackgroundWith(stopper({ terminate, identity: async () => current, retryEveryMs: 40, pollEveryMs: 30 }))
+			await vi.advanceTimersByTimeAsync(30) // Sighted at 30 ms: the old page, too early to ask again.
+			await vi.advanceTimersByTimeAsync(20)
+			current = OLD + 1 // The successor wakes mid-sleep, at 50 ms.
+			await vi.advanceTimersByTimeAsync(10) // At 60 ms the retry is due — and the sighting comes first.
+			await stopping
+			expect(endedWhile).toEqual([OLD])
 		} finally {
-			clearTimeout(wake)
+			vi.useRealTimers()
 		}
-		expect(endedWhile).toEqual([OLD])
+	})
+
+	test("nothing is started once the budget has run out, even by a step that was in flight", async () => {
+		vi.useFakeTimers()
+		try {
+			let release: (outcome: string) => void = () => {}
+			const terminate = () =>
+				new Promise<string>((resolve) => {
+					release = resolve
+				})
+			const identity = vi.fn(async () => OLD)
+			const rejected = expect(stopBackgroundWith(stopper({ terminate, identity, budgetMs: 50 }))).rejects.toThrow(/still alive/)
+			await vi.advanceTimersByTimeAsync(50) // The budget runs out while the ask is still in flight.
+			await rejected
+			release("terminated")
+			await vi.advanceTimersByTimeAsync(100)
+			expect(identity).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	test("a failed probe licenses no further ask, however long it keeps failing", async () => {

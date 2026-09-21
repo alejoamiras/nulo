@@ -440,7 +440,8 @@ async function endObserved(stopper: BackgroundStopper, progress: StopProgress): 
 			askAt = Date.now() + stopper.retryEveryMs
 		}
 		await pause(stopper.pollEveryMs)
-		sighting = await sight(stopper, before, progress)
+		// The caller already has its rejection by now; a probe begun here would race its teardown.
+		if (!progress.expired) sighting = await sight(stopper, before, progress)
 	}
 	if (sighting !== "gone") throw new Error("stopBackground: the budget ran out before the background page was seen gone")
 }

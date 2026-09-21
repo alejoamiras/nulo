@@ -77,6 +77,24 @@ Round-2 gate (same shape as round 1's): unit 3 files / 64 passed, the driver fil
 `bun run lint` exit 0; Firefox network 4 files / 4 passed (29.2 s, 22.6 s, 21.4 s, 8.5 s); Firefox smoke
 3 files / 5 passed, 2 skipped.
 
+### Round 3 — conditional, two new findings; the loop stops here
+
+Codex accepted the round-2 residual as documented ("acceptable for this harness") and raised:
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| M5 | Medium | A probe could still *start* after the budget expired, when expiry landed during the ask or the pause — the caller already had its rejection and the abandoned loop would begin one more privileged call against its teardown | Fixed: `expired` is checked immediately before the probe. Pinned with fake timers — the budget runs out while the ask is in flight, the ask is then released, and the identity probe count must stay at one. Mutation-checked: with the guard removed that case fails (`called 2 times`) |
+| M6 | Medium | The successor unit case rode real timers: a first poll delayed past 40 ms would legitimately re-ask on the old page and fail a correct implementation | Fixed: the case now runs on fake timers and steps through 30, 50 and 60 ms, so the interleaving is exact |
+
+Round-3 gate: unit 3 files / 65 passed (the driver file 3× with no flake); `bun run lint` exit 0; Firefox
+network 4 files / 4 passed (29.3 s, 22.3 s, 22.1 s, 8.5 s); Firefox smoke 3 files / 5 passed, 2 skipped.
+
+**Not converged.** The plan's hard stop is three rounds, and the third still had findings, so no fourth pass
+was run and the owner decides: one more confirmation pass on these two small fixes, or the PR as it stands.
+The shape of the loop, for that call: 5 findings → 1 → 2. All six Mediums sit inside the one Firefox
+`stopBackground` loop and its unit file; round 1's two Lows were wording. Nothing was ever raised on Chrome,
+the seam, the ported specs or the debt maps. All eight adopted, none refuted.
+
 ## Gate
 
 | Command | Result |
