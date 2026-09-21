@@ -76,6 +76,8 @@ export interface BrowserDriver {
 	 * Resolve once a tab or window is showing exactly `url`, or reject after `timeout` ms. For a
 	 * document the extension opens with `tabs.create`: over BiDi such a tab stays `about:blank` in
 	 * `targets()` for good when what it loads is not HTML, so the URL is read from the browser.
+	 * Reading a window's URL means switching to it, so Firefox is left on the last window listed:
+	 * call this with nothing focus-dependent (a WebAuthn ceremony, a file pick) still pending.
 	 */
 	waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void>
 	/**

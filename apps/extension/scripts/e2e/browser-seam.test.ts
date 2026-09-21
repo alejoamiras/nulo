@@ -180,16 +180,26 @@ const RELOAD_DEBT: Record<string, number> = {
 	"network/session-reconnect.test.ts": 1,
 }
 
-/** 1-based lines of `x.reload(...)` calls made from the test process. */
+/** The last name in `a.b`, `a["b"]` or `b` — what a reload is being asked of. */
+function receiverName(receiver: ts.Expression): string {
+	const bare = unwrap(receiver)
+	if (ts.isPropertyAccessExpression(bare)) return bare.name.text
+	if (ts.isElementAccessExpression(bare)) return literalText(unwrap(bare.argumentExpression)) ?? ""
+	return ts.isIdentifier(bare) ? bare.text : ""
+}
+
+/**
+ * 1-based lines of `x.reload(...)` calls made from the test process. Syntactic, like the rest of
+ * this scan: a page bound to a variable NAMED `location` or `runtime` would pass, and a count
+ * cannot tell one reload in a file from another that replaced it.
+ */
 function directReloads(source: string): number[] {
 	const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true)
 	const lines: number[] = []
 	const visit = (node: ts.Node): void => {
 		const member = ts.isCallExpression(node) ? calledMember(node) : undefined
-		if (member?.name === "reload") {
-			const receiver = unwrap(member.receiver)
-			const name = ts.isPropertyAccessExpression(receiver) ? receiver.name.text : ts.isIdentifier(receiver) ? receiver.text : ""
-			if (!IN_PAGE_RELOADERS.has(name)) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+		if (member?.name === "reload" && !IN_PAGE_RELOADERS.has(receiverName(member.receiver))) {
+			lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
 		}
 		ts.forEachChild(node, visit)
 	}
@@ -450,6 +460,7 @@ describe("browser seam guard", () => {
 		expect(directReloads(inAsync("await reloadExtensionPage(page)"))).toEqual([])
 		expect(directReloads(inAsync("await page.evaluate(() => chrome.runtime.reload())"))).toEqual([])
 		expect(directReloads(inAsync("await page.evaluate(() => window.location.reload())"))).toEqual([])
+		expect(directReloads(inAsync('await page.evaluate(() => window["location"].reload())'))).toEqual([])
 	})
 
 	test("leaves the words alone outside a target test", () => {

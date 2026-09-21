@@ -32,4 +32,12 @@ The first hypothesis for S1–S3 — that the popup *reacts* to the flag flippin
 ## Evidence
 
 - Merged top, before this arc: `lint`, `typecheck:all`, `lint:actions` 0; `test:all` and `test:ci-gating` red on exactly the two guard failures above, green after the arc 4 and arc 6 fixes. Both builds 0 with `chunkCycleGuard` + `parseLimitGuard` active; WAR identical to arc 7; largest parsed file 4,138,965 bytes; `web-ext lint` 0 errors / 14 warnings; notices assertion 0 on both targets. Chrome smoke **137 passed / 7 skipped**. Firefox smoke 114 passed, **14 failed** — all in dev's two new files.
-- This arc: `legal-acceptance.test.ts` 13/13 and `send-fee-privacy.test.ts` 1/1 on Firefox at `--retry=0`, first run.
+- This arc: `legal-acceptance.test.ts` 13/13 and `send-fee-privacy.test.ts` 1/1 on Firefox at `--retry=0`, first run; the same two plus `import-dead-rpc.test.ts` on Chrome, 21/21 at `--retry=0`. At the arc's head: `lint`, `typecheck:all`, `test:all`, `test:ci-gating`, `lint:actions` exit 0, and the full Firefox smoke **128 passed / 16 skipped** (114 before dev, plus dev's fourteen).
+
+## Codex integration pass (GPT-6 Astra, `high`, fresh session)
+
+Scope: the five conflicted merges, the four new commits, and semantic collisions between dev's twelve commits and the stack that no test would catch (build, workflows, product paths).
+
+- **Round 1 — "no new material findings".** It confirmed from the code that the notices generator attributes modules across chunks and worker builds (so grouping by package loses nothing), that the notices file is `.txt` and outside the parse guard's extensions, that dev's production marker greps and notices assertion select the requested target and run before upload, that the required workflows equal dev's, and that the moved CDP interception is behaviour-identical.
+- One **Low**, taken: `directReloads` is syntactic. `window["location"].reload()` no longer false-positives; the limits that remain (a page bound to a variable named `location`, and a count that cannot tell one reload from its replacement) are stated at the function, as the scan's other limits already are.
+- Two inference limits it would not sign off, both true and both now written down: `waitForOpenedUrl` leaves the classic session on the last window it listed, so it is for a step with nothing focus-dependent pending; and `hits() > 0` proves the observer intercepted, not that coverage is exhaustive — no escape path was found, and an observer cannot outlive its own Firefox process.
