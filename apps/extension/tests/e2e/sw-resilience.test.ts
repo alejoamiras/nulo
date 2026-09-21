@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest"
-import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { isFirefox, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
 import {
@@ -9,16 +8,14 @@ import {
 	lockWallet,
 	navigateByHash,
 	readLivenessBaseline,
-	stopServiceWorker,
 	waitForWorkerLiveness,
 } from "./fixtures/helpers"
 
-// Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
-// respawns it cold — is where storage migrations, service init and cold-boot
-// races actually break. `stopServiceWorker` (fixtures/helpers.ts) is what makes
-// these tests mean anything: a kill that leaves the worker running lets every
-// test here pass against a worker that never died.
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+// A background death — Chrome recycling its idle worker, Firefox ending its event page — and the
+// cold respawn on the next event is where storage migrations, service init and cold-boot races
+// actually break. `stopBackground` is what makes these tests mean anything: a kill that leaves the
+// background running lets every test here pass against one that never died.
+describe("background death and cold respawn", () => {
 	test("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 		const page = await openPopup(registeredExtension)
 		await waitForHash(page, "#/popup/general")
@@ -26,7 +23,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await lockWallet(page)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		// Open a fresh popup. The popup app's SW client will trigger the SW to
 		// spawn cold, write the liveness heartbeat, and serve the locked-state
@@ -64,25 +61,29 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 	// page). The replacement worker holds no session, so the popup's reconnect boot must lock it on
 	// its own — nothing here clicks Lock. Pre-fix the shell stayed on general with a dead session
 	// behind it, and the next Lock click stripped the header without navigating.
-	test("an open popup outlives the kill: it locks itself on reconnect and unlocks again", async ({ registeredExtension }) => {
-		const page = await openPopup(registeredExtension)
-		await ensureUnlocked(page)
-		await waitForHash(page, "#/popup/general")
+	// Chrome's alone: Firefox will not end an event page while an extension page keeps it busy.
+	test.skipIf(isFirefox)(
+		"an open popup outlives the kill: it locks itself on reconnect and unlocks again",
+		async ({ registeredExtension }) => {
+			const page = await openPopup(registeredExtension)
+			await ensureUnlocked(page)
+			await waitForHash(page, "#/popup/general")
 
-		await stopServiceWorker(registeredExtension)
+			await stopBackground(registeredExtension)
 
-		await waitForWorkerLiveness(page, await readLivenessBaseline(page))
-		await waitForHash(page, "#/popup/auth", 30_000)
-		await page.waitForFunction(async () => !(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
-			timeout: 10_000,
-			polling: 200,
-		})
+			await waitForWorkerLiveness(page, await readLivenessBaseline(page))
+			await waitForHash(page, "#/popup/auth", 30_000)
+			await page.waitForFunction(async () => !(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
+				timeout: 10_000,
+				polling: 200,
+			})
 
-		await ensureUnlocked(page)
-		await waitForHash(page, "#/popup/general", 15_000)
-		expect(registeredExtension.pageErrors).toEqual([])
-		await page.close()
-	})
+			await ensureUnlocked(page)
+			await waitForHash(page, "#/popup/general", 15_000)
+			expect(registeredExtension.pageErrors).toEqual([])
+			await page.close()
+		},
+	)
 
 	test("strict mode default ON: unlock → kill SW → expect lock screen on respawn", async ({ registeredExtension }) => {
 		const page = await openPopup(registeredExtension)
@@ -90,7 +91,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		// Note: deliberately NO lockWallet() call. Strict mode is the lock.
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		const page2 = await openPopup(registeredExtension)
 		await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
@@ -181,7 +182,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		await waitForHash(page, "#/popup/general", 10_000)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		const page2 = await openPopup(registeredExtension)
 		await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
@@ -231,7 +232,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		const beforeLiveness = await readLivenessBaseline(page)
 		await page.close()
 
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 
 		// Clock starts at the KILL, not after `openPopup` — which already waits for
 		// the background to be connected, i.e. for the very write being timed. Timing

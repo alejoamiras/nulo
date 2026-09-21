@@ -45,7 +45,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
 import type { Page } from "puppeteer"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import {
@@ -61,7 +61,6 @@ import {
 	captureBalanceBaseline,
 	ensureUnlocked,
 	getAccountAddress,
-	stopServiceWorker,
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
@@ -87,7 +86,7 @@ import {
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKillUnderPage, () => {
 	test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 		if (process.env.E2E_REQUIRE_SETUP === "1") {
 			expect(hasConfig).toBe(true)
@@ -269,7 +268,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 				const stageAtKill = await readStage(page2)
 				console.warn(`[sw-crash] A: killing while held at service-restore (stage=${stageAtKill})`)
 				const killAt = Date.now()
-				await stopServiceWorker(ctx2)
+				await stopBackground(ctx2)
 
 				// The state machine: the page is alive and its catch owns the
 				// rollback. Terminal `rolled-back` is the designed outcome;
@@ -384,7 +383,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 				expect(probePre?.disconnectedAt ?? null).toBeNull()
 
 				console.warn("[sw-crash] B: killing while held at account-state (post-finalize)")
-				await stopServiceWorker(ctx2)
+				await stopBackground(ctx2)
 				await clearRestoreGate(page2)
 
 				// The retain contract: no rollback stage may EVER appear. Bounded

@@ -4,10 +4,10 @@ import ManifestConfig from "./manifest.config"
 // Permissions that don't exist in Firefox MV3:
 // - "background": Firefox uses a persistent background page model, not
 //   the dedicated MV3 background permission flag.
-// - "offscreen": no `chrome.offscreen` API in Firefox MV3. A
-//   hidden-minimized-window fallback in `wallet/utils/offscreen.ts`
-//   handles it at runtime via `hasOffscreenApi()`. Including the
-//   permission would emit a manifest warning at install time without
+// - "offscreen": no `chrome.offscreen` API in Firefox MV3. There the PXE
+//   page is a frame of the background page instead (`wallet/utils/
+//   offscreen.ts`, chosen at runtime via `hasOffscreenApi()`). Including
+//   the permission would emit a manifest warning at install time without
 //   any benefit.
 // - "sidePanel": Chrome-only; Firefox's equivalent is `sidebar_action`.
 //   AMO's validator rejects it outright ("Invalid permissions"). Every
