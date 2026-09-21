@@ -60,7 +60,9 @@ async function until(condition: () => boolean, timeoutMs = 3_000): Promise<void>
 
 // Ownership is read from `/proc/<pid>/environ`, so the Firefox driver — and these cases — are
 // Linux-only. The unit suite still has to pass for a Chrome-only developer elsewhere.
-describe.skipIf(process.platform !== "linux")("webdriver launch ownership", () => {
+// `releaseLaunch` may spend its whole grace (5 s, then 2 s after SIGKILL) on a loaded host, which
+// is already past the runner's 5 s default.
+describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { timeout: 20_000 }, () => {
 	afterAll(() => {
 		for (const pid of markers.flatMap((marker) => ownedProcesses(marker))) {
 			try {

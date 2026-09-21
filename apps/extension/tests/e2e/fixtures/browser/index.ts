@@ -24,6 +24,18 @@ export interface VirtualAuthenticator {
 	cleanup(): Promise<void>
 }
 
+export type RpcInterception = { kind: "refuse" } | { kind: "redirect"; to: string }
+
+export interface ArmedInterception {
+	/** Requests intercepted so far. */
+	hits: () => Promise<number>
+	/** Every arming or reply failure on a request this interception must control. A test checks
+	 *  this after its scenario: a request that escaped to the real endpoint is a failed test,
+	 *  however the scenario itself came out. */
+	failures: () => Promise<string[]>
+	stop: () => Promise<void>
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -60,6 +72,19 @@ export interface BrowserDriver {
 	 * `waitForTarget` never matches a URL there — while `targets()` does list it, correctly.
 	 */
 	waitForTarget(browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target>
+	/**
+	 * Resolve once a tab or window is showing exactly `url`, or reject after `timeout` ms. For a
+	 * document the extension opens with `tabs.create`: over BiDi such a tab stays `about:blank` in
+	 * `targets()` for good when what it loads is not HTML, so the URL is read from the browser.
+	 * Reading a window's URL means switching to it, so Firefox is left on the last window listed:
+	 * call this with nothing focus-dependent (a WebAuthn ceremony, a file pick) still pending.
+	 */
+	waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void>
+	/**
+	 * Answer every request the browser makes to `fromOrigin` — whichever of the extension's
+	 * contexts issues it — without touching the network. Resolves once no request can escape.
+	 */
+	interceptRpc(browser: Browser, extensionId: string, fromOrigin: string, mode: RpcInterception): Promise<ArmedInterception>
 	/**
 	 * Runs before every scripted click. The suite clicks from inside the page, which — unlike a
 	 * person's click — neither focuses the window nor, on every browser, counts as a user gesture.
@@ -118,6 +143,14 @@ export const reloadExtensionPage = (page: Page): Promise<void> => driver.reloadE
 export const isTargetGone = (text: string): boolean => driver.targetGone?.test(text) ?? false
 export const waitForTarget = (browser: Browser, predicate: (target: Target) => boolean, timeout: number): Promise<Target> =>
 	driver.waitForTarget(browser, predicate, timeout)
+export const waitForOpenedUrl = (browser: Browser, url: string, timeout: number): Promise<void> =>
+	driver.waitForOpenedUrl(browser, url, timeout)
+export const interceptRpc = (
+	browser: Browser,
+	extensionId: string,
+	fromOrigin: string,
+	mode: RpcInterception,
+): Promise<ArmedInterception> => driver.interceptRpc(browser, extensionId, fromOrigin, mode)
 export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
 	driver.openScratchPage(browser, extensionId, opts)
 export const prepareClick = (page: Page): Promise<void> => driver.prepareClick(page)

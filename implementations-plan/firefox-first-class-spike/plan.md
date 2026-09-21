@@ -244,6 +244,30 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run test` exit 0; `action-popup-layout.test.ts` **fails** on a Firefox build with the old stylesheet and **passes** with the new one; Firefox and Chrome smoke exit 0; on the arc's PR the three required checks and both Firefox aggregators conclude success.
 
+### Phase 11 — Absorb what dev gained while the stack was open (2026-09-20) ✓
+
+**Why.** The owner asked for the stack to be merged, *"mindful"* of dev: twelve commits had landed under it — the Terms gate (#627, #628), the send-fee privacy notice (#631), third-party notices in the build (#639–#642), a Presto bump — none of which had ever run on Firefox. A rebase was refused by the session's permission layer as a history rewrite, so dev was **merged** into the bottom branch and cascaded upward, arc by arc; no branch was force-pushed.
+
+**What the merge needed, by the arc that owns it.**
+- Arc 3 (seam): dev's `legal-acceptance.test.ts` closed browsers directly and wrote the extension scheme by hand — the seam guard failed; it now uses `ctx.close()` / `extensionUrl()`. `fixtures/extension.ts` conflicted where dev's Terms seeding met the seam's `close`; both kept.
+- Arc 4 (driver): the same spec called `browser.waitForTarget` — the guard failed; it goes through the seam.
+- Arc 6 (CI lanes): dev added `packages/legal` and `packages/third-party-notices` to the Chrome smoke and network filters — the twin-filter pin failed; the Firefox lanes follow.
+- Arc 7 (chunk split): dev fixed the same test-modules-as-routes leak in its own module with a pinned test (`scripts/pages-options.ts`); dev's version is taken and this stack's inline `extensions: ["vue"]` dropped. The builds pass with both guards on, `web_accessible_resources` are identical to arc 7's, the largest parsed file is unchanged (4,138,965 bytes), `web-ext lint` is 0 errors, and the notices assertion passes on both targets.
+
+**What only a Firefox run could see (this arc).** With the above, every pre-existing spec still passed on Firefox and dev's two new smoke files failed (14 tests):
+1. **`page.reload()` on an extension page** (nine specs, and `network/legal-acceptance-wall.test.ts`) — the documented process-swap strand. They use `reloadExtensionPage`; the seam guard gains a shrink-only rule for direct `reload()` calls, which is how this slipped in.
+2. **A fixture race dev introduced** (S1–S3): `openOnboarding` evaluated in the setup popup *after* flipping `onboarding:completed` to false. The popup reads that flag while it mounts and, with no wallet, opens the onboarding tab and `window.close()`s — Firefox honours the close. The Terms state is now seeded before the flip.
+3. **The licences tab** (S10): the product works — the tab opens and loads — but a `tabs.create` tab onto `text/plain` stays `about:blank` in Puppeteer's BiDi target map for good. New driver method `waitForOpenedUrl` (Chrome: a page target with that URL; Firefox: the browser's own window list).
+4. **`send-fee-privacy.test.ts` refuses an RPC origin through CDP `Fetch`.** Rather than an eleventh Chrome-only file, `interceptRpc` becomes a driver method: Chrome keeps the CDP body verbatim (`fixtures/browser/chrome-rpc-intercept.ts`, moved from `helpers/`); Firefox registers one `http-on-modify-request` observer in the parent process through `chromeScript`, which sees every channel whichever context opened it. `hits()` / `failures()` become async, since Firefox reads them over the wire. Only `refuse` exists on Firefox: the one spec that redirects (`import-dead-rpc`) stays Chrome-only, as planned.
+
+**Not changed.** Dev's route scan still routes the sixteen non-test helper modules beside the pages (its test pins exactly that); harmless, and dev's to decide. The Chrome-only set is still the ten files.
+
+**UI impact:** none — test, fixture, CI-filter and docs changes only.
+
+**Known while the stack is open.** Arcs 4–8 each run Firefox smoke on their own head, where fixes 1–4 are not yet present: their advisory `extension-smoke-e2e-firefox-status` (and the Firefox network lane's `legal-acceptance-wall` shard) will be red on those heads and green on this arc's. The stack merges atomically, so dev never sees an intermediate state.
+
+**Validation gate.** `bun run lint`, `typecheck:all`, `test:all`, `test:ci-gating`, `lint:actions` exit 0 at this arc's head; `legal-acceptance.test.ts` and `send-fee-privacy.test.ts` pass on Firefox and on Chrome, and `import-dead-rpc.test.ts` on Chrome, at `--retry=0`; the full Firefox and Chrome smoke suites exit 0; on this arc's PR the three required checks and both Firefox aggregators conclude success; every lower PR's three required checks conclude success.
+
 ## Security & Adversarial Considerations
 
 - **Threat model.** New production surface = the PRF fix and two manifest keys. Everything else is test/CI code. Attackers of interest: supply chain (a swapped geckodriver or Firefox binary inside CI) and another local process on a shared dev host.
@@ -315,6 +339,7 @@ Multi-arc, stacked with `gh stack`. Arcs revert **top-down** (each builds on the
 | 6 | `ci-firefox-lanes` | 7, 8 | `ci(firefox): advisory firefox lanes in pr, nightly and release workflows` |
 | 7 | `firefox-offscreen-chunk-split` | 9 (closes 2) | `build(extension): keep every shipped file under the firefox linter's parse limit` |
 | 8 | `firefox-popup-panel-height` | 10 | `fix(popup): keep the bottom nav on the popup's bottom edge in a firefox panel` |
+| 9 | `firefox-spec-portability` | 11 | `test(e2e): run the terms gate and the dead-rpc send spec on firefox` |
 
 Arc 1 is a user-facing fix and may be merged ahead of the rest at the owner's call. Titles stay ≤ 93 characters. No PR (draft included) opens before every quality loop below has converged. Merging is always the owner's action.
 

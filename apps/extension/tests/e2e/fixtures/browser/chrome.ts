@@ -1,5 +1,6 @@
 import type { Browser } from "puppeteer"
 import puppeteer from "puppeteer"
+import { cdpInterceptRpc } from "./chrome-rpc-intercept"
 import { cdpVirtualAuthenticator } from "./chrome-webauthn"
 import type { BrowserDriver, LaunchOptions, LaunchedBrowser } from "./index"
 
@@ -65,6 +66,10 @@ export const chromeDriver: BrowserDriver = {
 		await page.reload({ waitUntil: "domcontentloaded" })
 	},
 	waitForTarget: (browser, predicate, timeout) => browser.waitForTarget(predicate, { timeout }),
+	waitForOpenedUrl: async (browser, url, timeout) => {
+		await browser.waitForTarget((target) => target.type() === "page" && target.url() === url, { timeout })
+	},
+	interceptRpc: (browser, extensionId, fromOrigin, mode) => cdpInterceptRpc(browser, `${SCHEME}${extensionId}/`, fromOrigin, mode),
 	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
 	prepareClick: async () => {},
 	pickFile: async (page, open, filePath) => {

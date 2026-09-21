@@ -1,17 +1,5 @@
 import type { Browser, CDPSession } from "puppeteer"
-import { extensionUrl } from "../fixtures/browser"
-
-export type RpcInterception = { kind: "refuse" } | { kind: "redirect"; to: string }
-
-export interface ArmedInterception {
-	/** Requests intercepted so far. */
-	hits: () => number
-	/** Every arming or reply failure on a target whose requests this helper must control. A test
-	 *  checks this after its scenario: a request that escaped to the real seed endpoint is a
-	 *  failed test, however the scenario itself came out. */
-	failures: () => string[]
-	stop: () => Promise<void>
-}
+import type { ArmedInterception, RpcInterception } from "./index"
 
 type PausedRequest = { requestId: string; request: { url: string } }
 type TargetInfo = { type: string; url: string }
@@ -35,9 +23,9 @@ type AttachedToTarget = { sessionId: string; targetInfo: TargetInfo; waitingForD
  * waiting) and are armed in place. Dedicated workers fetch through their document's loader, so
  * the document's session sees their requests and the worker targets themselves are not attached.
  */
-export async function interceptRpc(
+export async function cdpInterceptRpc(
 	browser: Browser,
-	extensionId: string,
+	extensionRoot: string,
 	fromOrigin: string,
 	mode: RpcInterception,
 ): Promise<ArmedInterception> {
@@ -63,7 +51,7 @@ export async function interceptRpc(
 		else fail(`${msg}: ${e}`)
 	}
 
-	const isExtensionWorker = (info: TargetInfo) => info.type === "service_worker" && info.url.startsWith(extensionUrl(extensionId, "/"))
+	const isExtensionWorker = (info: TargetInfo) => info.type === "service_worker" && info.url.startsWith(extensionRoot)
 
 	const arm = async (session: CDPSession, label: string, info: TargetInfo) => {
 		sessions.add(session)
@@ -124,5 +112,5 @@ export async function interceptRpc(
 		await stop()
 		throw e
 	}
-	return { hits: () => hits, failures: () => [...failures], stop }
+	return { hits: async () => hits, failures: async () => [...failures], stop }
 }
