@@ -56,7 +56,7 @@ A third change came from the screenshots, not a failure: `sheet-not-gated` ghost
 
 ### I3 — `fee-methods` wall time
 
-Local proverless, retry 0: 272 s for 8 tests (5 pre-existing + the 3 walks), of which the three walks are ≈ 126 s (15 + 72 + 40). The file runs alone in the dedicated heavy-network job (`_extension-network-e2e.yml`, `timeout-minutes: 30`); the seven real sends it now makes (was three) are all proverless-cheap here and prover-ON in CI. Holds within the budget with room; the file stays on its lane, no workflow edit.
+Local proverless, retry 0: 272 s for 8 tests (5 pre-existing + the 3 walks), of which the three walks are ≈ 126 s (15 + 72 + 40). The file runs alone in the dedicated heavy-network job (`_extension-network-e2e.yml`, `timeout-minutes: 30`); the seven real sends it now makes (was three) are all proverless-cheap here and prover-ON in CI. Holds within the budget with room; the file stays on its lane, no workflow edit. CI confirmed it on PR #660: the `heavy / fee-methods + selfpay-phase` job ran prover-ON in 8 min 47 s wall (sandbox boot included) against its 30-minute budget.
 
 ### I2 / I4 — read from the shots
 
