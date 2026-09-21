@@ -148,6 +148,27 @@ contract FeeOnTransferERC20 is ERC20 {
     }
 }
 
+/// Charges the SENDER `surchargeBps` on top of every transfer: the recipient nets the full value,
+/// so the deposit-side check passes and only the sender's own debit shows it.
+contract SenderSurchargeERC20 is ERC20 {
+    uint256 public immutable surchargeBps;
+
+    constructor(uint256 surchargeBps_) ERC20("Surcharged", "SUR") {
+        surchargeBps = surchargeBps_;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && to != address(0)) {
+            super._update(from, address(0xdead), (value * surchargeBps) / 10_000);
+        }
+        super._update(from, to, value);
+    }
+}
+
 /// A plain 18-decimal token with a public mint, for the happy paths.
 contract PlainERC20 is ERC20 {
     constructor(string memory n, string memory s) ERC20(n, s) {}

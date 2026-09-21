@@ -74,7 +74,7 @@ Branch B). The forge scripts are fixtures and one-job helpers:
 
 ## Tests
 
-**140 hermetic forge tests** (`forge test --no-match-contract Fork`), **12 halmos proofs**
+**157 hermetic forge tests** (`forge test --no-match-contract Fork`), **12 halmos proofs**
 (`FormalRouterTest 8 · FormalFactoryTest 2 · FormalCloneTest 2`; the guard-shaped ones carry a
 forge canary proving the property fails without the guard), **live Sepolia fork suites** (real registry/Inbox/FeeJuicePortal, real
 Permit2, real V4 pools, live token metadata), and a committed `.gas-snapshot` for the metered
@@ -82,11 +82,11 @@ first-time vs known `bridge()` calls.
 
 | Layer | Suites |
 |---|---|
-| unit | `PortalFactory`, `SwapBridgeRouter`, `Keystone` (3-way vectors with Noir + TS), `ContentHash`, `WitnessHash`, `RouteValidation` |
+| unit | `PortalFactory`, `CloneWithdrawRealOutbox` (a clone against Aztec's real `Outbox`: replay, caller binding, cross-clone proofs — the other suites' capturing fake accepts anything), `SwapBridgeRouter`, `Keystone` (3-way vectors with Noir + TS), `ContentHash`, `WitnessHash`, `RouteValidation` |
 | fuzz | `PortalFactoryFuzz`, `CloneRoundtripFuzz`, `SwapBridgeRouterFuzz`, `RouteGrammarFuzz` |
 | invariant | `PortalFactoryInvariant`, `SwapBridgeRouterInvariant` (handler drives create/pause/bridge/fuel-only/identity/donate/sweep/rotate) |
 | symbolic | `FormalFactory`, `FormalClone`, `FormalRouter` — see the header of each for what halmos can and cannot model (it has no sha256, so `createPortal` itself is forge-only) |
-| adversarial | `BlackhatFactory` (F-1…F-8), `BlackhatAudit` (F-A…F-M), `BlackhatV4Fork` |
+| adversarial | `BlackhatFactory` (F-1…F-9), `BlackhatAudit` (F-A…F-M), `BlackhatV4Fork` |
 | fork | `FactoryFork`, `SwapBridgeRouterPermit2Fork`, `DeployFuelLive.fork`, `MainnetFuel.fork`, `BlackhatV4Fork` |
 
 ## Threat model — the factory-bound portal
