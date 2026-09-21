@@ -125,7 +125,7 @@ export function initWalletSdkHandler(
 			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
 			logger: NOOP_LOGGER,
 		},
-		buildContentTransport(logger, (sessionId) => sessionKnownTo(state.late.handler, sessionId)),
+		buildContentTransport(logger, (sessionId, tabId) => sessionKnownTo(state.late.handler, sessionId, tabId)),
 		buildHandlerCallbacks(deps, state, ports.windows),
 	)
 	state.late.handler = handler
@@ -298,8 +298,8 @@ function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
 /** What the content wrapper needs besides the SDK's listener. */
 type ContentWrapperDeps = {
 	logger: ILogger
-	/** Answers for the handler that exists right now; asked only for a session-bound message. */
-	sessionKnown: (sessionId: string) => boolean
+	/** Whether the sender's tab holds the session, per the handler that exists right now; asked only for a session-bound message. */
+	sessionKnown: (sessionId: string, tabId: number) => boolean
 	sendToTab: BackgroundTransport["sendToTab"]
 }
 
@@ -388,7 +388,7 @@ function admitContentMessage(
 }
 
 /**
- * A validated message for a session this background does not know is answered with the SDK's
+ * A validated message for a session the sender's tab does not hold is answered with the SDK's
  * own disconnect instead of being forwarded: the handler would drop it in silence, and the page
  * would wait out its 300 s ceiling for a background that forgot it (see `stale-session.ts`).
  * Returns whether the message was answered here.
@@ -398,7 +398,7 @@ function replyIfStale(envelope: ContentScriptMessageEnvelope, tabId: number | un
 	if (stale === "forward") return false
 	// A connected page repeats this every heartbeat until it reconnects; debug keeps it out of
 	// every user's log buffer.
-	deps.logger.log("wallet-sdk-bg", LogLevel.Debug, "Answering a message for a session this background does not know", {
+	deps.logger.log("wallet-sdk-bg", LogLevel.Debug, "Answering a message for a session the sender's tab does not hold", {
 		type: envelope.type,
 		session: describeExternalId(stale.sessionId),
 	})

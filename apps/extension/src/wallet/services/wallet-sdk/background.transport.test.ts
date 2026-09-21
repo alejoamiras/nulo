@@ -3,13 +3,14 @@
  * then the dead-session reply — and what each lets through. `background.admission.test.ts` and
  * `background.init-order.pins.test.ts` mock the handler and the relay away, so neither can see
  * the wrapper; here both are real, the relay is a stub that hands back the listener it was given,
- * and the live session is established through the real key exchange, the way a page does it.
- * (The "no handler yet" forward is a property of `sessionKnownTo`, pinned in its own table test —
- * `initWalletSdkHandler` binds the handler before it attaches the listener, so the wrapper itself
- * never runs without one.)
+ * the SDK's own listener is wrapped in a spy (so "forwarded" and "not forwarded" are observed on
+ * it, not inferred from silence), and the live session is established through the real key
+ * exchange, the way a page does it. (The "no handler yet" forward is a property of
+ * `sessionKnownTo`, pinned in its own table test — `initWalletSdkHandler` binds the handler before
+ * it attaches the listener, so the wrapper itself never runs without one.)
  */
 import { exportPublicKey, generateKeyPair } from "@aztec/wallet-sdk/crypto"
-import { BackgroundConnectionHandler, type MessageSender } from "@aztec/wallet-sdk/extension/handlers"
+import { BackgroundConnectionHandler, type BackgroundTransport, type MessageSender } from "@aztec/wallet-sdk/extension/handlers"
 import { RECEIVER_GONE_MESSAGE } from "@nulo/extension-messaging/errors"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -35,6 +36,7 @@ const sendMessage = vi.fn<(tabId: number, message: unknown) => Promise<void>>()
 const sender = (tab: number, frameId = 0): MessageSender => ({ tab: { id: tab, url: `${FAKE_DAPP_ORIGIN}/` }, frameId }) as MessageSender
 const disconnect = (sessionId: string) => ({ origin: "background", type: SESSION_DISCONNECTED, sessionId })
 const disconnectsSent = () => sendMessage.mock.calls.filter(([, message]) => (message as { type?: string }).type === SESSION_DISCONNECTED)
+const sentTo = (tab: number) => sendMessage.mock.calls.filter(([to]) => to === tab).map(([, message]) => message)
 const ping = (sessionId: string) => ({ origin: "content-script", type: "ping", sessionId })
 const secure = (sessionId: string) => ({ origin: "content-script", type: "secure-message", sessionId, content: { iv: "", ciphertext: "" } })
 const discovery = (requestId: string) => ({
@@ -44,6 +46,9 @@ const discovery = (requestId: string) => ({
 })
 
 type Deliver = (message: unknown, from?: MessageSender) => void
+
+/** The SDK's own listener, wrapped so forwarding is observed rather than inferred from silence. */
+let sdkListener: ReturnType<typeof vi.fn<Listener>> | undefined
 
 function boot(init: typeof initWalletSdkHandler = initWalletSdkHandler): { handler: BackgroundConnectionHandler; deliver: Deliver } {
 	attached = undefined
@@ -76,6 +81,8 @@ async function establish(deliver: Deliver, sessionId: string, tab = TAB): Promis
 	await vi.waitFor(() =>
 		expect(sendMessage).toHaveBeenCalledWith(tab, expect.objectContaining({ type: "key-exchange-response", sessionId })),
 	)
+	sdkListener?.mockClear()
+	sendMessage.mockClear()
 }
 
 const flush = async () => {
@@ -86,47 +93,59 @@ let encrypted: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
 	sendMessage.mockReset().mockResolvedValue(undefined)
+	sdkListener = undefined
 	encrypted = vi.spyOn(BackgroundConnectionHandler.prototype, "handleEncryptedMessage")
-	// biome-ignore lint/suspicious/noExplicitAny: chrome stub
-	;(globalThis as any).chrome = {
+	// The SDK's `initialize` is one line — hand its listener to the transport; the same line, with
+	// the listener wrapped, is what lets a test see whether the wrapper forwarded.
+	vi.spyOn(BackgroundConnectionHandler.prototype, "initialize").mockImplementation(function (this: BackgroundConnectionHandler) {
+		const self = this as unknown as { transport: BackgroundTransport; handleMessage: Listener }
+		sdkListener = vi.fn<Listener>(self.handleMessage)
+		self.transport.addContentListener(sdkListener)
+	})
+	vi.stubGlobal("chrome", {
 		runtime: { getURL: (p: string) => p },
 		tabs: { sendMessage },
 		action: { setBadgeText() {}, setBadgeBackgroundColor() {} },
-	}
-	// biome-ignore lint/suspicious/noExplicitAny: vite define-injected global
-	;(globalThis as any).__VERSION__ = "test"
+	})
+	vi.stubGlobal("__VERSION__", "test")
 })
 afterEach(() => {
 	vi.restoreAllMocks()
+	vi.unstubAllGlobals()
 	vi.unstubAllEnvs()
 })
 
 describe("the wrapper's order of checks", () => {
-	test("a subframe's message is dropped before anything else — its dead session gets no reply", async () => {
+	test("a subframe's message is dropped before anything else — not forwarded, its dead session gets no reply", async () => {
 		const { deliver } = boot()
 		deliver(ping("ghost"), sender(TAB, 3))
 		deliver(secure("ghost"), sender(TAB, 3))
 		await flush()
-		expect(sendMessage).not.toHaveBeenCalled()
-		expect(encrypted).not.toHaveBeenCalled()
-	})
-
-	test("a malformed content-script envelope is dropped", async () => {
-		const { deliver } = boot()
-		deliver({ origin: "content-script", type: "bogus", sessionId: "ghost" })
-		await flush()
+		expect(sdkListener).not.toHaveBeenCalled()
 		expect(sendMessage).not.toHaveBeenCalled()
 	})
 
-	test("a message that is not the content script's passes through untouched", async () => {
+	test("a malformed content-script envelope is dropped — even one the SDK would otherwise dispatch", async () => {
 		const { deliver } = boot()
-		deliver({ origin: "background", type: "ping", sessionId: "ghost" })
+		const dispatched = vi.spyOn(BackgroundConnectionHandler.prototype, "handleDiscoveryRequest")
+		deliver({ ...discovery("m1"), sessionId: 5 })
 		await flush()
+		expect(sdkListener).not.toHaveBeenCalled()
+		expect(dispatched).not.toHaveBeenCalled()
+		expect(sendMessage).not.toHaveBeenCalled()
+	})
+
+	test("a message that is not the content script's is forwarded untouched, and nothing is sent", async () => {
+		const { deliver } = boot()
+		const message = { origin: "background", type: "ping", sessionId: "ghost" }
+		deliver(message)
+		await flush()
+		expect(sdkListener).toHaveBeenCalledWith(message, sender(TAB))
 		expect(sendMessage).not.toHaveBeenCalled()
 	})
 })
 
-describe("a session this background does not know", () => {
+describe("a session the sender's tab does not hold", () => {
 	test.each([
 		["ping", ping],
 		["secure-message", secure],
@@ -136,6 +155,7 @@ describe("a session this background does not know", () => {
 		await flush()
 		expect(sendMessage).toHaveBeenCalledTimes(1)
 		expect(sendMessage).toHaveBeenCalledWith(TAB, disconnect("ghost"))
+		expect(sdkListener).not.toHaveBeenCalled()
 		expect(encrypted).not.toHaveBeenCalled()
 	})
 
@@ -160,11 +180,12 @@ describe("a session this background does not know", () => {
 })
 
 describe("a live session, established through the real key exchange", () => {
-	test("its ping is answered with pong to its tab and never disconnected", async () => {
+	test("its ping is forwarded and answered with pong to its tab, never disconnected", async () => {
 		const { deliver } = boot()
 		await establish(deliver, "s1")
 		deliver(ping("s1"))
 		await flush()
+		expect(sdkListener).toHaveBeenCalledTimes(1)
 		expect(sendMessage).toHaveBeenCalledWith(TAB, { origin: "background", type: "pong", sessionId: "s1" })
 		expect(disconnectsSent()).toEqual([])
 	})
@@ -178,22 +199,27 @@ describe("a live session, established through the real key exchange", () => {
 		expect(disconnectsSent()).toEqual([])
 	})
 
-	test("its id sent from another tab is forwarded as known: the pong goes to the session's tab, no tab is disconnected", async () => {
+	test("its id sent from another tab is answered in that tab only: not forwarded, the owning tab untouched and still live", async () => {
 		const { deliver } = boot()
 		await establish(deliver, "s1")
 		deliver(ping("s1"), sender(OTHER_TAB))
 		await flush()
-		expect(sendMessage).toHaveBeenCalledWith(TAB, { origin: "background", type: "pong", sessionId: "s1" })
-		expect(sendMessage).not.toHaveBeenCalledWith(OTHER_TAB, expect.anything())
-		expect(disconnectsSent()).toEqual([])
+		expect(sdkListener).not.toHaveBeenCalled()
+		expect(sentTo(OTHER_TAB)).toEqual([disconnect("s1")])
+		expect(sentTo(TAB)).toEqual([])
+		deliver(ping("s1"))
+		await flush()
+		expect(sentTo(TAB)).toEqual([{ origin: "background", type: "pong", sessionId: "s1" }])
 	})
 
-	test("a page that picked a dead id is disconnected in its own tab only", async () => {
+	test("another tab's live id and an absent id are indistinguishable to the sender — no liveness oracle", async () => {
 		const { deliver } = boot()
 		await establish(deliver, "s1")
-		deliver(ping("chosen-dead"), sender(OTHER_TAB))
+		deliver(ping("s1"), sender(OTHER_TAB))
+		deliver(ping("never-issued"), sender(OTHER_TAB))
 		await flush()
-		expect(disconnectsSent()).toEqual([[OTHER_TAB, disconnect("chosen-dead")]])
+		expect(sentTo(OTHER_TAB)).toEqual([disconnect("s1"), disconnect("never-issued")])
+		expect(sdkListener).not.toHaveBeenCalled()
 	})
 
 	test("after the wallet terminated it, a tab that missed that disconnect is told again on its next ping", async () => {

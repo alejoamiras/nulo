@@ -420,9 +420,10 @@ browsers end their background in unrelated ways. Import it; never copy it, never
 **Firefox** ends its event page through the privileged `chromeScript` channel and resolves once that
 page's `performance.timeOrigin` is gone. Two things differ from Chrome and shape every spec: no
 successor starts until the add-on's next event (the spec's next step — opening the popup, a dApp
-click — is the wake; a connected dApp's own heartbeat is such an event too — with every alarm
-cleared and nothing open, `inflight-call-background-death` finds the successor up within its budget
-on every kill), and the termination is a polite suspension, so **with an extension page open
+click — is the wake; a dApp with a call pending is such an event too — the SDK heartbeats only while
+a call is in flight — and in the two kills of `inflight-call-background-death` that open nothing,
+with every alarm cleared, the successor is up within the budget: suggestive, one end-of-budget
+sample per kill), and the termination is a polite suspension, so **with an extension page open
 Firefox leaves the background running and still reports success** — close every popup first; the
 helper rejects by name when the page outlives the call. A dApp page's content script does not hold
 it. `storage.session` survives the kill on both browsers.

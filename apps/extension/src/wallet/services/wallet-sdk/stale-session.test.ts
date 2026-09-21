@@ -15,12 +15,23 @@ describe("staleSessionVerdict", () => {
 	test.each([
 		["ping", "ping"],
 		["secure-message", "secure-message"],
-	] as const)("an unknown session named by a %s is disconnected in the sender's tab", (_label, type) => {
+	] as const)("a session the sender's tab does not hold, named by a %s, is disconnected in that tab", (_label, type) => {
 		expect(staleSessionVerdict(envelope({ type }), 7, unknown)).toEqual({ disconnectTab: 7, sessionId: "s1" })
 	})
 
-	test("a known session is forwarded", () => {
+	test("a session the sender's tab holds is forwarded", () => {
 		expect(staleSessionVerdict(envelope({}), 7, known)).toBe("forward")
+	})
+
+	test("the predicate is asked for the browser's tab, not one the envelope could name", () => {
+		const asked: Array<[string, number]> = []
+		const recording = (sessionId: string, tabId: number) => {
+			asked.push([sessionId, tabId])
+			return true
+		}
+		const hostile = { ...envelope({}), tabId: 99 } as ContentScriptMessageEnvelope
+		staleSessionVerdict(hostile, 7, recording)
+		expect(asked).toEqual([["s1", 7]])
 	})
 
 	test.each(["discovery-request", "key-exchange-request", "disconnect-request"] as const)(
@@ -51,14 +62,19 @@ describe("staleSessionVerdict", () => {
 })
 
 describe("sessionKnownTo", () => {
-	test("asks the handler for the session", () => {
-		const handler = { getSession: (id: string) => (id === "s1" ? { sessionId: "s1" } : undefined) }
-		expect(sessionKnownTo(handler, "s1")).toBe(true)
-		expect(sessionKnownTo(handler, "ghost")).toBe(false)
+	const handler = { getSession: (id: string) => (id === "s1" ? { tabId: 7 } : undefined) }
+
+	test("a session is known only to the tab that holds it", () => {
+		expect(sessionKnownTo(handler, "s1", 7)).toBe(true)
+		expect(sessionKnownTo(handler, "s1", 9)).toBe(false)
+	})
+
+	test("an absent session and another tab's session answer alike", () => {
+		expect(sessionKnownTo(handler, "ghost", 9)).toBe(sessionKnownTo(handler, "s1", 9))
 	})
 
 	test("answers known while no handler exists — the boot window forwards as before", () => {
-		expect(sessionKnownTo(undefined, "ghost")).toBe(true)
+		expect(sessionKnownTo(undefined, "ghost", 7)).toBe(true)
 	})
 })
 

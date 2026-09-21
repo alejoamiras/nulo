@@ -5,8 +5,8 @@
  * The encrypted session lives only in the background's memory. A restarted background knows no
  * session, so the dApp's heartbeat and its calls reach it and are dropped; nothing on the wire says
  * "gone", and the dApp waits out its own 300 s ceiling. The wallet answers a message that names a
- * session it does not know with the SDK's unencrypted `session-disconnected`, and the SDK rejects
- * every in-flight call at once (`Wallet disconnected`).
+ * session the sender's tab does not hold with the SDK's unencrypted `session-disconnected`, and the
+ * SDK rejects every in-flight call at once (`Wallet disconnected`).
  *
  * Three shapes. A send parked in proving when the background dies. An idle dApp whose next call is
  * what wakes a cold background: the cold-start relay drops that call, as it drops every pre-attach
@@ -64,8 +64,10 @@ async function quietKill(ctx: ExtensionContext, lastExtensionPage: Page): Promis
 
 /**
  * Wait for the dApp's `method` call to settle as the SDK's disconnect rejection within `budgetMs`
- * of `since`, and return how long it took. A timeout names whether a background runs by then — on
- * the unfixed tree that is the whole diagnosis of what woke it.
+ * of `since`, and return how long it took. The wait gets only what is left of the budget and the
+ * elapsed time is asserted, so a slow driver round-trip cannot let a later answer pass for the one
+ * under test. A timeout names whether a background runs by then — on the unfixed tree that is the
+ * whole diagnosis of what woke it.
  */
 async function rejectedWithin(
 	ctx: ExtensionContext,
@@ -77,7 +79,7 @@ async function rejectedWithin(
 ): Promise<number> {
 	let result: PgResult
 	try {
-		result = await waitForPgResult(dapp, method, fromSeq, budgetMs)
+		result = await waitForPgResult(dapp, method, fromSeq, Math.max(since + budgetMs - Date.now(), 1))
 	} catch (err) {
 		const alive = await backgroundAlive(ctx).catch(
 			(probe: unknown) => `unknown (${probe instanceof Error ? probe.message : String(probe)})`,
@@ -87,6 +89,9 @@ async function rejectedWithin(
 		)
 	}
 	const elapsedMs = Date.now() - since
+	expect(elapsedMs, `[${SPEC}] ${method} settled ${elapsedMs} ms after the kill; the budget is ${budgetMs} ms`).toBeLessThanOrEqual(
+		budgetMs,
+	)
 	expect(result.status, `[${SPEC}] ${method} settled ok; a dead session must reject`).toBe("error")
 	expect(errorMessageOf(result)).toContain("Wallet disconnected")
 	await dapp.waitForSelector('[data-testid="pg-status"][data-status="disconnected"]', { timeout: 5_000 })

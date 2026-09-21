@@ -105,7 +105,7 @@ existing subframe and schema checks, on a **validated** content-script envelope 
 if type ∈ {"ping", "secure-message"}            // only messages that presuppose an established session
    and envelope.sessionId is a string
    and sender.tab.id is a number                // the browser's value, never the envelope's
-   and the handler exists and handler.getSession(sessionId) is undefined
+   and the handler exists and does not hold sessionId FOR sender.tab.id   // absent, or another tab's (D22)
 then
    sendToTab(sender.tab.id, { origin: "background", type: "session-disconnected", sessionId })
    // and do not forward: the SDK would only drop it
@@ -332,11 +332,11 @@ forward; no `sessionId` → forward); the `background.ts` wiring; **`background.
 | non-content-script message | passthrough, nothing sent |
 | unknown session, top frame, `ping` / `secure-message` | exactly one `session-disconnected` to `sender.tab.id`, SDK handler not invoked |
 | the same again | one more, identical (idempotent, no state) |
-| a session id that belongs to **another tab's** live session | forwarded (it is known) — no disconnect to either tab |
+| a session id that belongs to **another tab's** live session | answered in the sender's tab only, exactly as an absent id — no liveness oracle; the owning tab hears nothing, its session stays live and its next ping still pongs (D22; the row said "forwarded" until arc 1's codex round 1) |
 | live session (established through the real handler), `ping` | PONG to its tab, no disconnect |
 | a key exchange in progress, then its first `secure-message` | never a disconnect |
 | the wallet terminated a session (its approved discovery is restored, `:402-412`) and the tab **missed** that disconnect; the tab's next `ping` | one `session-disconnected` — the case the removed guard (D1) would have suppressed |
-| a page **chose** its discovery `requestId` (it becomes the session id): equal to another tab's **live** session → `ping` from the choosing tab | forwarded (known); no disconnect reaches either tab |
+| a page **chose** its discovery `requestId` (it becomes the session id): equal to another tab's **live** session → `ping` from the choosing tab | answered in the choosing tab only, indistinguishable from a dead id (D22); the owning tab is untouched |
 | the same, equal to a **dead** id | the reply goes to the choosing tab only — the browser's `sender.tab.id` — never to the tab that once held it |
 | `tabs.sendMessage` rejects "receiver gone" | swallowed, as today |
 | handler not yet assigned | forwarded |
@@ -566,6 +566,7 @@ and adopted as written (rev 4):
 |---|---|---|
 | D19 | **High.** "≥ 1 passed per file" still accepts a deleted canary, because each canary file's setup-contract test keeps passing | Adopted: the step requires each **named** substantive test `passed` (`canary-expectations.json`), with pins tying the names to the spec sources and to the job lists, and a fixture for exactly that mutation |
 | D20 | **Medium.** The popup's locked screen does not imply the content listener is attached — service RPCs go live in `services.start()`, the SDK handler later | Adopted: test 3 waits on `waitForWorkerLiveness` (written after `initWalletSdkHandler`) before starting its 3 s clock; the inference is replaced by Fact 16 |
+| D22 | **Medium** (arc 1 codex fix loop, round 1). Forwarding an id another tab holds while answering an absent one handed an approved page a liveness oracle for chosen ids (silence vs disconnect) | Adopted: the verdict is tab-bound — `sessionKnownTo(handler, sessionId, tabId)` is true only for the tab that holds the session; absent and other-tab ids get the same sender-local reply, the owning tab is never written to, and the transport test pins the indistinguishability. Revises the two other-tab rows above; the pre-existing SDK question (a chosen id overwriting a live session at key exchange) stays with the closing ledger |
 | D21 | **Medium.** Recording the alarm's period does not control when it fires; two 30 s windows can straddle it | Adopted: no alarm exists during the budget (`chrome.alarms.clearAll()` before the kill — the plan's "before the first fire" margin was infeasible next to the one-minute reaper alarm); the result is labelled suggestive and **criterion 2 no longer claims what woke Firefox** |
 
 Rejected alternatives: B, C, D, E (above). Unresolved between the auditors: none — D1 is ruled. Codex's
