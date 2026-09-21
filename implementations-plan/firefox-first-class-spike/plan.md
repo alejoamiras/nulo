@@ -244,7 +244,7 @@ The canary lane needs `presto-server` started the way CI starts it (`PRESTO_ALLO
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run test` exit 0; `action-popup-layout.test.ts` **fails** on a Firefox build with the old stylesheet and **passes** with the new one; Firefox and Chrome smoke exit 0; on the arc's PR the three required checks and both Firefox aggregators conclude success.
 
-### Phase 11 — Absorb what dev gained while the stack was open (2026-09-20)
+### Phase 11 — Absorb what dev gained while the stack was open (2026-09-20) ✓
 
 **Why.** The owner asked for the stack to be merged, *"mindful"* of dev: twelve commits had landed under it — the Terms gate (#627, #628), the send-fee privacy notice (#631), third-party notices in the build (#639–#642), a Presto bump — none of which had ever run on Firefox. A rebase was refused by the session's permission layer as a history rewrite, so dev was **merged** into the bottom branch and cascaded upward, arc by arc; no branch was force-pushed.
 
