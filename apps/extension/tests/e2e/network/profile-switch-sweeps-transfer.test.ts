@@ -70,7 +70,13 @@ test.skipIf(!hasConfig)(
 
 		await holdProofGate(page)
 		// Settles true only on the "submitted" toast, which needs a broadcast.
-		const submitted = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: config.minterAddress }).then(
+		const submitted = sendTransfer(page, {
+			fromType: "public",
+			toType: "public",
+			amount: "1",
+			destination: config.minterAddress,
+			expect: "send",
+		}).then(
 			() => true,
 			() => false,
 		)

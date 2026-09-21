@@ -247,9 +247,27 @@ and an absence-wait passes vacuously while a presence-wait times out. Always wri
 
 **A Send fee trigger can show a method that is not in effect.** With a saved pick, the card previews
 that pick's row while balances load (`send-fee-method-trigger[data-fee-method]`), and a preview pays
-nothing. To assert the method in effect, wait on something only the effective method produces (the
-`send-fee-privacy-notice` row, an enabled submit), and scope by `fee-settings-card[data-origin]` —
-across an origin flip the trigger attribute alone cannot tell the new origin's method from the last one's.
+nothing. To assert the method in effect, wait on something only the effective method produces
+(`send-publish-strip[data-you]`, `send-submit[data-action]`, the `send-fee-privacy-notice` tag, an
+enabled submit — `waitForFee` / `waitForTag` in `fixtures/send-page.ts`), and scope by
+`fee-settings-card[data-origin]` — across an origin flip the trigger attribute alone cannot tell the new
+origin's method from the last one's.
+
+**A send names what it expects of the page.** `sendTransfer` takes `expect: "send" | "review"` and
+`submitSend` throws when the page disagrees — a gated send that the button would fire directly, or a
+one-tap send that opens the sheet, is a product bug the helper must not paper over by clicking
+whatever appears. Every read of the page goes through `readSendView` + `assertPublishInvariant`
+(tag ⇔ `data-action="review"` ⇔ `data-you="exposed"`), so a test asserting one surface has
+asserted the other two. The sheet's CTA arms after a delay: wait on `send-review-submit[data-ready]`
+(`waitForReviewReady`), never on a sleep. Closing the sheet goes through `waitForReviewClosed`, which
+finishes a stuck leave transition for that popup only (`settleClosedPopup`) — `closeStuckPopup` would
+clear the whole `#popup` layer, including a popup that must stay open beneath.
+
+**Focus after a close is waited for, never read.** focus-trap hands focus back to the opener on a
+0 ms timer after the release (`delayReturnFocus`), and CDP round-trips on this pipe are shorter than
+that: a `document.activeElement` read straight after the close saw `BODY` on one run in three while
+an in-page sampler showed the opener focused 26 ms later. `waitForFocus(page, testid)`
+(`helpers/pointer-probes.ts`) polls for the landing and names where focus is when it does not land.
 
 **The one sanctioned real click: `pointerClick(page, testid)`** (`helpers/legal-drivers.ts`). The
 helpers above dispatch the click in-page, which reaches an element even when an overlay covers it, so

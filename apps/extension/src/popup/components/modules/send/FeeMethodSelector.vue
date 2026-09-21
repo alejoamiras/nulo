@@ -4,13 +4,17 @@
  * trigger shows the active method's title (or "Select method"); the
  * popup lists every entry from `methods` with the per-entry testid
  * `send-fee-method-{subtitle}`. Disabled entries (token_fpc placeholder)
- * cannot be selected.
+ * cannot be selected. `payerNoticeShape` hangs the "names your address" tag
+ * on the label: the page decides when, this only draws it.
  */
 import { Dropdown } from "@/components/ui/Dropdown"
+import mark from "@/components/composite/send/publish-mark.module.css"
 
 defineProps({
 	modelValue: { type: Object, default: null },
 	methods: { type: Array, required: true },
+	/** "private-private" | "private-public" while this send's fee names the account; null otherwise. */
+	payerNoticeShape: { type: String, default: null },
 })
 
 const emit = defineEmits(["update:modelValue", "open", "close"])
@@ -18,7 +22,18 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 
 <template>
 	<Flex direction="column" gap="4" :class="$style.card">
-		<span :class="$style.fee_label">Fee Source</span>
+		<Flex align="center" justify="between">
+			<span :class="$style.fee_label">Fee Source</span>
+			<span
+				v-if="payerNoticeShape"
+				:class="[$style.tag, mark.exposed]"
+				data-testid="send-fee-privacy-notice"
+				:data-notice-shape="payerNoticeShape"
+			>
+				<i :class="[mark.mark, mark.filled]" aria-hidden="true" />
+				NAMES YOUR ADDRESS
+			</span>
+		</Flex>
 		<Dropdown @onOpen="emit('open')" @onClose="emit('close')">
 			<template #trigger>
 				<Flex
@@ -73,5 +88,17 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 
 .fee_placeholder {
 	color: var(--nulo-secondary);
+}
+
+.tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	white-space: nowrap;
 }
 </style>

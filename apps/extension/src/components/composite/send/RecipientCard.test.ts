@@ -17,8 +17,10 @@ const mountCard = (props: Record<string, unknown> = {}) =>
 	mount(RecipientCard, { props: { address: FULL, ...props }, global: { stubs: STUBS } })
 
 describe("composite/send/RecipientCard", () => {
-	test("renders with data-testid='recipient-card'", () => {
-		expect(mountCard({ name: "Alice" }).find('[data-testid="recipient-card"]').exists()).toBe(true)
+	test("renders with data-testid='recipient-card' and names the full address for a test to read", () => {
+		const card = mountCard({ name: "Alice" }).find('[data-testid="recipient-card"]')
+		expect(card.exists()).toBe(true)
+		expect(card.attributes("data-address")).toBe(FULL)
 	})
 
 	test("shows the recipient name when provided", () => {

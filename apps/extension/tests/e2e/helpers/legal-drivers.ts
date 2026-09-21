@@ -62,19 +62,30 @@ export async function isSheetPresent(page: Page): Promise<boolean> {
 /**
  * A REAL pointer click at the element's centre, after proving nothing sits on top of it there. A
  * DOM-dispatched click reaches an element under an overlay; this is the proof that no overlay is.
+ * `last` picks the last match of the testid — the control of the popup on top of a stack.
  */
-export async function pointerClick(page: Page, testid: string): Promise<void> {
+export async function pointerClick(page: Page, testid: string, opts: { last?: boolean } = {}): Promise<void> {
 	await page.waitForSelector(sel(testid), { visible: true, timeout: 15_000 })
-	const point = await page.evaluate((s) => {
-		const el = document.querySelector(s)
-		if (!el) throw new Error(`${s} not found`)
-		el.scrollIntoView({ block: "center" })
-		const box = el.getBoundingClientRect()
-		const x = box.left + box.width / 2
-		const y = box.top + box.height / 2
-		const top = document.elementFromPoint(x, y)
-		return { x, y, reachable: !!top && (el === top || el.contains(top)), covering: top?.getAttribute("data-testid") ?? top?.tagName }
-	}, sel(testid))
+	const point = await page.evaluate(
+		(s, last) => {
+			const all = document.querySelectorAll(s)
+			const el = last ? all[all.length - 1] : all[0]
+			if (!el) throw new Error(`${s} not found`)
+			el.scrollIntoView({ block: "center" })
+			const box = el.getBoundingClientRect()
+			const x = box.left + box.width / 2
+			const y = box.top + box.height / 2
+			const top = document.elementFromPoint(x, y)
+			return {
+				x,
+				y,
+				reachable: !!top && (el === top || el.contains(top)),
+				covering: top?.getAttribute("data-testid") ?? top?.tagName,
+			}
+		},
+		sel(testid),
+		opts.last === true,
+	)
 	if (!point.reachable) throw new Error(`${testid} is covered at its centre by ${point.covering}`)
 	await page.mouse.click(point.x, point.y)
 }
