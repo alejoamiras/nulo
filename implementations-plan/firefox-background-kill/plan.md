@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: none (owner asked for a follow-up PR, not a blueprint run)
 code_review: off
 budget: no recon agents (the terrain is mapped in pxe-timer-throttling); foreign reviewer at high; code-review off (standing owner directive)
-status: IMPLEMENTING 2026-09-21 — phase 1 ✓; the owner placed the spike's helper in the tree, so the scoping session carried on
+status: IMPLEMENTED 2026-09-21 — phases 1–3 ✓ (the owner placed the spike's helper in the tree, so the scoping session carried on); codex fix loop, then the PR
 ---
 
 # Kill the Firefox background alone: the privileged termination behind the seam, and the port
@@ -148,7 +148,7 @@ reject, and after how long) and record the numbers in the lessons — no fix her
 `--retry=0`, one browser at a time. A file red on Firefox is diagnosed before anything is re-run; a Chrome
 regression is a stop (the Chrome body was not supposed to change).
 
-### Phase 3 — docs, index, lessons
+### Phase 3 — docs, index, lessons ✓ (2026-09-21, [lessons](./lessons/phase-3.md))
 
 `apps/extension/tests/e2e/FIREFOX.md` (the "ten files" row → what remains Chrome-only and why; the host row's
 "background-only termination is a recorded follow-up" clause goes; a heartbeat-wake fact if phase 1

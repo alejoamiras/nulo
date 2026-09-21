@@ -1,6 +1,6 @@
 ---
 name: e2e-testing
-description: Write, run, and deflake the Nulo extension's Puppeteer e2e suites (smoke + network). Use when the user says "e2e", "smoke", "network suite", "puppeteer", "flaky test", "stopServiceWorker", "e2e:agent", or wants to test an extension UI or dApp flow end to end.
+description: Write, run, and deflake the Nulo extension's Puppeteer e2e suites (smoke + network). Use when the user says "e2e", "smoke", "network suite", "puppeteer", "flaky test", "stopBackground", "kill the service worker", "e2e:agent", or wants to test an extension UI or dApp flow end to end.
 ---
 
 # E2E testing — Vitest + Puppeteer on the Nulo extension
@@ -26,7 +26,7 @@ Every suite runs on Chrome (default) and on Firefox (`NULO_E2E_BROWSER=firefox`)
 
 - **A browser difference goes on `BrowserDriver`** (`fixtures/browser/index.ts`), with a Chrome implementation next to the Firefox one. `scripts/e2e/browser-seam.test.ts` rejects a scheme literal, a direct `browser.close()` / `newPage()` / `waitForTarget()`, and any `isFirefox`/`BROWSER` branch under `fixtures/**` or `helpers/**`. A test file may use `isFirefox` to skip itself whole (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`) or to state a real difference in an expectation.
 - **Open, navigate, reload and click through the helpers**: `newPage`, `gotoExtensionPage`, `reloadExtensionPage`, `clickByTestId`/`clickSelector`, `pickFileByTestId`. Each hides a Firefox failure mode that does not look like its cause (a page in a window the wallet opened, a stranded context, a missing user gesture, an unfocused window).
-- **A Chrome-only file is a capability statement, not a quarantine.** The set is the ten files that kill the MV3 service worker or arm CDP Fetch. Adding one is the owner's call.
+- **A Chrome-only file is a capability statement, not a quarantine.** The set is four files: `backup-restore-sw-restart` kills the background under an open extension page (Firefox leaves an event page running while one is open), `import-dead-rpc` redirects over CDP Fetch, and the two execution canaries are pinned to Chrome. Adding one is the owner's call.
 - **The e2e tree is outside `bun run typecheck`.** `scripts/e2e/unresolved-names.test.ts` catches a missing import or stale identifier in 3 s; anything subtler is proven by running the file.
 - **Red on Firefox only?** Read `document.visibilityState` and `document.hasFocus()` in the page before touching a fixture.
 
@@ -307,7 +307,7 @@ the flow with the ordinary helpers.
   means Chrome registered the script; `launchExtension` waits for `nulo:liveness` in
   `chrome.storage.session` (30s). After a restart, gate with `waitForWorkerLiveness(page, afterTs)`
   on a heartbeat STRICTLY NEWER than `afterTs` (the dead worker's value survives in storage; a
-  truthy check lies), and take `afterTs` from `readLivenessBaseline(page)` AFTER `stopServiceWorker`
+  truthy check lies), and take `afterTs` from `readLivenessBaseline(page)` AFTER `stopBackground`
   returned: the old instance is gone by then, so anything newer came from a replacement. The
   heartbeat ticks every 10s, so a baseline read BEFORE the kill can be beaten by the old worker's
   final tick and pass before any replacement boots. A post-stop read may already be the
@@ -362,9 +362,10 @@ the flow with the ordinary helpers.
   `isAuthRequired` meta, so there the run only settles; they gate their content on `isLogined`
   themselves. An explicit Lock over such a worker always announces itself: `lockActiveProfile`
   emits when `close()` had no in-memory session to emit over. A test that keeps a popup open across
-  `stopServiceWorker` waits for `#/popup/auth` to arrive on its own and never clicks Lock (the
+  `stopBackground` waits for `#/popup/auth` to arrive on its own and never clicks Lock (the
   reconnect cleanup hides the control); `sw-resilience`'s open-popup test and the passkey canary's
-  stage 4 are the pins (ledger #29).
+  stage 4 are the pins (ledger #29) — Chrome's alone, since Firefox will not end its event page
+  under an open popup.
 - **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
   submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
   node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
@@ -410,12 +411,21 @@ the pattern.
   mint_and_pay_fee`); credit (`pay_fee`) is deployed-only. The FPC debits MAX gas cost, so assert the
   credit DECREASED, never that it equals the receipt fee.
 
-## 3. Kill or restart the service worker
+## 3. Kill or restart the background
 
-There is ONE helper: `stopServiceWorker(ext)` in `fixtures/helpers.ts`. Import it; never copy it,
-never call `worker.close()` or `Runtime.terminateExecution` in a test.
+There is ONE helper: `stopBackground(ext)` from `fixtures/browser` — a driver method, since the two
+browsers end their background in unrelated ways. Import it; never copy it, never call
+`worker.close()` or `Runtime.terminateExecution` in a test.
 
-Why, in six lines. Chrome parks a stopped worker's DevTools host while any CDP session is attached and
+**Firefox** ends its event page through the privileged `chromeScript` channel and resolves once that
+page's `performance.timeOrigin` is gone. Two things differ from Chrome and shape every spec: no
+successor starts until the add-on's next event (the spec's next step — opening the popup, a dApp
+click — is the wake), and the termination is a polite suspension, so **with an extension page open
+Firefox leaves the background running and still reports success** — close every popup first; the
+helper rejects by name when the page outlives the call. A dApp page's content script does not hold
+it. `storage.session` survives the kill on both browsers.
+
+**Chrome**, in six lines. Chrome parks a stopped worker's DevTools host while any CDP session is attached and
 hands that host — same target id — to the worker's next start, which under MV3 is milliseconds away.
 Puppeteer's `worker.close()` is attach → `Target.closeTarget` → detach, so under load the stop lands
 before the detach, the restarted worker inherits the old target, and `targetdestroyed` never fires
@@ -430,13 +440,13 @@ memory, session record and heartbeat intact — a test built on it exercises not
 After the call, the OLD instance is gone. Whether a new one is running depends on the test: a page
 holding a port reconnects and wakes it at once; `cold-wake-discovery` closes the popup, clears the
 alarms, and opens the dApp page BEFORE the kill (a content script injects without messaging) so the
-click is provably the first wake event, then asserts no worker target exists before clicking. Then
+click is provably the first wake event, then asserts `backgroundAlive(ext)` is false before clicking. Then
 gate on the strictly-newer heartbeat from an extension page (§2), and expect the popup's boot path
 (`popup/boot-session.ts`, `auth-guard.ts`): under strict security a restart drops the session, so
 `ensureUnlocked` with a budget sized to the bootstrap (120s on the prover-ON canary) is the
 recovery, not a route wait.
 
-A stage that can outlast Chrome's idle reaper (a prover-ON canary) checks `findServiceWorkerTarget`
+A stage that can outlast Chrome's idle reaper (a prover-ON canary) checks `backgroundAlive(ext)`
 first: an absent worker is already the restart, so it proceeds to recovery with a warning; a present
 one gets the real kill (`restartServiceWorker` in the two canaries). Called with no worker alive, the
 helper's own 15s `waitForTarget` throws — nothing in it wakes one.
@@ -541,7 +551,7 @@ the sanctioned response.
 
 | # | Fingerprint | Mechanism | Fix | Status |
 |---|---|---|---|---|
-| 1 | `stopServiceWorker: the service-worker target was still alive 15s after close()` (also `Target.detachFromTarget: No session with given id`) | attached `worker.close()` races Chrome's parked DevTools host; restarted worker keeps the target id | unattached `Target.closeTarget` + `performance.timeOrigin` witness (`fixtures/helpers.ts`) | fixed, `e2e-flake-fixes` (2026-09-05) |
+| 1 | `stopBackground: the service-worker target was still alive 15s after close()` (`stopServiceWorker: …` before the helper moved onto the driver; also `Target.detachFromTarget: No session with given id`) | attached `worker.close()` races Chrome's parked DevTools host; restarted worker keeps the target id | unattached `Target.closeTarget` + `performance.timeOrigin` witness (`fixtures/browser/chrome.ts`) | fixed, `e2e-flake-fixes` (2026-09-05) |
 | 2 | `Expected no popup but 1 new popup target(s) appeared: …#/popup/auth` (`wallet-locked-mid-session`) | URL-keyed popup diff; an existing page re-routed to `#/popup/auth` under the lock redirect; the unowned first-run tab fed it | identity-keyed diff in `callExpectingNoPopup`; `launchExtension` closes the first-run tab before the flag flip | fixed, `e2e-flake-fixes` |
 | 3 | `ensureUnlocked: lock state never settled within 30s (hash: #/popup/auth, …)` after a restart on the prover-ON canary | slow bootstrap under load, AND a first post-restart RPC rejection with no retry path (`isSessionChecked` stuck) | `resolveBootSession` + `lookupActiveProfileWithBackoff` (60s), `data-boot-outcome` + `boot-retry`; harness presses retry once, `decisionBudgetMs: 120_000` on the canary | fixed (2026-09-02) |
 | 4 | `waitForExecuteApprovable: not approvable after 10000ms: {…feeMethod:null…}` on `tx-sendTx-multicall-chunked (#33)` while #32 passes | cold-shard fee estimation on the heaviest (7-call) simulation under the default 10s budget | none yet | **open** — rerun once; a second red on a quiet queue → run the file locally before touching the budget or estimation |
