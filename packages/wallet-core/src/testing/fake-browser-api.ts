@@ -259,7 +259,12 @@ class FakeWindowsAdapter implements WindowPort {
 
 class FakeAlarmsAdapter implements AlarmsPort {
 	public async create(name: string, options: AlarmCreateOptions): Promise<void> {
-		await fakeBrowser.alarms.create(name, options)
+		// fake-browser's typings want exactly one first-firing field; the port, like chrome's own
+		// API, leaves all three optional. `?? 0` is the default the fake applies internally.
+		const { when, delayInMinutes, periodInMinutes } = options
+		await (when === undefined
+			? fakeBrowser.alarms.create(name, { delayInMinutes: delayInMinutes ?? 0, periodInMinutes })
+			: fakeBrowser.alarms.create(name, { when, periodInMinutes }))
 	}
 
 	public async clear(name: string): Promise<boolean> {

@@ -30,7 +30,7 @@
 		}
 	},
 	"devDependencies": {
-		"@webext-core/fake-browser": "^1.5.2",
+		"@webext-core/fake-browser": "^2.0.1",
 		"chrome-types": "^0.1.429",
 		"jsdom": "^29.1.1",
 		"typescript": "^6.0.3",
