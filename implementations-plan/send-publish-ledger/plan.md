@@ -16,7 +16,7 @@ base: dev @ 06010c9b
 
 - **Date**: 2026-09-21. **Status**: implemented, PR [#660](https://github.com/alejoamiras/nulo/pull/660) open into `dev` — merge is the owner's call.
 - **Delivered**: phases 1–6 as planned; 11 commits (+ the `origin/dev` merge for the Biome 2.5.13 bump). The one addition beyond the plan is D22 (a covered sheet cannot send), from the codex post-implementation round.
-- **Dropped**: nothing. **Deferred to the owner**: I1 (Escape in a real Chrome action popup — one manual check), and the Escape-without-close behaviour of registry popups (`lessons/phase-6.md`).
+- **Dropped**: nothing. **I1 verified by the owner** in a real Chrome (Escape closes the sheet, the popup stays). **Deferred to the owner**: the Escape-without-close behaviour of registry popups (`lessons/phase-6.md`).
 - **Gates at delivery**: `audit:vue` (6 996 unit + component tests, build) · `test:ci-gating` 132/132 · smoke 15/15 · network 10/10 at retry 0 · mutation pass 23/24 killed, 1 equivalent · codex: conditional approve → approve in two rounds.
 - **Seeds retired**: the `/goal` + `/loop` seeds below are spent; nothing to resume.
 
@@ -446,7 +446,7 @@ the dev box — the advisory Firefox lanes run the same files in CI).
 
 **Inferences** (unverified — attack these)
 
-- I1. Chrome closes an action popup on Escape unless the keydown is `preventDefault`ed. Checked by hand in phase 3; A6 depends on it.
+- I1. Chrome closes an action popup on Escape unless the keydown is `preventDefault`ed. **Verified by the owner in a real Chrome, 2026-09-21** (*"I pressed I1 and the sheet closed"* — the sheet, not the popup); A6 stands.
 - I2. A page-rendered `Popup` stacks and transitions like a registry one when given a store slot. Verified in phase 3 in the built popup, both themes. If it does not (teleport order, transition glitch), stop: the sheet becomes a registry-mounted component fed by props through a thin page-owned binding, and the plan is revised before phase 3c continues — not patched with z-index overrides.
 - I3. The extra real sends fit the `heavy` lane's budget (today ~6 min for `fee-methods` plus `selfpay-phase`). Measured in phase 5; if it does not fit, the sends move to their own file and lane — a workflow edit plus the `behavior-gating` pin, scoped then.
 - I4. 38px more sticky footer leaves the form usable at 600px (437 → 399px visible). Measured on the mock; re-measured on the product in phase 3. If a field becomes unreachable or the fee card cannot be brought fully into view, stop and bring the measurement to the owner — a layout change is not ours to improvise.
