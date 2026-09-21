@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
 
@@ -33,9 +33,10 @@ jobs:
       # Pinned, not `stable`: a newer Foundry routes test-contract creation through the
       # deployCode(string,bytes) cheatcode, which halmos 0.3.3 does not implement — setUp then
       # finds no successful path and every proof fails. This is the version the suites were
-      # validated against. Bump it deliberately, re-running halmos when you do.
+      # validated against. Bump it deliberately, re-running halmos when you do. 1.8.1 was tried
+      # with halmos 0.3.3 (2026-09-21): 0 of 12 proofs pass, and the gas snapshot moves by 8%.
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.7.1"
 
@@ -151,7 +152,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # setup-aztec shells out to bun, so it has to be on PATH before that step runs.
       - uses: ./.github/actions/setup-bun
@@ -201,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
 
@@ -239,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
 
@@ -271,7 +272,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-bun
 
@@ -289,7 +290,7 @@ jobs:
 
       # Same pins as the forge job: the generation deploys from these artifacts.
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.7.1"
 
@@ -311,7 +312,7 @@ jobs:
 
       - name: Upload sandbox logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bridge-integration-logs
           path: |
@@ -325,7 +326,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Guards the F-007 invariant that claim_private is the only consumer of a mint_to_private
       # message. It was never wired to anything. --self-test first: it replays crafted

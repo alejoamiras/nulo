@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -31,7 +31,7 @@ jobs:
       # only — the tsbuildinfo's internal per-file signatures handle the
       # source-change tracking. Restore-keys lets branch history fall back
       # to the nearest stored state.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/extension/tsconfig.tsbuildinfo
           key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('bun.lock', 'tsconfig.json', 'apps/extension/tsconfig.json', 'apps/extension/package.json') }}
@@ -157,7 +157,7 @@ jobs:
           fi
       - name: Upload bun audit JSON
         if: always() && steps.audit-json.outputs.exit != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bun-audit
           path: audit.json

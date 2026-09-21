@@ -76,7 +76,7 @@ jobs:
       version: ${{ steps.r.outputs.version }}
       sha: ${{ steps.r.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -240,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: ./.github/actions/setup-bun
@@ -258,7 +258,7 @@ jobs:
     timeout-minutes: 5
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: ./.github/actions/setup-bun
@@ -436,18 +436,18 @@ jobs:
       SHA: ${{ needs.resolve.outputs.sha }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
 
       - name: Download Chrome build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: extension-chrome
           path: dist/release/chrome
       - name: Download Firefox build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: extension-firefox
           path: dist/release/firefox
@@ -464,7 +464,7 @@ jobs:
             > SHASUMS256.txt
 
       - name: Generate changelog since previous tag (git-cliff)
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
         with:
           config: cliff.toml
           args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'apps/extension/**'

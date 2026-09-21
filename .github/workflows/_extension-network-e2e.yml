@@ -144,7 +144,7 @@ jobs:
       # the upstream default of 2 (no env var set).
       VITE_NULO_FEE_MULTIPLIER: "10"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -385,7 +385,7 @@ jobs:
 
       - name: Upload network e2e logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Use shard_label (e.g. "1-of-5") not shard ("1/5") — upload-artifact
           # rejects `/` in names (actions/upload-artifact#647).

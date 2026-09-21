@@ -1,6 +1,6 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended", ":semanticCommits"],
+	"extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests"],
 	"baseBranchPatterns": ["dev"],
 	"rangeStrategy": "in-range",
 	"minimumReleaseAge": "7 days",
@@ -58,6 +58,16 @@
 			"description": "Pinned to Node 24 lifecycle. Patch/minor on 24.x still bumped.",
 			"matchPackageNames": ["@types/node"],
 			"allowedVersions": "<25"
+		},
+		{
+			"description": "Held at 1.7.1: from 1.8 forge creates test contracts through the deployCode(string,bytes) cheatcode, which halmos 0.3.3 (the newest release) does not implement, so every symbolic proof fails in setUp. Lift when a halmos release runs green against the newer forge; the gas snapshot is re-recorded in the same PR.",
+			"matchPackageNames": ["foundry", "foundry-rs/foundry"],
+			"allowedVersions": "<=1.7.1"
+		},
+		{
+			"description": "Follows the @aztec line, which depends on pako ^2: the extension's only use is a shim standing in for a bb.js module, and a v3 here would ship a second copy of the library for nothing.",
+			"matchPackageNames": ["pako"],
+			"allowedVersions": "<3"
 		},
 		{
 			"description": "Aztec line: class-id stability per SECURITY.md. Manual via Aztec milestone. LAST so no later rule re-enables.",
