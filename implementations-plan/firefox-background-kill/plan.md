@@ -46,13 +46,13 @@ The nine `backgroundKill` files, what each carries beyond the kill, and the phas
 
 | File | Kills | Other Chrome assumptions | Phase |
 |---|---|---|---|
-| `sw-resilience.test.ts` (264 lines, 4 cases) | 5 | none; case 4 *times* the first heartbeat after a respawn (Ask A2) | 2 |
+| `sw-resilience.test.ts` (264 lines, 4 cases) | 5 | none; case 4 *times* the first heartbeat after a respawn and holds on Firefox (2.6 s); case 2 keeps a popup open across the kill and skips in-file on Firefox (Ask A2, the phase 1 mechanism) | 2 |
 | `sw-restart-network.test.ts` (77) | 1 | none | 2 |
 | `network/connect-locked-queue-sw-restart.test.ts` (73) | 1 | none | 2 |
 | `network/cold-wake-discovery.test.ts` (92) | 1 | one `service_worker` target read (`WORKER_DEBT`) | 2 |
 | `network/balance-row-reconciliation.test.ts` (95) | 1 | none | 2 |
 | `imported-account-lifecycle.test.ts` (151) | 1 | one direct `page.reload()` (`RELOAD_DEBT`) | 2 |
-| `network/backup-restore-sw-restart.test.ts` (478) | 2 | none found by grep; read it before porting | 2 |
+| `network/backup-restore-sw-restart.test.ts` (478) | 2 | both kills land **under the open restore page** — the page's own catch is what the spec tests. Firefox declines that termination (phase 1), so the file stays Chrome-only by mechanism: `CHROME_ONLY.backgroundKillUnderPage` | not portable |
 | `network/frozen-account-canary.test.ts` (300) | 1 | two worker-target reads, one `page.reload()`; CLAUDE.md: "both canaries stay Chrome-only" | Ask A1 (default: not ported) |
 | `network/passkey-execution-canary.test.ts` (261) | 1 | same shape as the frozen canary | Ask A1 (default: not ported) |
 
@@ -134,7 +134,7 @@ step. Never run two cwd-changing shell calls in parallel.
 `network/firefox-background-restart.test.ts` + `network/pxe-host-state.test.ts` on Firefox; `pxe-host-state`
 + `sw-resilience.test.ts` on Chrome (proves the moved Chrome body). All exit 0.
 
-### Phase 2 — port the seven files
+### Phase 2 — port the seven files ✓ (2026-09-21, [lessons](./lessons/phase-2.md) — six ported, one not portable by mechanism)
 
 For each file in the table above: replace the kill with the driver call (already true if phase 1 kept the
 re-export), replace worker-target reads with `backgroundAlive` / the liveness gate, replace the direct

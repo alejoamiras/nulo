@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest"
-import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox, stopBackground } from "./fixtures/browser"
+import { stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
 import { lockWallet, readLivenessBaseline, waitForWorkerLiveness } from "./fixtures/helpers"
@@ -10,7 +9,7 @@ import { lockWallet, readLivenessBaseline, waitForWorkerLiveness } from "./fixtu
 // recycle wipes session, NOT local — so both should round-trip. This
 // test stops + respawns the SW and asserts the network detail page
 // renders the same primary-endpoint marker.
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("background restart — network state", () => {
 	test("SW restart preserves active network + primary endpoint", async ({ registeredExtension }) => {
 		const page = await openPopup(registeredExtension)
 		await waitForHash(page, "#/popup/general")

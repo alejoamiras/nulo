@@ -1,6 +1,5 @@
-import type { Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
+import { backgroundAlive, stopBackground } from "../fixtures/browser"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import { ensureUnlocked, readLivenessBaseline, waitForWorkerLiveness } from "../fixtures/helpers"
@@ -22,7 +21,7 @@ const hasConfig = aztecConfig !== undefined
  * The dApp click must be the FIRST wake event after the kill — no popup is
  * opened, no extension page is touched between the kill and the click.
  */
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("cold-wake discovery", () => {
 	test.skipIf(!hasConfig)(
 		"cold-wake — a discovery that WAKES a dead SW still reaches the discover popup",
 		{ timeout: 180_000 },
@@ -53,9 +52,8 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 
 			await stopBackground(ext)
 
-			// Wake isolation: the SW must be genuinely dead at click time.
-			const swAlive = ext.browser.targets().some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId))
-			expect(swAlive).toBe(false)
+			// Wake isolation: the background must be genuinely dead at click time.
+			expect(await backgroundAlive(ext)).toBe(false)
 
 			// The connect click fires the content script's chrome.runtime.sendMessage —
 			// the wake event itself. Arm the discover wait first (waiting never wakes).

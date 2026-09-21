@@ -62,8 +62,7 @@ async function unlockAndReconnect(ctx: ExtensionContext, popup: Page): Promise<P
  * The PXE host's lifetime rule on Firefox: it lives at most as long as the background page. After the
  * background ends the wallet is locked (strict security mode drops the session on any background
  * death, on both browsers, by design), and the first request after the unlock builds exactly one new
- * host. Chrome's offscreen document survives a worker restart; its restart path is covered by the
- * `CHROME_ONLY.backgroundKill` files.
+ * host. Chrome's offscreen document survives a worker restart, so there is nothing of this to pin there.
  *
  * Only the background is ended, as a crash or memory pressure would end it. A key left in
  * `storage.session` is the witness: an add-on reload wipes that area, a background death does not,

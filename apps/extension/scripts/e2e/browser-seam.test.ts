@@ -27,7 +27,6 @@ const WORKER_LOADER = "service-worker-loader"
 const WORKER_DEBT: Record<string, number> = {
 	"fixtures/journal.ts": 1,
 	"fixtures/browser/chrome-rpc-intercept.ts": 1,
-	"network/cold-wake-discovery.test.ts": 1,
 }
 
 /**
@@ -170,7 +169,6 @@ const IN_PAGE_RELOADERS = new Set(["runtime", "location"])
  * navigation timeout. What remains reloads a dApp's web page, or sits in a Chrome-only file.
  */
 const RELOAD_DEBT: Record<string, number> = {
-	"imported-account-lifecycle.test.ts": 1,
 	"network/frozen-account-canary.test.ts": 1,
 	"network/passkey-execution-canary.test.ts": 1,
 	"network/session-reconnect.test.ts": 1,

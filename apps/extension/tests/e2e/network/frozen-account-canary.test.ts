@@ -34,7 +34,7 @@ import { TEST_PASSWORD } from "../fixtures/constants"
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe.skipIf(isFirefox)(CHROME_ONLY.canary, () => {
 	test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 		if (process.env.E2E_REQUIRE_SETUP === "1") {
 			expect(hasConfig).toBe(true)

@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
+import { stopBackground } from "../fixtures/browser"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
 import { ensureUnlocked, lockWallet, readLivenessBaseline, waitForWorkerLiveness } from "../fixtures/helpers"
@@ -30,7 +30,7 @@ async function readBadgeText(page: Page): Promise<string> {
  * permanent — even unlocking never cleared it, because the empty-queue drain
  * early-returns without touching the badge).
  */
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("connect-locked-queue — background restart", () => {
 	test.skipIf(!hasConfig)(
 		"connect-locked-queue-sw-restart — a killed SW drops the queue cleanly: badge reconciled at boot, no popup on unlock",
 		{ timeout: 120_000 },

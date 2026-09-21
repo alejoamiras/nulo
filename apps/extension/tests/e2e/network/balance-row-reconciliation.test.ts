@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox, stopBackground } from "../fixtures/browser"
+import { stopBackground } from "../fixtures/browser"
 import { clickByTestId, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import { TEST_PASSWORD } from "../fixtures/constants"
 import { waitForFreshBalanceRow, waitForTokenCardAmount } from "../fixtures/helpers"
@@ -24,7 +24,7 @@ const hasConfig = aztecConfig !== undefined
 
 const BALANCE_ROOT = "nulo:core:token-balances"
 
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("balance-row reconciliation", () => {
 	test.skipIf(!hasConfig)(
 		"a token whose balance row vanished is repaired and re-projected on the next worker boot",
 		{ timeout: 240_000 },
