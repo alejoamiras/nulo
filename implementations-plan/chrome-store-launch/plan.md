@@ -107,7 +107,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; 0 linter errors; the built manifest carries the declared categories; the data-consent line is seen in a real install prompt: zip `dist/firefox`, and in Firefox Nightly or Developer Edition ≥ 153 with a throwaway profile and `xpinstall.signatures.required=false`, use **Install Add-on From File** (temporary loading of an unpacked extension grants install-time permissions silently and shows no prompt); screenshot saved in `lessons/phase-4.md`.
 - Layers: unit · lint · build · add-on linter · manual browser check.
 
-### Phase 5 — Source package and reproducibility
+### Phase 5 — Source package and reproducibility ✓
 - Root `package.json` `prepare` guard; `SOURCE-BUILD.md`; `source-rebuild.sh`; `source-rebuild.yml`.
 - Local first: `git archive` unpacked **outside the repo** (the session scratch directory), two clean rebuilds plus one ordinary `bun run build:firefox` in the worktree, `diff -r` all three; peak memory via `/usr/bin/time -v`. Non-determinism (hashes, timestamps, ordering) is fixed at its source in the build config. Three failed attempts at the same difference → stop and surface: an unfixable difference is a finding for the owner, not something to document away.
 
