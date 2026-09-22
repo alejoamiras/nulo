@@ -494,3 +494,20 @@ Prompt: the net diff of Phases 4–6 over Arc 1's tip (`git diff 0826e151..HEAD`
 - **Valid credentials fail when the add-on falls beyond page one.** [scripts/release/publish-firefox-amo.ts:131](scripts/release/publish-firefox-amo.ts:131): the interpreter treats absence from the first response as lack of authorship. [AMO defaults to 25 results and provides pagination](https://mozilla.github.io/addons-server/topics/api/addons.html#list). An account owning more add-ons can therefore fail the credential check despite owning `wallet@nulo.sh`.
 
 verdict: reject — confidence: high. Release tests: 151 passed; extension tests failed to start workers. Live AMO behavior, environment protections, rebuild execution, and Mozilla’s policy acceptance remain unverified.
+
+
+---
+
+# Arc 2 implementation — round 2
+
+Prompt: the six round-1 fixes listed with their commits; same scope and rules.
+
+**Must-fix**
+
+- **The corrected Node description still misidentifies the release runtime.** [apps/extension/store/SOURCE-BUILD.md:13](apps/extension/store/SOURCE-BUILD.md:13) says release builds use Node 24. Neither build workflow selects Node; the [Ubuntu 24.04 runner image defaults to Node 22.23.2](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md). A reviewer therefore receives an incorrect description of the build environment. Select Node 24 explicitly or document the actual tested runtimes.
+
+- **The archive contradicts “No … generated code is checked in.”** [apps/extension/store/SOURCE-BUILD.md:61](apps/extension/store/SOURCE-BUILD.md:61): tracked inputs include generated `apps/extension/src/types/auto-imports.d.ts` and `components.d.ts`, plus the vendored compiled `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json`. Its provenance explicitly identifies a precompiled upstream artifact, consumed by `frozen-artifact.ts`. A reviewer inspecting the supplied archive finds generated inputs the instructions deny exist. Narrow the statement and identify these exceptions.
+
+- **The new exception test cannot detect removal of the recovery guards.** [scripts/release/publish-firefox-amo-run.test.ts:309](scripts/release/publish-firefox-amo-run.test.ts:309): the fourth-fetch exception is handled inside the existing `call()` catch. The throwing `jti` replacement at line 315 happens after execution and is never invoked. An in-memory mutation removing both new guards preserved the fetch-test outcome; a fourth-`jti` exception then lost `RECOVERY`. Inject that exception before execution and assert recovery. The implementation fix works; its new regression test does not protect it.
+
+verdict: reject — confidence: high. All 156 release tests pass; live AMO behavior, environment protections, updated rebuild execution, extension tests, and Mozilla policy acceptance remain unverified.

@@ -37,4 +37,12 @@
 | S2 | `actions/upload-artifact` drops dotfiles by default, so a hidden file present in only one tree survives neither the reference nor the rebuild artifact and `compare` passes | yes (`include-hidden-files` defaults false at the pinned SHA) | `include-hidden-files: true` on every upload in `source-rebuild.yml` and on both in `_build-extension.yml` |
 | S3 | The credential check read one page of the author-scoped list (25 by default) and reported absence | yes | `?page_size=50`, `next` links followed up to `OWN_ADDONS_MAX_PAGES = 10` (a `next` outside `AMO_API` is ignored), "not found in the first N pages" is distinct from absence; tests for a third-page hit and the cap |
 
+### Round 2 — reject (3 must-fix); the six round-1 fixes confirmed
+
+| # | Finding | Verified | Fix |
+|---|---|---|---|
+| M4 | The round-1 Node sentence said the release builds use Node 24; no workflow selects Node and the Ubuntu 24.04 runner defaults to 22.23.2 | yes (run 35670945252's `== node v22.23.2 runs vite` on both runners) | already corrected at `e6a8751d`, before this round's response landed: the document states Node 22 on the runners, Node 24.18.0 on the workstation, identical trees |
+| M5 | "No minified or generated code is checked in" — the archive holds generated `src/types/*.d.ts`, rendered `packages/design/src/tokens.ts` and the vendored `SchnorrAccount.json` | yes | the sentence names all three, with the generator or provenance of each |
+| M6 | The recovery regression test's `jti` throw was assigned after the run and never invoked; the fetch throw it did exercise is caught by `call()`, so deleting both guards kept the test green | yes | `jti` throws on the 4th (PATCH) and 3rd (create) request, before the fetch; each asserts the recovery; the fetch-throw case is its own test |
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`
