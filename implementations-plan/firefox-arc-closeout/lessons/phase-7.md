@@ -64,4 +64,10 @@ All three loops converged: arc 1 in two rounds (`lessons/phase-3.md`), arc 2 in 
 
 ## Delivery
 
-`gh stack view` before submit: `dev ← worktree-firefox-arc-closeout @ f34ed0da ← firefox-arc-closeout-canaries @ d6d45b06` (+ this docs commit). Submitted with `gh stack submit --auto --open` only after the three loops converged; titles arc 1 `fix(wallet-sdk): reject a dApp's in-flight call in seconds when the background dies`, arc 2 `test(e2e): run both execution canaries on firefox and assert every canary lane ran them`; each body quotes the owner's calls and states `UI impact: none`. Opened 2026-09-22: arc 1 **#665**, arc 2 **#666** (stack #667). Merging is the owner's; the session never merges.
+`gh stack view` before submit: `dev ← worktree-firefox-arc-closeout @ f34ed0da ← firefox-arc-closeout-canaries @ d6d45b06` (+ this docs commit). Submitted with `gh stack submit --auto --open` only after the three loops converged; titles arc 1 `fix(wallet-sdk): reject a dApp's in-flight call in seconds when the background dies`, arc 2 `test(e2e): run both execution canaries on firefox and assert every canary lane ran them`; each body quotes the owner's calls and states `UI impact: none`. Opened 2026-09-22: arc 1 **#665**, arc 2 **#666** (stack #667).
+
+**Checks.** All five aggregators green on both PRs (`quality-status`, `extension-smoke-e2e-status`, `extension-network-e2e-status`, `extension-smoke-e2e-firefox-status`, `extension-network-e2e-firefox-status`; the advisory `tools-e2e-status` and `bridge-contracts-status` too) — no re-run, nothing made advisory.
+
+**The 22-minute rule, read off #666.** The four-file canary job, whole job including setup: **7 min 35 s on Chrome** (01:11:36 → 01:19:11 UTC), **7 min 12 s on Firefox** (01:05:03 → 01:12:15 UTC). Both logs: `Test Files 4 passed (4)`, `JSON report written to …/canary-results.json`, `Assert canary results` → success, `PROVE_SUCCESS=11`. With the local runs (5 min 10–11 s per browser) that is three measurements per browser, all far under 22 minutes — no split.
+
+**Merge.** The owner authorized the merge explicitly on 2026-09-22; `gh stack merge 667 --yes --squash` landed #665 as `44cfe61e` and #666 as `34111b65` on dev (atomic, after #660 had moved dev by one commit). The remote branches were deleted on merge.
