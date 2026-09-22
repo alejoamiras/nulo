@@ -24,10 +24,6 @@ on:
         default: ""
   schedule:
     - cron: "17 5 * * 1"
-  # TEMPORARY, removed by the last commit of the Firefox arc: a new workflow file cannot be
-  # dispatched until it exists on the default branch, so the arc runs it on every push.
-  push:
-    branches: [worktree-chrome-store-launch-firefox]
 
 permissions:
   contents: read
