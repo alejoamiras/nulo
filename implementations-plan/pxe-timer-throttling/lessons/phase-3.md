@@ -16,6 +16,10 @@
 
 ## Follow-ups (recorded, not done)
 
+*Update 2026-09-21:* 1–3 were taken up by [`firefox-background-kill`](../../firefox-background-kill/plan.md) —
+the restart spec ends the background alone, six of the background-kill files run on Firefox, and the
+unsettled dApp call was measured on both browsers (it is browser-neutral).
+
 1. **The restart spec's mechanism.** It ends the background with `runtime.reload()`; the plan named
    Firefox's privileged `terminateBackground()` (Ask A3, the spike's mechanism in `spike/spike.patch`).
    Swapping it is two lines in `tests/e2e/network/firefox-background-restart.test.ts` behind a driver

@@ -1,9 +1,10 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
-import type { CDPSession, Page, Target } from "puppeteer"
-import { assertChromeOnly, reloadExtensionPage } from "./browser"
+import type { Page } from "puppeteer"
+import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
-import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
+import { clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
+import { type SendAction, submitSend } from "./send-page"
 
 /**
  * Selector contract for tests in this directory.
@@ -1051,6 +1052,10 @@ export interface SendTransferOptions {
 	toType: "public" | "private"
 	amount: string
 	destination: string
+	/** What the footer must offer this send: "send" at once, or "review" through the sheet because
+	 *  the fee names the account. The other offer fails the send (`submitSend`) — a real send is a
+	 *  check on the gate, never a detour around it. */
+	expect?: SendAction
 }
 
 /** Toggle a send-type pair (send-from-type or send-to-type) until the
@@ -1116,6 +1121,20 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	await setActiveSendType(page, "send-from-type", opts.fromType)
 	await setActiveSendType(page, "send-to-type", opts.toType)
 
+	await fillSendForm(page, opts)
+	await submitSend(page, { expect: opts.expect ?? "send" })
+
+	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
+	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
+	// especially the shield (public→private) path — so give it real headroom there. Proverless
+	// bulk shards stay tight to keep failures honest-fast.
+	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
+	// Wait for popup to fully close
+	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
+}
+
+/** Fills the open Send form and waits until the footer is clickable — the fee estimate landed. */
+export async function fillSendForm(page: Page, opts: { amount: string; destination: string }): Promise<void> {
 	// Wait for amount input to become ENABLED
 	// AmountCard has :disabled="!tokenBalanceByType" — disabled when balance for selected type is 0/loading
 	await page.waitForFunction(
@@ -1162,22 +1181,6 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	}
 
 	await new Promise((r) => setTimeout(r, PXE_ANCHOR_SYNC_WORKAROUND_MS))
-
-	// Submit — scroll into view via page.evaluate (the button may be below the
-	// fold in PopupCard) then trigger via clickByTestId, which uses an
-	// in-page synthetic click (the elementHandle path hangs on this stack).
-	await page.evaluate(() => {
-		document.querySelector('[data-testid="send-submit"]')?.scrollIntoView({ block: "center" })
-	})
-	await clickByTestId(page, "send-submit")
-
-	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
-	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
-	// especially the shield (public→private) path — so give it real headroom there. Proverless
-	// bulk shards stay tight to keep failures honest-fast.
-	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
-	// Wait for popup to fully close
-	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
 }
 
 /** Map a (fromType, toType) pair to the user-visible transfer-type label
@@ -1942,125 +1945,6 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
 	await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 5_000 }, rowSelector)
 }
 
-const STOP_WORKER_BUDGET_MS = 15_000
-const WORKER_PROBE_BUDGET_MS = 2_000
-
-/** The worker global's creation time: only a new worker instance produces a newer value. The
- *  whole probe — attach included, since Puppeteer's attach carries the 300 s protocol timeout — races
- *  the budget. An attached session is released the moment the budget expires (a session left on a
- *  stopping worker is the very hazard `stopServiceWorker` exists to avoid), and one that attaches
- *  after expiry is released without evaluating. Release is requested, never awaited: the caller's
- *  budget must not depend on Chrome answering a detach. */
-async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
-	let session: CDPSession | undefined
-	let expired = false
-	const release = () => session?.detach().catch(() => {})
-	const probe = (async () => {
-		session = await target.createCDPSession()
-		if (expired) throw new Error("worker probe attached after its budget")
-		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
-		return Number(result.value)
-	})()
-	let timer: ReturnType<typeof setTimeout> | undefined
-	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => {
-			expired = true
-			release()
-			reject(new Error("worker probe timed out"))
-		}, budgetMs)
-	})
-	try {
-		return await Promise.race([probe, timeout])
-	} finally {
-		if (timer) clearTimeout(timer)
-		probe.then(release, release)
-	}
-}
-
-function isServiceWorkerTarget(ext: ExtensionContext, t: Target): boolean {
-	return t.type() === "service_worker" && t.url().includes(ext.extensionId)
-}
-
-/** The extension's service-worker target, or undefined while Chrome runs none (MV3 reaps an idle
- *  worker; a caller that must tolerate that decides here instead of waiting for one to appear). */
-export function findServiceWorkerTarget(ext: ExtensionContext): Target | undefined {
-	return ext.browser.targets().find((t) => isServiceWorkerTarget(ext, t))
-}
-
-/**
- * Terminate the extension's service worker and wait until the ORIGINAL worker instance is gone.
- *
- * Chrome parks a stopped worker's DevTools host while any session is attached and hands that host
- * to the worker's next start; an MV3 extension worker restarts within milliseconds of stopping. A
- * stop issued through an attached session (Puppeteer's `worker.close()`) therefore often leaves
- * the restarted worker under the original target id, and `targetdestroyed` never fires. So the
- * stop is an UNATTACHED `Target.closeTarget` from the browser session, and "gone" has two proofs:
- * the identity-keyed `targetdestroyed` (the fast path), or — because a session this helper does
- * not own, such as Puppeteer's own auto-attach on every worker start, can still park the host —
- * a newer `performance.timeOrigin` on whichever worker target is live. The fallback probes attach
- * only after a normal destroy would long have landed; a still-stopping worker met by that attach is
- * parked, not resurrected, and cannot yield a newer origin. `Runtime.terminateExecution` is not an
- * alternative — it leaves the worker running.
- */
-export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	// Without this the target wait below would burn its whole budget and report a worker that was
-	// slow to appear, when the truth is that the file should never have run on this browser.
-	assertChromeOnly("backgroundKill", "stopServiceWorker")
-	const isExtensionWorker = (t: Target) => isServiceWorkerTarget(ext, t)
-	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
-	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)
-
-	let settled = false
-	let onDestroyed: (target: Target) => void = () => {}
-	const destroyed = new Promise<void>((resolve) => {
-		onDestroyed = (target) => {
-			if (target === swTarget) resolve()
-		}
-	})
-	ext.browser.on("targetdestroyed", onDestroyed)
-
-	const browserSession = await ext.browser.target().createCDPSession()
-	let deadlineTimer: ReturnType<typeof setTimeout> | undefined
-	try {
-		// The id comes from the browser's own target list (public protocol), matched on the same
-		// predicate as the Target above, so no private `_targetId` read is needed.
-		const { targetInfos } = await browserSession.send("Target.getTargets")
-		const info = targetInfos.find((t) => t.type === "service_worker" && t.url.includes(ext.extensionId))
-		if (!info) throw new Error("stopServiceWorker: the browser lists no service-worker target for the extension")
-		const { success } = await browserSession.send("Target.closeTarget", { targetId: info.targetId })
-		if (!success) throw new Error("stopServiceWorker: Target.closeTarget reported failure")
-
-		const restarted = (async () => {
-			await new Promise((r) => setTimeout(r, 2_000))
-			while (!settled) {
-				const live = ext.browser.targets().find(isExtensionWorker)
-				const origin = live ? await readWorkerTimeOrigin(live, WORKER_PROBE_BUDGET_MS).catch(() => undefined) : undefined
-				if (origin !== undefined && origin > originBefore) return
-				await new Promise((r) => setTimeout(r, 250))
-			}
-		})()
-		const deadline = new Promise<never>((_, reject) => {
-			deadlineTimer = setTimeout(
-				() =>
-					reject(
-						new Error(
-							`stopServiceWorker: the service-worker target was still alive ${STOP_WORKER_BUDGET_MS / 1000}s after close()`,
-						),
-					),
-				STOP_WORKER_BUDGET_MS,
-			)
-		})
-		// One race, so a probe stuck in a CDP round trip can neither hide the destroy event nor
-		// outlive the budget.
-		await Promise.race([destroyed, restarted, deadline])
-	} finally {
-		settled = true
-		if (deadlineTimer) clearTimeout(deadlineTimer)
-		ext.browser.off("targetdestroyed", onDestroyed)
-		browserSession.detach().catch(() => {})
-	}
-}
-
 /** The heartbeat the worker writes to `chrome.storage.session` (`nulo:liveness`), read from an
  *  extension page. Throws unless the read succeeds with a finite positive value: a failed read
  *  turned into 0 would let ANY retained timestamp satisfy a strictly-newer gate. */
@@ -2079,7 +1963,7 @@ export async function readLivenessBaseline(page: Page): Promise<number> {
  * Wait until a worker writes a heartbeat STRICTLY NEWER than `afterTs`. The dead worker's value
  * survives in `chrome.storage.session`, so a truthy check passes before any replacement boots.
  *
- * Take `afterTs` from `readLivenessBaseline` AFTER `stopServiceWorker` resolved: the old instance
+ * Take `afterTs` from `readLivenessBaseline` AFTER `stopBackground` resolved: the old instance
  * is gone by then, so anything newer came from a replacement. That read may already be the
  * replacement's first write, which costs one more tick (`HEARTBEAT_INTERVAL_MS`, 10s) — fine for
  * a recovery gate, wrong for a test that TIMES the first heartbeat, which keeps a pre-kill
