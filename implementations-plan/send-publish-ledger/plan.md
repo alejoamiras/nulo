@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 harden: not scheduled
 budget: recon 2 agents; codex at high; code-review off (owner, Phase 0)
-status: implemented 2026-09-21 — PR #660 open into dev; rev 4 APPROVED by the owner (2026-09-21), A1–A9 as recommended. Rev 1: codex reject, fable conditional approve. Rev 2: fresh-context codex pass → reject. Rev 3: codex closure check → conditional approve; its five conditions are folded into rev 4 (§ Decision ledger, § Audit verdicts).
+status: MERGED 2026-09-21 — PR #660 squashed into dev as 83b914be; rev 4 APPROVED by the owner (2026-09-21), A1–A9 as recommended. Rev 1: codex reject, fable conditional approve. Rev 2: fresh-context codex pass → reject. Rev 3: codex closure check → conditional approve; its five conditions are folded into rev 4 (§ Decision ledger, § Audit verdicts).
 base: dev @ 06010c9b
 ---
 
@@ -14,11 +14,14 @@ base: dev @ 06010c9b
 
 ## Outcome
 
-- **Date**: 2026-09-21. **Status**: implemented, PR [#660](https://github.com/alejoamiras/nulo/pull/660) into `dev`; CI 46 pass / 0 fail; owner-tested in a real Chrome (*"I tested it and it works fine."*).
+- **Date**: 2026-09-21. **Status**: **merged** — PR [#660](https://github.com/alejoamiras/nulo/pull/660) squashed into `dev` as `83b914be` on the owner's authorization; CI 46 pass / 0 fail on the merge commit; owner-tested in a real Chrome (*"I tested it and it works fine."* / *"Looks fucking amazing."*). One `dev` conflict on the way (`tests/e2e/fixtures/helpers.ts` imports vs the Firefox PRs #659/#661), resolved in a signed merge commit and re-gated.
 - **Delivered**: phases 1–6 as planned; 11 commits (+ the `origin/dev` merge for the Biome 2.5.13 bump). The one addition beyond the plan is D22 (a covered sheet cannot send), from the codex post-implementation round.
 - **Dropped**: nothing. **I1 verified by the owner** in a real Chrome (Escape closes the sheet, the popup stays). **Follow-ups the owner asked for** (`lessons/phase-6.md`): (1) the CTA's keyboard-focus ring on the dark theme — after Escape closes the sheet, focus returns to "Review send" and `Button.vue`'s `:focus-visible` outline paints `--nulo-accent`, white on dark, over the orange button; the owner wants a restyle, a `@nulo/design` decision; (2) the Escape-without-close behaviour of registry popups.
 - **Gates at delivery**: `audit:vue` (6 996 unit + component tests, build) · `test:ci-gating` 132/132 · smoke 15/15 · network 10/10 at retry 0 · mutation pass 23/24 killed, 1 equivalent · codex: conditional approve → approve in two rounds.
 - **Seeds retired**: the `/goal` + `/loop` seeds below are spent; nothing to resume.
+- **Follow-ups, unplanned** (each is its own blueprint when the owner wants it):
+  - `send-review-focus-ring` — the CTA's keyboard-focus ring on the dark theme: after Escape closes the sheet, focus returns to "Review send" and `Button.vue`'s `:focus-visible` outline paints `--nulo-accent` (white on dark) over the orange button. Correct a11y (only a keyboard close shows it); the owner wants it restyled — a `@nulo/design` token/variant decision touching every button.
+  - `popup-escape-closes` — registry popups that do not opt into `closeOnEscape` release their focus trap on Escape but stay visible, leaving the keyboard on whatever is beneath (codex post-impl round 1). The sheet refuses consent while covered (D22), so the send is safe; whether Escape should close such popups is a product call on every popup.
 
 Tell the sender, at the button, what a send puts on the public chain — always, in one line — and
 make the one send that names them against their intent pass through an explicit review.
