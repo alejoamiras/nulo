@@ -167,6 +167,8 @@ jobs:
           name: extension-chrome
           path: apps/extension/dist/chrome
           if-no-files-found: error
+          # A dotfile in the output is part of the shipped tree; source-rebuild.yml diffs this artifact.
+          include-hidden-files: true
           retention-days: 7
 
       - name: Upload Firefox build
@@ -177,4 +179,6 @@ jobs:
           name: extension-firefox
           path: apps/extension/dist/firefox
           if-no-files-found: error
+          # A dotfile in the output is part of the shipped tree; source-rebuild.yml diffs this artifact.
+          include-hidden-files: true
           retention-days: 7

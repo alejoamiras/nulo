@@ -31,6 +31,10 @@ if [ "$HAVE_BUN" != "$WANT_BUN" ]; then
 	exit 1
 fi
 
+# Bun runs the package scripts, but `cross-env` and `vite` are Node programs (their shebangs), so
+# the ambient Node is a build input too; it is named so a differing rebuild can be explained.
+echo "== node $(node --version) runs vite"
+
 if git rev-parse --git-dir >/dev/null 2>&1; then
 	echo "note: running inside a git checkout; the reference procedure unpacks the archive outside any repository" >&2
 fi

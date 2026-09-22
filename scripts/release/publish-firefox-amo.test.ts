@@ -14,9 +14,11 @@ import {
 	jwt,
 	NOTES_END,
 	NOTES_START,
+	ownAddonsRequest,
 	requiredSourcePaths,
 	reviewerNotes,
 	SOURCE_MAX_BYTES,
+	sourcePackageJsonPath,
 	sourceRequest,
 	uploadRequest,
 	versionRequest,
@@ -91,9 +93,14 @@ describe("interpreters", () => {
 	test("source and own-add-ons", () => {
 		expect(interpretSource({ source: "https://addons.mozilla.org/x/source.zip" }).ok).toBe(true)
 		expect(interpretSource({ source: null }).ok).toBe(false)
-		expect(interpretOwnAddons({ results: [{ guid: "other@x" }, { guid: GECKO_ID, status: "incomplete" }] }, GECKO_ID)).toEqual({ ok: true, value: "incomplete" })
-		expect(interpretOwnAddons({ results: [{ guid: "other@x" }] }, GECKO_ID).ok).toBe(false)
+		expect(interpretOwnAddons({ results: [{ guid: "other@x" }, { guid: GECKO_ID, status: "incomplete" }] }, GECKO_ID)).toEqual({ ok: true, value: { kind: "found", status: "incomplete" } })
+		expect(interpretOwnAddons({ results: [{ guid: "other@x" }], next: null }, GECKO_ID)).toEqual({ ok: true, value: { kind: "absent", listed: 1 } })
+		const next = "https://addons.mozilla.org/api/v5/addons/addon/?page=2&page_size=50"
+		expect(interpretOwnAddons({ results: [{ guid: "other@x" }], next }, GECKO_ID)).toEqual({ ok: true, value: { kind: "next", url: next, listed: 1 } })
+		expect(interpretOwnAddons({ results: [], next: "https://evil.example/steal" }, GECKO_ID)).toEqual({ ok: true, value: { kind: "absent", listed: 0 } })
 		expect(interpretOwnAddons({ detail: "Authentication credentials were not provided." }, GECKO_ID).ok).toBe(false)
+		expect(ownAddonsRequest().url).toBe("https://addons.mozilla.org/api/v5/addons/addon/?page_size=50")
+		expect(ownAddonsRequest(next).url).toBe(next)
 	})
 
 	test("apiError keeps strings and string arrays only, truncated", () => {
@@ -132,13 +139,21 @@ describe("checkFirefoxManifest", () => {
 })
 
 describe("checkSourceArchive", () => {
-	const paths = requiredSourcePaths("0.27.0")
-	test("needs both prefixed paths and stays under 200 MB", () => {
-		expect(paths).toEqual(["nulo-0.27.0/apps/extension/store/SOURCE-BUILD.md", "nulo-0.27.0/bun.lock"])
-		expect(checkSourceArchive([...paths, "nulo-0.27.0/README.md"], 30e6, "0.27.0")).toEqual({ ok: true, value: true })
-		expect(checkSourceArchive(["apps/extension/store/SOURCE-BUILD.md", "bun.lock"], 30e6, "0.27.0").ok).toBe(false)
-		expect(checkSourceArchive([paths[0]], 30e6, "0.27.0").ok).toBe(false)
-		expect(checkSourceArchive(paths, SOURCE_MAX_BYTES, "0.27.0").ok).toBe(false)
+	const paths = [...requiredSourcePaths("0.27.0"), sourcePackageJsonPath("0.27.0")]
+	const pkg = JSON.stringify({ name: "@nulo/extension", version: "0.27.0" })
+	test("needs the prefixed paths, a tree at VERSION, and stays under 200 MB", () => {
+		expect(paths).toEqual(["nulo-0.27.0/apps/extension/store/SOURCE-BUILD.md", "nulo-0.27.0/bun.lock", "nulo-0.27.0/apps/extension/package.json"])
+		expect(checkSourceArchive([...paths, "nulo-0.27.0/README.md"], 30e6, "0.27.0", pkg)).toEqual({ ok: true, value: true })
+		expect(checkSourceArchive(["apps/extension/store/SOURCE-BUILD.md", "bun.lock", "apps/extension/package.json"], 30e6, "0.27.0", pkg).ok).toBe(false)
+		expect(checkSourceArchive([paths[0], paths[2]], 30e6, "0.27.0", pkg).ok).toBe(false)
+		expect(checkSourceArchive(paths, SOURCE_MAX_BYTES, "0.27.0", pkg).ok).toBe(false)
+	})
+
+	test("a tree whose package version is not VERSION is refused: the reviewer's rebuild would refuse it too", () => {
+		const r = checkSourceArchive([...requiredSourcePaths("0.28.0"), sourcePackageJsonPath("0.28.0")], 30e6, "0.28.0", pkg)
+		expect(r.ok).toBe(false)
+		expect(!r.ok && r.reason).toContain('"0.27.0", not 0.28.0')
+		expect(checkSourceArchive(paths, 30e6, "0.27.0", "not json").ok).toBe(false)
 	})
 })
 

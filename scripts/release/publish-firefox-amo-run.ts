@@ -23,9 +23,11 @@ import {
 	interpretUploadStatus,
 	interpretVersion,
 	jwt,
+	OWN_ADDONS_MAX_PAGES,
 	ownAddonsRequest,
 	RECOVERY,
 	reviewerNotes,
+	sourcePackageJsonPath,
 	sourceRequest,
 	uploadRequest,
 	uploadStatusRequest,
@@ -51,6 +53,8 @@ export interface Files {
 	text(path: string): string
 	/** Entry names of a zip, as `unzip -Z1` prints them. Throws if unreadable. */
 	zipEntries(path: string): string[]
+	/** One text entry of a zip. Throws if absent or unreadable. */
+	zipText(path: string, entry: string): string
 	/** The zip's `manifest.json`, parsed. Throws if absent or unreadable. */
 	zipManifest(path: string): unknown
 }
@@ -77,7 +81,7 @@ export async function runPublishFirefoxAmo(env: Record<string, string | undefine
 	try {
 		return await run(env, io)
 	} catch (e) {
-		return fail(io, `unexpected failure (${e instanceof Error ? e.name : typeof e})`)
+		return fail(io, `unexpected failure (${errorName(e)})`)
 	}
 }
 
@@ -105,12 +109,22 @@ function readAuth(env: Record<string, string | undefined>, io: RunIO): Auth | nu
 async function runCheck(env: Record<string, string | undefined>, io: RunIO): Promise<RunResult> {
 	const auth = readAuth(env, io)
 	if (!auth) return fail(io, "AMO_JWT_ISSUER and AMO_JWT_SECRET are required")
-	const res = await call(io, auth, ownAddonsRequest(), "list add-ons", REQUEST_TIMEOUT_MS)
-	if (!res.ok) return fail(io, res.reason)
-	const mine = interpretOwnAddons(res.json, GECKO_ID)
-	if (!mine.ok) return fail(io, mine.reason)
-	io.log(`check ok: ${GECKO_ID} is authored by this key pair — status ${mine.value}`)
-	return { exit: 0 }
+	let req = ownAddonsRequest()
+	let listed = 0
+	for (let page = 1; page <= OWN_ADDONS_MAX_PAGES; page++) {
+		const res = await call(io, auth, req, "list add-ons", REQUEST_TIMEOUT_MS)
+		if (!res.ok) return fail(io, res.reason)
+		const mine = interpretOwnAddons(res.json, GECKO_ID)
+		if (!mine.ok) return fail(io, mine.reason)
+		if (mine.value.kind === "found") {
+			io.log(`check ok: ${GECKO_ID} is authored by this key pair — status ${mine.value.status}`)
+			return { exit: 0 }
+		}
+		listed += mine.value.listed
+		if (mine.value.kind === "absent") return fail(io, `${GECKO_ID} is not among the add-ons this key pair authors (${listed} listed over ${page} page(s))`)
+		req = ownAddonsRequest(mine.value.url)
+	}
+	return fail(io, `${GECKO_ID} not found in the first ${OWN_ADDONS_MAX_PAGES} pages of the key pair's add-ons (${listed} listed)`)
 }
 
 interface Inputs {
@@ -137,21 +151,37 @@ async function runPublish(env: Record<string, string | undefined>, io: RunIO): P
 
 	const auth = readAuth(env, io)
 	if (!auth) return fail(io, "AMO_JWT_ISSUER and AMO_JWT_SECRET are required")
+	// Both files are read before the first request, so nothing on disk can fail once a version exists.
+	const zipBytes = io.files.bytes(zipPath)
+	const sourceBytes = io.files.bytes(sourcePath)
 
-	const uploaded = await upload(io, auth, io.files.bytes(zipPath), `nulo-firefox-${version}.zip`)
+	const uploaded = await upload(io, auth, zipBytes, `nulo-firefox-${version}.zip`)
 	if (!uploaded.ok) return fail(io, uploaded.reason)
 	io.log(`upload ok: ${uploaded.value} validated`)
 
-	const created = await createVersion(io, auth, uploaded.value, notes, storeVersion)
+	// From here on a failure may leave a version behind, whatever throws: the recovery always follows.
+	let created: Awaited<ReturnType<typeof createVersion>>
+	try {
+		created = await createVersion(io, auth, uploaded.value, notes, storeVersion)
+	} catch (e) {
+		return fail(io, `create version: unexpected failure (${errorName(e)}); ${RECOVERY}`)
+	}
 	if (!created.ok) return fail(io, `${created.reason}; ${RECOVERY}`)
 	io.log(`version ok: id ${created.value.id}, ${storeVersion} on ${created.value.channel}; file ${created.value.fileStatus}`)
 
-	const attached = await attachSource(io, auth, created.value.id, io.files.bytes(sourcePath), `nulo-${version}-source.zip`)
+	let attached: Awaited<ReturnType<typeof attachSource>>
+	try {
+		attached = await attachSource(io, auth, created.value.id, sourceBytes, `nulo-${version}-source.zip`)
+	} catch (e) {
+		return fail(io, `version ${created.value.id} exists but attach source: unexpected failure (${errorName(e)}); ${RECOVERY}`)
+	}
 	if (!attached.ok) return fail(io, `version ${created.value.id} exists but ${attached.reason}; ${RECOVERY}`)
 
 	io.log(`published: version ${created.value.id} (${storeVersion}, ${created.value.channel}, file ${created.value.fileStatus}); source attached; follow it in the Developer Hub`)
 	return { exit: 0 }
 }
+
+const errorName = (e: unknown) => (e instanceof Error ? e.name : typeof e)
 
 type Checked<T> = { ok: true; value: T } | { ok: false; reason: string }
 
@@ -174,12 +204,14 @@ function readInputs(env: Record<string, string | undefined>, io: RunIO): Checked
 
 	if (!io.files.exists(sourcePath)) return { ok: false, reason: `source archive ${sourcePath} does not exist` }
 	let entries: string[]
+	let packageJson = ""
 	try {
 		entries = io.files.zipEntries(sourcePath)
+		if (entries.includes(sourcePackageJsonPath(version))) packageJson = io.files.zipText(sourcePath, sourcePackageJsonPath(version))
 	} catch {
 		return { ok: false, reason: `cannot list ${sourcePath}` }
 	}
-	const source = checkSourceArchive(entries, io.files.size(sourcePath), version)
+	const source = checkSourceArchive(entries, io.files.size(sourcePath), version, packageJson)
 	if (!source.ok) return source
 
 	if (!io.files.exists(listingPath)) return { ok: false, reason: `listing ${listingPath} does not exist` }
@@ -252,6 +284,7 @@ export const diskFiles: Files = {
 		execFileSync("unzip", ["-Z1", p], { encoding: "utf8", maxBuffer: 64 << 20 })
 			.split("\n")
 			.filter(Boolean),
+	zipText: (p, entry) => execFileSync("unzip", ["-p", p, entry], { encoding: "utf8", maxBuffer: 1 << 20 }),
 	zipManifest(p) {
 		if (!existsSync(p)) throw new Error("zip missing")
 		return JSON.parse(execFileSync("unzip", ["-p", p, "manifest.json"], { encoding: "utf8", maxBuffer: 1 << 20 }))

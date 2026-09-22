@@ -64,8 +64,10 @@ export const sourceRequest = (guid: string, versionId: number | string, archive:
 	files: { source: { filename, bytes: archive, type: "application/zip" } },
 })
 
-/** "List all add-ons you are the author of": proves the key pair, unlike the public detail endpoint. */
-export const ownAddonsRequest = (): ApiRequest => ({ kind: "json", url: `${AMO_API}/addons/addon/`, method: "GET" })
+/** "List all add-ons you are the author of": proves the key pair, unlike the public detail endpoint. Paginated: `url` is a `next` link on later pages. */
+export const ownAddonsRequest = (url = `${AMO_API}/addons/addon/?page_size=50`): ApiRequest => ({ kind: "json", url, method: "GET" })
+/** Pages of the author-scoped list followed before giving up; the add-on is expected well within them. */
+export const OWN_ADDONS_MAX_PAGES = 10
 
 export type Verdict<T> = { ok: true; value: T } | { ok: false; reason: string }
 
@@ -123,14 +125,17 @@ export function interpretSource(json: unknown): Verdict<true> {
 	return { ok: true, value: true }
 }
 
-/** The author-scoped list; `guid` must be among ours. Pagination: the add-on is expected on the first page. */
-export function interpretOwnAddons(json: unknown, guid: string): Verdict<string> {
+export type OwnAddons = { kind: "found"; status: string } | { kind: "next"; url: string; listed: number } | { kind: "absent"; listed: number }
+
+/** One page of the author-scoped list: our `guid`, or the `next` page to read, or the end of the list. */
+export function interpretOwnAddons(json: unknown, guid: string): Verdict<OwnAddons> {
 	const o = obj(json)
 	const results = Array.isArray(o?.results) ? o.results : null
 	if (!results) return { ok: false, reason: "add-on list response carries no results" }
 	const mine = results.map(obj).find((a) => a?.guid === guid)
-	if (!mine) return { ok: false, reason: `${guid} is not among the add-ons this key pair authors (${results.length} listed)` }
-	return { ok: true, value: typeof mine.status === "string" ? mine.status : "unknown" }
+	if (mine) return { ok: true, value: { kind: "found", status: typeof mine.status === "string" ? mine.status : "unknown" } }
+	const next = typeof o?.next === "string" && o.next.startsWith(`${AMO_API}/`) ? o.next : null
+	return { ok: true, value: next ? { kind: "next", url: next, listed: results.length } : { kind: "absent", listed: results.length } }
 }
 
 /** The API's error strings, truncated; never the raw body. */
@@ -171,11 +176,21 @@ export function checkFirefoxManifest(manifest: unknown, version: string): Verdic
 /** Paths a `git archive --prefix=nulo-<v>/` of the release must contain for a reviewer to rebuild it. */
 export const requiredSourcePaths = (version: string) => [`nulo-${version}/apps/extension/store/SOURCE-BUILD.md`, `nulo-${version}/bun.lock`]
 
-export function checkSourceArchive(entries: readonly string[], sizeBytes: number, version: string): Verdict<true> {
+/** The archived extension manifest source, whose `version` must be the release's: the build takes its version from the tag, `git archive` keeps the tree's, and the reviewer script refuses a tree at another version. */
+export const sourcePackageJsonPath = (version: string) => `nulo-${version}/apps/extension/package.json`
+
+export function checkSourceArchive(entries: readonly string[], sizeBytes: number, version: string, packageJson: string): Verdict<true> {
 	if (sizeBytes >= SOURCE_MAX_BYTES) return { ok: false, reason: `source archive is ${sizeBytes} bytes, at or over AMO's 200 MB cap` }
 	const present = new Set(entries)
-	const missing = requiredSourcePaths(version).filter((p) => !present.has(p))
+	const missing = [...requiredSourcePaths(version), sourcePackageJsonPath(version)].filter((p) => !present.has(p))
 	if (missing.length) return { ok: false, reason: `source archive lacks ${missing.join(", ")} (is it git archive --prefix=nulo-${version}/ of the release?)` }
+	let treeVersion: unknown
+	try {
+		treeVersion = obj(JSON.parse(packageJson))?.version
+	} catch {
+		return { ok: false, reason: `${sourcePackageJsonPath(version)} in the source archive is not JSON` }
+	}
+	if (treeVersion !== version) return { ok: false, reason: `the source archive's tree is at version ${JSON.stringify(treeVersion ?? null)}, not ${version}: a reviewer's rebuild would refuse it` }
 	return { ok: true, value: true }
 }
 

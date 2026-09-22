@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type ApiRequest, GECKO_ID, NOTES_END, NOTES_START, RECOVERY, requiredSourcePaths } from "./publish-firefox-amo"
+import { type ApiRequest, GECKO_ID, NOTES_END, NOTES_START, OWN_ADDONS_MAX_PAGES, RECOVERY, requiredSourcePaths, sourcePackageJsonPath } from "./publish-firefox-amo"
 import { type ApiResponse, type Files, POLL_INTERVAL_MS, type RunIO, runPublishFirefoxAmo, VALIDATION_DEADLINE_MS } from "./publish-firefox-amo-run"
 
 const SECRET = "SECRET-A1B2"
@@ -16,9 +16,14 @@ interface Fixture {
 	manifest?: unknown
 	sourceEntries?: string[]
 	sourceSize?: number
+	/** The archived `apps/extension/package.json`'s version. */
+	treeVersion?: string
 	listing?: string
 	missing?: string[]
+	/** Paths whose `bytes()` throws. */
+	unreadable?: string[]
 }
+const SOURCE_ENTRIES = [...requiredSourcePaths("0.27.0"), sourcePackageJsonPath("0.27.0"), "nulo-0.27.0/README.md"]
 
 /** A scripted API plus an in-memory file system; running out of steps throws (reported without the secret). */
 function harness(steps: Step[], fx: Fixture = {}) {
@@ -27,12 +32,17 @@ function harness(steps: Step[], fx: Fixture = {}) {
 	let clock = 1_700_000_000_000
 	let n = 0
 	const missing = new Set(fx.missing ?? [])
+	const unreadable = new Set(fx.unreadable ?? [])
 	const files: Files = {
 		exists: (p) => !missing.has(p),
 		size: () => fx.sourceSize ?? 30e6,
-		bytes: () => new Uint8Array([0x50, 0x4b]),
+		bytes: (p) => {
+			if (unreadable.has(p)) throw new Error(`EIO ${SECRET}`)
+			return new Uint8Array([0x50, 0x4b])
+		},
 		text: () => fx.listing ?? LISTING,
-		zipEntries: () => fx.sourceEntries ?? [...requiredSourcePaths("0.27.0"), "nulo-0.27.0/README.md"],
+		zipEntries: () => fx.sourceEntries ?? SOURCE_ENTRIES,
+		zipText: () => JSON.stringify({ name: "@nulo/extension", version: fx.treeVersion ?? "0.27.0" }),
 		zipManifest: (p) => {
 			if (missing.has(p)) throw new Error("zip missing")
 			return "manifest" in fx ? fx.manifest : FIREFOX_MANIFEST
@@ -122,12 +132,13 @@ describe("inputs", () => {
 		}
 	})
 
-	test("a missing, oversized or unprefixed source archive is refused before any request", async () => {
+	test("a missing, oversized, unprefixed or wrong-version source archive is refused before any request", async () => {
 		const fixtures: Fixture[] = [
 			{ missing: ["dist/source/nulo-0.27.0-source.zip"] },
 			{ sourceSize: 250 * 1024 * 1024 },
-			{ sourceEntries: ["apps/extension/store/SOURCE-BUILD.md", "bun.lock"] },
-			{ sourceEntries: ["nulo-0.27.0/bun.lock"] },
+			{ sourceEntries: ["apps/extension/store/SOURCE-BUILD.md", "bun.lock", "apps/extension/package.json"] },
+			{ sourceEntries: ["nulo-0.27.0/bun.lock", sourcePackageJsonPath("0.27.0")] },
+			{ treeVersion: "0.26.0" },
 		]
 		for (const fx of fixtures) {
 			const h = harness([new Error("must not be called")], fx)
@@ -180,9 +191,26 @@ describe("check mode", () => {
 		expectNoSecretLeak(h)
 	})
 
-	test("fails when wallet@nulo.sh is not among the key pair's add-ons, and without a key pair", async () => {
-		const h = harness([ok({ results: [{ guid: "other@x" }] })])
+	test("follows the list's next links and finds the add-on on a later page", async () => {
+		const next = (n: number) => `https://addons.mozilla.org/api/v5/addons/addon/?page=${n}&page_size=50`
+		const h = harness([ok({ results: [{ guid: "a@x" }], next: next(2) }), ok({ results: [{ guid: "b@x" }], next: next(3) }), ok({ results: [{ guid: GECKO_ID, status: "public" }], next: null })])
+		expect((await runPublishFirefoxAmo(env({ MODE: "check" }), h.io)).exit).toBe(0)
+		expect(h.calls.map((c) => c.req.url)).toEqual([`https://addons.mozilla.org/api/v5/addons/addon/?page_size=50`, next(2), next(3)])
+		expect(h.output()).toContain("status public")
+	})
+
+	test("gives up after the page cap without claiming absence", async () => {
+		const pages = Array.from({ length: OWN_ADDONS_MAX_PAGES + 1 }, (_, i) => ok({ results: [{ guid: `x${i}@x` }], next: `https://addons.mozilla.org/api/v5/addons/addon/?page=${i + 2}` }))
+		const h = harness(pages)
 		expect((await runPublishFirefoxAmo(env({ MODE: "check" }), h.io)).exit).toBe(1)
+		expect(h.calls).toHaveLength(OWN_ADDONS_MAX_PAGES)
+		expect(h.output()).toContain(`first ${OWN_ADDONS_MAX_PAGES} pages`)
+	})
+
+	test("fails when wallet@nulo.sh is not among the key pair's add-ons, and without a key pair", async () => {
+		const h = harness([ok({ results: [{ guid: "other@x" }], next: null })])
+		expect((await runPublishFirefoxAmo(env({ MODE: "check" }), h.io)).exit).toBe(1)
+		expect(h.output()).toContain("1 listed over 1 page")
 		expectNoSecretLeak(h)
 		const none = harness([])
 		expect((await runPublishFirefoxAmo(env({ MODE: "check", AMO_JWT_ISSUER: undefined }), none.io)).exit).toBe(1)
@@ -263,6 +291,31 @@ describe("publish flow", () => {
 		expect(createTimeout.output()).toContain("timed out")
 		expect(createTimeout.output()).toContain("do NOT re-run")
 		expectNoSecretLeak(createTimeout)
+	})
+
+	test("an unreadable source archive fails before any request, never after the version exists", async () => {
+		const h = harness([new Error("must not be called")], { unreadable: ["dist/source/nulo-0.27.0-source.zip"] })
+		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
+		expect(h.calls).toHaveLength(0)
+		expect(h.output()).toContain("unexpected failure (Error)")
+		expectNoSecretLeak(h)
+	})
+
+	test("a throw after the version exists still carries the recovery procedure", async () => {
+		const h = harness([ok({ uuid: "u-1" }), VALID, CREATED])
+		const realFetch = h.io.fetch
+		let n = 0
+		h.io.fetch = async (req, a, t) => {
+			if (++n === 4) throw new RangeError(`boom ${SECRET}`)
+			return realFetch(req, a, t)
+		}
+		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
+		expect(h.output()).toContain("version 9001 exists but attach source: request failed (RangeError)")
+		expect(h.output()).toContain("do NOT re-run")
+		h.io.jti = () => {
+			throw new TypeError("boom")
+		}
+		expectNoSecretLeak(h)
 	})
 
 	test("a duplicate version (400) carries the API's own detail", async () => {

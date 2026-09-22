@@ -91,6 +91,7 @@ jobs:
         with:
           name: reference
           path: ${{ runner.temp }}/reference
+          include-hidden-files: true
           retention-days: 3
 
   # The shipped bytes for a bare commit: the workflow the release itself uses, at that commit.
@@ -130,6 +131,7 @@ jobs:
         with:
           name: rebuild-x64
           path: ${{ runner.temp }}/src/nulo-${{ needs.target.outputs.version }}/apps/extension/dist/firefox
+          include-hidden-files: true
           retention-days: 3
 
   rebuild-arm64:
@@ -158,6 +160,7 @@ jobs:
         with:
           name: rebuild-arm64
           path: ${{ runner.temp }}/src/nulo-${{ needs.target.outputs.version }}/apps/extension/dist/firefox
+          include-hidden-files: true
           retention-days: 3
 
   compare:
