@@ -376,7 +376,7 @@ Un-skip, reword the comment.
   `Tests 2 passed (2)` — the agent-runner contract test and the canary itself, named in the output — **0
   skipped**; wall time recorded per browser.
 
-### Phase 5 — the passkey canary on Firefox
+### Phase 5 ✓ — the passkey canary on Firefox
 
 `credentialOutlivesPage` on the three driver files; the spec reads it; the seam scan bans it elsewhere.
 

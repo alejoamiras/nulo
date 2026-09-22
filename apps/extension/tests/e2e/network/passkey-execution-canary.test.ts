@@ -13,20 +13,24 @@
  *   2. A's FIRST tx executes the frozen ctor via the multicall deploy path — simulate, REAL
  *      proof, node acceptance (mined).
  *   3. An authwit-CONSUMING tx as the named caller B (B's first tx — its own ctor) lands.
- *   4. A service-worker restart later, the profile re-unlocks via a FRESH WebAuthn ceremony in
- *      the SAME popup FrameTreeNode (passkey sessions are never silently restored), and the
- *      re-derived account still signs, proves, and lands a tx.
+ *   4. A background restart later, the profile re-unlocks via a FRESH WebAuthn ceremony (passkey
+ *      sessions are never silently restored), and the re-derived account still signs, proves, and
+ *      lands a tx.
  *
- * FTN discipline (load-bearing): the virtual authenticator — and therefore the credential and its
- * PRF seed — is scoped to the anchor popup page's FrameTreeNode. The anchor popup stays OPEN for
- * the whole test; closing it garbage-collects the credential and makes the post-restart unlock
- * impossible. No browser-relaunch leg, ever: credentials die with the browser instance.
+ * Credential scope (load-bearing): the virtual authenticator — and therefore the credential and
+ * its PRF seed — is scoped by the browser. On Chrome it belongs to the anchor popup page's
+ * FrameTreeNode, so that popup stays OPEN across the restart: closing it garbage-collects the
+ * credential and makes the post-restart unlock impossible. On Firefox it belongs to the session
+ * and the credential outlives the window that made it — while the background cannot be ended under
+ * an open extension page — so there the anchor popup closes before the kill and a fresh popup hosts
+ * the ceremony. Which applies is the driver's `credentialOutlivesPage`, never a browser test here.
+ * No browser-relaunch leg, ever: credentials die with the browser instance.
  *
- * Every stage asserts an exact outcome — no ok-or-error tolerances. Run prover-ON:
- * `bun run e2e:agent tests/e2e/network/passkey-execution-canary.test.ts`.
+ * Every stage asserts an exact outcome — no ok-or-error tolerances. Run prover-ON, on Chrome and
+ * on Firefox: `bun run e2e:agent tests/e2e/network/passkey-execution-canary.test.ts`.
  */
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, backgroundAlive, isFirefox, stopBackground } from "../fixtures/browser"
+import { backgroundAlive, credentialOutlivesPage, stopBackground } from "../fixtures/browser"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import {
 	clickByTestId,
@@ -45,19 +49,19 @@ import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-describe.skipIf(isFirefox)(CHROME_ONLY.canary, () => {
+describe("passkey canary — the KDF-change execution gate, on both browsers", () => {
 	test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 		if (process.env.E2E_REQUIRE_SETUP === "1") {
 			expect(hasConfig).toBe(true)
 		}
 	})
 
-	/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
-	 *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
-	 *  kill, whose failures propagate. */
-	async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
+	/** A prover-ON stage can outlast the browser's idle reaper, and nothing here wakes a background:
+	 *  an absent one IS the restart this stage exercises, so recovery proceeds; a present one gets the
+	 *  real kill, whose failures propagate. */
+	async function restartBackground(ctx: ExtensionContext): Promise<void> {
 		if (!(await backgroundAlive(ctx))) {
-			console.warn("[passkey-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
+			console.warn("[passkey-canary] no live background — the browser already stopped it; proceeding to recovery")
 			return
 		}
 		await stopBackground(ctx)
@@ -97,9 +101,11 @@ describe.skipIf(isFirefox)(CHROME_ONLY.canary, () => {
 			const step = (m: string) => console.log(`[passkey-canary] ${m}`)
 
 			// ── Stage 1: passkey profile + second account + dApp connection ──
-			// The anchor popup owns the virtual authenticator's FTN — it stays open until the end.
+			// The anchor popup anchors the virtual authenticator; where the credential is page-scoped
+			// it stays open until the end, and the post-restart ceremony runs in it.
 			const anchorPopup = await openPopup(ctx)
 			const auth = await setupPasskeyVirtualAuth(ctx.browser, anchorPopup)
+			let ceremonyPopup = anchorPopup
 			try {
 				step("registering passkey profile (in-page PRF ceremony)")
 				await registerPasskeyProfile(anchorPopup)
@@ -162,29 +168,35 @@ describe.skipIf(isFirefox)(CHROME_ONLY.canary, () => {
 				await waitForTxMined(aztecConfig!, txHashOf(consumeResult.resultJson), 300_000)
 				step("authwit consumed; B's ctor-deploy tx MINED")
 
-				// ── Stage 4: SW restart → ceremony re-unlock in the SAME FTN → still operates ──
-				step("terminating the service worker")
-				await restartServiceWorker(ctx)
+				// ── Stage 4: background restart → ceremony re-unlock → still operates ──
+				// A page-scoped credential keeps the anchor popup open across the kill. A session-scoped
+				// one lets it close first — which the kill needs, as Firefox declines to end a background
+				// under an open extension page — and a fresh popup then hosts the ceremony.
+				step("terminating the background")
+				if (credentialOutlivesPage) await anchorPopup.close()
+				await restartBackground(ctx)
+				if (credentialOutlivesPage) ceremonyPopup = await openPopup(ctx)
 
-				// The anchor popup stays open (same FTN = same virtual authenticator = same
-				// credential), so it is the extension page the post-stop baseline is read from.
-				await waitForWorkerLiveness(anchorPopup, await readLivenessBaseline(anchorPopup))
-				step("SW rebooted; the anchor popup must lock itself in the SAME FrameTreeNode")
-				// Passkey sessions are never silently restored: the replacement worker holds no
-				// session while this popup's store still says authenticated. Its reconnect boot
-				// resolves `locked` under an auth-required page and enters the locked state on its
-				// own — no Lock click here; the reconnect cleanup hides the header's lock control.
-				await waitForHash(anchorPopup, "#/popup/auth", 60_000)
-				await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
-				await anchorPopup.waitForFunction(
+				// Session storage retains the dead background's heartbeat, so the gate needs a STRICTLY
+				// NEWER value; the baseline is read after the stop, from an extension page.
+				await waitForWorkerLiveness(ceremonyPopup, await readLivenessBaseline(ceremonyPopup))
+				step("background restarted; the ceremony popup must present the lock screen")
+				// Passkey sessions are never silently restored: the replacement background holds no
+				// session. A popup kept open still says authenticated in its store; its reconnect boot
+				// resolves `locked` under an auth-required page and enters the locked state on its own —
+				// no Lock click here (the reconnect cleanup hides the header's lock control). A fresh
+				// popup boots straight into it.
+				await waitForHash(ceremonyPopup, "#/popup/auth", 60_000)
+				await ceremonyPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
+				await ceremonyPopup.waitForFunction(
 					() => {
 						const btn = document.querySelector<HTMLButtonElement>('[data-testid="auth-submit"]')
 						return btn !== null && !btn.disabled
 					},
 					{ timeout: 15_000 },
 				)
-				await clickByTestId(anchorPopup, "auth-submit")
-				await waitForHash(anchorPopup, "#/popup/general", 60_000)
+				await clickByTestId(ceremonyPopup, "auth-submit")
+				await waitForHash(ceremonyPopup, "#/popup/general", 60_000)
 				step("post-restart ceremony unlock ok")
 
 				// Reconnect the dApp and land a post-restart tx as A. The background rebuilds the
@@ -247,6 +259,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.canary, () => {
 				step("post-restart tx mined — passkey-derived account fully operational after ceremony re-unlock")
 			} finally {
 				await auth.cleanup()
+				await ceremonyPopup.close().catch(() => {})
 				await anchorPopup.close().catch(() => {})
 			}
 		},
