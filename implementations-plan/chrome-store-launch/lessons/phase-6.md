@@ -62,4 +62,11 @@ Arc 2 loop converged (three rounds; transcripts in `audit-codex.md` under "Arc 2
 | S2 | `remote-code.md` paraphrased privacy § 2 as "forbids loading remote scripts" where the policy says "remote code", then concluded both sentences are true — but the note itself shows the CSP does not govern WASM bytes | yes | the note quotes both sentences verbatim, keeps § 13 as true, states § 2's attribution to the CSP is more than the policy delivers, and flags the rewording as an owner item (`BEFORE-LAUNCH.md` § 2). `legal/*.md` is not edited by this plan |
 | S3 | `BEFORE-LAUNCH.md` required the privacy page out of draft before submission (§ 2) while dating it on the day 1.0 ships (§ 3); the date placeholder alone keeps the banner | yes | § 2 states the sequence (privacy date = planned submission day, three places), § 3 keeps the Terms only, with a confirm-unchanged line for privacy |
 
+### Round 2 — approve
+
+> No new or unresolved material findings. All three fixes verified at `6306838e`; 158 release tests pass, and the original version mismatch now fails before any network call.
+> > verdict: approve — confidence: high; live credentials/environment protections, store execution and acceptance, builds, reproducibility execution, E2E, and extension unit tests remain unverified. The privacy-policy rewording remains explicitly tracked as owner work before submission.
+
+Cross-stack pass converged (two rounds). Both loops' transcripts: `audit-codex.md`. The `push:` trigger of `source-rebuild.yml` is removed in the arc's final, trigger-only commit; the last green rebuild (run 35671809803) ran on `6306838e`, the parent of the docs commits that precede it — no build input changed after that run.
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`

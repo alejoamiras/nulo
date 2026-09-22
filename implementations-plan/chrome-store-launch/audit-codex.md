@@ -541,3 +541,12 @@ Prompt: fresh session; `git diff 2540271a..HEAD` read as one surface — contrad
 157 release tests passed under local Bun 1.4.0. Extension unit tests failed to start workers.
 
 verdict: conditional — confidence: high; live credentials/environment protections, store API execution and acceptance, builds, reproducibility execution, and E2E remain unverified.
+
+
+---
+
+# Cross-stack pass — round 2
+
+No new or unresolved material findings. All three fixes verified at `6306838e`; 158 release tests pass, and the original version mismatch now fails before any network call.
+
+verdict: approve — confidence: high; live credentials/environment protections, store execution and acceptance, builds, reproducibility execution, E2E, and extension unit tests remain unverified. The privacy-policy rewording remains explicitly tracked as owner work before submission.

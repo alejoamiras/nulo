@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (repo + store APIs) · codex high · code-review off
-status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21, in execution
+status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21 — implemented 2026-09-22, both arc loops and the cross-stack pass converged, stacked PRs open (owner merges)
 ---
 
 # Store launch — Chrome Web Store and Firefox Add-ons, the repo half
