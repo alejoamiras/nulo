@@ -27,15 +27,15 @@ that cannot be read out of this repository.
 | ~~`legal name`~~ | Filled: Alejo Amiras. |
 | ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
-| `effective date` | The date the 1.0 listing goes live. |
+| `effective date` | Privacy 1.0: filled, 23 September 2026 (the submission day). Terms 1.0: the date the 1.0 listing goes live. |
 | `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
-| `published security-reporting URL` | `SECURITY.md` is a repo path; a rendered legal page needs a URL that resolves for a reader who is not in the repo. |
-| `provider legal name and privacy-policy link` | The email provider behind `hello@nulo.sh`. There is no form provider any more — the wallet's contact items are `mailto:` links. |
-| `applicable Cloudflare contracting entity and privacy-policy link` | Hosting for `nulo.sh` and `passkey.nulo.sh`. |
-| `verified categories and access` ×2 | What the dRPC provider account and the Cloudflare dashboard actually expose to the Developer. **Check the dashboards; do not guess.** |
-| `actual period or criteria` ×3 | Retention for website/security records, correspondence, and provider schedules. |
-| `actual native-application legal links` | Presto's own licence and privacy information. |
-| EU/UK Article 27 representative | Only if required. **Delete the line rather than leaving it blank.** |
+| ~~`published security-reporting URL`~~ | Filled: `https://github.com/alejoamiras/nulo/security` (GitHub private vulnerability reporting, enabled 2026-09-22). |
+| ~~`provider legal name and privacy-policy link`~~ | Filled: Google LLC (Google Workspace, from the MX record and Google's contracting-entity table). |
+| ~~`applicable Cloudflare contracting entity and privacy-policy link`~~ | Filled: Cloudflare, Inc. (Self-Serve Subscription Agreement; `nulo.sh` is on the Free plan). |
+| ~~`verified categories and access`~~ ×2 | Filled from both dashboards on 2026-09-22. Re-check them if a plan, Worker logging or browser analytics setting changes. |
+| ~~`actual period or criteria`~~ ×3 | Filled: the hosting dashboard's own window (I keep no copies), correspondence for up to two years after resolution, and the providers' DPAs. |
+| ~~`actual native-application legal links`~~ | Filled: Presto's `LICENSE` (AGPL-3.0-only) and `PRIVACY.md` on GitHub. |
+| ~~EU/UK Article 27 representative~~ | Deleted: the owner's call that none is required. |
 
 ## Release blockers beyond the text
 

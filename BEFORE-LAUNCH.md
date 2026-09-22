@@ -9,6 +9,9 @@ Find every one: `git grep -n "«FILL" -- legal/`. What each one needs is describ
 
 ## 1. Any time before v1.0.0 — look these up, do not guess
 
+**Done 2026-09-22** for the privacy policy, every row below; the Terms carry the same security URL
+and Presto links. What each fill says, and its source, is in `legal/README.md` § Placeholders.
+
 | Fill | Where | How to find it |
 |---|---|---|
 | Email provider's legal name + privacy link | `legal/privacy.md` § 5.5 | The provider behind `hello@nulo.sh` |
@@ -40,8 +43,8 @@ first submission the privacy page must have lost its DRAFT banner, which takes t
 privacy policy's effective date is set to the planned submission day** — the banner stays while
 any placeholder survives, and the date is one. Set it in the three places tests hold together:
 
-- [ ] `legal/privacy.md` — the version line at the top, and the 1.0 row of the history table
-- [ ] `packages/legal/src/manifest.ts` — `effective` for `privacy` 1.0
+- [x] `legal/privacy.md` — the version line at the top, and the 1.0 row of the history table
+- [x] `packages/legal/src/manifest.ts` — `effective` for `privacy` 1.0 (23 September 2026)
 
 The Terms keep their placeholders until § 3: their effective date is the 1.0 ship day and their
 two listing URLs exist only after both submissions, so `/terms` stays draft a little longer, which
@@ -50,8 +53,8 @@ the stores do not mind — they require a reachable privacy policy, not terms.
 Also before submission, one wording item in the privacy policy that is not a placeholder: § 2
 attributes "loads no remote code" to the content security policy, which only forbids remote
 *scripts* — WASM bytes are kept local by the bundled loaders, not the policy
-(`apps/extension/store/remote-code.md` § What this bears on). Reword to "forbids loading remote
-scripts" or drop the attribution; the fact itself stays.
+(`apps/extension/store/remote-code.md` § What this bears on). **Done 2026-09-22:** § 2 now reads
+"forbids loading remote scripts".
 
 ## 3. The day v1.0.0 ships — in the `release: promote dev → main` PR that carries it
 

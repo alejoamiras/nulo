@@ -145,7 +145,8 @@ describe("the real documents", () => {
 		const markdown = readFileSync(resolve(legalDir, `${doc}.md`), "utf8")
 		const version = /\*\*Version (\S+) /.exec(markdown)?.[1] ?? ""
 		const html = renderLegalPage({ doc, version, markdown }, { permalink: false })
-		expect(html).not.toMatch(/href="[^"]*\.md/)
+		// External documents may themselves be Markdown files (a linked GitHub PRIVACY.md).
+		expect(html).not.toMatch(/href="(?!https:)[^"]*\.md/)
 		expect(html.match(/<script/g)).toHaveLength(1)
 	})
 })

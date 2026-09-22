@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Version 1.0 — effective «FILL: effective date»**
+**Version 1.0 — effective 23 September 2026**
 
 This policy explains what happens to information when you use Nulo. The published source shows the
 extension's implemented data handling. Hosting, correspondence, authenticator and store processing
@@ -46,7 +46,7 @@ for wallet telemetry.
 Specifically, the extension contains **no** analytics SDK, **no** crash or error reporting service,
 **no** telemetry, **no** advertising or marketing tags, **no** cookies set by me, **no**
 fingerprinting, and **no** third-party scripts. Its content security policy forbids loading remote
-code.
+scripts.
 
 I do not sell personal information or share it for cross-context behavioural advertising. I and the
 providers identified below process the limited website, correspondence and service data described in
@@ -115,7 +115,10 @@ them, including after you change or remove that endpoint.** Changing an endpoint
 information already disclosed.
 
 **What the Developer can see:** the default endpoint uses a provider account belonging to the
-Developer. Information available to the Developer through that account is «FILL: verified dashboard/reporting categories, or confirmed absence of such access».
+Developer. Information available to the Developer through that account is aggregate usage
+statistics — request counts, compute units and cost by network, method, key and request type, and
+average latency — over selectable periods, and an error log that groups failed requests from the
+past 3 days by error, method and network.
 
 ### 5.2 Price data (CoinGecko)
 
@@ -169,10 +172,15 @@ Article 6(1)(f).
 
 The website is static and carries no analytics or tracking of mine.
 
-Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by «FILL: applicable Cloudflare contracting
-entity and privacy-policy link». Website requests expose IP addresses, requested URLs and ordinary
-browser headers to the hosting provider. Information available to the Developer through hosting tools
-is «FILL: verified categories and access». This processing supports delivery and security of the
+Hosting for `nulo.sh` and `passkey.nulo.sh` is provided by Cloudflare, Inc.
+([privacy policy](https://www.cloudflare.com/privacypolicy/)). Website requests expose IP addresses,
+requested URLs and ordinary browser headers to the hosting provider. Information available to the
+Developer through hosting tools is aggregate traffic statistics (requests, bandwidth, unique visitors
+and countries) and, for up to the past 30 days, a sample of individual requests showing the time, IP
+address, country, network, user agent, method, protocol, hostname, requested path, and how the
+request was cached or filtered. Request logging on the `passkey.nulo.sh` application is turned off,
+and the hosting provider's browser analytics are not enabled. This processing supports delivery and
+security of the
 sites, relying on legitimate interests where applicable. The retention information below and the
 international-processing information in § 12 cover these hosting records.
 
@@ -181,15 +189,19 @@ own email client addressed to `hello@nulo.sh`; nothing is submitted to a form se
 third-party form provider receives anything.
 
 If you email me, I receive what you send — your message, your email address, and any attachments —
-through the email provider «FILL: provider legal name and privacy-policy link». I use correspondence
+through the email provider Google LLC (Google Workspace;
+[privacy notice](https://cloud.google.com/terms/cloud-privacy-notice)). I use correspondence
 to respond, investigate reported problems and maintain security, relying on legitimate interests
 where that basis is available and appropriate. Writing to me is entirely optional. **Do not attach
 wallet secrets, recovery phrases or unencrypted backups.**
 
-**Retention.** Website and security records are retained for «FILL: actual period or specific
-retention criteria». Correspondence and attachments are retained for «FILL: actual period or criteria
-tied to resolving the report and any necessary legal retention». Provider retention is «FILL:
-applicable periods or linked schedules». I may retain relevant records longer where necessary to
+**Retention.** Website and security records are kept only for as long as the hosting provider makes
+them available in its dashboard (currently up to 30 days); I do not export or copy them.
+Correspondence and attachments are retained until the matter is resolved and then for no more than
+two years. Provider retention is set by each provider's data processing terms:
+[Cloudflare's](https://www.cloudflare.com/cloudflare-customer-dpa/) and
+[Google's](https://cloud.google.com/terms/data-processing-addendum). I may retain relevant records
+longer where necessary to
 comply with law or to establish, exercise or defend legal claims.
 
 **Uninstall page.** If you remove the extension, your browser opens the site root, `nulo.sh`. There is
@@ -224,7 +236,9 @@ sensitive private transaction data — to a process on `127.0.0.1`. Production p
 HTTPS; a limited HTTP health check may also occur, carrying no proving inputs.
 
 The extension's connection is local. **The native application's own processing, storage and network
-activity are governed by its implementation and its own privacy information**, available at «FILL: actual native-application legal links».
+activity are governed by its implementation and its own privacy information**, available at
+[its licence](https://github.com/alejoamiras/presto/blob/main/LICENSE) (AGPL-3.0-only) and
+[its privacy notice](https://github.com/alejoamiras/presto/blob/main/PRIVACY.md).
 
 ### 5.9 Public proving parameters
 
@@ -302,8 +316,6 @@ remove blockchain records, exported files, or records held independently by othe
 complain to the competent data-protection authority — in Argentina, the **Agencia de Acceso a la
 Información Pública (AAIP)**; elsewhere, where applicable, the authority where you live or work.
 
-«FILL: if an EU or UK Article 27 representative is required, name the representative and contact details here; otherwise delete this line rather than leaving it blank.»
-
 ## 11. Children
 
 Nulo is not intended for anyone under 18, and I do not knowingly collect anything from children. See
@@ -312,8 +324,17 @@ the [Terms of Use](terms.md) § 3.
 ## 12. International processing
 
 Providers used for website hosting and correspondence may process personal data outside your
-country. For transfers for which I am responsible, the destinations and applicable safeguards are
-«FILL: provider/destination mapping and the actual adequacy decision or contractual safeguard, including the UK mechanism where relevant». Contact me for information about those safeguards.
+country. For transfers for which I am responsible, the destinations and applicable safeguards are:
+
+- **Cloudflare, Inc.** (hosting; the United States and Cloudflare's global network): the EU Standard
+  Contractual Clauses with the UK Addendum, and Cloudflare's participation in the EU–US Data Privacy
+  Framework, under [Cloudflare's Data Processing Addendum](https://www.cloudflare.com/cloudflare-customer-dpa/).
+- **Google LLC** (email; the United States): the Standard Contractual Clauses, or another recognised
+  transfer solution, under
+  [Google's Cloud Data Processing Addendum](https://cloud.google.com/terms/data-processing-addendum),
+  which covers EU, UK and Swiss data.
+
+Contact me for information about those safeguards.
 
 Independent providers — including the node provider, the price API and the block explorer you reach
 directly from your own browser — describe their own international processing in their privacy
@@ -332,7 +353,8 @@ part of the passkey security model.
 No software is perfectly secure. Nulo has not been audited by an independent security firm, and it
 cannot protect you from a compromised device. See the [Terms of Use](terms.md) §§ 4.7 and 5.
 
-To report a vulnerability, use «FILL: published security-reporting URL» rather than a public form.
+To report a vulnerability, use GitHub's private vulnerability reporting at
+https://github.com/alejoamiras/nulo/security rather than a public form.
 
 ## 14. Changes to this policy
 
@@ -373,4 +395,4 @@ described in § 5.
 
 | Version | Effective | Change |
 |---|---|---|
-| 1.0 | «FILL: effective date» | First published version. |
+| 1.0 | 23 September 2026 | First published version. |
