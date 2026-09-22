@@ -52,10 +52,12 @@ export default {
 	cross_origin_opener_policy: {
 		value: "same-origin",
 	},
+	// Generated from src/assets/logo.png by scripts/store-icons.ts; `--check` fails on drift.
 	icons: {
-		16: "src/assets/logo.png",
-		24: "src/assets/logo.png",
-		32: "src/assets/logo.png",
-		128: "src/assets/logo.png",
+		16: "src/assets/icons/16.png",
+		32: "src/assets/icons/32.png",
+		48: "src/assets/icons/48.png",
+		96: "src/assets/icons/96.png",
+		128: "src/assets/icons/128.png",
 	},
 } as ManifestV3Export

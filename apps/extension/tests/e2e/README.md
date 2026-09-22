@@ -60,6 +60,18 @@ The **default-token seeding** spec (`network/default-token-seeding.test.ts`) nee
 
 The **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`, `lock-cancels-dapp-send`, `auto-lock-defers-while-proving`, `profile-switch-sweeps-transfer`) hold the tx at `proving` via a `ProofGate` barrier (`holdProofGate`/`releaseProofGate` in `fixtures/proof-gate.ts`, backed by `chrome.storage.session` key `nulo:e2e:proof-gate`) so the sub-second proverless prove still gives a deterministic window. Real BB proving is guarded by the prover-ON `network-e2e-canary` CI job (`transfers` + `tx-sendTx-default`); see [CI.md § Proverless network e2e](../../../../CI.md). Full design: [`implementations-plan/e2e-proverless-stub/`](../../../../implementations-plan/e2e-proverless-stub/plan.md).
 
+### Store captures (opt-in)
+
+`tests/e2e/store-captures.test.ts` is collected by the smoke config and skipped unless
+`STORE_CAPTURES=1`. It writes the three 360×600 popup captures `scripts/store-art.ts` frames for the
+store listings, against a production build in artifact mode:
+
+```bash
+cd apps/extension && bun run build:chrome
+STORE_CAPTURES=1 NULO_E2E_ARTIFACT_RUN=1 EXTENSION_PATH="$PWD/dist/chrome" bun run test:e2e -- tests/e2e/store-captures.test.ts
+bun scripts/store-art.ts
+```
+
 ## Running multiple agents in parallel
 
 Open one terminal per worktree and run `bun run e2e:agent` in each. Each agent allocates fresh ports and owns its own anvil + aztec + playground:

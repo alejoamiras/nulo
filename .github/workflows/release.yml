@@ -4,7 +4,7 @@ name: release
 #  - push to main: release-please-action maintains the Release PR; on merge,
 #    it tags + creates the GitHub Release. The same workflow run then runs
 #    the publish chain (gates → build → smoke → assets → cliff notes →
-#    landing → marketplaces).
+#    landing). The store uploads are opt-in workflow_dispatch inputs.
 #  - workflow_dispatch: re-publish artifacts for an existing tag. Skips the
 #    release-please job. Useful when an asset upload failed mid-publish.
 on:
@@ -27,8 +27,13 @@ on:
         required: false
         type: boolean
         default: false
-      publish_marketplaces:
-        description: "Enable Chrome Web Store + Firefox AMO publishing (stubs until secrets are wired)."
+      publish_chrome:
+        description: "Upload the Chrome zip to the Chrome Web Store (keyless: OIDC → Google WIF; environment chrome-web-store). Stable tags on main only."
+        required: false
+        type: boolean
+        default: false
+      publish_firefox:
+        description: "Upload the Firefox zip to Firefox Add-ons (environment firefox-add-ons). Stable tags on main only."
         required: false
         type: boolean
         default: false
@@ -144,6 +149,9 @@ jobs:
       version: ${{ steps.r.outputs.version }}
       sha: ${{ steps.r.outputs.sha }}
       is_prerelease: ${{ steps.r.outputs.is_prerelease }}
+      # The dispatch ref authenticates the WORKFLOW FILE, not the tag it checks out: without this
+      # output a tag on any branch could supply the script that runs with a store credential.
+      on_main: ${{ steps.r.outputs.on_main }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -174,20 +182,27 @@ jobs:
           VERSION="${TAG#v}"
           IS_PRE="false"
           case "$VERSION" in *-*) IS_PRE="true" ;; esac
+          # true/false, never an abort: resolve also serves releases that publish to no store.
+          ON_MAIN="false"
+          if git merge-base --is-ancestor "$SHA" origin/main; then ON_MAIN="true"; fi
           {
             echo "tag=$TAG"
             echo "version=$VERSION"
             echo "sha=$SHA"
             echo "is_prerelease=$IS_PRE"
+            echo "on_main=$ON_MAIN"
           } >> "$GITHUB_OUTPUT"
+          # Written before any protected job asks for approval, so the approver sees what would ship.
+          {
+            echo "## resolve"
+            echo "- tag: \`$TAG\`"
+            echo "- sha: \`$SHA\`"
+            echo "- prerelease: $IS_PRE"
+            echo "- on main: $ON_MAIN"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  # Reusable workflows inherit skip propagation when ANY ancestor in the needs
-  # chain was skipped (release-please skips on workflow_dispatch). The
-  # `if: always() && ...` forces evaluation AFTER the upstream needs settle —
-  # without `always()`, GitHub Actions evaluates the if too early and treats
-  # the skipped ancestor as a falsy chain. Caught on the v0.20.1 republish
-  # run after the simpler `if: needs.X.result == 'success'` still skipped
-  # every gate.
+  # A skipped ancestor anywhere in the needs chain (release-please on workflow_dispatch) skips
+  # every descendant unless its `if` starts with `always()`; each result is then checked by hand.
   lint-and-typecheck:
     needs: resolve
     if: always() && needs.resolve.result == 'success'
@@ -515,48 +530,94 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: bun scripts/release/open-sync-pr-run.ts
 
+  # Keyless: the job's OIDC token is exchanged through Google Workload Identity Federation for a
+  # ten-minute access token on the service account linked to the store publisher. The environment
+  # holds ids as VARIABLES and no secret; its protection rules (main only, required reviewer) and
+  # the pool's attribute condition (repository id, environment, ref, event, workflow_ref) are what
+  # bound this job. store-check.yml exercises the same credential read-only.
   publish-chrome-store:
-    name: publish to Chrome Web Store
+    name: publish to Chrome Web Store (${{ needs.resolve.outputs.tag }})
     needs: [resolve, attach-assets]
-    if: github.event.inputs.publish_marketplaces == 'true'
+    if: |
+      always() && !cancelled() &&
+      github.event.inputs.publish_chrome == 'true' &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      needs.resolve.outputs.on_main == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
+    environment: chrome-web-store
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
     steps:
+      # A tag older than this job has no publish script at its commit and fails here, clearly.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 1
+      # No workspace install: the script imports only node: modules and Bun built-ins.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.resolve.outputs.version }}
           path: dist/release
-      # Requires repo secrets: CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN, CWS_EXTENSION_ID
-      - name: Upload to Chrome Web Store
-        env:
-          VERSION: ${{ needs.resolve.outputs.version }}
+      # Exactly one SHASUMS line may name this zip; `--ignore-missing` would pass on the other store's line alone.
+      - name: Verify the Chrome zip checksum
+        working-directory: dist/release
         run: |
-          echo "Stub. Wire chrome-webstore-upload-cli or mnao305/chrome-extension-upload here."
-          exit 1  # Until secrets are wired, fail loudly when this is accidentally enabled.
+          line=$(grep -E " nulo-chrome-${VERSION}\.zip$" SHASUMS256.txt)
+          [ "$(printf '%s\n' "$line" | wc -l)" = "1" ] || { echo "::error::expected one SHASUMS line for nulo-chrome-${VERSION}.zip"; exit 1; }
+          printf '%s\n' "$line" | sha256sum -c -
+      - name: Authenticate to Google (OIDC → WIF)
+        if: env.DRY_RUN != 'true'
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.CWS_WIF_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload and publish
+        env:
+          MODE: publish
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
+          CWS_PUBLISH_TYPE: ${{ vars.CWS_PUBLISH_TYPE }}
+          ZIP_PATH: dist/release/nulo-chrome-${{ needs.resolve.outputs.version }}.zip
+        run: bun scripts/release/publish-chrome-store-run.ts
 
+  # Firefox Add-ons: same gate, same shape. The body (environment, git-archive source package,
+  # AMO_JWT_* secrets, scripts/release/publish-firefox-amo-run.ts) lands with the Firefox arc; until
+  # then the job fails loudly if enabled, and deliberately declares no `environment:` so GitHub
+  # cannot auto-create an unprotected one.
   publish-firefox-amo:
-    name: publish to Firefox AMO
+    name: publish to Firefox Add-ons (${{ needs.resolve.outputs.tag }})
     needs: [resolve, attach-assets]
-    if: github.event.inputs.publish_marketplaces == 'true'
+    if: |
+      always() && !cancelled() &&
+      github.event.inputs.publish_firefox == 'true' &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      needs.resolve.outputs.on_main == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-${{ needs.resolve.outputs.version }}
-          path: dist/release
-      # Requires repo secrets: AMO_JWT_ISSUER, AMO_JWT_SECRET
-      # Requires `gecko.id` in apps/extension/manifest/manifest.firefox.config.ts to be a real ID.
-      - name: Upload to AMO
-        env:
-          IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
+      - name: Not wired yet
         run: |
-          echo "Stub. Wire web-ext sign here."
-          exit 1  # Until secrets are wired, fail loudly when this is accidentally enabled.
+          echo "::error::publish_firefox is not wired yet; the Firefox arc adds the job body."
+          exit 1
 
   status:
     name: status

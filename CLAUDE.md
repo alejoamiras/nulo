@@ -588,9 +588,9 @@ Per-release procedure for shipping a stable release. Total time: ~20 min, of whi
    ```bash
    gh workflow run release.yml --ref main \
      -f tag="v$VERSION" -f dry_run=false \
-     -f run_network_e2e=true -f publish_marketplaces=false
+     -f run_network_e2e=true
    ```
-   This runs `lint+typecheck → unit-tests → build chrome+firefox → smoke-against-artifact → attach-assets` (zips + SHASUMS + git-cliff body overlay). ~15-25 min. **network-e2e is OPT-IN** (`run_network_e2e=true`) and no longer runs on the auto push:main publish either — the promote dev→main PR already gates the exact code with the full required network suite before it reaches main, so re-running it on the publish was pure duplication AND a strand risk (a network-e2e cancel/timeout on push:main used to take the whole run down mid-attach, leaving a tag + empty release; dropped 2026-07-20). The publish still gates on `smoke-against-artifact` (the real built zip). This does NOT touch the required `extension-network-e2e-status` PR gate — that's produced by the standalone `Extension network e2e` workflow on PRs, which is untouched.
+   Add `-f publish_chrome=true` (and, once wired, `-f publish_firefox=true`) only when this dispatch IS the store submission: each publish job runs in its protected environment, only for a stable tag on `main`, and needs the reviewer's approval; `gh workflow run store-check.yml --ref main -f store=chrome` proves the credential without uploading. This runs `lint+typecheck → unit-tests → build chrome+firefox → smoke-against-artifact → attach-assets` (zips + SHASUMS + git-cliff body overlay). ~15-25 min. **network-e2e is OPT-IN** (`run_network_e2e=true`) and no longer runs on the auto push:main publish either — the promote dev→main PR already gates the exact code with the full required network suite before it reaches main, so re-running it on the publish was pure duplication AND a strand risk (a network-e2e cancel/timeout on push:main used to take the whole run down mid-attach, leaving a tag + empty release; dropped 2026-07-20). The publish still gates on `smoke-against-artifact` (the real built zip). This does NOT touch the required `extension-network-e2e-status` PR gate — that's produced by the standalone `Extension network e2e` workflow on PRs, which is untouched.
 7. **Cloudflare landing redeploy — automatic on ANY stable publish path; the tools app redeploys only via its CF Git-integration on `push:main` while its hook stays unwired** (`push:main` AND `workflow_dispatch`). The `refresh-landing` + `deploy-tools` jobs carry `always() && !cancelled()` guards (fixed 2026-07-03, `implementations-plan/release-pipeline-hardening/`). They used to lack `always()` and so silently skipped whenever a `workflow_dispatch` ancestor (`network-e2e` / `release-please` / `auto-unstick`) skipped — which stranded `nulo.sh` on the prior version after every manual-unstick publish. If a deploy is stale anyway (a CDN miss, or you want to force one), re-fire it with the break-glass workflow — **one command, no CF token, no account id**: `gh workflow run refresh-landing.yml` (optional `-f target=landing|tools|both`).
 8. **Verify**: `gh release view v$VERSION --json assets -q '[.assets[] | .name]'` should list `nulo-chrome-X.Y.Z.zip`, `nulo-firefox-X.Y.Z.zip`, `SHASUMS256.txt`.
 
@@ -625,8 +625,8 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
 6. **Trigger the publish chain via the STABLE workflow's escape hatch:**
    ```bash
    gh workflow run release.yml --ref dev \
-     -f tag="v$VERSION" -f dry_run=false \
-     -f publish_marketplaces=false
+     -f tag="v$VERSION" -f dry_run=false
+   # Never -f publish_chrome/publish_firefox here: the store jobs refuse prereleases.
    # Add -f run_network_e2e=true if you want to gate this rc on the
    # 30-45 min network e2e suite. Off by default for prereleases.
    ```
