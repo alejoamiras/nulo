@@ -511,3 +511,12 @@ Prompt: the six round-1 fixes listed with their commits; same scope and rules.
 - **The new exception test cannot detect removal of the recovery guards.** [scripts/release/publish-firefox-amo-run.test.ts:309](scripts/release/publish-firefox-amo-run.test.ts:309): the fourth-fetch exception is handled inside the existing `call()` catch. The throwing `jti` replacement at line 315 happens after execution and is never invoked. An in-memory mutation removing both new guards preserved the fetch-test outcome; a fourth-`jti` exception then lost `RECOVERY`. Inject that exception before execution and assert recovery. The implementation fix works; its new regression test does not protect it.
 
 verdict: reject — confidence: high. All 156 release tests pass; live AMO behavior, environment protections, updated rebuild execution, extension tests, and Mozilla policy acceptance remain unverified.
+
+
+---
+
+# Arc 2 implementation — round 3
+
+No new or unresolved material findings. All three fixes are verified; 157 release tests pass.
+
+verdict: approve — confidence: high. Live AMO behavior, environment protections, rebuild execution, extension tests, and Mozilla policy acceptance remain independently unverified.

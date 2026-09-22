@@ -45,4 +45,11 @@
 | M5 | "No minified or generated code is checked in" — the archive holds generated `src/types/*.d.ts`, rendered `packages/design/src/tokens.ts` and the vendored `SchnorrAccount.json` | yes | the sentence names all three, with the generator or provenance of each |
 | M6 | The recovery regression test's `jti` throw was assigned after the run and never invoked; the fetch throw it did exercise is caught by `call()`, so deleting both guards kept the test green | yes | `jti` throws on the 4th (PATCH) and 3rd (create) request, before the fetch; each asserts the recovery; the fetch-throw case is its own test |
 
+### Round 3 — approve
+
+> No new or unresolved material findings. All three fixes are verified; 157 release tests pass.
+> > verdict: approve — confidence: high. Live AMO behavior, environment protections, rebuild execution, extension tests, and Mozilla policy acceptance remain independently unverified.
+
+Arc 2 loop converged (three rounds; transcripts in `audit-codex.md` under "Arc 2 implementation"). Every fix was rebuilt by `source-rebuild.yml` on push: runs 35669743682 (`c67d19bc`), 35670945252 (`fae07730`), 35671260446 (`0dac1301`).
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`
