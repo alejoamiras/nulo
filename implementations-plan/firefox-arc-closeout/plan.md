@@ -407,7 +407,7 @@ already says so.
   test left passing → exits 1. Those captured reports become the unit test's fixtures.
 - Job duration is read on the PR (Delivery) — slower browser, max of ≥ 2 runs — against the 22-minute rule.
 
-### Phase 7 — the rule, the bump gate, the closeout
+### Phase 7 ✓ — the rule, the bump gate, the closeout
 
 Committed **with** Phase 6's pins where they state the same fact. A checklist in `lessons/phase-7.md` ticks every
 place recon found the rule — `FIREFOX.md` row; `CLAUDE.md` (Firefox-lanes bullet; § Account-address freeze: on a
