@@ -49,6 +49,13 @@ export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
 	readonly scheme: string
+	/**
+	 * Whether a WebAuthn credential made on one extension page can still be used once that page has
+	 * closed. Chrome's virtual authenticator is attached to the page that anchors it and dies with
+	 * it; Firefox's belongs to the session. A spec that has to close every extension page before a
+	 * background kill reads this to know whether its ceremony may move to a fresh popup.
+	 */
+	readonly credentialOutlivesPage: boolean
 	launch(opts: LaunchOptions): Promise<LaunchedBrowser>
 	/** `path` starts at the package root: `/src/popup/index.html#/windows/execute`. */
 	extensionUrl(extensionId: string, path: string): string
@@ -147,12 +154,11 @@ export const driver = selectDriver()
 export const BROWSER: BrowserKind = driver.kind
 export const EXTENSION_SCHEME = driver.scheme
 export const isFirefox = BROWSER === "firefox"
+export const credentialOutlivesPage = driver.credentialOutlivesPage
 
-/** Why a whole file does not run on Firefox: a capability the browser lacks, or a gate pinned to
- *  Chrome by rule — never a failing test. */
+/** Why a whole file does not run on Firefox: a capability the browser lacks — never a failing test. */
 export const CHROME_ONLY = {
 	backgroundKillUnderPage: "ends the background under an open extension page; Firefox will not end an event page one keeps busy",
-	canary: "an execution canary pinned to Chrome, where it gates every @aztec bump under real proving",
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
 } as const
 

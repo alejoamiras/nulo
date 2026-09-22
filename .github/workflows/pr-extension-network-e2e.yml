@@ -168,9 +168,10 @@ jobs:
       # Proverless shard pool (fast, Presto OFF). Exclude, on top of the
       # fee-methods + concurrent-confirm heavy jobs (which run proverless too),
       # the prover-ON canary files transfers + tx-sendTx-default +
-      # frozen-account-canary — they run with REAL proving in
-      # network-e2e-canary. Keep this list in sync with those jobs.
-      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/selfpay-phase.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      # frozen-account-canary + passkey-execution-canary — they run with REAL
+      # proving in network-e2e-canary. The partition is pinned by
+      # scripts/ci-cd/behavior-gating.test.ts.
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/selfpay-phase.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts"
       proverless: true
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
@@ -232,17 +233,22 @@ jobs:
     #     validates a REAL proof at node.sendTx; playground hard-codes NO_WAIT so
     #     mine isn't awaited). Covers dapp-send-executor plumbing transfers doesn't.
     #   - frozen-account-canary: the address-freeze execution gate (frozen-ctor
-    #     multicall deploy → init-nullifier flip → authwit consume → SW-restart
-    #     re-derive), which MUST see real proving — a fake proof would green a
-    #     frozen artifact the prover can no longer prove (CLAUDE.md
-    #     "Account-address freeze").
+    #     multicall deploy → init-nullifier flip → authwit consume →
+    #     background-restart re-derive), which MUST see real proving — a fake
+    #     proof would green a frozen artifact the prover can no longer prove
+    #     (CLAUDE.md "Account-address freeze").
+    #   - passkey-execution-canary: the passkey analog (PRF ceremony → frozen
+    #     ctor → authwit consume → background-restart ceremony re-unlock), the
+    #     KDF-change execution gate; real proving for the same reason.
+    # The same four files run on Firefox (pr-extension-network-e2e-firefox.yml);
+    # a red canary on either browser holds an @aztec bump.
     # Dedicated runner with presto-server (proverless: false default).
     uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "canary"
       retry: "0"
-      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts"
       # Real proving — Presto ON unless the emergency kill switch is set.
       disable_presto: ${{ github.event.inputs.disable_presto == 'true' || vars.NULO_E2E_DISABLE_PRESTO == '1' }}
     secrets:

@@ -201,7 +201,7 @@ function directReloads(source: string): number[] {
 	return lines
 }
 
-const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER"])
+const BROWSER_FLAGS = new Set(["isFirefox", "BROWSER", "credentialOutlivesPage"])
 
 /**
  * 1-based lines where a file asks which browser it is on. A shared helper that does is a second,
@@ -253,13 +253,14 @@ function isMemberName(node: ts.Identifier, namespaces: Set<string>): boolean {
 	return !(ts.isIdentifier(receiver) && namespaces.has(receiver.text))
 }
 
-/** The same question put to `driver.kind`, or to the variable the seam itself resolves from. */
+/** The same question put to `driver.kind` or a driver fact, or to the variable the seam itself resolves from. */
 function asksTheDriverOrTheEnv(node: ts.Node): boolean {
 	if (literalText(node) === "NULO_E2E_BROWSER") return true
 	if (!ts.isPropertyAccessExpression(node)) return false
 	if (node.name.text === "NULO_E2E_BROWSER") return true
 	const receiver = unwrap(node.expression)
-	return node.name.text === "kind" && ts.isIdentifier(receiver) && receiver.text === "driver"
+	if (!ts.isIdentifier(receiver) || receiver.text !== "driver") return false
+	return node.name.text === "kind" || BROWSER_FLAGS.has(node.name.text)
 }
 
 const isSharedHelper = (rel: string): boolean =>
@@ -434,6 +435,8 @@ describe("browser seam guard", () => {
 		["an import alias", 'import { isFirefox as ff } from "./browser"\nif (ff) stub()'],
 		["a namespace import", 'import * as seam from "./browser"\nif (seam.isFirefox) stub()'],
 		["the driver's kind", 'import { driver } from "./browser"\nif (driver.kind === "firefox") stub()'],
+		["a driver fact", 'import { credentialOutlivesPage } from "./browser"\nif (credentialOutlivesPage) stub()'],
+		["a driver fact on the driver", 'import { driver } from "./browser"\nif (driver.credentialOutlivesPage) stub()'],
 		["the env var", 'const b = 1\nif (process.env.NULO_E2E_BROWSER === "firefox") stub()'],
 		["the env var by key", 'const b = 1\nif (process.env["NULO_E2E_BROWSER"] === "firefox") stub()'],
 	])("flags a browser test asked through %s", (_label, body) => {

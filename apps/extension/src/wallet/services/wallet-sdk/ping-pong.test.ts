@@ -14,12 +14,21 @@
  * network suite's job. If upstream renames `activeSessions` or reshapes
  * `handlePing`, this reds — that is the point: it pins the vendored behavior
  * the validator change relies on.
+ *
+ * Two more pins guard the wallet's own use of `session-disconnected` for a session a restarted
+ * background does not know (`stale-session.ts`): the wire literal is read from the installed SDK's
+ * source, since its package entry does not export the enum; and the content script posts nothing
+ * to the page for a disconnect whose port it does not hold — a port exists only from the discovery
+ * approval on, so the reply can reach no page the user never approved.
  */
 
+import { readFileSync } from "node:fs"
 import { describe, expect, test, vi } from "vitest"
-import { BackgroundConnectionHandler } from "@aztec/wallet-sdk/extension/handlers"
+import { BackgroundConnectionHandler, ContentScriptConnectionHandler } from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER } from "@aztec/wallet-sdk/types"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { validateContentScriptMessage } from "./content-script-validator"
+import { SESSION_DISCONNECTED } from "./stale-session"
 
 import type { MessageSender } from "@aztec/wallet-sdk/extension/handlers"
 
@@ -66,5 +75,45 @@ describe("ping→pong reachability (validator + vendored handler)", () => {
 		const { sendToTab, listener } = makeHandler()
 		deliverThroughValidator(listener, { origin: "content-script", type: "ping", sessionId: "ghost" })
 		expect(sendToTab).not.toHaveBeenCalled()
+	})
+})
+
+describe("session-disconnected — the SDK's side of the wallet's reply", () => {
+	test("the wire literal is the installed SDK's own", () => {
+		const source = readFileSync(
+			resolvePackageAsset("@aztec/wallet-sdk", "src/extension/handlers/internal_message_types.ts", { from: import.meta.url }),
+			"utf8",
+		)
+		expect(source).toMatch(new RegExp(`SESSION_DISCONNECTED:\\s*'${SESSION_DISCONNECTED}'`))
+	})
+
+	test("the content script posts nothing to the page for a port it does not hold, and holds one only from approval on", () => {
+		let fromBackground: ((message: unknown) => void) | undefined
+		const content = new ContentScriptConnectionHandler({
+			sendToBackground: vi.fn(),
+			addBackgroundListener: (listener) => {
+				fromBackground = listener as (message: unknown) => void
+			},
+		})
+		content.start()
+		const posted = vi.spyOn(window, "postMessage").mockImplementation(() => {})
+		if (!fromBackground) throw new Error("the content script registered no background listener")
+
+		fromBackground({ origin: "background", type: SESSION_DISCONNECTED, sessionId: "ghost" })
+		expect(posted).not.toHaveBeenCalled()
+		expect(content.getConnectionCount()).toBe(0)
+
+		fromBackground({
+			origin: "background",
+			type: "discovery-approved",
+			sessionId: "s1",
+			content: { id: "nulo", name: "Nulo", version: "0", icon: "" },
+		})
+		expect(posted).toHaveBeenCalledTimes(1)
+		expect(content.getConnectionCount()).toBe(1)
+
+		fromBackground({ origin: "background", type: SESSION_DISCONNECTED, sessionId: "s1" })
+		expect(content.getConnectionCount()).toBe(0)
+		posted.mockRestore()
 	})
 })

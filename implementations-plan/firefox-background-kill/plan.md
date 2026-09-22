@@ -53,8 +53,8 @@ The nine `backgroundKill` files, what each carries beyond the kill, and the phas
 | `network/balance-row-reconciliation.test.ts` (95) | 1 | none | 2 |
 | `imported-account-lifecycle.test.ts` (151) | 1 | one direct `page.reload()` (`RELOAD_DEBT`) | 2 |
 | `network/backup-restore-sw-restart.test.ts` (478) | 2 | both kills land **under the open restore page** — the page's own catch is what the spec tests. Firefox declines that termination (phase 1), so the file stays Chrome-only by mechanism: `CHROME_ONLY.backgroundKillUnderPage` | not portable |
-| `network/frozen-account-canary.test.ts` (300) | 1 | two worker-target reads, one `page.reload()`; CLAUDE.md: "both canaries stay Chrome-only" | Ask A1 (default: not ported) |
-| `network/passkey-execution-canary.test.ts` (261) | 1 | same shape as the frozen canary | Ask A1 (default: not ported) |
+| `network/frozen-account-canary.test.ts` (300) | 1 | two worker-target reads, one `page.reload()`; CLAUDE.md: "both canaries stay Chrome-only" | Ask A1 (default: not ported) — **superseded**: ported by `firefox-arc-closeout` (Phase 4) |
+| `network/passkey-execution-canary.test.ts` (261) | 1 | same shape as the frozen canary | Ask A1 (default: not ported) — **superseded**: ported by `firefox-arc-closeout` (Phase 5, `credentialOutlivesPage`) |
 
 `import-dead-rpc.test.ts` is `cdpFetch` (the one spec that *redirects* a request); it stays Chrome-only and is out of scope.
 
