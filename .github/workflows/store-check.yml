@@ -8,8 +8,9 @@ run-name: "store-check → ${{ inputs.store }}"
 # Each job runs in its store's environment with that store's permissions and auth steps exactly as
 # release.yml's publish job does, and runs the same script with MODE=check. Every step of a job that
 # holds `id-token: write` is trusted code: checkout, Bun, Google's auth action, the repo's script.
+# The Firefox key pair reaches exactly one step, after every third-party action has run.
 #
-# `gh workflow run store-check.yml --ref main -f store=chrome`
+# `gh workflow run store-check.yml --ref main -f store=chrome|firefox|both`
 
 on:
   workflow_dispatch:
@@ -20,6 +21,8 @@ on:
         default: chrome
         options:
           - chrome
+          - firefox
+          - both
 
 permissions:
   contents: read
@@ -31,7 +34,7 @@ concurrency:
 jobs:
   chrome:
     name: check Chrome Web Store access
-    if: inputs.store == 'chrome'
+    if: inputs.store == 'chrome' || inputs.store == 'both'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: chrome-web-store
@@ -63,3 +66,25 @@ jobs:
           CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
           CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
         run: bun scripts/release/publish-chrome-store-run.ts
+
+  firefox:
+    name: check Firefox Add-ons access
+    if: inputs.store == 'firefox' || inputs.store == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: firefox-add-ons
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: List the key pair's add-ons
+        env:
+          MODE: check
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: bun scripts/release/publish-firefox-amo-run.ts

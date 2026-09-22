@@ -17,7 +17,8 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | `pr-tools-e2e.yml` | `tools-e2e-status` (not required yet) | — | when the tools graph, the bridge contracts or `packages/bridge-core/**` change, OR the `e2e:tools` label | the tools browser suite (Playwright, embedded wallet-sdk test wallet, injected L1 wallet) in 6 shards, one sandbox each |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
 | `release.yml` | `status` (not required) | — | push to `main` + manual `workflow_dispatch` | release-please + gates + build + smoke against artifact + assets + deploys; `publish_chrome` / `publish_firefox` inputs run the store uploads in their protected environments |
-| `store-check.yml` | — | — | manual `workflow_dispatch` (`store`) | proves a store credential read-only (one `fetchStatus`, no upload) |
+| `store-check.yml` | — | — | manual `workflow_dispatch` (`store`: chrome / firefox / both) | proves a store credential read-only (Chrome: one `fetchStatus`; Firefox: the author-scoped add-on list; no upload) |
+| `source-rebuild.yml` | — | — | weekly (Mon 05:17 UTC) + manual `workflow_dispatch` (`tag`) | rebuilds `git archive` of a release (or of the commit) on x86_64 + Ubuntu ARM64 with the reviewer script and fails on any byte differing from the shipped Firefox zip |
 | `nightly.yml` | `status` (not required) | — | schedule (03:23 UTC daily) + manual dispatch | full quality bar incl. network suite → prerelease GitHub Release from dev (`v<ver>-nightly.<YYDDD>`) |
 
 Each required check-run is `app_id`-pinned to GitHub Actions in `required_status_checks.checks`, so only a check produced by Actions (not a same-named check from another app) can satisfy the gate.

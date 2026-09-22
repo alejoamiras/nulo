@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (repo + store APIs) · codex high · code-review off
-status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21, in execution
+status: revision 2 (Firefox joins; keyless Chrome publish) — codex approved (round 7) — owner approved 2026-09-21 — implemented 2026-09-22, both arc loops and the cross-stack pass converged, stacked PRs open (owner merges)
 ---
 
 # Store launch — Chrome Web Store and Firefox Add-ons, the repo half
@@ -99,7 +99,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0. Tests prove: dry run makes zero fetch calls (injected fetch throws) and needs no token; `DRY_RUN=maybe` and an unknown `CWS_PUBLISH_TYPE` exit 1; a Firefox zip is refused; a fake token (`TOKEN-A1B2`) is absent from captured output on every error path; preflight refuses a wrong `itemId`, `takenDown`, a pending review, a not-lower version in any distribution channel (including `0.10.0.0` vs `0.9.0.0`) and a revision with an unknown state, and accepts absent revisions; an unset `MODE` exits 1; `MODE=check` needs no zip, makes exactly one GET, applies no eligibility rule (a pending review at an equal version prints and exits 0) and fails on a foreign `itemId`; an upload answering `SUCCEEDED` publishes **without** polling, even when `lastAsyncUploadState` is absent; upload `IN_PROGRESS` → `SUCCEEDED` and `UPLOAD_IN_PROGRESS` → `SUCCEEDED`; a `crxVersion` mismatch; `FAILED`, `NOT_FOUND`, unspecified; deadline exhausted (publish never called); publish `PENDING_REVIEW`, `STAGED`, `PUBLISHED` (distinct summaries) and `REJECTED`; warnings in `warningInfo.warnings` and in a 4xx `error.details`; non-JSON 502; a per-request timeout. `release.yml` has no `publish_marketplaces`; both publish `if`s start with `always() && !cancelled()`; actionlint clean.
 - Layers: unit · lint · actionlint · dry run.
 
-### Phase 4 — Firefox data declaration
+### Phase 4 — Firefox data declaration ✓
 - Apply Ask 5's answer to `manifest.firefox.config.ts` (replacing the "not a settled classification" comment with one sentence stating what the declaration covers), `src/manifest.test.ts` (the pin and its now-stale comment at `:119-120`), `listing.md`, `legal/README.md`, `BEFORE-LAUNCH.md`.
 
 **Validation gate**
@@ -107,7 +107,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; 0 linter errors; the built manifest carries the declared categories; the data-consent line is seen in a real install prompt: zip `dist/firefox`, and in Firefox Nightly or Developer Edition ≥ 153 with a throwaway profile and `xpinstall.signatures.required=false`, use **Install Add-on From File** (temporary loading of an unpacked extension grants install-time permissions silently and shows no prompt); screenshot saved in `lessons/phase-4.md`.
 - Layers: unit · lint · build · add-on linter · manual browser check.
 
-### Phase 5 — Source package and reproducibility
+### Phase 5 — Source package and reproducibility ✓
 - Root `package.json` `prepare` guard; `SOURCE-BUILD.md`; `source-rebuild.sh`; `source-rebuild.yml`.
 - Local first: `git archive` unpacked **outside the repo** (the session scratch directory), two clean rebuilds plus one ordinary `bun run build:firefox` in the worktree, `diff -r` all three; peak memory via `/usr/bin/time -v`. Non-determinism (hashes, timestamps, ordering) is fixed at its source in the build config. Three failed attempts at the same difference → stop and surface: an unfixable difference is a finding for the owner, not something to document away.
 
@@ -116,7 +116,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; `bun install` succeeds in the unpacked archive with no `.git` above it; all local `diff -r` are empty; in CI both `rebuild-x64` and `rebuild-arm64` are byte-identical to the `reference` build; measured peak memory is recorded in `SOURCE-BUILD.md` (above 9 GB it is stated up front, as Mozilla requires).
 - Layers: lint · actionlint · shellcheck · local rebuild ×3 · CI rebuild on two architectures against the release build path.
 
-### Phase 6 — Firefox publish job
+### Phase 6 — Firefox publish job ✓
 - `publish-firefox-amo{,.test,-run,-run.test}.ts`; the Firefox job's `environment:` key and body in `release.yml`; the Firefox job in `store-check.yml`; docs, including the partial-failure recovery in the runbook.
 
 **Validation gate**

@@ -169,10 +169,19 @@ match them.
 `browser_specific_settings.gecko.data_collection_permissions.required` in the Firefox build:
 
 ```
-none
+financialAndPaymentInfo
 ```
 
-The value here must equal the manifest's; the test enforces it.
+The value here must equal the manifest's; the test enforces it. Firefox's taxonomy is about what is
+**transmitted**, so the other categories were assessed against outbound flows and left out:
+`authenticationInfo` (passwords and keys never leave the device), `browsingActivity` /
+`websiteActivity` / `websiteContent` (connected-app origins are stored locally and sent nowhere),
+`personallyIdentifyingInfo` (contacts and profile names stay local). One reading is contestable
+and is stated in `legal/privacy.md` § 5.4: for passkey profiles a label derived from the profile
+name and an identifier are handed to the browser's WebAuthn API and on to the user's authenticator
+(`wallet/utils/passkey-label.ts:51-53`); the declaration treats that as the browser acting at the
+user's request, not the add-on sending data to a party of its choosing. Chrome's form covers local
+handling as well and so ticks more boxes; the two differ by design.
 
 ### Reviewer notes
 

@@ -35,17 +35,33 @@ displays a verified address and phone number publicly, and no clause can waive t
 
 The store dashboards are filled from `apps/extension/store/listing.md` (one source for both stores;
 `scripts/store-listing.test.ts` holds it to the manifests and to the privacy policy). Before the
-first submission the privacy page must have lost its DRAFT banner: every `«FILL»` in § 1 above is
-read by a reviewer who opens `nulo.sh/privacy`.
+first submission the privacy page must have lost its DRAFT banner, which takes two things: every
+`«FILL»` in § 1 above is filled (a reviewer who opens `nulo.sh/privacy` reads them), **and the
+privacy policy's effective date is set to the planned submission day** — the banner stays while
+any placeholder survives, and the date is one. Set it in the three places tests hold together:
+
+- [ ] `legal/privacy.md` — the version line at the top, and the 1.0 row of the history table
+- [ ] `packages/legal/src/manifest.ts` — `effective` for `privacy` 1.0
+
+The Terms keep their placeholders until § 3: their effective date is the 1.0 ship day and their
+two listing URLs exist only after both submissions, so `/terms` stays draft a little longer, which
+the stores do not mind — they require a reachable privacy policy, not terms.
+
+Also before submission, one wording item in the privacy policy that is not a placeholder: § 2
+attributes "loads no remote code" to the content security policy, which only forbids remote
+*scripts* — WASM bytes are kept local by the bundled loaders, not the policy
+(`apps/extension/store/remote-code.md` § What this bears on). Reword to "forbids loading remote
+scripts" or drop the attribution; the fact itself stays.
 
 ## 3. The day v1.0.0 ships — in the `release: promote dev → main` PR that carries it
 
-The **effective date** is the date the 1.0 listing goes live. It appears in five places that tests
-hold in agreement, so change them together:
+The Terms' **effective date** is the date the 1.0 listing goes live (the privacy policy's was set
+at submission, § 2). It appears in three places that tests hold in agreement, so change them
+together:
 
 - [ ] `legal/terms.md` — the version line at the top, and the 1.0 row of the history table
-- [ ] `legal/privacy.md` — the same two places
-- [ ] `packages/legal/src/manifest.ts` — `effective` for `terms` 1.0 and `privacy` 1.0 (currently `null`)
+- [ ] `packages/legal/src/manifest.ts` — `effective` for `terms` 1.0 (currently `null`)
+- [ ] `legal/privacy.md` + its manifest entry — already dated at submission; confirm unchanged
 
 Then:
 
@@ -67,5 +83,6 @@ re-accept. `git diff <last release tag> -- legal/` answers whether any of this a
 
 - `main`'s required-check cut-over, pending before the next promote:
   [`CLAUDE.md` § Release runbook](./CLAUDE.md#release-runbook), step 1.
-- Firefox `data_collection_permissions` and the Firefox 150+ minimum: tracked in
-  [`legal/README.md`](./legal/README.md), owned by another worktree.
+- Firefox `data_collection_permissions` (`financialAndPaymentInfo`) and the Firefox 153 minimum
+  are settled and pinned by `apps/extension/src/manifest.test.ts`; the reasoning is in
+  `apps/extension/store/listing.md` § Data collection declaration.

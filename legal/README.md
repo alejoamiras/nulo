@@ -76,8 +76,10 @@ These came out of the two-round review and are **not** fixed by editing the docu
 
 Owned elsewhere, tracked here so nothing falls between worktrees:
 
-- **Firefox** `data_collection_permissions` (required for new AMO submissions) and the Firefox 150+
-  minimum version the passkey RP-ID flow needs — handled in a separate worktree.
+- **Firefox** `data_collection_permissions` is settled: `["financialAndPaymentInfo"]` (transactions
+  and balance queries leave for the configured node; the reasoning and the one contestable reading,
+  the passkey label, are in `apps/extension/store/listing.md` § Data collection declaration). The
+  minimum version is Firefox 153. Both are pinned by `apps/extension/src/manifest.test.ts`.
 - **The README banner** said "Aztec testnet only. Do not use with real funds" while mainnet is the
   seeded default; corrected in the same commit as this file. The rest of that banner still reads
   "DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET", which will also need rewriting at the 1.0 cut.

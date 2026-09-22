@@ -39,7 +39,7 @@
     "check:imports": "biome check apps/ packages/",
     "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",
     "audit:tools": "bun run typecheck:all && bun run test:tools && bun run lint && bun run --cwd apps/tools verify:deployments && bun run build:tools",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",

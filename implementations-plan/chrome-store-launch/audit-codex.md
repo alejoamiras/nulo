@@ -469,3 +469,84 @@ verdict: reject — confidence: high; store unit tests timed out starting worker
 # Arc 1 implementation — round 3
 
 verdict: approve — confidence: high; the round-2 finding is resolved at `feb03368`, all earlier fixes remain intact, and no material findings remain; 120 release tests and icon drift checks pass, while store unit tests remain unverified after prior worker timeouts, alongside live WIF/environment protections, store acceptance, builds and E2E.
+
+
+---
+
+# Arc 2 implementation — round 1
+
+Prompt: the net diff of Phases 4–6 over Arc 1's tip (`git diff 0826e151..HEAD`), adversarial, read-only, as a Mozilla reviewer and as an attacker; findings ranked must-fix / should-fix / note with `path:line`.
+
+**Must-fix**
+
+- **Source can disagree with the submitted version.** [.github/workflows/release.yml:647](.github/workflows/release.yml:647): a stable tag `v0.28.0` on a `main` commit whose package version remains `0.27.0` passes the publish gates. The build overrides the version, but `git archive` preserves `0.27.0`. Source validation checks filenames only, so AMO receives a version whose supplied rebuild script immediately refuses to run. Assert the committed package version equals `VERSION` before uploading.
+
+- **The reviewer instructions falsely say Node is unused.** [apps/extension/store/SOURCE-BUILD.md:10](apps/extension/store/SOURCE-BUILD.md:10): `build:firefox` invokes `cross-env` and Vite through Node shebangs, without `--bun`. A reviewer installing only the stated runtime cannot build; changing ambient Node also changes an unacknowledged build input. A harmless launcher probe confirmed execution under Node.
+
+- **The modification inventory understates the patches.** [apps/extension/store/SOURCE-BUILD.md:62](apps/extension/store/SOURCE-BUILD.md:62) says two patch files. The archive contains—and `package.json` activates—four: two packages at two versions each. Mozilla receives contradictory modification inventories between this document and the reviewer notes.
+
+**Should-fix**
+
+- **Unexpected failures after version creation omit recovery instructions.** [scripts/release/publish-firefox-amo-run.ts:149](scripts/release/publish-firefox-amo-run.ts:149): if reading the source archive throws after creation, the outer catch prints only `unexpected failure (Error)`. An injected read failure reproduced this: version 9001 exists, but no “do NOT re-run” instruction appears. Preserve creation state across the exception boundary.
+
+- **Hidden-file differences can pass reproducibility comparison.** [.github/workflows/source-rebuild.yml:90](.github/workflows/source-rebuild.yml:90): the reference and rebuild uploads omit `include-hidden-files`, whose [pinned action default is false](https://github.com/actions/upload-artifact/blob/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/action.yml). A release zip containing an extra or different `.hidden/config.json` loses that file before comparison; otherwise identical trees pass. Transfer complete archives or explicitly preserve hidden files.
+
+- **Valid credentials fail when the add-on falls beyond page one.** [scripts/release/publish-firefox-amo.ts:131](scripts/release/publish-firefox-amo.ts:131): the interpreter treats absence from the first response as lack of authorship. [AMO defaults to 25 results and provides pagination](https://mozilla.github.io/addons-server/topics/api/addons.html#list). An account owning more add-ons can therefore fail the credential check despite owning `wallet@nulo.sh`.
+
+verdict: reject — confidence: high. Release tests: 151 passed; extension tests failed to start workers. Live AMO behavior, environment protections, rebuild execution, and Mozilla’s policy acceptance remain unverified.
+
+
+---
+
+# Arc 2 implementation — round 2
+
+Prompt: the six round-1 fixes listed with their commits; same scope and rules.
+
+**Must-fix**
+
+- **The corrected Node description still misidentifies the release runtime.** [apps/extension/store/SOURCE-BUILD.md:13](apps/extension/store/SOURCE-BUILD.md:13) says release builds use Node 24. Neither build workflow selects Node; the [Ubuntu 24.04 runner image defaults to Node 22.23.2](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md). A reviewer therefore receives an incorrect description of the build environment. Select Node 24 explicitly or document the actual tested runtimes.
+
+- **The archive contradicts “No … generated code is checked in.”** [apps/extension/store/SOURCE-BUILD.md:61](apps/extension/store/SOURCE-BUILD.md:61): tracked inputs include generated `apps/extension/src/types/auto-imports.d.ts` and `components.d.ts`, plus the vendored compiled `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json`. Its provenance explicitly identifies a precompiled upstream artifact, consumed by `frozen-artifact.ts`. A reviewer inspecting the supplied archive finds generated inputs the instructions deny exist. Narrow the statement and identify these exceptions.
+
+- **The new exception test cannot detect removal of the recovery guards.** [scripts/release/publish-firefox-amo-run.test.ts:309](scripts/release/publish-firefox-amo-run.test.ts:309): the fourth-fetch exception is handled inside the existing `call()` catch. The throwing `jti` replacement at line 315 happens after execution and is never invoked. An in-memory mutation removing both new guards preserved the fetch-test outcome; a fourth-`jti` exception then lost `RECOVERY`. Inject that exception before execution and assert recovery. The implementation fix works; its new regression test does not protect it.
+
+verdict: reject — confidence: high. All 156 release tests pass; live AMO behavior, environment protections, updated rebuild execution, extension tests, and Mozilla policy acceptance remain unverified.
+
+
+---
+
+# Arc 2 implementation — round 3
+
+No new or unresolved material findings. All three fixes are verified; 157 release tests pass.
+
+verdict: approve — confidence: high. Live AMO behavior, environment protections, rebuild execution, extension tests, and Mozilla policy acceptance remain independently unverified.
+
+
+---
+
+# Cross-stack pass — round 1
+
+Prompt: fresh session; `git diff 2540271a..HEAD` read as one surface — contradictions between the two stores' statements, the two publish jobs and `store-check.yml` together, the artifact change's consumers, the two runners as a pair, docs one arc left stale.
+
+**Must-fix:** None.
+
+**Should-fix**
+
+- **Firefox accepts a version/source mismatch that Chrome rejects.** [publish-firefox-amo.ts:165](scripts/release/publish-firefox-amo.ts:165) checks only the version prefix. With `VERSION=0.27.0`, a manifest declaring `0.27.0.9` passes; an injected runner reproduction completed upload → version creation → source attachment with exit 0. Chrome rejects the same mismatch. The attached source rebuilds `0.27.0.0`, violating reproducibility. Validate the complete derived version before uploading.
+
+- **The remote-code note misquotes the privacy policy and incorrectly declares consistency.** [remote-code.md:79](apps/extension/store/remote-code.md:79) substitutes “remote scripts” for the policy’s actual “remote code” wording at `legal/privacy.md:48–49`. Earlier, the note correctly explains that this CSP permits compiling WASM from any source; its conclusion nevertheless says both policy sentences remain true. Preserve the actual wording and explicitly flag the remaining CSP claim for correction. This concerns the claimed enforcement mechanism, independently of the owner’s store classification. [Chrome CSP reference](https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy).
+
+- **The launch checklist gives incompatible privacy-publication deadlines.** [BEFORE-LAUNCH.md:38](BEFORE-LAUNCH.md:38) requires the privacy page to lose its DRAFT banner before submission, but line 43 defers its effective date until the listing goes live. That unresolved date placeholder itself preserves the banner. Document the agreed sequence: finalize the privacy date before submission, updating its header, history and manifest together; finalize Terms separately once listing URLs exist.
+
+157 release tests passed under local Bun 1.4.0. Extension unit tests failed to start workers.
+
+verdict: conditional — confidence: high; live credentials/environment protections, store API execution and acceptance, builds, reproducibility execution, and E2E remain unverified.
+
+
+---
+
+# Cross-stack pass — round 2
+
+No new or unresolved material findings. All three fixes verified at `6306838e`; 158 release tests pass, and the original version mismatch now fails before any network call.
+
+verdict: approve — confidence: high; live credentials/environment protections, store execution and acceptance, builds, reproducibility execution, E2E, and extension unit tests remain unverified. The privacy-policy rewording remains explicitly tracked as owner work before submission.
