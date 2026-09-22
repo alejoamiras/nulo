@@ -52,4 +52,14 @@
 
 Arc 2 loop converged (three rounds; transcripts in `audit-codex.md` under "Arc 2 implementation"). Every fix was rebuilt by `source-rebuild.yml` on push: runs 35669743682 (`c67d19bc`), 35670945252 (`fae07730`), 35671260446 (`0dac1301`).
 
+## Cross-stack codex pass
+
+### Round 1 — conditional (0 must-fix, 3 should-fix), all verified and fixed
+
+| # | Finding | Verified | Fix |
+|---|---|---|---|
+| S1 | The Firefox runner checked the manifest version by prefix, so `0.27.0.9` passed for `VERSION=0.27.0` (upload → version → source, exit 0) while the Chrome runner rejects it; the attached source rebuilds `0.27.0.0` | yes | `derivedStoreVersion()` mirrors `manifest.config.ts` (strip non-digits, pad to four) and the manifest version must equal it; `0.27.0.9` refused, `0.27.0-rc.1` → `0.27.0.1` tested |
+| S2 | `remote-code.md` paraphrased privacy § 2 as "forbids loading remote scripts" where the policy says "remote code", then concluded both sentences are true — but the note itself shows the CSP does not govern WASM bytes | yes | the note quotes both sentences verbatim, keeps § 13 as true, states § 2's attribution to the CSP is more than the policy delivers, and flags the rewording as an owner item (`BEFORE-LAUNCH.md` § 2). `legal/*.md` is not edited by this plan |
+| S3 | `BEFORE-LAUNCH.md` required the privacy page out of draft before submission (§ 2) while dating it on the day 1.0 ships (§ 3); the date placeholder alone keeps the banner | yes | § 2 states the sequence (privacy date = planned submission day, three places), § 3 keeps the Terms only, with a confirm-unchanged line for privacy |
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`

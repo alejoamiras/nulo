@@ -520,3 +520,24 @@ verdict: reject — confidence: high. All 156 release tests pass; live AMO behav
 No new or unresolved material findings. All three fixes are verified; 157 release tests pass.
 
 verdict: approve — confidence: high. Live AMO behavior, environment protections, rebuild execution, extension tests, and Mozilla policy acceptance remain independently unverified.
+
+
+---
+
+# Cross-stack pass — round 1
+
+Prompt: fresh session; `git diff 2540271a..HEAD` read as one surface — contradictions between the two stores' statements, the two publish jobs and `store-check.yml` together, the artifact change's consumers, the two runners as a pair, docs one arc left stale.
+
+**Must-fix:** None.
+
+**Should-fix**
+
+- **Firefox accepts a version/source mismatch that Chrome rejects.** [publish-firefox-amo.ts:165](scripts/release/publish-firefox-amo.ts:165) checks only the version prefix. With `VERSION=0.27.0`, a manifest declaring `0.27.0.9` passes; an injected runner reproduction completed upload → version creation → source attachment with exit 0. Chrome rejects the same mismatch. The attached source rebuilds `0.27.0.0`, violating reproducibility. Validate the complete derived version before uploading.
+
+- **The remote-code note misquotes the privacy policy and incorrectly declares consistency.** [remote-code.md:79](apps/extension/store/remote-code.md:79) substitutes “remote scripts” for the policy’s actual “remote code” wording at `legal/privacy.md:48–49`. Earlier, the note correctly explains that this CSP permits compiling WASM from any source; its conclusion nevertheless says both policy sentences remain true. Preserve the actual wording and explicitly flag the remaining CSP claim for correction. This concerns the claimed enforcement mechanism, independently of the owner’s store classification. [Chrome CSP reference](https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy).
+
+- **The launch checklist gives incompatible privacy-publication deadlines.** [BEFORE-LAUNCH.md:38](BEFORE-LAUNCH.md:38) requires the privacy page to lose its DRAFT banner before submission, but line 43 defers its effective date until the listing goes live. That unresolved date placeholder itself preserves the banner. Document the agreed sequence: finalize the privacy date before submission, updating its header, history and manifest together; finalize Terms separately once listing URLs exist.
+
+157 release tests passed under local Bun 1.4.0. Extension unit tests failed to start workers.
+
+verdict: conditional — confidence: high; live credentials/environment protections, store API execution and acceptance, builds, reproducibility execution, and E2E remain unverified.
