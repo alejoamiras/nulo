@@ -116,7 +116,7 @@ Two arcs, stacked. Arc 1 = Phases 1–3 (shared assets + Chrome). Arc 2 = Phases
 - Pass: exit 0; `bun install` succeeds in the unpacked archive with no `.git` above it; all local `diff -r` are empty; in CI both `rebuild-x64` and `rebuild-arm64` are byte-identical to the `reference` build; measured peak memory is recorded in `SOURCE-BUILD.md` (above 9 GB it is stated up front, as Mozilla requires).
 - Layers: lint · actionlint · shellcheck · local rebuild ×3 · CI rebuild on two architectures against the release build path.
 
-### Phase 6 — Firefox publish job
+### Phase 6 — Firefox publish job ✓
 - `publish-firefox-amo{,.test,-run,-run.test}.ts`; the Firefox job's `environment:` key and body in `release.yml`; the Firefox job in `store-check.yml`; docs, including the partial-failure recovery in the runbook.
 
 **Validation gate**
