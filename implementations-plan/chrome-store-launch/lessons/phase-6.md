@@ -69,4 +69,8 @@ Arc 2 loop converged (three rounds; transcripts in `audit-codex.md` under "Arc 2
 
 Cross-stack pass converged (two rounds). Both loops' transcripts: `audit-codex.md`. The `push:` trigger of `source-rebuild.yml` is removed in the arc's final, trigger-only commit; the last green rebuild (run 35671809803) ran on `6306838e`, the parent of the docs commits that precede it — no build input changed after that run.
 
+## Stack submission
+
+`dev` had moved two commits (#660, #661) since the stack's base, and PR #662 was `mergeable_state=dirty` on `implementations-plan/index.md` alone — GitHub runs no `pull_request` workflow without a merge ref, so the PR showed no checks. Resolved by merging `origin/dev` into arc 1 (`8732b06f`) and arc 1 into arc 2 (`be33ff91`): a merge cascade, not a rebase. #660 changes `apps/extension` (a build input) and the `push:` trigger was already gone, so the reproducibility check was re-run locally on the merged tree: two clean `git archive` rebuilds and the worktree's `build:firefox` are byte-identical (`diff a-b: 0`, `diff a-worktree: 0`; peak RSS 2.35 GB). Stack #664: PR #662 (arc 1 → dev), PR #663 (arc 2 → arc 1).
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`
