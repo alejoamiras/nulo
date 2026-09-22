@@ -625,6 +625,7 @@ export function silentlyClosed(watch: SilentCloseWatch, open: readonly string[],
 export const firefoxDriver: BrowserDriver = {
 	kind: "firefox",
 	scheme: SCHEME,
+	credentialOutlivesPage: true,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
 	discoverExtensionId,
