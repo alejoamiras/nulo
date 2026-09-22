@@ -1,4 +1,4 @@
-import type { Browser, Page } from "puppeteer"
+import type { Browser, CDPSession, Page, Target } from "puppeteer"
 import puppeteer from "puppeteer"
 import { cdpInterceptRpc } from "./chrome-rpc-intercept"
 import { cdpVirtualAuthenticator } from "./chrome-webauthn"
@@ -61,6 +61,118 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 	return { browser, close: () => browser.close() }
 }
 
+const STOP_WORKER_BUDGET_MS = 15_000
+const WORKER_PROBE_BUDGET_MS = 2_000
+
+/** The worker global's creation time: only a new worker instance produces a newer value. The
+ *  whole probe — attach included, since Puppeteer's attach carries the 300 s protocol timeout — races
+ *  the budget. An attached session is released the moment the budget expires (a session left on a
+ *  stopping worker is the very hazard `stopBackground` exists to avoid), and one that attaches
+ *  after expiry is released without evaluating. Release is requested, never awaited: the caller's
+ *  budget must not depend on Chrome answering a detach. */
+async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
+	let session: CDPSession | undefined
+	let expired = false
+	const release = () => session?.detach().catch(() => {})
+	const probe = (async () => {
+		session = await target.createCDPSession()
+		if (expired) throw new Error("worker probe attached after its budget")
+		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
+		return Number(result.value)
+	})()
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			expired = true
+			release()
+			reject(new Error("worker probe timed out"))
+		}, budgetMs)
+	})
+	try {
+		return await Promise.race([probe, timeout])
+	} finally {
+		if (timer) clearTimeout(timer)
+		probe.then(release, release)
+	}
+}
+
+const isServiceWorkerOf = (extensionId: string) => (t: Target) => t.type() === "service_worker" && t.url().includes(extensionId)
+
+/** MV3 reaps an idle worker, so "none right now" is an answer a caller may have to tolerate. */
+const backgroundAlive = async (browser: Browser, extensionId: string): Promise<boolean> =>
+	browser.targets().some(isServiceWorkerOf(extensionId))
+
+/**
+ * Terminate the extension's service worker and wait until the ORIGINAL worker instance is gone.
+ *
+ * Chrome parks a stopped worker's DevTools host while any session is attached and hands that host
+ * to the worker's next start; an MV3 extension worker restarts within milliseconds of stopping. A
+ * stop issued through an attached session (Puppeteer's `worker.close()`) therefore often leaves
+ * the restarted worker under the original target id, and `targetdestroyed` never fires. So the
+ * stop is an UNATTACHED `Target.closeTarget` from the browser session, and "gone" has two proofs:
+ * the identity-keyed `targetdestroyed` (the fast path), or — because a session this helper does
+ * not own, such as Puppeteer's own auto-attach on every worker start, can still park the host —
+ * a newer `performance.timeOrigin` on whichever worker target is live. The fallback probes attach
+ * only after a normal destroy would long have landed; a still-stopping worker met by that attach is
+ * parked, not resurrected, and cannot yield a newer origin. `Runtime.terminateExecution` is not an
+ * alternative — it leaves the worker running.
+ */
+async function stopBackground(browser: Browser, extensionId: string): Promise<void> {
+	const isExtensionWorker = isServiceWorkerOf(extensionId)
+	const swTarget = await browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
+	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)
+
+	let settled = false
+	let onDestroyed: (target: Target) => void = () => {}
+	const destroyed = new Promise<void>((resolve) => {
+		onDestroyed = (target) => {
+			if (target === swTarget) resolve()
+		}
+	})
+	browser.on("targetdestroyed", onDestroyed)
+
+	const browserSession = await browser.target().createCDPSession()
+	let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+	try {
+		// The id comes from the browser's own target list (public protocol), matched on the same
+		// predicate as the Target above, so no private `_targetId` read is needed.
+		const { targetInfos } = await browserSession.send("Target.getTargets")
+		const info = targetInfos.find((t) => t.type === "service_worker" && t.url.includes(extensionId))
+		if (!info) throw new Error("stopBackground: the browser lists no service-worker target for the extension")
+		const { success } = await browserSession.send("Target.closeTarget", { targetId: info.targetId })
+		if (!success) throw new Error("stopBackground: Target.closeTarget reported failure")
+
+		const restarted = (async () => {
+			await new Promise((r) => setTimeout(r, 2_000))
+			while (!settled) {
+				const live = browser.targets().find(isExtensionWorker)
+				const origin = live ? await readWorkerTimeOrigin(live, WORKER_PROBE_BUDGET_MS).catch(() => undefined) : undefined
+				if (origin !== undefined && origin > originBefore) return
+				await new Promise((r) => setTimeout(r, 250))
+			}
+		})()
+		const deadline = new Promise<never>((_, reject) => {
+			deadlineTimer = setTimeout(
+				() =>
+					reject(
+						new Error(
+							`stopBackground: the service-worker target was still alive ${STOP_WORKER_BUDGET_MS / 1000}s after close()`,
+						),
+					),
+				STOP_WORKER_BUDGET_MS,
+			)
+		})
+		// One race, so a probe stuck in a CDP round trip can neither hide the destroy event nor
+		// outlive the budget.
+		await Promise.race([destroyed, restarted, deadline])
+	} finally {
+		settled = true
+		if (deadlineTimer) clearTimeout(deadlineTimer)
+		browser.off("targetdestroyed", onDestroyed)
+		browserSession.detach().catch(() => {})
+	}
+}
+
 /** The MV3 service worker is the first extension context Chrome starts, and its URL carries the id. */
 async function discoverExtensionId(browser: Browser): Promise<string> {
 	const worker = await browser.waitForTarget(
@@ -97,6 +209,8 @@ export const chromeDriver: BrowserDriver = {
 	virtualAuthenticator: cdpVirtualAuthenticator,
 	holdNextCredentialGet: async () => {},
 	pxeHostState,
+	stopBackground,
+	backgroundAlive,
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {

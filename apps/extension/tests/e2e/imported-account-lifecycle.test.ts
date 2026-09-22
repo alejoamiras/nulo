@@ -21,10 +21,10 @@
  */
 import { describe, expect } from "vitest"
 import type { Page } from "puppeteer"
-import { CHROME_ONLY, isFirefox } from "./fixtures/browser"
+import { reloadExtensionPage, stopBackground } from "./fixtures/browser"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, stopServiceWorker, waitForToast } from "./fixtures/helpers"
+import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, waitForToast } from "./fixtures/helpers"
 import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 
 const NEW_PASSWORD = "changed-password-9"
@@ -42,7 +42,7 @@ async function assertImportedStillDecrypts(page: Page, expectedAddress: string, 
 // NO retry (the `transfers.test.ts` rationale, sharpened): the scenario is DESTRUCTIVE — a retry
 // re-enters against a profile whose password stage 4 already changed and whose MAC stage 5 may
 // have corrupted, so every retry fails for a reason other than the original failure.
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("imported account lifecycle", () => {
 	test("imported account survives lock/unlock, a REAL SW kill, and a password change; a MAC tamper degrades exactly as designed", {
 		timeout: 480_000,
 		retry: 0,
@@ -82,7 +82,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 		// silent-restore bearer leg is integration-covered — the strict-OFF settings toggle has a
 		// documented post-unlock stall, see sw-resilience's skipped test.)
 		await page.close()
-		await stopServiceWorker(registeredExtension)
+		await stopBackground(registeredExtension)
 		const page2 = await openPopup(registeredExtension)
 		await ensureUnlocked(page2)
 		await waitForHash(page2, "#/popup/general", 30_000)
@@ -103,7 +103,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 			}
 		})()
 		expect(staleBody).toBeNull()
-		await page2.reload() // clear the failed export popup state
+		await reloadExtensionPage(page2) // clear the failed export popup state
 		await waitForHash(page2, "#/popup/general", 15_000)
 
 		// ── Stage 5 (destructive, LAST): corrupt the envelope MAC at rest → degradation ──

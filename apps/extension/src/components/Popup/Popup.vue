@@ -13,34 +13,68 @@ const props = defineProps({
 	displaceIdx: {
 		type: Number,
 	},
+	/** Escape emits `onClose` and is swallowed. Off, Escape only releases the trap (focus-trap's default). */
+	closeOnEscape: {
+		type: Boolean,
+		default: false,
+	},
+	/** What the trap focuses on activation: a selector, or false to leave focus where it was. */
+	initialFocus: {
+		type: [String, Boolean],
+		default: false,
+	},
 })
 const emit = defineEmits(["onClose"])
 
 let trap
+let mounted = true
+// Activation waits a tick; only the latest request may create a trap, and only while still shown and mounted.
+let activation = 0
 const popupEl = useTemplateRef("popupEl")
+
+const onEscape = (event) => {
+	event.preventDefault()
+	emit("onClose")
+	return false
+}
+
+const releaseTrap = (options) => {
+	if (trap?.active) trap.deactivate(options)
+	trap = undefined
+}
+
+const activate = async () => {
+	const _ = managers.profile?.refreshSession()
+	const token = ++activation
+
+	await nextTick()
+	const container = popupEl.value?.wrapper
+	if (token !== activation || !mounted || !props.show || !container) return
+
+	releaseTrap({ returnFocus: false })
+	const options = { initialFocus: props.initialFocus, allowOutsideClick: true, fallbackFocus: container }
+	if (props.closeOnEscape) options.escapeDeactivates = onEscape
+	trap = focusTrap.createFocusTrap(container, options)
+	trap.activate()
+}
+
+const deactivate = async () => {
+	activation++
+	await nextTick()
+	releaseTrap()
+}
 
 watch(
 	() => props.show,
-	async () => {
-		if (props.show) {
-			const _ = managers.profile?.refreshSession()
-
-			await nextTick()
-			trap = focusTrap.createFocusTrap(popupEl.value?.wrapper, {
-				initialFocus: false,
-				allowOutsideClick: true,
-				fallbackFocus: popupEl.value?.wrapper,
-			})
-			trap.activate()
-		} else {
-			await nextTick()
-			if (trap?.active) {
-				trap.deactivate()
-			}
-		}
-	},
+	() => (props.show ? activate() : deactivate()),
 	{ flush: "post" },
 )
+
+onBeforeUnmount(() => {
+	mounted = false
+	activation++
+	releaseTrap({ returnFocus: false })
+})
 </script>
 
 <template>
