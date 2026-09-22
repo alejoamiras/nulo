@@ -366,7 +366,7 @@ differs from F-B16), the e2e skill's ledger, `FIREFOX.md` if a Firefox nuance wa
 **Gate.** `cd ROOT && bun run audit:vue && bun run test:ci-gating` → exit 0. Then **Arc 1's codex loop** (see
 Post-implementation) before Phase 4 starts.
 
-### Phase 4 — the frozen-account canary on Firefox
+### Phase 4 ✓ — the frozen-account canary on Firefox
 
 Un-skip, reword the comment.
 
