@@ -448,8 +448,39 @@ describe("canary lanes", () => {
     }
   })
 
-  // A job in `needs` that the script never reads can be red under a green aggregator.
-  test("every job an aggregator waits on is read in its result loop", () => {
+  // The reusable workflow folds newlines before `read -ra`; a block-scalar list is refused here as well,
+  // since the whitespace-splitting pins above would accept one that the steps then mis-parse.
+  test("every file list is one line", () => {
+    for (const { file, browser } of LANES) {
+      for (const [name, job] of laneJobs(file, browser)) {
+        for (const key of ["test_files", "exclude_files"] as const) {
+          const value = job.with?.[key]
+          if (value !== undefined) expect(String(value), `${file} → ${name} ${key}`).not.toContain("\n")
+        }
+      }
+    }
+  })
+
+  /** A script's lines that run — comments cannot test a result. */
+  const commandLines = (run: unknown): string[] =>
+    String(run ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"))
+
+  /** The jobs an aggregator's script actually tests: the operands of its `for r in …; do` lists and of
+   *  its direct `[ "${{ needs.x.result }}" …` checks — an echo or a comment naming a result does not count. */
+  function resultsTested(run: unknown): string[] {
+    const commands = commandLines(run).join("\n")
+    const inLoops = [...commands.matchAll(/for r in([\s\S]*?);\s*do/g)].flatMap((loop) =>
+      [...loop[1].matchAll(/needs\.([\w-]+)\.result/g)].map((token) => token[1]),
+    )
+    const direct = [...commands.matchAll(/\[ "\$\{\{ needs\.([\w-]+)\.result \}\}" /g)].map((token) => token[1])
+    return [...new Set([...inLoops, ...direct])].sort()
+  }
+
+  // A job in `needs` that the loop never tests can be red under a green aggregator.
+  test("every job an aggregator waits on is tested in its result loop, and nothing else is", () => {
     for (const [file, aggregator] of [
       ["pr-extension-network-e2e.yml", "status"],
       ["pr-extension-network-e2e-firefox.yml", "status"],
@@ -457,29 +488,41 @@ describe("canary lanes", () => {
     ] as const) {
       const job = workflow(file).jobs[aggregator]
       const script = (job.steps as { run?: string }[]).map((step) => step.run ?? "").join("\n")
-      for (const need of [job.needs ?? []].flat()) {
-        expect(script, `${file} → ${aggregator} reads needs.${need}.result`).toContain(`needs.${need}.result`)
-      }
+      expect(resultsTested(script), `${file} → ${aggregator} tests exactly its needs`).toEqual([...[job.needs ?? []].flat()].sort())
     }
+    // The publish gate enumerates success: `!= 'failure'` would let a skipped or cancelled gate publish.
     const publish = workflow("nightly.yml").jobs["publish-nightly"]
     for (const need of [publish.needs ?? []].flat()) {
-      expect(String(publish.if), `nightly.yml → publish-nightly gates on needs.${need}.result`).toContain(`needs.${need}.result`)
+      expect(String(publish.if), `nightly.yml → publish-nightly requires needs.${need}.result == 'success'`).toContain(
+        `needs.${need}.result == 'success'`,
+      )
     }
   })
 
+  // Pinned whole, not by fragment: a narrower condition, a `continue-on-error` or a commented-out call
+  // would each keep the fragment while disarming the step.
   test("the reusable workflow asserts canary results on every canary* label, like its zero-proofs check", () => {
-    type Step = { name?: string; if?: string; run?: string; env?: Record<string, string> }
-    const steps = workflow(SUITE).jobs["network-e2e"].steps as Step[]
+    type Step = { name?: string; if?: string; run?: string; env?: Record<string, string>; "continue-on-error"?: unknown }
+    const job = workflow(SUITE).jobs["network-e2e"]
+    expect(job["continue-on-error"], "the suite job fails when a step does").toBeUndefined()
+    const steps = job.steps as Step[]
     const results = steps.find((step) => step.name === "Assert canary results")
     expect(results, "the results step exists").toBeDefined()
-    expect(String(results?.if)).toContain("startsWith(inputs.shard_label, 'canary')")
-    expect(String(results?.run)).toContain("scripts/ci-cd/assert-canary-results.ts")
-    const run = steps.find((step) => step.name === "Run network e2e via agent")
-    expect(String(run?.env?.NULO_E2E_RESULTS_FILE), "a canary* run writes the report").toContain(
-      "startsWith(inputs.shard_label, 'canary')",
+    expect(results?.if).toBe("${{ always() && !cancelled() && startsWith(inputs.shard_label, 'canary') }}")
+    expect(results?.["continue-on-error"], "a red assertion is a red job").toBeUndefined()
+    expect(commandLines(results?.run)).toContain(
+      'bun scripts/ci-cd/assert-canary-results.ts "${RUNNER_TEMP}/canary-results.json" "${TEST_FILE_LIST[@]}"',
     )
+    const run = steps.find((step) => step.name === "Run network e2e via agent")
+    expect(run?.env?.NULO_E2E_RESULTS_FILE, "a canary* run writes the report").toBe(
+      "${{ startsWith(inputs.shard_label, 'canary') && format('{0}/canary-results.json', runner.temp) || '' }}",
+    )
+    expect(run?.["continue-on-error"]).toBeUndefined()
     const presto = steps.find((step) => String(step.name).startsWith("Assert presto activity"))
-    expect(String(presto?.run), "the zero-proofs check matches canary* too").toContain('"$SHARD_LABEL" == canary*')
+    expect(presto?.["continue-on-error"]).toBeUndefined()
+    expect(commandLines(presto?.run), "the zero-proofs check matches canary* too").toContain(
+      'if [ "$PROVE_SUCCESS" -eq 0 ] && [[ "$SHARD_LABEL" == canary* ]]; then',
+    )
     expect(existsSync(join(ROOT, "scripts/ci-cd/assert-canary-results.ts"))).toBe(true)
   })
 })
