@@ -4,6 +4,7 @@ import {
 	checkFirefoxManifest,
 	checkSourceArchive,
 	DATA_COLLECTION,
+	derivedStoreVersion,
 	GECKO_ID,
 	interpretOwnAddons,
 	interpretSource,
@@ -126,7 +127,8 @@ describe("checkFirefoxManifest", () => {
 			[bss({ data_collection_permissions: undefined }), "settled"],
 			[{ ...FIREFOX_MANIFEST, version_name: "0.26.0" }, "version_name"],
 			[{ ...FIREFOX_MANIFEST, version: "0.27.0" }, "four integers"],
-			[{ ...FIREFOX_MANIFEST, version: "0.28.0.0" }, "derive"],
+			[{ ...FIREFOX_MANIFEST, version: "0.28.0.0" }, "derives to"],
+			[{ ...FIREFOX_MANIFEST, version: "0.27.0.9" }, "derives to"],
 			[null, "not an object"],
 		]
 		for (const [manifest, word] of cases) {
@@ -135,6 +137,14 @@ describe("checkFirefoxManifest", () => {
 			expect(!r.ok && r.reason).toContain(word)
 		}
 		expect(DATA_COLLECTION).toEqual(["financialAndPaymentInfo"])
+	})
+})
+
+describe("derivedStoreVersion", () => {
+	test("mirrors manifest.config.ts: strip non-digits, pad to four", () => {
+		expect(derivedStoreVersion("0.27.0")).toBe("0.27.0.0")
+		expect(derivedStoreVersion("0.27.0-rc.1")).toBe("0.27.0.1")
+		expect(derivedStoreVersion("1.2.3-nightly.26265")).toBe("1.2.3.26265")
 	})
 })
 

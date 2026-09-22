@@ -155,6 +155,12 @@ export interface FirefoxManifestFacts {
 	storeVersion: string
 }
 
+/** The four-integer manifest version the build derives from a package version, as `manifest.config.ts` does (`0.27.0` → `0.27.0.0`, `0.27.0-rc.1` → `0.27.0.1`). */
+export function derivedStoreVersion(version: string): string {
+	const [major = "0", minor = "0", patch = "0", label = "0"] = version.replace(/[^\d.]+/g, "").split(".")
+	return `${major}.${minor}.${patch}.${label}`
+}
+
 /** The zip must be the Firefox build of this release with the settled declaration. */
 export function checkFirefoxManifest(manifest: unknown, version: string): Verdict<FirefoxManifestFacts> {
 	const m = obj(manifest)
@@ -162,7 +168,7 @@ export function checkFirefoxManifest(manifest: unknown, version: string): Verdic
 	if (m.version_name !== version) return { ok: false, reason: `manifest version_name ${JSON.stringify(m.version_name ?? null)} is not VERSION ${version}` }
 	const storeVersion = typeof m.version === "string" ? m.version : ""
 	if (!/^\d+\.\d+\.\d+\.\d+$/.test(storeVersion)) return { ok: false, reason: `manifest version ${JSON.stringify(storeVersion)} is not four integers` }
-	if (!storeVersion.startsWith(`${version.split("-")[0]}.`)) return { ok: false, reason: `manifest version ${storeVersion} does not derive from VERSION ${version}` }
+	if (storeVersion !== derivedStoreVersion(version)) return { ok: false, reason: `manifest version ${storeVersion} is not the ${derivedStoreVersion(version)} that VERSION ${version} derives to` }
 	const gecko = obj(obj(m.browser_specific_settings)?.gecko)
 	if (!gecko) return { ok: false, reason: "the zip carries no browser_specific_settings.gecko: that is not the Firefox build" }
 	if (gecko.id !== GECKO_ID) return { ok: false, reason: `gecko.id ${JSON.stringify(gecko.id ?? null)} is not ${GECKO_ID}` }

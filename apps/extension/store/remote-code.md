@@ -76,8 +76,13 @@ per-request window. What it cannot do is any of the things listed above.
 
 ## What this bears on
 
-`legal/privacy.md` says, in § 2, that the content security policy forbids loading remote scripts,
-and in § 13 that "the extension loads no remote code" (`legal/privacy.md:48-49`, `:325-326`). Under the
-reading above — code is what the browser executes as script or WASM, and the package bundles all of
-it — both sentences are true and stay as written. The Firefox reviewer notes and the Chrome
-remote-code justification in `store/listing.md` summarise this note.
+`legal/privacy.md` says in § 2 "Its content security policy forbids loading remote code"
+(`legal/privacy.md:48-49`) and in § 13 "The extension loads no remote code" (`:325-326`). The § 13
+sentence is true under the reading above — code is what the browser executes as script or WASM,
+and the package bundles all of it — and stays as written. The § 2 sentence attributes that fact to
+the policy, which is more than the policy delivers: `script-src 'self'` forbids remote *scripts*,
+while `'wasm-unsafe-eval'` permits compiling WASM bytes from any source, and it is the bundled
+loaders above, not the policy, that keep the WASM local. **Open owner item** (`BEFORE-LAUNCH.md`
+§ 2): reword § 2 to "forbids loading remote scripts" or drop the attribution — the fact stands, the
+mechanism named for it does not. The Firefox reviewer notes and the Chrome remote-code
+justification in `store/listing.md` summarise this note and rest on the § 13 sentence.
