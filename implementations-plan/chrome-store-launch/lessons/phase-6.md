@@ -24,4 +24,17 @@
 | dry run | `git archive --format=zip --prefix=nulo-0.27.0/ … HEAD`, zip of Phase 5's `dist/firefox`, `MODE=publish DRY_RUN=true VERSION=0.27.0 ZIP_PATH=… SOURCE_PATH=… LISTING_PATH=apps/extension/store/listing.md bun scripts/release/publish-firefox-amo-run.ts` | exit 0: `zip ok … settled data declaration`, `source ok … reviewer notes: 2279 chars`, `no request was made` |
 | dry run, refusals | the Chrome zip; the released v0.27.0 Firefox zip; `MODE` unset | exit 1 each, before any request |
 
+## Arc 2 codex fix loop
+
+### Round 1 — reject (3 must-fix, 3 should-fix), all verified against the repo and fixed (`fae07730`)
+
+| # | Finding | Verified | Fix |
+|---|---|---|---|
+| M1 | A stable tag on a commit whose `apps/extension/package.json` is at another version passes every gate: the build takes `version_override` from the tag (`release.yml:248`) while `git archive` keeps the tree's version, so AMO receives a source package whose own rebuild script refuses it | yes | `checkSourceArchive` also requires `nulo-<v>/apps/extension/package.json` with `version === VERSION`; the runner reads it through `Files.zipText` (`unzip -p`); tests on both layers |
+| M2 | `SOURCE-BUILD.md` said Node is unused; `build:firefox` runs `cross-env` and `vite`, both Node programs, under the ambient Node | yes (their shebangs; no `--bun`) | the document names Node as the runtime Vite runs under; `source-rebuild.sh` prints the Node it found |
+| M3 | `SOURCE-BUILD.md` counted two patch files; `patches/` holds four (two packages × two versions), all activated by `patchedDependencies` | yes | four, named, matching the reviewer notes |
+| S1 | A throw between the create request and the source PATCH (an unreadable source archive) reached the outer catch, which prints `unexpected failure (Error)` without the recovery | yes | both files are read into memory before the first request; the create and the PATCH are each wrapped so any throw after the create carries `RECOVERY`; tested with a fetch that throws on the 4th call |
+| S2 | `actions/upload-artifact` drops dotfiles by default, so a hidden file present in only one tree survives neither the reference nor the rebuild artifact and `compare` passes | yes (`include-hidden-files` defaults false at the pinned SHA) | `include-hidden-files: true` on every upload in `source-rebuild.yml` and on both in `_build-extension.yml` |
+| S3 | The credential check read one page of the author-scoped list (25 by default) and reported absence | yes | `?page_size=50`, `next` links followed up to `OWN_ADDONS_MAX_PAGES = 10` (a `next` outside `AMO_API` is ignored), "not found in the first N pages" is distinct from absence; tests for a third-page hit and the cap |
+
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-6.md`

@@ -469,3 +469,28 @@ verdict: reject — confidence: high; store unit tests timed out starting worker
 # Arc 1 implementation — round 3
 
 verdict: approve — confidence: high; the round-2 finding is resolved at `feb03368`, all earlier fixes remain intact, and no material findings remain; 120 release tests and icon drift checks pass, while store unit tests remain unverified after prior worker timeouts, alongside live WIF/environment protections, store acceptance, builds and E2E.
+
+
+---
+
+# Arc 2 implementation — round 1
+
+Prompt: the net diff of Phases 4–6 over Arc 1's tip (`git diff 0826e151..HEAD`), adversarial, read-only, as a Mozilla reviewer and as an attacker; findings ranked must-fix / should-fix / note with `path:line`.
+
+**Must-fix**
+
+- **Source can disagree with the submitted version.** [.github/workflows/release.yml:647](.github/workflows/release.yml:647): a stable tag `v0.28.0` on a `main` commit whose package version remains `0.27.0` passes the publish gates. The build overrides the version, but `git archive` preserves `0.27.0`. Source validation checks filenames only, so AMO receives a version whose supplied rebuild script immediately refuses to run. Assert the committed package version equals `VERSION` before uploading.
+
+- **The reviewer instructions falsely say Node is unused.** [apps/extension/store/SOURCE-BUILD.md:10](apps/extension/store/SOURCE-BUILD.md:10): `build:firefox` invokes `cross-env` and Vite through Node shebangs, without `--bun`. A reviewer installing only the stated runtime cannot build; changing ambient Node also changes an unacknowledged build input. A harmless launcher probe confirmed execution under Node.
+
+- **The modification inventory understates the patches.** [apps/extension/store/SOURCE-BUILD.md:62](apps/extension/store/SOURCE-BUILD.md:62) says two patch files. The archive contains—and `package.json` activates—four: two packages at two versions each. Mozilla receives contradictory modification inventories between this document and the reviewer notes.
+
+**Should-fix**
+
+- **Unexpected failures after version creation omit recovery instructions.** [scripts/release/publish-firefox-amo-run.ts:149](scripts/release/publish-firefox-amo-run.ts:149): if reading the source archive throws after creation, the outer catch prints only `unexpected failure (Error)`. An injected read failure reproduced this: version 9001 exists, but no “do NOT re-run” instruction appears. Preserve creation state across the exception boundary.
+
+- **Hidden-file differences can pass reproducibility comparison.** [.github/workflows/source-rebuild.yml:90](.github/workflows/source-rebuild.yml:90): the reference and rebuild uploads omit `include-hidden-files`, whose [pinned action default is false](https://github.com/actions/upload-artifact/blob/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/action.yml). A release zip containing an extra or different `.hidden/config.json` loses that file before comparison; otherwise identical trees pass. Transfer complete archives or explicitly preserve hidden files.
+
+- **Valid credentials fail when the add-on falls beyond page one.** [scripts/release/publish-firefox-amo.ts:131](scripts/release/publish-firefox-amo.ts:131): the interpreter treats absence from the first response as lack of authorship. [AMO defaults to 25 results and provides pagination](https://mozilla.github.io/addons-server/topics/api/addons.html#list). An account owning more add-ons can therefore fail the credential check despite owning `wallet@nulo.sh`.
+
+verdict: reject — confidence: high. Release tests: 151 passed; extension tests failed to start workers. Live AMO behavior, environment protections, rebuild execution, and Mozilla’s policy acceptance remain unverified.

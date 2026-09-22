@@ -21,6 +21,6 @@
 | actionlint | `bun run lint:actions` | exit 0 |
 | shellcheck | `shellcheck apps/extension/scripts/source-rebuild.sh` | exit 0 |
 | local rebuild ×3 | `.playwright-mcp/local-rebuild.sh` at `5d58c67e` | `rebuild-a exit=0`, `rebuild-b exit=0`, `diff a-b: 0 differences`, `diff a-worktree: 0 differences` |
-| CI rebuild | push `c67d19bca2bd39503873a03b062b80f55d9605d0` → `gh run list --workflow source-rebuild.yml --event push --commit c67d19bc…` → run **35669743682**; `gh run watch 35669743682 --exit-status` | exit 0: `rebuild on x86_64` success, `rebuild on ARM64` success, `compare rebuilds with the shipped tree` success ("identical to the shipped tree" ×2) |
+| CI rebuild | push `c67d19bca2bd39503873a03b062b80f55d9605d0` (and, after the Arc 2 round-1 fixes, `fae07730` → run **35670945252**, green, Node 22.23.2 on both runners) → `gh run list --workflow source-rebuild.yml --event push --commit c67d19bc…` → run **35669743682**; `gh run watch 35669743682 --exit-status` | exit 0: `rebuild on x86_64` success, `rebuild on ARM64` success, `compare rebuilds with the shipped tree` success ("identical to the shipped tree" ×2) |
 
 `LESSONS_FILE=implementations-plan/chrome-store-launch/lessons/phase-5.md`

@@ -10,10 +10,10 @@ one script and produces a tree that must match the submitted add-on byte for byt
 - **Package manager and script runner: Bun, not npm.** The exact Bun release is named by
   `package.json#packageManager` (`bun@1.4.2` for this line) and the script refuses any other
   version. **Node stays: Vite (the bundler) and `cross-env` are Node programs and run under the
-  machine's Node** — the reviewer machine's Node 24 is what the release builds use too (the script
-  prints the Node it found). The output does not depend on the Node minor: the runs recorded in
-  `.github/workflows/source-rebuild.yml`'s job summaries and a workstation on a different Node 24
-  release produced identical trees.
+  machine's Node** (the script prints the Node it found). The release builds run on GitHub's
+  Ubuntu runners under their default Node 22; the output does not depend on the Node major: the
+  runs recorded in `.github/workflows/source-rebuild.yml` (Node 22.23.2, x86_64 and ARM64) and a
+  workstation on Node 24.18.0 produced identical trees, so the reviewer machine's Node 24 is fine.
 - **Architecture:** the build is verified on Ubuntu 24.04 ARM64 and on x86_64 by
   `.github/workflows/source-rebuild.yml`, which does exactly what this document does.
 - **Memory:** see § Resources below.
