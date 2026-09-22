@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 budget: recon 2 agents (done); codex high (GPT-6 Astra); fable leg = Plan agent; no /code-review (owner's standing directive)
 base: dev 60da5d66
-status: APPROVED by the owner 2026-09-21 (rev 4) — implementing. Audits: fable conditional approve; codex reject (rev 1) → reject (fresh, rev 2) → conditional approve (rev 3), its three conditions met in rev 4
+status: COMPLETED — merged to dev 2026-09-22 (#665 `44cfe61e`, #666 `34111b65`); approved by the owner 2026-09-21 (rev 4). Audits: fable conditional approve; codex reject (rev 1) → reject (fresh, rev 2) → conditional approve (rev 3), its three conditions met in rev 4
 ---
 
 # firefox-arc-closeout
