@@ -51,12 +51,26 @@
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
   .scroll { overflow-x: auto; }
+  .status { border: 1px solid var(--accent); padding: 14px 16px; display: grid; gap: 8px; font-size: 0.95rem; }
+  .status h2 { font-size: 1.05rem; }
+  .status .row { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+  .status .row b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; color: var(--accent); }
 </style>
 <main>
   <section>
-    <p class="eyebrow">Blueprint · light · codex conditional approve, folded in · your call</p>
+    <p class="eyebrow">Blueprint · light · approved · Phases 1–3 done · review loop, then the PR</p>
     <h1>New test runner, the old patch removed, and proof it still runs clean on Bun</h1>
     <p class="lede">Every unit test in the repo runs on <strong>vitest</strong>, driven by Bun. A year's worth of vitest is now out (version 5) and it contains the fix for the one Bun problem we had to patch around ourselves last month. This plan takes the new version, deletes our patch, and re-runs the same "does Bun behave like Node?" measurement we built for the original switch — on the new runner, at one commit, both engines — so the upgrade is proved rather than assumed. On the way it keeps the few things vitest 5 improves for free and measures, instead of guessing, whether its speed options are worth turning on here.</p>
+  </section>
+
+  <section class="status">
+    <h2>Where it stands — 22 Sep</h2>
+    <div class="row">
+      <b>Phase 1 ✓</b><span>vitest 5.0.1 is in, the interop patch is gone. <strong>jsdom stays at 29.1.1</strong>: jsdom 30 cannot start under Bun — Bun hands out two different objects for the fake window's global (one gets jsdom 30's new private "brand", the other is the window you use), so every DOM test worker dies at setup. Reproduced without vitest and with plain <code>node:vm</code>; Node is fine. Filed upstream as oven-sh/bun#43671; the fix (oven-sh/bun#34623) is open and unmerged. Your call: hold jsdom, ship vitest 5 alone; jsdom 30 comes back when a Bun release carries the fix.</span>
+      <b>Phase 2 ✓</b><span>Harvest measured, six <code>vi.when</code> sites, default reporters; no runtime setting changed.</span>
+      <b>Phase 3 ✓</b><span>The matrix at one commit (<code>93b95f06</code>): <strong>15 × COMPARE OK</strong> with identical pass/skip records on Node and Bun, plus the landing site recorded <strong>Bun-only by design</strong> — its tests render the legal pages with a Bun-only markdown API, so the Node side is red on every run and says why (your call, 21 Sep). One suite (the extension) was re-run at the same commit after a busy host timed out one Node run; the file alone was 6/6 green, the re-run 10/10 on both engines (your call, 22 Sep). All five fan-outs and the CI dispatch green at that commit.</span>
+      <b>Phase 4</b><span>Codex adversarial review of the whole diff, then the PR into <code>dev</code>; merge is yours.</span>
+    </div>
   </section>
 
   <section>
@@ -84,7 +98,7 @@
   <section>
     <h2>Calendar</h2>
     <div class="calendar">
-      <b>now</b><span>plan approval → the bump commit (Phase 1, vitest first then jsdom, gate bypassed on your direction), harvest (Phase 2), the matrix (Phase 3, ~50 min at 10 runs), review loop then PR (Phase 4)</span>
+      <b>21–22 Sep</b><span>the bump commit (Phase 1 — vitest in, jsdom attempted and held), harvest (Phase 2), the matrix (Phase 3 — two full runs plus one same-commit re-run of the extension pair), review loop then PR (Phase 4, in progress)</span>
       <b>Mon 22 Sep</b><span>vitest 5.0.1 would have cleared the 7-day gate</span>
       <b>Wed 24 Sep</b><span>jsdom 30.1.0 would have cleared it</span>
     </div>
@@ -106,7 +120,7 @@
       <div class="phase">
         <h3>3 · The matrix</h3>
         <p>At one committed tree, after a frozen install, on an idle host, touching no file until the last run finishes: 16 suites × Node and Bun × 10 runs (30 for <code>resolve-asset</code>), each pair compared, the summaries committed under the soak tool's baseline folder. Then the CI-shaped concurrent run five times, and a manual CI dispatch bound to that exact commit. A red on the Node side is reproduced and classified before anything else: a real test bug gets fixed and the matrix restarts at the new commit; a regression in the new versions, an environment problem or a product defect comes to you.</p>
-        <p class="proves">Proves itself by: 16 × <code>COMPARE OK</code> with the full reports kept, five green fan-outs, the dispatch green at the matrix SHA. Any later change to a test, config or lockfile re-runs the whole phase.</p>
+        <p class="proves">Proves itself by: 15 × <code>COMPARE OK</code> plus the landing site's Bun run green with its Node side quoted red-by-design (amended from 16 on your call, 21 Sep), the full reports kept, five green fan-outs, the dispatch green at the matrix SHA. Any later change to a test, config or lockfile re-runs the whole phase. <strong>Done:</strong> see the status box above.</p>
       </div>
       <div class="phase">
         <h3>4 · Review loop, then the PR</h3>
@@ -129,7 +143,7 @@
   <section class="approval">
     <h2>What you are approving</h2>
     <ul>
-      <li>Scope: vitest 5.0.1 + jsdom 30.1.0 in every workspace, the interop patch deleted, <code>resolve-asset</code> on the Bun convention, the soak evidence re-recorded, the harvest as measured — no runtime-setting change; no product code, no UI surface.</li>
+      <li>Scope: vitest 5.0.1 in every workspace (jsdom 30.1.0 was in scope and is <strong>held at 29.1.1</strong> — see the status box), the interop patch deleted, <code>resolve-asset</code> on the Bun convention, the soak evidence re-recorded, the harvest as measured — no runtime-setting change; no product code, no UI surface.</li>
       <li>Tier: light — one codex audit, one PR into <code>dev</code>, merge is yours.</li>
       <li>Validation: lint + typecheck + all suites on every phase; <code>audit:vue</code> + Node smoke e2e locally; the 16-suite matrix at one commit after a frozen install; network + tools e2e in CI.</li>
       <li>No <code>/harden</code> pass — no trust boundary moves; no <code>/code-review</code> (your Phase 0 answer).</li>
@@ -148,7 +162,7 @@
     <p class="warn">Use exactly one per session — they don't compose. Run it inside the plan's worktree (<code>agent-worktree resume vitest-5-bump</code>).</p>
     <div class="seed rec">
       <h3>/goal</h3>
-      <pre><code>/goal Phases 1–4 marked ✓ in implementations-plan/vitest-5-bump/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its validation gate as written in plan.md reported passing in the transcript; Phase 1's install used a LOCAL minimumReleaseAgeExcludes naming only vitest, jsdom and the transitives the gate named (each listed in lessons/phase-1.md with its publish date and provenance read), the exclude deleted before the commit so no commit touches bunfig.toml, and `bun install --frozen-lockfile --force` exit 0 quoted after the deletion; no runtime-config key (`isolate`, `pool`, `fsModuleCache`, `deps.interopDefault`, `clearMocks`) was added to any vitest config; Phase 3's evidence is 16 `COMPARE OK` full reports at ONE matrix commit after `bun install --frozen-lockfile` (both engines, 10 runs each and 30 for resolve-asset, quoted in the transcript), the 32 compacts committed, `bun run test:all` ×5 exit 0, and a `pr-quick.yml` workflow_dispatch whose `headSha` equals the matrix commit with every job green; every executable change after the matrix re-ran Phase 3 (or none happened — say which); for each phase the agent printed `LESSONS_FILE=implementations-plan/vitest-5-bump/lessons/phase-N.md`; plan.md says `code_review: off`, so `/code-review` was NOT run; the codex fix loop converged over the whole diff from 25062c06 BEFORE the PR was created, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; exactly one PR into dev exists for branch worktree-vitest-5-bump, labelled `e2e:extension-network` and `e2e:tools` AFTER creation, and `gh pr checks` shows quality-status, extension-smoke-e2e-status, extension-network-e2e-status and tools-e2e-status green.</code></pre>
+      <pre><code>/goal Phases 1–4 marked ✓ in implementations-plan/vitest-5-bump/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by its validation gate as written in plan.md reported passing in the transcript; Phase 1's install used a LOCAL minimumReleaseAgeExcludes naming only vitest, jsdom and the transitives the gate named (each listed in lessons/phase-1.md with its publish date and provenance read), the exclude deleted before the commit so no commit touches bunfig.toml, and `bun install --frozen-lockfile --force` exit 0 quoted after the deletion; no runtime-config key (`isolate`, `pool`, `fsModuleCache`, `deps.interopDefault`, `clearMocks`) was added to any vitest config; Phase 3's evidence is 15 `COMPARE OK` full reports plus landing's Bun soak green with its Node side quoted red-by-design (`Bun.markdown.html`; owner 2026-09-21) at ONE matrix commit after `bun install --frozen-lockfile` (both engines, 10 runs each and 30 for resolve-asset, quoted in the transcript), the 32 compacts committed, `bun run test:all` ×5 exit 0, and a `pr-quick.yml` workflow_dispatch whose `headSha` equals the matrix commit with every job green; every executable change after the matrix re-ran Phase 3 (or none happened — say which); for each phase the agent printed `LESSONS_FILE=implementations-plan/vitest-5-bump/lessons/phase-N.md`; plan.md says `code_review: off`, so `/code-review` was NOT run; the codex fix loop converged over the whole diff from 25062c06 BEFORE the PR was created, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; exactly one PR into dev exists for branch worktree-vitest-5-bump, labelled `e2e:extension-network` and `e2e:tools` AFTER creation, and `gh pr checks` shows quality-status, extension-smoke-e2e-status, extension-network-e2e-status and tools-e2e-status green.</code></pre>
     </div>
     <div class="seed">
       <h3>/loop 15m</h3>

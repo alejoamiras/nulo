@@ -191,8 +191,9 @@ workspace); Renovate config (the `test-runner` group already covers `vitest` + `
   presumed** test bugs (Phase 1 step 4).
 - **Fail-closed evidence.** The matrix-commit rule (every executable byte at one SHA, after a frozen install)
   and `compare`'s meta checks are what stop a "the soak was green on a slightly different tree" argument; the
-  PR HEAD may differ from the matrix commit only by `**/*.md` and the baseline JSONs, and CI's
-  `workflow_dispatch` is bound to the matrix SHA.
+  PR HEAD may differ from the matrix commit only by `**/*.md`, the baseline JSONs and the tracked `eli5.html`
+  companion (documentation, never executed by a gate — R4-7), and CI's `workflow_dispatch` is bound to the
+  matrix SHA.
 - **Node floor.** jsdom 30's `engines` (`^22.22.2 || ^24.15.0 || >=26`) is above the host's 24.12; every Node
   execution in this plan (the soak fixtures in `test:ci-gating`, doctor on Node if it comes to that, the Node
   reference side, the Node smoke e2e) runs on a Node that satisfies it, and the actual versions — host, and
@@ -451,3 +452,24 @@ carry the merged SHA.
 | R3-4 | Retire the stopgap and add `.vitest/` to `.gitignore` before the first vitest-only run, not after both installs | **folded** — Phase 1 step 1 |
 | R3-5 | Stale claims: "clean-gate install" (Done), "handled by the age gate" (tier), "owner-approved" ten runs while A1 is open | **folded** — all three rewritten |
 | — | Dropping Phase 1a loses nothing given the two-step install; the exclude-free final gate is correct; no 09-24 wait remains | noted |
+
+### Codex round 4 (fresh session, high) — Phase 4 review of the whole diff from `25062c06` → `conditional approve`, no implementation blocker
+
+Session `01a0c9cc-1aed-71c2-a5c1-04a9b2088f47`; transcript in `lessons/phase-4.md`. Every finding is documentation-level, so no executable byte changed and Phase 3 stands.
+
+| # | Finding | Disposition |
+|---|---|---|
+| R4-1 | should-fix — the maintainer comparison the age-gate bypass required was skipped (`lessons/phase-1.md`) | **folded** — compared after the fact and recorded with its limit: current ownership is identical across both version pairs, the per-version publisher is `GitHub Actions` on all four; corrected in R4-6 |
+| R4-2 | should-fix — "not a vitest-5 regression" overreaches: passing alone and 9/10 does not exclude a load-dependent timing regression | **folded** — reworded to "environment, probable; regression not excluded"; the re-run is the disposition (D12), not a causal proof |
+| R4-3 | nit — "330 runs per engine" is wrong (committed: 180; all attempts: 370) and "one red" hides the deterministic reds of matrix #1 | **folded** — populations stated per engine; deterministic vs intermittent separated |
+| R4-4 | nit — "the assertions never ran under vitest 4" is false: v4 auto-awaited and warned | **folded** — verified in `@vitest/expect` 4.1.10 `recordAsyncExpect`; reworded |
+| R4-5 | nit — the extension doctor aggregate ran twice, the plan said three | **folded as an accepted deviation** — nothing from doctor ships (D4); a third single-sample row under today's load would not be comparable |
+| — | Checked and fine: no weakened assertion, skip, timeout or runtime opt-out; all six `vi.when` rewrites behaviour-preserving; no `clearMocks`/#10373 masking; 15 compares and landing's 30 problems recomputed independently; all 32 compacts bind to `93b95f06`, vitest 5.0.1 and the HEAD lock hash; HEAD-1 adds md + JSON only; dispatch `35746293931` confirmed at that SHA; reporter change disclosed; no `bunfig.toml` commit, no absolute path, no suppression, no provenance comment | noted |
+
+### Codex round 5 (resumed, high) — the folds re-read → `conditional approve`, no new material finding
+
+| # | Finding | Disposition |
+|---|---|---|
+| R4-6 | R4-1's record was wrong the other way: the registry does expose `versions[<v>].maintainers` (vitest 0.1.0: `patak, antfu`); the honest statement is "the compared version records report identical maintainer sets and publisher identities; this does not establish an immutable ownership history or exclude intervening changes" | **folded** — `lessons/phase-1.md`, `lessons/phase-4.md`, R4-1 |
+| R4-7 | Bookkeeping: the fail-closed rule (md + baseline JSON only after the matrix) does not literally admit the tracked `eli5.html`, updated after the matrix | **folded as a narrow exception** — the companion is documentation (HTML/CSS/text) no gate executes; the rule now names it |
+| — | R4-2..R4-5 faithful; the executable diff re-read with no new test weakening, runtime workaround or dependency drift; the revisions do not invalidate the measured tree | noted — **loop converged** (round 2 of 3) |

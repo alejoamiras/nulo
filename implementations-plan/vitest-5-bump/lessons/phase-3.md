@@ -90,9 +90,11 @@ run 5: exit=0 1751 ms  Tests  7 passed (7)
 run 6: exit=0 1743 ms  Tests  7 passed (7)
 ```
 
-Classification: **environment** — host contention on the reference side, the same class as Phase 2's
-`presto/client.test.ts` timeout; not a vitest-5 regression (the test is deterministic alone and 9/10 in the
-suite), not a Bun divergence (Bun 10/10), not a product defect. No assertion or timeout was touched. **Owner
+Classification: **environment, probable** — host contention on the reference side, the same class as
+Phase 2's `presto/client.test.ts` timeout. What the evidence shows: deterministic alone (6/6), 9/10 in the
+suite, 10/10 on Bun, 10/10 on Node in the re-run. What it cannot exclude (codex r4-2): a version-dependent
+timing regression that only shows under load would produce the same pattern; the re-run is the disposition,
+not a proof of cause. Not a Bun divergence, not a product defect. No assertion or timeout was touched. **Owner
 disposition, 2026-09-22: re-run the extension pair at the same commit** (no tracked edit, so the matrix commit
 is unchanged); the discarded attempt's full reports are kept out of the tree, its compare and reproduction are
 this section.
@@ -325,9 +327,11 @@ other seven probes resolve to the same store paths.
 
 ## Notes for the next matrix
 
-- 10 runs detect a 10 % per-run flake with 65 % power and a 5 % one with 40 %; the one red seen across 330
-  reference runs and 330 candidate runs was a contention timeout, and it took a same-commit re-run, not a
-  bigger matrix, to clear.
+- 10 runs detect a 10 % per-run flake with 65 % power and a 5 % one with 40 %. Populations, per engine: the
+  committed evidence is 180 runs (15 × 10 + 30); both full matrices plus the extension re-run are 370. The
+  deterministic Node reds — landing in both matrices, the two test-shape files in matrix #1 — were red 10/10
+  and are explained above; the single *intermittent* red in 370 reference runs was the timeout, and it took a
+  same-commit re-run, not a bigger matrix, to clear.
 - The "load < 4" precondition is not achievable on this host while other sessions run; the honest substitute
   is to record the launch load and read the wall-clock lines as same-window comparisons only.
 - A red reference run cascades: a timed-out `await import()` in one test can leak state into the next, so two

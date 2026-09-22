@@ -54,7 +54,16 @@ and `https://slsa.dev/provenance/v1`), fetched from `registry.npmjs.org/-/npm/v1
 Lifecycle scripts in the new tree: none in `vitest`, `@vitest/mocker`, `@vitest/spy`, `magic-string`,
 `picomatch`, `tinybench`, `@jridgewell/sourcemap-codec`; `jsdom` declares `prepare: wireit`, which Bun does not
 run for dependencies (`trustedDependencies` is undeclared; `bun pm default-trusted` does not list jsdom).
-Maintainer fields were not compared — the diff read covered names, versions, publish dates and scripts.
+Maintainer fields, compared after the fact (codex r4-1, corrected in r4-6: each version record carries its own
+`maintainers` snapshot — vitest 0.1.0's says `patak, antfu` — so this compares the snapshots the four version
+records report, plus their publisher identities): `vitest` — the same five
+maintainers on 4.1.10 and 5.0.1 (`ariperkkio`, `antfu`, `hiogawa`, `oreanno`, `yyx990803`), both versions
+published by `GitHub Actions` (`_npmUser`, the trusted-publisher identity the attestations above bind);
+`jsdom` — the same six on 29.1.1 and 30.1.0 (`timothygu`, `domenic`, `sebmaster`, `zirro`, `tmpvar`,
+`joris-van-der-wel`), both published by `GitHub Actions`. The compared version records report identical maintainer sets and publisher identities; this does not
+establish an immutable ownership history or exclude an intervening ownership change between the two
+versions — the provenance statements (source repo + workflow) are the evidence that binds each version to its
+build.
 
 ## Lockfile diff against `25062c06` (final, after the jsdom revert)
 
@@ -76,7 +85,10 @@ restored from `25062c06` and re-resolved with only the vitest pins changed.
 
 `bun run test:all`: one red file, `packages/bridge-core/src/backup.test.ts` (6 tests) — `expect(...).rejects.toThrow(...)`
 without `await`; vitest 5 fails an unawaited `resolves`/`rejects` assertion (vitest-dev/vitest#10868).
-Classification: test-assumption bug (the assertions never ran under vitest 4). Fix: `await` at the 8 sites;
+Classification: test-assumption bug — vitest 4 auto-awaited an unawaited `rejects`/`resolves` at the end of
+the test and printed `Promise returned by \`expect(…)\` was not awaited` (`@vitest/expect` 4.1.10
+`recordAsyncExpect`); vitest 5 fails the test instead, so the missing `await`s surfaced now (codex r4-4
+corrected the earlier "never ran" reading). Fix: `await` at the 8 sites;
 46/46 green. No `clearMocks` fallout anywhere. Vite prints `config uses features unsupported by configLoader:
 'native'` twice per `test:all` (the extension's `vitest.config.ts` / `vite.shared.ts` /
 `retry-error-reporter.ts` are ESM loaded through the CJS config loader) — a warning, behaviour unchanged;

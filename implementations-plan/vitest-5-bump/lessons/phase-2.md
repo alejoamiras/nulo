@@ -84,8 +84,10 @@ sequentially on an otherwise idle 192-core host, 2026-09-21 20:56–21:48 UTC. D
 under `--bun` too (it spawns `process.execPath`), so these are Bun numbers. Each row is doctor's own **min of
 3 runs** (2 for `bridge-core`, **1** for the extension aggregate — doctor drops the repeats on long suites),
 and its numbers are *warm* for the baseline and *priming* for `fsModuleCache` (the cache is written during the
-measured run). The extension aggregate was measured twice (two doctor passes; the plan asked for three repeats,
-which doctor's own min-of-N gives on every other suite). **Nothing is adopted** — every row below is an input to
+measured run). The extension aggregate was measured twice (two doctor passes), where the plan asked for three —
+**an accepted deviation, recorded** (codex r4-5): doctor drops its own repeats on that suite, a third pass
+would be one more single-sample row, and nothing from doctor is adopted in this PR (D4), so the number's job is
+orientation for a later runtime-change plan, which measures again under its own bar. **Nothing is adopted** — every row below is an input to
 a future runtime-change plan under the 30-run bar, not a decision.
 
 | Suite | baseline (forks · isolate) | `pool: threads` | `isolate: false` | `fsModuleCache: true` | doctor's recommendation |
