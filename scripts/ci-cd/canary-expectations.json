@@ -1,0 +1,14 @@
+{
+	"tests/e2e/network/frozen-account-canary.test.ts": [
+		"frozen-account canary — derive, ctor-deploy with real proof, authwit consume, SW-restart re-derive"
+	],
+	"tests/e2e/network/passkey-execution-canary.test.ts": [
+		"passkey canary — register via PRF ceremony, ctor-deploy with real proof, authwit consume, SW-restart ceremony re-unlock"
+	],
+	"tests/e2e/network/transfers.test.ts": [
+		"transfers scenario — mint, 4 transfer types, token detail, send entry, activity history"
+	],
+	"tests/e2e/network/tx-sendTx-default.test.ts": [
+		"tx-sendTx-default — popup opens, fee picker shown, confirm submits with real proof (prover-ON canary)"
+	]
+}

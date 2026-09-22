@@ -185,6 +185,7 @@ async function discoverExtensionId(browser: Browser): Promise<string> {
 export const chromeDriver: BrowserDriver = {
 	kind: "chrome",
 	scheme: SCHEME,
+	credentialOutlivesPage: false,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
 	newPage: (browser) => browser.newPage(),

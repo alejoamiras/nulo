@@ -253,11 +253,15 @@ jobs:
           EXCLUDE_FILES: ${{ inputs.exclude_files }}
           TEST_FILES: ${{ inputs.test_files }}
           SHARD: ${{ inputs.shard }}
+          # A canary lane writes vitest's json report for the results assertion below.
+          NULO_E2E_RESULTS_FILE: ${{ startsWith(inputs.shard_label, 'canary') && format('{0}/canary-results.json', runner.temp) || '' }}
         run: |
           # Use bash arrays + read -ra so word-splitting is explicit + scoped
           # (avoids shellcheck SC2086 noise on intentional split-into-flags).
-          read -ra EXCLUDE_LIST <<< "$EXCLUDE_FILES"
-          read -ra TEST_FILE_LIST <<< "$TEST_FILES"
+          # `read` consumes one line: a list written as a YAML block scalar would lose every file
+          # after its first, so newlines are folded to spaces first.
+          read -ra EXCLUDE_LIST <<< "${EXCLUDE_FILES//$'\n'/ }"
+          read -ra TEST_FILE_LIST <<< "${TEST_FILES//$'\n'/ }"
           EXCLUDE_ARGS=()
           for f in "${EXCLUDE_LIST[@]}"; do
             [ -n "$f" ] && EXCLUDE_ARGS+=(--exclude "$f")
@@ -295,6 +299,19 @@ jobs:
             fi
           fi
           exit "$CODE"
+
+      # A canary lane is evidence only if every file it was given ran and its substantive test
+      # passed. The exit code and the file count cannot see a skipped describe, a missing sandbox
+      # config or a deleted test — each canary file also carries a setup-contract test that keeps
+      # passing on its own — so the json report is read back against canary-expectations.json.
+      - name: Assert canary results
+        if: ${{ always() && !cancelled() && startsWith(inputs.shard_label, 'canary') }}
+        shell: bash
+        env:
+          TEST_FILES: ${{ inputs.test_files }}
+        run: |
+          read -ra TEST_FILE_LIST <<< "${TEST_FILES//$'\n'/ }"
+          bun scripts/ci-cd/assert-canary-results.ts "${RUNNER_TEMP}/canary-results.json" "${TEST_FILE_LIST[@]}"
 
       # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual
       # leak guarantee for diagnostic probes (compile-time gate is design intent,
@@ -367,7 +384,7 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PROVE_SUCCESS" -eq 0 ] && [ "$SHARD_LABEL" = "canary" ]; then
+          if [ "$PROVE_SUCCESS" -eq 0 ] && [[ "$SHARD_LABEL" == canary* ]]; then
             echo "::error::canary lane finished with ZERO successful native proofs — the native proving lane was bypassed."
             tail -30 /tmp/presto-server.log || true
             exit 1

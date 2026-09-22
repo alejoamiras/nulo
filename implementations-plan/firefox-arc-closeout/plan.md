@@ -366,7 +366,7 @@ differs from F-B16), the e2e skill's ledger, `FIREFOX.md` if a Firefox nuance wa
 **Gate.** `cd ROOT && bun run audit:vue && bun run test:ci-gating` → exit 0. Then **Arc 1's codex loop** (see
 Post-implementation) before Phase 4 starts.
 
-### Phase 4 — the frozen-account canary on Firefox
+### Phase 4 ✓ — the frozen-account canary on Firefox
 
 Un-skip, reword the comment.
 
@@ -376,7 +376,7 @@ Un-skip, reword the comment.
   `Tests 2 passed (2)` — the agent-runner contract test and the canary itself, named in the output — **0
   skipped**; wall time recorded per browser.
 
-### Phase 5 — the passkey canary on Firefox
+### Phase 5 ✓ — the passkey canary on Firefox
 
 `credentialOutlivesPage` on the three driver files; the spec reads it; the seam scan bans it elsewhere.
 
@@ -387,7 +387,7 @@ Un-skip, reword the comment.
   output); on Chrome the popup stays open across the kill exactly as today. Wall times
   recorded, and the four-file sum per browser compared with the 22-minute rule **before** Phase 6.
 
-### Phase 6 — CI lists and the pool pins
+### Phase 6 ✓ — CI lists and the pool pins
 
 The three callers, the reusable workflow's `Assert canary results` step with its script and the `json`
 reporter switch, `behavior-gating.test.ts` pins (a)–(e), `CHROME_ONLY.canary` removed; the split path if the sum
@@ -407,7 +407,7 @@ already says so.
   test left passing → exits 1. Those captured reports become the unit test's fixtures.
 - Job duration is read on the PR (Delivery) — slower browser, max of ≥ 2 runs — against the 22-minute rule.
 
-### Phase 7 — the rule, the bump gate, the closeout
+### Phase 7 ✓ — the rule, the bump gate, the closeout
 
 Committed **with** Phase 6's pins where they state the same fact. A checklist in `lessons/phase-7.md` ticks every
 place recon found the rule — `FIREFOX.md` row; `CLAUDE.md` (Firefox-lanes bullet; § Account-address freeze: on a

@@ -26,7 +26,7 @@ Every suite runs on Chrome (default) and on Firefox (`NULO_E2E_BROWSER=firefox`)
 
 - **A browser difference goes on `BrowserDriver`** (`fixtures/browser/index.ts`), with a Chrome implementation next to the Firefox one. `scripts/e2e/browser-seam.test.ts` rejects a scheme literal, a direct `browser.close()` / `newPage()` / `waitForTarget()`, and any `isFirefox`/`BROWSER` branch under `fixtures/**` or `helpers/**`. A test file may use `isFirefox` to skip itself whole (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`) or to state a real difference in an expectation.
 - **Open, navigate, reload and click through the helpers**: `newPage`, `gotoExtensionPage`, `reloadExtensionPage`, `clickByTestId`/`clickSelector`, `pickFileByTestId`. Each hides a Firefox failure mode that does not look like its cause (a page in a window the wallet opened, a stranded context, a missing user gesture, an unfocused window).
-- **A Chrome-only file is a capability statement, not a quarantine.** The set is four files: `backup-restore-sw-restart` kills the background under an open extension page (Firefox leaves an event page running while one is open), `import-dead-rpc` redirects over CDP Fetch, and the two execution canaries are pinned to Chrome. Adding one is the owner's call.
+- **A Chrome-only file is a capability statement, not a quarantine.** The set is two files: `backup-restore-sw-restart` kills the background under an open extension page (Firefox leaves an event page running while one is open) and `import-dead-rpc` redirects over CDP Fetch. The two execution canaries run on both browsers — the passkey one moves its post-kill ceremony to a fresh popup where the driver's `credentialOutlivesPage` says the credential survives the anchor page. Adding a Chrome-only file is the owner's call.
 - **The e2e tree is outside `bun run typecheck`.** `scripts/e2e/unresolved-names.test.ts` catches a missing import or stale identifier in 3 s; anything subtler is proven by running the file.
 - **Red on Firefox only?** Read `document.visibilityState` and `document.hasFocus()` in the page before touching a fixture.
 
@@ -382,8 +382,9 @@ the flow with the ordinary helpers.
   emits when `close()` had no in-memory session to emit over. A test that keeps a popup open across
   `stopBackground` waits for `#/popup/auth` to arrive on its own and never clicks Lock (the
   reconnect cleanup hides the control); `sw-resilience`'s open-popup test and the passkey canary's
-  stage 4 are the pins (ledger #29) — Chrome's alone, since Firefox will not end its event page
-  under an open popup.
+  stage 4 on Chrome are the pins (ledger #29). On Firefox, which will not end its event page under
+  an open popup, the passkey canary closes the popup before the kill — its session-scoped credential
+  survives that (`credentialOutlivesPage`) — and the fresh popup boots straight into the lock screen.
 - **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
   submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
   node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
@@ -478,10 +479,10 @@ left. `network/inflight-call-background-death.test.ts` is the model: in flight, 
 background (heartbeat-dependent, seconds budget), idle against an attached one (rejected under the
 5 s heartbeat interval, so only the `secure-message` branch can have answered).
 
-A stage that can outlast Chrome's idle reaper (a prover-ON canary) checks `backgroundAlive(ext)`
-first: an absent worker is already the restart, so it proceeds to recovery with a warning; a present
-one gets the real kill (`restartServiceWorker` in the two canaries). Called with no worker alive, the
-helper's own 15s `waitForTarget` throws — nothing in it wakes one.
+A stage that can outlast the browser's idle reaper (a prover-ON canary) checks `backgroundAlive(ext)`
+first: an absent background is already the restart, so it proceeds to recovery with a warning; a
+present one gets the real kill (`restartBackground` in the two canaries). Called with no worker
+alive, Chrome's helper's own 15s `waitForTarget` throws — nothing in it wakes one.
 
 Stage gates are `chrome.storage.session` rendezvous compiled in by the proverless build, each with
 its own protocol: `proof-gate.ts` is presence-only and parks a tx right before `pxe.proveTx`;
@@ -615,6 +616,7 @@ the sanctioned response.
 | 30 | `import-dead-rpc` STATEFUL: `stub saw: [aztec_getNodeInfo]`, `expected -1 to be greater than 0`, the test finishing in ~13s (REFUSED's time) instead of ~36s (nightly 2026-09-18) | CDP `Fetch` interception armed from Puppeteer's `targetcreated` raced the target's first request: Puppeteer resumes a new target (`Runtime.runIfWaitingForDebugger`) in the same tick it emits the event; the offscreen document is created at the account-state leg and its first request is the PXE boot call, which escaped to the real (refused) seed port and fast-failed the registration leg | `helpers/rpc-intercept.ts` runs its own browser-level `Target.setAutoAttach` with `waitForDebuggerOnStart` and resumes each target only after `Fetch.enable` — Chrome holds a target until every waiting client resumes (per-session navigation throttle). Rule: anything that must be armed on a target before its first request cannot hang off `targetcreated`; hold the target. `NULO_E2E_INTERCEPT_LOG=1` prints `attached … (held)` per target | fixed (2026-09-18) |
 | 31 | prover-ON canary: `frozen-account-canary` grant returns `status:"error"` ("The wallet could not process the request.") and/or `transfers` never reaches "Transaction submitted"; the job notice reads `N /prove requests, M successful proofs` with M < N; `presto-server.log` has `Failed to fetch release metadata … status=403 Forbidden` then `Cannot verify bb v<x>: no digest available from GitHub API` | Presto downloads `bb` lazily on the first `/prove` and refuses an unverified binary; the digest lookup is an ANONYMOUS GitHub API call (60/hour per source address, shared between runners). `presto-server` 1.1.1 — the build pinned at the time — sends no `Authorization` header, so the `GITHUB_TOKEN` the start step passes was inert; every `/prove` fails until a lookup gets through, and each failed proof is a failed test (`VITE_NULO_PRESTO_REQUIRED=1`, no fallback) | pin moved to `presto-server` 1.1.2, the first release that sends the token, so the lookup is authenticated (1,000/hour per repository). If the fingerprint returns, check the pin did not fall below 1.1.2 and that the start step still passes `GITHUB_TOKEN`; a re-run clears a one-off. Diagnose in seconds: the assert step now prints the server's WARN/ERROR lines when requests outnumber proofs; the full log is in the `network-e2e-logs-canary` failure artifact | **fixed** — `presto-server` 1.1.2 pinned |
 | 32 | a dApp call hangs after `stopBackground`: `sendTx` / `getChainInfo did not settle within 30000 ms (background alive now: true)`, `pg-status` still connected — the successor is up, the page's session is not | SDK sessions live in the background's memory; the successor's `handlePing` / `handleEncryptedMessage` drop a session they do not know in silence and the dApp waits out its own 300 s ceiling. Not a flake: the product had no reply for a forgotten session | the content wrapper answers an unknown session's `ping` / `secure-message` with the SDK's `session-disconnected` (`wallet-sdk/stale-session.ts`); `network/inflight-call-background-death.test.ts` pins the rejection on both browsers (§3) | fixed, `firefox-arc-closeout` (2026-09-21) |
+| 33 | a green canary job that proved nothing: a Firefox canary job listing fewer files than Chrome's, or a canary under `describe.skip` (or deleted) while the job stays green | the lane lists were hand-mirrored, and the job's verdict was its exit code plus a file count — each canary file also carries a setup-contract test that passes on its own, so a skipped or missing canary leaves the file "passed" | `scripts/ci-cd/behavior-gating.test.ts` "canary lanes": every `*-canary.test.ts` on disk runs under a `canary*` label with `proverless` not true, is out of the pool, the pool equals the union of the dedicated lists, every aggregator `needs` is read — over all four lanes; and `Assert canary results` on every `canary*` label reads vitest's json report (`NULO_E2E_RESULTS_FILE`, added by `e2eReporters()`) against `scripts/ci-cd/canary-expectations.json`: every listed file present, nothing skipped, the named title passed (`scripts/ci-cd/assert-canary-results.ts`, fixtures from real runs) | **closed** — the pins and the step ship together (`firefox-arc-closeout`) |
 
 ## 6. Editing the harness
 
