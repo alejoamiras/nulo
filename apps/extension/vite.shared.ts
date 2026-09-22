@@ -67,8 +67,15 @@ export const noirAliases: Record<string, string> = {
  * auto-added `github-actions` annotation reporter (it is only appended when the
  * resolved list is empty), so it must be re-added by hand on CI or PR
  * annotations silently disappear. RetryErrorReporter surfaces the retained
- * first-attempt errors of retried passes.
+ * first-attempt errors of retried passes. `NULO_E2E_RESULTS_FILE` adds the `json`
+ * report a canary lane is asserted on (`scripts/ci-cd/assert-canary-results.ts`).
  */
-export function e2eReporters(): ("default" | "github-actions" | RetryErrorReporter)[] {
-	return ["default", ...(process.env.GITHUB_ACTIONS ? (["github-actions"] as const) : []), new RetryErrorReporter()]
+export function e2eReporters(): ("default" | "github-actions" | ["json", { outputFile: string }] | RetryErrorReporter)[] {
+	const resultsFile = process.env.NULO_E2E_RESULTS_FILE
+	return [
+		"default",
+		...(process.env.GITHUB_ACTIONS ? (["github-actions"] as const) : []),
+		...(resultsFile ? [["json", { outputFile: resultsFile }] as ["json", { outputFile: string }]] : []),
+		new RetryErrorReporter(),
+	]
 }

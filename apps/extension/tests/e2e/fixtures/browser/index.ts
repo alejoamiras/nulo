@@ -156,11 +156,9 @@ export const EXTENSION_SCHEME = driver.scheme
 export const isFirefox = BROWSER === "firefox"
 export const credentialOutlivesPage = driver.credentialOutlivesPage
 
-/** Why a whole file does not run on Firefox: a capability the browser lacks, or a gate pinned to
- *  Chrome by rule — never a failing test. */
+/** Why a whole file does not run on Firefox: a capability the browser lacks — never a failing test. */
 export const CHROME_ONLY = {
 	backgroundKillUnderPage: "ends the background under an open extension page; Firefox will not end an event page one keeps busy",
-	canary: "an execution canary pinned to Chrome, where it gates every @aztec bump under real proving",
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
 } as const
 

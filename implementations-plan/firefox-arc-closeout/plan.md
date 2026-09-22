@@ -387,7 +387,7 @@ Un-skip, reword the comment.
   output); on Chrome the popup stays open across the kill exactly as today. Wall times
   recorded, and the four-file sum per browser compared with the 22-minute rule **before** Phase 6.
 
-### Phase 6 — CI lists and the pool pins
+### Phase 6 ✓ — CI lists and the pool pins
 
 The three callers, the reusable workflow's `Assert canary results` step with its script and the `json`
 reporter switch, `behavior-gating.test.ts` pins (a)–(e), `CHROME_ONLY.canary` removed; the split path if the sum
