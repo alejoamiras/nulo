@@ -301,20 +301,37 @@ describe("publish flow", () => {
 		expectNoSecretLeak(h)
 	})
 
-	test("a throw after the version exists still carries the recovery procedure", async () => {
-		const h = harness([ok({ uuid: "u-1" }), VALID, CREATED])
-		const realFetch = h.io.fetch
+	test("a throw outside the request path after the version exists still carries the recovery procedure", async () => {
+		// `jti` runs before each fetch and outside `call()`'s catch, so its 4th throw escapes the source PATCH.
+		const attach = harness([ok({ uuid: "u-1" }), VALID, CREATED])
 		let n = 0
-		h.io.fetch = async (req, a, t) => {
-			if (++n === 4) throw new RangeError(`boom ${SECRET}`)
-			return realFetch(req, a, t)
+		attach.io.jti = () => {
+			if (++n === 4) throw new TypeError(`boom ${SECRET}`)
+			return `jti-${n}`
 		}
+		expect((await runPublishFirefoxAmo(env(), attach.io)).exit).toBe(1)
+		expect(attach.output()).toContain("version 9001 exists but attach source: unexpected failure (TypeError)")
+		expect(attach.output()).toContain("do NOT re-run")
+		expectNoSecretLeak(attach)
+
+		// The 3rd throw escapes the create request itself: the version may exist remotely.
+		const create = harness([ok({ uuid: "u-1" }), VALID])
+		let m = 0
+		create.io.jti = () => {
+			if (++m === 3) throw new TypeError("boom")
+			return `jti-${m}`
+		}
+		expect((await runPublishFirefoxAmo(env(), create.io)).exit).toBe(1)
+		expect(create.output()).toContain("create version: unexpected failure (TypeError)")
+		expect(create.output()).toContain("do NOT re-run")
+		expect(create.kinds()).toEqual(["upload", "upload-status"])
+	})
+
+	test("a fetch that throws after the version exists is a request failure with the recovery procedure", async () => {
+		const h = harness([ok({ uuid: "u-1" }), VALID, CREATED, new RangeError(`boom ${SECRET}`)])
 		expect((await runPublishFirefoxAmo(env(), h.io)).exit).toBe(1)
 		expect(h.output()).toContain("version 9001 exists but attach source: request failed (RangeError)")
 		expect(h.output()).toContain("do NOT re-run")
-		h.io.jti = () => {
-			throw new TypeError("boom")
-		}
 		expectNoSecretLeak(h)
 	})
 

@@ -58,8 +58,16 @@ one script and produces a tree that must match the submitted add-on byte for byt
 ## What the build does
 
 - Vite (Rolldown) bundles the TypeScript and Vue sources; the manifest comes from
-  `apps/extension/manifest/manifest.firefox.config.ts`. No minified or generated code is checked
-  in; everything under `dist/` is produced by this step.
+  `apps/extension/manifest/manifest.firefox.config.ts`. No minified code is checked in and
+  everything under `dist/` is produced by this step. The archive does carry three kinds of
+  generated or vendored **input**, each readable: `apps/extension/src/types/auto-imports.d.ts`
+  and `components.d.ts` (type declarations the build regenerates; no runtime code),
+  `packages/design/src/tokens.ts` (design tokens rendered from `token-contract.ts` by
+  `packages/design/scripts/gen-tokens.ts`; a test fails when they drift), and
+  `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json` (the Schnorr account
+  contract's compiled artifact, a byte-exact copy from the `@aztec/accounts@5.0.1` npm package —
+  origin and SHA-256 in `PROVENANCE.md` beside it — pinned so account addresses stay stable
+  across upstream releases; the extension executes it inside the bundled Aztec VM).
 - The build makes **no network request**. All inputs are the archive plus the installed
   dependencies.
 - Third-party code is used as published, with the modifications listed in the reviewer notes
