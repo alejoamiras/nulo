@@ -150,7 +150,6 @@ describe("CI behavior-gating guard", () => {
     // Beyond src + manifest: the licence texts and the expected-minimum list are build inputs too.
     for (const input of inputs) {
       expect(quick["extension"], `extension build: ${input}`).toContain(input)
-      expect(quick["firefox-touching"], `the zip-content assertion runs per target: ${input}`).toContain(input)
     }
     // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
     const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/_build-extension.yml"), "utf8")) as any
@@ -159,6 +158,13 @@ describe("CI behavior-gating guard", () => {
     const firstUpload = steps.findIndex((step) => step.name?.startsWith("Upload"))
     expect(assertion, "the assertion step exists").toBeGreaterThan(-1)
     expect(assertion, "an artifact without notices is never uploaded").toBeLessThan(firstUpload)
+  })
+
+  test("an extension build builds both targets, so the preview comment links both", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-quick.yml"), "utf8")) as any
+    expect(wf.jobs["build-chrome"].if).toBe("needs.changes.outputs.needs-extension-build == 'true'")
+    expect(wf.jobs["build-firefox"].if).toBe(wf.jobs["build-chrome"].if)
   })
 
   test("tools build covers the tools graph", () => {
