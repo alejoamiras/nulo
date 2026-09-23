@@ -2,7 +2,7 @@
 plan: popup-escape-followups
 tier: light, without a plan audit (the owner scoped the run as "a single PR + codex iteration loop")
 driver: claude-code
-status: in review 2026-09-23 — PR #678; codex post-impl loop converged (conditional approve → approve → approve, 3 rounds); a fresh codex review of the PR (xhigh) converged in 2 rounds (conditional approve → approve); the owner authorised the merge once CI is green
+status: completed 2026-09-23 — merged to dev (#678, squash `f8bf0aa6`) on the owner's authorisation after a fresh codex review of the PR converged in 2 rounds (conditional approve → approve); the post-impl loop had converged in 3 (conditional approve → approve → approve)
 eli5_mode: none (owner-scoped run)
 code_review: off
 budget: codex high, at most 3 rounds
@@ -105,4 +105,4 @@ One branch (`worktree-popup-escape-followups`), one PR into `dev`, opened after 
 1. The first CI run was all green: 51 pass, 3 skipped. The preview comment linked both builds.
 2. The owner then wrote "Codex review it, and merge it when green." A fresh codex session reviewed the PR: conditional approve (two Medium test-quality findings, one Low record), then approve with no material findings.
 3. Validating its fixes surfaced two double reads in the test file, and both were fixed. See `lessons/phase-1.md` § PR review.
-4. The merge is a squash onto `dev` once CI is green again.
+4. Merged as the squash `f8bf0aa6` once CI was green again (51 pass, 3 skipped, both Firefox lanes included).
