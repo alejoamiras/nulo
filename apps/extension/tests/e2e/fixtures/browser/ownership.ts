@@ -198,13 +198,17 @@ export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): P
 	rmSync(recordFile(record), { force: true })
 }
 
+/** True once two scans a poll apart find nothing. A process inside execve reads an empty environ,
+ *  so one empty scan can miss a process that is very much alive; it shows again a moment later. */
 async function waitForExit(record: LaunchOwnership, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
-	while (Date.now() < deadline) {
-		if (!ownsProcess(record)) return true
+	let emptyScans = 0
+	for (;;) {
+		emptyScans = ownsProcess(record) ? 0 : emptyScans + 1
+		if (emptyScans === 2) return true
+		if (Date.now() >= deadline) return false
 		await new Promise((resolve) => setTimeout(resolve, 100))
 	}
-	return !ownsProcess(record)
 }
 
 /**

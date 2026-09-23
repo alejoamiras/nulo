@@ -39,11 +39,17 @@ function launchMarker(): string {
 	return marker
 }
 
-/** Real processes to own, so the kill path is exercised rather than mocked. */
-function spawnMarked(marker: string, command = "sleep", args = ["120"]) {
+/** Real processes to own, so the kill path is exercised rather than mocked. Returns once the child
+ *  carries its marker: Bun's spawn returns while the child is still inside execve, and until the
+ *  kernel has set up the new image its `/proc/<pid>/environ` reads empty, so a scan would miss it. */
+async function spawnMarked(marker: string, command = "sleep", args = ["120"]): Promise<number> {
 	const child = spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, [LAUNCH_ENV]: marker } })
-	if (!child.pid) throw new Error("could not spawn a test process")
-	return child.pid
+	const pid = child.pid
+	if (!pid) throw new Error("could not spawn a test process")
+	const marked = () => ownedProcesses(marker).includes(pid)
+	await until(marked)
+	if (!marked()) throw new Error(`process ${pid} never showed its marker`)
+	return pid
 }
 
 /** A record whose owning run is gone, which is what makes the sweep act on it. */
@@ -79,9 +85,9 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(readStartTime(0)).toBeUndefined()
 	})
 
-	test("a process is owned by the marker it inherited, not by its number", () => {
+	test("a process is owned by the marker it inherited, not by its number", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		expect(ownedProcesses(marker)).toEqual([pid])
 		// The same pid under another launch's marker is a stranger: this is the recycled-number case.
 		expect(ownsProcess(ownedByThisRun({ marker: launchMarker(), pid, profileDir: "", ownsProfile: false, label: "t" }))).toBe(false)
@@ -89,7 +95,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("release stops the processes and only then removes the profile", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "release" })
 		recordLaunch(record)
@@ -103,7 +109,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 	// and the profile would be deleted under it.
 	test("a child that left the process group is still found and stopped", async () => {
 		const marker = launchMarker()
-		const leader = spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
+		const leader = await spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
 		await until(() => ownedProcesses(marker).length === 2)
 		expect(ownedProcesses(marker)).toHaveLength(2)
 
@@ -118,7 +124,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 	test("a caller-supplied profile survives release, and the record is still cleared", async () => {
 		const marker = launchMarker()
 		const profileDir = plainDir("caller-owned")
-		const record = ownedByThisRun({ marker, pid: spawnMarked(marker), profileDir, ownsProfile: false, label: "borrowed" })
+		const record = ownedByThisRun({ marker, pid: await spawnMarked(marker), profileDir, ownsProfile: false, label: "borrowed" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
@@ -128,7 +134,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a record whose owner is still alive is NOT an orphan — it belongs to a running agent", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		// Owned by THIS process, which is alive for the duration of the test.
 		recordLaunch(ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "live" }))
@@ -139,7 +145,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a record whose owner is gone is reaped, processes and profile both", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		recordLaunch(orphaned({ marker, pid, profileDir, ownsProfile: true, label: "orphan" }))
 		expect(await reapOrphanLaunches()).toContain("orphan")
@@ -160,7 +166,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
 	test("an orphan's record never authorises a signal to a process that lacks its marker", async () => {
-		const stranger = spawnMarked(launchMarker())
+		const stranger = await spawnMarked(launchMarker())
 		recordLaunch(orphaned({ marker: launchMarker(), pid: stranger, profileDir: "", ownsProfile: false, label: "reissued" }))
 		expect(await reapOrphanLaunches()).toContain("reissued")
 		expect(readStartTime(stranger)).toBeDefined()
@@ -201,7 +207,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a malformed or misfiled record is discarded without acting on it", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		mkdirSync(RECORDS, { recursive: true })
 		const misfiled = path.join(RECORDS, `${newLaunchMarker()}.json`)
 		writeFileSync(misfiled, JSON.stringify(orphaned({ marker, pid, profileDir: "", ownsProfile: false, label: "misfiled" })))
