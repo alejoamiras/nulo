@@ -181,11 +181,12 @@ export function listOwnedLaunches(): LaunchOwnership[] {
 /**
  * Stop the launch's processes and only then delete the profile. Deleting a profile a live Firefox
  * still holds open leaves the store pinned as a deleted-but-open file, which is how a reaper turns
- * one failed run into host-wide memory pressure.
+ * one failed run into host-wide memory pressure. `scan` is a parameter so that what each poll finds
+ * can be scripted.
  */
-export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): Promise<void> {
+export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000, scan = ownedProcesses): Promise<void> {
 	// A killed process stays in /proc until it is reaped, so SIGKILL is waited out as well.
-	const stopped = (await stopOwned(record, "SIGTERM", graceMs)) || (await stopOwned(record, "SIGKILL", 2_000))
+	const stopped = (await stopOwned(record, "SIGTERM", graceMs, scan)) || (await stopOwned(record, "SIGKILL", 2_000, scan))
 	// A process that outlived SIGKILL is unkillable (uninterruptible sleep); leaving its profile is
 	// the lesser harm, and the record survives for the next run's sweep.
 	if (!stopped) return
@@ -198,12 +199,17 @@ export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): P
  *  A process inside execve reads an empty environ until the kernel has set up its new image, so it
  *  is signalled when a later scan finds it. Best effort: nothing bounds how long an exec reads
  *  empty, and a process no scan ever found cannot be shown gone. */
-async function stopOwned(record: LaunchOwnership, signal: NodeJS.Signals, timeoutMs: number): Promise<boolean> {
+async function stopOwned(
+	record: LaunchOwnership,
+	signal: NodeJS.Signals,
+	timeoutMs: number,
+	scan: (marker: string) => number[],
+): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
 	const signalled = new Set<number>()
 	let emptyScans = 0
 	for (;;) {
-		const live = ownedProcesses(record.marker)
+		const live = scan(record.marker)
 		for (const pid of live) if (!signalled.has(pid) && signalIfOwned(pid, record.marker, signal)) signalled.add(pid)
 		emptyScans = live.length === 0 ? emptyScans + 1 : 0
 		if (emptyScans === 2) return true

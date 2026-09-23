@@ -39,17 +39,45 @@ function launchMarker(): string {
 	return marker
 }
 
-/** Real processes to own, so the kill path is exercised rather than mocked. Returns once the child
- *  carries its marker: Bun's spawn returns while the child is still inside execve, and until the
- *  kernel has set up the new image its `/proc/<pid>/environ` reads empty, so a scan would miss it. */
+/** Real processes to own, so the kill path is exercised rather than mocked. Returns once a scan has
+ *  found the child carrying its marker: Bun's spawn returns while the child is still inside execve,
+ *  and until the kernel has set up the new image its `/proc/<pid>/environ` reads empty. A child that
+ *  execs again reads empty again, so one sighting is the proof, not a second read. */
 async function spawnMarked(marker: string, command = "sleep", args = ["120"]): Promise<number> {
 	const child = spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, [LAUNCH_ENV]: marker } })
 	const pid = child.pid
 	if (!pid) throw new Error("could not spawn a test process")
-	const marked = () => ownedProcesses(marker).includes(pid)
-	await until(marked)
-	if (!marked()) throw new Error(`process ${pid} never showed its marker`)
+	let seen = false
+	await until(() => {
+		seen = ownedProcesses(marker).includes(pid)
+		return seen
+	})
+	if (!seen) throw new Error(`process ${pid} never showed its marker`)
 	return pid
+}
+
+/** Runs a release on fake timers, so each poll lands on a fixed tick however slow a scan is, and
+ *  records every signal meant for `pid` instead of sending it; with `failFirst` the first send
+ *  fails. Returns the signals in the order they were sent. */
+async function recordSignals(pid: number, release: () => Promise<void>, failFirst = false): Promise<unknown[]> {
+	const sent: unknown[] = []
+	const realKill = process.kill.bind(process)
+	const kill = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+		if (target !== pid) return realKill(target, signal)
+		sent.push(signal)
+		if (failFirst && sent.length === 1) throw new Error("not sent")
+		return true
+	})
+	vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })
+	try {
+		const released = release()
+		await vi.advanceTimersByTimeAsync(10_000)
+		await released
+	} finally {
+		vi.useRealTimers()
+		kill.mockRestore()
+	}
+	return sent
 }
 
 /** A record whose owning run is gone, which is what makes the sweep act on it. */
@@ -105,30 +133,35 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
 	})
 
-	// No test process can be made to outlive SIGKILL, so here its signals are swallowed, and the
-	// first one fails. A failed send is retried on the next poll; a sent one is not repeated.
+	// No test process can be made to outlive SIGKILL, so here its signals are recorded, not sent, and
+	// the first one fails. A failed send is retried on the next poll; a sent one is not repeated.
 	test("a launch that outlives SIGKILL keeps its profile and its record", async () => {
 		const marker = launchMarker()
 		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "unkillable" })
 		recordLaunch(record)
-		const sent: unknown[] = []
-		const realKill = process.kill.bind(process)
-		const kill = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
-			if (target !== pid) return realKill(target, signal)
-			sent.push(signal)
-			if (sent.length === 1) throw new Error("not sent")
-			return true
-		})
-		try {
-			await releaseLaunch(record, 1_000)
-		} finally {
-			kill.mockRestore()
-		}
-		expect(sent).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"])
+		expect(await recordSignals(pid, () => releaseLaunch(record, 1_000), true)).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"])
 		expect(existsSync(profileDir)).toBe(true)
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(true)
+	})
+
+	// A process inside execve reads an empty environ, so one scan can miss it and a later one find it.
+	test("a process a later scan finds is signalled, and only two empty scans in a row free the profile", async () => {
+		const marker = launchMarker()
+		const pid = await spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
+		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "late" })
+		recordLaunch(record)
+		const polls = [[], [pid], [], []]
+		const profileAtPoll: boolean[] = []
+		const scan = () => {
+			profileAtPoll.push(existsSync(profileDir))
+			return polls[profileAtPoll.length - 1] ?? []
+		}
+		expect(await recordSignals(pid, () => releaseLaunch(record, 1_000, scan))).toEqual(["SIGTERM"])
+		expect(profileAtPoll).toEqual([true, true, true, true])
+		expect(existsSync(profileDir)).toBe(false)
 	})
 
 	// Firefox's children are free to start their own session. A group signal would miss that one
