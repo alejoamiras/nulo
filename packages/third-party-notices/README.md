@@ -51,6 +51,7 @@ build rather than vanishing. Every installation is validated before duplicates a
 | Emitted code asset (`.wasm`, `.wasm.gz`, `.js`) that is not a chunk a recorded worker build compiled and that no `VENDORED` asset claim covers, or a claim whose covering package is not bundled | refused |
 | A `generated` claim whose asset's whole text is not the shape that tool writes (a file name proves nothing) | refused |
 | `VENDORED` entry that matches nothing, accounts for nothing, was reviewed at another host version, or whose component lacks an `https` source, a text, or an allowed licence | refused |
+| `DERIVED` entry that lacks an `https` source, a text, or an allowed licence | refused |
 
 All violations of one build are reported together, each naming its package.
 
@@ -66,7 +67,7 @@ a branch). An override cannot launder a licence: its expression goes through the
 | `src/packages.ts` | module id → owning package; licence-file discovery |
 | `src/collect.ts` | rendered modules + assets out of an output bundle |
 | `src/stylesheets.ts` | what a stylesheet inlines by `@import` / `@use` / `@forward`, transitively |
-| `src/policy.ts` | `ALLOWED`, `FONT_ALLOWED`, `OVERRIDES`, `VENDORED` — the reviewed records |
+| `src/policy.ts` | `ALLOWED`, `FONT_ALLOWED`, `OVERRIDES`, `VENDORED`, `DERIVED` — the reviewed records |
 | `src/generate.ts` | policy checks + byte-stable rendering; `noticeNames` parses a rendered file |
 | `src/plugin.ts` | the thin Vite shell (`main` + `worker`) |
 | `src/check-minimum.ts`, `bin/check-minimum.ts` | CI: a built dir's notices ⊇ `expected-minimum.txt` |
@@ -105,7 +106,9 @@ one Vite served from cache stays.
   own entries; the Emscripten runtime brings musl libc, whose notice rides with Emscripten's. `barretenberg.wasm` and the noir
   wasm have **not** been inventoried to that depth: they are attributed to the project that
   publishes them, under its licence files.
-- Third-party source copied into a first-party directory is invisible to any module walk.
+- Third-party source copied into a first-party directory is invisible to any module walk. It is
+  recorded by hand in `DERIVED`, whose entries render in every build and meet the same source, text
+  and licence rules as a `VENDORED` component.
 - What is deliberately not covered, and what would reopen each item, is in
   `implementations-plan/third-party-notices/follow-ups.md`.
 

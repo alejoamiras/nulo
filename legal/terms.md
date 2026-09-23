@@ -330,8 +330,10 @@ make your own decisions.
 
 ## 13. Open source, licence and the Nulo name
 
-**13.1 The code.** Nulo's original code is licensed under the **Apache License, Version 2.0**, which
-governs the rights it grants in source and object form. These Terms address use of the Developer's
+**13.1 The code.** Nulo's code is licensed under the **Apache License, Version 2.0**, which governs
+the rights it grants in source and object form. Parts of it are derived from Azguard Wallet,
+Copyright 2026 BB Strategy Pte. Ltd., also licensed under Apache-2.0; the NOTICE file and the notices
+accompanying each release identify them. These Terms address use of the Developer's
 distributed extension and do not restrict rights granted by that licence. Bundled components are
 licensed as identified in the licence files and notices accompanying each release, including any
 alternative licence expressly granted by their copyright holders. These Terms do not restrict
