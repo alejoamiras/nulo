@@ -28,3 +28,9 @@ One `e2e:agent` run (proverless, retry 0) with the real file and the mutant:
 | Mutant B (old walk) | ✗, but for a different reason — on its run the DOM did *not* linger, so `registry-toggle-submit` was unreachable. Its landings give the header order: `account-avatar-btn → account-selector → account-address-copy → network-button → header-lock → BUTTON (Back) → authwits-actions-btn` |
 
 Put together: on mutant A's lingering state, the old walk's ten Tabs would have been four inside the popup plus the five header controls plus Back — `registry-toggle-submit` included, `authwits-actions-btn` one Tab away — so it would have **passed a premature close**, exactly as codex predicted. The new walk fails it at the first Tab that leaves. The mutant file was deleted after the run (`git status` clean of it); the sandbox's ports were released; static scans 91/91 afterwards.
+
+## Round 2 — same session, resumed with the fix commit `28782ba3`
+
+Verdict, verbatim: `approve` — "no new material findings". The loop converged in two rounds; nothing was rejected at any point.
+
+After the fixes: `build:chrome` then `bun run test:e2e tests/e2e/popup-stack.test.ts` → 2/2 (the network runner had rebuilt `dist/chrome` with its own flavour, so the smoke build was redone first).

@@ -2,7 +2,7 @@
 plan: popup-escape-closes
 tier: light
 driver: claude-code
-status: approved 2026-09-23 (rev 3; the owner pasted the recommended /goal seed unchanged — no conditions) — implementing
+status: in review 2026-09-23 — all phases ✓, codex post-impl loop converged (conditional approve → approve, 2 rounds); PR into dev opened, NOT merged (the owner decides). Approved 2026-09-23 as rev 3, no conditions
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex high; code-review off)
