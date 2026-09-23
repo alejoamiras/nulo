@@ -21,7 +21,6 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import type { TxProfileResult, TxSimulationResult, UtilityExecutionResult } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import z from "zod"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { ContactService } from "@/wallet/services/contact/service"
@@ -65,8 +64,10 @@ export class ViewExecutor {
 	public constructor(private readonly deps: ViewExecutorDeps) {}
 
 	public async executeSimulateTransaction(op: SimulateTransactionOperation): Promise<unknown> {
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { txRequest, pxe, account } = await this.deps.txBuilder.buildStandard(
 			op,
+			fence,
 			AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
 		)
 		const simulatedTx = await pxe.simulateTx(txRequest, {
@@ -89,15 +90,12 @@ export class ViewExecutor {
 		const pxe = this.deps.pxeService.getPXE(networkInfoFrom(network))
 
 		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
+		const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
+		const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 		if (!registeredContracts.has(op.contract)) {
-			const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
-			const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 			this.deps.logDebug("Register contract")
 			await pxe.registerContract({ instance, artifact })
 		}
-
-		const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
-		const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 
 		const fn = findFunctionByName(artifact, op.method)
 		if (!fn) {
@@ -124,7 +122,15 @@ export class ViewExecutor {
 		try {
 			return decodeFromAbi(fn.returnTypes, result)
 		} catch (error) {
-			this.deps.logError("Failed to decode simulation results", fn.returnTypes, result, getErrorMessage(error))
+			// `result` is the decoded return of a call executed under the user's own account scope —
+			// live private contract state. The expected types and the arity are what diagnose a
+			// decode mismatch; the values are the leak.
+			this.deps.logError(
+				"Failed to decode simulation results",
+				fn.returnTypes,
+				{ returnValueCount: Array.isArray(result) ? result.length : 0 },
+				error,
+			)
 			return result as AbiDecoded
 		}
 	}
@@ -270,6 +276,7 @@ export class ViewExecutor {
 		const result = await runFastPath({
 			node,
 			pxe,
+			resolver: this.deps.resolver,
 			network,
 			fromAddr: AztecAddress.fromStringUnsafe(op.accountAddress),
 			opts: op.opts,
@@ -295,6 +302,7 @@ export class ViewExecutor {
 	 *  synced, or when a fast-path-exclusive operation throws and signals
 	 *  fallback. */
 	private async executeAztecSimulateTxStandard(op: AztecSimulateTxOperation): Promise<TxSimulationResult> {
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 		// Thread the dApp's `opts.fee.gasSettings` (including
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
@@ -302,6 +310,7 @@ export class ViewExecutor {
 		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
 		const { txRequest, node, pxe, account } = await this.deps.txBuilder.buildStandard(
 			{ ...op, actions },
+			fence,
 			feePaymentMethod,
 			undefined,
 			op.opts.fee?.gasSettings,
@@ -385,8 +394,9 @@ export class ViewExecutor {
 		if (op.accountAddress !== op.opts?.from?.toString()) {
 			throw new Error("Invalid `opts.from`")
 		}
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
-		const { txRequest, node, pxe } = await this.deps.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
+		const { txRequest, node, pxe } = await this.deps.txBuilder.buildStandard({ ...op, actions }, fence, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
 		await applyEmbeddedFpcGasCap(txRequest, fee, node)
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []

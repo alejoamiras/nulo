@@ -5,22 +5,9 @@
  * services as the popup.
  */
 
-import { consoleMethods, LogLevel } from "@/wallet/logger"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
-import { getErrorData } from "@nulo/wallet-core/utils"
+import { installConsoleForwarding } from "@/wallet/logger/console-forwarding"
 
-// Forward console.{log,warn,error,...} to the unified log pipe.
-const logger = new LoggerServiceClient("onboarding")
-for (const [method, level] of consoleMethods) {
-	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
-	;(self as any)[`on${method}`] = (...args: any[]) => {
-		logger.log("ui", level, ...args)
-	}
-}
-
-self.onunhandledrejection = (e: PromiseRejectionEvent) => {
-	logger.log("ui", LogLevel.Error, getErrorData(e.reason))
-}
+installConsoleForwarding("onboarding")
 
 import { createPinia } from "pinia"
 import { createApp } from "vue"
@@ -30,7 +17,8 @@ import routes from "~pages"
 import "@nulo/design/base.css"
 import "./onboarding.scss"
 
-import { initAppServiceContext } from "@/utils/core"
+import { initAppServiceContext, managers } from "@/utils/core"
+import { createLegalGuard } from "./legal-guard"
 
 // Match popup's eager service-context init so consumers don't race on
 // "ports not ready". Idempotent — safe to call from any context.
@@ -46,5 +34,7 @@ const router = createRouter({
 	history: createWebHashHistory(import.meta.env.BASE_URL),
 	routes,
 })
+
+router.beforeEach(createLegalGuard(() => managers.legal.getStatus()))
 
 createApp(App).use(router).use(createPinia()).mount("#app")

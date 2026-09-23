@@ -1,6 +1,6 @@
-import { expect, inject } from "vitest"
+import { inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -34,6 +34,6 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "getAddressBook", async () => {
 			await clickByTestId(page, "pg-btn-getAddressBook")
 		})
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "data-addressBook:result")
 	},
 )

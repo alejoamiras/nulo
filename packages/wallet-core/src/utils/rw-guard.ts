@@ -1,4 +1,5 @@
 import { type ILogger, LogLevel } from "../logger/interfaces"
+import { type Deferred, deferred } from "./deferred"
 
 /** Force-release timeout for stuck readers (ms). Converts a deadlock into a
  *  loud log + forced drain so the wallet recovers on its own instead of
@@ -14,19 +15,6 @@ import { type ILogger, LogLevel } from "../logger/interfaces"
  *  + margin; the delete path itself now WAITS behind the proof (its clear ops got
  *  the proof-length request timeout) rather than relying on this force-release. */
 export const MAX_READER_DRAIN_MS = 90 * 60_000
-
-interface Deferred<T> {
-	promise: Promise<T>
-	resolve: (value: T) => void
-}
-
-function deferred<T = void>(): Deferred<T> {
-	let resolve!: (value: T) => void
-	const promise = new Promise<T>((res) => {
-		resolve = res
-	})
-	return { promise, resolve }
-}
 
 /**
  * Read/write concurrency guard.

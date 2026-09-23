@@ -18,7 +18,7 @@ const stubs = {
 				:type="type"
 				:data-error="error"
 				@input="$emit('update:modelValue', $event.target.value); $emit('input', $event)"
-			/><slot name='right' /><slot name='suffix' /><slot name='labelSuffix' />`,
+			/><slot name='right' /><slot name='suffix' /><slot name='labelSuffix' /><slot name='bottom' />`,
 	},
 }
 
@@ -30,46 +30,25 @@ const baseProps = (over = {}) => ({
 })
 
 describe("ImportSecretForm", () => {
-	it("renders seed input + new+confirm password fields when method=seed", () => {
+	it("renders phrase input + new+confirm password fields when method=seed", () => {
 		const wrapper = mount(ImportSecretForm, { props: baseProps(), global: { stubs } })
-		expect(wrapper.text()).toContain("Seed Phrase")
+		expect(wrapper.text()).toContain("Recovery Phrase")
 		expect(wrapper.text()).toContain("New Password")
 		// new + confirm
 		expect(wrapper.find("[data-testid=import-password-input]").exists()).toBe(true)
 		expect(wrapper.find("[data-testid=import-password-confirm-input]").exists()).toBe(true)
 	})
 
-	it("renders Plain Key labels and the private key input testid for method=private_key", () => {
-		const wrapper = mount(ImportSecretForm, { props: baseProps({ method: "private_key" }), global: { stubs } })
-		expect(wrapper.text()).toContain("Plain Key")
-		expect(wrapper.find("[data-testid=import-private-key-input]").exists()).toBe(true)
-	})
-
-	it("renders single password (no confirm) and Password label for method=public_key", () => {
-		const wrapper = mount(ImportSecretForm, { props: baseProps({ method: "public_key" }), global: { stubs } })
-		expect(wrapper.text()).toContain("Encrypted Key")
-		expect(wrapper.text()).toContain("Password") // section label
-		expect(wrapper.find("[data-testid=import-password-confirm-input]").exists()).toBe(false)
-	})
-
-	it("exposes per-method input testids (seed, private_key, public_key)", () => {
+	it("exposes ONLY the seed input testid (plain/encrypted key inputs are gone)", () => {
 		const seed = mount(ImportSecretForm, { props: baseProps({ method: "seed" }), global: { stubs } })
 		expect(seed.find("[data-testid=import-seed-input]").exists()).toBe(true)
 		expect(seed.find("[data-testid=import-private-key-input]").exists()).toBe(false)
 		expect(seed.find("[data-testid=import-public-key-input]").exists()).toBe(false)
-
-		const priv = mount(ImportSecretForm, { props: baseProps({ method: "private_key" }), global: { stubs } })
-		expect(priv.find("[data-testid=import-private-key-input]").exists()).toBe(true)
-		expect(priv.find("[data-testid=import-seed-input]").exists()).toBe(false)
-
-		const pub = mount(ImportSecretForm, { props: baseProps({ method: "public_key" }), global: { stubs } })
-		expect(pub.find("[data-testid=import-public-key-input]").exists()).toBe(true)
-		expect(pub.find("[data-testid=import-seed-input]").exists()).toBe(false)
 	})
 
-	it("emits secretInput when typing into the secret field", async () => {
-		const wrapper = mount(ImportSecretForm, { props: baseProps({ method: "private_key" }), global: { stubs } })
-		await wrapper.find("[data-testid=import-private-key-input]").trigger("input")
+	it("emits secretInput when typing into the phrase field", async () => {
+		const wrapper = mount(ImportSecretForm, { props: baseProps({ method: "seed" }), global: { stubs } })
+		await wrapper.find("[data-testid=import-seed-input]").trigger("input")
 		expect(wrapper.emitted("secretInput")).toBeTruthy()
 	})
 
@@ -88,12 +67,13 @@ describe("ImportSecretForm", () => {
 		expect(wrapper.text()).toContain("Boom")
 	})
 
-	it("forwards error.type='secret' to the private key Input via the error prop", () => {
-		const wrapper = mount(ImportSecretForm, {
-			props: baseProps({ method: "private_key", error: { type: "secret", title: "Bad", tooltip: "" } }),
+	it("shows the 'Correct' indicator only at exactly 24 words", () => {
+		const short = mount(ImportSecretForm, { props: baseProps({ method: "seed" }), global: { stubs } })
+		expect(short.text()).not.toContain("Correct")
+		const full = mount(ImportSecretForm, {
+			props: { ...baseProps({ method: "seed" }), seedPhrase: Array(24).fill("word").join(" ") },
 			global: { stubs },
 		})
-		const input = wrapper.find("[data-testid=import-private-key-input]")
-		expect(input.attributes("data-error")).toBe("true")
+		expect(full.text()).toContain("Correct")
 	})
 })

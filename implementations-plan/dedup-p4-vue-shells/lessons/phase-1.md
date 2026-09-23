@@ -1,0 +1,109 @@
+# Lessons — dedup-p4-vue-shells
+
+Base: `worktree-dedup-p3-service-wrappers` (PR #568). Scope: ledger ids J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3.
+
+## Phase 0 — blueprint light under the ledger README's pre-answers
+
+- Deviation: the README pre-answers "recon: 0 extra agents"; one read-only Sonnet reuse sweep ran anyway because P4
+  introduces a mechanism with no precedent in the repo (CSS-module partials) and the ledger's line ranges were two
+  phases old. Its findings are condensed in `recon.md`; every verdict that matters was re-checked by hand.
+- The `composes:` spike (FeeCostReadout, reverted) is the fact the whole phase rests on: vitest 6/6, build 0, two-token
+  mapping, one emitted partial rule.
+
+## Skipped ids
+
+- **K4** — the seven onboarding heroes share a shape but not their CSS or markup (padding 8/16/24, bar 40/56,
+  `Flex` vs `header`, centered variants with a `.subhead`); a shared component would need four props and two slots
+  to save ~30 lines.
+- **J3 (LSM adoption)** — folded into J1's partial; `ListStatusMessage.empty` is a dashed 32px card, the pages'
+  empty state a borderless 12px-gap column.
+- **J4 (useEntityCrud move for contracts/notes)** — three visible-state differences (`isLoading` start value, error
+  reset on refresh, the refetch toast) for ~30 lines; the template piece still lands.
+
+## Codex plan audit
+
+`/codex high` (GPT-6 Astra, session `01a07cb9-c178-7562-ab43-7d0f685a3e8f`): *conditional approve*, seven conditions, all verified and adopted (table in `plan.md` § Audit log). The two that changed the design: J2's shell must forward `#trailing` as a named slot and leave three exceptional pages on a partial; M3 is skipped (two chip variants and a two-chip case). Notes' error reset corrected the J4 reasoning.
+
+## Skipped ids (after the audit)
+
+- **M3** — the Incoming chip is accent-coloured and non-shrinking, the settled card's chip lacks the nowrap rules and renders two chips when both labels exist; a single `chip` prop on the layout cannot preserve that.
+- **L3 (LSM adoption)** — `ListStatusMessage.empty_sub` adds `width:100%` and `overflow-wrap:break-word`; the two views compose a partial instead.
+
+## Phase 1 — partials (J1, J3, L1, K9, K10, N6, N9, L3, J2's classes) ✓
+
+- Six partials, 42 consumer files, +108/−467 before formatting. Every extraction asserted the consumer blocks equal
+  (declaration-set compare, so `verify`'s reordered `.wrapper` and `GasBalanceCard`'s reformatted shimmer passed) before
+  writing the partial from the first consumer.
+- N9: the partial carries only the shared declarations and the `:hover`/`:active` blocks; `.fpc`/`.contact` keep
+  `&:hover .icons { opacity: 1 }` locally (the build emits native nesting, so `.fpc:hover .icons` keeps its
+  specificity), `.fpc` keeps `min-height`, all four keep `padding`.
+- K10: the `body` rule stays in both viewer windows; only `viewer_wrapper`/`json_viewer` moved.
+- Gate: lint 0 · extension typecheck 0 · 49 files / 487 tests (send, general, execute, popups, pages) · `build:chrome` 0
+  with `src/types/` unchanged. Emitted CSS: each partial rule once (`select_row`, `approval_wrapper`, `scroll_area`,
+  `viewer_wrapper`, `json_viewer`, `detail_row`, `fee_label`, `empty_state`, `amount_value`, `hero_meta` …); consumer
+  → partial two-token mappings 4/4 approval windows, 2/2 viewers, 4/4 `detail_row`, 3/3 `fee_label`, 3/3 `skeleton`,
+  4/4 select rows, 2/2 headers, 3/3 detail pages, 2/2 empty states, 19/19 settings wrappers and contents (counted as partial-token occurrences across the page chunks); the
+  composed skeleton's `animation` names the partial's emitted `@keyframes`; the partial's `select_row` rule precedes
+  the consumers' rules in the stylesheet. (`AmountCard.vue` owns a separate shimmer — not an L1 site, untouched.)
+
+## Phase 2 — popup shells (J2, J4, M2) ✓
+
+- `SettingsPageShell` (16 pages; `about`, `appearance`, `authwits` keep their markup and compose the partial, which now
+  lives beside the shell in `components/composite/`), `AsyncListStatus` (5 list pages, the page's own retry handler
+  and toast untouched), `BarrierOverlay` (both barriers keep their `Teleport`, copy and testids; the copy stays as slot
+  text so Vue condenses it exactly as before). The page rewrite was scripted from the exact opening/closing markup —
+  two wrapper shapes (`v-if` before `direction` on four pages, after the class on one) and two closings (blank line or
+  not before the outer `</Flex>`); the body dedents by one tab.
+- The three existing suites that mount these parents (`MigrationBarrier`, `AccountIntegrityBarrier`, the networks
+  settings page) register the real extracted child: vitest auto-registers nothing, so an unregistered
+  `<BarrierOverlay>` would have rendered an empty custom element and the copy assertions would have gone silent.
+- Stub gotcha: a bare boolean attr (`wide`) reaches an untyped stub prop as `""`; type the stub prop `Boolean`.
+- Gate: lint 0 · extension typecheck 0 · 64 files / 678 tests (`components`, `pages`, `general`) + the 12-case
+  `AsyncListStatus` suite · `build:chrome` 0; `components.d.ts` gained the three entries and is committed.
+
+## Phase 3 — onboarding + entries (K1, K7, K5, K6, K11) ✓
+
+- `OnboardingExplainer` (learn/fees are now route meta + cards + handlers + one tag; the explainer owns
+  `OnboardingPage :gap="40"`, the hero, the grid with its container query, the actions and the "Skip intro" link),
+  `OnboardingSkipLink` (also the accelerator's `v-else-if` skip), `OnboardingProfileNameField` (the `Input` attrs
+  forwarded verbatim; `focus()` exposed for `useProfileNameField`'s error restore, whose ref is typed `{ focus }`),
+  `OnboardingBackLink` (testid only). The learn page's template comment about the skip route was dropped: its script
+  comment already carries the constraint, and the template line it annotated no longer exists there.
+- `installConsoleForwarding(client)` in `wallet/logger/console-forwarding.ts`, imported directly by both entries; the
+  copied `noExplicitAny` suppression is gone (the hooks are typed as `Record<string, (...args: unknown[]) => void>`).
+- Test gotchas: `useRouter` inside an auto-imported SFC is the real vue-router import under vitest, so the back link's
+  test mocks `vue-router` (the repo's pattern), not a global; the design `Input`'s root is a wrapper `div`, so the
+  `onboarding-name-input` testid lands on that root exactly as before and the tests assert on the input inside it.
+- Gate: lint 0 · extension typecheck 0 · onboarding + logger suites green (28 component cases + 2 forwarding cases +
+  the existing page/composable suites) · `build:chrome` 0; `components.d.ts` gained the four onboarding entries.
+
+## Phase 4 — full local gate ✓ (ae39b8d4, clean index)
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (455 files, 5,590 tests) ·
+`bun run --cwd apps/extension build:chrome` exit 0 with `git diff --exit-code --stat -- apps/extension/src/types/` exit 0 ·
+no `nulo:e2e:` marker in `dist/chrome`.
+
+## Codex fix loop (`/codex high`, GPT-6 Astra, session `01a07cd2-6f9a-7981-9125-62e53b23a59f`, resumed each round)
+
+- **Round 1** (on ae39b8d4): *"no new material findings"* — parity sound, four low items adopted: the forwarding test
+  now walks all six console mappings, restores the hooks it installs and pins the pre-existing `window.onerror`
+  collision; the name-field tests assert the exact sanitized+truncated value, one forwarded native event and the
+  error clearing `aria-invalid`; the shell's bound-title case became a post-mount title change and the duplicate
+  slot case became a parent `v-if` transition; the overlay's duplicate order case became the condensed multi-line copy
+  check; the seven component openers lost their narration (two kept a constraint), the explainer's container-query
+  comment and the forwarder's doc shrank, and journal's "mirrors tx" comments above composed classes went. An HTML
+  comment inside the `<Input …/>` tag broke the SFC ("Duplicate attribute"); it lives above the tag.
+- **Round 2** (on 007da0af): *"no new material findings"* — every round-1 item verified addressed; one low comment
+  correction adopted after the verdict (the explainer's container-query note now attributes the side padding to the
+  app shell, with `OnboardingPage` as the query container). Loop converged in two rounds.
+
+## Phase 4 re-run on the converged tree (007da0af; the two later commits touch comments only, lint 0) ✓
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 ( Test Files 455 passed | 2 skipped (457)  Tests 5591 passed | 2 skipped | 7 todo (5600) ) · `build:chrome` exit 0 ·
+generated `src/types/` unchanged · no `nulo:e2e:` marker in `dist/chrome`.
+
+## Stack rebase onto dev (2026-09-07, after #558 #560 #562 #563 #564 landed)
+
+- dev deleted `SelectBalanceTypePopup.vue` (the holdings work); the rebase took the deletion, so N9's `select_row`
+  partial now has three consumers (`SelectFpcPopup`, `SelectNetworksPopup`, `ImportContactsPopup`). Post-rebase gate:
+  lint 0, typecheck 0, 131 files / 1,335 tests across the touched dirs, build 0, generated types unchanged.

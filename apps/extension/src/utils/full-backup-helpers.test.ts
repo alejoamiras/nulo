@@ -1,12 +1,102 @@
-import { describe, expect, it } from "vitest"
+import { EncryptionKey } from "@nulo/wallet-crypto"
+import { describe, expect, it, vi } from "vitest"
+import { IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
 import {
+	AssemblyAbortedError,
+	assembleFullBackup,
+	type BackupSource,
+	MAX_BACKUP_FILE_BYTES,
 	collectRestoreErrors,
 	detectBackupType,
 	normalizeAllIds,
 	readBackupFile,
 	remapByMap,
-	resolveRestoredActiveNetworkId,
+	resolveRestoredActiveNetworkIdByChain,
+	remapNetworkIdByChain,
+	capRecords,
 } from "./full-backup-helpers"
+
+describe("assembleFullBackup", () => {
+	const twelveSources = (slice: (name: string) => unknown): { sources: BackupSource[]; spies: ReturnType<typeof vi.fn>[] } => {
+		const names = [
+			"profile",
+			"network",
+			"account",
+			"imported-keys",
+			"transaction",
+			"token",
+			"token-balance",
+			"account-state",
+			"auth-registry",
+			"fpc",
+			"contact",
+			"config",
+		]
+		const spies = names.map((name) => vi.fn(async () => slice(name)))
+		return { sources: names.map((name, i) => ({ name, backup: spies[i] })), spies }
+	}
+
+	it("calls every source exactly once (single-execution proof) and keys slices by source name", async () => {
+		const { sources, spies } = twelveSources((name) => [{ from: name }])
+		const result = await assembleFullBackup({ "wallet-version": "1.0.0" }, sources)
+		for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1)
+		const parsed = JSON.parse(result.compact) as { data: Record<string, unknown> }
+		expect(Object.keys(parsed.data)).toHaveLength(12)
+		expect(parsed.data.config).toEqual([{ from: "config" }])
+	})
+
+	it("seals so the import-side recompute reproduces the checksum (pretty file path)", async () => {
+		const { sources } = twelveSources((name) => [{ from: name }])
+		const result = await assembleFullBackup({ "wallet-version": "1.0.0", "master-key": "mk" }, sources)
+		// Exactly what the importer does: parse the downloaded pretty file,
+		// strip only `checksum`, compact-restringify, hash.
+		const parsed = JSON.parse(result.pretty) as Record<string, unknown>
+		const { checksum, ...body } = parsed
+		expect(checksum).toBe(result.checksum)
+		expect(await EncryptionKey.getHashHex(JSON.stringify(body))).toBe(result.checksum)
+	})
+
+	it("is immune to caller-side mutation after sealing (canonical snapshot)", async () => {
+		const envelope: Record<string, unknown> = { "wallet-version": "1.0.0" }
+		const slice: Record<string, unknown>[] = [{ v: 1 }]
+		const sources: BackupSource[] = [{ name: "profile", backup: async () => slice }]
+		const result = await assembleFullBackup(envelope, sources)
+		envelope["wallet-version"] = "TAMPERED"
+		slice[0].v = 999
+		const parsed = JSON.parse(result.compact) as { "wallet-version": string; data: { profile: Array<{ v: number }> } }
+		expect(parsed["wallet-version"]).toBe("1.0.0")
+		expect(parsed.data.profile[0].v).toBe(1)
+		const { checksum, ...body } = JSON.parse(result.compact) as Record<string, unknown>
+		expect(await EncryptionKey.getHashHex(JSON.stringify(body))).toBe(checksum)
+	})
+
+	it("rejects an envelope that already carries a checksum", async () => {
+		await expect(assembleFullBackup({ checksum: "forged" }, [])).rejects.toThrow(/must not carry a checksum/)
+	})
+
+	it("aborts via the onSlice probe without calling later sources", async () => {
+		const { sources, spies } = twelveSources(() => [])
+		let calls = 0
+		const probe = () => ++calls <= 2
+		await expect(assembleFullBackup({}, sources, probe)).rejects.toBeInstanceOf(AssemblyAbortedError)
+		expect(spies[0]).toHaveBeenCalledTimes(1)
+		expect(spies[1]).toHaveBeenCalledTimes(1)
+		for (const spy of spies.slice(2)) expect(spy).not.toHaveBeenCalled()
+	})
+
+	it("skips null/undefined slices and drops undefined envelope fields", async () => {
+		const sources: BackupSource[] = [
+			{ name: "a", backup: async () => null },
+			{ name: "b", backup: async () => undefined },
+			{ name: "c", backup: async () => [1] },
+		]
+		const result = await assembleFullBackup({ present: "x", absent: undefined }, sources)
+		const parsed = JSON.parse(result.compact) as Record<string, unknown> & { data: Record<string, unknown> }
+		expect(Object.keys(parsed.data)).toEqual(["c"])
+		expect("absent" in parsed).toBe(false)
+		expect(parsed.present).toBe("x")
+	})
+})
 
 describe("detectBackupType", () => {
 	it("detects plain JSON object", () => {
@@ -68,6 +158,22 @@ describe("readBackupFile", () => {
 		const { selection } = await readBackupFile(makeFile("hello world ###"))
 		expect(selection.type).toBe("unknown")
 	})
+
+	function makeSizedFile(size: number, name = "backup.json"): File {
+		return { name, size, text: async () => "{}" } as unknown as File
+	}
+
+	it("rejects an oversized file before reading it", async () => {
+		const { parseError, selection } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES + 1))
+		expect(parseError?.title).toBe("Backup File Too Large")
+		expect(selection.type).toBe("unknown")
+		expect(selection.backup).toBeNull()
+	})
+
+	it("accepts a file exactly at the limit", async () => {
+		const { parseError } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES))
+		expect(parseError).toBeUndefined()
+	})
 })
 
 describe("collectRestoreErrors", () => {
@@ -79,9 +185,10 @@ describe("collectRestoreErrors", () => {
 
 	it("filters generic services to only failed entries", () => {
 		const result = collectRestoreErrors("network", [{ id: "a", restoreError: "boom" }, { id: "b" }, { id: "c", restoreError: "kaput" }])
+		// `row` is the SOURCE position: "c" is index 2 of the input, not index 1 of the errors.
 		expect(result).toEqual([
-			{ id: "a", restoreError: "boom" },
-			{ id: "c", restoreError: "kaput" },
+			{ row: 0, id: "a", restoreError: "boom" },
+			{ row: 2, id: "c", restoreError: "kaput" },
 		])
 	})
 
@@ -108,10 +215,224 @@ describe("collectRestoreErrors", () => {
 				senders: [{ address: "ok" }],
 			},
 		])
+		// Children are identified by POSITION: the addresses are registered contracts and
+		// tagging senders, both of which are privacy signals in their own right.
 		expect(result).toEqual([
-			{ networkId: "net1", contracts: [{ address: "x", restoreError: "fail" }], senders: [] },
-			{ networkId: "net2", contracts: [], senders: [{ address: "t", restoreError: "boom" }] },
+			{ networkId: "net1", contracts: [{ child: 0, restoreError: "fail" }], senders: [] },
+			{ networkId: "net2", contracts: [], senders: [{ child: 0, restoreError: "boom" }] },
 		])
+	})
+
+	// These records reach the "View Errors" viewer, which offers a one-click copy of the whole
+	// log, AND a console.warn that the hijacked console feeds into the log store.
+	describe("payload stripping", () => {
+		it("drops an imported key's sealed signing key", () => {
+			// An ImportedAccountKey is keyed by address and carries no `id`, so a row claiming one is
+			// carrying something else under that name — the ordinal locates it instead.
+			const result = collectRestoreErrors(IMPORTED_KEYS_SERVICE_NAME, [
+				{ id: "k1", profileId: "p1", chainId: 1, address: "0xacc", encryptedSigningKey: "SEALED-BLOB", restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SEALED-BLOB")
+			expect(result).toEqual([{ row: 0, profileId: "p1", chainId: 1, restoreError: "boom" }])
+		})
+
+		it("drops an endpoint URL, which routinely carries a provider API key", () => {
+			const result = collectRestoreErrors("network", [
+				{ id: "n1", endpoints: [{ id: "e1", rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" }], restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result).toEqual([{ row: 0, id: "n1", restoreError: "boom" }])
+		})
+
+		it("drops contact PII", () => {
+			const result = collectRestoreErrors("contact", [{ id: "c1", name: "Mom", address: "0xmom", restoreError: "boom" }])
+
+			expect(JSON.stringify(result)).not.toContain("Mom")
+			expect(JSON.stringify(result)).not.toContain("0xmom")
+		})
+
+		it("drops balances", () => {
+			const result = collectRestoreErrors("token-balance", [
+				{ id: "b1", publicBalance: "123456", privateBalance: "999999", restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("999999")
+		})
+
+		it("drops the instance/artifact blobs beside a failed account-state contract", () => {
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: "net1",
+					contracts: [{ address: "0xc", instance: { packedBytecode: "BLOB" }, artifact: { name: "T" }, restoreError: "fail" }],
+					senders: [],
+				},
+			])
+
+			expect(JSON.stringify(result)).not.toContain("BLOB")
+			expect(result).toEqual([{ networkId: "net1", contracts: [{ child: 0, restoreError: "fail" }], senders: [] }])
+		})
+
+		it("sanitizes the account-state ITEM level too, not just its children", () => {
+			// The item level is not a trusted layer above its children — `networkId` comes from the
+			// same attacker-controlled slice, and the normalizer admits ids up to 100 chars.
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: { rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" },
+					contracts: [],
+					senders: [],
+					restoreError: "fetch failed: https://rpc.example.com/v2/SECRET-KEY",
+				},
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result[0].networkId).toBe("[object]")
+			expect(result[0].restoreError).toContain("https://rpc.example.com")
+		})
+
+		it("numbers rows by SOURCE position, not by position in the error array", () => {
+			// Numbering after the filter would just re-derive the error array's own index —
+			// information the array already carries, and useless for locating the failed row.
+			const result = collectRestoreErrors("network", [
+				{ id: "a" },
+				{ id: "b" },
+				{ id: "c", restoreError: "boom" },
+				{ id: "d" },
+				{ id: "e", restoreError: "kaput" },
+			]) as Array<Record<string, unknown>>
+
+			expect(result.map((r) => r.row)).toEqual([2, 4])
+		})
+
+		it("numbers account-state CHILDREN by source position too", () => {
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: "net1",
+					contracts: [{ address: "ok" }, { address: "ok2" }, { address: "bad", restoreError: "fail" }],
+					senders: [],
+				},
+			]) as Array<{ contracts: Array<Record<string, unknown>> }>
+
+			expect(result[0].contracts[0].child).toBe(2)
+		})
+
+		it("keeps a config key — safe by construction, and better than an ordinal", () => {
+			// Only members of RESTORABLE_CONFIG_KEYS reach a config restore result.
+			const result = collectRestoreErrors("config", [{ key: "theme", value: "dark", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0].key).toBe("theme")
+			expect(result[0]).not.toHaveProperty("value")
+		})
+
+		it("does NOT keep `key` on a non-config service", () => {
+			// `restoreRows` preserves the raw failed row, so a crafted token can carry a `key` that
+			// was never validated by anything. It is only safe where the config restore path enforces
+			// the set it is drawn from.
+			const result = collectRestoreErrors("token", [{ id: "t1", key: "SECRET", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET")
+			expect(result[0]).not.toHaveProperty("key")
+		})
+
+		it("does NOT keep a config `key` that is not a restorable one", () => {
+			const result = collectRestoreErrors("config", [{ key: "strictSecurityMode", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0]).not.toHaveProperty("key")
+		})
+
+		it("does NOT keep `networkId` on a token — a Token has no such field", () => {
+			// The field policy is per-service for exactly this reason: a global list would emit any
+			// allowlisted name a crafted row chose to carry, and backup migration preserves unknown
+			// properties on its way to `restoreRows`, which hands the raw row back on failure.
+			const result = collectRestoreErrors("token", [{ id: 7, networkId: "ATTACKER_SECRET_UNDER_64", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("ATTACKER_SECRET_UNDER_64")
+			expect(result).toEqual([{ row: 0, id: 7, restoreError: "boom" }])
+		})
+
+		it("does NOT keep `id` on a transaction — a Tx is keyed by hash", () => {
+			const result = collectRestoreErrors("transaction", [
+				{ id: "ATTACKER_SECRET_UNDER_64", networkId: "n1", chainId: 31337, restoreError: "boom" },
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("ATTACKER_SECRET_UNDER_64")
+			expect(result).toEqual([{ row: 0, networkId: "n1", chainId: 31337, restoreError: "boom" }])
+		})
+
+		it("emits nothing but the ordinal for a service absent from the policy", () => {
+			const result = collectRestoreErrors("not-a-real-service", [{ id: "x1", profileId: "p1", restoreError: "boom" }])
+
+			expect(result).toEqual([{ row: 0, restoreError: "boom" }])
+		})
+
+		it("drops a chainId that is a string — a short string passes a length check but is not a chain id", () => {
+			const result = collectRestoreErrors("token", [{ id: "t1", chainId: "SECRET", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET")
+			expect(result[0]).not.toHaveProperty("chainId")
+		})
+
+		it("keeps a numeric chainId", () => {
+			const result = collectRestoreErrors("token", [{ id: "t1", chainId: 31337, restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0].chainId).toBe(31337)
+		})
+
+		it("constrains allowlisted fields by TYPE, not just by name", () => {
+			// Allowlisting names alone is not enough: a crafted backup can ship an allowlisted key
+			// whose VALUE is an object carrying whatever it likes, and a name-only filter copies it
+			// through intact.
+			const result = collectRestoreErrors("token", [
+				{ id: "t1", chainId: { rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" }, restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(JSON.stringify(result)).not.toContain("rpcUrl")
+			// `chainId` is typed numeric, so a non-number is dropped outright rather than described.
+			expect(result).toEqual([{ row: 0, id: "t1", restoreError: "boom" }])
+		})
+
+		it("bounds an allowlisted id that is really a payload wearing an id's name", () => {
+			const result = collectRestoreErrors("token", [{ id: "X".repeat(5000), restoreError: "boom" }]) as Array<Record<string, unknown>>
+
+			expect(result[0].id).toBe("[string:5000]")
+		})
+
+		it("scrubs and bounds restoreError — a fetch failure interpolates the whole endpoint", () => {
+			const result = collectRestoreErrors("network", [
+				{ id: "n1", restoreError: "fetch failed: https://rpc.example.com/v2/SECRET-KEY?apiKey=abc" },
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result[0].restoreError).toContain("https://rpc.example.com")
+		})
+
+		it("caps a very long restoreError", () => {
+			const result = collectRestoreErrors("network", [{ id: "n1", restoreError: "x".repeat(9000) }]) as Array<Record<string, unknown>>
+
+			expect((result[0].restoreError as string).length).toBeLessThanOrEqual(200)
+		})
+
+		it("caps a hostile backup's error count instead of recording all of it", () => {
+			const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `r${i}`, restoreError: "boom" }))
+			const result = collectRestoreErrors("contact", rows)
+
+			expect(result).toHaveLength(201)
+			expect(JSON.stringify(result?.[200])).toContain("further error(s) not recorded")
+		})
 	})
 })
 
@@ -205,38 +526,113 @@ describe("normalizeAllIds + remapByMap", () => {
 	})
 })
 
-describe("resolveRestoredActiveNetworkId (item 1b — preserve active-network across import)", () => {
-	it("maps a CHANGED id through the index pairing", () => {
-		const got = resolveRestoredActiveNetworkId("a", [{ id: "A" }], [{ id: "a" }])
-		expect(got).toBe("A")
+describe("resolveRestoredActiveNetworkIdByChain — the exported preference names a chain", () => {
+	const seeded = [
+		{ id: "main", chainId: 4248422646 },
+		{ id: "local", chainId: 0 },
+	]
+	it("selects the seeded row of that chain, chain 0 included", () => {
+		expect(resolveRestoredActiveNetworkIdByChain(4248422646, seeded)).toBe("main")
+		expect(resolveRestoredActiveNetworkIdByChain(0, seeded)).toBe("local")
 	})
-	it("maps an UNCHANGED id via identity (the changed-only remap map would miss this)", () => {
-		const got = resolveRestoredActiveNetworkId("b", [{ id: "b" }], [{ id: "b" }])
-		expect(got).toBe("b")
+	it("leaves the primary seed active for an absent, non-numeric, non-integer or unseeded chain", () => {
+		expect(resolveRestoredActiveNetworkIdByChain(undefined, seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain("0", seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain(1.5, seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain(7, seeded)).toBeUndefined()
 	})
-	it("picks the correct row among several", () => {
-		const news = [{ id: "A" }, { id: "b" }, { id: "C" }]
-		const olds = [{ id: "a" }, { id: "b" }, { id: "c" }]
-		expect(resolveRestoredActiveNetworkId("a", news, olds)).toBe("A")
-		expect(resolveRestoredActiveNetworkId("b", news, olds)).toBe("b")
-		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBe("C")
+})
+
+describe("remapNetworkIdByChain — rows bind to the seeded network of their chain, never to an exported id", () => {
+	const seeded = [
+		{ id: "main", chainId: 4248422646 },
+		{ id: "local", chainId: 0 },
+		{ id: "main-dup", chainId: 4248422646 },
+	]
+	it("rewrites networkId from chainId (chain 0 included) and ignores the exported id", () => {
+		const data: Record<string, unknown> = {
+			"account-state": [{ networkId: "evil", chainId: 0, senders: [] }],
+			transaction: [{ hash: "h", chainId: 4248422646 }],
+		}
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state", "transaction"])
+		expect(dropped).toEqual({})
+		expect(data["account-state"]).toEqual([{ networkId: "local", chainId: 0, senders: [] }])
+		expect(data.transaction).toEqual([{ hash: "h", chainId: 4248422646, networkId: "main" }])
 	})
-	it("returns undefined when the selected source FAILED to restore", () => {
-		const news = [{ id: "A" }, { id: "c", restoreError: "boom" }]
-		const olds = [{ id: "a" }, { id: "c" }]
-		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBeUndefined()
+	it("duplicate seeded chains all map to the first seeded row", () => {
+		const data: Record<string, unknown> = { transaction: [{ hash: "h", chainId: 4248422646 }] }
+		remapNetworkIdByChain(data, seeded, ["transaction"])
+		expect((data.transaction as Array<{ networkId: string }>)[0].networkId).toBe("main")
 	})
-	it("returns undefined for a DUPLICATED source id (ambiguous pairing)", () => {
-		const news = [{ id: "D1" }, { id: "D2" }]
-		const olds = [{ id: "d" }, { id: "d" }]
-		expect(resolveRestoredActiveNetworkId("d", news, olds)).toBeUndefined()
+	it("drops rows whose chain is missing, non-numeric, non-integer or unseeded — and non-object rows — returning ordinals only", () => {
+		const bad = [
+			{ networkId: "x" },
+			{ networkId: "x", chainId: "0" },
+			{ networkId: "x", chainId: 1.5 },
+			{ networkId: "x", chainId: 99 },
+			null,
+			3,
+		]
+		const data: Record<string, unknown> = { "account-state": [...bad, { networkId: "x", chainId: 0 }] }
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
+		expect(dropped).toEqual({ "account-state": [0, 1, 2, 3, 4, 5] })
+		expect(data["account-state"]).toEqual([{ networkId: "local", chainId: 0 }])
 	})
-	it("returns undefined for absent / non-string / foreign ids (hostile-safe)", () => {
-		const news = [{ id: "A" }]
-		const olds = [{ id: "a" }]
-		expect(resolveRestoredActiveNetworkId(undefined, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId(12345 as unknown, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId({} as unknown, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId("does-not-exist", news, olds)).toBeUndefined()
+	it("an oversized malformed slice is rejected in linear time and reported capped", () => {
+		const rows = Array.from({ length: 80_000 }, (_, i) => ({ networkId: "x", chainId: 99, senders: [{ address: `0x${i}` }] }))
+		const data: Record<string, unknown> = { "account-state": rows }
+		const started = performance.now()
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
+		expect(performance.now() - started).toBeLessThan(1_000)
+		expect(dropped["account-state"]).toHaveLength(80_000)
+		expect(data["account-state"]).toEqual([])
+		const records = capRecords(dropped["account-state"].map((row) => ({ row, restoreError: "x" })))
+		expect(records).toHaveLength(201)
+		expect(records[200]).toEqual({ restoreError: "79800 further error(s) not recorded" })
+	})
+	it("leaves slices it was not asked about, and non-array slices, untouched", () => {
+		const data: Record<string, unknown> = { token: [{ chainId: 0, networkId: "keep" }], transaction: "nope" }
+		expect(remapNetworkIdByChain(data, seeded, ["transaction"])).toEqual({})
+		expect(data).toEqual({ token: [{ chainId: 0, networkId: "keep" }], transaction: "nope" })
+	})
+})
+
+describe("collectRestoreErrors — account-state top-level records (skip/violation shapes)", () => {
+	it("collects an item-level restoreError even when every child is clean", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: [], contracts: [], restoreError: "Skipped — couldn't reach the network" },
+			{ networkId: "n2", senders: [{ address: "ok" }], contracts: [] },
+		])
+		expect(result).toEqual([{ networkId: "n1", contracts: [], senders: [], restoreError: "Skipped — couldn't reach the network" }])
+	})
+
+	it("carries the item-level error ALONGSIDE failed children", () => {
+		const result = collectRestoreErrors("account-state", [
+			{
+				networkId: "n1",
+				senders: [{ address: "s", restoreError: "boom" }],
+				contracts: [],
+				restoreError: "Skipped — ran out of time reaching the network (3 registration(s) not attempted)",
+			},
+		])
+		expect(result).toHaveLength(1)
+		const item = result?.[0] as { restoreError?: string; senders: unknown[] }
+		expect(item.restoreError).toContain("ran out of time")
+		expect(item.senders).toHaveLength(1)
+	})
+
+	it("collapses non-object result entries ([null]/[undefined]) into ONE constant record, never throws", () => {
+		const result = collectRestoreErrors("account-state", [null, undefined, 42] as unknown as unknown[])
+		expect(result).toEqual([
+			{ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" },
+		])
+	})
+
+	it("guards malformed child arrays instead of throwing (post-finalize path)", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: null, contracts: undefined, restoreError: "malformed account-state item" },
+			{ networkId: "n2", senders: [null, { address: "s", restoreError: "x" }], contracts: [undefined] },
+		] as unknown as unknown[])
+		expect(result).toHaveLength(2)
 	})
 })

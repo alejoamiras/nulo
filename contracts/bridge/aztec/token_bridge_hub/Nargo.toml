@@ -1,0 +1,13 @@
+[package]
+name = "token_bridge_hub_contract"
+authors = ["nulo"]
+compiler_version = ">=1.0.0"
+type = "contract"
+
+[dependencies]
+token = { git = "https://github.com/AztecProtocol/aztec-standards", tag = "v5.0.1", directory = "src/token_contract" }
+claim_secret_lib = { path = "../claim_secret" }
+register_hash_lib = { path = "../register_hash" }
+aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/aztec-nr/aztec" }
+compressed_string = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/aztec-nr/compressed-string" }
+token_portal_content_hash_lib = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }

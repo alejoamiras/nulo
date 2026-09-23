@@ -1,4 +1,15 @@
-export { ChainRuntime, ChainRuntimeRegistry, ProductionPxeFactory, type NetworkInfo, type PxeFactory } from "./chain-runtime"
+export {
+	ChainRuntime,
+	ChainRuntimeRegistry,
+	ProductionPxeFactory,
+	type ActiveProve,
+	type NetworkInfo,
+	type ProveBackend,
+	type ProvePhaseEvent,
+	type ProvePhaseObserver,
+	type PxeFactory,
+} from "./chain-runtime"
+export { createProvePhaseSink, type ProvePhaseSink } from "./prove-phase-sink"
 export { type KnownArtifacts, type KnownArtifactsLoader, loadProductionKnownArtifacts } from "./known-artifacts"
 export { ArtifactRegistry, defaultPolicy, type ArtifactPolicy, type ArtifactSource } from "./artifact-registry"
 export {
@@ -17,7 +28,7 @@ export {
 	verifyArtifactClassId,
 } from "./artifact-class-id"
 export type { IPXE } from "./ipxe"
-export { PXE_SERVICE_NAME, type Methods, type NotesFilter } from "./spec"
+export { PXE_SERVICE_NAME, type Methods, type NotesFilter, type PxeEvents } from "./spec"
 export {
 	PRIVATE_ADDRESS_MAGIC_VALUE,
 	PublicEventCursorSchema,

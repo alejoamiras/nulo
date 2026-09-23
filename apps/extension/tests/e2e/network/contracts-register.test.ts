@@ -1,6 +1,6 @@
-import { expect, inject } from "vitest"
+import { inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, setPgTextarea, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -49,12 +49,7 @@ test.skipIf(!hasConfig)(
 			}
 			return v
 		})
-		await page.evaluate((json: string) => {
-			const input = document.querySelector<HTMLTextAreaElement>('[data-testid="pg-input-contractInstance"]')!
-			const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
-			setter?.call(input, json)
-			input.dispatchEvent(new Event("input", { bubbles: true }))
-		}, instanceJson)
+		await setPgTextarea(page, "contractInstance", instanceJson)
 
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "registerContract", async () => {
 			await clickByTestId(page, "pg-btn-registerContract")
@@ -64,6 +59,6 @@ test.skipIf(!hasConfig)(
 		// return-shape conformance (a non-undefined result rejects client-side even
 		// though registration succeeded wallet-side). The old ["ok","error"] tolerance
 		// masked exactly that bug.
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "contracts-register:result")
 	},
 )

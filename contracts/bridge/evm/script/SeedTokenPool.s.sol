@@ -11,7 +11,7 @@ import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
-import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
+import {PoolSetupHelper, IWETH} from "./PoolSetupHelper.sol";
 
 interface IMintable {
     function mint(address to, uint256 amount) external;

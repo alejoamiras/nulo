@@ -1,4 +1,3 @@
-import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import type { IService, ServiceCollection } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
@@ -7,7 +6,7 @@ import { AccountService, AccountType } from "@/wallet/services/account/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { NuloAccount, V5_REGIME } from "@nulo/aztec-runtime/account"
-import type { MasterSecretBytes } from "@nulo/wallet-crypto"
+import { deriveAccountSeed, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "./blocked-repository"
 import { accountSetDigest } from "./types"
@@ -19,8 +18,10 @@ const walletVersion = (): string => (typeof __VERSION__ === "undefined" ? "unkno
 export const ACCOUNT_INTEGRITY_COORDINATOR_NAME = "account-integrity-coordinator"
 
 /** Injectable for unit tests (jsdom cannot run bb.js poseidon); production always uses the REAL
- *  frozen path — the same secret formula and `NuloAccount.new` the wallet derives with. */
-export type DeriveAddress = (master: Fr, account: { chainId: number; type: number; index: number }) => Promise<string>
+ *  frozen path — the SHARED `deriveAccountSeed` formula and `NuloAccount.new`, never a local
+ *  re-implementation (a stale duplicate here is the drift class that bricks profiles at unlock —
+ *  the real default is additionally pinned by a node-env test in aztec-runtime). */
+export type DeriveAddress = (master: Fr, account: { l1ChainId: number; type: number; index: number }) => Promise<string>
 
 /**
  * AccountIntegrityCoordinator — the background owner of the address-freeze runtime check.
@@ -50,8 +51,9 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		private readonly logger: ILogger,
 		browserApi?: BrowserApi,
 		private readonly deriveAddress: DeriveAddress = async (master, account) => {
-			// Mirrors AccountService.deriveAccountSecret exactly — same formula, same frozen path.
-			const secret = await poseidon2Hash([master, account.chainId, account.type, account.index])
+			// The ONE shared formula (NULO-ACCOUNT-KDF v2), reading the row-carried l1ChainId —
+			// self-contained, so this pre-session-open path needs no network lookup.
+			const secret = await deriveAccountSeed(master, account.l1ChainId, account.type, account.index)
 			return (await NuloAccount.new(secret, logger)).address.toString()
 		},
 	) {

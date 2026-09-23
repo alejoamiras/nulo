@@ -6,38 +6,18 @@ const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 /**
- * Runtime checks for the incoming-transfer arc, pinned by the post-impl
- * codex audit. Three named scenarios:
+ * Runtime wiring smoke for incoming transfers. It proves two things and only two: the popup's
+ * activity page mounts on a fresh profile without a runtime error, and the
+ * `IncomingTransferServiceClient` connects (explicit connect() in onMounted — a ServiceClient never
+ * auto-connects on listener registration) and renders an empty incoming feed. No receive, no
+ * outgoing hash and no self-mint is created, so neither the receive path nor the dedupe is
+ * exercised here.
  *
- *   1. **faucet-drip name regression** — the unified `pickPrimaryMethod`
- *      helper across F4's 7 sites is exercised at every popup mount
- *      that loads the activity feed; the popup-side TransactionService
- *      replay flows through the helper. A reverted F4 site would
- *      surface in the popup mounting / activity-feed loading path
- *      (typecheck wouldn't catch a runtime-level regression).
- *
- *   2. **incoming-receive happy path** — `IncomingTransferServiceClient`
- *      is reachable + connects + returns the expected empty list on a
- *      fresh profile with no third-party senders. Validates the codex
- *      re-audit critical (ServiceClient never auto-connects on listener
- *      registration — explicit connect() in onMounted is required).
- *
- *   3. **self-mint dedupe** — verified by absence: a fresh profile has
- *      no outgoing tx hashes to dedupe against, and the
- *      IncomingTransferService poll surface returns []. A regression
- *      that surfaced ANY note as incoming on a fresh profile would
- *      fail the empty-list assertion.
- *
- * Implementation note: this test deliberately stays off the send-tx
- * path. Prior attempts that drove `sendTransfer` against the
- * tokenReadyExtension fixture stalled at the amount-input enable
- * (60s timeout) — a fee-estimation edge case unrelated to this arc.
- * The unit-test pins for the helper logic (primary-method.test.ts +
- * tx-enrichment.test.ts + operation-planner.test.ts + service.test.ts)
- * provide the deeper coverage; this e2e provides the wire-up smoke.
+ * Deliberately off the send-tx path; the helper logic is unit-pinned (primary-method,
+ * tx-enrichment, operation-planner and service tests).
  */
 test.skipIf(!hasConfig)(
-	"incoming-transfer arc — name regression + empty happy path + self-mint dedupe",
+	"incoming transfers — activity page mounts + empty incoming feed on a fresh profile",
 	{ timeout: 180_000, retry: 0 },
 	async ({ registeredExtension }) => {
 		const page = await openPopup(registeredExtension)
@@ -59,19 +39,10 @@ test.skipIf(!hasConfig)(
 		// as a hung request, surfacing here when nothing renders.
 		await new Promise((r) => setTimeout(r, 3_000))
 
-		// Empty-list assertions cover both the happy-path empty state
-		// (incoming-receive happy path) AND the dedupe-by-absence proof
-		// (self-mint dedupe — no spurious rows on a fresh profile that
-		// has done zero transfers and zero receives).
+		// A fresh profile has nothing incoming; any card here is a spurious row.
 		const incomingCards = await page.$$('[data-testid="tx-incoming-card"]')
 		expect(incomingCards.length).toBe(0)
 
-		// The faucet-drip name regression is captured at runtime by the
-		// activity page successfully MOUNTING — its row-merge logic
-		// (buildActivityRows) runs through the unified row model + the
-		// pickPrimaryMethod helper indirectly via the tx-card flow. A
-		// reverted F4 site would have thrown an import or runtime error
-		// during this mount path. The mount-without-error is the assert.
 		const onActivityPage = await page.evaluate(() => window.location.hash.includes("/popup/activity"))
 		expect(onActivityPage).toBe(true)
 

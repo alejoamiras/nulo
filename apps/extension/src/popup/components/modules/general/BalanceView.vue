@@ -1,22 +1,20 @@
 <script setup>
 /** Components */
+import { Skeleton } from "@nulo/design"
 import ActionButtonsView from "./ActionButtonsView.vue"
 import GasBalanceCard from "./GasBalanceCard.vue"
-import { Dropdown } from "@/components/ui/Dropdown"
-
-/** Vendor */
-import { DateTime } from "luxon"
 
 /** Services */
-import { ContentKind } from "@/wallet/services/task/spec"
-import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
-import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyWithToast } from "@/utils/clipboard"
+import { isValidDecimals, parseRawBalance, safeFiatOf } from "@/utils/token-amount"
+import { aggregateFiat } from "@/utils/token-aggregate"
+import { forChain } from "@/utils/token-order"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
@@ -26,62 +24,56 @@ const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
-import { usePopupStore } from "@/stores/popup.store"
-import { useCacheStore } from "@/stores/cache.store"
 const appStore = useAppStore()
-const popupStore = usePopupStore()
-const cacheStore = useCacheStore()
 
-const router = useRouter()
-
+/** Home shows the account aggregate; the token page passes its own balance for a per-token hero. */
 const props = defineProps({
 	tokenBalance: {
 		type: Object,
 		required: false,
 		default: null,
 	},
+	/** Home only: defaults that are not token rows yet. A mount without them has none to wait for. */
+	seedEntries: {
+		type: Array,
+		default: () => [],
+	},
+	seedReady: {
+		type: Boolean,
+		default: true,
+	},
 })
 
 const tokenBalances = ref([])
 
-const tokenToDisplay = computed(
-	() => props.tokenBalance?.token || tokenBalances.value.find((tb) => tb.token.id === appStore.displayOption)?.token,
-)
-const tokenBalanceToDisplay = computed(() => {
-	return props.tokenBalance || tokenBalances.value.find((tb) => tb.token.id === tokenToDisplay.value?.id)
-})
+const tokenToDisplay = computed(() => props.tokenBalance?.token)
 const showFullBalance = ref(false)
+/** The token hero reads a stored row: a malformed side or invalid decimals renders a dash, never throws. */
+const heroSides = computed(() => {
+	const tb = props.tokenBalance
+	if (!tb || !isValidDecimals(tb.token?.decimals)) return undefined
+	const publicRaw = parseRawBalance({ publicBalance: tb.publicBalance })
+	const privateRaw = parseRawBalance({ privateBalance: tb.privateBalance })
+	if (publicRaw === undefined || privateRaw === undefined) return undefined
+	return { publicRaw, privateRaw, decimals: tb.token.decimals }
+})
 const totalTokenBalance = computed(() => {
-	if (!tokenBalanceToDisplay.value) return { value: 0 }
-
-	// Sum raw base units in bigint domain — no float pivot, no precision loss
-	// even at 18 decimals.
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	const publicRaw = BigInt(tokenBalanceToDisplay.value?.publicBalance || 0)
-	const privateRaw = BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
-	const totalRaw = publicRaw + privateRaw
-
-	return balanceFormatted(totalRaw, decimals, showFullBalance.value ? undefined : 20)
+	if (!props.tokenBalance) return { value: 0 }
+	const sides = heroSides.value
+	if (!sides) return { value: "—" }
+	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20)
 })
 
 const privateBalanceFormatted = computed(() => {
-	if (!tokenBalanceToDisplay.value) return "0"
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	return balanceFormatted(tokenBalanceToDisplay.value?.privateBalance || 0, decimals, 10).value
+	const sides = heroSides.value
+	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10).value : "—"
 })
 const publicBalanceFormatted = computed(() => {
-	if (!tokenBalanceToDisplay.value) return "0"
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	return balanceFormatted(tokenBalanceToDisplay.value?.publicBalance || 0, decimals, 10).value
+	const sides = heroSides.value
+	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10).value : "—"
 })
 
-const BalanceDisplayOptionsMap = {
-	total_account_value: "Account Value",
-	total_private_balances: "Private Account Value",
-	total_public_balances: "Public Account Value",
-}
-
-/** Live prices (A1). Parent owns the client lifecycle; the composable owns
+/** Live prices. Parent owns the client lifecycle; the composable owns
  *  freshness. Every fiat element below renders ONLY with a usable quote —
  *  no price means no dollar figure, never a fake $0.00. */
 const priceService = new PriceServiceClient()
@@ -99,64 +91,24 @@ configService.getValue("showFiatValues").then((v) => {
 	showFiatValues.value = v !== false
 })
 
-const displayedRawTotal = computed(() => {
-	if (!tokenBalanceToDisplay.value) return 0n
-	return BigInt(tokenBalanceToDisplay.value?.publicBalance || 0) + BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
-})
-
-/** A1 secondary line for a selected token: `≈ $x.xx`, or undefined (hidden). */
+/** Secondary line for the token hero: `≈ $x.xx`, or undefined (hidden, also for a malformed row). */
 const displayedTokenFiat = computed(() => {
-	if (!tokenToDisplay.value) return undefined
-	return prices.tokenFiatLabel(tokenToDisplay.value, displayedRawTotal.value)
+	const sides = heroSides.value
+	if (!tokenToDisplay.value || !sides) return undefined
+	return prices.tokenFiatLabel(tokenToDisplay.value, sides.publicRaw + sides.privateRaw)
 })
 
-/** Which balance sides the active aggregate option sums. */
-const aggregateSides = computed(() => ({
-	private: appStore.displayOption !== "total_public_balances",
-	public: appStore.displayOption !== "total_private_balances",
-}))
-
-/** Real fiat aggregate over priced HOLDINGS: Σ balance × price (micro-USD).
- *  A zero-balance row is worth exactly $0.00 whether priced or not, so it
- *  counts as neither a holding nor a pricing gap — a registered-but-empty
- *  token must not flag the aggregate as partial. */
-const aggregate = computed(() => {
-	let micro = 0n
-	let priced = 0
-	let holdings = 0
-	for (const tb of tokenBalances.value) {
-		let raw = 0n
-		if (aggregateSides.value.private) raw += BigInt(tb.privateBalance || 0)
-		if (aggregateSides.value.public) raw += BigInt(tb.publicBalance || 0)
-		if (raw === 0n) continue
-		holdings += 1
-		const value = prices.tokenFiatMicro(tb.token, raw)
-		if (value === undefined) continue
-		micro += value
-		priced += 1
-	}
-	return { micro, priced, holdings }
-})
+const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
+const aggregate = computed(() => aggregateFiat(tokenBalances.value, fiatOf))
 
 /** Always a dollar figure — holdings that lack a price count as $0.00 and
  *  the "priced assets only" caption owns the honesty, never an em-dash. */
 const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
-const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
+const isAggregatePartial = computed(() => aggregate.value.partial)
 
-const isCopied = ref(false)
 const handleCopy = (value, label) => {
-	isCopied.value = true
-	window.navigator.clipboard.writeText(value)
-	openToast({ label: `${label} is copied`, icon: "copy" })
-	setTimeout(() => {
-		isCopied.value = false
-	}, 2500)
+	void copyWithToast(value, openToast, `${label} is copied`)
 }
-const handleRefreshBalance = () => {
-	tokenBalanceService.refreshTokenBalance(tokenBalanceToDisplay.value?.id)
-}
-const isRefreshingBalance = ref(false)
-
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value
 	if (totalTokenBalance.value?.slashed || showFullBalance.value) {
@@ -168,157 +120,134 @@ const handleTokenBalanceClick = async () => {
 	handleCopy(balance, "Balance")
 }
 
-const taskService = new TaskServiceClient()
-taskService.onTaskCreated.add(onTaskCreated)
-taskService.onTaskUpdated.add(onTaskUpdated)
-taskService.onTaskDeleted.add(onTaskDeleted)
-function onTaskCreated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
+// The balance service returns a shared address's rows from every chain of the profile; the
+// aggregate is over the active chain only.
+const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
 
-			isRefreshingBalance.value = true
-
-			break
-
-		default:
-			break
-	}
+/** `loaded` = a snapshot for the active scope has SUCCEEDED; it then survives a later rejected refetch.
+ *  `loading` and `unavailable` both mean the total is not known — never a reason to print $0.00. */
+const balancesState = ref("loading")
+// A snapshot in flight is older than any event that lands meanwhile; the event marks it stale.
+let fetchDirty = false
+const markDirty = () => {
+	fetchDirty = true
 }
-function onTaskUpdated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (!task.finishedAt) return
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
 
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
+/** `seeded` counts: its balance row is created after the token row and may not have landed. */
+const WORKING_SEED = new Set(["pending", "seeding", "seeded"])
+/** The total is still moving: a snapshot is missing, a row has never been projected, or a default
+ *  token is on its way in. Showing a figure now would show one that is about to change. */
+const isTotalUnsettled = computed(() => {
+	if (balancesState.value !== "loaded" || !props.seedReady) return true
+	if (tokenBalances.value.some((tb) => tb.updatedAt === 0 && !tb.syncFailure)) return true
+	// A default whose row has landed is that row's business now, whatever the seed list still says.
+	const landed = new Set(tokenBalances.value.map((tb) => tb.token?.contract?.toLowerCase()))
+	return props.seedEntries.some((entry) => WORKING_SEED.has(entry.status) && !landed.has(entry.contract.toLowerCase()))
+})
+/** A skeleton that never resolves is worse than a partial figure: after the cap the hero says what
+ *  it knows. One cap per scope — a row that starts syncing later does not re-hide a shown total. */
+const HERO_PENDING_CAP_MS = 12_000
+const capElapsed = ref(false)
+let capTimer
+function restartCap() {
+	clearTimeout(capTimer)
+	capElapsed.value = false
+	capTimer = setTimeout(() => {
+		capElapsed.value = true
+	}, HERO_PENDING_CAP_MS)
 }
-function onTaskDeleted(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
-}
+const heroPending = computed(() => isTotalUnsettled.value && !capElapsed.value)
+/** After the cap one question decides the figure: did ANY snapshot succeed for this scope? A loaded
+ *  empty list is a real $0.00; a list that never loaded is unknown. */
+const isTotalKnown = computed(() => balancesState.value === "loaded")
 
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
 function onBalanceAdded(tb) {
-	if (tb.account !== appStore.account.address) return
-
+	if (!inActiveScope(tb)) return
 	tokenBalances.value.push(tb)
+	markDirty()
 }
 function onBalanceUpdated(tb) {
+	if (inActiveScope(tb)) markDirty()
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
 	if (idx !== -1) {
 		tokenBalances.value[idx] = tb
 	}
 }
 function onBalanceDeleted(tb) {
-	// tokenToDisplay is computed from tokenBalances, so the selected-token check
-	// must read the pre-delete list — capture it BEFORE filtering, otherwise the
-	// recompute returns undefined and the displayOption reset never fires
-	// (deleting the displayed balance would leave the home view stuck on a stale
-	// selection). Maintaining the list here also stops the deleted row lingering
-	// until the next full fetch.
-	const wasDisplayed = !props.tokenBalance && tokenToDisplay.value?.id === tb.token.id
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
-	if (wasDisplayed) {
-		appStore.displayOption = "total_account_value"
+	if (inActiveScope(tb)) markDirty()
+}
+// The first connect is the one the mount's fetch opened. Any later connect is a port drop and
+// reconnect: events may have been missed and the request in flight was rejected, so resnapshot —
+// the new generation fences that rejection out.
+let connectsSeen = 0
+tokenBalanceService.onConnected.add(onReconnected)
+function onReconnected() {
+	connectsSeen++
+	if (connectsSeen > 1) void fetchTokenBalances()
+}
+
+/** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
+const BALANCES_RETRY_MS = 2_000
+let retryTimer
+// A fetch for one scope may resolve after the user moved on; only the latest request may land,
+// and a snapshot overtaken by a live event is refetched rather than applied. A refetch inside a
+// scope keeps the rows and the state it has: `enterScope` is what clears them.
+let fetchGeneration = 0
+async function fetchTokenBalances(isTimedRetry = false) {
+	const generation = ++fetchGeneration
+	clearTimeout(retryTimer)
+	const address = appStore.account?.address
+	const chainId = appStore.network?.chainId
+	fetchDirty = false
+	if (!address) {
+		tokenBalances.value = []
+		balancesState.value = "loaded"
+		return
 	}
-}
-
-const tokenService = new TokenServiceClient()
-tokenService.onTokenDeleted.add(onTokenDeleted)
-function onTokenDeleted(token) {
-	if (!props.tokenBalance && tokenToDisplay.value?.id === token.id) {
-		appStore.displayOption = "total_account_value"
+	let rows
+	try {
+		rows = await tokenBalanceService.getTokenBalances(undefined, address)
+	} catch {
+		if (generation !== fetchGeneration) return
+		if (balancesState.value !== "loaded") balancesState.value = "unavailable"
+		if (!isTimedRetry) retryTimer = setTimeout(() => void fetchTokenBalances(true), BALANCES_RETRY_MS)
+		return
 	}
+	if (generation !== fetchGeneration) return
+	if (fetchDirty) return fetchTokenBalances()
+	tokenBalances.value = forChain(rows, chainId)
+	balancesState.value = "loaded"
 }
 
-async function fetchTokenBalances() {
-	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-	isRefreshingBalance.value = (await taskService.getTasks()).some(
-		(t) =>
-			!t.finishedAt &&
-			t.content.kind === ContentKind.BalanceUpdate &&
-			t.content.account === appStore.account.address &&
-			t.content.tbId === tokenBalanceToDisplay.value?.id,
-	)
+/** A new scope owes nothing to the previous one: its rows, its loaded state and its cap all restart. */
+function enterScope() {
+	tokenBalances.value = []
+	balancesState.value = "loading"
+	restartCap()
+	return fetchTokenBalances()
 }
 
-async function loadBalanceDisplayOption(profileId, networkId) {
-	const key = `nulo:ui:balanceDisplayOption@${profileId}`
-
-	const result = await storageLocalGet(key)
-	const optionsMap = result[key] || {}
-
-	let option = optionsMap[networkId]
-
-	if (!option) {
-		option = "total_account_value"
-		optionsMap[networkId] = option
-		await storageLocalSet({ [key]: optionsMap })
-	}
-
-	appStore.displayOption = option
-}
-async function saveBalanceDisplayOption(profileId, networkId, option) {
-	const key = `nulo:ui:balanceDisplayOption@${profileId}`
-
-	const result = await storageLocalGet(key)
-	const optionsMap = result[key] || {}
-
-	if (optionsMap[networkId] !== option) {
-		optionsMap[networkId] = option
-		await storageLocalSet({ [key]: optionsMap })
-	}
-}
-
+// The profile too: one phrase imported twice gives two profiles the same address on the same chain.
 watch(
-	() => appStore.network,
+	() => [appStore.profile?.id, appStore.account?.address, appStore.network?.chainId],
 	async () => {
-		await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
-	},
-)
-watch(
-	() => appStore.account,
-	async () => {
-		await fetchTokenBalances()
-		if (!tokenToDisplay.value) {
-			appStore.displayOption = "total_account_value"
-		}
-	},
-)
-watch(
-	() => appStore.displayOption,
-	async () => {
-		await saveBalanceDisplayOption(appStore.profile.id, appStore.network.id, appStore.displayOption)
+		await enterScope()
 	},
 )
 onMounted(async () => {
-	await fetchTokenBalances()
-
-	await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
+	await enterScope()
 })
 onBeforeUnmount(() => {
-	taskService.disconnect()
+	fetchGeneration++
+	clearTimeout(capTimer)
+	clearTimeout(retryTimer)
+	tokenBalanceService.onConnected.remove(onReconnected)
 	tokenBalanceService.disconnect()
-	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
 	configService.disconnect()
@@ -333,29 +262,41 @@ onBeforeUnmount(() => {
 				v-if="tokenToDisplay || showFiatValues"
 				@click="handleTokenBalanceClick"
 				data-testid="balance-amount"
-				:class="[$style.balance_amount, isRefreshingBalance && $style.refreshing]"
+				:aria-busy="(!tokenToDisplay && heroPending) || undefined"
+				:class="$style.balance_amount"
 			>
 				<template v-if="tokenToDisplay">
 					{{ totalTokenBalance.value }}
 					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
 				</template>
-				<template v-else>{{ aggregateFiatDisplay }}</template>
+				<Skeleton v-else-if="heroPending" :width="150" :height="40" data-testid="balance-hero-loading" :class="$style.hero_skeleton" />
+				<template v-else-if="isTotalKnown">{{ aggregateFiatDisplay }}</template>
+				<!-- The balance list could not be read at all: unknown, which is not zero. -->
+				<span v-else data-testid="balance-hero-unknown">—</span>
 			</div>
 
 			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
 				{{ displayedTokenFiat }}
 			</div>
-			<div v-if="!tokenToDisplay && isAggregatePartial" data-testid="balance-fiat-partial" :class="$style.fiat_partial">
+			<div
+				v-if="!tokenToDisplay && !heroPending && isTotalKnown && isAggregatePartial"
+				data-testid="balance-fiat-partial"
+				:class="$style.fiat_partial"
+			>
 				priced assets only
 			</div>
 
+			<!-- Glyphs-only: the lock/globe pair IS the vocabulary (same as the token rows) — no
+			     PRIVATE/PUBLIC words doubling it (owner call, post-approval). -->
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
-				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_dot" /> PRIVATE: <span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Private balance">
+					<span :class="$style.breakdown_private"><Icon name="lock" size="12" /></span>
+					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
 				</span>
 				<span :class="$style.breakdown_divider">|</span>
-				<span :class="$style.breakdown_item">
-					<span :class="[$style.breakdown_dot, $style.public_dot]" /> PUBLIC: <span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Public balance">
+					<span :class="$style.breakdown_public"><Icon name="globe" size="12" /></span>
+					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
 				</span>
 			</Flex>
 		</section>
@@ -381,8 +322,8 @@ onBeforeUnmount(() => {
 	align-items: center;
 	text-align: center;
 
-	margin-top: 32px;
-	margin-bottom: 16px;
+	margin-top: 22px;
+	margin-bottom: 10px;
 }
 
 .balance_amount {
@@ -404,14 +345,9 @@ onBeforeUnmount(() => {
 	color: var(--txt-tertiary);
 }
 
-@keyframes blink {
-	0% { opacity: 1; }
-	50% { opacity: 0.3; }
-	100% { opacity: 1; }
-}
-
-.refreshing {
-	animation: blink 2s linear infinite;
+/* Centred on the figure's own line box, so the section does not move when the number lands. */
+.hero_skeleton {
+	vertical-align: middle;
 }
 
 .fiat_line {
@@ -445,14 +381,15 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.breakdown_dot {
-	width: 6px;
-	height: 6px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as TokenCard's split: bone lock = private, grey globe = public. */
+.breakdown_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.public_dot {
-	background: var(--nulo-outline);
+.breakdown_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
 }
 
 .breakdown_divider {
@@ -461,18 +398,6 @@ onBeforeUnmount(() => {
 
 .actions {
 	width: 100%;
-	margin-top: 16px;
-}
-
-.hover_red {
-	& svg,
-	& span {
-		transition: all 0.2s var(--bezier);
-	}
-
-	&:hover {
-		svg { fill: var(--red); }
-		span { color: var(--red); }
-	}
+	margin-top: 12px;
 }
 </style>

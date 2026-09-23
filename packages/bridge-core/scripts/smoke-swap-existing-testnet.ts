@@ -1,236 +1,172 @@
 /**
- * Pre-promotion FUELED smoke for a candidate manifest: deposit + swap -> self-paying claim.
+ * Pre-promotion FUELED smoke for a candidate manifest: send + swap → self-paying hub claim.
  *
- * The fueled sibling of smoke-existing-testnet.ts (which does the plain deposit->claim). Registers the
- * candidate's L1/L2 contracts (NO deploy), then runs ONE public fueled bridge: swap a slice of the
- * bridged token -> Fee Juice, bridge the rest, and CLAIM in a single self-paying tx (the claimed Fee
- * Juice pays that tx's own gas). Proves the candidate's swap+fuel path end to end before promotion.
+ * The fueled sibling of smoke-existing-testnet.ts (which does the plain send→claim). Registers the
+ * manifest's hub and the hub-derived L2 token (NO deploy), then runs ONE public fueled send: swap a
+ * slice of the bridged token → Fee Juice, bridge the rest into the token's factory portal, and claim
+ * through the hub in a single self-paying tx (the claimed Fee Juice pays that tx's own gas).
  *
- * This is the lean candidate gate; fuel-testnet.ts is the heavier P5 validator (public + private +
- * MIN_FUEL_FJ calibration). Both compose the same extracted flows (runSwapBridge / publicFeeJuicePayment).
+ * This is the lean candidate gate; fuel-testnet.ts is the heavier validator (public + private +
+ * minFuelFj/fjPerTx calibration). Both compose the same flows (runSend / claimViaHub).
  *
  * Real proofs: expect ~15-40 min. Run:
- *   bun run scripts/smoke-swap-existing-testnet.ts --config <path/to/testnet-bridge.candidate.json>
- * (needs PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env).
+ *   bun run scripts/smoke-swap-existing-testnet.ts --config <manifest> [--token <erc20>]
+ * (needs PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env). `--token` defaults to the
+ * manifest's first token.
  */
-import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import type { ContractBase } from "@aztec/aztec.js/contracts"
+import { Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
-import { SPONSORED_FPC_SALT } from "@aztec/constants"
-import { EthAddress } from "@aztec/foundation/eth-address"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
+import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { feeJuiceAddress, publicFeeJuicePayment } from "../src/fee-juice"
-import { runSwapBridge } from "../src/flows"
-import { ensurePermit2Allowance } from "../src/l1"
-import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
-import { buildFuelRoute } from "../src/route"
+import type { L1Ctx } from "../src/flows"
+import { runSend } from "../src/send-flow"
+import { evmAbi } from "./script-artifacts"
+import { ensureRouterPermit2 } from "./script-l1"
+import {
+	claimTokensUntilSynced,
+	deployAccountIfAbsent,
+	freshSchnorrAccount,
+	registerHub,
+	registerHubToken,
+	sponsoredFpcFee,
+} from "./script-l2"
+import { claimTokenBlock, planFuelLeg, requireSwap, selectToken, sendGenerationOf } from "./script-send"
+import {
+	createL1Clients,
+	createL2Wallet,
+	createNode,
+	loadManifestV2FromConfigArg,
+	requireBridge,
+	sepoliaChain,
+	stopwatch,
+} from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
-const configArg = process.argv.indexOf("--config")
-if (configArg === -1) throw new Error("pass --config <candidate manifest path>")
-const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
-const fuel = CONFIG.l1.fuel
-if (!fuel) throw new Error("candidate manifest has no l1.fuel")
-const core = fuel.core
-const swap = fuel.swap
-if (!swap) throw new Error("candidate manifest has no l1.fuel.swap — this swap smoke needs the swap stack")
-
-const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
-
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
+const CONFIG = loadManifestV2FromConfigArg(process.argv, {
+	mode: "required",
+	requiredHint: "apps/tools/public/testnet-bridge.candidate.json",
 })
+const BRIDGE = requireBridge(CONFIG)
+const SWAP = requireSwap(BRIDGE)
+const TOKEN = selectToken(BRIDGE, process.argv)
+const GENERATION = sendGenerationOf(CONFIG, BRIDGE)
 
-const evmAbi = (name: string): Abi => JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8")).abi as Abi
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
-// Amounts are DECIMALS-DRIVEN from the manifest token (an 18-dec assumption against a 6-dec token
-// would request 10^19 base units into a 10^9 mint cap — instant revert; codex bug-bash r2).
-const TOKEN_DECIMALS = BigInt(CONFIG.l1.token?.decimals ?? 18)
-const TOTAL = 10n * 10n ** TOKEN_DECIMALS
+// Amounts are DECIMALS-DRIVEN from the manifest token: an 18-dec assumption against a 6-dec token
+// requests 10^19 base units into a 10^9 mint cap and reverts on the spot.
+const TOTAL = 10n * 10n ** BigInt(TOKEN.decimals)
 // Env-tunable: the slice must buy ENOUGH FJ for the self-paying claim at the CURRENT pool rate
-// (quote >= minFuelFj) — a fresh pool's pricing can put the old default under the floor.
-const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (10n ** TOKEN_DECIMALS).toString())
+// (quote >= minFuelFj) — a fresh pool's pricing can put the default under the floor.
+const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (10n ** BigInt(TOKEN.decimals)).toString())
 
-async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
 
-	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const azlo = CONFIG.l1.usdc as `0x${string}`
-	console.log(`candidate fuel smoke: portal ${CONFIG.l1.portal} (${CONFIG.l1.portalSource ?? "legacy"}), router ${core.router}`)
+const balanceOf = async (contract: ContractBase, from: AztecAddress): Promise<bigint> => {
+	const r = (await contract.methods.balance_of_public(from).simulate({ from } as never)) as { result?: bigint } | bigint
+	return typeof r === "bigint" ? r : (r.result ?? 0n)
+}
 
-	await pub.waitForTransactionReceipt({
-		hash: await wallet.writeContract({
-			address: azlo,
-			abi: evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20") as never,
-			functionName: "mint",
-			args: [account.address, TOTAL] as never,
-		}),
-	})
-	const route = buildFuelRoute({
-		token: azlo,
-		weth: swap.weth,
-		feeJuice: swap.feeJuice,
-		tokenWeth: swap.pools.tokenWeth ?? swap.pools.azloWeth,
-		ethFj: swap.pools.ethFj,
-	})
+async function mintIfPermissionless(l1: L1Ctx, amount: bigint, mins: () => string): Promise<void> {
+	if (TOKEN.source !== "permissionless-mint") {
+		console.log(`${TOKEN.displaySymbol} is canonical — fund the sender yourself (needs ${amount} base units)`)
+		return
+	}
+	const abi = evmAbi(TOKEN.sourceContract ?? "MintableERC20")
+	const hash = await l1.wallet.writeContract({
+		address: TOKEN.erc20 as Address,
+		abi,
+		functionName: "mint",
+		args: [l1.account.address, amount],
+		account: l1.account,
+		chain: l1.wallet.chain,
+	} as never)
+	await l1.pub.waitForTransactionReceipt({ hash })
+	console.log(`minted ${amount} ${TOKEN.displaySymbol} base units (${mins()})`)
+}
 
-	// ─── L2 (fresh account; sponsored FPC pays ONLY its deploy, fuel pays the claim) ──
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	const secret = Fr.random()
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
-	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
-	const from = (await manager.getAccount()).getAddress()
+interface L2Leg {
+	hub: ContractBase
+	l2Token: ContractBase
+	feeJuice: ContractBase
+	from: AztecAddress
+}
+
+/** A throwaway recipient (the sponsored FPC pays ONLY its deploy) plus the hub and token it claims through. */
+async function buildL2Leg(mins: () => string): Promise<L2Leg> {
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
+	const { manager, from } = await freshSchnorrAccount(ewallet as never)
 	console.log("L2 smoke account", from.toString())
 
-	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, { salt: new Fr(SPONSORED_FPC_SALT) })
-	try {
-		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
-	} catch {}
-	if (!(await node.getContract(from))) {
-		console.log(`deploying L2 smoke account (real proof)… (${mins()})`)
-		await (await manager.getDeployMethod()).send({
-			fee: { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) },
-			from: "NO_FROM" as never,
-		} as never)
-	}
-
-	// Register (NOT deploy) the candidate's L2 contracts, asserting each address recomputes.
-	const registerL2 = async (
-		label: string,
-		art: unknown,
-		args: unknown[],
-		ctor: string,
-		salt: number,
-		address: string,
-	): Promise<Contract> => {
-		const instance = await getContractInstanceFromInstantiationParams(
-			art as never,
-			{
-				constructorArgs: args,
-				salt: new Fr(salt),
-				publicKeys: PublicKeys.default(),
-				deployer: AztecAddress.ZERO,
-				constructorArtifact: ctor,
-			} as never,
-		)
-		if (instance.address.toString().toLowerCase() !== address.toLowerCase()) {
-			throw new Error(`manifest ${label} mismatch: recomputed ${instance.address.toString()} != recorded ${address}`)
-		}
-		try {
-			await ewallet.registerContract(instance, art as never)
-		} catch {}
-		return await Contract.at(instance.address, art as never, ewallet as never)
-	}
-	const proxy = await registerL2(
-		"proxy",
-		bridgeProxyArtifact,
-		[],
-		CONFIG.l2.proxy.constructorArtifact,
-		CONFIG.l2.proxy.salt,
-		CONFIG.l2.proxy.address,
-	)
-	const [tName, tSymbol, tDec] = CONFIG.l2.token.constructorArgs as [string, string, number, string]
-	const token = await registerL2(
-		"token",
-		TokenContractArtifact,
-		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO).
-		[tName, tSymbol, tDec, proxy.address, AztecAddress.ZERO],
-		CONFIG.l2.token.constructorArtifact,
-		CONFIG.l2.token.salt,
-		CONFIG.l2.token.address,
-	)
-	const bridge = await registerL2(
-		"bridge",
-		tokenBridgeArtifact,
-		[proxy.address, EthAddress.fromString(CONFIG.l1.portal)],
-		CONFIG.l2.bridge.constructorArtifact,
-		CONFIG.l2.bridge.salt,
-		CONFIG.l2.bridge.address,
-	)
-	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
-	console.log(`candidate contracts registered (${mins()})`)
-
-	const fjBalance = async (): Promise<bigint> => {
-		const r = (await feeJuice.methods.balance_of_public(from).simulate({ from })) as { result?: bigint }
-		return r.result ?? (r as unknown as bigint)
-	}
-	const tokenBalance = async (): Promise<bigint> => {
-		const r = (await token.methods.balance_of_public(from).simulate({ from })) as { result?: bigint }
-		return r.result ?? (r as unknown as bigint)
-	}
-
-	// ─── deposit + swap (L1) → self-paying public claim (L2) ─────────
-	const quote = await quoteFuelPath(pub as never, swap.quoter, route, FUEL_SLICE)
-	const minOut = minOutputForSlippage(quote, swap.slippageBps)
-	console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${mins()})`)
-
-	const tokenAbi = evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20")
-	await ensurePermit2Allowance({
-		allowance: async () =>
-			(await pub.readContract({
-				address: azlo,
-				abi: tokenAbi as never,
-				functionName: "allowance",
-				args: [account.address, core.permit2],
-			})) as bigint,
-		approveMax: async () =>
-			await wallet.writeContract({
-				address: azlo,
-				abi: tokenAbi as never,
-				functionName: "approve",
-				args: [core.permit2, (1n << 256n) - 1n] as never,
-			}),
-		waitReceipt: async (hash) => await pub.waitForTransactionReceipt({ hash }),
-		needed: TOTAL,
-		onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${mins()})`),
+	const { fee: sponsoredFee } = await sponsoredFpcFee(ewallet)
+	await deployAccountIfAbsent({
+		node,
+		manager: manager as never,
+		from,
+		fee: sponsoredFee,
+		log: (stage) => {
+			if (stage === "deploying") console.log(`deploying L2 smoke account (real proof)… (${mins()})`)
+		},
 	})
 
-	const result = await runSwapBridge(
-		{ pub, wallet, account } as never,
+	const hub = await registerHub(ewallet as never, BRIDGE.l2.hub)
+	const hubAddress = AztecAddress.fromStringUnsafe(BRIDGE.l2.hub.address)
+	const l2Token = await registerHubToken(ewallet as never, hubAddress, TOKEN, BRIDGE.l2.tokenClassId)
+	const feeJuice = Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
+	console.log(`hub + ${TOKEN.displaySymbol} registered (${mins()})`)
+	return { hub, l2Token, feeJuice, from }
+}
+
+async function main() {
+	const mins = stopwatch()
+
+	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
+	const l1: L1Ctx = { pub, wallet, account }
+	console.log(`fuel smoke: ${TOKEN.displaySymbol} ${TOKEN.erc20} → portal ${TOKEN.portal}, router ${GENERATION.router}`)
+
+	await mintIfPermissionless(l1, TOTAL, mins)
+	const fuel = await planFuelLeg(pub, SWAP, GENERATION.feeAsset, TOKEN.erc20 as Address, FUEL_SLICE)
+	console.log(`quote: ${FUEL_SLICE} ${TOKEN.displaySymbol}-units → ${fuel.quote} FJ-wei (floor ${fuel.minFuelOutput}) (${mins()})`)
+
+	const { hub, l2Token, feeJuice, from } = await buildL2Leg(mins)
+
+	await ensureRouterPermit2(l1, {
+		usdc: TOKEN.erc20 as `0x${string}`,
+		usdcAbi: evmAbi(TOKEN.sourceContract ?? "MintableERC20"),
+		permit2: GENERATION.permit2,
+		needed: TOTAL,
+		mins,
+	})
+
+	const result = await runSend(
+		l1,
+		GENERATION,
 		{
-			router: core.router,
-			routerAbi: evmAbi("SwapBridgeRouter"),
-			permit2: core.permit2,
-			swapTarget: core.swapTarget,
-			tokenPortal: CONFIG.l1.portal,
-			bridgeToken: azlo,
-			totalAmount: TOTAL,
-			fuelAmount: FUEL_SLICE,
+			intent: "token+gas",
+			erc20: TOKEN.erc20 as Address,
+			amount: TOTAL,
 			aztecRecipient: from.toString() as `0x${string}`,
-			fuelRecipient: from.toString() as `0x${string}`,
-			minFuelOutput: minOut,
-			path: route.path,
-			zeroForOnes: route.zeroForOnes,
 			isPrivate: false,
-			nonce: BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`),
+			gas: {
+				fuelAmount: FUEL_SLICE,
+				fuelRecipient: from.toString() as `0x${string}`,
+				minFuelOutput: fuel.minFuelOutput,
+				path: fuel.path,
+				zeroForOnes: fuel.zeroForOnes,
+			},
+			nonce: rndNonce(),
 			deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
-			chainId: 11155111,
 		},
 		(s) => console.log(`l1: ${s} (${mins()})`),
 		{ onSecrets: () => console.log("secrets persisted (in-memory for the smoke)") },
@@ -239,35 +175,39 @@ async function main() {
 		`bridged: tokenLeaf ${result.tokenLeafIndex}, fuelLeaf ${result.fuelLeafIndex}, fuelReceived ${result.fuelReceived} (${mins()})`,
 	)
 
+	// The claim pays its own gas from the Fee Juice it claims in the same tx.
 	const bridgedAmount = TOTAL - FUEL_SLICE
-	const fjwcFee = {
-		paymentMethod: publicFeeJuicePayment(from, {
-			claimAmount: result.fuelReceived,
-			claimSecret: Fr.fromHexString(result.fuelSecretHex),
-			messageLeafIndex: result.fuelLeafIndex,
-		}),
-	}
-	const fjBefore = await fjBalance()
-	let landed = false
-	for (let i = 0; i < 300 && !landed; i++) {
-		try {
-			await bridge.methods
-				.claim_public(from, bridgedAmount, Fr.fromHexString(result.tokenSecretHex), new Fr(result.tokenLeafIndex))
-				.send({ from, fee: fjwcFee, wait: { waitForStatus: TxStatus.PROPOSED } } as never)
-			landed = true
-		} catch {
-			if (i % 10 === 0) console.log(`claim not ready yet (messages syncing)… (${mins()})`)
-			await new Promise((r) => setTimeout(r, 6000))
-		}
-	}
-	if (!landed) throw new Error("self-paying claim never landed within budget")
+	const fjBefore = await balanceOf(feeJuice, from)
+	const outcome = await claimTokensUntilSynced({
+		hub,
+		claim: {
+			token: claimTokenBlock(TOKEN, result.token as NonNullable<typeof result.token>),
+			recipient: from.toString(),
+			amount: bridgedAmount,
+			claimValue: Fr.fromHexString(result.tokenClaimValueHex as string),
+			leafIndex: result.tokenLeafIndex as bigint,
+			isPrivate: false,
+			from: from.toString(),
+		},
+		sendOpts: {
+			from,
+			fee: {
+				paymentMethod: publicFeeJuicePayment(from, {
+					claimAmount: result.fuelReceived as bigint,
+					claimSecret: Fr.fromHexString(result.fuelSecretHex as string),
+					messageLeafIndex: result.fuelLeafIndex as bigint,
+				}),
+			},
+			wait: { waitForStatus: TxStatus.PROPOSED },
+		},
+	})
 
-	const tokenBal = await tokenBalance()
-	const fjAfter = await fjBalance()
+	const tokenBal = await balanceOf(l2Token, from)
+	const fjAfter = await balanceOf(feeJuice, from)
 	if (tokenBal < bridgedAmount) throw new Error(`token balance ${tokenBal} < bridged ${bridgedAmount}`)
-	if (fjAfter <= fjBefore) throw new Error(`no Fee Juice landed as balance (fee ate everything?)`)
-	console.log(`\n✅ CANDIDATE fueled smoke PASSED — deposit+swap→self-paying claim in ${mins()}.`)
-	console.log(`   token balance ${tokenBal}, FJ gained ${fjAfter - fjBefore}. Safe to promote.`)
+	if (fjAfter <= fjBefore) throw new Error("no Fee Juice landed as balance (fee ate everything?)")
+	console.log(`\n✅ FUELED smoke PASSED — send+swap→self-paying ${outcome.path} in ${mins()}.`)
+	console.log(`   ${TOKEN.displaySymbol} balance ${tokenBal}, FJ gained ${fjAfter - fjBefore}. Safe to promote.`)
 }
 
 main().catch((e) => {

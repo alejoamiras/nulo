@@ -8,6 +8,7 @@ export {
 	type JobProgress,
 	type JobStage,
 	type KnownJobErrorKind,
+	type ProveBackend,
 } from "./types"
 
 export { IllegalTransitionError, JobCancelledSentinel, assertCanTransition, canTransition } from "./fsm"

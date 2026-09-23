@@ -1,0 +1,29 @@
+# deflake-round-3 — plan audit, codex leg (xhigh, fresh session)
+
+Verbatim response (paths rewritten repo-relative):
+
+reject (with blocking findings: F1 can wrong-ALLOW an untested PR; the auth and SW root-cause claims are not supported by the cited evidence; the import split has no demonstrated viable budget).
+
+### Critical
+
+- **F1 is not gate-safe.** It emits success merely because a newer run exists ([plan.md:44](implementations-plan/deflake-round-3/plan.md:44)), while explicitly admitting duplicate resolution is nondeterministic ([plan.md:79](implementations-plan/deflake-round-3/plan.md:79)). In an R1→R2→R3 cancellation chain, R1 and R2 can green before R3 fails; an older success can then win—the exact inverse of today’s observed wrong-BLOCK.
+
+- **The probe identity is attacker-confusable.** Concurrency is keyed only by workflow and `head_ref` ([pr-quick.yml:12](.github/workflows/pr-quick.yml:12), [pr-smoke-e2e.yml:13](.github/workflows/pr-smoke-e2e.yml:13), [pr-network-e2e.yml:19](.github/workflows/pr-network-e2e.yml:19)); F1 likewise matches only workflow, branch, and broad event class ([plan.md:50](implementations-plan/deflake-round-3/plan.md:50)). Two fork PRs using the same branch name can cross-cancel; the unrelated newer run then greens the victim SHA without ever testing it. Matching head SHA, head repository and PR number is mandatory, but does not solve the duplicate-success coin flip.
+
+- **There is no magic non-blocking/non-winning conclusion.** GitHub treats `success`, `neutral`, and job-level `skipped` as satisfying required checks; `cancelled` blocks. A job-level `if` therefore wrong-ALLOWs, while omitting a workflow can leave the check pending. The Checks API has no deletion endpoint usable for this design. See GitHub’s [status-check semantics](https://docs.github.com/en/pull-requests/reference/status-checks). F1 must be replaced by a design that creates one authoritative check, deduplicates before same-name checks are created, or makes every duplicate mirror the authoritative run’s terminal result. Required-check integrity cannot depend on undocumented duplicate selection.
+
+### High
+
+- **The API plumbing is incomplete.** All three workflows explicitly omit `actions: read` ([pr-quick.yml:16](.github/workflows/pr-quick.yml:16), [pr-smoke-e2e.yml:17](.github/workflows/pr-smoke-e2e.yml:17), [pr-network-e2e.yml:23](.github/workflows/pr-network-e2e.yml:23)). The plan must explicitly add that permission, bind `GITHUB_TOKEN`/`GH_TOKEN`, paginate/order results, and fail closed on 403/rate-limit/malformed responses. `run_attempt` cannot identify concurrency supersession, so an API-free YAML expression is insufficient; the pure/IO split itself is reasonable.
+
+- **The recorded `ensureUnlocked` red does not establish hydration as its cause.** The ledger says the failure was the initial 5-second selector wait ([flake-ledger.md:252](implementations-plan/e2e-deflake/flake-ledger.md:252)), before fill or submit ([helpers.ts:82](apps/extension/tests/e2e/fixtures/helpers.ts:82)). Hydration therefore cannot explain that incident. A separate hydration race is real: the profile is loaded asynchronously ([auth.vue:126](apps/extension/src/popup/pages/auth.vue:126)), yet password-submit becomes enabled solely from password content ([auth.vue:58](apps/extension/src/popup/pages/auth.vue:58)). A test-only attribute leaves the user-facing early-submit bug intact. Gate submit on a hydrated valid profile and have e2e wait for enabled state; do not call this observability-only.
+
+- **The import split may only rename the same flake.** The cited content run exhausted the shared 300 seconds inside `importFullBackup` ([flake-ledger.md:259](implementations-plan/e2e-deflake/flake-ledger.md:259)); the plan provides no measured restore budget before reserving 40–60 seconds for routing ([plan.md:107](implementations-plan/deflake-round-3/plan.md:107)). Restore does expose a valid checkpoint at `restoreStatus="finished"` ([useFullBackupImport.ts:703](apps/extension/src/composables/useFullBackupImport.ts:703)), but first reproduce/instrument the loaded run. If legitimate progress exceeds 300 seconds, fix the slow resource/operation or use progress-stall detection; an arbitrary ≤240/60 split is not deflaking.
+
+- **The SW death confirmation is contradicted by the repo.** `Runtime.terminateExecution` is documented as leaving a zombie target ([migration.test.ts:28](apps/extension/tests/e2e/migration.test.ts:28)), and Puppeteer’s `waitForTarget` waits for a matching target to appear, not disappear. Prove a real target-destroy primitive and then reproduce the navigation-detach class before un-skipping. `retry:0` for test 4 is appropriate only after that proof.
+
+### Medium / Low
+
+- **Medium:** Defer `withFreshBalanceRow`. The plan claims nine sites, but there are 13 `captureBalanceBaseline` calls across nine files, including three fixtures. This action-closure churn is unrelated to the flake mechanisms and increases PR-3 risk ([plan.md:127](implementations-plan/deflake-round-3/plan.md:127)).
+
+- **Low:** Leaving actionlint/release aggregators untouched is justified by their exposure. The named commands exist; current `bun test scripts/ci-cd/` passed 7/7 and actionlint passed. The open+label burst is observable, but a green survivor does not test wrong-ALLOW—add an intentionally failing survivor safety test after redesign. Phase-6’s frozen-tree, three-first-attempt-green protocol is carried correctly; spell smoke invocations with CLI `--retry=0`, since the smoke config defaults to retry 2 ([vitest.e2e.config.ts:35](apps/extension/vitest.e2e.config.ts:35)).

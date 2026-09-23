@@ -6,7 +6,6 @@
  */
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
-import { EventHandler } from "@nulo/wallet-core/utils"
 import { asMasterSecretBytes } from "@nulo/wallet-crypto"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { describe, expect, test } from "vitest"
@@ -28,6 +27,7 @@ function row(overrides: Partial<Account> = {}): Account {
 		address: "0xaaaa",
 		index: 0,
 		type: AccountType.Nulo_v1,
+		l1ChainId: 0,
 		name: "A",
 		visible: true,
 		...overrides,
@@ -113,10 +113,10 @@ describe("AccountIntegrityCoordinator", () => {
 		])
 		const seen: string[] = []
 		const { coordinator, repo } = await build({
-			rows: [row(), row({ chainId: 7, address: "0xbbbb" })],
+			rows: [row(), row({ chainId: 7, l1ChainId: 7, address: "0xbbbb" })],
 			derive: async (_master, account) => {
-				seen.push(`${account.chainId}:${account.index}`)
-				return derived.get(`${account.chainId}:${account.index}`) ?? "0xnone"
+				seen.push(`${account.l1ChainId}:${account.index}`)
+				return derived.get(`${account.l1ChainId}:${account.index}`) ?? "0xnone"
 			},
 		})
 		await expect(coordinator.verifyBeforeSessionOpen("p1", MASTER)).rejects.toBeInstanceOf(AccountAddressInconsistencyError)

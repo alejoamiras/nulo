@@ -1,7 +1,7 @@
 /**
- * Full L1↔L2 bridge flow orchestrations — the logic the frontend drives and the
- * sandbox smoke proves, in one place. Each takes a connected L1 (viem) context +
- * an L2 bridge Contract + the deployed addresses, runs the cross-chain dance, and
+ * Cross-chain flow orchestrations the frontend drives and the sandbox smoke proves:
+ * the router deposit legs and the L2→L1 withdraw consumption. Each takes a connected
+ * L1 (viem) context + the generation's addresses, runs the cross-chain dance, and
  * reports stage transitions for the loading bar. Framework-agnostic (no Vue).
  *
  * The proven reference for these sequences is `scripts/deploy-sandbox.ts --smoke`.
@@ -11,7 +11,7 @@ import { waitForProven } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import { deriveTokenClaimSecret } from "./claim-secret"
@@ -52,7 +52,7 @@ export interface RecoveryHooks {
 // FeeJuicePortal) both go through bridge(). Signs a Permit2 witness (fuel fields zeroed) and
 // calls bridge(); returns the L1 result. The L2 claim runs separately (claimPublic/claimPrivate),
 // mirroring runSwapBridge. The direct approve+portal path (runDeposit/depositPublic/depositPrivate)
-// is DELETED — bridge-only now goes through bridge() everywhere (faucet inlines the same witness).
+// is DELETED — bridge-only now goes through bridge() everywhere (tools inlines the same witness).
 
 /** L1 stages for a router deposit, surfaced to the UI. */
 export type RouterDepositStage = "signing" | "depositing" | "syncing" | "done"
@@ -105,7 +105,7 @@ export async function runRouterDeposit(
 	// A nonzero-but-invalid recipient (a field that isn't a point on Grumpkin) would be committed into
 	// the deposit and then mint an undecryptable, unspendable note — the commitment makes it
 	// unrecoverable. Fail closed before the irreversible L1 tx. (The Noir claim_private wants a matching
-	// is_valid() assert on the next redeploy; today the faucet's wallet-sourced recipient is always valid.)
+	// is_valid() assert on the next redeploy; today the tools app's wallet-sourced recipient is always valid.)
 	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
 		throw new Error("runRouterDeposit: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
 	}
@@ -197,6 +197,9 @@ export interface WithdrawConsumeParams {
 	portalAbi: Abi
 	/** Seconds to wait for the burn's epoch to prove (aztec.js default 600 — raise for slow networks like the live testnet). */
 	provenTimeoutSec?: number
+	/** The consume hash the moment it exists, before its receipt is awaited — a caller with a
+	 *  journal records it here so a crash mid-wait still knows which transaction to finish. */
+	onSent?: (txHash: Hex) => void
 }
 
 /**
@@ -211,7 +214,7 @@ export async function consumeWithdrawal(
 	exitReceipt: { txHash: unknown },
 	p: WithdrawConsumeParams,
 	onStage?: (s: WithdrawFlowStage) => void,
-): Promise<void> {
+): Promise<{ consumeTxHash: Hex }> {
 	onStage?.("proving")
 	await waitForProven(node, exitReceipt as never, (p.provenTimeoutSec ? { provenTimeout: p.provenTimeoutSec } : undefined) as never)
 	const eff = await node.getTxEffect(exitReceipt.txHash as never)
@@ -235,8 +238,31 @@ export async function consumeWithdrawal(
 		args: [p.recipientL1, p.amount, false, BigInt(wit.epochNumber), BigInt(wit.numCheckpointsInEpoch), wit.leafIndex, path] as never,
 		account: l1.account,
 	})
-	await l1.pub.waitForTransactionReceipt({ hash: await l1.wallet.writeContract(req.request as never) })
+	const consumeTxHash = (await l1.wallet.writeContract(req.request as never)) as Hex
+	p.onSent?.(consumeTxHash)
+	await l1.pub.waitForTransactionReceipt({ hash: consumeTxHash })
 	onStage?.("done")
+	return { consumeTxHash }
+}
+
+/**
+ * Whether the Outbox has ALREADY consumed this exit's L2→L1 message. The message names its L1
+ * recipient, so anyone may finish it and the funds still land where the burn said — which is why a
+ * failed consume must ask this before it retries: a message someone else finished can never be
+ * consumed again, and a caller that keeps trying reports a permanent failure over a completed exit.
+ *
+ * Unknowable answers read as NOT consumed (a missing effect, an unproven epoch): a false "already
+ * done" would mark an exit complete whose funds are still sitting in the Outbox.
+ */
+export async function isOutboxMessageConsumed(l1: L1Ctx, node: AztecNodeClient, exitReceipt: { txHash: unknown }): Promise<boolean> {
+	const eff = await node.getTxEffect(exitReceipt.txHash as never)
+	const messageHash = eff?.data.l2ToL1Msgs[0]
+	if (!messageHash) return false
+	const { l1ContractAddresses } = await node.getNodeInfo()
+	const outbox = new OutboxContract(l1.pub as never, l1ContractAddresses.outboxAddress)
+	const wit = await computeL2ToL1MembershipWitness(node, outbox, messageHash, exitReceipt.txHash as never, 0)
+	if (!wit) return false
+	return outbox.hasMessageBeenConsumedAtEpoch(wit.epochNumber, getL2ToL1MessageLeafId(wit))
 }
 
 /** One-tx swap+fuel bridge stages, surfaced to the UI for the loading bar. */
@@ -295,6 +321,31 @@ export interface SwapRecoveryHooks {
 	onBridged?: (r: { tokenLeafIndex: bigint; fuelLeafIndex: bigint }) => void
 }
 
+/** Fail closed on the private-fuel invariants BEFORE any secret generation or signing.
+ *  Without this, a missing fuelSecret silently falls back to Fr.random() and strands the
+ *  Fee Juice (the PrivateFPC claimer reconstructs the secret from msg_sender — a random
+ *  one is unrecoverable), and a non-FPC fuelRecipient deposits the gas publicly to the
+ *  wrong L2 address. The shipping tools always passes both; this guards every other
+ *  caller of the exported helper. */
+function assertPrivateFuelInvariants(p: SwapBridgeParams): void {
+	if (!p.isPrivate) return
+	if (!p.fuelSecret) {
+		throw new Error(
+			"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
+		)
+	}
+	if (!p.tokenClaimSalt) {
+		throw new Error(
+			"runSwapBridge: private token leg requires an injected tokenClaimSalt — a random token secret strands the deposit against the recipient-committed claim_private (F2)",
+		)
+	}
+	if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
+		throw new Error(
+			`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
+		)
+	}
+}
+
 /**
  * The headline one-tx flow: sign a Permit2 witness-bound transfer, then call the router's
  * `bridgeWithFuel` — which pulls the token, swaps `fuelAmount` for Fee Juice, deposits the FJ to
@@ -310,28 +361,7 @@ export async function runSwapBridge(
 	onStage?: (s: SwapFlowStage) => void,
 	recovery?: SwapRecoveryHooks,
 ): Promise<SwapBridgeResult> {
-	// Fail closed on the private-fuel invariants BEFORE any secret generation or signing. Without
-	// this, a missing fuelSecret silently falls back to Fr.random() below and strands the Fee Juice
-	// (the PrivateFPC claimer reconstructs the secret from msg_sender — a random one is unrecoverable),
-	// and a non-FPC fuelRecipient deposits the gas publicly to the wrong L2 address. The shipping
-	// faucet always passes both; this guards every other caller of the exported helper.
-	if (p.isPrivate) {
-		if (!p.fuelSecret) {
-			throw new Error(
-				"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
-			)
-		}
-		if (!p.tokenClaimSalt) {
-			throw new Error(
-				"runSwapBridge: private token leg requires an injected tokenClaimSalt — a random token secret strands the deposit against the recipient-committed claim_private (F2)",
-			)
-		}
-		if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
-			throw new Error(
-				`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
-			)
-		}
-	}
+	assertPrivateFuelInvariants(p)
 	// A nonzero-but-invalid recipient (not a Grumpkin point) strands the deposit — it would mint an
 	// undecryptable note, and the commitment makes it unrecoverable. Fail closed before the L1 tx.
 	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {

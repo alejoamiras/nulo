@@ -1,4 +1,4 @@
-import { type LogEntry, formatArg, formatLogData, getLogLevelName } from "./logs-format"
+import { type LogEntry, formatLogData, getLogLevelName } from "./logs-format"
 
 const MAX_CELL_LENGTH = 32_760
 
@@ -15,40 +15,39 @@ export function buildLogsCsv(logs: LogEntry[]): string {
 		const time = new Date(log.timestamp).toISOString()
 		const source = log.source
 		const level = getLogLevelName(log.level)
-		const data = computeData(log)
-
-		if (data.length <= MAX_CELL_LENGTH) {
-			rows.push([time, source, level, data])
-			continue
-		}
-
-		let i = 0
-		while (i < data.length) {
-			const chunk = data.slice(i, i + MAX_CELL_LENGTH)
-			const isFirst = i === 0
-			const isLast = i + MAX_CELL_LENGTH >= data.length
-
-			let chunkWithDots = chunk
-			if (isFirst && !isLast) chunkWithDots = `${chunk}...`
-			else if (!isFirst && !isLast) chunkWithDots = `...${chunk}...`
-			else if (!isFirst && isLast) chunkWithDots = `...${chunk}`
-
-			rows.push([time, source, level, chunkWithDots])
-			i += MAX_CELL_LENGTH
+		for (const cell of splitIntoCells(formatLogData(log.data))) {
+			rows.push([time, source, level, cell])
 		}
 	}
 
 	return [["time", "source", "level", "data"], ...rows]
-		.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
+		.map((row) => row.map((value) => `"${neutralizeFormula(String(value)).replace(/"/g, '""')}"`).join(","))
 		.join("\n")
 }
 
-function computeData(log: LogEntry): string {
-	if (Array.isArray(log.data) && log.data.length) {
-		return log.data
-			.map(formatArg)
-			.filter((x) => x !== undefined)
-			.join(" ")
+/** A cell starting with a formula trigger opens as code in a spreadsheet; a leading quote keeps it text. */
+function neutralizeFormula(cell: string): string {
+	return /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell
+}
+
+/** Split an over-long data value into MAX_CELL_LENGTH-wide cells, ellipsis-marked on the
+ *  cut sides so a continuation cell is visibly a continuation. */
+function splitIntoCells(data: string): string[] {
+	if (data.length <= MAX_CELL_LENGTH) return [data]
+	const cells: string[] = []
+	let i = 0
+	while (i < data.length) {
+		const chunk = data.slice(i, i + MAX_CELL_LENGTH)
+		const isFirst = i === 0
+		const isLast = i + MAX_CELL_LENGTH >= data.length
+
+		let chunkWithDots = chunk
+		if (isFirst && !isLast) chunkWithDots = `${chunk}...`
+		else if (!isFirst && !isLast) chunkWithDots = `...${chunk}...`
+		else if (!isFirst && isLast) chunkWithDots = `...${chunk}`
+
+		cells.push(chunkWithDots)
+		i += MAX_CELL_LENGTH
 	}
-	return formatLogData(log.data)
+	return cells
 }

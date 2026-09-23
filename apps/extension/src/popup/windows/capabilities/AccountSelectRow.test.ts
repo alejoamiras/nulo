@@ -95,4 +95,34 @@ describe("AccountSelectRow", () => {
 		const cls = w.find('[data-testid="cap-account-item"]').attributes("class") || ""
 		expect(cls).toContain("row_disabled")
 	})
+
+	test("Space on the row emits 'toggle'", async () => {
+		const w = factory()
+		await w.find('[data-testid="cap-account-item"]').trigger("keydown.space")
+		expect(w.emitted("toggle")).toHaveLength(1)
+	})
+
+	test("disabled=true also blocks keyboard toggles", async () => {
+		const w = factory({ disabled: true })
+		const row = w.find('[data-testid="cap-account-item"]')
+		await row.trigger("keydown.enter")
+		await row.trigger("keydown.space")
+		expect(w.emitted("toggle")).toBeUndefined()
+		expect(row.attributes("tabindex")).toBe("-1")
+	})
+
+	test("locked row: marked granted, out of the tab order, ignores click / Enter / Space, hides the alias input", async () => {
+		const w = factory({ selected: true, locked: true })
+		const row = w.find('[data-testid="cap-account-item"]')
+		expect(row.attributes("data-granted")).toBe("true")
+		expect(row.attributes("data-selected")).toBe("true")
+		expect(row.attributes("aria-disabled")).toBe("true")
+		expect(row.attributes("tabindex")).toBe("-1")
+		await row.trigger("click")
+		await row.trigger("keydown.enter")
+		await row.trigger("keydown.space")
+		expect(w.emitted("toggle")).toBeUndefined()
+		expect(w.find('[data-testid="cap-account-alias-input"]').exists()).toBe(false)
+		expect(w.text()).toContain("SHARED")
+	})
 })

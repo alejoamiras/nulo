@@ -84,30 +84,6 @@ watch(
 						</Flex>
 					</Flex>
 				</Flex>
-
-				<!-- <Flex direction="column" gap="12">
-					<Button
-						@click="popupStore.open('new_network')"
-						wide
-						variant="secondary"
-						size="medium"
-						leftIcon="plus-circle"
-						leftIconColor="primary"
-					>
-						Add network
-					</Button>
-
-					<Text
-						size="12"
-						weight="500"
-						color="tertiary"
-						height="140"
-						align="center"
-					>
-						To add a new network, come up with a unique name and
-						provide an RPC link
-					</Text>
-				</Flex> -->
 			</Flex>
 		</PopupCard>
 	</Popup>
@@ -121,30 +97,8 @@ watch(
 }
 
 .network {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
+	composes: select_row from "./popup-shared.module.css";
 
 	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border: 1px solid var(--nulo-outline);
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
 }
 </style>

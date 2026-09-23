@@ -17,12 +17,12 @@ const SELECTOR = {
 	withdraw: "69328dec", // withdraw(address,uint256,address)
 } as const
 
-function strip0x(h: string): string {
+export function strip0x(h: string): string {
 	return h.startsWith("0x") || h.startsWith("0X") ? h.slice(2) : h
 }
 
 /** ABI word: a hex value right-aligned in 32 bytes (64 hex chars). */
-function word(hex: string): string {
+export function word(hex: string): string {
 	return strip0x(hex).toLowerCase().padStart(64, "0")
 }
 
@@ -30,14 +30,14 @@ function wordFromBigInt(n: bigint): string {
 	return n.toString(16).padStart(64, "0")
 }
 
-function bytesFromHex(hex: string): Uint8Array<ArrayBuffer> {
+export function bytesFromHex(hex: string): Uint8Array<ArrayBuffer> {
 	const clean = strip0x(hex)
 	const out = new Uint8Array(new ArrayBuffer(clean.length / 2))
 	for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16)
 	return out
 }
 
-async function sha256ToField(data: Uint8Array<ArrayBuffer>): Promise<string> {
+export async function sha256ToField(data: Uint8Array<ArrayBuffer>): Promise<string> {
 	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data))
 	let hex = ""
 	for (const b of digest) hex += b.toString(16).padStart(2, "0")

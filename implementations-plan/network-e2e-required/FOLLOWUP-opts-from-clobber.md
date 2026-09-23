@@ -5,6 +5,14 @@
 outside the session; 5 dispatcher unit tests pin it; F1's `authwit-lifecycle` e2e was
 upgraded to a true revoke proof (consume from B is blocked after revoke). The original
 filing is preserved below for the record.
+
+**Sibling closed (`self-pay-setup-fix`, 2026-09-05):** the same clobber survived in the
+generic account-operation path — `simulateTx` and `profileTx` still resolved the first session
+account and overwrote `opts.from` — and surfaced in production as a two-account self-paid bridge
+claim classified as externally paid (`Setup function not on allow list` in simulation). Both
+kinds now resolve the named account through the same session-bounded resolver, pinned in
+`dispatcher.test.ts`, and gated on the network suite by `sim-from-selfpay` (shard pool) and
+`selfpay-phase` (heavy runner). See `implementations-plan/self-pay-setup-fix/`.
 **Severity:** correctness + mild trust-boundary/UX. Confined to **multi-account** dApp sessions.
 
 ## What

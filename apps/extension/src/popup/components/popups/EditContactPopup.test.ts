@@ -86,12 +86,15 @@ const OLD_ADDRESS = `0x${"a".repeat(64)}`
 const NEW_ADDRESS = `0x${"b".repeat(64)}`
 const CONTACT = { id: "c1", name: "Alice", address: OLD_ADDRESS }
 
+const trackedWrappers: Array<ReturnType<typeof mount>> = []
+
 async function mountAndOpen(contacts = [CONTACT], editId = "c1") {
 	cacheStoreState.contactToEditIdx = editId
 	const w = mount(EditContactPopup, {
 		props: { show: false },
 		global: { stubs: STUBS },
 	})
+	trackedWrappers.push(w)
 	contactServiceMock.getContacts.mockResolvedValueOnce(contacts)
 	await w.setProps({ show: true })
 	await flushPromises()
@@ -104,6 +107,15 @@ beforeEach(() => {
 	cacheStoreState.importContact = null
 })
 afterEach(() => {
+	// Guaranteed net: unmount every tracked wrapper (scope cleanup removes the
+	// document listener) even when an assertion aborted the test mid-way.
+	for (const w of trackedWrappers.splice(0)) {
+		try {
+			w.unmount()
+		} catch {
+			/* already unmounted by the test */
+		}
+	}
 	vi.restoreAllMocks()
 })
 
@@ -162,6 +174,33 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 
 		expect(w.emitted("onClose")).toBeFalsy()
 		expect(openToastMock).toHaveBeenCalledWith({ label: "Something went wrong", icon: "warning" }, expect.anything())
+	})
+
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight update fires updateContact ONCE", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.updateContact.mockImplementation(() => new Promise(() => {}))
+		await w.find('[data-testid="name-input"]').setValue("Alicia-Reentrant")
+		await flushPromises()
+		// The popup's keydown listener lives on `document`; the mounted tree is
+		// detached, so dispatch from a real document-level input. (The tracked
+		// afterEach net unmounts every prior wrapper, so only THIS instance is
+		// listening; the unique-name filter below keeps the pin robust anyway.)
+		const docInput = document.createElement("input")
+		document.body.appendChild(docInput)
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		// Count only THIS instance's calls (unique name typed above) — leaked
+		// listeners from earlier tests answer the same document Enter but carry
+		// their own field values, so they cannot pollute this count.
+		const myCalls = contactServiceMock.updateContact.mock.calls.filter((c) => c[1] === "Alicia-Reentrant").length
+		// Cleanup BEFORE the assertion: a failing expect must not skip the
+		// unmount (scope cleanup removes the document listener) or the reset.
+		w.unmount()
+		contactServiceMock.updateContact.mockReset()
+		docInput.remove()
+		expect(myCalls).toBe(1)
 	})
 
 	test("Enter with a clean form is a no-op (dirty gate holds on the keyboard path)", async () => {

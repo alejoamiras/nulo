@@ -1,15 +1,19 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
 import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
@@ -56,6 +60,9 @@ const isNameAlreadyExist = computed(() => form.fields.name.error.value === "Alre
 const isUrlAlreadyExist = computed(() => form.fields.url.error.value === "Already exists")
 
 const isAvailableToCreateNetwork = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isCreating.value) return false
 	if (!nameTerm.value.length) return false
 	if (!urlTerm.value.length) return false
 	if (urlTerm.value.length < 5) return false
@@ -75,9 +82,11 @@ const handleCreateNetwork = async () => {
 	}
 
 	try {
+		// The latch spans the WHOLE handler (cleared in finally, not after
+		// addNetwork): the activation + refresh awaits below are still part of
+		// this submit, and a re-entry during them would double-create.
 		isCreating.value = true
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
-		isCreating.value = false
 
 		// Guard first, persist second: the guard admits (and moves the in-memory
 		// scope) before the service write, so a refusal leaves the durable active
@@ -89,13 +98,7 @@ const handleCreateNetwork = async () => {
 			network,
 		)
 		if (result !== "activated") {
-			if (result !== "stale") {
-				const label =
-					result === "blocked"
-						? "Network added. Finish or cancel your pending transaction to switch to it"
-						: "Network added, but the switch didn't confirm — reopen the popup to verify"
-				openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
-			}
+			toastNonActivatedOutcome(result)
 			appStore.networks = await managers.network.getNetworks()
 			emit("onClose")
 			return
@@ -106,21 +109,35 @@ const handleCreateNetwork = async () => {
 
 		openToast({ label: "Network is created" })
 	} catch (error) {
+		reportCreateFailure(error)
+	} finally {
 		isCreating.value = false
+	}
+}
 
-		const msg = error instanceof Error ? error.message : String(error)
-		if (msg.startsWith("DUPLICATE_CHAIN")) {
-			// Smart-add: chain already exists in profile. Surface this clearly
-			// so the user knows to use Settings → Networks → [chain] → Add endpoint.
-			openToast(
-				{ label: "A network for this chain already exists. Add it as an endpoint instead.", icon: "warning" },
-				TOAST_DURATION.LONG,
-			)
-		} else if (msg === "Failed to fetch node info" || msg === "Failed to fetch network info") {
-			isUrlHasError.value = true
-		} else {
-			openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
-		}
+/** The network exists but is not active: say why, unless the guard was merely superseded (`stale`). */
+function toastNonActivatedOutcome(result) {
+	if (result === "stale") return
+	const label =
+		result === "blocked"
+			? "Network added. Finish or cancel your pending transaction to switch to it"
+			: "Network added, but the switch didn't confirm — reopen the popup to verify"
+	openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+}
+
+function reportCreateFailure(error) {
+	const msg = errorMessageFromUnknown(error)
+	if (msg.startsWith("DUPLICATE_CHAIN")) {
+		// Smart-add: chain already exists in profile. Surface this clearly
+		// so the user knows to use Settings → Networks → [chain] → Add endpoint.
+		openToast(
+			{ label: "A network for this chain already exists. Add it as an endpoint instead.", icon: "warning" },
+			TOAST_DURATION.LONG,
+		)
+	} else if (msg === "Failed to fetch node info" || msg === "Failed to fetch network info") {
+		isUrlHasError.value = true
+	} else {
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
 	}
 }
 
@@ -153,10 +170,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isNameAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exists </Text>
-					</Flex>
+					<FieldWarning v-if="isNameAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -170,14 +184,8 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isUrlHasError" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Failed to fetch network info </Text>
-					</Flex>
-					<Flex v-else-if="isUrlAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exists </Text>
-					</Flex>
+					<FieldWarning v-if="isUrlHasError"> Failed to fetch network info </FieldWarning>
+					<FieldWarning v-else-if="isUrlAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -190,61 +198,3 @@ usePopupEntity(() => props.show, {
 	</FormPopup>
 </template>
 
-<style module>
-.network {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
-}
-
-.item {
-	height: 30px;
-
-	border-radius: 8px;
-	border: 2px solid var(--nulo-border);
-	cursor: pointer;
-
-	padding: 0 16px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border: 2px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-
-	&.selected {
-		background: var(--green);
-	}
-
-	&.disabled {
-		opacity: 0.5;
-		pointer-events: none;
-	}
-}
-</style>

@@ -16,6 +16,7 @@ export interface DappInteractionLike {
 	getInteractionPayload(requestId: string): Promise<unknown>
 	rejectInteraction(requestId: string, reason: string): void
 	resolveInteraction(requestId: string, result: unknown): Promise<void>
+	isInteractionCancelled(requestId: string): Promise<boolean>
 	onInteractionCancelled: EventHandler<string>
 }
 
@@ -75,6 +76,26 @@ export function useDappInteractionPayload<TPayload>(
 	}
 	interactionService.onInteractionCancelled.add(onCancelled)
 
+	/** Post-fetch steps: replay a pre-subscribe cancel and surface the dapp meta.
+	 *  Throws on mid-await disposal, mirroring the fetch path's disposed check. */
+	const finishLoad = async (id: string, result: TPayload) => {
+		// Replay a cancel that fired before this popup subscribed — the
+		// broadcast alone is lost to late mounts; the record's flag is not.
+		// Best-effort: a failed replay read must not fail an otherwise-good
+		// load (the live broadcast still covers the common path).
+		const cancelled = await interactionService.isInteractionCancelled(id).catch(() => false)
+		if (disposed) throw new Error("Composable disposed before payload landed")
+		if (cancelled) {
+			isCancelled.value = true
+		}
+
+		const meta = dappOf(result) as UIDappMetadata | undefined
+		if (meta) {
+			if (meta.logo) meta.logoBlobUrl = meta.logo
+			dapp.value = meta
+		}
+	}
+
 	const load = async (): Promise<TPayload> => {
 		isLoading.value = true
 		error.value = null
@@ -87,11 +108,7 @@ export function useDappInteractionPayload<TPayload>(
 			if (disposed) throw new Error("Composable disposed before payload landed")
 			payload.value = result
 
-			const meta = dappOf(result) as UIDappMetadata | undefined
-			if (meta) {
-				if (meta.logo) meta.logoBlobUrl = meta.logo
-				dapp.value = meta
-			}
+			await finishLoad(id, result)
 			return result
 		} catch (err) {
 			error.value = err

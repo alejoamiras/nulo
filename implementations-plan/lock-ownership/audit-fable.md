@@ -1,0 +1,14 @@
+# Fable plan audit — lock-ownership (round 1)
+
+Independent Plan agent (Fable), read-only, parallel with the codex round. Verdict on rev 1: **APPROVE-WITH-CHANGES**.
+
+Findings (condensed; adjudication in the rev-2 ledger):
+
+1. N-12 fence hole in the CONVERSE ordering — a close that captures the generation AFTER open's entry-bump never mismatches; parked mid-open (`wrapPair`), the expiry close then clears B's just-scheduled alarm. Offered two repairs (activeSession-undefined stand-down condition; double-bump at open exit). → SUBSUMED by the artifact-mutex redesign (bump atomic with B's artifacts + sync head identity guard); fable's ordering serializes correctly under the mutex.
+2. N-17 test spec vacuous (same finding as codex #4) + the GOLD recomposition: park at the deferred PXE await → fake-timer the serviceLock watchdog → the handoff lets the queued `onTokenDeleted` bump+wipe → release → assert the revoked CS writes nothing. → ADOPTED verbatim.
+3. f1-1 adoption's "B's row intact" assertion contradicts the fence under the gated-delete harness (the delete is already in flight; the gate breaks the FIFO that protects the row). → ADOPTED (mutex-consistent assertion set; "zero clears total" becomes "B's alarm never cleared" — A clearing its OWN alarm is legitimate under serialized ordering).
+4. N-11 silently-revertible liveness: `leave(stale)` must check the ticket BEFORE clearing the timer (a check-after-clear implementation passes every rev-1 test while disarming W2's watchdog) + the runbook's "watchdog uses its own token" was unstated + no direct-grant path exists (all grants via dispatch()) + the handoff-mint identity test doesn't discriminate what it claims. → ALL ADOPTED (check-first order specced + stale-leave-preserves-watchdog pin + watchdog-own-ticket + spec text fixed).
+5. Rationale imprecisions: `chrome.storage.session` is browser-session-lifetime (survives SW suspension; silent re-unlock is the feature); benignity of the failed-open stale alarm rests on `onAlarmFired`'s `if (!active) return` (:729) first, the scheduledTime gate second; expiry-only closes reach the off-lock path (manual closes are serialized); `restore()`'s isExpired gate drops leftovers. → ADOPTED into the plan text.
+6. Adjacencies: README lock-section drift, repository.ts:87-92 example, purge-rows.ts:8 + service.ts:2248/:2313 comment refs, `silentClose()` init-only invariant comment. → ADOPTED.
+
+Verified-sound list (independently checked): zero raw callers + KeyedLock withLock-only (grep), the 30-min envelope chain, N-11 core mechanics incl. no wedged-waiter window, p1-1/f1-1 RED-on-revert for the specced shapes, the N-17 two-site census (destructive bumpers all hold the lock; commitPublicEvent has no PXE await), N-12 direction sound once patched, init-tail close cannot race an open, a stood-down close cannot leak a DEK.

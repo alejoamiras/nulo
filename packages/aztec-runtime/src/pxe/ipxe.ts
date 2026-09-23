@@ -39,7 +39,7 @@ export interface IPXE {
 	registerContract(contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): Promise<void>
 	getContracts(): Promise<AztecAddress[]>
 	getNotes(filter: NotesFilter): Promise<NoteDao[]>
-	proveTx(txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult>
+	proveTx(txRequest: TxExecutionRequest, scopes: AztecAddress[], proveId?: string): Promise<TxProvingResult>
 	profileTx(txRequest: TxExecutionRequest, opts: ProfileTxOpts): Promise<TxProfileResult>
 	simulateTx(txRequest: TxExecutionRequest, opts: SimulateTxOpts, stubAccountAddresses?: string[]): Promise<TxSimulationResult>
 	executeUtility(call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult>

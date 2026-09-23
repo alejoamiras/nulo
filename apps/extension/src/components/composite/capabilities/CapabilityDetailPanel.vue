@@ -7,35 +7,15 @@
  * contact-name annotation) — those components own the trust-aware
  * rendering for addresses and class ids.
  */
-import type { Capability, Scope, ScopePattern } from "@nulo/wallet-bridge"
+import type { Capability } from "@nulo/wallet-bridge"
 import ScopeAddress from "@/components/ScopeAddress.vue"
 import ScopeClassId from "@/components/ScopeClassId.vue"
-import { getMethodLabel } from "@/utils/tx-enrichment"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 defineProps<{
 	capability: Capability
 	granted: boolean
 }>()
-
-function formatScope(scope: Scope): { isWildcard: boolean; patterns: ScopePattern[] } {
-	if (scope === "*") return { isWildcard: true, patterns: [] }
-	if (Array.isArray(scope)) return { isWildcard: false, patterns: scope }
-	return { isWildcard: true, patterns: [] }
-}
-
-/**
- * Render-time function-id sanitizer. `humanizeMethodName` is many-to-one
- * lossy (transfer, transfer_in_private, and transfer_private_to_private
- * all collapse to "Transfer (private)"), so we always show the RAW
- * sanitized method id and only attach the friendly label when
- * `METHOD_LABELS` knows it. Length cap of 64 handles legitimate Aztec
- * method names (the longest builtins are < 40 chars) while clamping
- * pathological wire values.
- */
-function fnLabel(fn: string): string {
-	return sanitizeWireString(fn, 64)
-}
 </script>
 
 <template>
@@ -139,73 +119,11 @@ function fnLabel(fn: string): string {
 		<template v-else-if="capability.type === 'simulation'">
 			<Flex v-if="capability.transactions" direction="column" gap="4">
 				<Text size="12" weight="600" color="secondary">Simulate transactions (and view-calls) in scope:</Text>
-				<Flex
-					v-if="formatScope(capability.transactions.scope).isWildcard"
-					align="center"
-					gap="6"
-					:class="$style.detail_list"
-				>
-					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">Any contract, any function</Text>
-				</Flex>
-				<Flex v-else direction="column" gap="10" :class="$style.detail_list">
-					<Flex
-						v-for="(p, pi) in formatScope(capability.transactions.scope).patterns"
-						:key="pi"
-						align="start"
-						gap="6"
-					>
-						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Flex direction="column" gap="3">
-							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
-							<ScopeAddress v-else :address="String(p.contract)" />
-							<Flex align="center" gap="6">
-								<Text size="11" color="tertiary">fn:</Text>
-								<Text size="11" weight="600" color="secondary" :class="$style.mono">
-									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
-								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
-								</Text>
-							</Flex>
-						</Flex>
-					</Flex>
-				</Flex>
+				<ScopePatternList :scope="capability.transactions.scope" />
 			</Flex>
 			<Flex v-if="capability.utilities" direction="column" gap="4">
 				<Text size="12" weight="600" color="secondary">Simulate utilities in scope:</Text>
-				<Flex
-					v-if="formatScope(capability.utilities.scope).isWildcard"
-					align="center"
-					gap="6"
-					:class="$style.detail_list"
-				>
-					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">Any contract, any function</Text>
-				</Flex>
-				<Flex v-else direction="column" gap="10" :class="$style.detail_list">
-					<Flex
-						v-for="(p, pi) in formatScope(capability.utilities.scope).patterns"
-						:key="pi"
-						align="start"
-						gap="6"
-					>
-						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Flex direction="column" gap="3">
-							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
-							<ScopeAddress v-else :address="String(p.contract)" />
-							<Flex align="center" gap="6">
-								<Text size="11" color="tertiary">fn:</Text>
-								<Text size="11" weight="600" color="secondary" :class="$style.mono">
-									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
-								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
-								</Text>
-							</Flex>
-						</Flex>
-					</Flex>
-				</Flex>
+				<ScopePatternList :scope="capability.utilities.scope" />
 			</Flex>
 			<Text v-if="!capability.transactions && !capability.utilities" size="12" color="tertiary">
 				No scopes specified
@@ -216,38 +134,7 @@ function fnLabel(fn: string): string {
 		<template v-else-if="capability.type === 'transaction'">
 			<Flex direction="column" gap="4">
 				<Text size="12" weight="600" color="secondary">Allowed transactions:</Text>
-				<Flex
-					v-if="formatScope(capability.scope).isWildcard"
-					align="center"
-					gap="6"
-					:class="$style.detail_list"
-				>
-					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">Any contract, any function</Text>
-				</Flex>
-				<Flex v-else direction="column" gap="10" :class="$style.detail_list">
-					<Flex
-						v-for="(p, pi) in formatScope(capability.scope).patterns"
-						:key="pi"
-						align="start"
-						gap="6"
-					>
-						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Flex direction="column" gap="3">
-							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
-							<ScopeAddress v-else :address="String(p.contract)" />
-							<Flex align="center" gap="6">
-								<Text size="11" color="tertiary">fn:</Text>
-								<Text size="11" weight="600" color="secondary" :class="$style.mono">
-									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
-								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
-								</Text>
-							</Flex>
-						</Flex>
-					</Flex>
-				</Flex>
+				<ScopePatternList :scope="capability.scope" />
 			</Flex>
 			<!-- Load-bearing invariant: dapp-interaction/service.ts:354-362 forces -->
 			<!-- the execute popup for every sendTx under default policy. Editing -->
@@ -331,16 +218,14 @@ function fnLabel(fn: string): string {
 }
 
 .detail_list {
-	padding-left: 4px;
+	composes: detail_list from "./capability-shared.module.css";
 }
 
 .bullet {
-	flex-shrink: 0;
-	line-height: 1.5;
+	composes: bullet from "./capability-shared.module.css";
 }
 
 .mono {
-	font-family: var(--font-mono);
-	letter-spacing: 0.04em;
+	composes: mono from "./capability-shared.module.css";
 }
 </style>

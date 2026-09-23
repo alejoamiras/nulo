@@ -17,6 +17,7 @@ export { defineMigration } from "./types"
 export {
 	Migrator,
 	RESERVED_KEYS,
+	SCHEMA_ATTEMPTS_KEY,
 	SCHEMA_RESERVED_PREFIX,
 	SCHEMA_RUNNING_KEY,
 	SCHEMA_VERSION_KEY,

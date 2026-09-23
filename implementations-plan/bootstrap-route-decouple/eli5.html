@@ -1,0 +1,224 @@
+<title>Bootstrap Route Decouple</title>
+<style>
+  :root {
+    --bg: #FAF9F5;
+    --ink: #1E1C17;
+    --muted: #6E6A5F;
+    --line: #E3E0D5;
+    --panel: #F1EFE7;
+    --accent: #B4540A;
+    --accent-ink: #8A3F06;
+    --accent-soft: #F7E8DB;
+    --ok: #3D7A46;
+    --code-bg: #14130E;
+    --code-ink: #E8E5DA;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15140F;
+      --ink: #E9E6DB;
+      --muted: #9B968A;
+      --line: #2E2C24;
+      --panel: #1D1B15;
+      --accent: #E08A45;
+      --accent-ink: #EFA96F;
+      --accent-soft: #2A2118;
+      --ok: #7FB388;
+      --code-bg: #0D0C09;
+      --code-ink: #DCD9CE;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15140F;
+    --ink: #E9E6DB;
+    --muted: #9B968A;
+    --line: #2E2C24;
+    --panel: #1D1B15;
+    --accent: #E08A45;
+    --accent-ink: #EFA96F;
+    --accent-soft: #2A2118;
+    --ok: #7FB388;
+    --code-bg: #0D0C09;
+    --code-ink: #DCD9CE;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 2.75rem; }
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 2rem; line-height: 1.15; letter-spacing: -0.01em;
+    text-transform: uppercase; margin: 0.4rem 0 0; text-wrap: balance;
+  }
+  h1 .bar { display: block; width: 3rem; height: 3px; background: var(--accent); margin-top: 0.9rem; }
+  h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink); margin: 0 0 1rem; padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  p { margin: 0 0 1rem; }
+  section > p:last-child { margin-bottom: 0; }
+  .lede { font-size: 1.05rem; }
+  .phase {
+    border: 1px solid var(--line); background: var(--panel);
+    padding: 1.1rem 1.3rem; margin-bottom: 0.9rem;
+  }
+  .phase h3 {
+    margin: 0 0 0.5rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .phase h3 .n { color: var(--accent); margin-right: 0.6rem; }
+  .phase p { margin: 0 0 0.55rem; font-size: 0.95rem; }
+  .proof { font-size: 0.83rem; color: var(--muted); margin: 0; }
+  .proof strong { color: var(--muted); font-weight: 600; }
+  .decision {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 1.25rem 1.5rem;
+  }
+  .decision h2 { border-bottom-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  ol.asks { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.8rem; }
+  ol.asks li { font-size: 0.95rem; }
+  ol.asks .rec { color: var(--accent-ink); font-weight: 600; }
+  ul.checklist { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.95rem; }
+  .audit-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+  .chip {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+    border: 1px solid var(--line); padding: 0.25rem 0.6rem; color: var(--muted);
+  }
+  .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .chip.warn { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.55;
+    padding: 1.1rem 1.25rem; overflow-x: auto; white-space: pre-wrap; margin: 0;
+  }
+  .seed { margin-bottom: 1.25rem; }
+  .seed .tag {
+    display: inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 0.3rem 0.7rem; margin-bottom: 0.5rem;
+  }
+  .seed .tag.rec { background: var(--accent); color: var(--bg); }
+  .seed .tag.alt { border: 1px solid var(--line); color: var(--muted); }
+  .warning { color: var(--accent-ink); font-weight: 600; font-size: 0.9rem; }
+  .muted { color: var(--muted); font-size: 0.85rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  .tablewrap { overflow-x: auto; }
+  td, th { text-align: left; padding: 0.45rem 0.8rem 0.45rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+</style>
+<main>
+  <header>
+    <span class="eyebrow">Nulo · implementation plan · ELI5 + approval sheet</span>
+    <h1>Bootstrap Route Decouple<span class="bar"></span></h1>
+    <div class="audit-row">
+      <span class="chip">tier: mid</span>
+      <span class="chip ok">fable: conditional approve — folded</span>
+      <span class="chip ok">codex: 3× reject → conditional approve — all folded</span>
+      <span class="chip ok">owner: APPROVED 2026-08-12 — asks 1–6 ratified</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>What this is</h2>
+    <p class="lede">One of our automated wallet tests fails randomly a few times a month, and the investigation found it isn't the test's fault — it's a real product bug. When someone imports a wallet backup while the network connection to Aztec is bad, the import screen either freezes with no feedback, wrongly says the import failed when it actually worked, or gets stuck on an error screen. This plan fixes the product so an import always reaches a clear, honest outcome within about a minute, no matter how the network behaves — which also permanently fixes the flaky test.</p>
+  </section>
+
+  <section>
+    <h2>Human context</h2>
+    <p>Importing a backup does two kinds of work. First it copies all your data into the wallet — accounts, tokens, history. That part is local and fast and never needs the network. Second, it re-subscribes your wallet to the blockchain so it can spot your private incoming payments again. That part does need the network, and today it can hang for minutes or fail in confusing ways.</p>
+    <p>You decided (and this plan records): the import should simply require a working connection, try a few times with growing pauses if it's flaky, and — if the network really is unreachable — say so honestly on the existing "finished with errors" screen and let you continue into your wallet anyway. Your data is always safe; only the re-subscription is skipped, and the screen tells you.</p>
+    <p>An important correction surfaced during research: the earlier investigation blamed a different piece of code (the transaction sync). Reading the current code disproved that — the real network-dependent step is the re-subscription above. Because the evidence trail matters, <strong>the first phase does nothing but prove this empirically</strong>; if the proof fails, work stops and we reassess before touching anything.</p>
+  </section>
+
+  <section>
+    <h2>Why tier "mid"</h2>
+    <p class="muted">Prescribed in your directive; the rubric agrees: contained change, one high-risk dimension (it touches the heavily-audited backup-restore code), no novel surface, no migrations. Two independent reviewers audited the plan; a third fresh review is finishing now.</p>
+  </section>
+
+  <section>
+    <h2>The six phases</h2>
+    <div class="phase">
+      <h3><span class="n">01</span>Prove the diagnosis (blocking)</h3>
+      <p>Export a real backup the same way the test does, look inside it, and reproduce the freeze against a controlled fake network — including a control run (same backup with the suspect part removed must import cleanly). If the suspected step turns out not to be the culprit, everything stops for a rethink.</p>
+      <p class="proof"><strong>Proves itself by:</strong> a written evidence log with measured timings, plus clean lint + typecheck.</p>
+    </div>
+    <div class="phase">
+      <h3><span class="n">02</span>The fix itself</h3>
+      <p>A quick "can we reach the network?" check with growing pauses between retries (~6–21 s total), a hard time limit on the re-subscription step (~30 s), and honest "skipped — couldn't reach network" entries on the existing error screen. Also hardens the wallet against maliciously oversized backups, and adds tests that lock the wallet mid-import to prove nothing sneaks through. The flaky test gets one new branch: if the error screen appears, click Continue.</p>
+      <p class="proof"><strong>Proves itself by:</strong> unit tests + the full smoke test suite green on the first attempt, including three new dead-network import tests. The old 90-second test limit is untouched.</p>
+    </div>
+    <div class="phase">
+      <h3><span class="n">03</span>Honest balance states</h3>
+      <p>Today a failed balance refresh looks identical to one still running — nothing is saved and nothing shows. Failures get remembered and shown: a small pulsing dot while refreshing, a dimmed amount with "couldn't refresh" when it failed.</p>
+      <p class="proof"><strong>Proves itself by:</strong> unit + component tests green.</p>
+    </div>
+    <div class="phase">
+      <h3><span class="n">04</span>Catch torn imports</h3>
+      <p>If the browser kills the wallet mid-import, a half-imported profile can currently sit there looking normal — and unlocking it silently papers over the damage. A small durable marker now brands an unfinished import, and trying to unlock one shows "this import didn't finish — delete and re-import" instead of letting you in.</p>
+      <p class="proof"><strong>Proves itself by:</strong> unit + crash-boundary tests, the smoke suite, and the two backup-restore network test files, all green solo.</p>
+    </div>
+    <div class="phase">
+      <h3><span class="n">05</span>Ship + certify</h3>
+      <p>Full local test gates, then the pull request, then the same certification the previous arc used: three consecutive fully-green CI runs on frozen code, first attempt only, zero retries — any red resets the count.</p>
+      <p class="proof"><strong>Proves itself by:</strong> the recorded 3-run certification matrix and the merged PR.</p>
+    </div>
+    <div class="phase">
+      <h3><span class="n">06</span>Close the books</h3>
+      <p>Update the flake ledger (entry 1 → FIXED), file the deferred ideas as tracked follow-ups, and deliver the final report.</p>
+      <p class="proof"><strong>Proves itself by:</strong> reviewed ledger diff — nothing silently dropped.</p>
+    </div>
+  </section>
+
+  <section class="decision">
+    <h2>Approval decision needed from you</h2>
+    <ol class="asks">
+      <li><strong>Test vehicle swap.</strong> You approved a build-time setting to point tests at a dead network. Research found a cleaner way: a crafted test backup controls the exact network address with zero product code. Both reviewers endorse the swap. <span class="rec">Recommended: ratify.</span></li>
+      <li><strong>Two new stored fields.</strong> A per-token "last refresh failed" note and the unfinished-import marker. We're pre-launch, so no data migrations are needed. <span class="rec">Recommended: confirm.</span></li>
+      <li><strong>Torn-import handling.</strong> Unlocking a half-imported profile is refused with an explanation and the existing delete + re-import path. (The earlier "block-screen" idea was dropped — review proved it could never actually appear.) <span class="rec">Recommended: confirm.</span></li>
+      <li><strong>What "import didn't finish" covers.</strong> The marker protects the data-copying stage. The network re-subscription stage is time-limited and visible on screen, but if you close the popup during those ~50 seconds, only the on-screen note is lost — never data. Making that stage crash-proof would be the big machinery you already declined. <span class="rec">Recommended: confirm.</span></li>
+      <li><strong>Deferred: true request cancellation.</strong> Abandoned network calls finish quietly in the background (bounded, a few at most). Properly cancelling them needs plumbing across three process boundaries — filed as a tracked follow-up instead. <span class="rec">Recommended: confirm.</span></li>
+      <li><strong>Safety caps on backups.</strong> A hostile backup file could name hundreds of networks to probe. Proposed caps: 8 networks, 64 contacts + 64 contracts per network, error text trimmed to 200 characters. <span class="rec">Recommended: confirm (or adjust numbers).</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Also approving</h2>
+    <ul class="checklist">
+      <li>Scope: the fix + the three bundled honesty items above; everything else deferred to the ledger.</li>
+      <li>Validation: unit + component + smoke e2e per phase as listed; full network suite before the PR; 3-run certification after.</li>
+      <li>No post-release hardening pass scheduled from this arc (it touches no new trust boundary beyond the already-audited restore path).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Implementation seeds</h2>
+    <p class="muted">Finalized (approval changed no scope). The current session already runs under the arc-wide /goal; these exist for a fresh session picking the work up. Run them inside the <code style="font-family: ui-monospace, Menlo, monospace">bootstrap-route-decouple</code> worktree (<code style="font-family: ui-monospace, Menlo, monospace">agent-worktree resume bootstrap-route-decouple</code>).</p>
+    <p class="warning">Use exactly ONE per session — setting one replaces the other.</p>
+    <div class="seed">
+      <span class="tag rec">Recommended · /goal</span>
+      <pre>/goal All 6 phases marked ✓ in implementations-plan/bootstrap-route-decouple/plan.md (the per-phase headers in the file), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/bootstrap-route-decouple/lessons/phase-N.md; /code-review max --fix complete with fixes committed separately; codex post-impl audit complete with high/critical findings addressed; PR merged to dev with quality-status + smoke-e2e-status + network-e2e-status green; the 3-run certification matrix (e2e-deflake Phase 6 rules) recorded in lessons/phase-5.md; e2e-deflake flake-ledger entry 1 updated to FIXED; bun run test and bun run lint report exit 0 in the transcript.</pre>
+    </div>
+    <div class="seed">
+      <span class="tag alt">Alternative · /loop 15m</span>
+      <pre>/loop 15m Drive implementations-plan/bootstrap-route-decouple forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status + log; check PR/CI state if any. (2) Waiting on CI is fine — verify it progresses; prep the next phase meanwhile. (3) No task in hand? Take the next pending plan.md step; after each meaningful edit run bun run lint + bun run test for touched packages; commit + push. (4) Stuck or at a decision fork? /codex xhigh, log consult + verdict in lessons/, act on the stronger argument; hard limits stay hard (no main/release pushes, no scope expansion). (5) Same step failed 5×? Stop and reassess with codex. (6) Phase gate green (exact commands in plan.md)? Mark ✓, file lessons, print LESSONS_FILE=..., advance. (7) All ✓? /code-review max --fix (commit separately) → codex post-impl audit → address high/critical → certification per plan.md Phase 5 → wrap-up report, surface and stop.</pre>
+    </div>
+  </section>
+
+  <p class="muted">Full technical plan: <span style="font-family: ui-monospace, Menlo, monospace">implementations-plan/bootstrap-route-decouple/plan.md</span> in the repo (audits: audit-codex.md · audit-fable.md · recon.md).</p>
+</main>

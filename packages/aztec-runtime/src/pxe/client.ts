@@ -26,7 +26,9 @@ import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { ServiceClient } from "@nulo/extension-messaging/offscreen"
 import type { NetworkInfo } from "./chain-runtime"
 import type { IPXE } from "./ipxe"
-import type { Methods, NotesFilter, NoteSchema } from "./spec"
+import type { Methods, NotesFilter, NoteSchema, PxeEvents } from "./spec"
+import type { ProvePhaseEvent } from "./chain-runtime"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { PXE_SERVICE_NAME } from "./spec"
 import { NoteDaoSchema, PackedPrivateEventSchema } from "./schemas"
 import {
@@ -39,6 +41,7 @@ import {
 	PublicTransferPageSchema,
 } from "./public-events"
 import { PXEProxy } from "./proxy"
+import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 
 /**
  * Base PXE service client. Chrome-agnostic: does no offscreen
@@ -78,7 +81,10 @@ export interface StoreKeyProvision {
 	generation: string
 }
 
-export class PxeServiceClientBase extends ServiceClient<Methods> implements ServiceSpec<Methods> {
+export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> implements ServiceSpec<Methods, PxeEvents> {
+	/** Prove-phase events from the offscreen prover, already sender-gated by the
+	 *  transport; the payload is still untrusted until the consumer validates it. */
+	public readonly onProvePhase = new EventHandler<ProvePhaseEvent>()
 	/** SW-side derivation hook for the per-profile store encryption key (see
 	 *  `setStoreKeyProvider`). Undefined until the embedder wires it at boot. */
 	private storeKeyProvider?: (profileId: string) => Promise<StoreKeyProvision | undefined>
@@ -106,8 +112,8 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	 * Register the SW-side store-key derivation hook (typically `derivePxeStoreKey(master,
 	 * profileId)` against the in-memory session, paired with the row's `pxeGeneration`, all
 	 * under the facade lock). The offscreen holds provisioned keys in memory only, so an
-	 * offscreen-document restart drops them; when a request then fails with the
-	 * `PXE_STORE_KEY_MISSING` marker, this client derives + re-provisions + retries ONCE. The
+	 * offscreen-document restart drops them; when a request then fails with a
+	 * `PxeStoreKeyMissingError`, this client derives + re-provisions + retries ONCE. The
 	 * provider returning `undefined` (profile locked / row gone / tombstoned) lets the original
 	 * error propagate — a locked or deleted profile cannot open its encrypted PXE store.
 	 */
@@ -131,14 +137,7 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		// carries its original generation and is rejected offscreen-side instead
 		// of silently running against the successor's store (#281 D4).
 		const netArg = args[0] as (NetworkInfo & { pxeGeneration?: string }) | undefined
-		if (
-			netArg &&
-			typeof netArg === "object" &&
-			"profileId" in netArg &&
-			"chainId" in netArg &&
-			!netArg.pxeGeneration &&
-			this.generationProvider
-		) {
+		if (netArg && needsGenerationStamp(netArg) && this.generationProvider) {
 			const generation = await this.generationProvider(netArg.profileId)
 			// A registered provider returning undefined means the profile row is GONE or
 			// tombstoned — exactly the deletion window the fence exists for. Failing here
@@ -153,18 +152,67 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		try {
 			return await super.request(method, ...args)
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
+			// The class, not the message: the service attaches a typed payload only to errors it
+			// throws itself, and the one legitimate site runs before any PXE op — so an op-internal
+			// error whose text happens to carry the marker (a hostile node can put anything in a
+			// message) arrives as a plain Error and can never start a re-provision.
 			const profileId = (args[0] as NetworkInfo | undefined)?.profileId
-			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
+			if (method === "provisionChainStoreKey" || !(err instanceof PxeStoreKeyMissingError) || !profileId || !this.storeKeyProvider) {
 				throw err
 			}
-			const provision = await this.storeKeyProvider(profileId)
-			if (!provision) throw err
-			await super.request(
+			// Tail-returned: the recovery helper owns the ENTIRE D4-hardened
+			// sequence (readiness → authority → guarded provision → single retry)
+			// including the key-zeroizing finally.
+			return this.recoverMissingStoreKey(method, args, err, profileId)
+		}
+	}
+
+	/** AUDIT D4-hardening: the recovery sequence is readiness ONCE, then
+	 *  authority ONCE, then already-ready sends — no `onReady` (which can
+	 *  recreate the offscreen document and reset its lifecycle map) may run
+	 *  between the authority read and the wire, or a concurrent delete +
+	 *  recreation could let a stale provision land on an empty map. */
+	private async recoverMissingStoreKey<T extends keyof Methods>(
+		method: T,
+		args: Parameters<Methods[T]>,
+		originalErr: unknown,
+		profileId: string,
+	): Promise<Awaited<ReturnType<Methods[T]>>> {
+		await this.onReady()
+		const provision = await this.storeKeyProvider?.(profileId)
+		if (!provision) throw originalErr
+		try {
+			// Capture-equality guard, POST-STAMP (the capture block above mutated
+			// args[0]) and capture-conditional: an UNCAPTURED op keeps the
+			// documented provision-then-retry contract, but a captured op whose
+			// generation differs from the provider's current row must not
+			// side-effect-install a newer key from its own error path — the
+			// original error propagates untouched.
+			const captured = (args[0] as { pxeGeneration?: string } | undefined)?.pxeGeneration
+			if (captured && provision.generation !== captured) throw originalErr
+			// Revalidate the incarnation immediately before the wire: `onReady`
+			// above can have REPLACED the offscreen document, and a deletion that
+			// completed against the OLD document leaves the replacement's
+			// lifecycle map empty — this stale provision would install the erased
+			// generation as live (ghost profile; a later same-id re-import is
+			// then wedged behind the live-under-different-generation rejection).
+			// A gone or superseded row aborts with the original error.
+			if (this.generationProvider) {
+				const liveGeneration = await this.generationProvider(profileId)
+				if (liveGeneration !== provision.generation) throw originalErr
+			}
+			// The base64 wire copy cannot be zeroized (JS strings are
+			// immutable); the key bytes below are, in every exit path.
+			await this.requestAlreadyReady(
 				"provisionChainStoreKey" as T,
 				...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<Methods[T]>),
 			)
-			return await super.request(method, ...args)
+			// A provision/retry send failure propagates AS ITSELF (more
+			// diagnostic than the original marker error), and the retry runs
+			// exactly once — a second missing-key rejection is terminal.
+			return await this.requestAlreadyReady(method, ...args)
+		} finally {
+			provision.key.fill(0)
 		}
 	}
 
@@ -239,8 +287,13 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		return (await z.array(NoteDaoSchema).parseAsync(result)) as unknown as NoteDao[]
 	}
 
-	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		const result = await this.request("proveTx", network, txRequest, scopes)
+	public async proveTx(
+		network: NetworkInfo,
+		txRequest: TxExecutionRequest,
+		scopes: AztecAddress[],
+		proveId?: string,
+	): Promise<TxProvingResult> {
+		const result = await this.request("proveTx", network, txRequest, scopes, proveId)
 		return await TxProvingResult.schema.parseAsync(result)
 	}
 
@@ -332,4 +385,10 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
 		await this.request("provisionChainStoreKey", profileId, storeKeyBase64, generation)
 	}
+}
+
+/** An op carries a stampable NetworkInfo when its first argument names a
+ *  profile + chain and no generation was stamped yet. */
+function needsGenerationStamp(netArg: NetworkInfo & { pxeGeneration?: string }): boolean {
+	return typeof netArg === "object" && "profileId" in netArg && "chainId" in netArg && !netArg.pxeGeneration
 }

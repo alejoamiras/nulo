@@ -112,3 +112,15 @@ export function buildCancelHandler(
 		execution.cancelJob(jobId).catch(() => {})
 	}
 }
+
+export interface FocusExecutor {
+	focusInteractionWindow(journalId: string): Promise<boolean>
+}
+
+/** Focus is best-effort: queued requests may have no popup, and RPC failures stay silent. */
+export function buildFocusHandler(dapp: FocusExecutor): (jobId: string | null | undefined) => void {
+	return (jobId) => {
+		if (!jobId) return
+		dapp.focusInteractionWindow(jobId).catch(() => {})
+	}
+}

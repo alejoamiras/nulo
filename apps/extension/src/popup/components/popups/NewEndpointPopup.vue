@@ -1,15 +1,18 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -29,6 +32,9 @@ const errorText = ref("")
 const isSubmitting = ref(false)
 
 const isAvailableToCreate = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isSubmitting.value) return false
 	if (urlTerm.value.length < 5) return false
 	if (errorText.value) return false
 	if (!network.value) return false
@@ -45,7 +51,7 @@ const handleCreate = async () => {
 		emit("onClose")
 		openToast({ label: "Endpoint added" })
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
 			errorText.value = `Wrong chain — this network is chain ${network.value?.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
@@ -60,23 +66,14 @@ const handleCreate = async () => {
 	}
 }
 
-watch(
-	() => props.show,
-	() => {
-		if (props.show) {
-			labelTerm.value = ""
-			urlTerm.value = ""
-			errorText.value = ""
-			document.addEventListener("keydown", onKeydown)
-		} else {
-			document.removeEventListener("keydown", onKeydown)
-		}
+usePopupEntity(() => props.show, {
+	submit: handleCreate,
+	onShow: () => {
+		labelTerm.value = ""
+		urlTerm.value = ""
+		errorText.value = ""
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleCreate()
-}
+})
 </script>
 
 <template>
@@ -116,10 +113,7 @@ const onKeydown = (e) => {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="errorText" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary">{{ errorText }}</Text>
-					</Flex>
+					<FieldWarning v-if="errorText">{{ errorText }}</FieldWarning>
 				</Transition>
 			</template>
 		</Input>

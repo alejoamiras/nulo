@@ -3,12 +3,18 @@ import path from "node:path"
 import fs from "node:fs"
 import { execSync } from "node:child_process"
 import type { TestProject } from "vitest/node"
+import { resolveBrowserKind } from "./fixtures/browser/selection"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Resolved before setup runs, so an unusable selector fails ahead of the orphan sweep rather than
+// after it — the workers would otherwise reject it only once the suite was already underway.
+const BROWSER = resolveBrowserKind()
 // `EXTENSION_PATH` env var lets the release workflow point the smoke suite at a
-// freshly-unzipped artifact instead of the repo's `dist/chrome/`. Falls back to
+// freshly-unzipped artifact instead of the repo's `dist/<browser>/`. Falls back to
 // the local build for ordinary `bun run test:e2e` runs.
-const EXTENSION_PATH = process.env.EXTENSION_PATH ? path.resolve(process.env.EXTENSION_PATH) : path.resolve(__dirname, "../../dist/chrome")
+const EXTENSION_PATH = process.env.EXTENSION_PATH
+	? path.resolve(process.env.EXTENSION_PATH)
+	: path.resolve(__dirname, "../../dist", BROWSER)
 
 /**
  * Kill orphan Chrome test processes started by THIS extension build only.
@@ -37,7 +43,7 @@ export async function setup(project: TestProject) {
 
 	const manifest = path.join(EXTENSION_PATH, "manifest.json")
 	if (!fs.existsSync(manifest)) {
-		throw new Error(`Extension not found at ${EXTENSION_PATH}\nRun "bun run build" or "bun run dev" first.`)
+		throw new Error(`No ${BROWSER} extension at ${EXTENSION_PATH}\nRun "bun run build" or "bun run dev" first.`)
 	}
 	project.provide("extensionPath", EXTENSION_PATH)
 }

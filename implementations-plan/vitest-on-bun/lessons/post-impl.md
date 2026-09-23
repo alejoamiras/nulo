@@ -1,0 +1,35 @@
+# Post-implementation review loop — Arc C
+
+## `/code-review max --fix` (whole implementation diff, 45 code-bearing files)
+
+Read in full: `vitest.base.ts`, the 12 configs, the 11 manifest flips, `biome.json`, and every file under `scripts/ci-cd/test-soak/`. One defect found and fixed:
+
+- `lib.ts` carried two raw NUL bytes as the digest separator inside template literals (`digestStatuses`, `buildInventory`) — git and `file` classified the source as binary. Replaced by the `\u0000` escape (byte-identical digest input; the committed baselines' digests stay valid). Committed separately: `f5caac58 fix(review)`.
+- Considered and left alone: the module-scope SIGINT/SIGTERM handlers in `cli.ts` also register when `cli.test.ts` imports it (harmless in `bun:test`); `relFile`'s `startsWith(wsDir)` prefix test (no workspace is a prefix of another); the reporter's `outputFile` string-or-object handling (both shapes verified by the fixtures on both engines).
+
+Verification: `lib.test.ts` 18/18 · biome clean · the fix post-dates the matrix, so the matrix re-runs at the final code commit after the codex loop (plan rule).
+
+## Codex post-impl round 1 — **reject** → all findings adopted
+
+Session `01a0367e-3bc4-7f71-aa20-2892751c4713` (gpt-5.6-sol, xhigh, read-only; launched detached after the tool's 10-minute background cap killed the first attempt). Verbatim verdict: "VERDICT: reject — blocking findings: fail-open summary validation and non-exact inventory comparison".
+
+| # | Finding (verbatim gist) | Verified | Fix |
+|---|---|---|---|
+| High | `compareSummaries` trusts the stored `failedRuns` and never applies `isFailedRun` to the rows — a row edited to `exitCode: 1, timedOut: true` with `failedRuns: 0` still compared OK | ✓ reproduced | re-derive failures from every row, require zero AND agreement with the stored count; adversarial test added |
+| Med | duplicate `<file> :: <fullName>` ids overwrite each other (4 suites lost 1–9 tests); status comparison checked names only (`{passed:1,skipped:29}` ≡ `{passed:29,skipped:1}`) | ✓ | deterministic occurrence suffixes (`… #2`, `… #3`); exact status-count records compared; tests for both; `phase-1.md`'s "collected is raw" claim corrected after the re-run |
+| Med | lifecycle hooks used unbounded `spawnSync` with no group forwarding; a failing post-hook was ignored | ✓ | hooks run through the async spawn + group + timeout machinery; `hookFailed` on the run row, included in `isFailedRun` |
+| Med | the timeout path returned right after SIGKILL without confirming exit; normal exits never swept residual group members; the hang test checked flags not survivors; fixture fallback 600 s | ✓ | `waitForExit` awaits the exit after the group kill (5 s grace) and sweeps the group on every exit; the hang test asserts no survivor via `pgrep`; fixture `testTimeout` 30 s |
+| Low | `resolve-esm.mjs` kept only the error code | ✓ | `code: message` preserved (canonicalized downstream) |
+| Low | `filters` bypassed canonicalization | ✓ | mapped through `canon.text` |
+| Low | the approved `no-json` fixture was absent | ✓ | added (`process.kill(process.ppid, "SIGKILL")` from a forks worker → launcher dies before any report) + test on both engines |
+| Low | CLAUDE.md said EVERY vitest config spreads `sharedTest` (the three Node e2e configs do not); stale "single test runner" comment in `apps/extension/vitest.config.ts` | ✓ | narrowed; comment rewritten |
+
+Rejected: nothing. Committed separately as `fix(review): fail-closed compare, occurrence ids, bounded hooks, group-kill sweep, no-json`. Verification: tool suites 35/35 on both engines, lint 0 errors.
+
+## Codex post-impl round 2 (resumed) — **conditional approve** → all four adopted
+
+Verbatim: "conditional approve — conditions: make assertion occurrence IDs collision-proof and add the regression test". Findings → fixes: [Med] generated ` #n` ids could collide with a real name ending in ` #2` → a literal `#` in a name is doubled before the id is built (injective: a generated suffix is always ` #<digits>` after a non-`#`), test `name, name, name, name #2` → four ids; [Low] `resolve-esm.mjs` used `wsDir` for Bun and `wsDir/` for Node so equivalent failures differed → one trailing-slash base for both; [Low] raw NUL bytes had leaked into this file and `phase-2.md` (git saw the commit as binary) → literal `\u0000` text; [Low] the `waitForExit` comment overstated "never returns with the group alive" → says the group kill is retried before returning. Committed as `fix(review): collision-proof occurrence ids, one resolver base, kill-sweep comment`. Verification: 35/35 both engines, lint 0 errors.
+
+## Codex post-impl round 3 (resumed) — **APPROVE — LOOP CONVERGED** (r1 reject → r2 conditional → r3 approve)
+
+Verbatim: "VERDICT: approve — [Low] `lessons/post-impl.md:31` reintroduces one raw NUL in the round-2 disposition … Replace it with the literal text. [Low] The occurrence encoding, regression test, resolver normalization, and bounded-kill comment are correctly folded. No new High/Med findings. looks fine". The stray NUL (my prose kept emitting the character where the six-character escape text was meant) is replaced; no code changed after `a7260587`, which is therefore the final code commit the matrix re-run binds to.

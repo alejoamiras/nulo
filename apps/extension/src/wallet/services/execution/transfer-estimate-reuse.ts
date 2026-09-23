@@ -4,16 +4,17 @@
  *
  * Extracted verbatim from the execution facade. The validation ladder in
  * `tryConsume` is the contract: ANY drift between estimate time and
- * confirm time (inputs, profile, endpoint, base fee, pending set, TTL)
- * rejects reuse and the caller falls back to a full rebuild. Rejection
- * order and the byte-stable fingerprint formats are pinned by the
+ * confirm time (inputs, endpoint, base fee, pending set, TTL) rejects
+ * reuse and the caller falls back to a full rebuild. A profile other than
+ * the executing fence's is not drift but a session that ended: it throws,
+ * so no rebuild ever runs under whichever profile is active instead.
+ * Rejection order and the byte-stable fingerprint formats are pinned by the
  * colocated tests — both are load-bearing (entries store fingerprints
  * computed at estimate time and compare against freshly-derived ones).
  *
  * Dependencies are injected as lazy lookups so the rejection ladder
  * keeps its laziness: branches that reject early never touch the later
- * dependencies (profile lookup happens only after input checks pass,
- * node lookup only after endpoint checks pass, etc.).
+ * dependencies (node lookup only after endpoint checks pass, etc.).
  */
 
 import { GasFees } from "@aztec/stdlib/gas"
@@ -21,14 +22,21 @@ import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
+import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
 import type { TransferRequest } from "./operation-planner"
 import type { FeeSettings } from "./spec"
 
-export const ESTIMATE_REUSE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+// 120 s, owner-set (plan decision #16): the retention bound on signed tx
+// requests held in SW memory. Staleness itself is guarded by the consume
+// ladder, not this TTL — past ~2 min entries mostly miss on base-fee drift
+// anyway, so the shorter window costs almost no hit rate.
+export const ESTIMATE_REUSE_TTL_MS = 120_000
 
 /** Stable fingerprint for a fee basis so we can compare the snapshot
  *  taken at estimate time against the value at confirm.
@@ -77,10 +85,7 @@ export type TransferEstimateReuseEntry = {
 	readonly recipientAddress: string
 	readonly amount: bigint
 	readonly feeSettingsHash: string
-	/** Profile id at estimate time. Used for cleaner reject diagnostics
-	 *  (codex audit NICE-TO-HAVE #2) — drift already fails closed via
-	 *  `getNetwork` / `getAccountContract` profile-scoping, but rejecting
-	 *  early avoids confusing errors deeper in the reuse path. */
+	/** Profile id at estimate time; consume refuses any other fence. */
 	readonly profileId: string
 	/** Validation snapshot — what was true at estimate time. */
 	readonly baseFeeFingerprint: string
@@ -94,6 +99,10 @@ export type TransferEstimateReuseEntry = {
 	readonly pendingHashes: readonly string[]
 	/** Built downstream state — reused on confirm. */
 	readonly txRequest: TxExecutionRequest
+	/** Provenance travels WITH the cached request: the entry retains the
+	 *  exact build, so the confirm leg classifies an existing-nullifier
+	 *  rejection with the same fidelity as a fresh build. */
+	readonly initializesAccount: boolean
 	readonly nonce: { toString(): string }
 	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	/** Inputs for the activity-feed record. We persist a transfer-only
@@ -109,7 +118,6 @@ export type TransferEstimateReuseEntry = {
 /** Lazy dependency lookups — injected so the rejection ladder's laziness
  *  survives extraction (early rejects never touch later deps). */
 export interface TransferEstimateReuseDeps {
-	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<MinFeeNode>
 	getPendingForAccount(account: string): { hash: string }[]
@@ -117,32 +125,40 @@ export interface TransferEstimateReuseDeps {
 }
 
 export class TransferEstimateReuse {
-	private cache = new Map<string, TransferEstimateReuseEntry>()
+	private readonly cache = new SingleShotTtlCache<TransferEstimateReuseEntry>(ESTIMATE_REUSE_TTL_MS)
 
 	public constructor(private readonly deps: TransferEstimateReuseDeps) {}
 
-	/** Store an entry under a fresh id, then opportunistically sweep
-	 *  expired entries so the map doesn't grow unboundedly when the popup
-	 *  keeps re-estimating without ever consuming. */
+	/** Store an entry under a fresh id (the store sweeps expired entries so the
+	 *  map doesn't grow when the popup re-estimates without ever consuming). */
 	public stash(estimateId: string, entry: TransferEstimateReuseEntry): void {
-		this.cache.set(estimateId, entry)
-		this.evictStale()
+		this.cache.stash(estimateId, entry)
+	}
+
+	/** Drop a stashed entry (cancelled estimate, rejected interaction).
+	 *  Idempotent; unknown ids are a no-op. */
+	public evict(estimateId: string): void {
+		this.cache.evict(estimateId)
 	}
 
 	/** Pop a cached estimate if (a) the id exists, (b) inputs match
 	 *  byte-for-byte, (c) the SW's current view of base fee + primary
 	 *  endpoint matches the snapshot, and (d) the entry is fresh (TTL).
 	 *  Any mismatch ⇒ delete + return undefined; caller falls back to a
-	 *  full rebuild. Single-shot: the entry is consumed on first lookup. */
-	public async tryConsume(estimateId: string, inputs: TransferRequest): Promise<TransferEstimateReuseEntry | undefined> {
-		const entry = this.cache.get(estimateId)
-		this.cache.delete(estimateId) // single-shot
+	 *  full rebuild — except an entry stashed under another profile than
+	 *  `fence`'s, which throws {@link SessionEndedError}. Single-shot: the
+	 *  entry is consumed on first lookup. */
+	public async tryConsume(
+		estimateId: string,
+		inputs: TransferRequest,
+		fence: ExecutionFence,
+	): Promise<TransferEstimateReuseEntry | undefined> {
+		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined
 
 		// TTL gate
 		if (Date.now() - entry.builtAt > ESTIMATE_REUSE_TTL_MS) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: stale (TTL)`)
-			return undefined
+			return this.reject(estimateId, "stale (TTL)")
 		}
 
 		// Input byte-for-byte match
@@ -155,30 +171,19 @@ export class TransferEstimateReuse {
 			entry.amount !== inputs.amount ||
 			entry.feeSettingsHash !== fingerprintFeeSettings(inputs.feeSettings)
 		) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: input drift`)
-			return undefined
+			return this.reject(estimateId, "input drift")
 		}
 
-		// Active-profile drift. `getNetwork` and `getAccountContract` already
-		// fail closed for cross-profile leakage, but rejecting reuse here
-		// avoids confusing downstream errors when the user swapped profiles
-		// between estimate and confirm. (codex audit NICE-TO-HAVE #2)
-		const profile = await this.deps.getActiveProfile()
-		if (!profile || profile.id !== entry.profileId) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: profile drift`)
-			return undefined
-		}
+		if (entry.profileId !== fence.profileId) throw new SessionEndedError()
 
-		// Endpoint identity (codex audit gap — primary can change at runtime)
+		// Endpoint identity: the primary can change at runtime.
 		const network = await this.deps.getNetwork(inputs.networkId)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: no primary endpoint`)
-			return undefined
+			return this.reject(estimateId, "no primary endpoint")
 		}
 		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: primary endpoint changed`)
-			return undefined
+			return this.reject(estimateId, "primary endpoint changed")
 		}
 
 		// Base fee snapshot. Compare the cached entry's fingerprint
@@ -198,37 +203,27 @@ export class TransferEstimateReuse {
 			// must reproduce the exact `GasFees.mul` product the build finalized.
 			const expectedFingerprint = fingerprintBaseFee(new GasFees(basis.feePerDaGas, basis.feePerL2Gas).mul(multiplier))
 			if (expectedFingerprint !== entry.baseFeeFingerprint) {
-				this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee changed`)
-				return undefined
+				return this.reject(estimateId, "base fee changed")
 			}
 		} catch (error) {
 			// Conservative: if we can't verify, don't reuse.
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee fetch failed: ${getErrorMessage(error)}`)
-			return undefined
+			return this.reject(estimateId, `base fee fetch failed: ${getErrorMessage(error)}`)
 		}
 
 		// Pending-tx drift. New same-account pending txs since estimate
 		// can consume notes the cached private-transfer TxRequest selected.
-		// Rebuild rather than risk a note-exhaustion failure mid-flight.
-		// (codex audit SHOULD-FIX #2 partial — PXE rebuild detection
-		// remains deferred; conservative TTL bounds that risk.)
-		const currentPending = new Set(this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash))
-		const cachedPending = new Set(entry.pendingHashes)
-		if (currentPending.size !== cachedPending.size || [...currentPending].some((h) => !cachedPending.has(h))) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: pending tx set changed`)
-			return undefined
+		// Rebuild rather than risk a note-exhaustion failure mid-flight. PXE rebuild
+		// detection stays deferred; the conservative TTL bounds that risk.
+		const currentHashes = this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash)
+		if (pendingHashesChanged(currentHashes, entry.pendingHashes)) {
+			return this.reject(estimateId, "pending tx set changed")
 		}
 
 		return entry
 	}
 
-	/** Garbage-collect entries past their TTL. */
-	private evictStale(): void {
-		const now = Date.now()
-		for (const [id, entry] of this.cache) {
-			if (now - entry.builtAt > ESTIMATE_REUSE_TTL_MS) {
-				this.cache.delete(id)
-			}
-		}
+	private reject(estimateId: string, reason: string): undefined {
+		this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: ${reason}`)
+		return undefined
 	}
 }

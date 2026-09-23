@@ -1,41 +1,8 @@
 /**
- * Journal record → terminal-state display mapping (Phase 2 follow-up).
- *
- * Pure function — no Vue, no chrome.*, no service clients. Used by
- * `RecentActivityView` and the Archives page (`activity.vue`) to render
- * `TransactionTerminalCard` for journal records that ended without
- * producing an on-chain transaction.
- *
- * Why a separate util:
- *   - On-chain settled transactions get their visual state from
- *     `TransactionCard` (driven by `TransactionService` + chain status).
- *   - Journal records that terminated WITHOUT broadcasting (cancel pre-
- *     submit, SW-restart-killed, prover error, network failure pre-broadcast)
- *     have no TransactionService entry. Their terminal state is the
- *     `progress.stage === "cancelled"` or `error.kind` value carried in
- *     the journal record itself.
- *
- * 9 `JobError.kind` variants collapse into 3 user-facing visual states.
- * UX-locked by the user (2026-05-13):
- *
- *   - **Cancelled** (neutral gray, `circle-minus`)
- *       Maps from: `progress.stage === "cancelled"` OR `error.kind === "user_rejected"`.
- *       Tone: "you did this on purpose".
- *
- *   - **Interrupted** (amber, `refresh-cw`)
- *       Maps from: `error.kind ∈ { sw_restart_post_prove, stale_on_resume,
- *       stuck_proving }`. Tone: "recoverable — try again". The Phase 2
- *       reaper emits these when a SW restart leaves the prove pipeline
- *       in an unrecoverable state (no requestId to deliver the result back
- *       to in the new SW instance), or when a prove exceeds its 35-min
- *       sanity ceiling.
- *
- *   - **Failed** (red, `close-circle`)
- *       Catch-all for everything else: real failures the user can't recover
- *       from automatically (`network`, `simulation`, `prover`, `popup_bound`),
- *       plus the per-flow tags `transfer` / `dapp_execute` that
- *       `ExecutionService.normalizeError` emits as kind on uncategorized
- *       failures, plus any future / unknown kind.
+ * Display for journal records that ended without an on-chain transaction. Those have no
+ * `TransactionService` entry, so their terminal state comes from the record's own stage and
+ * `error.kind`; settled transactions render through `TransactionCard` instead. The three visual
+ * states (cancelled, interrupted, failed) are owner-locked.
  */
 
 import type { JobErrorKind } from "@nulo/wallet-core/jobs"
@@ -74,12 +41,12 @@ export interface JournalTerminalDisplay {
  * Canonical icon names per visual state. Centralized to prevent
  * invented-name regressions: the original v0.15.3 implementation
  * shipped `circle-minus` and `refresh-cw` (Material-Icons-style names)
- * which don't exist in `apps/extension/src/assets/icons.json` — the
+ * which don't exist in the `@nulo/design` icon set — the
  * `Icon` component silently renders empty SVG paths for missing names
  * (no console error), so the bug only surfaced during user QA.
  *
- * Every entry MUST match a key in `icons.json`. If a future state needs
- * a new icon, grep that file first.
+ * Every entry MUST be a key of `@nulo/design`'s `internal/icons.json`. If a
+ * future state needs a new icon, grep that file first.
  */
 const ICONS = {
 	cancelled: "cancel",
@@ -264,6 +231,12 @@ function failedSubtitleFor(kind: JobErrorKind): string {
 			return "Simulation failed"
 		case "prover":
 			return "Couldn't generate proof"
+		case "duplicate_initialization":
+			// The first-tx init race: another device/tx initialized the account
+			// first. Honest and actionable — a plain retry succeeds once synced.
+			return "Account already initialized — retry after sync"
+		case "session_ended":
+			return "Stopped — wallet was locked"
 		// popup_bound, transfer, dapp_execute, unknown, and any other / future
 		// kind all fall through to the generic copy. The kind is still preserved
 		// in the journal record's error.kind field for debugging / future
@@ -327,27 +300,50 @@ export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalT
 	const display = journalTerminalDisplay(op)
 	if (!display) return null
 
-	const isTransfer = op.kind === "transfer"
-	const token = isTransfer && op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
-	const title = isTransfer ? token?.symbol || "Transfer" : op.title ? humanizeMethodName(op.title) : "Transaction"
-	const activityIcon = isTransfer ? "arrow-narrow-up-right" : "zap"
-	// `op.subtitle` is the dApp-controlled origin/name persisted at session-
-	// discover time. Bracket schemeful values so a malicious dApp can't make
-	// its label visually read as a clickable link on the main feed.
-	const originLabel = isTransfer ? null : sanitizeJournalSubtitle(op.subtitle)
-	// Gate on `=== undefined` because TransferType.Private === 0; a truthy
-	// check would silently drop the Private → Private chip.
-	const transferTypeLabel = isTransfer && op.transferType !== undefined ? formatTransferType(op.transferType) : null
+	const fields = op.kind === "transfer" ? transferCardFields(op, ctx) : dappCardFields(op)
+	return { ...fields, ...display }
+}
+
+type JournalCardFields = Pick<
+	JournalTerminalCardProps,
+	"title" | "activityIcon" | "originLabel" | "transferTypeLabel" | "amount" | "amountSymbol"
+>
+
+function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalCardFields {
+	const token = op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
 
 	// Pre-v7 records lacking `amountRaw` would have `balanceFormatted(undefined, …)`
-	// silently render "0", surfacing as a fake "0 USDC" ghost on the card
-	// (codex audit catch). Only emit amount when both pieces are present.
+	// silently render "0", surfacing as a fake "0 USDC" ghost on the card.
+	// Only emit amount when both pieces are present.
 	let amount: string | null = null
 	let amountSymbol: string | null = null
-	if (isTransfer && op.amountRaw && token) {
+	if (op.amountRaw && token) {
 		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
 		amountSymbol = token.symbol ?? null
 	}
 
-	return { title, activityIcon, originLabel, transferTypeLabel, amount, amountSymbol, ...display }
+	return {
+		title: token?.symbol || "Transfer",
+		activityIcon: "arrow-narrow-up-right",
+		originLabel: null,
+		// Gate on `=== undefined` because TransferType.Private === 0; a truthy
+		// check would silently drop the Private → Private chip.
+		transferTypeLabel: op.transferType !== undefined ? formatTransferType(op.transferType) : null,
+		amount,
+		amountSymbol,
+	}
+}
+
+function dappCardFields(op: OperationRecord): JournalCardFields {
+	return {
+		title: op.title ? humanizeMethodName(op.title) : "Transaction",
+		activityIcon: "zap",
+		// `op.subtitle` is the dApp-controlled origin/name persisted at session-
+		// discover time. Bracket schemeful values so a malicious dApp can't make
+		// its label visually read as a clickable link on the main feed.
+		originLabel: sanitizeJournalSubtitle(op.subtitle),
+		transferTypeLabel: null,
+		amount: null,
+		amountSymbol: null,
+	}
 }

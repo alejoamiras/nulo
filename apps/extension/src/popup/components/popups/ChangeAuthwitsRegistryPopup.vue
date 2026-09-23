@@ -8,6 +8,8 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -26,36 +28,16 @@ const props = defineProps({
 })
 
 const authwitsService = new AuthRegistryServiceClient()
-authwitsService.onRegistryEnabled.add(onRegistryEnabled)
-authwitsService.onRegistryDisabled.add(onRegistryDisabled)
-function onRegistryEnabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = true
-	}
-}
-function onRegistryDisabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = false
-	}
-}
+const registry = useAuthRegistryStatus(authwitsService, () =>
+	appStore.profile && appStore.network && appStore.account
+		? { profileId: appStore.profile.id, chainId: appStore.network.chainId, account: appStore.account.address }
+		: undefined,
+)
+const { isRegistryEnabled, isLoading, error } = registry
+onBeforeUnmount(() => registry.dispose())
 
-const isRegistryEnabled = ref(undefined)
 const feeSettings = ref()
-const isLoading = ref(false)
-const error = ref()
 const isErrorOccurred = computed(() => !!error.value)
-
-async function fetchRegistryStatus() {
-	isLoading.value = true
-
-	try {
-		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.account.address)
-	} catch (err) {
-		error.value = err
-	} finally {
-		isLoading.value = false
-	}
-}
 
 const isAllowedToExecute = computed(() => {
 	if (!feeSettings.value) return
@@ -64,6 +46,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleChangeRegistry() {
+	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
+	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	if (isLoading.value) return
 	// `isAllowedToExecute` is a computed ref (always truthy as a ref object) —
 	// must dereference `.value` for the guard to actually work. Pre-fix this
 	// guard was a no-op, letting Enter / programmatic clicks fire the handler
@@ -84,35 +69,26 @@ async function handleChangeRegistry() {
 			openToast({ label: "Failed to change registry status", icon: "warning" }, TOAST_DURATION.LONG)
 		}
 	} finally {
+		// Handler-owned latch release — closure via the hide watcher still
+		// happens, but the latch must not depend on it.
+		isLoading.value = false
 		emit("onClose")
 	}
 }
 
-watch(
+// No input to focus here: a global Enter confirms, gated by the handler's own latch and fee check.
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (props.show) {
-			await fetchRegistryStatus()
-
-			document.addEventListener("keydown", onKeydown)
-		} else {
-			isRegistryEnabled.value = undefined
-			isLoading.value = false
-			error.value = null
-
+	{
+		submit: handleChangeRegistry,
+		onShow: registry.fetch,
+		onHide: () => {
+			registry.reset()
 			authwitsService.disconnect()
-
-			document.removeEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
 )
-
-const onKeydown = (e) => {
-	// Mirror the full button :disabled gate (template uses
-	// `!isAllowedToExecute || isLoading`). Without the isLoading check,
-	// rapid Enter could re-enter the handler while a request is in flight.
-	if (e.key === "Enter" && isAllowedToExecute.value && !isLoading.value) handleChangeRegistry()
-}
 </script>
 
 <template>

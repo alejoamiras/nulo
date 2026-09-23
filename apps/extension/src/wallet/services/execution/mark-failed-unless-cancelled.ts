@@ -1,4 +1,5 @@
-import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { type JobError, type JobErrorKind, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 
 /**
  * Shared catch-arm disposition for the three dapp-send pipelines
@@ -7,22 +8,15 @@ import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError }
  * cancelJob did the transition + abort), and any other error marks the journal
  * `failed` before the caller rethrows it.
  *
- * Deliberately SYNCHRONOUS (not `async`): it throws the sentinel synchronously
- * and hands back `markJournal`'s own promise, so the call site's
- * `await markFailedUnlessCancelled(...); throw error` keeps the EXACT microtask
- * timing of the original inline `if (sentinel) throw; await markJournal; throw`.
- * An `async` wrapper would add one microtask before the `throw` on BOTH paths,
- * delaying each pipeline's `finally` (controller cleanup + slot release) by a
- * microtask — a real ordering change on the load-bearing cancel/slot-release
- * path. (codex post-impl 019ef365 caught this.) The co-located test pins the
- * synchronous-throw + promise-passthrough behavior so the `async` form can't
- * silently return.
+ * Deliberately not `async`: an async wrapper adds a microtask before each pipeline's `finally`
+ * (controller cleanup and slot release), reordering the cancel/slot-release path; the co-located
+ * test pins the synchronous throw and the promise passthrough.
  *
  * Scope: the dapp-send tail only (`lane.markJournal` + the `"dapp_execute"` error
  * context). `transfer-executor` deliberately does NOT use this — its catch
  * differs (RPC-cancel conversion via `maybeRethrowAsRpcCancel`, `task.fail`, and
  * a local `markJournal` closure over `transitionJournal` with a `"transfer"`
- * context).
+ * context) — but it shares {@link failureKind}.
  */
 export function markFailedUnlessCancelled(
 	error: unknown,
@@ -32,5 +26,14 @@ export function markFailedUnlessCancelled(
 	if (error instanceof JobCancelledSentinel) {
 		throw error
 	}
-	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
+	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, failureKind(error, "dapp_execute")))
+}
+
+/** The journal kind of a send failure. Classified failures keep their own kind:
+ *  retry policy and the activity card must tell "lost the first-tx race — wait
+ *  for sync, retry" and "the wallet was locked" from a generic failure. */
+export function failureKind(error: unknown, fallback: JobErrorKind): JobErrorKind {
+	if (error instanceof DuplicateInitializationError) return "duplicate_initialization"
+	if (error instanceof SessionEndedError) return "session_ended"
+	return fallback
 }

@@ -29,6 +29,8 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
 	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
+	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
+	Skeleton: { template: '<i data-testid="stub-skeleton" />', props: ["width", "height"] },
 }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -61,13 +63,15 @@ const factory = (overrides: Record<string, unknown> = {}, tokenOverrides: Record
 }
 
 describe("TokenCard", () => {
-	test("updatedAt===0 renders the loading block (spinner + 'Loading balance…')", () => {
+	test("updatedAt===0 renders a skeleton pair where the amount will be — no spinner, no caption, no '0'", () => {
 		mockQuotes = {}
 		const w = factory()
 		const loader = w.find('[data-testid="token-balance-loading"]')
 		expect(loader.exists()).toBe(true)
-		expect(loader.find('[data-testid="stub-spinner"]').exists()).toBe(true)
-		expect(loader.text()).toContain("Loading balance")
+		expect(loader.findAll('[data-testid="stub-skeleton"]')).toHaveLength(2)
+		expect(loader.attributes("aria-busy")).toBe("true")
+		expect(loader.text()).toBe("")
+		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(false)
 		// And the misleading "0" amount column must not be rendered
 		expect(w.text()).not.toMatch(/^0$/m)
 	})
@@ -79,7 +83,10 @@ describe("TokenCard", () => {
 		expect(w.text()).toContain("0")
 	})
 
-	test("isUpdating after first sync keeps the real amount visible (no loader)", () => {
+	test("isUpdating after first sync is SILENT per row — amount visible, no indicator of any kind", () => {
+		// The per-row refreshing dot was retired (batch refreshes animated every row at once);
+		// TokensView's section-header dot is the one activity signal. The row's contract during a
+		// routine refresh: show the last-known amount, change nothing else.
 		mockQuotes = {}
 		const w = factory({
 			updatedAt: 1700_000_000_000,
@@ -88,8 +95,68 @@ describe("TokenCard", () => {
 			isUpdating: true,
 		})
 		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
 		// Total = 5 TST (decimals 18) — formatter renders as "5"
 		expect(w.text()).toContain("5")
+	})
+
+	test("initial sync still shows the loading block (the never-synced state keeps speaking)", () => {
+		mockQuotes = {}
+		const initial = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", isUpdating: true })
+		expect(initial.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(initial.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+	})
+
+	test("a persisted syncFailure dims the last-known amount and says why", () => {
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1700_000_000_000,
+			publicBalance: "5000000000000000000",
+			privateBalance: "0",
+			syncFailure: { at: 1700_000_000_001, message: "sim failed" },
+		})
+		const failed = w.find('[data-testid="token-balance-failed"]')
+		expect(failed.exists()).toBe(true)
+		expect(failed.text()).toContain("Couldn't refresh")
+		// The last-known amount stays visible (dimmed, never blanked).
+		expect(w.text()).toContain("5")
+	})
+
+	test("the failed caption yields while a retry is in flight (silent row, amount stays)", () => {
+		// syncFailed gates on !isUpdating, so a retry clears the caption; with the per-row dot
+		// retired, the retry itself is silent — the amount just stays visible.
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1700_000_000_000,
+			publicBalance: "5000000000000000000",
+			privateBalance: "0",
+			isUpdating: true,
+			syncFailure: { at: 1700_000_000_001, message: "sim failed" },
+		})
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(w.text()).toContain("5")
+	})
+
+	test("an initial-sync RETRY in flight shows the loader again, not a stale failed caption", () => {
+		// updatedAt 0 + syncFailure + isUpdating: the retry's honest state is the
+		// loading block — a failed caption with no in-flight indicator would read
+		// as terminal while work is running.
+		mockQuotes = {}
+		const w = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", isUpdating: true, syncFailure: { at: 1, message: "x" } })
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+	})
+
+	test("a FAILED first sync shows the failure, never an infinite loading spinner", () => {
+		// A never-synced row (updatedAt 0) whose first projection failed used to
+		// spin forever — the exact failed-vs-still-running ambiguity the
+		// persisted record exists to close. The failed state wins the block.
+		mockQuotes = {}
+		const w = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", syncFailure: { at: 1, message: "x" } })
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(true)
 	})
 
 	test("B1: a priced token renders the holding's fiat line", async () => {
@@ -123,8 +190,43 @@ describe("TokenCard", () => {
 	})
 })
 
-describe("TokenCard — R5 layout (fiat left, dot split right)", () => {
-	test("priced: fiat REPLACES the static PRIVATE/PUBLIC label in the left column", async () => {
+describe("TokenCard — hostile rows", () => {
+	test("a malformed balance renders a dash with no split and never throws", async () => {
+		const w = factory({ updatedAt: 1, publicBalance: "1.5", privateBalance: "0" })
+		await flushPromises()
+		const amount = w.find('[data-malformed="true"]')
+		expect(amount.exists()).toBe(true)
+		expect(amount.text()).toBe("—")
+		expect(w.findAll('[data-testid="stub-icon"]')).toHaveLength(0)
+		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+
+	test("an absurd decimals value is treated the same way (no exponent is ever computed)", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 500 })
+		await flushPromises()
+		expect(w.find('[data-malformed="true"]').text()).toBe("—")
+		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+
+	test("a malformed row that never synced shows the dash, not the loading block", async () => {
+		const w = factory({ updatedAt: 0, publicBalance: "1.5", privateBalance: "0" })
+		await flushPromises()
+		expect(w.find('[data-malformed="true"]').text()).toBe("—")
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+	})
+
+	test("a long symbol and a long name both render clipped, with the balance still present", async () => {
+		const w = factory({ updatedAt: 1, publicBalance: (7n * 10n ** 18n).toString() }, { symbol: "S".repeat(400), name: "N".repeat(400) })
+		await flushPromises()
+		expect(w.find('[data-testid="token-symbol"]').text()).toHaveLength(400)
+		expect(w.find("[data-malformed]").exists()).toBe(false)
+		expect(w.text()).toContain("7")
+	})
+})
+
+describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () => {
+	test("priced: fiat fills the subtitle slot; no PRIVATE/PUBLIC label anywhere", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
@@ -135,66 +237,21 @@ describe("TokenCard — R5 layout (fiat left, dot split right)", () => {
 		expect(w.text()).not.toContain("PRIVATE / PUBLIC")
 	})
 
-	test("unpriced: the label survives (it keeps teaching the split)", async () => {
+	test("unpriced: the token's full NAME fills the subtitle slot (never the PRIVATE/PUBLIC label)", async () => {
 		mockQuotes = {}
 		const w = factory({ updatedAt: 1, publicBalance: "5" })
 		await flushPromises()
-		expect(w.text()).toContain("PRIVATE / PUBLIC")
+		expect(w.text()).not.toContain("PRIVATE / PUBLIC")
+		expect(w.text()).toContain("Test Token")
 	})
 
-	test("the split line renders both sides with the ●/○ dot marks", async () => {
+	test("the split line renders a bone lock (private) and a grey globe (public) with both amounts", async () => {
 		mockQuotes = {}
 		const w = factory({ updatedAt: 1, privateBalance: (7n * 10n ** 18n).toString(), publicBalance: (3n * 10n ** 18n).toString() })
 		await flushPromises()
-		const dots = w.findAll('span[class*="split_dot"]')
-		expect(dots.length).toBe(2)
+		const icons = w.findAll('[data-testid="stub-icon"]')
+		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(w.text()).toContain("7")
 		expect(w.text()).toContain("3")
-	})
-})
-
-describe("TokenCard — §3 catching-up indicator", () => {
-	const mountCard = (overrides: Record<string, unknown> = {}, backfilling = false, tokenOverrides: Record<string, unknown> = {}) => {
-		const tokenBalance = {
-			id: 42,
-			token: { ...tokenInfo, ...tokenOverrides },
-			account: "0xacct",
-			publicBalance: "0",
-			privateBalance: "0",
-			updatedAt: 0,
-			isUpdating: false,
-			isMinting: false,
-			...overrides,
-		}
-		return mount(TokenCard, { props: { tokenBalance, backfilling } as never, global: { stubs: STUBS } })
-	}
-
-	test("backfilling with a resolved balance → 'Catching up…' caption beside the still-visible balance", () => {
-		mockQuotes = {}
-		const w = mountCard({ updatedAt: 1, publicBalance: (5n * 10n ** 18n).toString() }, true)
-		expect(w.find('[data-testid="token-catching-up"]').exists()).toBe(true)
-		expect(w.text()).toContain("Catching up")
-		// the balance is shown, NOT the loading block
-		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
-		expect(w.text()).toContain("5")
-	})
-
-	test("backfilling AND balance unresolved (updatedAt===0) → escalates to the shimmer, not the spinner", () => {
-		mockQuotes = {}
-		const w = mountCard({ updatedAt: 0 }, true)
-		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
-		expect(w.find('[data-testid="token-balance-shimmer"]').exists()).toBe(true)
-		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(false) // spinner escalated away
-		expect(w.text()).toContain("Catching up")
-	})
-
-	test("NOT backfilling: no catching-up caption; updatedAt===0 keeps the plain spinner loader", () => {
-		mockQuotes = {}
-		const resolved = mountCard({ updatedAt: 1, publicBalance: "5" }, false)
-		expect(resolved.find('[data-testid="token-catching-up"]').exists()).toBe(false)
-
-		const loading = mountCard({ updatedAt: 0 }, false)
-		expect(loading.find('[data-testid="token-balance-shimmer"]').exists()).toBe(false)
-		expect(loading.find('[data-testid="stub-spinner"]').exists()).toBe(true)
 	})
 })

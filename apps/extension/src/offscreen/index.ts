@@ -1,43 +1,32 @@
-import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
+import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT, PRESTO_REQUIRED, PRESTO_REQUIRED_BUILD_STAMP } from "@/presto/config"
 import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
-import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
+import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
-import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PING, OFFSCREEN_PONG } from "@/wallet/utils/offscreen"
-import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
+import { OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
+import { isClientDisconnectRejection } from "@nulo/extension-messaging/errors"
 
-// Respond to health check pings from the service worker.
-// Registered before anything else so even a slow init doesn't block pong.
-chrome.runtime.onMessage.addListener((message) => {
-	if (message === OFFSCREEN_PING) {
+// B-17: a PONG must mean "PXE services are up", not just "document loaded". The
+// listener is registered early (so a ping is never dropped for lack of a
+// receiver), but it withholds PONG until `servicesReady` flips true after
+// `createPxeOffscreen` below. A PONG during init previously let the SW adopt a
+// still-initializing document and dispatch a PXE RPC before PxeService existed.
+let servicesReady = false
+chrome.runtime.onMessage.addListener((message, sender) => {
+	if (shouldRespondPong(message, servicesReady, sender)) {
 		chrome.runtime.sendMessage(OFFSCREEN_PONG).catch(() => {})
 	}
 	return false
 })
 
-// F-10 (Firefox only): a hidden-window offscreen carries its owning SW
-// instance's token in its URL (`?instance=<token>`). When a newer SW instance
-// adopts a fresh offscreen it broadcasts OFFSCREEN_ADOPT_INSTANCE with the new
-// token; a window whose token differs is a stale leftover leaked across a SW
-// restart and self-closes, so only one offscreen answers PXE requests. Chrome
-// documents carry no `?instance` (chrome.offscreen already prevents
-// duplicates), so `myInstanceToken` is null and this listener is never armed.
-const myInstanceToken = new URLSearchParams(location.search).get("instance")
-if (myInstanceToken !== null) {
-	chrome.runtime.onMessage.addListener((message: unknown, sender: chrome.runtime.MessageSender) => {
-		if (isSupersededByAdopt(message, sender, myInstanceToken)) window.close()
-		return false
-	})
-}
-
 // catch console
-const logger = new LoggerServiceClient("offscreen")
+const logger = documentLogger("offscreen")
 for (const [method, level] of consoleMethods) {
 	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
-	;(self as any)[`on${method}`] = (...args: any[]) => {
+	;(self as any)[`nuloOn${method}`] = (...args: any[]) => {
 		logger.log("pxe", level, ...args)
 	}
 }
@@ -45,14 +34,12 @@ for (const [method, level] of consoleMethods) {
 // catch unhandled errors
 self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	try {
-		// Known-benign cascade: when the SW port closes, every pending
-		// background-port RPC rejects with "Client disconnected". Most
-		// are fire-and-forget callers (LoggerServiceClient.log from the
-		// console-sniffer above) that don't attach .catch handlers, so
-		// each rejection fires here. That's expected unwind, not failure
-		// — demote to Debug + one summary line so the activity log isn't
-		// flooded with 14× identical errors per SW boot.
-		if (isBenignSwDisconnect(e.reason)) {
+		// Known-benign cascade: when the SW port closes, every pending background-port RPC rejects
+		// with "Client disconnected", and the un-awaited ones land here. Expected unwind, not
+		// failure — demoted to Debug so a SW restart does not flood the activity log.
+		if (isClientDisconnectRejection(e.reason)) {
+			// Only preventDefault() keeps DevTools from printing the rejection; the demotion never did.
+			e.preventDefault()
 			logger.log("pxe", LogLevel.Debug, "background port closed; pending RPC rejected (benign cascade)")
 			return
 		}
@@ -62,19 +49,18 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	}
 }
 
-// Pin the accelerator-required build stamp into the bundle so vite
-// cannot tree-shake the import. The CI agent greps dist/chrome for the
-// literal value as a propagation assertion. No-op at runtime.
-// See apps/extension/src/accelerator/config.ts for full context.
-if (ACCELERATOR_REQUIRED_BUILD_STAMP) {
-	;(globalThis as { __NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__?: string }).__NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__ =
-		ACCELERATOR_REQUIRED_BUILD_STAMP
+// Pin the presto-required build stamp into the bundle so vite cannot
+// tree-shake the import. The CI agent greps dist/chrome for the literal
+// value as a propagation assertion. No-op at runtime.
+// See apps/extension/src/presto/config.ts for full context.
+if (PRESTO_REQUIRED_BUILD_STAMP) {
+	;(globalThis as { __NULO_PRESTO_REQUIRED_BUILD_STAMP__?: string }).__NULO_PRESTO_REQUIRED_BUILD_STAMP__ = PRESTO_REQUIRED_BUILD_STAMP
 }
 
 // Mutually exclusive: a build cannot be both proverless (skip proving) and
-// accelerator-required (enforce native proving). Fail fast if misbuilt.
-if (E2E_PROVERLESS && ACCELERATOR_REQUIRED) {
-	throw new Error("[e2e] VITE_NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive.")
+// presto-required (enforce native proving). Fail fast if misbuilt.
+if (E2E_PROVERLESS && PRESTO_REQUIRED) {
+	throw new Error("[e2e] VITE_NULO_E2E_PROVERLESS and VITE_NULO_PRESTO_REQUIRED are mutually exclusive.")
 }
 
 // Pin the proverless build stamp (same anti-tree-shake reason as above).
@@ -89,27 +75,33 @@ if (E2E_PROVERLESS_BUILD_STAMP) {
 // wires the concrete Chrome-backed clients and keeps the READY send
 // so aztec-runtime stays chrome-free.
 const t0 = Date.now()
-// `factory` is only customized when ACCELERATOR_REQUIRED (CI builds). For
-// production builds the field is omitted; PxeService defaults to a vanilla
-// ProductionPxeFactory with no accelerator policy, preserving the SDK's
-// silent WASM fallback for users without Aztec Accelerator installed.
+// The prover reports each attempt's phases through this sink; PxeService
+// forwards them to the SW, where the coordinator attributes them by proveId.
+const provePhases = createProvePhaseSink()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
-	logger: new LoggerServiceClient(),
+	logger: documentLogger(),
 	// E2E_PROVERLESS builds the proverless PXE (proverEnabled:false, no
-	// AcceleratorProver) — referenced only in this flag-gated branch so DCE
+	// PrestoProver) — referenced only in this flag-gated branch so DCE
 	// strips it from prod. The controllable barrier lives SW-side (the
 	// offscreen has no chrome.storage); see ExecutionCoordinator's ProofGate.
+	// PRESTO_REQUIRED (CI builds) adds the plaintext endpoint + the preflight;
+	// production is HTTPS-only Presto with the silent WASM fallback.
 	factory: E2E_PROVERLESS
 		? new ProductionPxeFactory(undefined, { provingMode: "proverless" })
-		: ACCELERATOR_REQUIRED
+		: PRESTO_REQUIRED
 			? new ProductionPxeFactory(undefined, {
 					provingMode: "required",
-					host: ACCELERATOR_HOST,
-					port: ACCELERATOR_PORT,
+					host: PRESTO_HOST,
+					port: PRESTO_PORT,
+					httpsPort: PRESTO_HTTPS_PORT,
+					onProvePhase: provePhases.emit,
 				})
-			: undefined,
+			: new ProductionPxeFactory(undefined, { provingMode: "default", onProvePhase: provePhases.emit }),
+	provePhaseSink: provePhases,
 })
+// B-17: PXE services are now up — start answering health PINGs with PONG.
+servicesReady = true
 logger.log("pxe", LogLevel.Info, `Offscreen services initialized (${Date.now() - t0}ms)`)
 
 // notify bg only after services are actually initialized

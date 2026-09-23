@@ -1,9 +1,21 @@
 import { createTestingPinia } from "@pinia/testing"
-import { mount } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { useAppStore } from "@/stores/app.store"
+import SettingsPageShell from "@/components/composite/SettingsPageShell.vue"
 import NetworksIndex from "./index.vue"
+
+const configState = vi.hoisted(() => ({ developerMode: false, listeners: [] as Array<(s: { key: string; value: unknown }) => void> }))
+vi.mock("@/wallet/services/config/client", () => ({
+	ConfigServiceClient: function ConfigServiceClient() {
+		return {
+			getValue: vi.fn(async (key: string) => (key === "developerMode" ? configState.developerMode : undefined)),
+			onUpdate: { add: (fn: (s: { key: string; value: unknown }) => void) => configState.listeners.push(fn), remove: vi.fn() },
+			disconnect: vi.fn(),
+		}
+	},
+}))
 
 // The app store's setup runs `useSyncedRef` → `chrome.storage.local` on instantiation; stub it.
 beforeEach(() => {
@@ -33,6 +45,7 @@ function mountList(activeId: string) {
 	const wrapper = mount(NetworksIndex, {
 		global: {
 			plugins: [createTestingPinia({ createSpy: vi.fn })],
+			components: { SettingsPageShell },
 			stubs: {
 				// SettingItem stub renders `to` (proving the row is a keyboard-activatable link, not a
 				// click-only div) + the #right slot (where the active badge lives). $attrs forwards the
@@ -50,7 +63,7 @@ function mountList(activeId: string) {
 				SubPageHeader: true,
 				SectionLabel: true,
 				ItemsContainer: { template: "<div><slot /></div>" },
-				Button: true,
+				Button: { inheritAttrs: false, template: "<button v-bind='$attrs'><slot /></button>" },
 			},
 		},
 	})
@@ -98,5 +111,47 @@ describe("Settings › Networks list (item 4 — active badge, keyboard-activata
 		const html = wrapper.html()
 		expect(html).not.toContain("check-circle")
 		expect(html).not.toContain('name="circle"')
+	})
+})
+
+describe("Settings › Networks list — Add network is a Developer-Mode surface", () => {
+	beforeEach(() => {
+		configState.developerMode = false
+		configState.listeners.length = 0
+	})
+
+	test("hidden by default, shown once Developer Mode is on, and follows a live config update", async () => {
+		const { wrapper } = mountList("alpha")
+		await flushPromises()
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(false)
+		// Existing rows stay fully reachable regardless of the gate.
+		expect(wrapper.findAll('[data-testid="network-row"]')).toHaveLength(2)
+
+		for (const fn of configState.listeners) fn({ key: "developerMode", value: true })
+		await nextTick()
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(true)
+
+		for (const fn of configState.listeners) fn({ key: "developerMode", value: false })
+		await nextTick()
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(false)
+	})
+
+	test("an existing custom network stays listed and reachable with Developer Mode off", async () => {
+		const { wrapper, appStore } = mountList("alpha")
+		appStore.networks = [
+			...NETS,
+			{ id: "mine", name: "My Chain", chainId: 4242, kind: "custom", endpoints: [], primaryEndpointId: "" },
+		] as never
+		await flushPromises()
+		const custom = wrapper.findAll('[data-testid="network-row"]').find((r) => r.attributes("data-network-id") === "mine")
+		expect(custom?.attributes("data-to")).toBe("/popup/settings/networks/mine")
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(false)
+	})
+
+	test("mounts visible when Developer Mode is already on", async () => {
+		configState.developerMode = true
+		const { wrapper } = mountList("alpha")
+		await flushPromises()
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(true)
 	})
 })

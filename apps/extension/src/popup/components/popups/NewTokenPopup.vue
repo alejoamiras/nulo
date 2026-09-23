@@ -11,12 +11,14 @@ import { isValidHex } from "@/utils/string"
 /** Composables */
 import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast, TOAST_DURATION } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
@@ -253,7 +255,7 @@ const handleAddToken = async () => {
 				break
 		}
 	} catch (err) {
-		error.value = err instanceof Error ? err.message : String(err)
+		error.value = errorMessageFromUnknown(err)
 		balanceWait?.abort()
 	} finally {
 		activeBalanceWait = null
@@ -261,26 +263,12 @@ const handleAddToken = async () => {
 	}
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			activeBalanceWait?.abort()
-			activeBalanceWait = null
-			form.reset()
-			error.value = null
-			phase.value = "idle"
-			document.removeEventListener("keydown", onKeydown)
-			taskService.disconnect()
-			tokenBalanceService.disconnect()
-			tokenService.disconnect()
-		} else {
-			// Reset transient state on open. The close branch already clears
-			// `error.value`, but the submit handler's catch block runs as a
-			// microtask AFTER the close branch — so an in-flight RPC that
-			// rejected with "Client disconnected" during the close cascade
-			// can write to `error.value` after our null-reset and stick around
-			// for the next open. Re-clearing here is the cheapest defense.
+	{
+		submit: handleAddToken,
+		onShow: async () => {
+			// Cleared again on open: a disconnect rejection can repopulate the error after hide reset it.
 			error.value = null
 			phase.value = "idle"
 			tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
@@ -288,17 +276,20 @@ watch(
 				contractTerm.value = cacheStore.preselectedTokenAddressToAdd
 				cacheStore.preselectedTokenAddressToAdd = ""
 			}
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			activeBalanceWait?.abort()
+			activeBalanceWait = null
+			form.reset()
+			error.value = null
+			phase.value = "idle"
+			taskService.disconnect()
+			tokenBalanceService.disconnect()
+			tokenService.disconnect()
+		},
 	},
+	{ submitWaitsForShow: true },
 )
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddToken()
-}
 </script>
 
 <template>

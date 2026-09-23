@@ -9,8 +9,9 @@
  */
 
 import { expect, inject } from "vitest"
+import { reloadExtensionPage } from "../fixtures/browser"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
-import { setActiveSendType } from "../fixtures/helpers"
+import { setActiveSendType, waitForHomeTotal } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -30,7 +31,7 @@ test.skipIf(!hasConfig)(
 			}
 			return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
 		})
-		await page.reload({ waitUntil: "domcontentloaded" })
+		await reloadExtensionPage(page)
 		await waitForHash(page, "#/popup/general")
 
 		// ── B1: the funded token row carries its fiat line ────────────────
@@ -39,6 +40,7 @@ test.skipIf(!hasConfig)(
 		expect(rowFiat).toMatch(/^≈ \$/)
 
 		// ── A1: the aggregate header shows a REAL dollar figure ───────────
+		await waitForHomeTotal(page)
 		const headerText = await page.$eval('[data-testid="balance-amount"]', (el) => el.textContent?.trim() ?? "")
 		expect(headerText).toMatch(/\$/)
 		expect(headerText).not.toBe("$0.00") // 1,000 minted tokens at ~$1 ≠ zero

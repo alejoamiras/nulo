@@ -103,100 +103,84 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Connected Apps" :backTo="'/popup/settings'">
-			<template #trailing>
-				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Session actions">
-						<MaterialIcon name="more_vert" :size="18" color="secondary" />
-					</button>
+	<SettingsPageShell title="Connected Apps" :backTo="'/popup/settings'" gap="12">
+		<template #trailing>
+			<Dropdown>
+				<button type="button" :class="$style.icon_btn" aria-label="Session actions">
+					<MaterialIcon name="more_vert" :size="18" color="secondary" />
+				</button>
 
-					<template #popup>
-						<DropdownItem @click="handleDropAllSessions" :disabled="!dappSessions.length">
-							<Flex align="center" gap="8">
-								<Icon name="log-out" size="14" color="secondary" />
-								Disconnect all sessions
-							</Flex>
-						</DropdownItem>
-					</template>
-				</Dropdown>
-			</template>
-		</SubPageHeader>
-
-		<Flex direction="column" gap="12" :class="$style.content">
-			<SectionLabel label="Sessions" :count="sortedSessions.length" />
-
-			<ItemsContainer v-if="sortedSessions.length">
-				<div
-					v-for="ds in sortedSessions"
-					:key="ds.id"
-					role="button"
-					tabindex="0"
-					@click="handleOpenSession(ds)"
-					@keydown.enter="handleOpenSession(ds)"
-					:class="$style.row"
-				>
-					<Flex align="center" gap="12" wide>
-						<div :class="$style.logo_wrapper">
-							<Icon v-if="ds.loadingLogo" :loading="true" name="dapp" size="18" color="tertiary" />
-							<img
-								v-else-if="ds.dappMetadata.logoBlobUrl"
-								:src="ds.dappMetadata.logoBlobUrl"
-								:class="$style.logo"
-								alt=""
-							/>
-							<Icon v-else name="dapp" size="18" color="tertiary" />
-						</div>
-
-						<Flex direction="column" gap="2" wide :class="$style.row_text">
-							<span :class="$style.row_name">{{ ds.dappMetadata.name }}</span>
-							<span v-if="ds.capabilityGrants?.length" :class="$style.row_grants">
-								{{ formatGrantSummary(ds.capabilityGrants) }}
-							</span>
+				<template #popup>
+					<DropdownItem @click="handleDropAllSessions" :disabled="!dappSessions.length">
+						<Flex align="center" gap="8">
+							<Icon name="log-out" size="14" color="secondary" />
+							Disconnect all sessions
 						</Flex>
+					</DropdownItem>
+				</template>
+			</Dropdown>
+		</template>
 
-						<Flex align="center" gap="8" :class="$style.actions">
-							<Tooltip position="end" delay="350">
-								<span
-									role="button"
-									tabindex="0"
-									data-testid="session-disconnect"
-									@click.stop="handleDropSession(ds)"
-									@keydown.enter.stop="handleDropSession(ds)"
-									:class="[$style.action, $style.action_danger]"
-									aria-label="Disconnect session"
-								>
-									<Icon name="close-circle" size="14" color="tertiary" />
-								</span>
+		<SectionLabel label="Sessions" :count="sortedSessions.length" />
 
-								<template #content> Disconnect session </template>
-							</Tooltip>
-						</Flex>
+		<ItemsContainer v-if="sortedSessions.length">
+			<div
+				v-for="ds in sortedSessions"
+				:key="ds.id"
+				role="button"
+				tabindex="0"
+				@click="handleOpenSession(ds)"
+				@keydown.enter="handleOpenSession(ds)"
+				:class="$style.row"
+			>
+				<Flex align="center" gap="12" wide>
+					<div :class="$style.logo_wrapper">
+						<Icon v-if="ds.loadingLogo" :loading="true" name="dapp" size="18" color="tertiary" />
+						<img
+							v-else-if="ds.dappMetadata.logoBlobUrl"
+							:src="ds.dappMetadata.logoBlobUrl"
+							:class="$style.logo"
+							alt=""
+						/>
+						<Icon v-else name="dapp" size="18" color="tertiary" />
+					</div>
+
+					<Flex direction="column" gap="2" wide :class="$style.row_text">
+						<span :class="$style.row_name">{{ ds.dappMetadata.name }}</span>
+						<span v-if="ds.capabilityGrants?.length" :class="$style.row_grants">
+							{{ formatGrantSummary(ds.capabilityGrants) }}
+						</span>
 					</Flex>
-				</div>
-			</ItemsContainer>
 
-			<div v-else :class="$style.empty">
-				<div :class="$style.empty_label">No active sessions</div>
-				<div :class="$style.empty_hint">Connect a dApp to start a session</div>
+					<Flex align="center" gap="8" :class="$style.actions">
+						<Tooltip position="end" delay="350">
+							<span
+								role="button"
+								tabindex="0"
+								data-testid="session-disconnect"
+								@click.stop="handleDropSession(ds)"
+								@keydown.enter.stop="handleDropSession(ds)"
+								:class="[$style.action, $style.action_danger]"
+								aria-label="Disconnect session"
+							>
+								<Icon name="close-circle" size="14" color="tertiary" />
+							</span>
+
+							<template #content> Disconnect session </template>
+						</Tooltip>
+					</Flex>
+				</Flex>
 			</div>
-		</Flex>
+		</ItemsContainer>
 
-	</Flex>
+		<div v-else :class="$style.empty">
+			<div :class="$style.empty_label">No active sessions</div>
+			<div :class="$style.empty_hint">Connect a dApp to start a session</div>
+		</div>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .row {
 	position: relative;
 	padding: 12px 16px;

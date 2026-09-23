@@ -9,9 +9,6 @@ import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 
-/** Services */
-import { setSentinel } from "@/utils/core"
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 
@@ -41,7 +38,6 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
@@ -65,8 +61,6 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
@@ -74,11 +68,10 @@ const {
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -87,8 +80,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -132,49 +123,26 @@ onBeforeUnmount(() => {
 	password.value = ""
 	repeatedPassword.value = ""
 	seedPhrase.value = undefined
-	privateKey.value = undefined
-	publicKey.value = undefined
 })
 </script>
 
 <template>
-	<OnboardingPage :gap="24">
-		<button
-			type="button"
-			:class="$style.back"
-			data-testid="onboarding-import-back"
-			@click="router.push('/onboarding/welcome')"
-		>
-			<MaterialIcon name="chevron_left" :size="14" />
-			<span>Back</span>
-		</button>
-		<StepIndicator :current="1" />
+	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
+		<OnboardingBackLink testid="onboarding-import-back" />
+		<StepIndicator :current="2" />
 		<header :class="$style.hero">
 			<BrutalistTitle main="Import" sub="Profile" />
 			<div :class="$style.hero_bar" />
-			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
+			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
-		<Flex direction="column" gap="8">
-			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Profile name</Text>
-			<div :class="[shakeName && $style.shake]">
-				<Input
-					ref="nameInputRef"
-					v-model="profileName"
-					type="text"
-					placeholder="My Profile"
-					:maxLength="32"
-					:error="!!nameError"
-					:ariaInvalid="!!nameError"
-					sanitize
-					data-testid="onboarding-name-input"
-					@input="handleNameInput"
-				/>
-			</div>
-			<Text v-if="nameError" size="12" color="red" height="150" role="alert">
-				{{ nameError }}
-			</Text>
-		</Flex>
+		<OnboardingProfileNameField
+			ref="nameInputRef"
+			v-model="profileName"
+			:error="nameError"
+			:shake="shakeName"
+			@input="handleNameInput"
+		/>
 
 		<ImportMethodPicker
 			v-if="!selectedImportOption"
@@ -200,10 +168,8 @@ onBeforeUnmount(() => {
 		/>
 
 		<ImportSecretForm
-			v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
+			v-if="selectedImportOption === 'seed'"
 			v-model:seedPhrase="seedPhrase"
-			v-model:privateKey="privateKey"
-			v-model:publicKey="publicKey"
 			v-model:password="password"
 			v-model:repeatedPassword="repeatedPassword"
 			:method="selectedImportOption"
@@ -240,6 +206,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta"
 					size="large"
+					data-testid="import-full-backup-continue-btn"
 					@click="importedProfile && completeImport(importedProfile as { id: string })"
 				>
 					Continue
@@ -248,6 +215,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta_outline"
 					size="large"
+					data-testid="import-full-backup-view-errors-btn"
 					@click="showRestoreErrorLog"
 				>
 					View errors
@@ -265,29 +233,6 @@ onBeforeUnmount(() => {
 			>
 				Import profile
 			</Button>
-			<Button
-				v-if="selectedImportOption === 'private_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPrivateKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPrivateKey"
-			>
-				Import profile
-			</Button>
-			<Button
-				v-if="selectedImportOption === 'public_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPublicKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPublicKey"
-			>
-				Import profile
-			</Button>
-
 			<Button
 				variant="cta_outline"
 				size="large"
@@ -308,31 +253,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style module>
-.back {
-	align-self: flex-start;
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	background: transparent;
-	border: none;
-	color: var(--txt-secondary);
-	font-family: var(--font-mono);
-	font-size: 11px;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	cursor: pointer;
-	padding: 4px 8px 4px 0;
-	transition: color 0.15s var(--bezier);
-}
-.back:hover {
-	color: var(--txt-primary);
-}
-.back:focus-visible {
-	outline: 2px dotted var(--nulo-accent);
-	outline-offset: 2px;
-	color: var(--txt-primary);
-}
-
 .hero {
 	padding: 8px 0 16px;
 	display: flex;
@@ -346,26 +266,8 @@ onBeforeUnmount(() => {
 	background: var(--nulo-accent);
 }
 
-.section_label {
-	font-family: var(--font-headline);
-	text-transform: uppercase;
-	letter-spacing: 0.18em;
-}
-
 .ctas {
 	margin-top: 8px;
 }
 
-@keyframes shakeInput {
-	0% { transform: translateX(0); }
-	20% { transform: translateX(-4px); }
-	40% { transform: translateX(4px); }
-	60% { transform: translateX(-3px); }
-	80% { transform: translateX(2px); }
-	100% { transform: translateX(0); }
-}
-
-.shake {
-	animation: shakeInput 0.4s ease;
-}
 </style>

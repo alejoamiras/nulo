@@ -1,43 +1,24 @@
 /**
- * F-008 / Phase 7: "do not guess" parser for sendTx call arguments.
+ * "Do not guess" reader of a dApp call's arguments for the approval card.
  *
- * Pre-fix, the approval popup showed only the method name + contract address
- * for sendTx-like operations. The actual arguments (recipient, amount) were
- * hidden behind a "View JSON" sub-link. Users approved transfers without
- * seeing where the funds were going.
- *
- * This helper recognizes ONLY the documented Nulo / Aztec-standards token
- * transfer signatures. For known transfers it returns a typed intent with
- * `to` + `amount`. For anything else, it returns `{ kind: "unverified" }`
- * — the caller renders an "unverified summary" marker + indexed args
- * fallback rather than guessing semantically.
- *
- * The "do not guess" semantics are critical: a malicious dApp could craft
- * a payload whose method name + arg positions LOOK transfer-like but
- * aren't (codex Round 1 S-2). By matching only the exact known method
- * names + arg arities, the helper refuses to render a precise-but-wrong
- * "To/Amount" summary.
+ * A call is a transfer or a mint only when its name AND arity match a shape in the wallet's
+ * vocabulary; the recipient, amount, optional sender and optional authwit nonce are then read by ABI
+ * parameter name. Everything else is `unverified`, and the card chooses between an ABI decode and the
+ * raw fields. A name-plus-arity match is a display vocabulary, not proof of the contract's semantics.
  */
 
-/** Known token-transfer method names — all share `(from, to, amount)` arity. */
-const KNOWN_TRANSFER_METHODS = new Set(["transfer_in_private", "transfer_in_public", "transfer_to_private", "transfer_to_public"])
+import { findMintSignature, findTransferSignature } from "./token-transfer-vocabulary"
 
-/** Known mint method names that share `(to, amount)` arity. Mints are
- *  inbound transfers from the contract minter's perspective and worth
- *  surfacing as structured. */
-const KNOWN_MINT_METHODS = new Set(["mint_to_private", "mint_to_public"])
-
-/** Result of intent extraction. Discriminated on `kind` so the caller's
- *  template renders the right branch without ambiguity.
- *
- *  Transfers expose the contract-call `from` arg — distinct from the
- *  wallet-account "From account" label which means "the account
- *  submitting the tx" (often the same, but a malicious dApp can craft
- *  `transfer(other_account, attacker, amount)` to make a user authorize
- *  pulling funds from a non-submitter account they control). Rendering
- *  `from` explicitly forces the user to verify it. */
 export type TransferIntent =
-	| { kind: "transfer"; from: string; to: string; amount: string }
+	| {
+			kind: "transfer"
+			/** Absent for the 2-argument shape, where the sender is the caller of the call. */
+			from?: string
+			to: string
+			amount: string
+			/** Present only for the shapes that carry an `authwit_nonce` parameter. */
+			nonce?: string
+	  }
 	| { kind: "mint"; to: string; amount: string }
 	| { kind: "unverified" }
 
@@ -49,77 +30,90 @@ interface CallLike {
 	args?: unknown[]
 }
 
-/**
- * Extract a structured intent from a single call. Returns `unverified` if
- * the method name isn't in the known set OR if the arg arity doesn't
- * match the expected signature.
- */
+/** A raw argument reduced to what the card may render: a canonical field (every `aztec_sendTx`
+ *  argument on the wire — an address is indistinguishable from an amount without the ABI), plain
+ *  text, or nothing. */
+export type ProjectedArgument = { kind: "field"; value: string } | { kind: "text"; value: string } | { kind: "opaque" }
+
 export function parseTransferIntent(call: CallLike | undefined): TransferIntent {
 	if (!call) return { kind: "unverified" }
 	const name = call.method ?? call.name
 	if (typeof name !== "string") return { kind: "unverified" }
 	const args = call.args
 	if (!Array.isArray(args)) return { kind: "unverified" }
-
-	if (KNOWN_TRANSFER_METHODS.has(name)) {
-		// Signature: (from, to, amount). Strict arity is the "do not guess"
-		// defense if upstream extends the signature.
-		if (args.length !== 3) return { kind: "unverified" }
-		const from = canonicalAddress(args[0])
-		const to = canonicalAddress(args[1])
-		const amount = canonicalAmount(args[2])
-		if (from === undefined || to === undefined || amount === undefined) return { kind: "unverified" }
-		return { kind: "transfer", from, to, amount }
-	}
-
-	if (KNOWN_MINT_METHODS.has(name)) {
-		// Signature: (to, amount).
-		if (args.length !== 2) return { kind: "unverified" }
-		const to = canonicalAddress(args[0])
-		const amount = canonicalAmount(args[1])
-		if (to === undefined || amount === undefined) return { kind: "unverified" }
-		return { kind: "mint", to, amount }
-	}
-
+	const transfer = findTransferSignature(name, args.length)
+	if (transfer) return readTransfer(args, transfer.params)
+	const mint = findMintSignature(name, args.length)
+	if (mint) return readMint(args, mint.params)
 	return { kind: "unverified" }
 }
 
-/** Canonical 32-byte hex form — what an Aztec address serializes to.
- *  Accepts `0x` + exactly 64 hex chars. */
+function readTransfer(args: unknown[], params: readonly string[]): TransferIntent {
+	const at = (param: string): unknown => args[params.indexOf(param)]
+	const to = canonicalAddress(at("to"))
+	const amount = canonicalAmount(at("amount"))
+	if (to === undefined || amount === undefined) return { kind: "unverified" }
+	const intent: TransferIntent = { kind: "transfer", to, amount }
+	if (params.includes("from")) {
+		const from = canonicalAddress(at("from"))
+		if (from === undefined) return { kind: "unverified" }
+		intent.from = from
+	}
+	if (params.includes("authwit_nonce")) {
+		const nonce = canonicalAmount(at("authwit_nonce"))
+		if (nonce === undefined) return { kind: "unverified" }
+		intent.nonce = nonce
+	}
+	return intent
+}
+
+function readMint(args: unknown[], params: readonly string[]): TransferIntent {
+	const to = canonicalAddress(args[params.indexOf("to")])
+	const amount = canonicalAmount(args[params.indexOf("amount")])
+	return to === undefined || amount === undefined ? { kind: "unverified" } : { kind: "mint", to, amount }
+}
+
+/** Canonical 32-byte hex form — what an Aztec address serializes to. */
 const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
 
-/** Canonical numeric form — pure decimal or `0x`-prefixed hex (no `e`,
- *  no leading whitespace, no Unicode digit lookalikes, no `toString`
- *  trickery returning attacker-controlled text). */
-const CANONICAL_NUMBER_RE = /^(0x[0-9a-fA-F]+|\d+)$/
+/** Canonical numeric form — pure decimal, or `0x`-prefixed hex up to one field. No exponent, whitespace or Unicode digits. */
+const CANONICAL_NUMBER_RE = /^(0x[0-9a-fA-F]{1,64}|\d+)$/
 
-/** Address projection. Accepts a plain string in canonical hex form
- *  OR an `AztecAddress`-like object whose `toString()` returns that
- *  same canonical hex. Rejects anything else — including custom
- *  `toString()` returning UI text — so attacker-controlled objects
- *  cannot inject arbitrary characters into the structured render. */
+/** A canonical address string or an object whose own `toString()` yields one; anything else is refused
+ *  so an attacker-defined `toString()` cannot put arbitrary text into a structured row. */
 function canonicalAddress(arg: unknown): string | undefined {
 	const projected = projectToString(arg)
 	if (projected === undefined) return undefined
 	return HEX_ADDRESS_RE.test(projected) ? projected : undefined
 }
 
-/** Amount projection. Accepts string / number / bigint / `Fr`/`U128`-like
- *  objects whose `toString()` returns a canonical numeric form. Rejects
- *  custom `toString()` returning attacker-controlled text. */
+/** Amounts read as decimal integers whatever their wire spelling: an `Fr` arrives as 32-byte hex, and
+ *  a hex amount is exactly what nobody can review. */
 function canonicalAmount(arg: unknown): string | undefined {
-	if (typeof arg === "number" && Number.isFinite(arg)) return String(arg)
-	if (typeof arg === "bigint") return arg.toString()
+	if (typeof arg === "number") return Number.isSafeInteger(arg) && arg >= 0 ? String(arg) : undefined
+	if (typeof arg === "bigint") return arg >= 0n ? arg.toString() : undefined
 	const projected = projectToString(arg)
-	if (projected === undefined) return undefined
-	return CANONICAL_NUMBER_RE.test(projected) ? projected : undefined
+	if (projected === undefined || !CANONICAL_NUMBER_RE.test(projected)) return undefined
+	return BigInt(projected).toString()
 }
 
-/** Pulls a string out of `arg` without trusting attacker-defined
- *  `toString()`. Plain strings pass through. Other shapes go through
- *  `Object.prototype.toString.call(arg)` semantics implicitly via
- *  `String()` — but we ALSO require the original object to expose its
- *  OWN `toString` (rejecting `[object Object]` shaped output). */
+/** The projection the raw-argument fallback renders through: the same trust rules as the structured
+ *  rows, so a value the structured row would refuse cannot appear verbatim one branch over. */
+export function projectArgument(arg: unknown): ProjectedArgument {
+	if (typeof arg === "bigint") return { kind: "text", value: arg.toString() }
+	const projected = projectToString(arg)
+	if (projected === undefined) return { kind: "opaque" }
+	return HEX_ADDRESS_RE.test(projected) ? { kind: "field", value: projected } : { kind: "text", value: projected }
+}
+
+/** A field below 2^64 is a count or an amount far more often than a hash, and reads better as a decimal. */
+export function smallFieldDecimal(field: string): string | undefined {
+	const n = BigInt(field)
+	return n < 1n << 64n ? n.toString() : undefined
+}
+
+/** Pulls a string out of `arg`: plain strings pass through, primitives stringify, objects must expose
+ *  a `toString()` that returns something other than the default `[object Object]`. */
 function projectToString(arg: unknown): string | undefined {
 	if (typeof arg === "string") return arg
 	if (arg === null || arg === undefined) return undefined

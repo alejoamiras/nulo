@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 
 /// @notice KEYSTONE: pins the L1 content-hashes the portal emits for the L2
-/// token_bridge to consume. These MUST equal the Noir
+/// the hub to consume. These MUST equal the Noir
 /// token_portal_content_hash_lib outputs for the same inputs — the one
 /// cross-chain boundary the Noir TXE cannot test. The matching Noir assertion
 /// lives in bridge-aztec. If a selector or arg order ever drifts, a deposit's

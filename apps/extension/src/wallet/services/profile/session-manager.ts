@@ -54,8 +54,16 @@ import type { ConfigProp, IConfig } from "@/wallet/config"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { SessionSecretBox, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
+import { AlarmDispatcher, Lock } from "@nulo/wallet-core/utils"
+import {
+	asImportedKeysDek,
+	type ImportedKeysDek,
+	type MasterSecretBytes,
+	type Passhash,
+	SessionSecretBox,
+	verifyEnvelopeMacV3,
+	zeroize,
+} from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -68,6 +76,15 @@ export const SESSION_STORAGE_ROOT = "nulo:core:session"
  * Convention: `nulo:<service>:<purpose>`.
  */
 export const SESSION_TTL_ALARM_NAME = "nulo:core:session:ttl"
+
+/** The most an expired session can be held open for approved sends, capped again by its TTL. */
+const MAX_EXPIRY_DEFERRAL_MS = 10 * 60_000
+
+/** How far one deferral moves the deadline, capped again by the TTL. */
+const EXPIRY_DEFERRAL_STEP_MS = 60_000
+
+/** The deadline and TTL revision a snapshot-based write was decided on. */
+type CommitExpectation = { lockedAt: number | undefined; configRev: number }
 
 /** Callback the facade passes to `restore()` so SessionManager can fetch
  *  the profile named in the persisted session without reaching into
@@ -96,12 +113,45 @@ export class SessionManager {
 	 *  sync. */
 	private strictSecurityMode: boolean
 	private readonly alarms?: AlarmsPort
+	// Q-05: the named create/clear ritual is owned by the shared AlarmDispatcher.
+	// The listener deliberately does NOT go through `dispatcher.listen()`: the
+	// staleness gate needs `alarm.scheduledTime` (the dispatcher's tick contract
+	// doesn't surface the event), and the handler's fire-and-forget `void`
+	// semantics must stay byte-identical.
+	private readonly dispatcher?: AlarmDispatcher
 	/** Facade-lock serializer injected by ProfileService. Serializes the
 	 *  alarm-driven TTL close against the facade-locked session writers
 	 *  (refresh/open/unlock) so a racing refresh writeback cannot resurrect a
 	 *  session the alarm just closed. Defaults to a pass-through for the
 	 *  lock-agnostic legacy/test paths (which never wire the alarm). */
 	private readonly runExclusive: <T>(fn: () => Promise<T>) => Promise<T>
+	/** Serializes the session ARTIFACT operations (row write/delete, alarm
+	 *  schedule/clear) across every entry point — including the off-lock
+	 *  expiry close from `getActive` that the facade lock cannot serialize
+	 *  (wrapping it there would self-deadlock: the facade lock is
+	 *  non-reentrant and `getActive` is reached from inside it). Leaf-level:
+	 *  nothing inside an artifact section calls back into facade-locked
+	 *  code, so no lock-ordering cycle is possible. Watchdog DISABLED —
+	 *  a force-release would admit a successor's artifact section into a
+	 *  stalled close's, recreating the very interleaving this serializes
+	 *  away; the sections are short storage/alarm ops with no by-design
+	 *  long holds. */
+	private readonly artifactLock: Lock
+	/** Bumped as the LAST act of a successful open's artifact section — the
+	 *  COMMIT point. A close captures it at entry and re-checks inside the
+	 *  mutex: a mismatch means a successor fully landed (stand down, its
+	 *  artifacts are not ours to destroy); a match means no successor has
+	 *  committed (safe to delete whatever the row holds — the current
+	 *  session's record or a failed open's debris). */
+	private sessionGeneration = 0
+	/** Last serial handed to a published session. Only ever incremented — a rolled-back publication
+	 *  burns its serial — so a serial names exactly one session for the worker's lifetime. */
+	private lastSerial = 0
+	/** Bumped by every TTL change, so an expiry decision taken under the previous TTL stands down. */
+	private configRev = 0
+	/** Whether an expired session still has approved sends to finish. Late-bound by the execution
+	 *  layer, which this layer cannot import. */
+	private shouldDeferExpiry?: (profileId: string) => Promise<boolean>
 
 	/**
 	 * @param config      Reactive config — SessionManager subscribes to
@@ -139,9 +189,11 @@ export class SessionManager {
 		// behavior — proactive TTL lights up once the composition root
 		// passes a real `BrowserApi`.
 		this.alarms = browserApi?.alarms
+		this.dispatcher = this.alarms ? new AlarmDispatcher(SESSION_TTL_ALARM_NAME, this.alarms) : undefined
 		// Pass-through default keeps the lock-agnostic contract for callers
 		// that don't wire the alarm (legacy SW path / unit tests).
 		this.runExclusive = runExclusive ?? ((fn) => fn())
+		this.artifactLock = new Lock("session-artifacts", logger, null)
 		// SessionManager has no dispose method (SW-lifetime singleton);
 		// we don't store the unsubscribe handle. If a future teardown
 		// path emerges, capture this return value.
@@ -157,15 +209,35 @@ export class SessionManager {
 	 *  is async. Making this sync would require a fire-and-forget
 	 *  close, which drifts persisted-state from in-memory-state. */
 	public async getActive(): Promise<ActiveSession | undefined> {
-		if (!this.activeSession) {
+		const active = this.activeSession
+		if (!active) {
 			return undefined
 		}
-		if (this.isExpired(this.activeSession.session)) {
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
-			await this.close()
-			return undefined
+		// A pending decision is joined even once its deferral has moved the deadline in memory: a
+		// writer that went ahead could land between that write failing and the close it causes.
+		if (!active.expiryDecision && !this.isExpired(active.session)) {
+			return active
 		}
-		return this.activeSession
+		this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
+		// Decide on the OBSERVED session: this runs off the facade lock (getActive is reached both
+		// inside and outside it), and a concurrent open may replace the session meanwhile.
+		await this.expireOrDefer(active)
+		// A decision leaves the session open only with a deadline it moved or found moved, so the
+		// session is read again rather than reported locked.
+		return this.activeSession === active ? this.getActive() : undefined
+	}
+
+	/** Registers the check an expired session consults before it closes. While the check answers
+	 *  true the deadline moves a step at a time, up to `min(TTL, 10 min)` past the first deferred
+	 *  deadline of that session. */
+	public setExpiryDeferral(predicate: (profileId: string) => Promise<boolean>): void {
+		this.shouldDeferExpiry = predicate
+	}
+
+	/** Serial of the in-memory session, or `undefined` when none is published. Synchronous, lock-free
+	 *  and without the lazy expiry close, so it can share a tick with the call it guards. */
+	public peekLiveSerial(): number | undefined {
+		return this.activeSession?.serial
 	}
 
 	/** Returns the master secret for the given profile id. Throws
@@ -178,6 +250,18 @@ export class SessionManager {
 			throw new Error("Profile locked")
 		}
 		return session.secret
+	}
+
+	/** Returns a COPY of the imported-keys DEK for the given profile id, or `undefined` for a
+	 *  DEGRADED (derived-only) session. A copy, not the live reference — callers follow the
+	 *  house zeroize-after-use discipline and must not wipe the session's own buffer. Throws
+	 *  `"Profile locked"` on no-session / wrong-profile, same contract as `getSecret`. */
+	public async getDek(profileId: string): Promise<ImportedKeysDek | undefined> {
+		const session = await this.getActive()
+		if (session?.session.profile !== profileId) {
+			throw new Error("Profile locked")
+		}
+		return session.dek ? asImportedKeysDek(new Uint8Array(session.dek)) : undefined
 	}
 
 	/** Persists + enters the session for `profile`. `passhash` is now only
@@ -199,7 +283,7 @@ export class SessionManager {
 	 *  COPY of `secretBuffer` under a fresh random token). The caller is
 	 *  responsible for calling `zeroize(...)` on these buffers after `open`
 	 *  returns. */
-	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash): Promise<void> {
+	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash, dek?: ImportedKeysDek): Promise<void> {
 		try {
 			const since = Date.now()
 			// F-11: `passhash` is now only a PRESENCE signal — "a password
@@ -210,46 +294,164 @@ export class SessionManager {
 			// persisted. Reading `strictSecurityMode` here (not at the call
 			// sites) keeps the gate race-free with a concurrent strict-toggle ON
 			// mid-unlock — it cannot create a session that already carries a bearer.
-			const persistBearer = passhash !== undefined && !this.strictSecurityMode && profile.type === "password"
-			const bearer = persistBearer ? await this.sessionSecretBox.wrap(secretBuffer, profile.id) : undefined
+			// A DEGRADED (dek-less) session persists NO bearer either: the next SW
+			// wake must force a full password unlock that re-surfaces the state,
+			// never silently extend it (degradation state machine, rule 2).
+			const persistBearer = passhash !== undefined && !this.strictSecurityMode && profile.type === "password" && dek !== undefined
+			const bearer = persistBearer && dek ? await this.sessionSecretBox.wrapPair(secretBuffer, dek, profile.id) : undefined
 			const session: Session = {
 				profile: profile.id,
 				bearer,
 				since,
 				lockedAt: this.sessionTtl > 0 ? since + this.sessionTtl : undefined,
 			}
-			await this.session.set(session)
-			const secret = Fr.fromBuffer(Buffer.from(secretBuffer))
-			this.activeSession = { profile, session, secret }
-			this.onChange(this.toInfo(profile))
-			// Schedule the proactive lock alarm AFTER state is committed.
-			// If alarm scheduling fails (port error, browser throttling),
-			// log + fall back to the reactive `isExpired` check — never
-			// block session-open on alarm wiring.
-			await this.scheduleLockAlarm(session.lockedAt)
+			// B-01: memory-first. Commit the in-memory session BEFORE the storage
+			// write so a rejecting `session.set` can't discard it — the class
+			// contract is that a broken chrome.storage write at unlock still leaves
+			// the in-memory secret usable for this SW lifetime (degraded success:
+			// not persisted, but usable).
+			// Named + wiped in a finally: `Fr.fromBuffer` copies, so an anonymous `Buffer.from(...)`
+			// here would leave a second master-equivalent buffer alive until GC (same class of leak
+			// as the passkey OKM copy) — and an out-of-range throw must not skip the wipe.
+			const secretCopy = Buffer.from(secretBuffer)
+			let secret: Fr
+			try {
+				secret = Fr.fromBuffer(secretCopy)
+			} finally {
+				zeroize(secretCopy)
+			}
+			// The ARTIFACT SECTION: serialized against any in-flight close so a
+			// stale expiry close can never destroy this open's row/alarm (and
+			// vice versa: a queued close entered before us cleans its OWN
+			// predecessor first, then we land cleanly after).
+			await this.artifactLock.withLock(async () => {
+				// Wipe a replaced session's DEK before dropping the reference
+				// (close/replace/expiry discipline); store a COPY of the caller-owned dek.
+				zeroize(this.activeSession?.dek)
+				this.activeSession = {
+					profile,
+					session,
+					secret,
+					dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined,
+					serial: ++this.lastSerial,
+				}
+				this.onChange(this.toInfo(profile))
+				try {
+					await this.session.set(session)
+				} catch (error) {
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", error)
+					// The write failed, so the persisted record is now indeterminate — it
+					// may still hold a PRIOR profile's session that restore() would
+					// reactivate on the next SW start (wrong profile). Best-effort clear it.
+					await this.session.delete().catch(() => {})
+					// Read back: if we CANNOT confirm the record is gone (storage fully
+					// down / delete also failed), do NOT report this open as a degraded
+					// success — undo the in-memory transition so `openSessionVerified`'s
+					// post-open `isActive` check surfaces the failure to the RPC caller
+					// (no false "unlocked as B"). NOTE: a stale prior record we couldn't
+					// delete stays on disk; a restart then restores that record — but it is
+					// the user's own last durably-persisted session (or an unparseable
+					// partial write → silent-close → locked), never a secret exposure. This
+					// residual is unavoidable while storage is fully unavailable.
+					// The generation is NOT bumped on this path — a pending close still
+					// owns whatever the row holds and completes its cleanup.
+					if (await this.hasPersistedSession()) {
+						zeroize(this.activeSession?.dek)
+						this.activeSession = undefined
+						this.onChange(undefined)
+						return
+					}
+				}
+				// Schedule the proactive lock alarm AFTER state is committed.
+				// If alarm scheduling fails (port error, browser throttling),
+				// log + fall back to the reactive `isExpired` check — never
+				// block session-open on alarm wiring.
+				await this.scheduleLockAlarm(session.lockedAt)
+				// COMMIT POINT — last act of the section (a confirmed-gone-row
+				// degraded success commits too: the in-memory session is a real
+				// successor and its predecessor's bearer is confirmed erased).
+				// From here a stale close's generation re-check mismatches and
+				// stands down.
+				this.sessionGeneration++
+			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to open profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to open profile session", error)
 		}
 	}
 
 	/** Clears persisted + in-memory session. Emits `onChange(undefined)`
 	 *  iff a session was actually open (idempotent when already closed).
-	 *  Safe to call multiple times. */
-	public async close(): Promise<void> {
+	 *  Safe to call multiple times.
+	 *
+	 *  Returns whether it emitted. A worker that restarted holds no in-memory
+	 *  session while the persisted record may still exist, so an explicit lock
+	 *  that reaches here emits nothing — the caller that owns the user's intent
+	 *  (`lockActiveProfile`) announces the lock itself on `false`.
+	 *
+	 *  `expected` (the expiry path passes the session it OBSERVED): when the
+	 *  active session is no longer that exact object, a successor already
+	 *  replaced it — this stale close must not touch the successor's
+	 *  in-memory state or artifacts, so it returns untouched. */
+	public async close(expected?: ActiveSession): Promise<boolean> {
+		let emitted = false
 		try {
-			await this.session.delete()
+			// Identity guard — synchronous, so there is no TOCTOU between the
+			// check and the in-memory head below.
+			if (expected && this.activeSession !== expected) {
+				return false
+			}
+			const gen = this.sessionGeneration
+			// B-01: memory-first + asymmetric-to-open. Clear the in-memory session
+			// FIRST so a rejecting `session.delete` can't leave the secret live in
+			// memory after an explicit lock. Unlike open(), a swallowed delete
+			// failure here is NOT benign — the persisted bearer would survive and
+			// re-unlock on the next SW start — so `delete()` gets its OWN catch
+			// (clearLockAlarm must still run) and callers that need the durable
+			// guarantee (lockActiveProfile) read back via hasPersistedSession().
 			if (this.activeSession) {
+				zeroize(this.activeSession.dek)
 				this.activeSession = undefined
+				emitted = true
 				this.onChange(undefined)
 			}
-			// Cancel any pending lock alarm. Idempotent — `clear()` returns
-			// `false` if no alarm exists. Run after state-clear so a racing
-			// alarm fire that arrives during this call sees
-			// `activeSession === undefined` and short-circuits in
-			// `onAlarmFired`.
-			await this.clearLockAlarm()
+			// The ARTIFACT SECTION: a successor open that COMMITTED (bumped the
+			// generation) while we were en route owns the row and the alarm now —
+			// stand down entirely rather than destroy them. A matching generation
+			// means no successor committed: whatever the row holds (our session,
+			// or a failed open's debris) is ours to clean.
+			await this.artifactLock.withLock(async () => {
+				if (this.sessionGeneration !== gen) {
+					this.logger.log(LOG_SOURCE, LogLevel.Info, "Stale close stood down — a newer session committed its artifacts")
+					return
+				}
+				try {
+					await this.session.delete()
+				} catch (error) {
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", error)
+				}
+				// Cancel any pending lock alarm. Idempotent — `clear()` returns
+				// `false` if no alarm exists. Run after state-clear so a racing
+				// alarm fire that arrives during this call sees
+				// `activeSession === undefined` and short-circuits in
+				// `onAlarmFired`.
+				await this.clearLockAlarm()
+			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", error)
+		}
+		return emitted
+	}
+
+	/** True iff a session record is still persisted in storage. Used by
+	 *  `lockActiveProfile` as a post-close read-back (B-01): a swallowed
+	 *  `session.delete` failure would leave a bearer that re-unlocks on the next
+	 *  SW start, so the lock RPC surfaces the failure rather than reporting a
+	 *  false "locked". Fail-closed: a read error reports "still persisted". */
+	public async hasPersistedSession(): Promise<boolean> {
+		try {
+			return (await this.session.get()) !== undefined
+		} catch {
+			return true
 		}
 	}
 
@@ -258,22 +460,19 @@ export class SessionManager {
 	 *  the UI already has the correct active-profile info. */
 	public async refresh(): Promise<void> {
 		try {
+			// `getActive` joins a pending expiry decision, so a refresh applies after it, never under it.
 			const session = await this.getActive()
 			if (session) {
-				const since = Date.now()
-				session.session.since = since
-				session.session.lockedAt = this.sessionTtl > 0 ? since + this.sessionTtl : undefined
-				await this.session.set(session.session)
-				// Cancel + recreate the alarm against the new `lockedAt`.
-				// The previous alarm's `scheduledTime` no longer matches
-				// the persisted `lockedAt`, so the gate in `onAlarmFired`
-				// would ignore a late-firing stale delivery anyway — but
-				// cancelling avoids the spurious fire entirely.
-				await this.clearLockAlarm()
-				await this.scheduleLockAlarm(session.session.lockedAt)
+				await this.commitSession(session, {
+					mutate: ({ session: row }) => {
+						const since = Date.now()
+						row.since = since
+						row.lockedAt = this.sessionTtl > 0 ? since + this.sessionTtl : undefined
+					},
+				})
 			}
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to refresh profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to refresh profile session", error)
 		}
 	}
 
@@ -307,9 +506,12 @@ export class SessionManager {
 					// Persisting a fresh storage snapshot instead (`{...persisted}`)
 					// would be the lost-update vector against a serialized writer.
 					if (active.session.bearer || active.session.passhash) {
-						active.session.bearer = undefined
-						active.session.passhash = undefined
-						await this.session.set(active.session)
+						await this.commitSession(active, {
+							mutate: ({ session: row }) => {
+								row.bearer = undefined
+								row.passhash = undefined
+							},
+						})
 					}
 					return
 				}
@@ -321,7 +523,7 @@ export class SessionManager {
 			})
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Cleared passhash bearer (strict mode)")
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear passhash bearer", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear passhash bearer", error)
 		}
 	}
 
@@ -348,7 +550,7 @@ export class SessionManager {
 			// `nulo:core:session` must NOT abort service init (this runs under
 			// `ServiceCollection.start()`) — treat it as "no restorable session"
 			// so the user simply re-unlocks. The bad record stays for diagnosis.
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Undecodable persisted session; skipping restore", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Undecodable persisted session; skipping restore", error)
 			return
 		}
 		if (!session) {
@@ -382,14 +584,15 @@ export class SessionManager {
 			await this.silentClose()
 			return
 		}
-		let secretBytes: MasterSecretBytes | null = null
+		let pair: { master: MasterSecretBytes; dek: ImportedKeysDek } | null = null
 		try {
-			// AAD = profile id: a bearer minted for one profile can't unwrap
-			// under another. `unwrap` returns null (never throws) on a tampered
-			// bearer / bad GCM tag / wrong version.
-			secretBytes = await this.sessionSecretBox.unwrap(session.bearer, profile.id)
-			if (!secretBytes) {
-				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session bearer failed to unwrap (tampered / wrong profile) → silentClose")
+			// AAD = profile id: a bearer minted for one profile can't unwrap under another.
+			// `unwrapPair` returns null (never throws) on a tampered bearer / bad GCM tag / a
+			// non-v2 version — a legacy v1 (master-only) record silently closes into a full
+			// re-unlock, NEVER a dek-less session (degradation state machine, rule 3).
+			pair = await this.sessionSecretBox.unwrapPair(session.bearer, profile.id)
+			if (!pair) {
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session bearer failed to unwrap (tampered / wrong profile / v1) → silentClose")
 				await this.silentClose()
 				return
 			}
@@ -402,32 +605,64 @@ export class SessionManager {
 				await this.silentClose()
 				return
 			}
-			// `unwrap` already enforces the 32-byte length, but a 32-byte value ≥ the
-			// BN254 field modulus still throws in `Fr.fromBuffer`. A crafted/corrupt
-			// bearer must `silentClose`, not crash service init.
-			let secret: Fr
-			try {
-				// Fr.fromBuffer copies into Fr's internal field-element rep
-				// (verified by zeroize.test.ts). Safe to zero `secretBytes` after.
-				secret = Fr.fromBuffer(Buffer.from(secretBytes))
-			} catch (err) {
-				this.logger.log(
-					LOG_SOURCE,
-					LogLevel.Debug,
-					"Bearer decrypted to an out-of-range secret → silentClose",
-					getErrorMessage(err),
-				)
+			// Envelope-MAC v3 check: this passwordless path can never decrypt the sealed fields to
+			// run the words↔master pairing check, so it verifies the HKDF(master‖dek)-keyed MAC
+			// over the WHOLE envelope — row id first (a whole-envelope swap between same-password
+			// profiles fails even though every swapped byte, tag included, is authentic), then
+			// the four sealed slots, then the plaintext fingerprint — catching tampered slots,
+			// cross-profile transplants, AND identity swaps, unforgeable by the same-phrase
+			// attacker who holds the master but not this profile's DEK. Bearer restore requires
+			// BOTH a valid DEK and a valid MAC (rule 3) — any mismatch blocks silent restore;
+			// the forced password unlock runs the full pairing check + the degradation machine.
+			const envelopeIntact = await verifyEnvelopeMacV3(
+				// The REQUESTED id from the session record, not the row's self-claimed one —
+				// mirrors the unlock-path belt-and-suspenders on top of EntityStorage's guard.
+				session.profile,
+				pair.master,
+				pair.dek,
+				{
+					guard: profile.guard,
+					secret: profile.secret,
+					entropy: profile.entropy,
+					dek: profile.dekSealed,
+					walletFingerprint: profile.walletFingerprint,
+				},
+				profile.envelopeMac,
+			)
+			if (!envelopeIntact) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "Sealed-envelope MAC mismatch → silentClose (password unlock will verify)")
 				await this.silentClose()
 				return
 			}
+			// `unwrapPair` already enforces the pair length, but a 32-byte master ≥ the
+			// BN254 field modulus still throws in `Fr.fromBuffer`. A crafted/corrupt
+			// bearer must `silentClose`, not crash service init.
+			let secret: Fr
+			const masterCopy = Buffer.from(pair.master)
+			try {
+				// Fr.fromBuffer copies into Fr's internal field-element rep
+				// (verified by zeroize.test.ts). Safe to zero the pair after.
+				secret = Fr.fromBuffer(masterCopy)
+			} catch (err) {
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Bearer decrypted to an out-of-range secret → silentClose", err)
+				await this.silentClose()
+				return
+			} finally {
+				// The intermediate copy is master-equivalent — wipe it on BOTH the success and the
+				// out-of-range path, not just when the pair itself is wiped below.
+				zeroize(masterCopy)
+			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
-			this.activeSession = { profile, session, secret }
+			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)), serial: ++this.lastSerial }
 			// Re-schedule the alarm against the persisted `lockedAt`. If
 			// `lockedAt` is absent (older records), fall back to
 			// `since + sessionTtl`.
 			await this.scheduleLockAlarm(this.deriveLockedAt(session))
 		} finally {
-			zeroize(secretBytes)
+			if (pair) {
+				zeroize(pair.master)
+				zeroize(pair.dek)
+			}
 		}
 	}
 
@@ -449,6 +684,13 @@ export class SessionManager {
 		return this.activeSession?.session.profile === profileId
 	}
 
+	/** `true` iff `profileId`'s session is open WITHOUT its DEK (recovery mode). Synchronous on
+	 *  purpose: the state is committed before `open` resolves, so whoever observed the unlock
+	 *  observes this too — no RPC or event ordering to race. */
+	public isRecoveryMode(profileId: string): boolean {
+		return this.activeSession?.session.profile === profileId && this.activeSession.dek === undefined
+	}
+
 	private isExpired(session: Session): boolean {
 		return this.sessionTtl !== 0 && this.deriveLockedAt(session) <= Date.now()
 	}
@@ -464,19 +706,26 @@ export class SessionManager {
 	}
 
 	/** Close without emitting — used by `restore` so init-time cleanup
-	 *  doesn't fire onChange before any subscriber exists. */
+	 *  doesn't fire onChange before any subscriber exists.
+	 *  INVARIANT: init-only, pre-`ensureInitialized` — no concurrent open()
+	 *  can exist yet, which is why these legs run unfenced (no generation
+	 *  check, no artifact mutex). If a post-init caller ever appears, it
+	 *  must go through close() instead. */
 	private async silentClose(): Promise<void> {
 		try {
 			await this.session.delete()
+			zeroize(this.activeSession?.dek)
 			this.activeSession = undefined
 			await this.clearLockAlarm()
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", error)
 		}
 	}
 
 	private toInfo(profile: Profile): ProfileInfo {
-		return { id: profile.id, name: profile.name, type: profile.type }
+		const info: ProfileInfo = { id: profile.id, name: profile.name, type: profile.type }
+		if (this.isRecoveryMode(profile.id)) info.recoveryMode = true
+		return info
 	}
 
 	/**
@@ -524,6 +773,8 @@ export class SessionManager {
 	 * Errors are logged + swallowed; never escape the void IIFE.
 	 */
 	private async applyTtlChange(newTtl: number): Promise<void> {
+		// Before the first await, so an expiry decision that read the previous TTL sees the change.
+		this.configRev++
 		try {
 			// Serialize the writeback + close against the facade-locked session
 			// writers (refresh/open/unlock) AND the TTL alarm close, via the
@@ -539,30 +790,10 @@ export class SessionManager {
 				// changed the active session (e.g. bumped `since`, or closed it)
 				// while we waited for the lock.
 				const active = this.activeSession
-				if (!active) return
-				if (newTtl === 0) {
-					// `lockedAt: undefined` is dropped by JSON.stringify on
-					// persist, matching the no-TTL write in `open()`.
-					active.session.lockedAt = undefined
-					await this.session.set(active.session)
-					await this.clearLockAlarm()
-					return
-				}
-				const newLockedAt = active.session.since + newTtl
-				if (newLockedAt <= Date.now()) {
-					// New TTL has already elapsed since `since` — lock now,
-					// don't schedule an already-overdue alarm.
-					this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL shortened past elapsed window; locking immediately")
-					await this.close()
-					return
-				}
-				active.session.lockedAt = newLockedAt
-				await this.session.set(active.session)
-				await this.clearLockAlarm()
-				await this.scheduleLockAlarm(newLockedAt)
+				if (active) await this.applyTtl(active, newTtl)
 			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", error)
 		}
 	}
 
@@ -604,9 +835,108 @@ export class SessionManager {
 				)
 				return
 			}
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired; locking")
-			await this.close()
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired")
+			await this.expireOrDefer(active)
 		})
+	}
+
+	/**
+	 * The only writer of a live session's row. Under the artifact lock, and only while `session` is
+	 * still the active one, it applies `mutate` to the row as it is now, persists it, and re-arms the
+	 * alarm when `lockedAt` moved. A writer that decided on a snapshot passes `expect` and stands down
+	 * when the deadline or the TTL changed after it looked; every other writer always applies.
+	 */
+	private async commitSession(
+		session: ActiveSession,
+		{ mutate, expect }: { mutate: (session: ActiveSession) => void; expect?: CommitExpectation },
+	): Promise<void> {
+		await this.artifactLock.withLock(async () => {
+			if (this.activeSession !== session) return
+			if (expect && (session.session.lockedAt !== expect.lockedAt || this.configRev !== expect.configRev)) return
+			const lockedAt = session.session.lockedAt
+			mutate(session)
+			await this.session.set(session.session)
+			if (session.session.lockedAt !== lockedAt) {
+				await this.clearLockAlarm()
+				await this.scheduleLockAlarm(session.session.lockedAt)
+			}
+		})
+	}
+
+	/** One decision per expired session, joined by the alarm and every lazy `getActive`, so the
+	 *  deferral check runs once and at most one extension or close follows. */
+	private expireOrDefer(session: ActiveSession): Promise<void> {
+		session.expiryDecision ??= this.decideExpiry(session)
+			.catch((error) => this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to decide session expiry", error))
+			.finally(() => {
+				session.expiryDecision = undefined
+			})
+		return session.expiryDecision
+	}
+
+	/**
+	 * Extend an expired session by one step while approved sends are in flight and its budget lasts;
+	 * otherwise close it. The deadline and the TTL revision are read before the check is awaited: a
+	 * deadline moved meanwhile stands the decision down, and a TTL changed meanwhile is applied here,
+	 * because its writer may be queued behind the facade lock this decision's caller holds. A failed
+	 * write closes the session, since nothing re-arms the alarm that fired. The budget anchors on the
+	 * first deferred deadline and nothing refills it.
+	 */
+	private async decideExpiry(session: ActiveSession): Promise<void> {
+		const lockedAt = session.session.lockedAt
+		const configRev = this.configRev
+		const budgetEnd = session.deferBudgetEnd ?? this.deriveLockedAt(session.session) + Math.min(this.sessionTtl, MAX_EXPIRY_DEFERRAL_MS)
+		const step = Math.min(EXPIRY_DEFERRAL_STEP_MS, this.sessionTtl)
+		const hasWork = await this.hasWorkToFinish(session)
+		if (session.session.lockedAt !== lockedAt) return
+		try {
+			if (this.configRev !== configRev) {
+				await this.applyTtl(session, this.sessionTtl, { lockedAt, configRev: this.configRev })
+				return
+			}
+			const now = Date.now()
+			if (hasWork && now < budgetEnd) {
+				await this.commitSession(session, {
+					expect: { lockedAt, configRev },
+					mutate: (current) => {
+						current.deferBudgetEnd ??= budgetEnd
+						current.session.lockedAt = Math.min(now + step, budgetEnd)
+					},
+				})
+				return
+			}
+		} catch (error) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist an expiry decision; locking", error)
+		}
+		await this.close(session)
+	}
+
+	/** Applies `ttl` to a live session: a `ttl` already elapsed since `since` closes it rather than
+	 *  arming an overdue alarm; otherwise its deadline becomes `since + ttl`, or none for 0. */
+	private async applyTtl(session: ActiveSession, ttl: number, expect?: CommitExpectation): Promise<void> {
+		if (ttl !== 0 && session.session.since + ttl <= Date.now()) {
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL already elapsed; locking immediately")
+			await this.close(session)
+			return
+		}
+		await this.commitSession(session, {
+			expect,
+			mutate: ({ session: row }) => {
+				// `lockedAt: undefined` is dropped by JSON.stringify on persist, matching the no-TTL write in `open()`.
+				row.lockedAt = ttl === 0 ? undefined : row.since + ttl
+			},
+		})
+	}
+
+	/** The deferral check's answer; no check registered, or a check that throws, answers false. */
+	private async hasWorkToFinish(session: ActiveSession): Promise<boolean> {
+		if (!this.shouldDeferExpiry) return false
+		try {
+			return await this.shouldDeferExpiry(session.session.profile)
+		} catch (error) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Expiry deferral check failed; locking", error)
+			return false
+		}
 	}
 
 	/**
@@ -618,13 +948,13 @@ export class SessionManager {
 	 * reactive `isExpired` check is the safety net).
 	 */
 	private async scheduleLockAlarm(lockedAt: number | undefined): Promise<void> {
-		if (!this.alarms || this.sessionTtl === 0 || lockedAt === undefined || lockedAt <= Date.now()) {
+		if (!this.dispatcher || this.sessionTtl === 0 || lockedAt === undefined || lockedAt <= Date.now()) {
 			return
 		}
 		try {
-			await this.alarms.create(SESSION_TTL_ALARM_NAME, { when: lockedAt })
+			await this.dispatcher.create({ when: lockedAt })
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to schedule TTL alarm", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to schedule TTL alarm", error)
 		}
 	}
 
@@ -633,11 +963,11 @@ export class SessionManager {
 	 * when no alarm exists. No-op when alarms aren't wired.
 	 */
 	private async clearLockAlarm(): Promise<void> {
-		if (!this.alarms) return
+		if (!this.dispatcher) return
 		try {
-			await this.alarms.clear(SESSION_TTL_ALARM_NAME)
+			await this.dispatcher.clear()
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear TTL alarm", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear TTL alarm", error)
 		}
 	}
 }

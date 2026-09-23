@@ -20,42 +20,63 @@ on:
         required: false
         type: string
         default: ""
+      version_suffix:
+        description: |
+          If set (and version_override is not), append `-<suffix>` to the checked-in version
+          before building, e.g. `pr.612` → `0.27.0-pr.612`. The manifest keeps the 4-int
+          `version` Chrome requires and shows the full string as `version_name`, so a preview
+          build is distinguishable from a dev build in chrome://extensions.
+        required: false
+        type: string
+        default: ""
       upload_artifacts:
         description: Upload dist/ as a workflow artifact (for downstream smoke / release).
         required: false
         type: boolean
         default: false
+    outputs:
+      chrome_artifact_url:
+        description: Download URL of the uploaded Chrome build (empty when not uploaded).
+        value: ${{ jobs.build.outputs.chrome_artifact_url }}
+      firefox_artifact_url:
+        description: Download URL of the uploaded Firefox build (empty when not uploaded).
+        value: ${{ jobs.build.outputs.firefox_artifact_url }}
 
 jobs:
   build:
     name: vite build (${{ inputs.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      chrome_artifact_url: ${{ steps.upload-chrome.outputs.artifact-url }}
+      firefox_artifact_url: ${{ steps.upload-firefox.outputs.artifact-url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
       - uses: ./.github/actions/setup-bun
 
       - name: Patch extension version
-        if: inputs.version_override != ''
+        if: inputs.version_override != '' || inputs.version_suffix != ''
         env:
           OVERRIDE: ${{ inputs.version_override }}
+          SUFFIX: ${{ inputs.version_suffix }}
         run: |
           bun -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('apps/extension/package.json', 'utf8'));
-            p.version = process.env.OVERRIDE;
+            p.version = process.env.OVERRIDE || p.version + '-' + process.env.SUFFIX;
             fs.writeFileSync('apps/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
-            console.log('patched extension version to', process.env.OVERRIDE);
+            console.log('patched extension version to', p.version);
           "
 
-      # The CoinGecko demo key is a LOCAL/CI convenience only ("no key ships in
-      # releases", implementations-plan/token-prices). Vite bakes any VITE_* env
-      # into the bundle, so fail FAST if the variable is even set — stronger
-      # than only grepping the artifact afterwards (which we also do below).
-      - name: Assert no CoinGecko API key in the build env
+      # Vite bakes any VITE_* env into the bundle, so fail FAST if one of these
+      # is even set — stronger than only grepping the artifact afterwards (which
+      # we also do below). The CoinGecko key is a local/CI convenience that must
+      # never ship; the e2e flags would ship a wallet that misprices or stops
+      # seeding defaults entirely.
+      - name: Assert no test-only or secret VITE_* flags in the build env
         run: |
           if [ -n "${VITE_COINGECKO_API_KEY:-}" ]; then
             echo "::error::VITE_COINGECKO_API_KEY is set in the build environment — release builds must be keyless" >&2
@@ -65,7 +86,11 @@ jobs:
             echo "::error::VITE_NULO_E2E_PRICE_MAP is set in the build environment — e2e-only price mapping must never arm a release build" >&2
             exit 1
           fi
-          echo "✓ build env carries no CoinGecko key and no e2e price-map flag"
+          if [ -n "${VITE_NULO_E2E_TOKEN_SEEDS:-}" ] || [ -n "${VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM:-}" ]; then
+            echo "::error::VITE_NULO_E2E_TOKEN_SEEDS(_CONFIRM) is set in the build environment — an armed token-seed source REPLACES the default seed list, so a release build carrying it would ship a wallet that never seeds defaults" >&2
+            exit 1
+          fi
+          echo "✓ build env carries no CoinGecko key and no e2e price-map or token-seed flags"
 
       - name: Build Chrome
         if: inputs.target == 'chrome' || inputs.target == 'both'
@@ -74,6 +99,17 @@ jobs:
       - name: Build Firefox
         if: inputs.target == 'firefox' || inputs.target == 'both'
         run: bun run --cwd apps/extension build:firefox
+
+      # The build regenerates the auto-import declarations under src/types (unplugin-auto-import +
+      # unplugin-vue-components). A commit that adds an auto-imported export without rebuilding
+      # leaves dev one export stale until someone notices (#514 → #528). Fail here instead.
+      - name: Assert the build left generated sources unchanged
+        run: |
+          if ! git diff --exit-code --stat -- apps/extension/src/types/; then
+            echo "::error::the extension build regenerated files under apps/extension/src/types/ — run 'bun run build' locally and commit the result" >&2
+            exit 1
+          fi
+          echo "✓ generated sources unchanged by the build"
 
       # Production bundle-hygiene guard for test-only markers. Two families must
       # NEVER appear in a shipping build:
@@ -92,9 +128,21 @@ jobs:
           fail=0
           for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
             [ -d "$d" ] || continue
-            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture"; do
+            for marker in "NULO_PRESTO_REQUIRED_BUILD_STAMP" "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:restore-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture" "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
               if grep -rq "$marker" "$d"; then
                 echo "::error::test-only marker '$marker' leaked into $d" >&2
+                fail=1
+              fi
+            done
+          done
+          # Test libraries: a *.test.ts beside a page becomes a route unless the Pages scan excludes
+          # it (scripts/pages-options.ts, whose own test is the primary proof). These three strings
+          # survive minification and were each present in a build made without the exclude.
+          for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
+            [ -d "$d" ] || continue
+            for marker in "Vue Test Utils" "createTestingPinia" "__vitest"; do
+              if grep -rqF --include='*.js' "$marker" "$d"; then
+                echo "::error::test library marker '$marker' found in $d — a test module is being bundled" >&2
                 fail=1
               fi
             done
@@ -102,20 +150,35 @@ jobs:
           if [ "$fail" = 0 ]; then echo "✓ no test-only markers in production build"; fi
           exit "$fail"
 
+      # MIT, BSD and Apache-2.0 all require their notice to travel INSIDE the distributed artifact.
+      # The generator already fails the build on a disallowed or unreviewed licence; this catches
+      # the other failure — a file that is absent, or that silently lost a whole class of input
+      # (a worker build, the overrides, the vendored components).
+      - name: Assert the third-party notices shipped
+        env:
+          TARGET: ${{ inputs.target }}
+        run: bun packages/third-party-notices/bin/check-minimum.ts "$TARGET" apps/extension/dist
+
       - name: Upload Chrome build
+        id: upload-chrome
         if: inputs.upload_artifacts && (inputs.target == 'chrome' || inputs.target == 'both')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: extension-chrome
           path: apps/extension/dist/chrome
           if-no-files-found: error
+          # A dotfile in the output is part of the shipped tree; source-rebuild.yml diffs this artifact.
+          include-hidden-files: true
           retention-days: 7
 
       - name: Upload Firefox build
+        id: upload-firefox
         if: inputs.upload_artifacts && (inputs.target == 'firefox' || inputs.target == 'both')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: extension-firefox
           path: apps/extension/dist/firefox
           if-no-files-found: error
+          # A dotfile in the output is part of the shipped tree; source-rebuild.yml diffs this artifact.
+          include-hidden-files: true
           retention-days: 7

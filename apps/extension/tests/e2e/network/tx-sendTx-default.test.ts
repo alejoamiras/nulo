@@ -1,8 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
-import { waitForDappExecuteWorked } from "../fixtures/journal"
+import { BROWSER_AWAITING_CARD, PRESTO_AWAITING_CARD, waitForAwaitingCardBackend, waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -20,13 +20,12 @@ const hasConfig = aztecConfig !== undefined
  * happens during fixture setup (hookTimeout=300s) rather than in this test's
  * test budget.
  *
- * Asserts on `data-stage="proving"` instead of waiting on the dApp's full
- * sendTx promise — accelerator-server 1.0.1 only covers `createChonkProof`;
- * init/inner/reset/tail kernel proofs still run in-process via bb.js WASM
- * and exceed puppeteer's protocolTimeout on slow runners. Reaching the
- * `proving` stage validates wallet built + simulated + entered the prove
- * pipeline — exactly what popup-shape tests should check. See
- * implementations-plan/journal-stage-restructure/plan.md.
+ * Waits on the journal reaching real work instead of the dApp's full sendTx
+ * promise (the popup-shape signal), then on the awaiting card's backend
+ * evidence: `presto` / "Proving with Presto ✦" in the prover-ON CI lane
+ * (`VITE_NULO_PRESTO_REQUIRED=1`), `browser` / "Proving in browser…" on a
+ * local WASM build with no Presto listening. Under a proverless build the op
+ * never lingers in `proving`, so that assertion is skipped there.
  */
 test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm submits with real proof (prover-ON canary)",
@@ -80,6 +79,14 @@ test.skipIf(!hasConfig)(
 		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
 		await waitForDappExecuteWorked(walletPopup)
 
+		if (process.env.NULO_E2E_PROVERLESS !== "1") {
+			// The required-mode build (CI's prover-ON lanes) may only prove natively. A plain build
+			// proves wherever the box allows: natively when a healthy Presto answers, in the browser
+			// otherwise — either way the card must name the backend the journal recorded.
+			const native = process.env.VITE_NULO_PRESTO_REQUIRED === "1"
+			await waitForAwaitingCardBackend(walletPopup, native ? [PRESTO_AWAITING_CARD] : [PRESTO_AWAITING_CARD, BROWSER_AWAITING_CARD])
+		}
+
 		// Prover-ON canary (this file runs in the real-proving canary job, NOT the
 		// proverless pool): wait through the REAL prove to submit and assert the
 		// node accepted the real proof. The playground hard-codes `wait: "NO_WAIT"`
@@ -90,7 +97,7 @@ test.skipIf(!hasConfig)(
 		// submit) — that's the local assertion-logic check; the real-prove timing
 		// is exercised in CI.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "tx-sendTx-default:result")
 		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

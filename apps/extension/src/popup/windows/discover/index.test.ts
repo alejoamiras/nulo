@@ -28,8 +28,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { flushPromises, mount } from "@vue/test-utils"
-import { ref, type Ref } from "vue"
+import { ref } from "vue"
 
 // ── Mock state (closure refs so tests can flip values mid-test) ──────
 
@@ -357,5 +358,20 @@ describe("discover popup — isReady race fix", () => {
 		// Allow MUST stay disabled — even though requestId is truthy.
 		// Pre-fix: this assertion would have FAILED (Allow would be enabled).
 		expect(isDisabled(allow(w))).toBe(true)
+	})
+
+	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
+		resolveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
+		const w = factory()
+		await flushPromises()
+		getActiveProfilePromiseResolve?.({ id: "p1" })
+		await flushPromises()
+		loadPromiseResolve?.()
+		await flushPromises()
+		const vm = w.vm as unknown as { approve: () => Promise<void> }
+		await vm.approve()
+		await flushPromises()
+		expect(w.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })

@@ -1,0 +1,146 @@
+name: Setup presto-server
+description: |
+  Install the headless Presto server (Linux x86_64) for CI proving.
+
+  Trust posture: BOTH the release tarball and the extracted `presto-server`
+  binary are pinned by SHA-256 in the caller. The tarball pin is checked on
+  download (before anything is extracted); the archive must hold exactly one
+  member, a regular file named `presto-server` (a link, a duplicate or any
+  extra entry fails the step); only that member is extracted; the binary pin
+  is re-checked on EVERY run, cache hits included, because `actions/cache`
+  restores the binary, not the tarball. The upstream `.sha256` sidecar is
+  compared too, but it shares the tarball's origin — it only catches transfer
+  corruption, never a release-origin compromise. The two pins are pins, not
+  independent provenance (SECURITY.md "Binary dependencies").
+
+  Adds the binary to PATH at $RUNNER_TEMP/presto-bin. No sudo. No global
+  filesystem mutation outside RUNNER_TEMP, which the runner reaps.
+
+  Bumping: update `version`, `expected_tarball_sha256` AND `expected_sha256`
+  in the caller workflow in one commit — see SECURITY.md for the procedure.
+
+inputs:
+  version:
+    description: |
+      presto-server release version. The tag is `presto-v${version}` and the
+      asset is `presto-server-${version}-linux-x86_64.tar.gz`.
+    required: false
+    default: "1.1.2"
+  expected_tarball_sha256:
+    description: |
+      Repo-pinned SHA-256 of the release tarball, checked before extraction.
+      REQUIRED — an accidental version bump fails loudly at the verify step.
+    required: true
+  expected_sha256:
+    description: |
+      Repo-pinned SHA-256 of the EXTRACTED `presto-server` binary — the trust
+      anchor on cache-hit runs. REQUIRED. Compute both pins with:
+        curl -sSfLO https://github.com/alejoamiras/presto/releases/download/presto-v<VER>/presto-server-<VER>-linux-x86_64.tar.gz
+        sha256sum presto-server-<VER>-linux-x86_64.tar.gz
+        tar -xzf presto-server-<VER>-linux-x86_64.tar.gz presto-server && sha256sum presto-server
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Compute install dir
+      id: paths
+      shell: bash
+      run: |
+        echo "bin_dir=$RUNNER_TEMP/presto-bin" >> "$GITHUB_OUTPUT"
+
+    - name: Cache presto-server binary
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.bin_dir }}
+        key: ${{ runner.os }}-presto-server-${{ inputs.version }}-${{ inputs.expected_sha256 }}
+
+    - name: Download, verify the tarball, extract the single member (cache miss)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VER: ${{ inputs.version }}
+        BIN_DIR: ${{ steps.paths.outputs.bin_dir }}
+        EXPECTED_TARBALL_SHA: ${{ inputs.expected_tarball_sha256 }}
+      run: |
+        set -euo pipefail
+        BASE="https://github.com/alejoamiras/presto/releases/download/presto-v${VER}"
+        TARBALL="presto-server-${VER}-linux-x86_64.tar.gz"
+        TMP=$(mktemp -d)
+        cd "$TMP"
+        curl -sSfL "${BASE}/${TARBALL}" -o "${TARBALL}"
+        curl -sSfL "${BASE}/${TARBALL}.sha256" -o "${TARBALL}.sha256"
+
+        ACTUAL_TARBALL_SHA=$(sha256sum "${TARBALL}" | awk '{print $1}')
+        if [ "${ACTUAL_TARBALL_SHA}" != "${EXPECTED_TARBALL_SHA}" ]; then
+          echo "::error::presto-server tarball SHA-256 mismatch against the repo pin."
+          echo "  expected: ${EXPECTED_TARBALL_SHA}"
+          echo "  actual:   ${ACTUAL_TARBALL_SHA}"
+          exit 1
+        fi
+        # Same-origin sidecar: transfer-integrity only.
+        SIDECAR_SHA=$(awk '{print $1}' "${TARBALL}.sha256")
+        if [ "${SIDECAR_SHA}" != "${ACTUAL_TARBALL_SHA}" ]; then
+          echo "::error::upstream .sha256 sidecar disagrees with the downloaded tarball (corrupt download?)."
+          exit 1
+        fi
+
+        # Exactly one member, a regular file (`-`) named presto-server: a symlink, hard link,
+        # duplicate or extra entry could plant a file or redirect the hashed path.
+        tar -tvf "${TARBALL}" > members.txt
+        if [ "$(wc -l < members.txt)" -ne 1 ]; then
+          echo "::error::presto-server tarball must contain exactly one member:"
+          cat members.txt
+          exit 1
+        fi
+        MEMBER_TYPE=$(cut -c1 members.txt)
+        MEMBER_NAME=$(awk '{print $NF}' members.txt)
+        if [ "${MEMBER_TYPE}" != "-" ] || [ "${MEMBER_NAME}" != "presto-server" ]; then
+          echo "::error::presto-server tarball member is not a regular file named presto-server:"
+          cat members.txt
+          exit 1
+        fi
+        mkdir -p "${BIN_DIR}"
+        tar -xzf "${TARBALL}" -C "${BIN_DIR}" presto-server
+        echo "Tarball SHA-256 verified: ${ACTUAL_TARBALL_SHA}"
+
+    # On a cache hit the restored directory is untrusted until re-checked: it must hold exactly the
+    # one regular file we cached, and that file must hash to the pin, before it is made executable
+    # or put on PATH. The binary hash is verified on EVERY run so the cache backend is never an
+    # unverified trust point.
+    - name: Verify the restored directory and the binary SHA-256
+      shell: bash
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha256 }}
+        BIN_DIR: ${{ steps.paths.outputs.bin_dir }}
+      run: |
+        set -euo pipefail
+        BINARY="${BIN_DIR}/presto-server"
+        ENTRIES=$(find "${BIN_DIR}" -mindepth 1 | wc -l)
+        if [ "${ENTRIES}" -ne 1 ] || [ ! -f "${BINARY}" ] || [ -L "${BINARY}" ]; then
+          echo "::error::${BIN_DIR} must contain exactly one regular file, presto-server:"
+          ls -la "${BIN_DIR}" || true
+          exit 1
+        fi
+        ACTUAL=$(sha256sum "${BINARY}" | awk '{print $1}')
+        if [ "${ACTUAL}" != "${EXPECTED_SHA}" ]; then
+          echo "::error::presto-server binary SHA-256 mismatch (cache poisoning?)."
+          echo "  expected: ${EXPECTED_SHA}"
+          echo "  actual:   ${ACTUAL}"
+          echo "  binary:   ${BINARY}"
+          echo "  Drop the cache + retry, or update the pins if upstream changed."
+          exit 1
+        fi
+        chmod +x "${BINARY}"
+        echo "Binary SHA-256 verified: ${ACTUAL}"
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "${{ steps.paths.outputs.bin_dir }}" >> "$GITHUB_PATH"
+
+    - name: Verify executable
+      shell: bash
+      run: |
+        which presto-server
+        ldd "$(which presto-server)" || true

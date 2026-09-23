@@ -19,6 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { flushPromises, mount } from "@vue/test-utils"
 import { reactive, ref, type Ref } from "vue"
 
@@ -81,6 +82,7 @@ const appStoreDefaults = () =>
 		isLogined: true,
 		account: { name: "TestAccount" },
 		network: { name: "TestNet" },
+		networks: [],
 		pageAwaitingAuth: "",
 	})
 let appStoreMock = appStoreDefaults()
@@ -384,5 +386,94 @@ describe("capabilities window — shell lifecycle frozen oracle", () => {
 		handler(undefined)
 		await flushPromises()
 		expect(rejectViaInteractionServiceMock).toHaveBeenCalledTimes(2)
+	})
+
+	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
+		resolveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
+		// Minimal payload so init() reaches initComplete (empty delta = no account gating).
+		payloadToLoad = { params: { delta: [], existingGrants: [] }, session: { chainId: "1" } }
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as { approve: () => Promise<void> }
+		await vm.approve()
+		await flushPromises()
+		expect(w.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w.find('[data-testid="error-text"]').exists()).toBe(false)
+	})
+})
+
+describe("capabilities window — account widening consent (real rows)", () => {
+	const A = { address: `0x${"aa".repeat(32)}`, name: "Alpha", chainId: 1 }
+	const B = { address: `0x${"bb".repeat(32)}`, name: "Beta", chainId: 1 }
+	const accountsCap = { type: "accounts", canGet: true, canCreateAuthWit: false }
+	const realRows = () => {
+		resolveInteractionMock.mockClear()
+		return mount(Capabilities, { global: { stubs: { ...STUBS, AccountSelectRow: false } } })
+	}
+	const rows = () => w!.findAll('[data-testid="cap-account-item"]')
+	const resolvedArg = () =>
+		(
+			resolveInteractionMock.mock.calls[0] as unknown as [
+				string,
+				{ selectedAccounts?: string[]; granted: Array<Record<string, unknown>> },
+			]
+		)[1]
+
+	test("held rows are pre-selected and locked; a membership-only approve needs a new row; approve returns held ∪ picked", async () => {
+		payloadToLoad = {
+			params: {
+				delta: [accountsCap],
+				existingGrants: [],
+				availableAccounts: [A, B],
+				grantedAccounts: [A.address],
+				accountsMembershipOnly: true,
+			},
+			session: { chainId: "1" },
+		}
+		w = realRows()
+		await completeInit()
+		const [rowA, rowB] = rows()
+		expect(rowA.attributes("data-granted")).toBe("true")
+		expect(rowA.attributes("data-selected")).toBe("true")
+		expect(rowB.attributes("data-granted")).toBeUndefined()
+		expect(rowB.attributes("data-selected")).toBeUndefined()
+		await rowA.trigger("click")
+		expect(rowA.attributes("data-selected")).toBe("true")
+
+		const vm = w!.vm as unknown as { approve: () => Promise<void> }
+		await vm.approve()
+		await flushPromises()
+		expect(resolveInteractionMock).not.toHaveBeenCalled()
+		expect(w!.find('[data-testid="error-text"]').exists()).toBe(true)
+
+		await rowB.trigger("click")
+		await vm.approve()
+		await flushPromises()
+		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
+		expect(resolvedArg().selectedAccounts).toEqual([`aztec:1:${A.address}`, `aztec:1:${B.address}`])
+		expect(resolvedArg().granted).toEqual([accountsCap])
+	})
+
+	test("a flag-only request (field-diff) approves with no new row and keeps the held row locked", async () => {
+		const wide = { ...accountsCap, canCreateAuthWit: true }
+		payloadToLoad = {
+			params: {
+				delta: [wide],
+				existingGrants: [],
+				availableAccounts: [A, B],
+				grantedAccounts: [A.address],
+				accountsMembershipOnly: false,
+			},
+			session: { chainId: "1" },
+		}
+		w = realRows()
+		await completeInit()
+		expect(rows()[0].attributes("data-granted")).toBe("true")
+		const vm = w!.vm as unknown as { approve: () => Promise<void> }
+		await vm.approve()
+		await flushPromises()
+		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
+		expect(resolvedArg().selectedAccounts).toEqual([`aztec:1:${A.address}`])
+		expect(resolvedArg().granted).toEqual([wide])
 	})
 })

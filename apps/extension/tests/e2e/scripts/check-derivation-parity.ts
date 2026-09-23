@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 import puppeteer from "puppeteer"
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { poseidon2Hash } from "@aztec/foundation/crypto/sync"
+import { deriveAccountSeed } from "@nulo/wallet-crypto"
 import { NuloAccount } from "@nulo/aztec-runtime/account"
 import { createLogger } from "@aztec/foundation/log"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -28,15 +28,14 @@ import { TEST_PASSWORD } from "../fixtures/constants"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../../dist/chrome")
 
-// Mirrors AccountType.Nulo_v1 from apps/extension/src/wallet/services/account/spec.ts:5
-// SECURITY: must match the enum exactly — used in poseidon2Hash for key derivation.
+// Mirrors AccountType.Nulo_v1 (account/spec.ts) — SECURITY: must match the enum exactly.
 const ACCOUNT_TYPE_NULO_V1 = 0
-// Local Network chainId per apps/extension/src/wallet/services/network/service.ts:85
-const LOCAL_NETWORK_CHAIN_ID = 0
+// The Local Network's EXACT L1 chain id (anvil) — the KDF v2 derivation input.
+const LOCAL_L1_CHAIN_ID = 31337
 
 async function deriveExpectedAddress(master: Fr): Promise<{ address: string; masterBase64: string }> {
 	const logger = createLogger("derivation-parity")
-	const accountSecret = poseidon2Hash([master, new Fr(LOCAL_NETWORK_CHAIN_ID), new Fr(ACCOUNT_TYPE_NULO_V1), new Fr(0)])
+	const accountSecret = await deriveAccountSeed(master, LOCAL_L1_CHAIN_ID, ACCOUNT_TYPE_NULO_V1, 0)
 	const accountContract = await NuloAccount.new(accountSecret, logger)
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
 	return { address: accountContract.address.toString(), masterBase64 }

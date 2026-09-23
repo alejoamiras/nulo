@@ -1,6 +1,6 @@
 import { Fr } from "@aztec/aztec.js/fields"
 import { describe, expect, it } from "vitest"
-import { assertSaltV2, parseClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "./relay-claim"
+import { parseClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "./relay-claim"
 
 const RECIPIENT = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 const BRIDGE = "0x00000000000000000000000000000000000000000000000000000000000000aa"
@@ -74,18 +74,6 @@ describe("requireRelayerSecret", () => {
 		} catch (e) {
 			expect((e as Error).message).not.toContain(junk)
 		}
-	})
-})
-
-describe("assertSaltV2", () => {
-	it("passes for a recipient-committed manifest", () => {
-		expect(() => assertSaltV2({ l1: { privateClaimMode: "salt-v2" } })).not.toThrow()
-	})
-
-	it("fail-closed when the mode is absent or a pre-commitment value", () => {
-		expect(() => assertSaltV2({ l1: {} })).toThrow(/absent/)
-		expect(() => assertSaltV2({ l1: { privateClaimMode: "bearer" } })).toThrow(/bearer/)
-		expect(() => assertSaltV2({})).toThrow(/refusing to relay/)
 	})
 })
 

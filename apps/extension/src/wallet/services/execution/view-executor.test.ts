@@ -48,6 +48,8 @@ function addr(hex: string) {
 	return { toString: () => hex } as never
 }
 
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
+
 function makeHarness(overrides: Partial<ViewExecutorDeps> = {}) {
 	const network = {
 		id: "net-1",
@@ -83,7 +85,10 @@ function makeHarness(overrides: Partial<ViewExecutorDeps> = {}) {
 			getContractInstance: vi.fn(async () => undefined),
 			getPrivateEvents: vi.fn(async () => []),
 		} as never,
-		profileService: { getActiveProfile: vi.fn(async () => ({ id: "p1" })) } as never,
+		profileService: {
+			getActiveProfile: vi.fn(async () => ({ id: "p1" })),
+			captureExecutionFence: vi.fn(async () => FENCE),
+		} as never,
 		networkService: { getNetwork: vi.fn(async () => network), getNode: vi.fn(async () => node) } as never,
 		accountService: { getAccountContract: vi.fn(async () => account) } as never,
 		contactService: { getContacts: vi.fn(async () => []) } as never,
@@ -150,11 +155,19 @@ describe("ViewExecutor.executeAztecSimulateTx", () => {
 	test("fast path result=null falls back to the standard path", async () => {
 		fastPathMocks.rehydrateOptimizablePrefix.mockReturnValue({ optimizableCalls: [], remainingRaw: [] })
 		fastPathMocks.runFastPath.mockResolvedValue(null)
-		const { executor, pxe } = makeHarness()
-		await executor.executeAztecSimulateTx(makeSimOp())
+		const { executor, pxe, deps } = makeHarness()
+		const calls = [
+			{ name: "balance_of_public", to: "0x01", selector: "0x11" },
+			{ name: "transfer", to: "0x01", selector: "0x22" },
+		]
+		await executor.executeAztecSimulateTx(makeSimOp({ exec: { calls } }))
 
 		expect(fastPathMocks.runFastPath).toHaveBeenCalledTimes(1)
 		expect(pxe.simulateTx).toHaveBeenCalledTimes(1)
+		// The standard path receives EVERY original call with its wire name intact — that is the
+		// evidence `validateEncodedCallFn` re-checks after a fast-path fallback.
+		const planned = (deps.planner.processAztecJsPayload as ReturnType<typeof vi.fn>).mock.calls[0][0] as { calls: unknown[] }
+		expect(planned.calls).toEqual(calls)
 	})
 
 	test("fast path result returned verbatim when non-null", async () => {
@@ -166,6 +179,47 @@ describe("ViewExecutor.executeAztecSimulateTx", () => {
 
 		expect(result).toBe(fastResult)
 		expect(pxe.simulateTx).not.toHaveBeenCalled()
+	})
+})
+
+describe("ViewExecutor builds under a fence captured at entry", () => {
+	const PROFILE_ADDR = `0x${"11".repeat(32)}`
+
+	test("simulate_transaction, the standard aztec_simulateTx arm and profileTx each hand the builder their capture", async () => {
+		fastPathMocks.rehydrateOptimizablePrefix.mockReturnValue(null)
+		const { executor, deps } = makeHarness()
+		await executor.executeSimulateTransaction({
+			kind: "simulate_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			actions: [],
+		} as never)
+		await executor.executeAztecSimulateTx(makeSimOp())
+		await executor.executeAztecProfileTx(
+			makeSimOp({ kind: "aztec_profileTx", accountAddress: PROFILE_ADDR, opts: { from: addr(PROFILE_ADDR), additionalScopes: [] } }),
+		)
+		const builds = (deps.txBuilder.buildStandard as ReturnType<typeof vi.fn>).mock.calls as unknown[][]
+		expect(builds.map((call) => call[1])).toEqual([FENCE, FENCE, FENCE])
+		expect(deps.profileService.captureExecutionFence).toHaveBeenCalledTimes(3)
+	})
+
+	test("a failed capture (locked) stops before any build", async () => {
+		const { executor, deps } = makeHarness({
+			profileService: {
+				captureExecutionFence: vi.fn(async () => {
+					throw new Error("Wallet locked")
+				}),
+			} as never,
+		})
+		await expect(
+			executor.executeSimulateTransaction({
+				kind: "simulate_transaction",
+				networkId: "net-1",
+				accountAddress: "0xacct",
+				actions: [],
+			} as never),
+		).rejects.toThrow("Wallet locked")
+		expect(deps.txBuilder.buildStandard).not.toHaveBeenCalled()
 	})
 })
 

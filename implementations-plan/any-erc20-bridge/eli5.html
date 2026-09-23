@@ -1,0 +1,125 @@
+<title>Any-Token Bridge Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{color-scheme:dark;--bg:#0a0908;--surface:#141312;--low:#1d1b1a;--outline:#4a463f;--border:#231f1c;--accent:#f8f1e7;--txt:#f5f0e6;--txt2:#999187;--mint:#18d2a5;--yellow:#e6c525;--red:#f03c3c;--tint:color-mix(in srgb,var(--txt) 5%,transparent)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){color-scheme:light;--bg:#f5f5f7;--surface:#fff;--low:#f0efec;--outline:#c9c5bd;--border:#d8d4cc;--accent:#a8480c;--txt:rgba(0,0,0,.88);--txt2:rgba(0,0,0,.6)}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f5f5f7;--surface:#fff;--low:#f0efec;--outline:#c9c5bd;--border:#d8d4cc;--accent:#a8480c;--txt:rgba(0,0,0,.88);--txt2:rgba(0,0,0,.6)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 Inter,system-ui,sans-serif}
+.page{max-width:760px;margin:0 auto;padding:56px 24px 96px;display:flex;flex-direction:column;gap:36px}
+h1,h2,h3{font-family:"Space Grotesk",system-ui,sans-serif;margin:0;text-wrap:balance}
+h1{font-size:40px;font-weight:700;letter-spacing:-.02em;line-height:1.05;text-transform:uppercase}
+h2{font-size:22px;font-weight:700;letter-spacing:-.015em;text-transform:uppercase}
+h3{font-size:16px;font-weight:600}
+p{margin:0}.lede{color:var(--txt2);font-size:16px;max-width:64ch}
+.lbl{font:500 11px/1 "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--txt2)}
+.mono{font-family:"JetBrains Mono",monospace;font-size:13px}
+section{display:flex;flex-direction:column;gap:14px}
+.box{border:1px solid var(--outline);background:var(--surface);padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.box.acc{border-left:3px solid var(--accent)}.box.warn{border-left:3px solid var(--yellow)}.box.ok{border-left:3px solid var(--mint)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.phase{border:1px solid var(--outline);background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.phase .k{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.phase .proves{font:400 12.5px/1.5 Inter,system-ui,sans-serif;color:var(--txt2);border-top:1px solid var(--border);padding-top:6px;margin-top:2px}
+.tag{display:inline-block;border:1px solid var(--outline);padding:2px 6px;font:600 9.5px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--txt2)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}th,td{border:1px solid var(--outline);padding:8px 10px;text-align:left;vertical-align:top}th{font:600 11px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--txt2);background:var(--tint)}
+.scroll{overflow-x:auto}ul{margin:0;padding-left:18px}li{margin:3px 0}
+pre{background:var(--low);border:1px solid var(--outline);padding:12px 14px;overflow-x:auto;white-space:pre-wrap;font:12.5px/1.5 "JetBrains Mono",monospace;margin:0}
+.cta{border:1px solid var(--accent);padding:14px 16px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+a{color:var(--txt)}.muted{color:var(--txt2);font-size:13px}
+</style>
+<div class="page">
+<header style="display:flex;flex-direction:column;gap:14px">
+<p class="lbl">nulo tools · plan for approval · mega-deep · 2026-09-02 · all questions answered</p>
+<h1>Any-token bridge</h1>
+<p class="lede">Today the tools app can bridge exactly one token (USDC) because every piece — the Ethereum vault, the Aztec contract, the config file, the form — was built for one. This plan rebuilds the bridge so <b>any ERC-20 on Ethereum</b> can go to Aztec (and back), lets people turn any token straight into Aztec gas, and replaces the two old tabs with the three-step wizard you chose. It ships on testnet with documentation for how to deploy it; mainnet comes later as its own step.</p>
+</header>
+
+<section>
+<h2>What changes, in plain words</h2>
+<div class="grid">
+<div class="box"><h3>One vault per token, stamped out on demand</h3><p>On Ethereum, a small "factory" contract creates a tiny vault for a token the first time anyone bridges it. Vaults have no settings and no owner — nothing to repoint or hijack. The factory is the only thing that can announce a new token to Aztec.</p></div>
+<div class="box"><h3>One Aztec contract for every token</h3><p>On Aztec, a single "hub" listens for those announcements, creates the matching Aztec token itself, and handles every claim and withdrawal. Its addresses are all predictable in advance, so a fake vault or a fake token can never be slipped in.</p></div>
+<div class="box"><h3>Gas from any token</h3><p>"Send USDC and arrive with gas" already existed as a small toggle. Now any token can become gas (all of it, or a slice), and the app proposes the slice for you ("enough for ~20 transactions").</p></div>
+<div class="box"><h3>The wizard</h3><p>Token → Amount → Review. Logos for known tokens, a paste-an-address path for the rest, plain-language privacy, and a review that shows five lines before you sign. First-time tokens get one extra step, once, ever.</p></div>
+</div>
+</section>
+
+<section>
+<h2>Why the heaviest planning tier</h2>
+<p class="lede">Scored high on four of six risk dimensions: <b>novelty</b> (a contract deploying other contracts on Aztec has no prior art in this repo), <b>blast radius</b> (every bridged asset flows through the hub), <b>irreversibility</b> (the contracts are immutable — a mistake means a new generation), and <b>security</b>. Migration is medium (no production users; the old bridge simply retires) and external coupling is high (Uniswap, Permit2, the Aztec message system, a public token list). Three independent drafts (Claude, Codex, a second Claude), a contradiction check, two audit rounds and a final fresh reviewer went into this version.</p>
+</section>
+
+<section>
+<h2>Decisions you already made</h2>
+<div class="scroll"><table>
+<tr><th>Question</th><th>Your call</th><th>What it means</th></tr>
+<tr><td>Vault design</td><td>Immutable clones + one guardian pause</td><td>An Ethereum guardian key can pause deposits or withdrawals (both, without expiry). It can never move funds. If that key is stolen, exits can be frozen until you regain control; a broken hub can be frozen but not repaired — recovery is a new generation.</td></tr>
+<tr><td>Aztec side</td><td>One hub, deploys tokens itself, exit-only pause</td><td>The hub has no owner; one Aztec guardian can pause <i>exits</i> only (claims are never pausable). Pausing both sides together means nobody burns on Aztec while Ethereum payouts are frozen.</td></tr>
+<tr><td>First private claim of a brand-new token</td><td>Two Aztec transactions, once per token</td><td>The standard Aztec token reads its "who may mint" setting from a block that must already be mined, so the very first <i>private</i> claim of a never-seen token can't share a transaction with the token's creation. The app auto-continues from the first to the second (two wallet prompts). Public claims and every later claim are one transaction. Forking the standard token to avoid this was rejected.</td></tr>
+<tr><td>Token list</td><td>Fetched live from Uniswap's list</td><td>One pinned source, checked and capped before use, logos only from our own bundle. If the list is down, the app still works with the tokens we pre-created.</td></tr>
+<tr><td>Old bridge</td><td>Retire it</td><td>Mainnet tools show a "being upgraded" placeholder until a mainnet generation ships. Anyone holding old L2 USDC has no in-app exit (you accepted this; scripts can do it if ever needed).</td></tr>
+<tr><td>Odd tokens</td><td>Reject fee-on-transfer; rebasing unsupported</td><td>A token that skims a fee on transfer is refused cleanly. Tokens that change balances on their own are documented as unsupported and shown with a caution.</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>The eleven steps</h2>
+<p class="muted">Six groups of work; five of them become stacked pull requests. Each step "proves itself" with a fixed set of checks before the next one starts.</p>
+<div class="phase"><div class="k"><h3>P0 · Spike + keystones</h3><span class="tag">throwaway branch</span></div><p>Prove the two unknowns first: that an Aztec contract really can deploy a token from inside a test, and that Ethereum, Aztec and the app all compute the same addresses and message hashes for the same inputs.</p><p class="proves">Proves itself by: the same fixed test vectors passing in Solidity, Noir and TypeScript; the deploy-from-inside test running in the Aztec test runner (or its documented fallback).</p></div>
+<div class="phase"><div class="k"><h3>P1 · Vault + factory</h3><span class="tag">PR 1</span></div><p>Build the vault template and the factory that stamps vaults out and announces tokens to Aztec, with the guardian pause.</p><p class="proves">Proves itself by: unit tests, randomized (fuzz) tests, whole-system invariants, formal proofs, an attacker-style test suite, and a test against real Sepolia contracts.</p></div>
+<div class="phase"><div class="k"><h3>P2 · Router</h3><span class="tag">PR 1</span></div><p>The contract users actually sign against now derives the legal vault itself (closing the long-standing "any portal" hole) and learns the "all of it becomes gas" path.</p><p class="proves">Proves itself by: the same suite as P1 plus the real-Uniswap fork tests and a gas measurement.</p></div>
+<div class="phase"><div class="k"><h3>P3 · The hub</h3><span class="tag">PR 2</span></div><p>The single Aztec contract: announcements in, token creation, claims, withdrawals. CI starts compiling it so the committed build can never drift from the source.</p><p class="proves">Proves itself by: Aztec unit tests + the keystone vectors + the Ethereum suites still green.</p></div>
+<div class="phase"><div class="k"><h3>P4 · Hub test suite</h3><span class="tag">PR 2</span></div><p>At least 40 named tests: two tokens at once, wrong-token claims, replayed permissions, races where someone else registers first, the two-transaction private first claim, the exit pause.</p><p class="proves">Proves itself by: every negative test failing with an exact message; the "only one place may consume a deposit" tripwire re-pointed at the hub.</p></div>
+<div class="phase"><div class="k"><h3>P5 · Shared logic</h3><span class="tag">PR 3</span></div><p>The app's engine learns tokens as a list: config format, per-token history and backups, the live token list with caps and fallbacks, route discovery with an honest "no gas route" state, the gas-slice proposal.</p><p class="proves">Proves itself by: the engine's unit tests + type-checking across every script that reads the config.</p></div>
+<div class="phase"><div class="k"><h3>P6 · Deployer + local end-to-end</h3><span class="tag">PR 3</span></div><p>One deploy script that can be re-run safely, plus a local full run: first-time public, first-time private, known token + gas, gas only, and an exit — including a failed step followed by a successful retry.</p><p class="proves">Proves itself by: the local sandbox smoke passing all five flows, the config verifier accepting the result.</p></div>
+<div class="phase"><div class="k"><h3>P7 · Wizard foundation</h3><span class="tag">PR 4</span></div><p>The per-token wallet permission (one wallet prompt per new token), the token catalog, quotes, the gas proposal, and history keyed per token.</p><p class="proves">Proves itself by: ≥10 unit cases per building block.</p></div>
+<div class="phase"><div class="k"><h3>P8 · Wizard screens + retire the old UI</h3><span class="tag">PR 4</span></div><p>The three steps, review, receipt, mainnet placeholder; then the old Bridge/Fuel tabs and every legacy contract and script are deleted in one move.</p><p class="proves">Proves itself by: the full app audit, the browser smoke tests, the Aztec build compiled and compared to what's committed, and a grep proving no legacy references remain.</p></div>
+<div class="phase"><div class="k"><h3>P9 · Documentation</h3><span class="tag">PR 5</span></div><p>The deploy runbook rewritten for "generations", READMEs, the version-coupling notes, the env template.</p><p class="proves">Proves itself by: a reviewer following the runbook against the deploy script's own help text.</p></div>
+<div class="phase"><div class="k"><h3>P10 · Testnet</h3><span class="tag">live</span></div><p>You run the deployer (it needs your keys); the agent runs the canaries and promotes the config; you sign off in the real app with the wallet checklist: a pasted token's public first claim, the two-step private first claim, a gas-only send, an exit, and a paused-exit rejection.</p><p class="proves">Proves itself by: your sign-off, recorded.</p></div>
+</section>
+
+<section>
+<h2>Things worth knowing</h2>
+<div class="box warn"><h3>Private first claims take two transactions</h3><p>Only for the very first private depositor of a token nobody has bridged before: registration lands first, the claim follows a block later, and the app walks you through both. Public first claims are one transaction; pre-created tokens never hit this. It comes from the standard Aztec token's design, not from the bridge.</p></div>
+<div class="box warn"><h3>Exits burn before they finish</h3><p>Withdrawing burns on Aztec first, then finishes on Ethereum days later. If the guardians pause, they pause exits on Aztec too, so no new burn can start while payouts are frozen; an exit already burned simply waits until unpause. The review says so; your history never loses the record. A token that switches on a transfer tax after it was bridged charges that tax to the withdrawer — the vault's reserve is protected either way.</p></div>
+<div class="box ok"><h3>What the final reviewer changed</h3><p>A fresh Codex pass gave a <b>conditional approve</b>. Its conditions are folded in: registration can no longer leave a half-finished token behind (the announcement is checked before anything is created), every live contract's wiring is read back and pinned before promotion, resuming an old transfer re-checks the token's frozen name against the factory, and the Aztec build is compiled in CI and compared to what's committed.</p></div>
+<div class="box"><h3>Names are read once</h3><p>The factory reads a token's name and symbol the moment its vault is created and freezes them (31 plain characters). A token that renames itself later keeps its original Aztec name.</p></div>
+<div class="box"><h3>What was deliberately not built</h3><p>Per-token Aztec contracts, an owner-updatable settings contract, an expiring pause, a legacy exit path, fee-on-transfer support, a Uniswap v3 route, exotic multi-hop routes, a bundled-only token list, a forked token contract, a registration relayer, and anything inside the wallet — the tools app is a plain dApp and the wallet must serve it through its public interface like any other.</p></div>
+</section>
+
+<section>
+<h2>Your answers (2026-09-02)</h2>
+<ul>
+<li><b>A1 ✓</b> — real Sepolia WETH + fake USDC/USDT/cbBTC/WBTC; Uniswap pools seeded for fake USDC <b>and fake USDT</b> ("one more route"); cbBTC/WBTC show "no gas route" on testnet.</li>
+<li><b>A2 ✓</b> — target <b>20</b> transactions; per-transaction and first-time-registration costs measured on testnet (worst case + 20 %) and written into the config.</li>
+<li><b>A3 ✓</b> — token list cached 24 h; caps 2 MB / 10,000 tokens / 64-character names.</li>
+<li><b>A4 ✓</b> — mainnet placeholder: "Bridging is being upgraded — back with the next mainnet generation" + links, no wallet connect.</li>
+<li><b>A5 ✓</b> — four small deviations from the brief's wording accepted: (a) no factory "create-and-deposit" helper (the router does it); (b) the creation event carries fixed-width name/symbol words, not free strings; (c) a plain-address salt instead of a hash; (d) vault bodies are hash-identical to today's, not byte-identical (pause, size cap and exact-amount checks were inserted).</li>
+<li><b>A6 ✓</b> — one wallet permission prompt per new token, raised when you press <b>Sign &amp; send</b> (before the Ethereum signature, so declining cancels cleanly); for exits it comes at token selection because Aztec balances are needed on Step 1.</li>
+<li><b>A8 ✓</b> — exits live behind a direction switch above Step 1.</li>
+<li><b>A9 ✗</b> — nothing in the wallet or its packages is touched or tested; the tools app is a standard dApp. Your P10 sign-off carries a wallet checklist (public first claim, the two-step private claim, an exit with its permission prompt, a paused-exit rejection).</li>
+<li><b>Q1</b> — two Aztec transactions for the first private claim: keep the standard token, no relayer (see the decisions table).</li>
+<li><b>Q2</b> — Aztec exit-only pause: yes.</li>
+</ul>
+</section>
+
+<div class="cta">
+<h2>Your approval decision</h2>
+<ul>
+<li>Confirm scope: testnet live + documentation; mainnet later behind a security hardening pass (which becomes a <i>blocking</i> decision on hub recovery).</li>
+<li>Confirm the tier (mega-deep) and the delivery shape: five stacked PRs, Ethereum contracts → Aztec contracts → shared logic → wizard → docs.</li>
+<li>Confirm the validation gates as described per step (contract suites, Sepolia fork tests, Aztec tests locally, the sandbox end-to-end, your live sign-off).</li>
+<li>All questions are answered and folded in; nothing is open.</li>
+<li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+</ul>
+</div>
+
+<section>
+<h2>Implementation seeds (draft — finalized after approval)</h2>
+<p class="muted">Paste exactly one into a session running inside the plan's worktree (<span class="mono">agent-worktree resume any-erc20-bridge</span>). They don't compose. Step P10 needs you present for keys and sign-off.</p>
+<div class="box acc"><h3>Recommended: /goal</h3><pre>/goal All eleven phases (P0–P10, the phase headers in implementations-plan/any-erc20-bridge/plan.md) marked ✓ in the file, each ✓ backed by that phase's Validation gate reported passing in the transcript; for each phase `LESSONS_FILE=implementations-plan/any-erc20-bridge/lessons/phase-N.md` printed; `/code-review` complete per PR arc at the level in Delivery with fixes committed; the codex fix loop converged for every PR arc AND the final cross-arc pass, each evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; the five stacked PRs exist on GitHub, created only after all loops converged (`gh stack view` in the transcript); `bun run test:all` and `bun run lint` both exit 0 in the transcript; owner testnet sign-off recorded in lessons/phase-10.md.</pre></div>
+<div class="box"><h3>Alternative: /loop 15m</h3><pre>/loop 15m Drive implementations-plan/any-erc20-bridge forward. Never idle waiting for my input. Each firing: (1) reality check — read plan.md + lessons/ (authoritative), rebuild the task list from plan.md if empty, `git status`, `git log --oneline -5`; PR exists? `gh stack view`; else `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`. (2) CI wait is fine — `gh run watch <id>` up to 10 min; use the wait to prep the next phase. (3) No task in hand? pick the next pending step in plan.md; after each meaningful edit run `bun run lint` + the touched package's tests; commit → push (Arc 0 on `any-erc20-bridge/spike`; Arcs 1–5 via `gh stack push`, `gh stack sync` if dev or a lower arc moved). (4) Decision I'd normally bring to you? `/codex xhigh` with full context, converge, act, log in lessons/phase-N.md — hard limits stay hard (no merge to dev/main, no deploy, no secrets, no scope beyond plan.md; any deploy or secret-touching step = surface and hold). (5) Same step failed 5×? stop, reassess with codex. (6) Phase green = THAT phase's Validation gate in plan.md passes verbatim → paste the result, mark ✓, write lessons, print `LESSONS_FILE=implementations-plan/any-erc20-bridge/lessons/phase-N.md`. Arc boundary (per Delivery)? run the arc's quality loop FIRST (`/code-review <level> --fix` → separate commit → `/security-review` on Arcs 1–2 → codex loop with the arc map + the plan's no-over-engineering + comment-quality rules until clean) THEN `gh stack add <next-arc-branch>`. (7) All phases ✓? final fresh-codex cross-arc pass → `gh stack submit --auto` + `gh pr edit` bodies → `gh pr checks --watch` → wrap-up report (what shipped, every contentious decision with ELI5 context, open items) → surface and stop. Keep the native task list current; plan.md stays the source of truth.</pre></div>
+</section>
+
+<p class="muted">Full plan: <span class="mono">implementations-plan/any-erc20-bridge/plan.md</span> · audits: <span class="mono">audit-codex*.md</span>, <span class="mono">audit-fable.md</span> · <a href="plan.md">plan.md</a> · <a href="./lessons/">lessons/</a></p>
+</div>

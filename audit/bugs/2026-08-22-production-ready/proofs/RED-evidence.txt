@@ -1,0 +1,125 @@
+
+ RUN  v4.1.10 audit/bugs/2026-08-22-production-ready/proofs
+
+ ❯ c3-1-migration-ambient-burn.proof.test.ts (1 test | 1 failed) 10ms
+     × three ambient boots of a transiently-failing migration keep the block RETRYABLE 9ms
+ ❯ c6-2-tojsonsafe-dag.proof.test.ts (2 tests | 1 failed) 8ms
+     × the same object referenced twice is not '[Circular]' 6ms
+ ❯ p1-1-lock-double-release.proof.test.ts (1 test | 1 failed) 68ms
+     × force-release hands off cleanly and late leave is a no-op 67ms
+ ❯ f1-1-session-ttl-alarm-cancel.proof.test.ts (1 test | 1 failed) 15ms
+     × open(B) during a suspended close(A) keeps B's alarm 14ms
+ ❯ c5-3-numeric-id-alias-collapse.proof.test.ts (1 test | 1 failed) 5ms
+     × a huge-numeric junk key must not pin the cursor onto one collapsing id 4ms
+ ❯ c2-1-reaper-vs-fifo-waiter.proof.test.ts (1 test | 1 failed) 12ms
+     × a queued record older than the grace window with a live worker survives the tick 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  c2-1-reaper-vs-fifo-waiter.proof.test.ts > C2-1: reaper must not fail queued records that are merely waiting in a live FIFO > a queued record older than the grace window with a live worker survives the tick
+AssertionError: expected 'failed' to be 'queued' // Object.is equality
+
+Expected: "queued"
+Received: "failed"
+
+ ❯ c2-1-reaper-vs-fifo-waiter.proof.test.ts:80:33
+     78|   // (stuck_queued), so claim time will reject an operation the user m…
+     79|   // still explicitly approve.
+     80|   expect(after?.progress.stage).toBe("queued")
+       |                                 ^
+     81|  })
+     82| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  c3-1-migration-ambient-burn.proof.test.ts > C3-1: ambient SW wakes must not exhaust the migration retry budget > three ambient boots of a transiently-failing migration keep the block RETRYABLE
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ c3-1-migration-ambient-burn.proof.test.ts:93:20
+     91|   // makes an early wake already terminal — the budget was spent by tr…
+     92|   // the user never directed.
+     93|   expect(terminal).toBe(false)
+       |                    ^
+     94|  })
+     95| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  c5-3-numeric-id-alias-collapse.proof.test.ts > C5-3: id allocation must ignore non-canonical / out-of-range numeric key aliases > a huge-numeric junk key must not pin the cursor onto one collapsing id
+AssertionError: expected 1e+21 not to be 1e+21 // Object.is equality
+ ❯ c5-3-numeric-id-alias-collapse.proof.test.ts:38:22
+     36|   // with a hostile suffix present. RED today: both equal 1e21 (+1 rou…
+     37|   // back), so rows written with them share one storage key.
+     38|   expect(second).not.toBe(first)
+       |                      ^
+     39|  })
+     40| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  c6-2-tojsonsafe-dag.proof.test.ts > C6-2: toJsonSafe must serialize repeated non-cyclic references in full > the same object referenced twice is not '[Circular]'
+AssertionError: expected '[Circular]' to deeply equal '0x00000000000000000000000000000000000…'
+
+Expected: "0x0000000000000000000000000000000000000000000000000000000000000000"
+Received: "[Circular]"
+
+ ❯ c6-2-tojsonsafe-dag.proof.test.ts:56:19
+     54|   const out = toJsonSafe({ maxFee: zero, fee: zero }) as { maxFee: unk…
+     55|
+     56|   expect(out.fee).toEqual(out.maxFee)
+       |                   ^
+     57|   expect(out.fee).not.toBe("[Circular]")
+     58|  })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  f1-1-session-ttl-alarm-cancel.proof.test.ts > F1-1: reactive TTL close must not cancel a newer session's lock alarm > open(B) during a suspended close(A) keeps B's alarm
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ f1-1-session-ttl-alarm-cancel.proof.test.ts:109:77
+    107|   // clearLockAlarm() ran unconditionally after B's scheduleLockAlarm —
+    108|   // auto-lock for B degrades to lazy.
+    109|   expect(clearedAlarms.filter((n) => n === "nulo:core:session:ttl").le…
+       |                                                                             ^
+    110|  })
+    111| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  p1-1-lock-double-release.proof.test.ts > P1-1: a wedged holder's late leave() must not release the new owner's lock > force-release hands off cleanly and late leave is a no-op
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ p1-1-lock-double-release.proof.test.ts:62:21
+     60|   await new Promise((r) => setTimeout(r, 5))
+     61|
+     62|   expect(w3Entered).toBe(false)
+       |                     ^
+     63|
+     64|   await Promise.all([w2, w3])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  6 failed (6)
+      Tests  6 failed | 1 passed (7)
+   Start at  21:14:54
+   Duration  2.43s (transform 1.68s, setup 0ms, import 3.50s, tests 118ms, environment 1ms)
+

@@ -38,6 +38,10 @@ import type { Profile } from "./spec"
 export type PasskeyRecovery = {
 	credentialId: Base64CredentialId
 	secret: MasterSecretBytes
+	/** The AES-GCM wrap key for the imported-keys DEK slot, derived while the credential is
+	 *  transiently alive (same HKDF extract as the master, distinct expand — see
+	 *  `PasskeyCredential.deriveDekWrapKey`). Non-extractable; nothing to zeroize. */
+	dekWrapKey: CryptoKey
 	/** Optional because WebAuthn `get` may omit userHandle. */
 	userHandle?: HexUserHandle
 }
@@ -54,12 +58,7 @@ export class PasskeyRecoveryCoordinator {
 	 *  and will re-verify it under the lock after this returns. */
 	public async createForNewProfile(profileId: string, name: string): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.createKey(profileId, name)
-		const secret = await credential.deriveMasterSecret()
-		return {
-			credentialId: credential.id,
-			secret,
-			userHandle: credential.userHandle,
-		}
+		return this.toRecovery(credential)
 	}
 
 	/** Unlock an existing passkey profile by credentialId, or recover
@@ -68,12 +67,7 @@ export class PasskeyRecoveryCoordinator {
 	 *  from what the caller had, secret is the PRF-derived master). */
 	public async recoverByCredentialId(credentialId: string): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.getKey(credentialId)
-		const secret = await credential.deriveMasterSecret()
-		return {
-			credentialId: credential.id,
-			secret,
-			userHandle: credential.userHandle,
-		}
+		return this.toRecovery(credential)
 	}
 
 	/** Import an existing passkey with no credentialId pre-known (used by
@@ -81,12 +75,7 @@ export class PasskeyRecoveryCoordinator {
 	 *  returns whichever credential the user selects. */
 	public async recoverUnknown(): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.getKey()
-		const secret = await credential.deriveMasterSecret()
-		return {
-			credentialId: credential.id,
-			secret,
-			userHandle: credential.userHandle,
-		}
+		return this.toRecovery(credential)
 	}
 
 	/** PATH A — caller (popup) has already collected `PasskeyCredentialData`
@@ -101,12 +90,13 @@ export class PasskeyRecoveryCoordinator {
 	 *      returned (may be undefined). */
 	public async recoverFromCredentialData(data: PasskeyCredentialData): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.materializeCredential(data)
+		return this.toRecovery(credential)
+	}
+
+	private async toRecovery(credential: Awaited<ReturnType<PasskeyService["getKey"]>>): Promise<PasskeyRecovery> {
 		const secret = await credential.deriveMasterSecret()
-		return {
-			credentialId: credential.id,
-			secret,
-			userHandle: credential.userHandle,
-		}
+		const dekWrapKey = await credential.deriveDekWrapKey()
+		return { credentialId: credential.id, secret, dekWrapKey, userHandle: credential.userHandle }
 	}
 
 	/** Verifies the user still holds the key bound to this passkey

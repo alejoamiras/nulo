@@ -17,6 +17,8 @@
  * `window.localStorage`.
  */
 
+import { validateAnyBackupRecord } from "./backup"
+
 export interface KV {
 	getItem(key: string): string | null
 	setItem(key: string, value: string): void
@@ -24,6 +26,9 @@ export interface KV {
 }
 
 export const JOURNAL_KEY = "nulo-bridge:journal:v1"
+
+/** Where entries that failed the load-time validation are parked. Never read as records. */
+export const QUARANTINE_KEY = "nulo-bridge:journal:quarantine"
 
 /** Parse cap - storage-flooding guard. Eviction is prioritized: unfinished records survive
  *  first, then newest completed; junk can never evict a live record. */
@@ -38,9 +43,9 @@ interface JournalBase {
 	 *  (kept explicit for back-compat); withdraws are always 1. Private-fuel fields are additive WITHIN
 	 *  schema 2 — no bump: an old client reads a private record as a public schema-2 record minus the
 	 *  optional private fields. */
-	schema: 1 | 2
-	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
-	 *  provisional `wd-pending-<rand>` between send and receipt. */
+	schema: 1 | 2 | 3
+	/** Deposits: secretHashHex, or a provisional `dep-pending-<rand>` until the send derives it.
+	 *  Withdraws: exitTxHash, or a provisional `wd-pending-<rand>` between send and receipt. */
 	id: string
 	direction: "deposit" | "withdraw"
 	isPrivate: boolean
@@ -54,6 +59,10 @@ interface JournalBase {
 	chainId: number
 	portal: string
 	bridge: string
+	/** Set when a re-read of the chain contradicted the record's own token facts. Terminal: a
+	 *  blocked record never runs again, so a rewritten block can never be claimed or exited
+	 *  against; only discarding it clears the state. */
+	blocked?: string
 }
 
 /** The fuel side of a fueled deposit (plan ledger L11/L14). All amounts base-unit decimal strings. */
@@ -95,13 +104,15 @@ export interface DepositFuelBlock {
 	/** PRIVATE fuel only — the PrivateFPC L2 address the FJ was deposited to (`fuelRecipient`).
 	 *  Persisted for post-hoc address-drift detection and to rebuild the claim. */
 	fpc?: string
-	/** PRIVATE fuel only — set when the last claim send threw the `mint_and_pay_fee` insufficiency assert
-	 *  (the tx is INVALID pre-inclusion, so the FJ stays unconsumed). The ONE signal that authorises a
-	 *  retry of the private claim without a tx hash (the narrow allow-list); cleared once a hash lands. */
+	/** PRIVATE fuel only — set when the last send was refused before any transaction existed: the
+	 *  `mint_and_pay_fee` insufficiency assert, or a Fee Juice message the wallet could not consume yet
+	 *  (both INVALID pre-inclusion, so the FJ stays unconsumed). The ONE signal that authorises a retry
+	 *  of the private claim without a tx hash (the narrow allow-list); cleared once a hash lands. */
 	setupInsufficiency?: boolean
 }
 
 export interface DepositJournalRecord extends JournalBase {
+	schema: 1 | 2
 	direction: "deposit"
 	/** Which asset this deposit bridges. Absent ⇒ "bridge-token" (ADDITIVE — pre-Fuel records have no
 	 *  field and the loader never gates on it). "fee-juice" = a direct Fuel bridge (L1 fee asset → L2 Fee
@@ -128,6 +139,10 @@ export interface DepositJournalRecord extends JournalBase {
 	 *  event. The 5.0 readiness gate polls `getL1ToL2MessageCheckpoint` on this before simulating the claim. */
 	messageHash?: string
 	claimTxHash?: string
+	/** The token message was consumed by another submitter (a relayer, another tab): proven by the
+	 *  message's own nullifier, so the tokens arrived without a claim of ours. Recorded as its own fact
+	 *  — there is no `claimTxHash` to show. */
+	claimedByOther?: boolean
 	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
 	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */
 	depositL2Block?: number
@@ -136,20 +151,88 @@ export interface DepositJournalRecord extends JournalBase {
 }
 
 export interface WithdrawJournalRecord extends JournalBase {
+	schema: 1 | 2
 	direction: "withdraw"
 	/** Bound in the L2→L1 message - tamper makes the consume revert. */
 	recipientL1: string
 	exitTxHash?: string
 	exitBlock?: number
 	consumeTxHash?: string
+	/** The Outbox says this exit's message is already consumed while THIS app never sent a finish
+	 *  transaction: the message names its L1 recipient, so a relayer that got there first released
+	 *  the funds to the same address. Terminal — there is nothing left to consume, and retrying
+	 *  forever is the only other outcome. */
+	consumedByOther?: boolean
 }
 
-export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord
+/**
+ * The token a schema-3 record moves, copied from the factory's frozen registration record once the
+ * L1 receipt exists (the pre-receipt copy is the app's prediction; the receipt rewrite is what the
+ * L2 side is claimed against). `portal` here and `JournalBase.portal` are the same clone.
+ */
+export interface JournalTokenBlock {
+	erc20: string
+	portal: string
+	l2Token: string
+	nameWord: string
+	symbolWord: string
+	decimals: number
+	displaySymbol: string
+	/** From the factory's `PortalCreated`/`registrationOf` — the `register` leaf a first claim consumes. */
+	registerKey?: string
+	registerIndex?: string
+}
+
+/** What a send intends: the token leg, the token leg plus a gas slice, or gas only (no token block). */
+export type SendIntent = { intent: "token" | "token+gas"; token: JournalTokenBlock } | { intent: "gas"; token?: never }
+
+/**
+ * Schema 3: one record per send through the hub. `bridge` is the hub, `portal` the token's clone
+ * (or the FeeJuicePortal for a gas-only send). Deposit facts are the schema-2 ones; a first-time
+ * private deposit additionally records its own L2 `register_token` tx.
+ */
+export type SendDepositRecord = Omit<DepositJournalRecord, "schema" | "assetKind"> & {
+	schema: 3
+	/** Set when the hub had not registered the token at send time: this send's claim registers it
+	 *  (in its own tx for a private deposit, inside the claim for a public one). */
+	registers?: true
+	/** The L2 registration tx of a first-time private deposit (the claim is the next tx). */
+	registerTxHash?: string
+} & SendIntent
+
+export type SendWithdrawRecord = Omit<WithdrawJournalRecord, "schema"> & {
+	schema: 3
+	intent: "token"
+	token: JournalTokenBlock
+}
+
+export type SendJournalRecord = SendDepositRecord | SendWithdrawRecord
+
+export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord | SendJournalRecord
+
+export function isSendRecord(rec: BridgeJournalRecord): rec is SendJournalRecord {
+	return rec.schema === 3
+}
+
+/** Schema-3 display stages: a first-time private deposit passes through `registering` before the claim. */
+export type SendDepositStage = DepositStage | "registering"
+
+/** The facts a stage is derived from — every deposit shape carries them, so one rail serves them all. */
+export type DepositStageFacts = Pick<SendDepositRecord, "completedAt" | "claimTxHash" | "registerTxHash" | "leafIndex">
+
+export function deriveSendDepositStage(rec: DepositStageFacts, runtime: DepositStageRuntime = {}): SendDepositStage {
+	if (rec.completedAt) return "done"
+	if (rec.claimTxHash) return "claiming"
+	if (rec.registerTxHash) return "registering"
+	if (rec.leafIndex) return runtime.claimable ? "claimable" : "syncing"
+	return "depositing"
+}
 
 /** The deposit's asset variant, defaulting to the legacy "bridge-token" for records written before Fuel
  *  existed (the field is additive; absent ⇒ token bridge). Withdraws are always token-bridge. The ONE
  *  place the default is decided, so every consumer (deploymentMatches, backup, receipt) agrees. */
 export function assetKindOf(rec: BridgeJournalRecord): "bridge-token" | "fee-juice" {
+	if (isSendRecord(rec)) return rec.direction === "deposit" && rec.intent === "gas" ? "fee-juice" : "bridge-token"
 	return rec.direction === "deposit" && rec.assetKind === "fee-juice" ? "fee-juice" : "bridge-token"
 }
 
@@ -157,30 +240,100 @@ export function assetKindOf(rec: BridgeJournalRecord): "bridge-token" | "fee-jui
 export type DepositStage = "depositing" | "syncing" | "claimable" | "claiming" | "done"
 export type WithdrawStage = "exiting" | "proving" | "consumable" | "consuming" | "done"
 
+const WITHDRAW_PENDING = "wd-pending-"
+const DEPOSIT_PENDING = "dep-pending-"
+const pendingSuffix = () => Math.random().toString(36).slice(2, 10)
+
 export function makeProvisionalWithdrawId(): string {
-	return `wd-pending-${Math.random().toString(36).slice(2, 10)}`
+	return `${WITHDRAW_PENDING}${pendingSuffix()}`
+}
+
+/** The id a deposit is journaled under before its own claim hash exists — everything the L1 leg
+ *  narrates (the Permit2 approval above all) needs a record to narrate into. */
+export function makeProvisionalDepositId(): string {
+	return `${DEPOSIT_PENDING}${pendingSuffix()}`
 }
 
 export function isProvisionalWithdrawId(id: string): boolean {
-	return id.startsWith("wd-pending-")
+	return id.startsWith(WITHDRAW_PENDING)
 }
 
-function parseRecords(raw: string | null): BridgeJournalRecord[] {
-	if (!raw) return []
+/** Any id a flow minted before its own transaction named the record: there is nothing in such a
+ *  record a backup or a resume could act on. */
+export function isProvisionalRecordId(id: string): boolean {
+	return id.startsWith(WITHDRAW_PENDING) || id.startsWith(DEPOSIT_PENDING)
+}
+
+/** The id stood in while a half-started row is validated: the file validator refuses a provisional
+ *  withdraw id outright (a recovery file must never carry one), while our own storage legitimately
+ *  holds such rows between a send and the receipt that names them. */
+const PROBE_ID = `0x${"0".repeat(64)}`
+
+/**
+ * Deep-validate ONE stored entry with the strictness an imported recovery file gets. Storage is not
+ * a trusted channel: a token block from here reaches the wallet's grant + contract registration, so
+ * its words must be as strictly shaped as a file's, and a half-shaped schema-3 row would otherwise
+ * crash the boot that reads it. Null = the entry does not run and does not render.
+ */
+function validateStoredRecord(entry: unknown): BridgeJournalRecord | null {
+	const id = (entry as { id?: unknown } | null)?.id
+	if (typeof id !== "string" || id.length === 0) return null
 	try {
-		const parsed = JSON.parse(raw) as { schema?: number; records?: unknown }
-		if (parsed?.schema !== 1 || !Array.isArray(parsed.records)) return []
-		const valid = parsed.records.filter(
-			(r): r is BridgeJournalRecord =>
-				!!r &&
-				typeof r === "object" &&
-				typeof (r as BridgeJournalRecord).id === "string" &&
-				((r as BridgeJournalRecord).direction === "deposit" || (r as BridgeJournalRecord).direction === "withdraw"),
-		)
-		return capRecords(valid)
+		const rec = validateAnyBackupRecord(isProvisionalRecordId(id) ? { ...(entry as object), id: PROBE_ID } : entry)
+		return { ...rec, id } as BridgeJournalRecord
+	} catch {
+		return null
+	}
+}
+
+/** The stored entries split into what may run and what may not. */
+interface JournalPartition {
+	records: BridgeJournalRecord[]
+	invalid: unknown[]
+}
+
+function partitionStored(raw: string | null): JournalPartition {
+	if (!raw) return { records: [], invalid: [] }
+	let parsed: { schema?: number; records?: unknown }
+	try {
+		parsed = JSON.parse(raw) as { schema?: number; records?: unknown }
+	} catch {
+		return { records: [], invalid: [] }
+	}
+	if (parsed?.schema !== 1 || !Array.isArray(parsed.records)) return { records: [], invalid: [] }
+	const records: BridgeJournalRecord[] = []
+	const invalid: unknown[] = []
+	for (const entry of parsed.records) {
+		const rec = validateStoredRecord(entry)
+		if (rec) records.push(rec)
+		else invalid.push(entry)
+	}
+	return { records: capRecords(records), invalid }
+}
+
+/** The quarantined entries exactly as stored — they failed validation, so they are never records. */
+export function loadQuarantine(kv: KV): unknown[] {
+	try {
+		const parsed = JSON.parse(kv.getItem(QUARANTINE_KEY) ?? "null") as { schema?: number; records?: unknown }
+		return parsed?.schema === 1 && Array.isArray(parsed.records) ? parsed.records : []
 	} catch {
 		return []
 	}
+}
+
+/**
+ * Park every entry that failed validation under the quarantine key and rewrite the journal without
+ * them. Run once at startup, BEFORE anything writes: every write round-trips through `loadJournal`,
+ * so a sweep that never ran would let the first patch drop an unreadable row for good. Returns how
+ * many entries moved; no write at all when everything validated.
+ */
+export function quarantineInvalid(kv: KV): number {
+	const { records, invalid } = partitionStored(kv.getItem(JOURNAL_KEY))
+	if (invalid.length === 0) return 0
+	const held = loadQuarantine(kv)
+	kv.setItem(QUARANTINE_KEY, JSON.stringify({ schema: 1, records: [...held, ...invalid].slice(-MAX_RECORDS) }))
+	write(kv, records)
+	return invalid.length
 }
 
 /** Prioritized retention under MAX_RECORDS: unfinished records are NEVER evicted - an unfinished
@@ -196,7 +349,7 @@ export function capRecords(records: BridgeJournalRecord[]): BridgeJournalRecord[
 }
 
 export function loadJournal(kv: KV): BridgeJournalRecord[] {
-	return parseRecords(kv.getItem(JOURNAL_KEY))
+	return partitionStored(kv.getItem(JOURNAL_KEY)).records
 }
 
 function write(kv: KV, records: BridgeJournalRecord[]): void {
@@ -215,10 +368,25 @@ export function upsertRecord(kv: KV, rec: BridgeJournalRecord): void {
 
 /** Shallow-merge a patch into one record (re-read first). No-op if the id is gone. */
 export function patchRecord(kv: KV, id: string, patch: Partial<BridgeJournalRecord>): BridgeJournalRecord | undefined {
+	return patchRecordWhen(kv, id, () => true, patch)
+}
+
+/** `patchRecord` guarded by a predicate over the freshly loaded record: a no-op (undefined) when
+ *  the id is gone or the guard rejects. Load, guard and write are one synchronous span — the
+ *  closest thing to a compare-and-set that localStorage offers, not an atomic one. A patch given
+ *  as a function is computed from that same loaded record, so a nested block can be merged onto
+ *  the copy the guard just accepted rather than one captured earlier. */
+export function patchRecordWhen(
+	kv: KV,
+	id: string,
+	when: (current: BridgeJournalRecord) => boolean,
+	patch: Partial<BridgeJournalRecord> | ((current: BridgeJournalRecord) => Partial<BridgeJournalRecord>),
+): BridgeJournalRecord | undefined {
 	const records = loadJournal(kv)
 	const i = records.findIndex((r) => r.id === id)
-	if (i < 0) return undefined
-	const next = { ...records[i], ...patch, id: records[i].id, updatedAt: Date.now() } as BridgeJournalRecord
+	if (i < 0 || !when(records[i])) return undefined
+	const fields = typeof patch === "function" ? patch(records[i]) : patch
+	const next = { ...records[i], ...fields, id: records[i].id, updatedAt: Date.now() } as BridgeJournalRecord
 	records[i] = next
 	write(kv, records)
 	return next
@@ -229,6 +397,22 @@ export function rekeyRecord(kv: KV, oldId: string, next: BridgeJournalRecord): v
 	const records = loadJournal(kv).filter((r) => r.id !== oldId && r.id !== next.id)
 	records.push({ ...next, updatedAt: Date.now() })
 	write(kv, records)
+}
+
+/** `rekeyRecord` guarded the way `patchRecordWhen` is: the source must still exist and pass `when`
+ *  (which also sees the whole journal), and no record may already hold the new id — unlike the
+ *  unguarded form, this never overwrites a destination. One synchronous load → guard → write. */
+export function rekeyRecordWhen(
+	kv: KV,
+	oldId: string,
+	when: (current: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean,
+	next: BridgeJournalRecord,
+): boolean {
+	const records = loadJournal(kv)
+	const current = records.find((r) => r.id === oldId)
+	if (!current || records.some((r) => r.id === next.id) || !when(current, records)) return false
+	write(kv, [...records.filter((r) => r.id !== oldId), { ...next, updatedAt: Date.now() }])
+	return true
 }
 
 export function removeRecord(kv: KV, id: string): void {

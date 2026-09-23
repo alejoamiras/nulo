@@ -1,3 +1,4 @@
+import { memoizeAsync } from "./async-memo"
 import { _resetArtifactCatalogForTests, getCatalogEntry } from "./artifact-catalog"
 
 /** Field types we know how to decode from a packed note. */
@@ -58,40 +59,32 @@ const nftNote = (contractName: string): NoteSchema => ({
  * aztec-packages release. Update this file when storage layouts shift in a
  * future bump.
  */
-let cachedSchemas: Promise<NoteSchemaMap> | null = null
+const schemasMemo = memoizeAsync<NoteSchemaMap>(async () => {
+	const map: NoteSchemaMap = new Map()
+
+	const token = await getCatalogEntry("token")
+	map.set(token.classId, new Map([["0x3", uintNote("Aztec Token")]]))
+
+	const nft = await getCatalogEntry("nft")
+	map.set(nft.classId, new Map([["0x7", nftNote("Aztec NFT")]]))
+
+	const wonderlandToken = await getCatalogEntry("wonderlandToken")
+	map.set(wonderlandToken.classId, new Map([["0x7", uintNote("Wonderland Token")]]))
+
+	const privateFpc = await getCatalogEntry("privateFpc")
+	map.set(privateFpc.classId, new Map([["0x1", uintNote("Private FPC")]]))
+
+	return map
+})
 
 export async function loadProductionNoteSchemas(): Promise<NoteSchemaMap> {
-	if (cachedSchemas) return cachedSchemas
-	cachedSchemas = (async () => {
-		const map: NoteSchemaMap = new Map()
-
-		const token = await getCatalogEntry("token")
-		map.set(token.classId, new Map([["0x3", uintNote("Aztec Token")]]))
-
-		const nft = await getCatalogEntry("nft")
-		map.set(nft.classId, new Map([["0x7", nftNote("Aztec NFT")]]))
-
-		const wonderlandToken = await getCatalogEntry("wonderlandToken")
-		map.set(wonderlandToken.classId, new Map([["0x7", uintNote("Wonderland Token")]]))
-
-		const privateFpc = await getCatalogEntry("privateFpc")
-		map.set(privateFpc.classId, new Map([["0x1", uintNote("Private FPC")]]))
-
-		return map
-	})()
-	try {
-		return await cachedSchemas
-	} catch (err) {
-		// Allow retry after transient failure (matches ArtifactRegistry pattern).
-		cachedSchemas = null
-		throw err
-	}
+	return schemasMemo.get()
 }
 
 /** Reset the module-level cache. Test-only. Also resets the shared artifact
  *  catalog so class ids re-resolve — this stays the single authoritative reset
  *  note-schema callers/tests already use. */
 export function _resetNoteSchemasForTests(): void {
-	cachedSchemas = null
+	schemasMemo.reset()
 	_resetArtifactCatalogForTests()
 }

@@ -21,6 +21,7 @@ export type BundleId =
 	| "accounts"
 	| "accounts-noAuthWit"
 	| "transaction"
+	| "transaction-contracts"
 	| "transaction-scoped"
 	| "data"
 	| "data-scopedEvents"
@@ -75,6 +76,15 @@ function buildCapabilities(id: BundleId): unknown[] {
 			return [
 				{ type: "accounts", canGet: true, canCreateAuthWit: true },
 				{ type: "transaction", scope: "*" },
+				{ type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } },
+			]
+		case "transaction-contracts":
+			// The delegated-authwit e2e's shape: a dApp that registers its own
+			// contracts AND sends transactions through them.
+			return [
+				{ type: "accounts", canGet: true, canCreateAuthWit: true },
+				{ type: "transaction", scope: "*" },
+				{ type: "contracts", contracts: "*", canRegister: true, canGetMetadata: true },
 				{ type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } },
 			]
 		case "transaction-scoped":

@@ -58,6 +58,9 @@ export type RegisterTokenOperation = {
 
 export type FeeOptions = {
 	readonly embeddedFeePayment?: "fjwc" | "fpc"
+	/** The dApp named the account itself as payer and carries no fee call: pay from held Fee Juice
+	 *  with the wallet's own method. Not embedded — the payload carries no payment. */
+	readonly requestedPayment?: "fj"
 	readonly gasLimits?: GasLimits
 	readonly teardownGasLimits?: GasLimits
 	readonly maxFeesPerGas?: { feePerDaGas: number | string; feePerL2Gas: number | string }

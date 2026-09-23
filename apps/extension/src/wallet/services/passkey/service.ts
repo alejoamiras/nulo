@@ -1,9 +1,9 @@
 import type { ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
-import { PASSKEY_SERVICE_NAME, type Methods, type PasskeyCredentialData, type PasskeyRequest } from "./spec"
+import { PASSKEY_SERVICE_NAME, PASSKEY_TIMEOUT, type Methods, type PasskeyCredentialData, type PasskeyRequest } from "./spec"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 
 export * from "./spec"
@@ -11,9 +11,15 @@ export * from "./spec"
 /**
  * Hard timeout for a passkey popup. Bounds the worst case when neither the
  * user interacts nor `chrome.windows.onRemoved` fires (eg. extension reload,
- * popup crash, MV3 suspension races). 5 minutes is ample for WebAuthn UX.
+ * popup crash, MV3 suspension races). Derived from the ceremony budget, NOT
+ * a free-standing figure: authenticators that only return PRF on `get` run a
+ * SECOND full leg (`passkey-ceremony.ts` runCreate → runGet fallback), so a
+ * legitimate ceremony can need 2 × PASSKEY_TIMEOUT; the extra minute covers
+ * window spawn + user hand-off. A window ceiling below the two-leg worst
+ * case force-closes the popup under the user's finger and orphans the
+ * just-minted resident credential.
  */
-const PASSKEY_TIMEOUT_MS = 5 * 60 * 1000
+const PASSKEY_TIMEOUT_MS = 2 * PASSKEY_TIMEOUT + 60_000
 
 /**
  * Two ceremony hosts share this service:
@@ -108,10 +114,7 @@ export class PasskeyService extends Service<Methods> implements ServiceSpec<Meth
 	}
 
 	private async openWindowAndWait(request: PasskeyRequest): Promise<PasskeyCredential> {
-		let id: string
-		do {
-			id = getRandomHex(8)
-		} while (this.pending.has(id))
+		const id = randomIdNotIn((candidate) => this.pending.has(candidate))
 
 		const handle = this.windowManager.openAndAwait<PasskeyCredential>({
 			url: chrome.runtime.getURL(`src/popup/index.html#/windows/passkey?requestId=${id}`),

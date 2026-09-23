@@ -199,6 +199,15 @@ against a fake services-contract; no real chain or runtime needed.
 - **Scope enforcement is per-message.** A granted session is not a free pass —
   `scope-enforcement.ts` re-checks each method's targets against the session's
   allow-list. Don't bypass it on the "trusted dispatcher" assumption.
+- **An accounts grant is widened, never re-granted.** A repeat `accounts` request from a session
+  that already holds one is compared against the profile's visible accounts on the session's
+  chain (CAIP-10 projected, `getSessionAccountAddresses`): an unheld account opens the popup with
+  the held rows locked (`grantedAccounts`); with equal flags (`accountsMembershipOnly`) the
+  decision only adds membership and the stored grant record is never replaced; a decline keeps
+  the grant, its flags and aliases; and the decision carries `requiresGrant: ["accounts"]`, which
+  `applyCapabilityDecision` enforces inside its lock so a grant revoked while the popup was open
+  refuses the addition (`CapabilityNotGrantedError`) instead of landing accounts on a grant-less
+  session. A dApp never learns which accounts it lacks — only that a prompt opened.
 - **Capabilities encode UX, not authority.** The `capability-map.ts` columns
   determine whether a popup opens; the underlying authority is the session
   itself. Adding a capability without updating the popup model leaves a silent
@@ -253,7 +262,7 @@ by all three apps:
 | Side | Import | In |
 |---|---|---|
 | Extension | `import "@nulo/wallet-sdk-schema-patch/register"` | `wallet-sdk/background.ts` (first import) |
-| Faucet | `import "@nulo/wallet-sdk-schema-patch/register"` | `composables/createAztecWalletSession.ts` (first import) |
+| Tools | `import "@nulo/wallet-sdk-schema-patch/register"` | `composables/createAztecWalletSession.ts` (first import) |
 | Playground | `import "@nulo/wallet-sdk-schema-patch/register"` | `lib/wallet.ts` (first import) |
 
 `./register` is **side-effect only** — importing it first mutates `WalletSchema`
@@ -269,7 +278,7 @@ new Nulo-custom RPC, edit the ONE source and add a paired reachability assertion
 Keeping the patch in a **dedicated private package** — not an export of
 `wallet-bridge` itself — is deliberate: `wallet-bridge` depends on `wallet-core`
 + `extension-messaging` and must stay extension-internal, so exposing it to the
-faucet/playground dApp surfaces would leak its dispatcher/protocol internals to
+tools/playground dApp surfaces would leak its dispatcher/protocol internals to
 third-party dApps.
 
 ### Dropped surface

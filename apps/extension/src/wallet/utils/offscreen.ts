@@ -1,11 +1,9 @@
+import { isSenderAtUrl, isTrustedInternalSender } from "@nulo/extension-messaging/offscreen"
+
 export const OFFSCREEN_READY_MESSAGE = "OFFSCREEN_READY"
 export const OFFSCREEN_PING = "OFFSCREEN_PING"
 export const OFFSCREEN_PONG = "OFFSCREEN_PONG"
 export const OFFSCREEN_KEEPALIVE = "OFFSCREEN_KEEPALIVE"
-/** F-10: broadcast (Firefox only) so a stale offscreen from a prior SW
- *  instance recognizes it's been superseded and self-closes. Payload:
- *  `{ type: OFFSCREEN_ADOPT_INSTANCE, token }`. */
-export const OFFSCREEN_ADOPT_INSTANCE = "OFFSCREEN_ADOPT_INSTANCE"
 
 let offscreenTimeout: NodeJS.Timeout
 let offscreenPromise: Promise<void> | null = null
@@ -20,68 +18,77 @@ const path = "src/offscreen/index.html"
  *  imported under vitest's node env. Computing on-demand keeps the import
  *  graph clean for tests that pull NetworkService → PxeServiceClient. */
 let _offscreenUrl: string | undefined
-function offscreenUrl(): string {
+export function offscreenUrl(): string {
 	if (_offscreenUrl === undefined) _offscreenUrl = chrome.runtime.getURL(path)
 	return _offscreenUrl
 }
 
+/** True iff `sender` is the offscreen document itself — the only legitimate source of a PXE
+ *  response, READY or PONG. Exact document URL; the Firefox frame's `?instance=` query is ignored
+ *  here (`isLiveOffscreenSender` reads it). A same-extension page that opens or embeds the
+ *  offscreen URL still passes: that is the transport's documented boundary, not a hole these
+ *  checks close. */
+export function isOffscreenDocumentSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+	return isSenderAtUrl(sender, offscreenUrl())
+}
+
 /**
- * True on Chromium-based browsers that ship the MV3 `chrome.offscreen` API.
- * Firefox MV3 does NOT, so the Firefox build path uses a hidden minimized
- * window hosting the same offscreen.html instead. Pattern adapted from
- * Grego's extension-wallet (`extension-wallet/src/background/offscreen-
- * lifecycle.ts`).
- *
- * Behind a feature flag in spirit: Firefox parity is gated on manual
- * verification. The same code ships in both Chrome and Firefox bundles;
- * the runtime check decides which path executes. Chrome carries ~30
- * lines of dead code from the Firefox branch.
+ * True on Chromium-based browsers that ship the MV3 `chrome.offscreen` API. Firefox MV3 does not,
+ * so there the same offscreen.html is hosted as an <iframe> of the background page. The same code
+ * ships in both bundles; the runtime check decides which branch executes.
  */
 function hasOffscreenApi(): boolean {
 	return typeof chrome !== "undefined" && typeof chrome.offscreen !== "undefined"
 }
 
 /**
- * Firefox-only: ID of the hidden minimized window hosting offscreen.html.
- * Module-level so close/create can coordinate. Survives only the SW
- * lifetime — see the SW-restart-leak caveat in `ensureOffscreenRunning`.
+ * Firefox-only: the frame hosting offscreen.html, and the generation stamped into its URL. A frame
+ * inherits the background page's `visible`, so its timers run unthrottled — in a minimized window
+ * Firefox clamps every timer to one per second, and the PXE's node client waits on a zero-delay
+ * timer per RPC batch. The frame dies with the background page; the next request re-creates it.
  */
-let firefoxOffscreenWindowId: number | null = null
+let firefoxOffscreenFrame: { element: HTMLIFrameElement; generation: string } | null = null
 
-/**
- * F-10: per-SW-lifetime token stamped into the Firefox offscreen window's URL,
- * so a stale window (leaked across a SW restart) can recognize it's been
- * superseded and self-close. Lazy so `crypto.randomUUID` isn't invoked at
- * import time under vitest's node env.
- */
-let _firefoxInstanceToken: string | undefined
-function firefoxInstanceToken(): string {
-	if (_firefoxInstanceToken === undefined) _firefoxInstanceToken = crypto.randomUUID()
-	return _firefoxInstanceToken
+/** The `?instance=` generation a sender's URL carries, or null when the URL is absent or malformed. */
+function senderGeneration(sender: chrome.runtime.MessageSender): string | null {
+	if (sender.url === undefined) return null
+	try {
+		return new URL(sender.url).searchParams.get("instance")
+	} catch {
+		return null
+	}
 }
 
 /**
- * F-10: decide whether an incoming `OFFSCREEN_ADOPT_INSTANCE` broadcast means
- * THIS offscreen window has been superseded and should self-close. True only
- * when: the offscreen has a token (`myInstanceToken !== null`, i.e. Firefox),
- * the sender is the same-extension SW (matching `runtime.id`, no `tab`), the
- * message is an ADOPT, and it names a DIFFERENT instance token. Pure so the
- * two-stale-plus-one-fresh case is unit-testable.
+ * Accepts READY and PONG only from the current PXE document: on Firefox the connected frame whose
+ * generation the sender's URL carries, on Chrome any sender at the offscreen URL (`chrome.offscreen`
+ * allows one document). A frame removed on READY timeout or a failed health check can still have a
+ * message in flight, and by URL alone it would open its successor's gate or pass its health check.
+ * This rejects previous generations; it does not authenticate a document against same-extension code.
  */
-export function isSupersededByAdopt(
-	message: unknown,
-	sender: chrome.runtime.MessageSender | undefined,
-	myInstanceToken: string | null,
-): boolean {
-	if (myInstanceToken === null) return false
-	const m = message as { type?: unknown; token?: unknown } | null
-	return (
-		sender?.id === chrome.runtime.id && sender.tab === undefined && m?.type === OFFSCREEN_ADOPT_INSTANCE && m.token !== myInstanceToken
-	)
+function isLiveOffscreenSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+	if (!isOffscreenDocumentSender(sender) || sender === undefined) return false
+	if (hasOffscreenApi()) return true
+	const frame = firefoxOffscreenFrame
+	return frame?.element.isConnected === true && senderGeneration(sender) === frame.generation
 }
 
-const onOffscreenReady = (message: unknown) => {
-	if (message === OFFSCREEN_READY_MESSAGE) {
+/**
+ * B-17: the offscreen answers a health PING with PONG only once its PXE services
+ * are actually initialized — not merely when the document has loaded. A PONG
+ * returned during init let the SW (after an SW restart that left a mid-init
+ * document alive) adopt that document and dispatch a PXE RPC before `PxeService`
+ * existed — a missing-handler timeout instead of a clean readiness wait. The
+ * PING listener is still installed early; it just withholds PONG until services
+ * are ready, so `isOffscreenHealthy` treats a still-initializing document as
+ * not-yet-adoptable and the caller recreates + waits for READY.
+ */
+export function shouldRespondPong(message: unknown, servicesReady: boolean, sender: chrome.runtime.MessageSender | undefined): boolean {
+	return message === OFFSCREEN_PING && servicesReady && isTrustedInternalSender(sender)
+}
+
+const onOffscreenReady = (message: unknown, sender: chrome.runtime.MessageSender | undefined) => {
+	if (message === OFFSCREEN_READY_MESSAGE && isLiveOffscreenSender(sender)) {
 		chrome.runtime.onMessage.removeListener(onOffscreenReady)
 		clearTimeout(offscreenTimeout)
 		resolveOffscreenPromise()
@@ -91,21 +98,53 @@ const onOffscreenReady = (message: unknown) => {
 }
 const onOffscreenTimeout = () => {
 	chrome.runtime.onMessage.removeListener(onOffscreenReady)
-	// Kill the half-initialized offscreen so it doesn't become a ghost.
-	closeOffscreen().catch(() => {})
+	// Fence FIRST (before the close): bumping the sequence invalidates the
+	// current pass, so when the close below makes its still-pending
+	// `createDocument` reject with "closed before fully loading", the retry
+	// branch sees a stale pass id and propagates instead of re-creating an
+	// untracked document (unguarded, that once produced a false-success pass).
+	passSeq += 1
+	// B-17: kill the half-initialized offscreen through the serialized close tail
+	// so the next pass can join it (see `trackedClose`). The gate below rejects
+	// `ready`, which clears the single-flight gate (ensureInFlight) — so a
+	// successor pass can begin while this close is still in flight; without
+	// joining it, a late-landing `closeDocument()` here tears down the
+	// successor's freshly-created document.
+	void trackedClose()
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
 
-/**
- * Check if the existing offscreen document is responsive.
- * Sends a ping and waits for a pong within HEALTH_CHECK_TIMEOUT_MS.
- * Returns true if healthy, false if zombie/unresponsive.
- *
- * Browser-agnostic: both Chromium offscreen and Firefox hidden-window
- * variants listen on `chrome.runtime.onMessage`, so the ping/pong path
- * is identical.
- */
+/** B-17: serialize EVERY offscreen close (timeout kill, zombie-adopt kill, and
+ *  the create-retry loading-race close) through one tail, and expose its latest
+ *  link as `pendingClose`. `closeDocument()` / the frame's removal act on the
+ *  singleton offscreen surface, so two closes that overlap in time can compose
+ *  destructively: a create-retry close that lands AFTER a successor pass created
+ *  a fresh document tears that document down. Serializing means closes settle in
+ *  order and a successor that joins `pendingClose` waits for ALL of them before
+ *  probing/creating. Identity-guarded so an earlier link settling doesn't null a
+ *  newer one. */
+let closeTail: Promise<void> = Promise.resolve()
+let pendingClose: Promise<void> | null = null
+function trackedClose(): Promise<void> {
+	const link = closeTail.then(() => closeOffscreen()).catch(() => {})
+	closeTail = link
+	pendingClose = link
+	void link.finally(() => {
+		if (pendingClose === link) pendingClose = null
+	})
+	return link
+}
+
+/** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
+ *  timeout handler bumps it to invalidate the running pass. `createOffscreen`
+ *  retries ONLY while its pass id is still current — a mutable boolean here
+ *  was insufficient: a NEW pass would reset it, re-arming the timed-out
+ *  pass's zombie continuation, whose close-and-retry could then tear down
+ *  the new pass's loading document (the cross-caller kill, resurrected). */
+let passSeq = 0
+
+/** PING the PXE document and wait HEALTH_CHECK_TIMEOUT_MS for its PONG; false is a zombie to replace. */
 async function isOffscreenHealthy(): Promise<boolean> {
 	return new Promise<boolean>((resolve) => {
 		const timer = setTimeout(() => {
@@ -113,8 +152,8 @@ async function isOffscreenHealthy(): Promise<boolean> {
 			resolve(false)
 		}, HEALTH_CHECK_TIMEOUT_MS)
 
-		const onPong = (message: unknown) => {
-			if (message === OFFSCREEN_PONG) {
+		const onPong = (message: unknown, sender: chrome.runtime.MessageSender | undefined) => {
+			if (message === OFFSCREEN_PONG && isLiveOffscreenSender(sender)) {
 				chrome.runtime.onMessage.removeListener(onPong)
 				clearTimeout(timer)
 				resolve(true)
@@ -136,12 +175,7 @@ async function isOffscreenHealthy(): Promise<boolean> {
  * Close the existing offscreen, ignoring errors.
  *
  * Chromium: `chrome.offscreen.closeDocument()`.
- * Firefox: `chrome.windows.remove(firefoxOffscreenWindowId)` if known.
- *   If the window ID is unknown (post-SW-restart, see caveat below) we
- *   can't close it without a `tabs` permission to look it up by URL.
- *   That window is left running; the freshly-created replacement
- *   coexists. Acceptable for behind-feature-flag manual verification;
- *   tracked as a known limitation.
+ * Firefox: remove the frame; a removed frame's document is destroyed with it.
  */
 async function closeOffscreen() {
 	if (hasOffscreenApi()) {
@@ -152,14 +186,8 @@ async function closeOffscreen() {
 		}
 		return
 	}
-	if (firefoxOffscreenWindowId !== null) {
-		try {
-			await chrome.windows.remove(firefoxOffscreenWindowId)
-		} catch {
-			// Window already gone (user closed manually, browser quit, etc.)
-		}
-		firefoxOffscreenWindowId = null
-	}
+	firefoxOffscreenFrame?.element.remove()
+	firefoxOffscreenFrame = null
 }
 
 /**
@@ -168,69 +196,68 @@ async function closeOffscreen() {
  * Chromium: `chrome.offscreen.createDocument` with the WORKERS reason.
  *   Handles the ghost bug where `getContexts()` returns empty but
  *   `createDocument()` throws "single offscreen document".
- * Firefox: `chrome.windows.create` minimized + unfocused, hosting the
- *   same offscreen.html. The window doesn't take focus and shows in the
- *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
- *   works identically to Chromium's offscreen.
+ * Firefox: an <iframe> of the background page hosting the same
+ *   offscreen.html; the `chrome.runtime` message channel works identically
+ *   to Chromium's offscreen document.
  */
-async function createOffscreen() {
-	if (hasOffscreenApi()) {
-		try {
-			await chrome.offscreen.createDocument({
-				url: path,
-				reasons: ["WORKERS"],
-				justification: "Offscreen document is used for running PXE in it",
-			})
-		} catch (err) {
-			if (String(err).includes("single offscreen document")) {
-				// Ghost offscreen — close it and retry once
-				await closeOffscreen()
-				await chrome.offscreen.createDocument({
-					url: path,
-					reasons: ["WORKERS"],
-					justification: "Offscreen document is used for running PXE in it",
-				})
-			} else {
-				throw err
-			}
+async function createOffscreen(passId: number) {
+	if (hasOffscreenApi()) return createOffscreenChromium(passId)
+	createOffscreenFirefox()
+}
+
+async function createOffscreenChromium(passId: number) {
+	const create = () =>
+		chrome.offscreen.createDocument({
+			url: path,
+			reasons: ["WORKERS"],
+			justification: "Offscreen document is used for running PXE in it",
+		})
+	try {
+		await create()
+	} catch (err) {
+		// Two transient shapes get one close-and-retry: the ghost bug
+		// ("single offscreen document": getContexts saw none but create says
+		// one exists) and the loading race ("closed before fully loading":
+		// the document was torn down mid-load, e.g. by browser cleanup —
+		// the close is a no-op then, the retry is what matters). ONLY while
+		// this pass is still current: the ready-gate timeout bumps `passSeq`
+		// and then closes the document, so a timeout-induced rejection (or a
+		// zombie continuation surviving into a successor pass) must
+		// propagate — its close-and-retry would tear down a document this
+		// pass no longer tracks.
+		const msg = String(err)
+		if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
+			// B-17: route through the serialized close tail so this close composes
+			// with a concurrent timeout close instead of racing it — a successor
+			// joins the tail and can't create into a document this close then tears
+			// down out of order.
+			await trackedClose()
+			// The close suspends: re-check the fence so a timeout landing in
+			// the close window can't be followed by an untracked create.
+			if (passId !== passSeq) throw err
+			await create()
+		} else {
+			throw err
 		}
-		return
 	}
-	// Firefox path. `chrome.windows.create` can resolve to undefined when
-	// the browser refuses (rare, but typed that way) — fail loud so the
-	// caller's create-promise rejection path runs and the ready-gate can
-	// time out cleanly instead of hanging on a missing window id.
-	const token = firefoxInstanceToken()
-	const win = await chrome.windows.create({
-		url: `${chrome.runtime.getURL(path)}?instance=${token}`,
-		state: "minimized",
-		focused: false,
-	})
-	if (!win) {
-		throw new Error("Firefox offscreen fallback: chrome.windows.create resolved without a window")
-	}
-	firefoxOffscreenWindowId = win.id ?? null
-	// F-10: notify any stale offscreen (a prior SW instance's window, leaked
-	// across a SW restart) that a newer instance now owns the offscreen — it
-	// self-closes on token mismatch. Broadcast here, before the ready-gate
-	// awaits below routes any PXE traffic, so the stale window is gone first.
-	chrome.runtime.sendMessage({ type: OFFSCREEN_ADOPT_INSTANCE, token }).catch(() => {})
+}
+
+/** Firefox path. Appending is synchronous, so unlike the Chromium branch there is no gap between
+ *  the create and the tracker assignment for a timed-out pass to race into. The generation in
+ *  the URL is what `isLiveOffscreenSender` matches READY and PONG against. The background page
+ *  may run this before `body` exists. */
+function createOffscreenFirefox(): void {
+	const generation = crypto.randomUUID()
+	const element = document.createElement("iframe")
+	element.src = `${offscreenUrl()}?instance=${generation}`
+	;(document.body ?? document.documentElement).appendChild(element)
+	firefoxOffscreenFrame = { element, generation }
 }
 
 /**
- * Detect whether the offscreen surface is already alive in this SW
- * lifetime. Chromium uses the `getContexts` introspection API; Firefox
- * relies on the in-memory `firefoxOffscreenWindowId`.
- *
- * Caveat (Firefox SW-restart): when the SW restarts, the in-memory
- * tracker resets to null even if the hidden window is still alive in
- * the browser. The next `ensureOffscreenRunning()` call will then
- * create a new window — leaking the old one. Re-discovering the old
- * window requires `chrome.windows.getAll({populate:true})` + a `tabs`
- * permission to read URLs, which expands the manifest surface beyond
- * what's needed for non-Firefox builds. Tracked as a known limitation
- * of the initial Firefox feature-flag pass; revisit if leaks are
- * observed during manual verification.
+ * Detect whether the offscreen surface is already alive. Chromium uses the
+ * `getContexts` introspection API; Firefox asks whether the tracked frame is
+ * still attached — attachment only, readiness is the health check's job.
  */
 async function isOffscreenAlreadyRunning(): Promise<boolean> {
 	if (hasOffscreenApi()) {
@@ -240,35 +267,84 @@ async function isOffscreenAlreadyRunning(): Promise<boolean> {
 		})
 		return existingContexts.length > 0
 	}
-	// Firefox: trust the module-local tracker (see SW-restart caveat above).
-	return firefoxOffscreenWindowId !== null
+	return firefoxOffscreenFrame?.element.isConnected === true
 }
 
-export async function ensureOffscreenRunning() {
+/**
+ * Single-flight gate for the WHOLE ensure sequence (probe → zombie close →
+ * create → ready-await). Without it, concurrent cold-start callers race: a
+ * second caller's `getContexts` sees the document the first caller is still
+ * CREATING, its health ping gets no pong (the loading document hasn't
+ * installed its listener yet), and its "zombie" close tears down the loading
+ * document — surfacing on the creator as Chrome's "Offscreen document closed
+ * before fully loading". Joiners must share one pass, not re-probe.
+ */
+let ensureInFlight: Promise<void> | null = null
+
+export function ensureOffscreenRunning(): Promise<void> {
+	if (!ensureInFlight) {
+		ensureInFlight = doEnsureOffscreenRunning().finally(() => {
+			ensureInFlight = null
+		})
+	}
+	return ensureInFlight
+}
+
+async function doEnsureOffscreenRunning() {
+	// B-17: join a timed-out predecessor's close before probing or creating.
+	// onOffscreenTimeout fences + closes but does NOT await the close, and the
+	// single-flight gate clears when its `ready` rejects — so without this a
+	// successor could probe/create while `closeDocument()` is still in flight and
+	// have its new document torn down by that late close.
+	if (pendingClose) await pendingClose
+
 	if (await isOffscreenAlreadyRunning()) {
 		// Offscreen exists — verify it's actually responsive
 		if (await isOffscreenHealthy()) {
 			return
 		}
-		// Zombie offscreen — kill it and recreate below
-		await closeOffscreen()
+		// Zombie offscreen — kill it and recreate below. Through the serialized
+		// tail (B-17) so it composes with any other in-flight close.
+		await trackedClose()
 	}
 
 	if (!offscreenPromise) {
-		offscreenPromise = new Promise((resolve, reject) => {
+		// Capture the gate LOCALLY: the ready/timeout handlers null the module
+		// variable when they settle it, and awaiting the variable after that
+		// awaits `null` — an instant false success for every joiner.
+		const ready = new Promise<void>((resolve, reject) => {
 			resolveOffscreenPromise = resolve
 			rejectOffscreenPromise = reject
 		})
+		offscreenPromise = ready
+		const passId = ++passSeq
 		offscreenTimeout = setTimeout(onOffscreenTimeout, READY_TIMEOUT_MS)
 		chrome.runtime.onMessage.addListener(onOffscreenReady)
+		const creating = createOffscreen(passId)
+		// Race-loser guard: when the gate times out first, `creating` may reject
+		// AFTER this pass already rejected — that late rejection must not surface
+		// as an unhandled rejection in the SW.
+		creating.catch(() => {})
 		try {
-			await createOffscreen()
+			// Race so a `createDocument` that HANGS cannot outlive the gate: the
+			// 10s timeout rejects `ready`, the pass rejects, and the single-flight
+			// clears — awaiting only the create would wedge every future caller.
+			await Promise.race([creating, ready])
 		} catch (err) {
 			clearTimeout(offscreenTimeout)
 			chrome.runtime.onMessage.removeListener(onOffscreenReady)
 			offscreenPromise = null
 			throw err
 		}
+		// DELIBERATELY not `await creating` here. A ghost document can emit
+		// READY during its close-and-retry teardown, so `ready` can win while
+		// `creating` is still replacing the document — an accepted benign race
+		// (rare² timing; requests transiently fail; the next pass's probe+ping
+		// adopts or replaces the live document). Awaiting `creating` would
+		// close that window but reintroduces a wedge: the gate timer is already
+		// cleared, so a hung post-READY create would block every caller forever.
+		await ready
+		return
 	}
 
 	await offscreenPromise

@@ -3,8 +3,6 @@ import { BASELINE_VERSION } from "@/wallet/storage/migrations"
 import { ACCOUNT_STORAGE_ROOT, accountRowId } from "@/wallet/services/account/spec"
 import { AUTH_REGISTRY_ENABLED_STORAGE_ROOT, AUTH_REGISTRY_STORAGE_ROOT } from "@/wallet/services/auth-registry/spec"
 import { CONTACT_STORAGE_ROOT } from "@/wallet/services/contact/spec"
-import { FPC_STORAGE_ROOT } from "@/wallet/services/fpc/spec"
-import { NETWORK_STORAGE_ROOT } from "@/wallet/services/network/spec"
 import { PROFILE_STORAGE_ROOT } from "@/wallet/services/profile/repository"
 import { TOKEN_BALANCE_STORAGE_ROOT } from "@/wallet/services/token-balance/spec"
 import { TOKEN_STORAGE_ROOT } from "@/wallet/services/token/spec"
@@ -27,12 +25,10 @@ const fixture = () => ({
 		{ profileId: "p1", chainId: 31337, address: "0xaaa1", name: "Account 1", type: 0 },
 		{ profileId: "p1", chainId: 31337, address: "0xaaa2", name: "Account 2", type: 0 },
 	],
-	network: [{ id: "n1", profileId: "p1", name: "Local", rpcUrl: "http://localhost:8080", chainId: 31337 }],
 	token: [{ id: 1, profileId: "p1", chainId: 31337, contract: "0xt0k", name: "Test", symbol: "TST", decimals: 18 }],
 	"token-balance": [{ id: 3, token: 1, account: "0xaaa1", publicBalance: "10", updatedAt: 1700000000000 }],
 	contact: [{ id: "c1", profileId: "p1", name: "Alice", address: "0xccc", abbr: "A" }],
 	transaction: [{ hash: "0xh4sh", account: "0xaaa1", chainId: 31337, status: 1 }],
-	fpc: [{ id: "f1", profileId: "p1", chainId: 31337, type: 1, address: "0xfpc", name: "Sponsored" }],
 	"auth-registry": [{ id: 7, account: "0xaaa1", hash: "0xmsg", content: { kind: "x" } }],
 	config: [
 		{ key: "theme", value: "dark" },
@@ -65,14 +61,12 @@ describe("backup-migration-registry", () => {
 		expect(entries[`${TOKEN_STORAGE_ROOT}@1`]).toBe(JSON.stringify(data.token[0]))
 		expect(entries[`${TOKEN_BALANCE_STORAGE_ROOT}@3`]).toBe(JSON.stringify(data["token-balance"][0]))
 		expect(entries[`${AUTH_REGISTRY_STORAGE_ROOT}@7`]).toBe(JSON.stringify(data["auth-registry"][0]))
-		expect(entries[`${NETWORK_STORAGE_ROOT}@n1`]).toBe(JSON.stringify(data.network[0]))
 		expect(entries[`${CONTACT_STORAGE_ROOT}@c1`]).toBe(JSON.stringify(data.contact[0]))
-		expect(entries[`${FPC_STORAGE_ROOT}@f1`]).toBe(JSON.stringify(data.fpc[0]))
 		expect(entries[CONFIG_STORAGE_KEY]).toBe(JSON.stringify({ theme: "dark", developerMode: true }))
 		// Pass-through slices contribute ZERO storage entries.
 		const keys = Object.keys(entries)
 		expect(keys.some((k) => k.startsWith(`${PROFILE_STORAGE_ROOT}@`))).toBe(false)
-		expect(keys).toHaveLength(10)
+		expect(keys).toHaveLength(8)
 	})
 
 	test("config toStored preserves an on-disk key absent from the typed Config class and never fabricates defaults", () => {
@@ -108,12 +102,13 @@ describe("backup-migration-registry", () => {
 		expect(dup.ok).toBe(false)
 	})
 
-	test("fpc slice element is the stored row verbatim — no `isProtocol` fabricated anywhere", () => {
-		const data = fixture()
-		const normalized = normalizeOrThrow(data)
-		const storedRow = JSON.parse(normalized.entries[`${FPC_STORAGE_ROOT}@f1`]) as Record<string, unknown>
-		expect(storedRow).toEqual(data.fpc[0])
-		expect("isProtocol" in storedRow).toBe(false)
+	test("the retired network and fpc slices are not registered: a backup carrying either (even empty) is rejected", () => {
+		expect("network" in BACKUP_SLICE_REGISTRY).toBe(false)
+		expect("fpc" in BACKUP_SLICE_REGISTRY).toBe(false)
+		expect(normalizeBackupData({ ...fixture(), network: [] })).toEqual({ ok: false, reason: 'unknown backup slice "network"' })
+		expect(normalizeBackupData({ ...fixture(), fpc: [] })).toEqual({ ok: false, reason: 'unknown backup slice "fpc"' })
+		expect(normalizeBackupData({ ...fixture(), network: [{ id: "n1", rpcUrl: "https://evil/" }] }).ok).toBe(false)
+		expect(normalizeBackupData({ ...fixture(), fpc: [{ id: "f1", type: 2, address: "0xevil" }] }).ok).toBe(false)
 	})
 
 	test("missing OPTIONAL slices normalize as empty (no reject, no absentRequired) and stay absent after denormalize", () => {
@@ -177,12 +172,10 @@ describe("backup-migration-registry", () => {
 		}
 		const cases: Array<[string, string, Record<string, unknown>, string]> = [
 			["account", ACCOUNT_STORAGE_ROOT, { profileId: "p1", chainId: 31337, address: "0xaaa1" }, accountRowId("p1", 31337, "0xaaa1")],
-			["network", NETWORK_STORAGE_ROOT, { id: "n1" }, "n1"],
 			["token", TOKEN_STORAGE_ROOT, { id: 5 }, "5"],
 			["token-balance", TOKEN_BALANCE_STORAGE_ROOT, { id: 9 }, "9"],
 			["contact", CONTACT_STORAGE_ROOT, { id: "c9" }, "c9"],
 			["transaction", TRANSACTION_STORAGE_ROOT, { hash: "0xh" }, "0xh"],
-			["fpc", FPC_STORAGE_ROOT, { id: "f9" }, "f9"],
 			["auth-registry", AUTH_REGISTRY_STORAGE_ROOT, { id: 2 }, "2"],
 		]
 		for (const [name, root, row, expected] of cases) {
@@ -218,11 +211,11 @@ describe("backup-migration-registry", () => {
 
 	test("version metadata: epoch gate is fail-closed; baseline shares the live schema number space", () => {
 		expect(isSupportedCompatEpoch(CURRENT_COMPAT_EPOCH)).toBe(true)
-		// Epoch 2 (the rc-era secret-root account generation) is a HARD reject: its backups carry
-		// addresses from the pre-5.0.0 derivation, which the signing-key-root model can no longer
-		// reproduce — importing them would create accounts that explode at first load instead of
-		// failing cleanly here at the designed gate.
-		for (const bad of [undefined, null, 1, 2, 4, "3", Number.NaN]) expect(isSupportedCompatEpoch(bad)).toBe(false)
+		// Epochs 2 (rc-era secret-root) and 3 (KDF-v1 signing-key-root) are HARD rejects: their
+		// backups carry addresses from superseded derivations, which NULO-ACCOUNT-KDF v2 can no
+		// longer reproduce — importing them would create accounts that explode at first load
+		// instead of failing cleanly here at the designed gate.
+		for (const bad of [undefined, null, 1, 2, 3, 5, "4", Number.NaN]) expect(isSupportedCompatEpoch(bad)).toBe(false)
 		expect(BACKUP_SCHEMA_BASELINE).toBe(BASELINE_VERSION)
 	})
 })

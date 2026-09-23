@@ -33,6 +33,13 @@ export class WrappedTask {
 		this.taskService.cancelTask(this.id)
 	}
 
+	/** Non-throwing existence probe: `task`/`status`/`isFinished` all throw
+	 *  `Invalid task id` once the registry is cleared (profile switch) — a
+	 *  long-lived waiter must be able to check before touching them. */
+	public get exists(): boolean {
+		return this.taskService.hasTask(this.id)
+	}
+
 	public get task(): Task {
 		return this.taskService.getTaskSync(this.id)
 	}

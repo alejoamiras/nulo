@@ -19,7 +19,7 @@
  */
 import { inject, expect } from "vitest"
 import { test, openPopup, waitForHash } from "../fixtures/extension"
-import { resetProfile } from "../fixtures/helpers"
+import { captureSoleProfileId, resetProfile, waitForProfilePurged } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -125,10 +125,17 @@ test.skipIf(!hasConfig)(
 			})
 		}, profileId)
 
-		// ── 5. Profile purge: the reset UI fires the awaited deletion cascade (coordinator →
-		// clearProfileState → crypto-erase + registry-driven OPFS removal + legacy sweep). ──
+		// ── 5. Profile purge: the reset UI AWAITS the deletion cascade (coordinator →
+		// clearProfileState → crypto-erase + registry-driven OPFS removal + legacy sweep)
+		// BEFORE navigating — so observe the purge's own completion signal (row proven
+		// present pre-submit + exact tombstone + row gone) first, then assert the
+		// redirect. The old 30s route wait raced the awaited cascade while the
+		// subsequent poll's budget went unused once the route arrived. ──
+		const deletedProfileId = await captureSoleProfileId(page)
+		expect(deletedProfileId).toBe(profileId)
 		await resetProfile(page)
-		await page.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 30_000 })
+		await waitForProfilePurged(page, deletedProfileId, { timeoutMs: 75_000 })
+		await page.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 15_000 })
 
 		// Poll: our profile's OPFS dir gone; the fake sibling INTACT (isolation negative-control).
 		let after: OpfsEntry[] = []

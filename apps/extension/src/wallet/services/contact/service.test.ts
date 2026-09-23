@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection, type IService } from "@/wallet/base"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
@@ -26,12 +27,22 @@ class FakeProfileService implements IService {
 	public static readonly name = PROFILE_SERVICE_NAME
 	public readonly name = PROFILE_SERVICE_NAME
 	public readonly onProfileDeleted = new EventHandler<ProfileInfo>()
+	private readonly deletionState = new ProfileDeletionState()
 	private active: ProfileInfo | undefined
 
 	public async start(): Promise<void> {}
 
+	public getDeletionState(): ProfileDeletionState {
+		return this.deletionState
+	}
+
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
 		return this.active
+	}
+
+	public async captureExecutionFence(): Promise<{ profileId: string; epoch: number }> {
+		if (!this.active || this.deletionState.isReserved(this.active.id)) throw new Error("Wallet locked")
+		return { profileId: this.active.id, epoch: this.deletionState.capture(this.active.id) }
 	}
 
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
@@ -220,6 +231,29 @@ describe("ContactService (port-migrated)", () => {
 			profile.setActiveProfile(profileB)
 			expect(await contactService.getContacts()).toHaveLength(1)
 		})
+
+		test("(F-B23) a MALFORMED row owned by the purged profile is removed by the raw second pass", async () => {
+			await contactService.addContact("Alice", "0xa")
+			// A validation-failed row (B-23 retain: hidden from reads, kept on
+			// disk). The typed purge pass can't see it — pre-fix it survived the
+			// privacy-erasing profile purge forever.
+			await api.storage.local.set({
+				"nulo:core:contacts@zz-malformed": JSON.stringify({ profileId: profileA.id, broken: true }),
+			})
+			// Another profile's malformed row must NOT be touched.
+			await api.storage.local.set({
+				"nulo:core:contacts@zz-other": JSON.stringify({ profileId: profileB.id, broken: true }),
+			})
+			// A JSON-syntax-broken row is unattributable — fail-closed, left alone.
+			await api.storage.local.set({ "nulo:core:contacts@zz-syntax": "{not json" })
+
+			await contactService.purgeForProfile(profileA.id)
+
+			const raw = await api.storage.local.get(null)
+			expect(raw["nulo:core:contacts@zz-malformed"]).toBeUndefined() // purged with its profile
+			expect(raw["nulo:core:contacts@zz-other"]).toBeDefined() // other profile: untouched
+			expect(raw["nulo:core:contacts@zz-syntax"]).toBeDefined() // unattributable: fail-closed
+		})
 	})
 
 	describe("backup/restore", () => {
@@ -242,6 +276,17 @@ describe("ContactService (port-migrated)", () => {
 
 			const all = await contactService.getContacts()
 			expect(all).toHaveLength(2)
+		})
+
+		test("restore sanitizes the name exactly like the plaintext import does (bidi override stripped)", async () => {
+			await contactService.addContact("Alice", "0xa")
+			const [genuine] = await contactService.backup()
+			const doctored = [{ ...genuine, id: "c-bidi", name: "\u202EAlice" }]
+			const restored = await contactService.restore(doctored)
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(restored[0].name).toBe("Alice")
+			const all = await contactService.getContacts()
+			expect(all.map((c) => c.name)).toEqual(["Alice", "Alice"])
 		})
 
 		test("(R3) a failed item stores the normalized error MESSAGE string, not the raw error", async () => {
@@ -274,6 +319,157 @@ describe("ContactService (port-migrated)", () => {
 
 			const raw = await api.storage.local.get(null)
 			expect(Object.keys(raw).some((k) => k.includes("bad-1"))).toBe(false)
+		})
+	})
+
+	describe("restore — deletion fence (N-14)", () => {
+		const rows = [
+			{ id: "c1", profileId: profileA.id, name: "Ali", address: "0xa", abbr: "AL" },
+			{ id: "c2", profileId: profileA.id, name: "Bob", address: "0xb", abbr: "BO" },
+		] as Parameters<typeof contactService.restore>[0]
+
+		test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+			// The first row's awaited storage.set is the interleave point: the
+			// deletion begins while it is in flight, so row 2's pre-write assert
+			// must reject. Row 1's already-dispatched write is the tombstoned
+			// purge's responsibility, not the fence's.
+			const origSet = api.storage.local.set.bind(api.storage.local)
+			let fired = false
+			api.storage.local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					profile.getDeletionState().beginDeletion(profileA.id)
+				}
+			}
+			const restored = await contactService.restore(rows)
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(restored[1].restoreError).toMatch(/deleted/)
+			const raw = await api.storage.local.get(null)
+			expect(Object.keys(raw).some((k) => k.includes("c2"))).toBe(false)
+		})
+
+		test("a restore starting while the profile is ALREADY mid-deletion writes nothing", async () => {
+			profile.getDeletionState().beginDeletion(profileA.id) // reserved at entry
+			const restored = await contactService.restore(rows)
+			expect(restored.every((r) => typeof r.restoreError === "string")).toBe(true)
+			const raw = await api.storage.local.get(null)
+			expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:contacts@"))).toBe(false)
+		})
+
+		test("positive control: no deletion → both rows land", async () => {
+			const restored = await contactService.restore(rows)
+			expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
+		})
+
+		test("a deletion that begins AND completes mid-restore still rejects later rows (entry-capture pin)", async () => {
+			// Discriminates entry capture from the rejected lazy design: after
+			// begin+release the profile is no longer reserved and the epoch is
+			// settled — a capture taken lazily at row 2 would observe the settled
+			// value and land the orphan; the entry-captured epoch has moved.
+			const origSet = api.storage.local.set.bind(api.storage.local)
+			let fired = false
+			api.storage.local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					const d = profile.getDeletionState()
+					d.beginDeletion(profileA.id)
+					d.release(profileA.id)
+				}
+			}
+			const restored = await contactService.restore(rows)
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(restored[1].restoreError).toMatch(/deleted/)
+		})
+
+		test("a hostile null row is a per-row restoreError, never a whole-slice abort", async () => {
+			// Backup slices are attacker-controlled; normalizeAllIds preserves
+			// non-object elements. The entry capture must tolerate them (null-safe
+			// read) so the documented per-row contract holds.
+			const restored = await contactService.restore([rows[0], null as never])
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(typeof restored[1].restoreError).toBe("string")
+		})
+
+		test("a deletion completing while parked at the e2e hold gate rejects every row (capture precedes the gate)", async () => {
+			// The gate parks an import RPC pre-finalize; a deletion can begin AND
+			// fully release during that park. The epochs must be captured BEFORE
+			// the gate — a post-gate capture would read the settled post-bump
+			// epoch and land orphan rows.
+			let release!: () => void
+			const parked = new Promise<void>((res) => {
+				release = res
+			})
+			const gated = new ContactService(logger, api, { waitAt: () => parked })
+			const gatedServices = new ServiceCollection()
+			gatedServices.add(profile)
+			gatedServices.add(gated)
+			await gatedServices.start()
+
+			const run = gated.restore(rows)
+			await new Promise((r) => setTimeout(r, 0)) // capture done; parked at the gate
+			const d = profile.getDeletionState()
+			d.beginDeletion(profileA.id)
+			d.release(profileA.id)
+			release()
+			const restored = await run
+			expect(restored.every((r) => typeof r.restoreError === "string")).toBe(true)
+			const raw = await api.storage.local.get(null)
+			expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:contacts@"))).toBe(false)
+		})
+	})
+
+	describe("addContact — creation fence", () => {
+		const contactRowCount = async (): Promise<number> => {
+			const raw = await api.storage.local.get(null)
+			return Object.keys(raw).filter((k) => k.startsWith("nulo:core:contacts@")).length
+		}
+
+		test("a deletion completing DURING the id allocation rejects the write (entry-capture pin)", async () => {
+			// begin + RELEASE while the id-alloc read is parked: the deletion fully
+			// settles, so only an entry-captured fence still rejects.
+			const realGet = api.storage.local.get.bind(api.storage.local)
+			let parked: (() => void) | null = null
+			let armed = true
+			api.storage.local.get = (async (key: unknown) => {
+				if (armed) {
+					armed = false
+					await new Promise<void>((resolve) => {
+						parked = resolve
+					})
+				}
+				return realGet(key as never)
+			}) as typeof api.storage.local.get
+
+			const run = contactService.addContact("Ghost", "0xdead")
+			await new Promise((r) => setTimeout(r, 0))
+			profile.getDeletionState().beginDeletion(profileA.id)
+			profile.getDeletionState().release(profileA.id)
+			;(parked as (() => void) | null)?.()
+
+			await expect(run).rejects.toThrow(/deleted|not current/i)
+			api.storage.local.get = realGet as typeof api.storage.local.get
+			expect(await contactRowCount()).toBe(0)
+		})
+
+		test("a deletion landing DURING the row write is compensated away before any emit", async () => {
+			const emitted: unknown[] = []
+			contactService.onContactAdded.add((c) => emitted.push(c))
+			const realSet = api.storage.local.set.bind(api.storage.local)
+			let fired = false
+			api.storage.local.set = (async (items: Record<string, unknown>) => {
+				await realSet(items)
+				if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:contacts@"))) {
+					fired = true
+					profile.getDeletionState().beginDeletion(profileA.id)
+				}
+			}) as typeof api.storage.local.set
+
+			await expect(contactService.addContact("Ghost", "0xdead")).rejects.toThrow(/deleted/)
+			api.storage.local.set = realSet as typeof api.storage.local.set
+			expect(await contactRowCount()).toBe(0)
+			expect(emitted).toHaveLength(0)
 		})
 	})
 })

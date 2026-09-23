@@ -29,11 +29,9 @@ const contact = (profileId: string, id: string, legacyName: string) => ({ id, pr
 const v1Data = () => ({
 	profile: { id: "p1", name: "Main", type: "password" },
 	account: [account("p1", "0xa1"), account("p1", "0xa2")],
-	network: [{ id: "n1", profileId: "p1", name: "Local", rpcUrl: "http://localhost:1", chainId: 31337 }],
 	token: [{ id: 1, profileId: "p1", chainId: 31337, contract: "0xt" }],
 	"token-balance": [{ id: 1, token: 1, account: "0xa1", updatedAt: 1 }],
 	contact: [contact("p1", "c1", "Alice")],
-	fpc: [{ id: "f1", profileId: "p1", chainId: 31337, type: 1, address: "0xf", name: "Sponsored" }],
 	config: [{ key: "theme", value: "dark" }],
 })
 
@@ -76,7 +74,7 @@ describe("backup-migrator", () => {
 		expect(res.kind).toBe("migrated")
 		expect(res.data.account).toEqual(data.account.map((a) => ({ ...a, pinned: false })))
 		expect(res.data.contact).toEqual([{ id: "c1", profileId: "p1", address: "0xc", name: "Alice" }])
-		for (const slice of ["network", "token", "token-balance", "fpc", "config", "profile"] as const) {
+		for (const slice of ["token", "token-balance", "config", "profile"] as const) {
 			expect(res.data[slice], slice).toEqual(data[slice])
 		}
 		expect(JSON.stringify(res.data)).not.toContain("nulo:schema:")

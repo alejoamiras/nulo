@@ -1,3 +1,4 @@
+import { memoizeAsyncBy } from "./async-memo"
 import type { PackedPrivateEvent, PXE } from "@aztec/pxe/client/bundle"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { type ContractArtifact, ContractArtifactSchema, EventSelector, FunctionCall } from "@aztec/stdlib/abi"
@@ -6,9 +7,10 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
-	getContractInstanceFromInstantiationParams,
+	getContractClassFromArtifact,
 	type CompleteAddress,
 	type PartialAddress,
+	computeContractAddressFromInstance,
 } from "@aztec/stdlib/contract"
 import { BlockParameterSchema } from "@aztec/stdlib/block"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -32,17 +34,20 @@ const AccessScopesSchema = z.array(AztecAddress.schema)
 import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { ReadWriteGuard } from "@nulo/wallet-core/utils"
-import type { NetworkInfo } from "./chain-runtime"
-import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import { EventHandler, ReadWriteGuard, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import type { ChainRuntime, NetworkInfo, ProvePhaseEvent } from "./chain-runtime"
+import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
 import { ArtifactRegistry } from "./artifact-registry"
+import { PxeLifecycleCoordinator } from "./lifecycle-coordinator"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
-import { type Methods, PXE_SERVICE_NAME } from "./spec"
+import { type Methods, PXE_SERVICE_NAME, type PxeEvents } from "./spec"
+import type { ProvePhaseSink } from "./prove-phase-sink"
 import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec/aztec.js/wallet"
 import { NotesFilterSchema } from "./schemas"
+import { withStaleAnchorRetry } from "./stale-anchor"
 import {
 	type PublicScanTips,
 	type PublicTokenClassStatus,
@@ -68,8 +73,9 @@ export interface IProfileReader {
 	onActiveProfileChanged: { add(handler: (profile: unknown) => void): void }
 }
 
-export class PxeService extends Service<Methods> implements ServiceSpec<Methods> {
+export class PxeService extends Service<Methods, PxeEvents> implements ServiceSpec<Methods, PxeEvents> {
 	public static name = PXE_SERVICE_NAME
+	public readonly onProvePhase = new EventHandler<ProvePhaseEvent>()
 
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getContractInstance",
@@ -128,13 +134,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * scoped clear).
 	 */
 	private readonly chainGuards = new Map<string, ReadWriteGuard>()
-	/** Per-chain purge epochs (#281 review): bumped by `clearChainState` so an
-	 *  in-flight read op cannot RESURRECT a just-purged chain — its write-rebind
-	 *  step would otherwise re-create the runtime + a fresh OPFS store dir for a
-	 *  chain whose network row is gone (nothing ever removes that dir again). A
-	 *  read that entered BEFORE the purge refuses to rebind; a new op after the
-	 *  purge sees the new epoch at entry and may legitimately re-create. */
-	private readonly chainPurgeEpochs = new Map<string, number>()
+	/** Per-chain purge-epoch fence (Q-01): owns the epoch counter + the
+	 *  capture/assert the op paths share. See {@link PxeLifecycleCoordinator}. */
+	private readonly lifecycle = new PxeLifecycleCoordinator()
 	private readonly profileBarriers = new Map<string, ReadWriteGuard>()
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
@@ -160,16 +162,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 */
 	private readonly profileLifecycles = new Map<string, { kind: "live" | "deleting" | "deleted"; gen: string }>()
 
-	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory) {
+	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory, provePhaseSink?: ProvePhaseSink) {
 		super(PXE_SERVICE_NAME, logger)
 		this.profiles = profiles
 		this.guardLogger = logger
 		this.artifacts = new ArtifactRegistry(loadProductionKnownArtifacts, { logger, logSource: PXE_SERVICE_NAME })
 		this.registry = new ChainRuntimeRegistry(factory ?? new ProductionPxeFactory())
+		// A dead SW loses the event (the transport swallows the rejection); the
+		// journal only ever goes stale, never wrong, so no retry.
+		provePhaseSink?.subscribe((payload) => this.emit("onProvePhase", payload))
 	}
 
 	private chainKey(profileId: string, chainId: number): string {
 		return chainRegistryKey({ profileId, chainId })
+	}
+
+	/** Monotonically advance a chain's purge epoch. Any operation that captured
+	 * the prior value fails its post-await equality check in withPxeWrite/Read,
+	 * so it can't recreate the runtime/store for a chain that is being (or was)
+	 * purged. Called at both ends of clearChainState's destructive section. */
+	private bumpChainPurgeEpoch(profileId: string, chainId: number): void {
+		this.lifecycle.bump(this.chainKey(profileId, chainId))
 	}
 
 	private getChainGuard(profileId: string, chainId: number): ReadWriteGuard {
@@ -198,9 +211,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		// would deadlock the reset flow. The deferred sweep is race-safe against that in-flight
 		// deletion: the profile row still exists while its purge runs (the coordinator deletes
 		// the row LAST), so the sweep skips it; every removal is idempotent + NotFound-swallowed.
-		void this.sweepOrphanStores().catch((err) =>
-			this.logWarn("deferred orphan-store sweep failed", err instanceof Error ? err.message : String(err)),
-		)
+		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", err))
 
 		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
 		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
@@ -231,42 +242,79 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// row), so recursively dropping its dir cannot race a sibling-chain open —
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
+			// The barrier loop stays INLINE: the next orphan's `enterWrite()` must
+			// be reserved on the same continuation the previous `leaveWrite()` ran
+			// on — a helper-return hop here would let a concurrent reader win the
+			// barrier and change removal/warning timing (codex post-impl).
 			for (const profileId of orphanProfiles) {
-				this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
-				await removeProfileStoreDirs(profileId)
-			}
-		}
-		if (pxes.length) {
-			for (let i = pxes.length - 1; i >= 0; i--) {
-				const deleted = await new Promise<boolean>((resolve, reject) => {
-					const req = indexedDB.deleteDatabase(pxes[i].name!)
-					req.onsuccess = () => resolve(true)
-					req.onerror = () => reject(req.error)
-					req.onblocked = () => {
-						this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-						resolve(false) // Skip — don't hang the sweep forever
-					}
-				})
-				// Only a REAL deletion clears the entry: a blocked DB survives, and the
-				// shared keyval-store guard below must see it (review finding — the
-				// unconditional splice made the emptiness check vacuous).
-				if (deleted) pxes.splice(i, 1)
-			}
-			if (!pxes.length) {
-				const keyval = dbs.find((x) => x.name === "keyval-store")
-				if (keyval) {
-					await new Promise<void>((resolve, reject) => {
-						const req = indexedDB.deleteDatabase(keyval.name!)
-						req.onsuccess = () => resolve()
-						req.onerror = () => reject(req.error)
-						req.onblocked = () => {
-							this.logWarn("deleteDatabase blocked (DB still in use): keyval-store")
-							resolve()
-						}
-					})
+				// Serialize against store-opens: dirs are (re)created by
+				// `registry.ensure` under this profile's `barrier.read`, so holding
+				// WRITE here means a same-id re-import provisioning DURING the sweep
+				// either lands its lifecycle entry before the re-check below
+				// (removal skipped) or has its store creation queued until the
+				// removal finishes (fresh dir after). Without the barrier, the
+				// recursive remove could delete a successor store mid-create. The
+				// barrier entry is retained (unlike clearProfileState's success
+				// path) — deleting it here could split-brain a queued reader onto a
+				// stale guard instance.
+				const barrier = this.getProfileBarrier(profileId)
+				await barrier.enterWrite()
+				try {
+					// Re-check liveness AFTER acquiring the barrier, not just at the
+					// snapshot: a provision that landed while we waited (dir exists ⟹ key
+					// provisioned ⟹ lifecycle entry present) must not be swept as orphan.
+					if (this.profileLifecycles.has(profileId)) continue
+					this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
+					await removeProfileStoreDirs(profileId)
+				} finally {
+					barrier.leaveWrite()
 				}
 			}
 		}
+		if (!pxes.length) return
+		// Tail-returned (never awaited-then-resumed): a hop before the first
+		// deleteDatabase would widen the window in which a concurrent DB open
+		// changes the blocked/warn outcome.
+		return this.sweepLegacyIndexedDbs(dbs, pxes)
+	}
+
+	/** One-way cleanup of the LEGACY (rc.2-era, pre-OPFS) IndexedDB stores,
+	 *  plus the shared keyval-store once none remain. */
+	private async sweepLegacyIndexedDbs(dbs: IDBDatabaseInfo[], pxes: IDBDatabaseInfo[]): Promise<void> {
+		for (let i = pxes.length - 1; i >= 0; i--) {
+			const deleted = await new Promise<boolean>((resolve, reject) => {
+				const req = indexedDB.deleteDatabase(pxes[i].name!)
+				req.onsuccess = () => resolve(true)
+				req.onerror = () => reject(req.error)
+				req.onblocked = () => {
+					this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
+					resolve(false) // Skip — don't hang the sweep forever
+				}
+			})
+			// Only a REAL deletion clears the entry: a blocked DB survives, and the
+			// shared keyval-store guard below must see it (review finding — the
+			// unconditional splice made the emptiness check vacuous).
+			if (deleted) pxes.splice(i, 1)
+		}
+		if (pxes.length) return
+		// Re-prove global emptiness at commit: the `pxes` bookkeeping above is a
+		// boot-time snapshot, and a PXE DB created since (or a concurrent
+		// clearProfileState draining the same list) would make deleting the
+		// SHARED keyval-store cross-profile corruption — same re-list
+		// clearProfileState itself performs.
+		const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+		if (remaining) return
+		const keyval = dbs.find((x) => x.name === "keyval-store")
+		if (!keyval) return
+		await new Promise<void>((resolve, reject) => {
+			const req = indexedDB.deleteDatabase(keyval.name!)
+			req.onsuccess = () => resolve()
+			req.onerror = () => reject(req.error)
+			req.onblocked = () => {
+				this.logWarn("deleteDatabase blocked (DB still in use): keyval-store")
+				resolve()
+			}
+		})
 	}
 
 	public async getContractInstance(
@@ -281,32 +329,39 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// helper: node-sourced instances reject upgrades explicitly, PXE preimages hydrate
 			// under the documented no-upgrades assumption.
 			const preimage = await pxe.getContractInstance(address)
-			let instance = preimage ? hydratePreimage(preimage) : undefined
-			if (!instance && !opts?.pxeOnly) {
-				try {
-					const nodeInstance = await node.getContract(address)
-					instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
-				} catch (err) {
-					// An upgrade rejection is a DEFINITIVE node answer, not a hiccup — re-throw it even in
-					// best-effort mode, or the cascade would silently serve a stale known-bundle instance
-					// for a contract the node says is unsupported.
-					if (err instanceof ContractUpgradedError) throw err
-					if (!opts?.nodeBestEffort) throw err
-					// Node hiccup on a best-effort lookup: degrade to "not found"
-					// and continue the cascade so the local known-bundle still has a chance.
-					this.logWarn(
-						`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
-						err instanceof Error ? err.message : String(err),
-					)
-					instance = undefined
-				}
-				if (!instance) {
-					await this.artifacts.ensureKnown()
-					instance = this.artifacts.getKnownInstance(address.toString())
-				}
-			}
-			return instance
+			const instance = preimage ? hydratePreimage(preimage) : undefined
+			if (instance || opts?.pxeOnly) return instance
+			// Tail-returned so the PXE-hit / pxeOnly fast paths above stay on the
+			// monolith's synchronous continuation.
+			return this.resolveInstanceFallback(node, address, opts)
 		})
+	}
+
+	/** The node → known-bundle tail of the contract-instance cascade (runs only
+	 *  on a PXE miss without `pxeOnly`). */
+	private async resolveInstanceFallback(
+		node: AztecNode,
+		address: AztecAddress,
+		opts: { nodeBestEffort?: boolean } | undefined,
+	): Promise<ContractInstanceWithAddress | undefined> {
+		let instance: ContractInstanceWithAddress | undefined
+		try {
+			const nodeInstance = await node.getContract(address)
+			instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
+		} catch (err) {
+			// An upgrade rejection is a DEFINITIVE node answer, not a hiccup — re-throw it even in
+			// best-effort mode, or the cascade would silently serve a stale known-bundle instance
+			// for a contract the node says is unsupported.
+			if (err instanceof ContractUpgradedError) throw err
+			if (!opts?.nodeBestEffort) throw err
+			// Node hiccup on a best-effort lookup: degrade to "not found"
+			// and continue the cascade so the local known-bundle still has a chance.
+			this.logWarn(`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`, err)
+			instance = undefined
+		}
+		if (instance) return instance
+		await this.artifacts.ensureKnown()
+		return this.artifacts.getKnownInstance(address.toString())
 	}
 
 	public async getContractArtifact(network: NetworkInfo, id: Fr, opts?: { pxeOnly?: boolean }): Promise<ContractArtifact | undefined> {
@@ -392,15 +447,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return this.withPxeWrite("registerContract", network, async (pxe) => {
 			const instance = await ContractInstanceWithAddressSchema.parseAsync(contract.instance)
 			const artifact = await ContractArtifactSchema.optional().parseAsync(contract.artifact)
-			if (artifact) {
-				await pxe.registerContractClass(artifact)
-			}
-			const derived = await pxe.registerContract(instance)
+			// Derive before any write: the upstream `registerContract` call itself persists the
+			// instance, so a preimage/address mismatch must be rejected while the store is untouched.
+			const derived = await computeContractAddressFromInstance(instance)
 			if (!derived.equals(instance.address)) {
 				throw new Error(
 					`registerContract address mismatch: PXE derived ${derived.toString()} from the preimage, expected ${instance.address.toString()}`,
 				)
 			}
+			if (artifact) {
+				await pxe.registerContractClass(artifact)
+			}
+			await pxe.registerContract(instance)
 		})
 	}
 
@@ -412,17 +470,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return this.withPxeWrite("getNotes", network, async (pxe) => pxe.debug.getNotes(await NotesFilterSchema.parseAsync(filter)))
 	}
 
-	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		return this.withPxeWrite("proveTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before proving
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] proveTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
-			}
-
+	public async proveTx(
+		network: NetworkInfo,
+		txRequest: TxExecutionRequest,
+		scopes: AztecAddress[],
+		proveId?: string,
+	): Promise<TxProvingResult> {
+		return this.withPxeWrite("proveTx", network, async (pxe, _node, runtime) => {
 			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
 			// during private execution (before proving) when it is absent — so any private-note-emitting
 			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
@@ -435,11 +489,32 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first (codex
 			// post-impl audit MEDIUM — tracked for a follow-up).
 			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
-			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				scopes: provedScopes,
-				senderForTags: provedScopes[0],
-			})
+			const parsed = await TxExecutionRequest.schema.parseAsync(txRequest)
+			// One attempt at a time per runtime (we hold its write lock), so the prover's
+			// phase observer attributes every phase of this call to `proveId`. A JSON
+			// round-trip turns an omitted id into `null`; only a string correlates. A stale-anchor
+			// resync-and-retry re-runs proveTx under the same `activeProve`, so both attempts stay
+			// attributed to this `proveId`.
+			runtime.activeProve = typeof proveId === "string" && proveId.length > 0 ? { proveId, seq: 0 } : undefined
+			try {
+				return await this.retryOnceOnStaleAnchor("proveTx", pxe, () =>
+					pxe.proveTx(parsed, { scopes: provedScopes, senderForTags: provedScopes[0] }),
+				)
+			} finally {
+				runtime.activeProve = undefined
+			}
 		})
+	}
+
+	/**
+	 * A stale anchor is retried once after a resync, inside the chain write guard the op holds.
+	 * Only the four chain-reading ops go through here; the retry re-runs the whole op (a second
+	 * full prove for `proveTx`) and never a broadcast — `sendTx` lives on the node client. The
+	 * replay is safe because the PXE awaits its job's staged-write abort before rethrowing the
+	 * op's error, so the retry starts from the store as it was before the first attempt.
+	 */
+	private retryOnceOnStaleAnchor<T>(label: string, pxe: PXE, op: () => Promise<T>): Promise<T> {
+		return withStaleAnchorRetry(label, pxe, op, (line) => this.logInfo(line))
 	}
 
 	public async simulateTx(
@@ -448,16 +523,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		opts: SimulateTxOpts,
 		stubAccountAddresses?: string[],
 	): Promise<TxSimulationResult> {
-		return this.withPxeWrite("simulateTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before simulation
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] simulateTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] simulateTx: failed to read sync state: ${e}`)
-			}
-
+		return this.withPxeWrite("simulateTx", network, async (pxe) => {
 			let overrides = await SimulationOverrides.schema.optional().parseAsync(opts.overrides)
 
 			// Source the stub artifact from `@aztec/accounts/stub/schnorr`
@@ -469,16 +535,31 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
 			// `@aztec/accounts/ecdsa/stub`).
+			//
+			// Override mechanics mirror upstream `EmbeddedWallet.buildAccountOverrides`:
+			// the stub CLASS is registered with the PXE (function artifacts are
+			// resolved from the class store by `currentContractClassId`, so an
+			// unregistered class makes every lookup come back empty), and each
+			// entry keeps the account's REAL instance with only the class id
+			// swapped — an instance derived from the stub artifact with a random
+			// salt would carry an address preimage inconsistent with the map key.
+			// The historical shape here (`new SimulationOverrides({...contracts})`,
+			// spreading entries at the TOP level) parked the map outside the
+			// `contracts` key, so the override never reached the simulator and
+			// discovery ran UNSTUBBED — proven live on testnet against an
+			// authwit-requiring op (single-sim-estimates B1, Finding 0).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
-				const contracts: Record<string, { instance: ContractInstanceWithAddress; artifact: ContractArtifact }> = {}
+				const stubClassId = await this.ensureStubClassRegistered(pxe)
+				const contracts: Record<string, { instance: ContractInstanceWithAddress }> = {}
 				for (const addr of stubAccountAddresses) {
-					const instance = await getContractInstanceFromInstantiationParams(StubSchnorrAccountContractArtifact, {
-						salt: Fr.random(),
-					})
-					contracts[addr] = { instance, artifact: StubSchnorrAccountContractArtifact }
+					const address = await AztecAddress.schema.parseAsync(addr)
+					const instance = await pxe.getContractInstance(address)
+					if (!instance) {
+						throw new Error(`stubAccountAddresses: no contract instance registered for ${addr}`)
+					}
+					contracts[addr] = { instance: { ...instance, currentContractClassId: stubClassId } }
 				}
-				overrides = new SimulationOverrides({ ...(overrides?.contracts ?? {}), ...contracts })
+				overrides = new SimulationOverrides({ contracts: { ...(overrides?.contracts ?? {}), ...contracts } })
 			}
 
 			// When we pass `overrides`, upstream PXE enforces
@@ -489,36 +570,56 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// could flip it and silently break overrides. Pass it
 			// explicitly when we know we need it.
 			const simScopes = await AccessScopesSchema.parseAsync(opts.scopes)
-			return await pxe.simulateTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				simulatePublic: opts.simulatePublic,
-				skipTxValidation: opts.skipTxValidation,
-				skipFeeEnforcement: opts.skipFeeEnforcement,
-				overrides,
-				...(overrides ? { skipKernels: true } : {}),
-				scopes: simScopes,
-				// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is not
-				// set" during private execution. First scope is the tx sender by our convention.
-				senderForTags: simScopes[0],
-			})
+			const request = await TxExecutionRequest.schema.parseAsync(txRequest)
+			return this.retryOnceOnStaleAnchor("simulateTx", pxe, () =>
+				pxe.simulateTx(request, {
+					simulatePublic: opts.simulatePublic,
+					skipTxValidation: opts.skipTxValidation,
+					skipFeeEnforcement: opts.skipFeeEnforcement,
+					overrides,
+					...(overrides ? { skipKernels: true } : {}),
+					scopes: simScopes,
+					// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is
+					// not set" during private execution. First scope is the tx sender by our convention.
+					senderForTags: simScopes[0],
+				}),
+			)
 		})
+	}
+
+	/** Per-PXE memo of the stub-class registration: class hashing + the
+	 *  registerContractClass round-trip are WASM-heavy and sit on the fee
+	 *  estimation hot path — pay them once per PXE incarnation, not per sim.
+	 *  Keyed by the PXE instance through an injected WeakMap so a
+	 *  chain-runtime teardown/recreate naturally re-registers against the
+	 *  fresh store — and the dead PXE is never pinned by its promise. */
+	private readonly stubClassRegistrations = memoizeAsyncBy<PXE, Fr>(async (pxe) => {
+		const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
+		await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
+		const { id } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
+		return id
+	}, new WeakMap<PXE, Promise<Fr>>())
+
+	private ensureStubClassRegistered(pxe: PXE): Promise<Fr> {
+		return this.stubClassRegistrations.get(pxe)
 	}
 
 	public async executeUtility(network: NetworkInfo, call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult> {
 		return this.withPxeWrite("executeUtility", network, async (pxe) => {
-			return await pxe.executeUtility(await FunctionCall.schema.parseAsync(call), {
-				authwits: await z.array(AuthWitness.schema).optional().parseAsync(opts.authwits),
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
-			})
+			const parsedCall = await FunctionCall.schema.parseAsync(call)
+			const authwits = await z.array(AuthWitness.schema).optional().parseAsync(opts.authwits)
+			const scopes = await AccessScopesSchema.parseAsync(opts.scopes)
+			return this.retryOnceOnStaleAnchor("executeUtility", pxe, () => pxe.executeUtility(parsedCall, { authwits, scopes }))
 		})
 	}
 
 	public async profileTx(network: NetworkInfo, txRequest: TxExecutionRequest, opts: ProfileTxOpts): Promise<TxProfileResult> {
 		return this.withPxeWrite("profileTx", network, async (pxe) => {
-			return await pxe.profileTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				profileMode: opts.profileMode,
-				skipProofGeneration: opts.skipProofGeneration,
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
-			})
+			const request = await TxExecutionRequest.schema.parseAsync(txRequest)
+			const scopes = await AccessScopesSchema.parseAsync(opts.scopes)
+			return this.retryOnceOnStaleAnchor("profileTx", pxe, () =>
+				pxe.profileTx(request, { profileMode: opts.profileMode, skipProofGeneration: opts.skipProofGeneration, scopes }),
+			)
 		})
 	}
 
@@ -619,13 +720,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				// with the profile (other chains share it); crypto-erase for the profile as a
 				// whole happens in clearProfileState. The IndexedDB delete is the LEGACY
 				// (rc.2-era) cleanup layer.
-				this.chainPurgeEpochs.set(
-					this.chainKey(profileId, chainId),
-					(this.chainPurgeEpochs.get(this.chainKey(profileId, chainId)) ?? 0) + 1,
-				)
+				// B-18: bump the purge epoch at BOTH ends of the destructive section.
+				// The opening bump fences ops that captured before the purge began;
+				// the closing bump (right before the guard releases) fences an op that
+				// entered DURING the 641-643 destruction window — it would have read
+				// the already-incremented value and otherwise passed the equality
+				// check in withPxeWrite/withPxeRead, resurrecting a chain whose row is
+				// gone. Only a genuinely-post-purge op captures the stable final value.
+				this.bumpChainPurgeEpoch(profileId, chainId)
 				await this.registry.dispose(profileId, chainId)
 				await removeChainStoreDir({ profileId, chainId })
 				await this.deleteDb(chainDataDir({ profileId, chainId }))
+				this.bumpChainPurgeEpoch(profileId, chainId)
 			})
 		})
 	}
@@ -704,10 +810,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 */
 	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
 		const key = Uint8Array.from(atob(storeKeyBase64), (c) => c.charCodeAt(0))
-		if (key.length !== 32) {
-			throw new Error(`provisionChainStoreKey: expected a 32-byte key, got ${key.length}`)
+		const refuse = (why: string): never => {
+			key.fill(0)
+			throw new Error(`provisionChainStoreKey: ${why}`)
 		}
-		if (!generation) throw new Error("provisionChainStoreKey: missing pxe generation")
+		if (key.length !== 32) refuse(`expected a 32-byte key, got ${key.length}`)
+		if (!generation) refuse("missing pxe generation")
 		// The D4 resurrection fence. Atomicity with `clearProfileState` comes from
 		// run-to-completion, NOT the profile barrier: the check+install below is one
 		// synchronous block, and clear marks `deleting` synchronously before its
@@ -719,17 +827,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		//  - deleted(same gen):    a stale replay of the erased incarnation — rejected forever.
 		//  - live(different gen):  a successor key while the predecessor is live — the SW
 		//    must clear first; failing loudly beats silently swapping keys under a runtime.
+		//  - live(same gen, different bytes): a derivation that disagrees with the installed
+		//    key — never swap a key under a running incarnation; the caller's inputs are wrong.
 		//  - unseen / live(same) / deleted(different gen): install (fresh incarnation,
 		//    idempotent re-provision, or a re-imported profile going live over a dead one).
 		const current = this.profileLifecycles.get(profileId)
-		if (current?.kind === "deleting") {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} is being deleted — provision rejected`)
-		}
-		if (current?.kind === "deleted" && current.gen === generation) {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} generation was erased — stale provision rejected`)
-		}
-		if (current?.kind === "live" && current.gen !== generation) {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} is live under a different generation — clear it first`)
+		if (current?.kind === "deleting") refuse(`profile ${profileId} is being deleted — provision rejected`)
+		if (current?.kind === "deleted" && current.gen === generation)
+			refuse(`profile ${profileId} generation was erased — stale provision rejected`)
+		if (current?.kind === "live" && current.gen !== generation)
+			refuse(`profile ${profileId} is live under a different generation — clear it first`)
+		const installed = this.storeKeys.get(profileId)
+		if (current?.kind === "live" && installed) {
+			// The decoded copy is secret material either way: wiped when redundant, wiped when refused.
+			const same = installed.every((b, i) => b === key[i])
+			key.fill(0)
+			if (!same) {
+				throw new Error(
+					`provisionChainStoreKey: profile ${profileId} is live under a different key for this generation — provision rejected`,
+				)
+			}
+			return
 		}
 		this.profileLifecycles.set(profileId, { kind: "live", gen: generation })
 		this.storeKeys.set(profileId, key)
@@ -773,12 +891,24 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * missing-key retry can provision-then-retry. The error deliberately does
 	 * NOT contain the PXE_STORE_KEY_MISSING marker: re-provisioning cannot
 	 * rescue a stale-generation op, so the client must not retry it.
+	 *
+	 * ONE non-live case passes: `deleted` under a DIFFERENT generation than the
+	 * capture. That op belongs to a same-id re-imported SUCCESSOR booting before
+	 * its first provision — not to the erased incarnation. It must fall through
+	 * to the missing-key path (the predecessor's key was crypto-erased, so the
+	 * runtime bind throws PXE_STORE_KEY_MISSING) and the client's provision —
+	 * which `provisionChainStoreKey` explicitly admits over deleted(other gen) —
+	 * flips the lifecycle live. Hard-rejecting here deadlocked the successor
+	 * forever: the only provision trigger is that retry marker, which this
+	 * error path deliberately suppresses (delete profile → re-import same seed
+	 * → every op rejected until the offscreen document restarted).
 	 */
 	private assertGenerationCurrent(network: NetworkInfo): void {
 		const captured = network.pxeGeneration
 		if (!captured) return
 		const current = this.profileLifecycles.get(network.profileId)
 		if (!current) return
+		if (current.kind === "deleted" && current.gen !== captured) return
 		if (current.kind !== "live" || current.gen !== captured) {
 			throw new Error(
 				`pxe op rejected: profile ${network.profileId} is ${current.kind} (generation ${current.gen === captured ? "matches" : "superseded"}) — the capture is stale`,
@@ -798,7 +928,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// raced concurrent readers + the SAH-pool lock (#281 D3). The read is
 			// fully released before the write is requested — no read→write upgrade.
 			const missed = Symbol("runtime-miss")
-			const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+			const chainKey = this.chainKey(network.profileId, network.chainId)
+			const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
 				const result = await barrier.read(async () => {
 					return chainGuard.read(async () => {
@@ -814,25 +945,51 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
-						if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-							throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-						}
+						// A stale op parked at this rebind can outlive a clearProfileState
+						// (which never bumps the CHAIN purge epoch) — without re-asserting
+						// the generation here, `ensure` would rebuild a runtime/store for
+						// the erased incarnation using the successor's key. Same assert,
+						// same placement, as withPxeWrite's ensure.
+						this.assertGenerationCurrent(network)
+						this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})
 				})
 			}
 			throw new Error(`${label}: chain runtime kept rebinding/vanishing after ${PxeService.MAX_RUNTIME_BIND_ATTEMPTS} attempts`)
 		} catch (err) {
-			this.logError(`[READ] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("READ", label, start, err)
 			throw err
 		}
 	}
 
-	private async withPxeWrite<T>(label: string, network: NetworkInfo, fn: (pxe: PXE, node: AztecNode) => Promise<T>): Promise<T> {
+	/**
+	 * A `PXE_STORE_KEY_MISSING` rejection is a designed protocol step, not an
+	 * incident: keys live in offscreen memory only, so the FIRST profile-scoped
+	 * op after an offscreen boot misses and the SW client derives +
+	 * re-provisions + retries once. Logging it at error painted three red lines
+	 * on every cold start for a condition that self-heals in ~1s; a retry that
+	 * ALSO fails still surfaces at the caller. Everything else stays error.
+	 */
+	private logOpFailure(kind: "READ" | "WRITE", label: string, start: number, err: unknown): void {
+		const message = errorMessageFromUnknown(err)
+		if (message.includes(PXE_STORE_KEY_MISSING)) {
+			this.logDebug(`[${kind}] ${label} pre-provision miss after ${Date.now() - start}ms (client re-provisions + retries)`)
+		} else {
+			this.logError(`[${kind}] ${label} failed after ${Date.now() - start}ms`, message)
+		}
+	}
+
+	private async withPxeWrite<T>(
+		label: string,
+		network: NetworkInfo,
+		fn: (pxe: PXE, node: AztecNode, runtime: ChainRuntime) => Promise<T>,
+	): Promise<T> {
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
-		const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+		const chainKey = this.chainKey(network.profileId, network.chainId)
+		const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 		try {
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
@@ -841,20 +998,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 					// A write op that captured NetworkInfo before a mid-flight clearChainState must
 					// NOT resurrect the purged chain by re-creating its runtime + a fresh OPFS store
 					// (concurrency audit MED #4 — the read path fenced this but the write path called
-					// ensure directly). Same epoch check as withPxeRead.
-					if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-						throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-					}
+					// ensure directly). Same epoch check as withPxeRead — now the shared fence.
+					this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)
-					const result = await fn(runtime.pxe, runtime.node)
+					const result = await fn(runtime.pxe, runtime.node, runtime)
 					this.logDebug(`[DEBUG] [WRITE] ${label} completed (${Date.now() - start}ms)`)
 					return result
 				})
 			})
 		} catch (err) {
-			this.logError(`[WRITE] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("WRITE", label, start, err)
 			throw err
 		}
 	}

@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 
@@ -73,7 +73,7 @@ test.skipIf(!hasConfig)(
 		await approveExecute(grantPopup)
 		step("grant popup approved; awaiting grant result")
 		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 120_000)
-		expect(grantResult.status).toBe("ok")
+		await assertPgOk(page, grantResult, "authwit-consume-smoke:grantResult")
 
 		// The RPC resolves at SUBMIT; the consume's public simulation reads
 		// the registry, so the grant must be MINED first.
@@ -103,6 +103,6 @@ test.skipIf(!hasConfig)(
 		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 240_000)
 		// ok ⇒ the build's public simulation passed the AuthRegistry check —
 		// the approval existed and B was the authorized caller.
-		expect(consumeResult.status).toBe("ok")
+		await assertPgOk(page, consumeResult, "authwit-consume-smoke:consumeResult")
 	},
 )

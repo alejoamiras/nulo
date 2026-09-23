@@ -30,6 +30,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
 import { PxeService, type IProfileReader } from "./service"
+import { LogLevel } from "@nulo/wallet-core/logger"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -298,5 +299,58 @@ describe("PxeService deletion honesty (finding D)", () => {
 		disposeShouldFail = false
 		await service.clearProfileState("p1", "gen-1")
 		expect(barriers.has("p1")).toBe(false)
+	})
+})
+
+describe("PxeService op-failure log classification", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: {
+				onMessage: { addListener: () => {}, removeListener: () => {} },
+				sendMessage: () => Promise.resolve(),
+			},
+		})
+	})
+	afterEach(() => {
+		vi.unstubAllGlobals()
+	})
+
+	function makeSpyLoggerService(factory: PxeFactory) {
+		const calls: unknown[][] = []
+		const logger: ILogger = {
+			log: (...args: unknown[]) => {
+				calls.push(args)
+			},
+		}
+		const service = new PxeService(noopProfiles, logger, factory)
+		;(service as unknown as { initialized: boolean }).initialized = true
+		return { service, calls }
+	}
+	const errorCalls = (calls: unknown[][]) => calls.filter((c) => c[1] === LogLevel.Error)
+
+	test("PXE_STORE_KEY_MISSING logs at DEBUG, not error — the client's re-provision retry is the designed recovery", async () => {
+		// The cold-start shape: first profile-scoped op after an offscreen boot,
+		// before the SW has (re)provisioned the in-memory store key. Three of
+		// these painted error-level lines on every fresh unlock.
+		const factory: PxeFactory = {
+			createChainRuntime: async () => {
+				throw new Error("PXE_STORE_KEY_MISSING: no store key provisioned for profile p1")
+			},
+		}
+		const { service, calls } = makeSpyLoggerService(factory)
+		await expect(service.getContractInstance(network, address)).rejects.toThrow(/PXE_STORE_KEY_MISSING/)
+		expect(errorCalls(calls)).toEqual([])
+		expect(calls.some((c) => c[1] === LogLevel.Debug && String(c[2]).includes("pre-provision miss"))).toBe(true)
+	})
+
+	test("any OTHER op failure still logs at ERROR (the downgrade is marker-scoped)", async () => {
+		const factory: PxeFactory = {
+			createChainRuntime: async () => {
+				throw new Error("store exploded")
+			},
+		}
+		const { service, calls } = makeSpyLoggerService(factory)
+		await expect(service.getContractInstance(network, address)).rejects.toThrow("store exploded")
+		expect(errorCalls(calls).length).toBeGreaterThan(0)
 	})
 })

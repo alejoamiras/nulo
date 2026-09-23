@@ -33,7 +33,7 @@ const handleReset = () => {
 					</Flex>
 
 					<Text size="14" weight="500" color="body" height="140" align="center" style="padding: 0 12px">
-						Password recovery is not possible. Delete this profile, then re-import it with its seed phrase or secret key.
+						Password recovery is not possible. Delete this profile, then re-import it with its recovery phrase.
 					</Text>
 				</Flex>
 
@@ -49,10 +49,9 @@ const handleReset = () => {
 				</ItemsContainer>
 
 				<ItemsContainer>
-					<!-- TODO: Update URL when Nulo domain is ready -->
 					<SettingItem
 						title="Report issue with authorization"
-						to="https://nulo.sh/forms/report-issue"
+						to="mailto:hello@nulo.sh?subject=Nulo%20authorization%20issue"
 						icon="help"
 						external
 						data-testid="forgot-report-btn"

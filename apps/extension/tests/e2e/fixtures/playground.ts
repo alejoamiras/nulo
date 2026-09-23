@@ -8,8 +8,9 @@
  *   - waiting for a result row to settle (using monotonic `data-result-seq`)
  *   - asserting deterministic absence of an approval popup (no new browser target)
  */
-import type { Page } from "puppeteer"
+import type { Page, Target } from "puppeteer"
 import { inject } from "vitest"
+import { EXTENSION_SCHEME, newPage } from "./browser"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
 import { dumpDeepDiagnostics } from "./journal"
 
@@ -26,7 +27,7 @@ export const PLAYGROUND_TEST_URL = (() => {
  * persistence and the protocol log so the DOM stays minimal).
  */
 export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
-	const page = await ctx.browser.newPage()
+	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
 	const url = PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
@@ -39,9 +40,38 @@ export async function clickPgButton(page: Page, name: string): Promise<void> {
 	await clickByTestId(page, `pg-btn-${name}`)
 }
 
+export type PgBundle = "accounts" | "transaction" | "transaction-contracts"
+
+/** Pick the capability bundle the next `requestCapabilities` click sends. */
+export async function selectPgBundle(page: Page, bundle: PgBundle): Promise<void> {
+	await page.evaluate((b) => {
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+		if (!select) throw new Error("pg-bundle-select not present on playground page")
+		select.value = b
+		select.dispatchEvent(new Event("change", { bubbles: true }))
+	}, bundle)
+}
+
 /** Set a playground input value via the v-model-aware `replaceInputValue`. */
 export async function setPgInput(page: Page, name: string, value: string): Promise<void> {
 	await replaceInputValue(page, `[data-testid="pg-input-${name}"]`, value)
+}
+
+/** Set a playground textarea (the contract-instance JSON inputs) through the prototype setter,
+ *  so the playground's `input` listener sees the value the way a typed one lands. */
+export async function setPgTextarea(page: Page, name: string, value: string): Promise<void> {
+	const selector = `[data-testid="pg-input-${name}"]`
+	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
+	await page.evaluate(
+		({ sel, val }: { sel: string; val: string }) => {
+			const el = document.querySelector<HTMLTextAreaElement>(sel)
+			if (!el) throw new Error(`setPgTextarea: ${sel} not present`)
+			const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
+			setter?.call(el, val)
+			el.dispatchEvent(new Event("input", { bubbles: true }))
+		},
+		{ sel: selector, val: value },
+	)
 }
 
 /** Read the current `data-status` of the playground header pill. */
@@ -106,6 +136,47 @@ export async function waitForPgResult(page: Page, method: string, fromSeq: numbe
 	return parsed
 }
 
+/** PER-FIELD cap on each dumped payload (the result/error field and the
+ *  pg-error-text line are bounded separately, so a full assertPgOk message
+ *  tops out around twice this plus fixed framing): big enough for every
+ *  legitimate error message, small enough that a hostile/degenerate payload
+ *  can't flood CI logs. */
+const PG_DUMP_MAX_CHARS = 2_000
+
+/** Bounded stringify of the branch-CORRECT payload field: `errorJson` when the
+ *  result settled to "error", `resultJson` when it settled "ok" — the two are
+ *  mutually exclusive on `PgResult`, so dumping the wrong one prints nothing. */
+export function formatPgMismatch(result: PgResult): string {
+	const field = result.status === "error" ? "errorJson" : "resultJson"
+	let payload: string
+	try {
+		payload = JSON.stringify(result.status === "error" ? result.errorJson : result.resultJson) ?? "undefined"
+	} catch {
+		payload = String(result.status === "error" ? result.errorJson : result.resultJson)
+	}
+	const bounded =
+		payload.length > PG_DUMP_MAX_CHARS
+			? `${payload.slice(0, PG_DUMP_MAX_CHARS)}…[truncated ${payload.length - PG_DUMP_MAX_CHARS} chars]`
+			: payload
+	return `${result.method} seq=${result.seq} status=${result.status}; ${field}=${bounded}`
+}
+
+/**
+ * Assert a settled pg result is "ok"; on mismatch, throw with the bounded
+ * payload dump plus the playground's own last-error line.
+ */
+export async function assertPgOk(page: Page, result: PgResult, label: string): Promise<void> {
+	if (result.status === "ok") return
+	const pgError = await page
+		.evaluate(() => document.querySelector('[data-testid="pg-error-text"]')?.textContent ?? "")
+		.catch(() => "<pg-error-text read failed>")
+	const boundedPgError =
+		pgError.length > PG_DUMP_MAX_CHARS
+			? `${pgError.slice(0, PG_DUMP_MAX_CHARS)}…[truncated ${pgError.length - PG_DUMP_MAX_CHARS} chars]`
+			: pgError
+	throw new Error(`[${label}] expected ok: ${formatPgMismatch(result)}; pg-error-text="${boundedPgError}"`)
+}
+
 /**
  * Like {@link waitForPgResult} but collects `count` settled results with
  * `seq > fromSeq`, ORDER-INDEPENDENTLY (returned ascending by seq). Concurrent
@@ -159,11 +230,12 @@ export async function waitForPgResults(page: Page, method: string, fromSeq: numb
 /**
  * Run `action` and assert NO new approval popup target opens within `timeoutMs`.
  *
- * Combines:
- *   - `browser.targets()` count snapshot before/after — any new target
- *     (popup, content script, page) shows up here regardless of how it
- *     was created.
- *   - `waitForPgResult(method, fromSeq)` so we know the dApp call completed.
+ * "New" is decided by Target IDENTITY: the set of page targets alive before the action, plus a
+ * `targetcreated` listener armed for its duration. It is deliberately not a URL diff — a popup
+ * page that already exists can change its URL while the call runs (the lock redirect
+ * `#/popup/register → #/popup/auth` lands whenever that page's own profile read returns), and a
+ * URL diff reports that as a popup that "appeared". Only page targets carrying the extension's
+ * popup document count; a proof worker or a content script is not a popup.
  *
  * Throws if a popup target appears OR the result doesn't land in time.
  */
@@ -175,25 +247,24 @@ export async function callExpectingNoPopup(
 	timeoutMs = 30_000,
 ): Promise<PgResult> {
 	const fromSeq = await snapshotResultSeq(page)
-	// Only count user-visible page targets; profileTx and other proof-generating
-	// methods spawn worker bundles (thread.worker.js) which are NOT popups.
-	const isPagePopup = (url: string) => url.startsWith("chrome-extension://") && url.includes("/src/popup/index.html")
-	const popupsBefore = new Set(
-		ctx.browser
-			.targets()
-			.filter((t) => t.type() === "page" && isPagePopup(t.url()))
-			.map((t) => t.url()),
-	)
-
-	await action()
-	const result = await waitForPgResult(page, method, fromSeq, timeoutMs)
-
-	const newPopups = ctx.browser
-		.targets()
-		.filter((t) => t.type() === "page" && isPagePopup(t.url()) && !popupsBefore.has(t.url()))
-		.map((t) => t.url())
-	if (newPopups.length > 0) {
-		throw new Error(`Expected no popup but ${newPopups.length} new popup target(s) appeared: ${newPopups.join(", ")}`)
+	const isPagePopup = (t: Target) =>
+		t.type() === "page" && t.url().startsWith(EXTENSION_SCHEME) && t.url().includes("/src/popup/index.html")
+	const before = new Set(ctx.browser.targets())
+	const created: Target[] = []
+	const onCreated = (t: Target) => created.push(t)
+	ctx.browser.on("targetcreated", onCreated)
+	try {
+		await action()
+		const result = await waitForPgResult(page, method, fromSeq, timeoutMs)
+		// A window created during the call may still be navigating when its `targetcreated` fired, so
+		// the popup test reads each candidate's URL now, not at creation.
+		const candidates = new Set([...created, ...ctx.browser.targets().filter((t) => !before.has(t))])
+		const newPopups = [...candidates].filter(isPagePopup).map((t) => t.url())
+		if (newPopups.length > 0) {
+			throw new Error(`Expected no popup but ${newPopups.length} new popup target(s) appeared: ${newPopups.join(", ")}`)
+		}
+		return result
+	} finally {
+		ctx.browser.off("targetcreated", onCreated)
 	}
-	return result
 }

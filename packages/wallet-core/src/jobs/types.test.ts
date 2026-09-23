@@ -10,6 +10,7 @@ describe("KNOWN_JOB_ERROR_KINDS (drift guard)", () => {
 		const produced = [
 			"transfer",
 			"dapp_execute",
+			"duplicate_initialization",
 			"prover",
 			"network",
 			"unknown",

@@ -1,3 +1,4 @@
+import { memoizeAsyncBy } from "./async-memo"
 import { type ContractArtifact, loadContractArtifact } from "@aztec/stdlib/abi"
 import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
 import { AuthRegistryArtifact } from "@aztec/standard-contracts/auth-registry"
@@ -85,24 +86,20 @@ export const ALL_CATALOG_KEYS: readonly CatalogKey[] = [
 	"privateFpc",
 ]
 
+// The store is held locally (not helper-internal) because the test reset
+// below clears the WHOLE map — the helper's reset is deliberately per-key.
 const cache = new Map<CatalogKey, Promise<CatalogEntry>>()
+const catalogMemo = memoizeAsyncBy<CatalogKey, CatalogEntry>(async (key) => {
+	const artifact = rawArtifact[key]()
+	const contractClass = await getContractClassFromArtifact(artifact)
+	return { artifact, classId: contractClass.id.toString() }
+}, cache)
 
 /** Load one artifact and compute its class id, once. Class ids are computed
  *  lazily (Poseidon hashing the artifact) and cached per key. Retry allowed
  *  after a transient failure. */
 export function getCatalogEntry(key: CatalogKey): Promise<CatalogEntry> {
-	const existing = cache.get(key)
-	if (existing) return existing
-	const entry = (async () => {
-		const artifact = rawArtifact[key]()
-		const contractClass = await getContractClassFromArtifact(artifact)
-		return { artifact, classId: contractClass.id.toString() }
-	})()
-	cache.set(key, entry)
-	entry.catch(() => {
-		if (cache.get(key) === entry) cache.delete(key)
-	})
-	return entry
+	return catalogMemo.get(key)
 }
 
 /** Reset the per-key cache. Test-only. */

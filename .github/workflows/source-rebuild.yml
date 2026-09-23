@@ -1,0 +1,199 @@
+name: source-rebuild
+run-name: "source-rebuild → ${{ inputs.tag || github.sha }}"
+
+# Does the source package a Mozilla reviewer receives rebuild the shipped Firefox add-on byte for
+# byte, on their machine shape (Ubuntu ARM64) and on x86_64? Advisory, no secrets, read-only.
+#
+# One SHA is resolved for everything: the tag's commit when `tag` is given, else the workflow's own.
+# The SHIPPED bytes come from exactly one of two mutually exclusive jobs: the GitHub Release's
+# nulo-firefox-<v>.zip for a tag, or the same reusable build the release runs for a bare commit.
+# Each rebuild job unpacks `git archive` of that SHA under $RUNNER_TEMP — outside any checkout, so
+# an archive that only builds with the parent repository around is caught — and runs the one script
+# the reviewer instructions name. `compare` diffs each rebuild against the shipped tree; any
+# difference fails, because Mozilla's rule is "There must be no differences".
+#
+# `gh workflow run source-rebuild.yml --ref main -f tag=vX.Y.Z`
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (e.g. v0.27.0). Empty: rebuild this commit against a fresh reference build."
+        required: false
+        type: string
+        default: ""
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-rebuild-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  target:
+    name: resolve the commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.t.outputs.sha }}
+      version: ${{ steps.t.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: t
+        env:
+          TAG: ${{ inputs.tag }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$TAG" ]; then
+            git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1 || { echo "::error::tag $TAG not found"; exit 1; }
+            SHA=$(git rev-list -n 1 "$TAG")
+          else
+            SHA="$HEAD_SHA"
+          fi
+          VERSION=$(git show "$SHA:apps/extension/package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+          [ -n "$VERSION" ] || { echo "::error::no version in apps/extension/package.json at $SHA"; exit 1; }
+          if [ -n "$TAG" ] && [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::tag $TAG names a tree at version $VERSION"; exit 1
+          fi
+          { echo "sha=$SHA"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+          { echo "## source-rebuild"; echo "- sha: \`$SHA\`"; echo "- version: $VERSION"; echo "- reference: ${TAG:+release $TAG}${TAG:-fresh build}"; } >> "$GITHUB_STEP_SUMMARY"
+
+  # The shipped bytes for a tag: the release asset, unpacked.
+  reference-release:
+    name: reference (release asset)
+    needs: target
+    if: inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.target.outputs.version }}
+    steps:
+      - name: Download and verify the Firefox zip
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "nulo-firefox-${VERSION}.zip" --pattern SHASUMS256.txt --dir "$RUNNER_TEMP/rel"
+          cd "$RUNNER_TEMP/rel"
+          grep -E " nulo-firefox-${VERSION}\.zip$" SHASUMS256.txt | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/reference"
+          unzip -q "nulo-firefox-${VERSION}.zip" -d "$RUNNER_TEMP/reference"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reference
+          path: ${{ runner.temp }}/reference
+          include-hidden-files: true
+          retention-days: 3
+
+  # The shipped bytes for a bare commit: the workflow the release itself uses, at that commit.
+  reference-build:
+    name: reference (fresh build)
+    needs: target
+    if: inputs.tag == ''
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ needs.target.outputs.sha }}
+      target: firefox
+      upload_artifacts: true
+
+  rebuild-x64:
+    name: rebuild on x86_64
+    needs: target
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Unpack the source archive outside the checkout and rebuild
+        env:
+          VERSION: ${{ needs.target.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          git archive --format=tar --prefix="nulo-${VERSION}/" HEAD | tar -x -C "$RUNNER_TEMP/src"
+          cd "$RUNNER_TEMP/src/nulo-${VERSION}"
+          /usr/bin/time -v apps/extension/scripts/source-rebuild.sh "$VERSION" 2> "$RUNNER_TEMP/time.txt"
+          grep -E "Maximum resident|Elapsed" "$RUNNER_TEMP/time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rebuild-x64
+          path: ${{ runner.temp }}/src/nulo-${{ needs.target.outputs.version }}/apps/extension/dist/firefox
+          include-hidden-files: true
+          retention-days: 3
+
+  rebuild-arm64:
+    name: rebuild on ARM64 (the reviewer's machine shape)
+    needs: target
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Unpack the source archive outside the checkout and rebuild
+        env:
+          VERSION: ${{ needs.target.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          git archive --format=tar --prefix="nulo-${VERSION}/" HEAD | tar -x -C "$RUNNER_TEMP/src"
+          cd "$RUNNER_TEMP/src/nulo-${VERSION}"
+          /usr/bin/time -v apps/extension/scripts/source-rebuild.sh "$VERSION" 2> "$RUNNER_TEMP/time.txt"
+          grep -E "Maximum resident|Elapsed" "$RUNNER_TEMP/time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rebuild-arm64
+          path: ${{ runner.temp }}/src/nulo-${{ needs.target.outputs.version }}/apps/extension/dist/firefox
+          include-hidden-files: true
+          retention-days: 3
+
+  compare:
+    name: compare rebuilds with the shipped tree
+    needs: [target, reference-release, reference-build, rebuild-x64, rebuild-arm64]
+    # Exactly one reference job ran and succeeded; the other was skipped by the `tag` input.
+    if: |
+      always() &&
+      needs.rebuild-x64.result == 'success' &&
+      needs.rebuild-arm64.result == 'success' &&
+      ((needs.reference-release.result == 'success' && needs.reference-build.result == 'skipped') ||
+       (needs.reference-build.result == 'success' && needs.reference-release.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.tag != '' && 'reference' || 'extension-firefox' }}
+          path: ${{ runner.temp }}/reference
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rebuild-x64
+          path: ${{ runner.temp }}/rebuild-x64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rebuild-arm64
+          path: ${{ runner.temp }}/rebuild-arm64
+      - name: diff -r each rebuild against the reference
+        run: |
+          fail=0
+          for arch in x64 arm64; do
+            if diff -rq "$RUNNER_TEMP/reference" "$RUNNER_TEMP/rebuild-$arch" > "$RUNNER_TEMP/diff-$arch.txt"; then
+              echo "rebuild-$arch: identical to the shipped tree" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              fail=1
+              n=$(wc -l < "$RUNNER_TEMP/diff-$arch.txt")
+              { echo "::error::rebuild-$arch differs from the shipped tree in $n paths"; head -n 50 "$RUNNER_TEMP/diff-$arch.txt"; } | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit $fail

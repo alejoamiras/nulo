@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 
 import { poseidon2HashBytes } from "@aztec/foundation/crypto/sync"
 import { Fr } from "@aztec/foundation/curves/bn254"
@@ -11,13 +12,20 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contra
 import { describe, expect, it } from "vitest"
 
 import {
+	deriveBridgeSecret,
 	DOM_SEP__FPC_BRIDGE_SECRET,
+	ownGasCeiling,
+	ownGasTxs,
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
-	deriveBridgeSecret,
+	PRIVATE_HUB_CLAIM_GAS,
+	PRIVATE_HUB_REGISTER_GAS,
 	privateFeeJuicePayment,
+	privateFpcFeeLimit,
 	privateFuelSecretHash,
 	privateMintAndPayFee,
+	PUBLIC_HUB_CLAIM_GAS,
+	PUBLIC_HUB_REGISTER_CLAIM_GAS,
 } from "./private-fuel"
 
 /**
@@ -28,17 +36,10 @@ import {
  * never a silent drift that strands or misroutes Fee Juice.
  */
 
-/** Resolve a file inside a package WITHOUT its exports map (which blocks ./target/*) — same
- *  node_modules walk the extension's `resolvePackageFile` uses. */
+/** Resolve a file inside a package WITHOUT its exports map (which blocks ./target/*) —
+ *  layout-agnostic via @nulo/resolve-asset, anchored at this declaring workspace. */
 function resolvePackageFile(pkg: string, file: string): string {
-	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
-	let dir = fileURLToPath(new URL(".", import.meta.url))
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", ...parts, file)
-		if (existsSync(candidate)) return candidate
-		dir = dirname(dir)
-	}
-	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
+	return resolvePackageAsset(pkg, file, { from: import.meta.url })
 }
 
 describe("private-fuel keystone", () => {
@@ -71,15 +72,13 @@ describe("private-fuel keystone", () => {
 		},
 	]
 
-	it.each(vectors)("deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)", async ({
-		salt,
-		claimer,
-		secret,
-		secretHash,
-	}) => {
-		expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
-		expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
-	})
+	it.each(vectors)(
+		"deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)",
+		async ({ salt, claimer, secret, secretHash }) => {
+			expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
+			expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
+		},
+	)
 
 	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
 		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
@@ -206,5 +205,59 @@ describe("privateFeeJuicePayment", () => {
 		expect(payload.calls).toHaveLength(1)
 		expect(payload.calls[0].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
 		expect(payload.calls[0].selector.toString()).toBe("0xb596dfae")
+	})
+})
+
+describe("privateFpcFeeLimit", () => {
+	it("is the FPC's getFeeLimit: Σ gasLimit·maxFee over both dimensions, no padding of its own", () => {
+		const fees = { feePerDaGas: 3n, feePerL2Gas: 7n }
+		expect(privateFpcFeeLimit({ daGas: 100, l2Gas: 1_000 }, fees)).toBe(7_300n)
+		expect(privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, fees)).toBe(
+			BigInt(PRIVATE_HUB_CLAIM_GAS.l2Gas) * 7n + BigInt(PRIVATE_HUB_CLAIM_GAS.daGas) * 3n,
+		)
+	})
+
+	it("the hub claim's declared limits stay well under the network's per-tx maximum, or they recreate the unpayable ceiling", () => {
+		// txsLimits.gas on the v5 testnet: daGas 117_668, l2Gas 6_540_000.
+		expect(PRIVATE_HUB_CLAIM_GAS.l2Gas).toBeLessThanOrEqual(6_540_000 / 2)
+		expect(PRIVATE_HUB_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
+	})
+
+	it("a fuel-paying registration declares limits above the claim's and within the per-tx maximum", () => {
+		// The registration publishes a Token instance and binds it in public on top of the FPC's
+		// setup, so it is the heavier of the two; it still has to fit one transaction.
+		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeGreaterThan(PRIVATE_HUB_CLAIM_GAS.l2Gas)
+		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeLessThanOrEqual(6_540_000)
+		expect(PRIVATE_HUB_REGISTER_GAS.daGas).toBeLessThanOrEqual(117_668)
+	})
+})
+
+describe("a hub claim paid from held gas", () => {
+	const fees = { feePerDaGas: 3n, feePerL2Gas: 7n }
+
+	it("sends one public transaction, sized for a registration when the hub does not know the token", () => {
+		expect(ownGasTxs({ isPrivate: false, registers: false })).toEqual({ claim: PUBLIC_HUB_CLAIM_GAS })
+		expect(ownGasTxs({ isPrivate: false, registers: true })).toEqual({ claim: PUBLIC_HUB_REGISTER_CLAIM_GAS })
+		expect(ownGasCeiling({ isPrivate: false, registers: true }, fees)).toBe(privateFpcFeeLimit(PUBLIC_HUB_REGISTER_CLAIM_GAS, fees))
+	})
+
+	it("sends a registration ahead of a private claim, and sets both ceilings aside", () => {
+		expect(ownGasTxs({ isPrivate: true, registers: true })).toEqual({
+			claim: PRIVATE_HUB_CLAIM_GAS,
+			register: PRIVATE_HUB_REGISTER_GAS,
+		})
+		expect(ownGasTxs({ isPrivate: true, registers: false })).toEqual({ claim: PRIVATE_HUB_CLAIM_GAS })
+		expect(ownGasCeiling({ isPrivate: true, registers: true }, fees)).toBe(
+			privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, fees) + privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, fees),
+		)
+	})
+
+	it("the public limits keep the claim's headroom over their derived samples and fit one transaction", () => {
+		// Derived samples: ≈1,320,000 (plain) and ≈1,480,000 (registering) L2 gas; 2.3× headroom; txsLimits 6,540,000.
+		expect(PUBLIC_HUB_CLAIM_GAS.l2Gas).toBeGreaterThanOrEqual(1_320_000 * 2.2)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.l2Gas).toBeGreaterThanOrEqual(1_480_000 * 2.2)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.l2Gas).toBeLessThanOrEqual(6_540_000)
+		expect(PUBLIC_HUB_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
 	})
 })

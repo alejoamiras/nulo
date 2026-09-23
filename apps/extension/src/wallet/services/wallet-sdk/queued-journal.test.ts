@@ -13,7 +13,13 @@ import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { MAX_QUEUED_GLOBAL, MAX_QUEUED_PER_SESSION, tryCreateQueuedJournal, type TryCreateQueuedJournalDeps } from "./queued-journal"
+import {
+	MAX_QUEUED_GLOBAL,
+	MAX_QUEUED_PER_SESSION,
+	failQueuedIfUnclaimed,
+	tryCreateQueuedJournal,
+	type TryCreateQueuedJournalDeps,
+} from "./queued-journal"
 
 function makeSession(sessionId = "session-A"): ActiveSession {
 	return {
@@ -71,6 +77,7 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 		dappSession: dappSession as never,
 		networkSvc: networkSvc as never,
 		account: account as never,
+		stampedProfileId: "profile-1",
 		logger,
 		...overrides,
 	}
@@ -113,8 +120,11 @@ function makeAccountStub(addresses: string[] = ["0xabc"]) {
 
 function makeNetworkStub() {
 	return {
+		// The anchored read: profileId-explicit, never the live active profile.
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		getNetworks: vi.fn<() => Promise<any[]>>(async () => [{ id: "network-row-1", chainId: 1338 }]),
+		getNetworksRaw: vi.fn<(profileId: string, chainId?: number) => Promise<any[]>>(async () => [
+			{ id: "network-row-1", chainId: 1338 },
+		]),
 	}
 }
 
@@ -187,7 +197,7 @@ describe("tryCreateQueuedJournal", () => {
 
 	test("skips when networkService can't resolve a Network row for the session's chainId", async () => {
 		const { deps, networkSvc, journal } = makeDeps()
-		networkSvc.getNetworks.mockResolvedValueOnce([])
+		networkSvc.getNetworksRaw.mockResolvedValueOnce([])
 		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(id).toBeUndefined()
 		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
@@ -357,5 +367,71 @@ describe("tryCreateQueuedJournal — record account", () => {
 
 		expect(id).toBeUndefined()
 		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("a switch racing journal creation is refused: active profile ≠ the session's stamp", async () => {
+		// The message rode a session stamped profile-1, but by the time the
+		// journal path runs, profile-2 is active — no record may be persisted
+		// under either profile (the dispatch guard rejects the message itself).
+		const { deps, profile, journal } = makeDeps()
+		profile.getActiveProfile.mockResolvedValue({ id: "profile-2" })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("pre-persist belt: a switch landing during the anchored reads is caught at the persist lock", async () => {
+		// First read (entry check) sees the stamped profile; the re-read inside
+		// the creation lock sees the switch — the record must not persist.
+		const { deps, profile, journal } = makeDeps()
+		profile.getActiveProfile.mockResolvedValueOnce({ id: "profile-1" }).mockResolvedValue({ id: "profile-2" })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("the network read is anchored to the stamped profile, not the live one", async () => {
+		const { deps, networkSvc } = makeDeps()
+		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(networkSvc.getNetworksRaw).toHaveBeenCalledWith("profile-1", expect.anything())
+	})
+
+	test("the dapp-session lookup is anchored to the stamped profile (silently revertible without this pin)", async () => {
+		const { deps, dappSession } = makeDeps()
+		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(dappSession.tryGetDappSessionByOriginAndChain).toHaveBeenCalledWith(expect.anything(), expect.anything(), "profile-1")
+	})
+})
+
+describe("failQueuedIfUnclaimed — CAS against a concurrent claim (N-07)", () => {
+	test("a record claimed (queued→pending) is NOT failed — the lock-held re-read stands down", async () => {
+		const { deps, journal } = makeDeps()
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeDefined()
+		// The claim lands first. A racy read-then-transition with a stale
+		// "queued" snapshot would now legally run pending→failed; the CAS's
+		// re-read under the transition lock must stand down instead. Stub the
+		// LEGACY read path so a reverted implementation reads a stale snapshot.
+		await journal.transitionOperation(id as string, { stage: "pending" })
+		const staleSnapshot = { id, progress: { stage: "queued" } }
+		vi.spyOn(journal, "getOperation").mockResolvedValueOnce(staleSnapshot as never)
+		await failQueuedIfUnclaimed(journal, id as string, "boom", deps.logger)
+		vi.restoreAllMocks()
+		expect((await journal.getOperation(id as string))?.progress.stage).toBe("pending")
+	})
+
+	test("a still-queued record IS failed with the popup_bound kind (positive control)", async () => {
+		const { deps, journal } = makeDeps()
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		await failQueuedIfUnclaimed(journal, id as string, "session gone", deps.logger)
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.progress.stage).toBe("failed")
+		expect(rec?.error?.kind).toBe("popup_bound")
+	})
+
+	test("a missing record is a silent no-op (byte-equivalent to the legacy behavior)", async () => {
+		const { deps, journal } = makeDeps()
+		await failQueuedIfUnclaimed(journal, "no-such-id", "gone", deps.logger)
+		expect(await journal.countOperations({ stage: "failed" })).toBe(0)
 	})
 })

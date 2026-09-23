@@ -9,7 +9,7 @@ const STUBS = {
 	Spinner: { template: '<span data-testid="stub-spinner" />' },
 	TransactionCardLayout: {
 		template: `
-			<div :data-testid="testId" :data-stage="stage">
+			<div :data-testid="testId" :data-stage="stage" :data-backend="backend">
 				<span class="title">{{ title }}</span>
 				<slot name="title-trailing" />
 				<slot name="badge" />
@@ -19,7 +19,7 @@ const STUBS = {
 				<span class="symbol">{{ amountSymbol }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage"],
+		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage", "backend"],
 	},
 }
 
@@ -73,6 +73,15 @@ describe("composite/TransactionAwaitingCard", () => {
 			const w = mountCard({ stage: s })
 			expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe(s)
 		}
+	})
+
+	test("backend threads to data-backend next to data-stage; the subtitle carries its testid", () => {
+		const w = mountCard({ stage: "proving", backend: "browser", subtitle: "Proving in browser…" })
+		const card = w.find("[data-testid='tx-awaiting-card']")
+		expect(card.attributes("data-stage")).toBe("proving")
+		expect(card.attributes("data-backend")).toBe("browser")
+		expect(w.find("[data-testid='tx-awaiting-subtitle']").text()).toBe("Proving in browser…")
+		expect(mountCard({ stage: "proving" }).find("[data-testid='tx-awaiting-card']").attributes("data-backend")).toBeUndefined()
 	})
 
 	test("data-stage is omitted when stage prop is null/default (no in-flight journal binding)", () => {
@@ -140,6 +149,64 @@ describe("composite/TransactionAwaitingCard", () => {
 			const events = w.emitted("cancel")
 			expect(events).toBeTruthy()
 			expect(events?.[0]).toEqual(["abc123"])
+		})
+	})
+
+	describe("focus surface (queued only)", () => {
+		test("at queued: the whole card click and its own button both emit 'focus' with the jobId, once each", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+			expect(w.attributes("title")).toBe("Show the approval window")
+			const focusBtn = w.find('[data-testid="tx-awaiting-focus"]')
+			expect(focusBtn.exists()).toBe(true)
+			expect(focusBtn.attributes("aria-label")).toBe("Show the approval window")
+
+			await w.trigger("click")
+			await focusBtn.trigger("click")
+			expect(w.emitted("focus")).toEqual([["abc123"], ["abc123"]])
+		})
+
+		test("no nested interactive controls: the card carries no ARIA role, and the two buttons are siblings", () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+			expect(w.find('[role="button"]').exists()).toBe(false)
+			expect(w.attributes("tabindex")).toBeUndefined()
+			const focusBtn = w.find('[data-testid="tx-awaiting-focus"]')
+			const cancelBtn = w.find('[data-testid="tx-awaiting-cancel"]')
+			expect(focusBtn.find('[data-testid="tx-awaiting-cancel"]').exists()).toBe(false)
+			expect(cancelBtn.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
+		})
+
+		test("the cancel button's click emits only 'cancel' (never bubbles into a focus)", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+
+			await w.find('[data-testid="tx-awaiting-cancel"]').trigger("click")
+			expect(w.emitted("cancel")).toEqual([["abc123"]])
+			expect(w.emitted("focus")).toBeUndefined()
+		})
+
+		test("past queued the card is inert: no focus button, no title, click emits nothing", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "proving" })
+			expect(w.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
+			expect(w.attributes("title")).toBeUndefined()
+
+			await w.trigger("click")
+			expect(w.emitted("focus")).toBeUndefined()
+		})
+
+		test("queued without a jobId is inert (nothing to focus)", () => {
+			const w = mountCard({ cancellable: true, jobId: null, stage: "queued" })
+			expect(w.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
+		})
+
+		test("with the REAL layout, two buttons widen the reserved action space; one button keeps the 20px reservation", () => {
+			const { TransactionCardLayout: _stub, ...stubs } = STUBS
+			const real = (props: Record<string, unknown>) => mount(TransactionAwaitingCard, { props, global: { stubs } })
+
+			const two = real({ cancellable: true, jobId: "abc123", stage: "queued", title: "A very long dApp title that fills the row" })
+			expect(two.html()).toMatch(/wrapper_two_actions/)
+
+			const one = real({ cancellable: true, jobId: "abc123", stage: "proving" })
+			expect(one.html()).toMatch(/wrapper_has_actions/)
+			expect(one.html()).not.toMatch(/wrapper_two_actions/)
 		})
 	})
 })

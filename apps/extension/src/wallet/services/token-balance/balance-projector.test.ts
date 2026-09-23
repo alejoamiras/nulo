@@ -42,6 +42,7 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 })
 
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { PxeStaleAnchorError } from "@nulo/extension-messaging/errors"
 import { BalanceProjector } from "./balance-projector"
 import type { TokenBalanceRaw } from "./spec"
 import type { Token } from "@/wallet/services/token/service"
@@ -70,6 +71,9 @@ function balance(id: number, tokenId: number, account = ACCOUNT_A): TokenBalance
 		id,
 		token: tokenId,
 		account,
+		profileId: "p1",
+		chainId: 1,
+		contract: `0x${tokenId.toString(16).padStart(64, "0")}`,
 		updatedAt: 0,
 	}
 }
@@ -199,7 +203,7 @@ describe("BalanceProjector", () => {
 	test("unknown token id → error entry preserves message", async () => {
 		const projector = makeProjector({ tokens: [] })
 		const result = await projector.project([balance(99, 999)])
-		expect(result[0]).toEqual({ kind: "error", id: 99, error: "Unknown token #999" })
+		expect(result[0]).toEqual({ kind: "error", id: 99, error: "Unknown token #999", transient: false })
 		expect(batchedViewSimulationMock).not.toHaveBeenCalled()
 	})
 
@@ -209,7 +213,17 @@ describe("BalanceProjector", () => {
 		batchedViewSimulationMock.mockRejectedValueOnce(new Error("PXE went away"))
 		const result = await projector.project([balance(1, 1), balance(2, 1)])
 		expect(result).toHaveLength(2)
-		expect(result.every((r) => r.kind === "error" && r.error === "PXE went away")).toBe(true)
+		expect(result.every((r) => r.kind === "error" && r.error === "PXE went away" && !r.transient)).toBe(true)
+	})
+
+	test("only a PxeStaleAnchorError marks the chunk's errors transient", async () => {
+		const t = token(1)
+		const projector = makeProjector({ tokens: [t] })
+		batchedViewSimulationMock.mockRejectedValueOnce(new PxeStaleAnchorError("simulateTx: stale chain anchor persisted after a resync"))
+		const result = await projector.project([balance(1, 1), balance(2, 1)])
+		expect(result).toHaveLength(2)
+		expect(result.every((r) => r.kind === "error" && r.transient)).toBe(true)
+		expect(result[0]).toMatchObject({ error: expect.stringContaining("stale chain anchor") })
 	})
 
 	test("two-pass enqueue: all PUBLIC calls precede all PRIVATE calls in the chunk (regression pin for fast-path-internal-views)", async () => {

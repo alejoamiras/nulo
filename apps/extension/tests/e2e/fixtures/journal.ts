@@ -23,6 +23,7 @@
  */
 import { execSync } from "node:child_process"
 import type { Page } from "puppeteer"
+import { EXTENSION_SCHEME } from "./browser"
 
 /** Non-terminal, claimed stages — "an op is in flight right now". */
 export const ACTIVE_STAGES = ["pending", "simulating", "proving", "submitting"] as const
@@ -38,6 +39,7 @@ export type InFlightCounts = { active: number; queued: number; total: number }
  * were copy-pasted across concurrency tests.
  */
 export async function readDappExecuteRecords(page: Page): Promise<DappExecuteView[]> {
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 16 — one tolerant in-browser journal scan projecting the exact lean record view
 	return page.evaluate(async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: { id: string; stage: string; sessionId?: string }[] = []
@@ -59,6 +61,49 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 	})
 }
 
+/** A send's record: its owner and how far it got. `enteredProveAt` is stamped just before a held
+ *  proof gate starts its release timer, so it is a lower bound on that start. */
+export type SendRecordView = { id: string; kind: "transfer" | "dapp_execute"; profileId: string; stage: string; enteredProveAt?: number }
+
+/** Snapshot every send record, popup (`transfer`) and dApp (`dapp_execute`), of every profile. */
+export async function readSendRecords(page: Page): Promise<SendRecordView[]> {
+	const rows = await page.evaluate(async () => {
+		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+		return Object.entries(all).flatMap(([key, raw]) => (key.startsWith("nulo:journal@") ? [raw] : []))
+	})
+	return rows.flatMap(toSendRecordView)
+}
+
+function toSendRecordView(raw: unknown): SendRecordView[] {
+	type Stored = { id?: string; kind?: string; profileId?: string; progress?: { stage?: string; enteredProveAt?: number } }
+	let record: Stored | null
+	try {
+		record = (typeof raw === "string" ? JSON.parse(raw) : raw) as Stored | null
+	} catch {
+		return []
+	}
+	if (record?.kind !== "transfer" && record?.kind !== "dapp_execute") return []
+	const { id = "", kind, profileId = "", progress } = record
+	return [{ id, kind, profileId, stage: progress?.stage ?? "?", enteredProveAt: progress?.enteredProveAt }]
+}
+
+/** Wait for a send record `match` accepts, and return it. */
+export async function waitForSendRecord(
+	page: Page,
+	match: (record: SendRecordView) => boolean,
+	timeoutMs = 60_000,
+): Promise<SendRecordView> {
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const records = await readSendRecords(page)
+		const found = records.find(match)
+		if (found) return found
+		if (Date.now() > deadline)
+			throw new Error(`waitForSendRecord: no matching record within ${timeoutMs}ms (records: ${JSON.stringify(records)})`)
+		await new Promise((resolve) => setTimeout(resolve, 250))
+	}
+}
+
 /**
  * Evaluate in the SERVICE-WORKER context (always an extension context, so
  * `chrome.storage` is defined) rather than the passed page. Critical because the
@@ -70,7 +115,7 @@ async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R
 	const target = page
 		.browser()
 		.targets()
-		.find((t) => t.type() === "service_worker" && t.url().includes("chrome-extension://"))
+		.find((t) => t.type() === "service_worker" && t.url().includes(EXTENSION_SCHEME))
 	if (!target) return "<no service_worker target>"
 	const worker = await target.worker()
 	if (!worker) return "<service_worker has no worker handle>"
@@ -101,7 +146,7 @@ async function extCtxEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) 
 		}
 	}
 	for (const t of page.browser().targets()) {
-		if (t.type() !== "page" || !t.url().includes("chrome-extension://")) continue
+		if (t.type() !== "page" || !t.url().includes(EXTENSION_SCHEME)) continue
 		try {
 			const p = await t.page()
 			if (p && (await isExtCtx(p))) return await p.evaluate(fn, ...args)
@@ -170,6 +215,7 @@ export async function dumpAuthwitMeasurement(page: Page, label: string): Promise
  * callers (F1/F2) too. Allowlisted to `dapp_execute` (NOT a `get(null)` dump).
  */
 export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] | string> {
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 18 — one tolerant scan applies the diagnostic allowlist before data crosses into CI artifacts
 	return extCtxEvaluate(page, async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: unknown[] = []
@@ -216,7 +262,13 @@ export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] 
 
 /**
  * The service-worker's own log trail — `LoggerStore` debounce-flushes it to
- * `chrome.storage.session["nulo:logs"]` every 2s (`wallet/logger/store.ts:80`).
+ * `chrome.storage.session["nulo:logs"]` every 2s (`wallet/logger/store.ts`).
+ *
+ * That flush is gated on `developerMode`, which e2e profiles do NOT enable, so this returns an
+ * empty trail unless the test turned it on. Treat it as a best-effort diagnostic aid for a stalled
+ * run: an empty result means "not retained", not "nothing happened". The one caller that asserts
+ * on it (`_probe-console-capture.test.ts`, opt-in and skipped by default) must therefore enable
+ * developer mode itself.
  * Reading it from the test side surfaces HOW FAR execution got — did `acquireSlot`
  * run, did `executionMutex.acquire` resolve, was the journal claim attempted — for
  * the F3 stall whose state otherwise lives only in SW memory. NO production change.
@@ -393,6 +445,7 @@ export async function waitForInFlight(
 ): Promise<void> {
 	const { minActive = 0, minQueued = 0, minInFlight = 0, sessionId, timeout = 30_000 } = opts
 	const wait = page.waitForFunction(
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 26 — parse, session filter, stage classification and three threshold checks form one polling predicate
 		async (sid: string | null, minA: number, minQ: number, minIF: number) => {
 			const active = new Set(["pending", "simulating", "proving", "submitting"])
 			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
@@ -486,4 +539,36 @@ export async function waitForDappExecuteWorked(page: Page, options: { timeout?: 
 		{ timeout, polling: 250 },
 	)
 	await awaitOrDump(page, "waitForDappExecuteWorked", wait)
+}
+
+export type AwaitingCardBackend = { backend: "presto" | "browser"; subtitle: string }
+export const PRESTO_AWAITING_CARD: AwaitingCardBackend = { backend: "presto", subtitle: "Proving with Presto ✦" }
+export const BROWSER_AWAITING_CARD: AwaitingCardBackend = { backend: "browser", subtitle: "Proving in browser…" }
+
+/**
+ * Wait for an awaiting card in `proving` to carry one of the accepted backends
+ * (`data-backend`) WITH that backend's exact subtitle. The card is the popup's
+ * projection of the journal row's `progress.backend`, which the prover's phase
+ * stream fills in a few seconds into the prove — this is the one end-to-end
+ * check that the offscreen → SW → journal → popup chain delivers it.
+ */
+export async function waitForAwaitingCardBackend(
+	page: Page,
+	accepted: readonly AwaitingCardBackend[],
+	options: { timeout?: number } = {},
+): Promise<void> {
+	const { timeout = 120_000 } = options
+	const wait = page.waitForFunction(
+		(alternatives: readonly { backend: string; subtitle: string }[]) =>
+			alternatives.some(({ backend, subtitle }) => {
+				const card = document.querySelector<HTMLElement>(
+					`[data-testid="tx-awaiting-card"][data-stage="proving"][data-backend="${backend}"]`,
+				)
+				if (!card) return false
+				return card.querySelector<HTMLElement>('[data-testid="tx-awaiting-subtitle"]')?.textContent?.trim() === subtitle
+			}),
+		{ timeout, polling: 250 },
+		accepted,
+	)
+	await awaitOrDump(page, "waitForAwaitingCardBackend", wait)
 }

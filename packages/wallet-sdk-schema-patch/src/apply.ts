@@ -2,13 +2,13 @@
  * Nulo-custom extension of `@aztec/wallet-sdk`'s `WalletSchema` with the
  * `registerToken`, `isTokenRegistered`, and `grantPublicAuthwit` methods.
  *
- * This is the single source of truth — the extension, faucet, and playground all
+ * This is the single source of truth — the extension, tools, and playground all
  * activate it via the sibling `./register` side-effect entry. (It used to be three
  * byte-identical inline copies; the drift risk is gone now that there is one.)
  *
  * ## Why a private package (not a wallet-bridge export)
  *
- * `wallet-bridge` is extension-internal — exposing it to faucet/playground would
+ * `wallet-bridge` is extension-internal — exposing it to tools/playground would
  * give third-party dApp surfaces a path to its dispatcher/protocol internals. A
  * dedicated PRIVATE package keeps the patch Nulo-internal while giving all three
  * apps one source.
@@ -25,7 +25,7 @@
  * If a future upstream `@aztec/wallet-sdk` ships its own `registerToken` (etc.),
  * we throw rather than silently no-op. The guard checks arg types + output type
  * (not just arity), so a same-arity-but-different-shape upstream method is caught.
- * Pinned upstream version: `@aztec/wallet-sdk == 5.0.0`; revisit on bump.
+ * Pinned upstream version: `@aztec/wallet-sdk == 5.2.0`; revisit on bump.
  */
 
 import { schemas } from "@aztec/stdlib/schemas"
@@ -43,70 +43,76 @@ const GRANT_CONTENT_SCHEMA = z.object({
 })
 const GRANT_AUTHWIT_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, GRANT_CONTENT_SCHEMA]), output: z.string() })
 
+const WALLET_FEATURES_SCHEMA = z.function({ input: z.tuple([]), output: z.array(z.string()) })
+
 /**
  * Mutate `schema` (the wallet-sdk `WalletSchema` singleton) in place, adding the
- * three Nulo-custom method entries. Idempotent when the entries already match our
+ * four Nulo-custom method entries. Idempotent when the entries already match our
  * shape; throws when an upstream entry of the same name has a different signature.
  */
 export function applyNuloSchemaPatch(schema: object): void {
-	// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
-	const target = schema as any
+	patchOrVerifyEntry(schema, "registerToken", PATCHED_SCHEMA, isRegisterTokenShape, "(AztecAddress, AztecAddress) => void")
+	patchOrVerifyEntry(schema, "isTokenRegistered", REGISTERED_QUERY_SCHEMA, isTokenRegisteredShape, "(AztecAddress) => boolean")
+	patchOrVerifyEntry(schema, "grantPublicAuthwit", GRANT_AUTHWIT_SCHEMA, isGrantAuthwitShape, "(AztecAddress, content) => string")
+	patchOrVerifyEntry(schema, "getWalletFeatures", WALLET_FEATURES_SCHEMA, isWalletFeaturesShape, "() => string[]")
+}
 
-	if ("registerToken" in schema) {
-		const existing = target.registerToken
-		if (existing !== PATCHED_SCHEMA) {
-			const items = existing?.def?.input?.def?.items
-			if (
-				items?.length !== 2 ||
-				items[0] !== schemas.AztecAddress ||
-				items[1] !== schemas.AztecAddress ||
-				existing?.def?.output?.def?.type !== "void"
-			) {
-				throw new Error(
-					`Nulo schema-patch: upstream WalletSchema.registerToken signature changed ` +
-						`(expected (AztecAddress, AztecAddress) => void). Update the patch or ` +
-						`remove it if upstream now provides registerToken natively.`,
-				)
-			}
-		}
-	} else {
-		target.registerToken = PATCHED_SCHEMA
-	}
+// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
+type SchemaEntry = any
 
-	if ("isTokenRegistered" in schema) {
-		const existing = target.isTokenRegistered
-		if (existing !== REGISTERED_QUERY_SCHEMA) {
-			const items = existing?.def?.input?.def?.items
-			if (items?.length !== 1 || items[0] !== schemas.AztecAddress || existing?.def?.output?.def?.type !== "boolean") {
-				throw new Error(
-					`Nulo schema-patch: upstream WalletSchema.isTokenRegistered signature changed ` +
-						`(expected (AztecAddress) => boolean). Update the patch or ` +
-						`remove it if upstream now provides isTokenRegistered natively.`,
-				)
-			}
-		}
-	} else {
-		target.isTokenRegistered = REGISTERED_QUERY_SCHEMA
+/** Install `patched` under `key` when absent; when present and not ours, accept
+ *  it only if `isCompatibleShape` holds — otherwise throw the signature-drift
+ *  error. The existing entry is left in place by identity either way. */
+function patchOrVerifyEntry(
+	schema: object,
+	key: "registerToken" | "isTokenRegistered" | "grantPublicAuthwit" | "getWalletFeatures",
+	patched: SchemaEntry,
+	isCompatibleShape: (existing: SchemaEntry) => boolean,
+	expectedSignature: string,
+): void {
+	const target = schema as Record<string, SchemaEntry>
+	if (!(key in schema)) {
+		target[key] = patched
+		return
 	}
+	const existing = target[key]
+	if (existing !== patched && !isCompatibleShape(existing)) {
+		throw new Error(
+			`Nulo schema-patch: upstream WalletSchema.${key} signature changed ` +
+				`(expected ${expectedSignature}). Update the patch or ` +
+				`remove it if upstream now provides ${key} natively.`,
+		)
+	}
+}
 
-	if ("grantPublicAuthwit" in schema) {
-		const existing = target.grantPublicAuthwit
-		if (existing !== GRANT_AUTHWIT_SCHEMA) {
-			const items = existing?.def?.input?.def?.items
-			if (
-				items?.length !== 2 ||
-				items[0] !== schemas.AztecAddress ||
-				items[1]?.def?.type !== "object" ||
-				existing?.def?.output?.def?.type !== "string"
-			) {
-				throw new Error(
-					`Nulo schema-patch: upstream WalletSchema.grantPublicAuthwit signature changed ` +
-						`(expected (AztecAddress, content) => string). Update the patch or ` +
-						`remove it if upstream now provides grantPublicAuthwit natively.`,
-				)
-			}
-		}
-	} else {
-		target.grantPublicAuthwit = GRANT_AUTHWIT_SCHEMA
-	}
+function isRegisterTokenShape(existing: SchemaEntry): boolean {
+	const items = existing?.def?.input?.def?.items
+	return (
+		items?.length === 2 &&
+		items[0] === schemas.AztecAddress &&
+		items[1] === schemas.AztecAddress &&
+		existing?.def?.output?.def?.type === "void"
+	)
+}
+
+function isTokenRegisteredShape(existing: SchemaEntry): boolean {
+	const items = existing?.def?.input?.def?.items
+	return items?.length === 1 && items[0] === schemas.AztecAddress && existing?.def?.output?.def?.type === "boolean"
+}
+
+function isWalletFeaturesShape(existing: SchemaEntry): boolean {
+	const items = existing?.def?.input?.def?.items
+	return (
+		items?.length === 0 && existing?.def?.output?.def?.type === "array" && existing?.def?.output?.def?.element?.def?.type === "string"
+	)
+}
+
+function isGrantAuthwitShape(existing: SchemaEntry): boolean {
+	const items = existing?.def?.input?.def?.items
+	return (
+		items?.length === 2 &&
+		items[0] === schemas.AztecAddress &&
+		items[1]?.def?.type === "object" &&
+		existing?.def?.output?.def?.type === "string"
+	)
 }

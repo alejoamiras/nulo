@@ -329,6 +329,27 @@ describe("fetchPublicTokenTransferEvents — boundary-ancestry probe (codex R3 #
 		).rejects.toThrow(/not an ancestor/)
 	})
 
+	test("IDENTITY (anchor == reference) → ok WITHOUT a membership query (a block is not a member of its own archive)", async () => {
+		// The caught-up-on-a-quiet-chain shape: the scanner's anchor IS the current checkpoint.
+		// The node returns NO witness for a block against itself (verified live on Alpha), so
+		// without the short-circuit every quiet poll tick threw a spurious "reorg" and ran a
+		// full reconciliation until the chain advanced.
+		let membershipQueried = false
+		const node = makeNode({ checkpointed: 100, membershipWitness: undefined })
+		const original = node.getBlockHashMembershipWitness
+		node.getBlockHashMembershipWitness = (...queryArgs: Parameters<typeof original>) => {
+			membershipQueried = true
+			return original(...queryArgs)
+		}
+		const same = BlockHash.random().toString()
+		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, {
+			referenceBlock: same,
+			verifyAncestorHash: same,
+		})
+		expect(result).toEqual({ events: [], scannedThrough: null, hasMore: false, dropped: false })
+		expect(membershipQueried).toBe(false)
+	})
+
 	test("verifyAncestorHash without a referenceBlock anchor → throws (misuse guard)", async () => {
 		const node = makeNode({ checkpointed: 100, membershipWitness: { leafIndex: 1n } })
 		await expect(fetchPublicTokenTransferEvents(node, CONTRACT, { verifyAncestorHash: BlockHash.random().toString() })).rejects.toThrow(

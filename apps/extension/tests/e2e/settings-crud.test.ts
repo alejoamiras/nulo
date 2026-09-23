@@ -1,6 +1,6 @@
 import { expect } from "vitest"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
-import { deleteNetworkRow, navigateToSettings } from "./fixtures/helpers"
+import { deleteNetworkRow, enableDeveloperMode, navigateToSettings, setDeveloperMode } from "./fixtures/helpers"
 
 // Scope note: `addNetwork` probes RPC, `addFpc` probes PXE, `addToken`
 // fetches metadata — all require a live Aztec node. Persistence-style
@@ -29,10 +29,32 @@ test("networks page lists the default networks", async ({ registeredExtension })
 	expect(registeredExtension.pageErrors).toEqual([])
 })
 
+test("Add network is a Developer-Mode surface; endpoint management of a built-in network is not", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+
+	// Explicit OFF: a vitest retry reuses the profile a previous attempt may have switched on.
+	await setDeveloperMode(page, false)
+	await navigateToSettings(page, "networks")
+	await page.waitForSelector('[data-testid="network-row"]', { visible: true, timeout: 5_000 })
+	expect(await page.$('[data-testid="network-new-btn"]')).toBeNull()
+	// A built-in network's endpoints stay editable with Developer Mode off.
+	await page.click('[data-testid="network-row"]')
+	await page.waitForSelector('[data-testid="endpoint-add-btn"]', { visible: true, timeout: 5_000 })
+
+	await enableDeveloperMode(page)
+	await navigateToSettings(page, "networks")
+	await page.waitForSelector('[data-testid="network-new-btn"]', { visible: true, timeout: 5_000 })
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+})
+
 test("NewNetworkPopup keeps submit disabled with empty name", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 
+	await enableDeveloperMode(page)
 	await navigateToSettings(page, "networks")
 	await clickByTestId(page, "network-new-btn")
 	await page.waitForSelector('[data-testid="new-network-submit"]', { visible: true, timeout: 5_000 })
@@ -52,6 +74,7 @@ test("NewNetworkPopup flags a duplicate name", async ({ registeredExtension }) =
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 
+	await enableDeveloperMode(page)
 	await navigateToSettings(page, "networks")
 
 	// Read the first existing network's name from the row contract

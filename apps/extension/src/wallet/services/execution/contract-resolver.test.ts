@@ -17,6 +17,7 @@ import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { ContractNotRegisteredError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { Action } from "./spec"
 import { ContractResolver, ensureRegistered } from "./contract-resolver"
@@ -106,9 +107,11 @@ describe("ContractResolver.resolveInstance", () => {
 		expect(inst.currentContractClassId.toString()).toBe("0xaa")
 	})
 
-	test("throws 'Contract instance not found' on PXE miss", async () => {
+	test("throws 'Contract instance not found' on PXE miss, typed for the dApp envelope", async () => {
 		const pxe = fakePxe({ getContractInstance: async () => undefined })
-		await expect(resolver.resolveInstance(pxe, addr)).rejects.toThrow(/Contract instance not found/)
+		const thrown = await resolver.resolveInstance(pxe, addr).catch((e: unknown) => e)
+		expect(thrown).toBeInstanceOf(ContractNotRegisteredError)
+		expect((thrown as Error).message).toBe("Contract instance not found")
 	})
 })
 
@@ -149,9 +152,11 @@ describe("ContractResolver.resolveArtifact", () => {
 		expect((art as unknown as { name: string }).name).toBe("Token")
 	})
 
-	test("throws the FORMATTED 'Contract artifact not found for class <classId>' on miss", async () => {
+	test("throws the FORMATTED 'Contract artifact not found for class <classId>' on miss, typed for the dApp envelope", async () => {
 		const pxe = fakePxe({ getContractArtifact: async () => undefined })
-		await expect(resolver.resolveArtifact(pxe, classId)).rejects.toThrow(/Contract artifact not found for class 0x0a/)
+		const thrown = await resolver.resolveArtifact(pxe, classId).catch((e: unknown) => e)
+		expect(thrown).toBeInstanceOf(ContractNotRegisteredError)
+		expect((thrown as Error).message).toBe("Contract artifact not found for class 0x0a")
 	})
 })
 

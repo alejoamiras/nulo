@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Nulo V5 — small promo tile</title>
+		<style>
+			@font-face {
+				font-family: "Space Grotesk";
+				font-weight: 300 700;
+				src: url("{{font}}") format("woff2");
+			}
+			html,
+			body {
+				margin: 0;
+				width: 440px;
+				height: 280px;
+				overflow: hidden;
+			}
+			body {
+				background: #0a0908;
+				color: #f5f0e6;
+				font-family: "Space Grotesk", sans-serif;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 28px;
+			}
+			.ring {
+				width: 96px;
+				height: 96px;
+				border: 8px solid #f5f0e6;
+				border-radius: 50%;
+				box-sizing: border-box;
+			}
+			.wordmark {
+				font-size: 56px;
+				font-weight: 600;
+				letter-spacing: 0.08em;
+				line-height: 1;
+			}
+			.wordmark small {
+				display: block;
+				margin-top: 10px;
+				font-size: 15px;
+				font-weight: 400;
+				letter-spacing: 0.22em;
+				color: #a39d94;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="ring"></div>
+		<div class="wordmark">NULO V5<small>AZTEC WALLET</small></div>
+	</body>
+</html>

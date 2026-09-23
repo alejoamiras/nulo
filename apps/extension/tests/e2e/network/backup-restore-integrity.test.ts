@@ -38,13 +38,16 @@ import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
+	captureSoleProfileId,
 	getAccountAddress,
 	navigateByHash,
-	refreshBalances,
 	reopenAndRecoverAfterImport,
 	resetProfile,
 	switchToLocalNetwork,
-	waitForBalance,
+	waitForFreshBalanceRow,
+	waitForProfilePurged,
+	waitForTokenCardAmount,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
@@ -94,8 +97,8 @@ test.skipIf(!hasConfig)(
 		// (chainId, address) tuple — network[0] would be a different chain and the
 		// tx would be (correctly) dropped as cross-chain.
 		const backupAccounts = exported.data.account as Array<{ address: string; chainId: number }>
-		const chainId =
-			backupAccounts.find((a) => a.address === funded)?.chainId ?? (exported.data.network as Array<{ chainId: number }>)[0].chainId
+		const chainId = backupAccounts.find((a) => a.address === funded)?.chainId
+		if (chainId === undefined) throw new Error("the funded account is missing from the exported backup")
 		const mkTx = (hash: string, account: string) => ({
 			chainId,
 			account,
@@ -113,10 +116,20 @@ test.skipIf(!hasConfig)(
 		exported.data.transaction = [mkTx(VALID_HASH, funded), mkTx(FOREIGN_HASH, FOREIGN_ACCOUNT)]
 
 		// A funded-account authwit must survive; a foreign-account one must be
-		// dropped — auth-registry rows are address-scoped in the provenance filter.
+		// dropped — auth-registry rows are (chainId, account)-scoped in the provenance
+		// filter. `profileId` is re-stamped to the created profile by restore, so any
+		// value the exporter could have written is fine here.
+		const mkAuthwit = (id: number, account: string, hash: string) => ({
+			id,
+			profileId: "exported-profile",
+			chainId,
+			account,
+			hash,
+			content: { kind: "call" },
+		})
 		exported.data["auth-registry"] = [
-			{ id: 1, account: funded, hash: `0x${"b2".repeat(32)}`, content: { kind: "call" } },
-			{ id: 2, account: FOREIGN_ACCOUNT, hash: `0x${"c3".repeat(32)}`, content: { kind: "call" } },
+			mkAuthwit(1, funded, `0x${"b2".repeat(32)}`),
+			mkAuthwit(2, FOREIGN_ACCOUNT, `0x${"c3".repeat(32)}`),
 		]
 		// A foreign-account token-balance must be dropped. Append it (don't clobber
 		// the wallet's real funded-account balances the export already carries).
@@ -166,61 +179,59 @@ test.skipIf(!hasConfig)(
 			expect(balanceAccounts).not.toContain(FOREIGN_ACCOUNT)
 
 			// ── 5. On-chain functionality ───────────────────────────────────
+			// The imported backup already CARRIES the funded balance rows with a
+			// nonzero updatedAt, so a value-only wait would pass with zero
+			// post-import sync. Gate on FRESHNESS (updatedAt past the imported
+			// baseline) + the exact raw value, then prove projection→render with a
+			// card-scoped display assert. Same total envelope the old 40× spam +
+			// text-scan spent (~150s); ≤5 refreshes, each only after the previous
+			// projection observably finished.
 			await switchToLocalNetwork(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			for (let i = 0; i < 40; i++) {
-				await refreshBalances(page2)
-				const bodyText = await page2.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			const importedBaseline = await captureBalanceBaseline(page2, funded, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page2, {
+				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: importedBaseline,
+				timeoutMs: 150_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			// ── 5b. Realistic-recovery leg ──────────────────────────────────
 			// Model the strict-mode + MV3-worker-restart path: the in-memory master
 			// is dropped and re-derived on unlock, which re-provisions the encrypted
 			// per-chain PXE store key and re-opens the OPFS store. Prove the store
-			// re-opened (never wiped — refuse-and-preserve) by re-syncing the SAME
-			// on-chain balance after the reopen+unlock.
+			// re-opened (never wiped — refuse-and-preserve) by a FRESH post-reopen
+			// re-projection of the SAME on-chain balance (baseline recaptured after
+			// the reopen so step 5's projection can't satisfy this leg).
 			await reopenAndRecoverAfterImport(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			for (let i = 0; i < 20; i++) {
-				await refreshBalances(page2)
-				if ((await page2.evaluate(() => document.body.innerText)).includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			const reopenBaseline = await captureBalanceBaseline(page2, funded, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page2, {
+				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: reopenBaseline,
+				timeoutMs: 90_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			// ── 6. Delete → re-add round-trip (finding D) ──────────────────────
-			// The reset UI fires deleteProfile WITHOUT awaiting (optimistic nav);
-			// the coordinator AWAITS the full purge + tombstone-clear internally.
-			// Poll until every account-owned root is empty AND the tombstone is
-			// cleared — proves the awaited cascade ran to completion. A
-			// fire-and-forget regression would leave orphaned rows or a stuck
-			// tombstone here forever (poll times out → test fails).
+			// The reset UI AWAITS the coordinator's full purge before navigating
+			// (reset.vue handleReset awaits deleteProfile), so observe the purge
+			// itself FIRST — profile row (proven to exist pre-submit) + exact
+			// tombstone + owned roots all cleared — and only then assert the
+			// redirect, which is prompt once the awaited delete resolved. The old
+			// shape waited on the route while the purge ran, racing an awaited
+			// cascade with a wait budgeted for a navigation.
+			const deletedProfileId = await captureSoleProfileId(page2)
 			await resetProfile(page2)
-			await page2.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 30_000 })
-			const readPurgeState = () =>
-				page2.evaluate(async () => {
-					const all = await chrome.storage.local.get()
-					const has = (p: string) => Object.keys(all).some((k) => k.startsWith(p))
-					return {
-						txs: has("nulo:core:txs@"),
-						accounts: has("nulo:core:accounts@"),
-						tokens: has("nulo:core:tokens@"),
-						tombstones: has("nulo:core:profile-tombstones@"),
-					}
-				})
-			let purge = await readPurgeState()
-			for (let i = 0; i < 120 && (purge.txs || purge.accounts || purge.tokens || purge.tombstones); i++) {
-				await new Promise((r) => setTimeout(r, 500))
-				purge = await readPurgeState()
-			}
-			expect(purge).toEqual({ txs: false, accounts: false, tokens: false, tombstones: false })
+			await waitForProfilePurged(page2, deletedProfileId, {
+				ownedRoots: ["nulo:core:txs", "nulo:core:accounts", "nulo:core:tokens"],
+				timeoutMs: 75_000,
+			})
+			await page2.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 15_000 })
 			await page2.close()
 
 			// Re-add a fresh profile; the deleted funded-account tx must not reappear.
@@ -233,7 +244,7 @@ test.skipIf(!hasConfig)(
 			expect(resurrectedTx).toBe(false)
 			await page3.close()
 		} finally {
-			await ctx2.browser.close()
+			await ctx2.close()
 			rmSync(profileDir, { recursive: true, force: true })
 			// The doctored file embeds the wallet's REAL (local-chain test) master-key.
 			rmSync(dirname(filePath), { recursive: true, force: true })

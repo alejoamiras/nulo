@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { readFileSync } from "node:fs"
+import { dirname, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
+import { resolveExportedAsset } from "@nulo/resolve-asset"
 import vue from "@vitejs/plugin-vue"
 import usePages from "vite-plugin-pages"
 import useAutoImport from "unplugin-auto-import/vite"
@@ -10,7 +11,12 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
-import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
+import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
+import { PAGES_OPTIONS } from "./scripts/pages-options"
+import { parseLimitGuard } from "./scripts/parse-limit-guard"
+import { stripArtifactDebugInfo } from "./scripts/strip-artifact-debug-info"
+import { vendorChunkGroups } from "./scripts/vendor-chunks"
+import { artifactAliases, debugStrippedArtifacts, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	server: {
@@ -35,10 +41,6 @@ export default defineConfig({
 			{ find: "src", replacement: srcDir },
 			{ find: "@assets", replacement: fileURLToPath(new URL("src/assets", import.meta.url)) },
 			...Object.entries(artifactAliases).map(([find, replacement]) => ({ find, replacement })),
-			{
-				find: "@alejoamiras/aztec-accelerator",
-				replacement: resolvePackageFile("@alejoamiras/aztec-accelerator", "dist/index.js"),
-			},
 			// Resolve the polyfill's Buffer shim to an absolute path. Rollup's
 			// inject (used by `nodePolyfills({ globals: { Buffer: true } })`)
 			// rewrites naked Buffer references into an import from this path;
@@ -87,6 +89,9 @@ export default defineConfig({
 		},
 	},
 	plugins: [
+		stripArtifactDebugInfo(debugStrippedArtifacts),
+		parseLimitGuard(),
+		chunkCycleGuard(),
 		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
 		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
 		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
@@ -104,32 +109,10 @@ export default defineConfig({
 				}
 			},
 		},
-		vue(),
+		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
+		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
-		usePages({
-			dirs: [
-				{
-					dir: "src/pages",
-					baseRoute: "common",
-				},
-				{
-					dir: "src/setup/pages",
-					baseRoute: "setup",
-				},
-				{
-					dir: "src/popup/pages",
-					baseRoute: "popup",
-				},
-				{
-					dir: "src/popup/windows",
-					baseRoute: "windows",
-				},
-				{
-					dir: "src/onboarding/pages",
-					baseRoute: "onboarding",
-				},
-			],
-		}),
+		usePages(PAGES_OPTIONS),
 
 		useAutoImport({
 			imports: [
@@ -240,26 +223,27 @@ export default defineConfig({
 			name: "sqlite3mc-wasm-emit",
 			apply: "build",
 			generateBundle() {
-				// The package's exports map doesn't expose ./package.json, so resolve by walking the
-				// node_modules chain from this config (hoisted install ⇒ the repo root hit).
-				const vendor = (() => {
-					let dir = dirname(fileURLToPath(import.meta.url))
-					while (dir !== dirname(dir)) {
-						const candidate = join(dir, "node_modules", "@aztec", "sqlite3mc-wasm")
-						if (existsSync(candidate)) return candidate
-						dir = dirname(dir)
-					}
-					throw new Error("sqlite3mc-wasm-emit: cannot locate @aztec/sqlite3mc-wasm in any node_modules")
-				})()
+				// Both files are condition-less exported subpaths, so they resolve directly —
+				// layout-agnostically — through this workspace's DECLARED @aztec/sqlite3mc-wasm
+				// dependency (the identity test pins that declaration in lockstep with the copy
+				// @aztec/kv-store consumes).
 				this.emitFile({
 					type: "asset",
 					fileName: "assets/sqlite3.wasm",
-					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3.wasm")),
+					source: readFileSync(
+						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
+							from: import.meta.url,
+						}),
+					),
 				})
 				this.emitFile({
 					type: "asset",
 					fileName: "assets/sqlite3-opfs-async-proxy.js",
-					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3-opfs-async-proxy.js")),
+					source: readFileSync(
+						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3-opfs-async-proxy.js", {
+							from: import.meta.url,
+						}),
+					),
 				})
 			},
 		},
@@ -315,6 +299,13 @@ export default defineConfig({
 				popup: "src/popup/index.html",
 				setup: "src/setup/index.html",
 				onboarding: "src/onboarding/index.html",
+			},
+			output: {
+				// Firefox's add-on linter refuses to parse a file of 5 MiB or more, and without a rule
+				// everything the offscreen page imports lands in one ~20 MB chunk. `vendorChunkGroups`
+				// says where the cuts go and why they are never by size; `parseLimitGuard` is what
+				// fails the build.
+				codeSplitting: { groups: vendorChunkGroups },
 			},
 		},
 	},

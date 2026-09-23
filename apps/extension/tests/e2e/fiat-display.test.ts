@@ -6,13 +6,13 @@
  */
 
 import { expect } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId } from "./fixtures/extension"
-import { navigateToSettings } from "./fixtures/helpers"
+import { withTimeoutMessage, test, openPopup, waitForHash, clickByTestId } from "./fixtures/extension"
+import { navigateToSettings, waitForHomeTotal } from "./fixtures/helpers"
 
 test("fresh wallet state matrix: truthful $0.00, zero fiat artifacts", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
-	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 10_000 })
+	await waitForHomeTotal(page)
 
 	// S-A matrix: an EMPTY wallet's account value IS $0.00 (true zero) —
 	// never an em-dash, never a stale placeholder.
@@ -35,19 +35,27 @@ test("settings carries the 'Show fiat values' kill-switch and it toggles", async
 	await navigateToSettings(page, "appearance")
 	await page.waitForSelector('[data-testid="fiat-values-toggle"]', { visible: true, timeout: 5_000 })
 
-	const before = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="fiat-values-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
-	expect(before).toBe(true) // default ON
+	// Toggle publishes its state as `data-toggle-active`; read and wait on that
+	// rather than sleeping and scraping a mangled CSS-module class name.
+	const readActive = () =>
+		page.evaluate(() => document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active"))
+
+	expect(await readActive()).toBe("true") // default ON
 
 	await clickByTestId(page, "fiat-values-toggle")
-	await new Promise((r) => setTimeout(r, 150))
-	const after = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="fiat-values-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
-	expect(after).toBe(false)
+	const after = await withTimeoutMessage(
+		page
+			.waitForFunction(
+				() => {
+					const v = document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active")
+					return v === "false" ? v : null
+				},
+				{ timeout: 2_000, polling: 50 },
+			)
+			.then((handle) => handle.jsonValue()),
+		async () => `fiat-values-toggle never flipped to off after the click (still ${await readActive()})`,
+	)
+	expect(after).toBe("false")
 
 	expect(registeredExtension.pageErrors).toEqual([])
 })

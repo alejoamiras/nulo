@@ -21,7 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -33,17 +33,36 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
-import type { ExecutionCoordinator } from "./execution-coordinator"
+import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
+import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
 import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
 import { fingerprintBaseFee, fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 
-/** Controller-registry subset of the (future) execution lane. */
+/** The resolved inputs the prove-and-send tail consumes, produced by either
+ *  the reused-estimate arm or the fresh-build arm. */
+type TransferBuildInputs = {
+	txRequest: TxExecutionRequest
+	node: AztecNode
+	pxe: IPXE
+	account: IAccountContract
+	network: Network
+	nonce: { toString(): string }
+	feePaymentMethod: AccountFeePaymentMethodOptions
+	initializesAccount: boolean | undefined
+	activity: {
+		token: { contract: string; name: string; symbol: string; decimals: number }
+		fnName: string
+		args: readonly unknown[]
+	}
+}
+
+/** Controller-registry subset of the execution lane. */
 export interface TransferExecutorLane {
-	registerController(journalId: string, controller: AbortController): void
+	registerInFlight(journalId: string, serial: number, controller: AbortController): { live: boolean }
 	deleteController(journalId: string): void
 }
 
@@ -54,6 +73,9 @@ export interface TransferExecutorDeps {
 	coordinator: ExecutionCoordinator
 	lane: TransferExecutorLane
 	getActiveProfile(): Promise<ProfileInfo | undefined>
+	captureExecutionFence(): Promise<ExecutionFence>
+	assertFence(fence: ExecutionFence): Promise<void>
+	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<AztecNode>
 	getPXE(network: Network): IPXE
@@ -65,93 +87,55 @@ export interface TransferExecutorDeps {
 	buildAndEstimate(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
+		signal?: AbortSignal,
 	): Promise<FeeEstimate>
 	createJournalOperation(input: NewOperationInput): Promise<OperationRecord>
 	transitionJournal(journalId: string, progress: JobProgress, error?: JobError | null): Promise<unknown>
-	logDebug(msg: string): void
+	logDebug(msg: string, ...rest: unknown[]): void
 	logError(msg: string, ...rest: unknown[]): void
 }
 
 export class TransferExecutor {
 	public constructor(private readonly deps: TransferExecutorDeps) {}
 
-	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
+	public async execute(req: TransferRequest, precomputedEstimateId: string | undefined, fence: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
-		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount)
+		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
-		// Durable record of this in-flight operation. Survives SW restart
-		// and popup close/reopen so consumers can recover a consistent view
-		// of "what is this tx doing right now". FSM:
-		//   pending → simulating → proving → submitting → succeeded | failed | cancelled
-		let journalOp: OperationRecord | undefined
-		try {
-			const profile = await this.deps.getActiveProfile()
-			if (profile) {
-				journalOp = await this.deps.createJournalOperation({
-					kind: "transfer",
-					origin: "popup",
-					profileId: profile.id,
-					accountAddress,
-					networkId,
-					tokenId,
-					// Persist amount + recipient so terminal cards can render
-					// the same info as awaiting/settled cards. amount is bigint
-					// → string for JSON safety; field name matches
-					// `balanceFormatted(rawAmount, decimals, length)`.
-					amountRaw: amount.toString(),
-					recipientAddress,
-					// Persist the privacy direction so the in-flight awaiting
-					// card can render the Private/Public chip the settled card
-					// shows. Resolved via `formatTransferType()` consumer-side.
-					transferType,
-				})
-			}
-		} catch (error) {
-			this.deps.logError("Failed to create journal operation", getErrorMessage(error))
-		}
-		const journalId = journalOp?.id
+		// Hoisted so catch (mark failed) + finally (controller cleanup) see them even when the
+		// journal-create refusal below throws before they are assigned.
+		let journalId: string | undefined
+		let controller: AbortController | undefined
 		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
 			if (!journalId) return
 			try {
 				await this.deps.transitionJournal(journalId, progress, error)
 			} catch (err) {
-				this.deps.logError("Failed to update journal operation", getErrorMessage(err))
+				this.deps.logError("Failed to update journal operation", err)
 			}
 		}
 
-		// Cancel surface: register an AbortController under journalId so
-		// cancelJob(journalId) can fire `signal.abort()`. checkCancelled
-		// reads the signal at each stage boundary and short-circuits with
-		// JobCancelledSentinel so the catch handler can skip the failure path.
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
+		// checkCancelled reads the controller's signal at each stage boundary
+		// and short-circuits with JobCancelledSentinel so the catch handler can
+		// skip the failure path.
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
 
 		try {
+			// Fail closed here, inside the try: a transfer with no durable record never runs.
+			const created = await this.createTransferJournal(req, fence)
+			journalId = created.journalId
+			controller = created.controller
+			if (!created.live) throw new SessionEndedError()
 			// Try the cached-estimate fast path first. Falls back to a fresh
 			// build if the snapshot has drifted (base fee, primary endpoint,
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
-			const reused = precomputedEstimateId ? await this.deps.estimateReuse.tryConsume(precomputedEstimateId, req) : undefined
-
-			let txRequest: TxExecutionRequest
-			let node: AztecNode
-			let pxe: IPXE
-			let account: IAccountContract
-			let network: Network
-			let nonce: { toString(): string }
-			let feePaymentMethod: AccountFeePaymentMethodOptions
-			// Activity-feed inputs — captured separately from the FPC-mutated
-			// `buildAndEstimate` txCalls so the persisted record stays just
-			// the user-intent transfer (no `pay_fee` / `fee_entrypoint_*`
-			// fee-payload pollution leaking into the activity card title).
-			let activityToken: { contract: string; name: string; symbol: string; decimals: number }
-			let activityFnName: string
-			let activityArgs: readonly unknown[]
+			const reused = precomputedEstimateId ? await this.deps.estimateReuse.tryConsume(precomputedEstimateId, req, fence) : undefined
 
 			// Enter `simulating` BEFORE the build — the fee strategies inside
 			// run real `simulateTx` calls which can take several seconds;
@@ -161,34 +145,10 @@ export class TransferExecutor {
 			await markJournal({ stage: "simulating" })
 			checkCancelled()
 
-			if (reused) {
-				this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
-				txRequest = reused.txRequest
-				nonce = reused.nonce
-				feePaymentMethod = reused.feePaymentMethod
-				activityToken = reused.token
-				activityFnName = reused.fnName
-				activityArgs = reused.args
-				network = await this.deps.getNetwork(networkId)
-				node = await this.deps.getNode(network.chainId)
-				pxe = this.deps.getPXE(network)
-				const profile = await requireActiveProfile(this.deps, "Wallet locked")
-				account = await this.deps.getAccountContract(profile.id, network.chainId, accountAddress)
-			} else {
-				const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
-				activityToken = { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals }
-				activityFnName = fn.name
-				activityArgs = args
-
-				const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
-				txRequest = built.txRequest
-				node = built.node
-				pxe = built.pxe
-				account = built.account
-				network = built.network
-				nonce = built.nonce
-				feePaymentMethod = built.feePaymentMethod
-			}
+			const { txRequest, node, pxe, account, network, nonce, feePaymentMethod, initializesAccount, activity } = reused
+				? await this.fromReusedEstimate(reused, req, precomputedEstimateId, fence)
+				: await this.buildFresh(req, fence, transferTask)
+			const { token: activityToken, fnName: activityFnName, args: activityArgs } = activity
 
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
 			// `txCalls` from the build carries the FPC mutation (`pay_fee` for
@@ -200,9 +160,12 @@ export class TransferExecutor {
 				pxe,
 				node,
 				txRequest,
+				initializesAccount,
 				scopes: [account.address],
 				parentTask: transferTask,
+				journalId,
 				checkCancelled,
+				...fenceChecks(this.deps, fence),
 				markJournal: (patch) => markJournal(patch),
 				recordTransaction: (hash) =>
 					this.deps.addTransaction(
@@ -245,7 +208,9 @@ export class TransferExecutor {
 			// Journal already in `cancelled` (cancelJob did it); convert the
 			// internal sentinel to the structured RPC-boundary error here.
 			maybeRethrowAsRpcCancel(error, transferTask)
-			await markJournal({ stage: "failed" }, normalizeError(error, "transfer"))
+			// Classified failures keep their own kind on the transfer path too, so a
+			// popup transfer reads the same as a dApp send.
+			await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
 			transferTask.fail(error)
 			throw error
 		} finally {
@@ -253,12 +218,139 @@ export class TransferExecutor {
 		}
 	}
 
-	public async estimateFee(req: TransferRequest): Promise<TransferFeeEstimate> {
+	/** Durable record of the in-flight operation. Survives SW restart and popup
+	 *  close/reopen so consumers can recover a consistent view of "what is this
+	 *  tx doing right now". FSM: pending → simulating → proving → submitting →
+	 *  succeeded | failed | cancelled. Creation fails closed — a create error or
+	 *  a record with no id throws, so an unrecorded transfer never runs (its
+	 *  cancel path and activity trail would both be lost). Called inside the
+	 *  build's try, so the throw fails the header task like any build error.
+	 *  This helper OWNS the full `await create → new AbortController →
+	 *  registerInFlight` span: the controller must be registered in the SAME
+	 *  continuation that sees the durable row, so `cancelJob(journalId)` can
+	 *  never land in a settlement hop between the row becoming visible and the
+	 *  controller existing (it would transition the row terminal, find nothing
+	 *  to abort, and a later-installed controller would let proving continue).
+	 *  `live: false` means the fence's session ended before the registration:
+	 *  nothing is registered and the caller fails the row. */
+	private async createTransferJournal(
+		req: TransferRequest,
+		fence: ExecutionFence,
+	): Promise<{ journalId: string; controller: AbortController | undefined; live: boolean }> {
+		// Inline, not a helper: an awaited wrapper would add a settlement hop between the row
+		// becoming visible and the controller registering. A storage fault becomes the typed
+		// refusal the Send screen words; a typed wallet error (a session end) keeps its class.
+		let journalOp: OperationRecord | undefined
+		try {
+			journalOp = await this.deps.createJournalOperation({
+				kind: "transfer",
+				origin: "popup",
+				profileId: fence.profileId,
+				profileEpoch: fence.epoch,
+				accountAddress: req.accountAddress,
+				networkId: req.networkId,
+				tokenId: req.tokenId,
+				// Persist amount + recipient so terminal cards can render
+				// the same info as awaiting/settled cards. amount is bigint
+				// → string for JSON safety; field name matches
+				// `balanceFormatted(rawAmount, decimals, length)`.
+				amountRaw: req.amount.toString(),
+				recipientAddress: req.recipientAddress,
+				// Persist the privacy direction so the in-flight awaiting
+				// card can render the Private/Public chip the settled card
+				// shows. Resolved via `formatTransferType()` consumer-side.
+				transferType: req.transferType,
+			})
+		} catch (error) {
+			if (error instanceof WalletError) throw error
+			this.deps.logError("Failed to create journal operation", error)
+			throw new OperationNotRecordedError()
+		}
+		const journalId = journalOp?.id
+		if (!journalId) throw new OperationNotRecordedError()
+		const controller = new AbortController()
+		if (!this.deps.lane.registerInFlight(journalId, fence.session, controller).live) {
+			return { journalId, controller: undefined, live: false }
+		}
+		return { journalId, controller, live: true }
+	}
+
+	/** Reused-estimate arm: the entry retains the exact build — its provenance
+	 *  rides along; only the live handles (network/node/pxe/account) resolve. */
+	private async fromReusedEstimate(
+		reused: NonNullable<Awaited<ReturnType<TransferEstimateReuse["tryConsume"]>>>,
+		req: TransferRequest,
+		precomputedEstimateId: string | undefined,
+		fence: ExecutionFence,
+	): Promise<TransferBuildInputs> {
+		this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
+		const network = await this.deps.getNetwork(req.networkId)
+		const node = await this.deps.getNode(network.chainId)
+		const pxe = this.deps.getPXE(network)
+		await this.deps.assertFence(fence)
+		const account = await this.deps.getAccountContract(fence.profileId, network.chainId, req.accountAddress)
+		// The lookup reads whichever session is live: re-check the fence before its keys are used.
+		fenceChecks(this.deps, fence).assertLive()
+		return {
+			txRequest: reused.txRequest,
+			node,
+			pxe,
+			account,
+			network,
+			nonce: reused.nonce,
+			feePaymentMethod: reused.feePaymentMethod,
+			initializesAccount: reused.initializesAccount,
+			activity: { token: reused.token, fnName: reused.fnName, args: reused.args },
+		}
+	}
+
+	/** Fresh-build arm: plan the transfer, then build + estimate. The activity
+	 *  inputs are captured from the PLAN, separately from the FPC-mutated
+	 *  `buildAndEstimate` txCalls, so the persisted record stays just the
+	 *  user-intent transfer (no `pay_fee` / `fee_entrypoint_*` fee-payload
+	 *  pollution leaking into the activity card title). */
+	private async buildFresh(req: TransferRequest, fence: ExecutionFence, transferTask: WrappedTask): Promise<TransferBuildInputs> {
+		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
+		const built = await this.deps.buildAndEstimate(op, op.feeSettings, fence, transferTask)
+		return {
+			txRequest: built.txRequest,
+			node: built.node,
+			pxe: built.pxe,
+			account: built.account,
+			network: built.network,
+			nonce: built.nonce,
+			feePaymentMethod: built.feePaymentMethod,
+			initializesAccount: built.initializesAccount,
+			activity: {
+				token: { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals },
+				fnName: fn.name,
+				args,
+			},
+		}
+	}
+
+	public async estimateFee(req: TransferRequest, signal?: AbortSignal): Promise<TransferFeeEstimate> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 
+		// Stage-boundary cancellation: an in-flight sim can't be preempted, but
+		// each next stage — and critically the stash — must not run after a
+		// cancel. A cancelled estimate never leaves a signed request cached.
+		const checkCancelled = (): void => {
+			if (signal?.aborted) throw new JobCancelledSentinel("")
+		}
+		checkCancelled()
+		const fence = await this.deps.captureExecutionFence()
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
+		checkCancelled()
 
-		const { txRequest, network, nonce, feePaymentMethod } = await this.deps.buildAndEstimate(op, op.feeSettings)
+		const {
+			txRequest,
+			network,
+			nonce,
+			feePaymentMethod,
+			initializesAccount: builtInitializes,
+		} = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
+		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 
@@ -300,6 +392,7 @@ export class TransferExecutor {
 						primaryEndpointUrl: primary.rpcUrl,
 						pendingHashes,
 						txRequest,
+						initializesAccount: builtInitializes,
 						nonce,
 						feePaymentMethod,
 						token: { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals },
@@ -311,7 +404,7 @@ export class TransferExecutor {
 			} catch (error) {
 				// Cache write is best-effort. The estimate result still goes
 				// out — the popup just won't get a reuse token.
-				this.deps.logDebug(`estimateTransferFee: cache write skipped: ${getErrorMessage(error)}`)
+				this.deps.logDebug("estimateTransferFee: cache write skipped", error)
 				estimateId = undefined
 			}
 		}

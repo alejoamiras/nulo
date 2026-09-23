@@ -1,0 +1,39 @@
+# PR #448 audit remediation — runbook
+
+Operative spec for the autonomous remediation goal (set 2026-08-24). Derives from the second-opinion adjudication of the 2026-08-22 audit (PR #448): 28 findings re-verified at dev HEAD `30fa4806` — 19 confirmed, 8 re-weighted, 1 refuted. Owner-private full verdict table: <https://claude.ai/code/artifact/c6648b18-9146-448c-8a1b-bd0d7023ac77> (this file is self-sufficient if unreachable).
+
+## Adjudication deltas vs the audit's own text
+
+- **N-20 REFUTED** as production-reachable (every restore path reallocates ids via the canonical allocator, so no writer can plant the poisoned key). Its proof `c5-3` is defective — it can never go green — NEVER adopt it as a regression pin.
+- **N-17**'s 5-min-stall trigger is foreclosed by the 90 s offscreen transport timeout; **N-16** is softened by the 60 s popup RPC timeout (the UI never hangs the lock period).
+- **N-11**'s decisive harm witness is `deleteNetwork` → `purgeChain` → `clearChainState` under the 30-min prove-tx envelope — not N-17.
+- **N-21** is latent (PATH-B passkey create has no production caller). **N-03**'s orphan row is inert. **N-10**'s harm ceiling is a transiently stale same-address balance.
+- **N-09** is resolved by owner-approved REMOVAL (2026-08-24) of the vestigial aztecReset/sentinel path — see batch 6.
+
+## Phase 0 — land the audit (merge explicitly authorized)
+
+On branch `chore/bugs-audit-2026-08-22`: add `audit/bugs/2026-08-22-production-ready/adjudication-2026-08-24.md` transcribing the verdict table, tiering, and fix traps (note the c5-3 defect and record the N-09 removal decision); commit this runbook (`implementations-plan/audit-448-remediation/runbook.md`) and add its line to `implementations-plan/index.md`. Push, wait for green, squash-merge PR #448 into dev. This is the only merge the goal authorizes.
+
+## Batches 1–9 — strictly sequential
+
+One batch at a time (this host mass-fails concurrent network-e2e; `e2e:agent` always solo; re-run before triaging failures). Default blueprint tier per batch; movable one step via logged codex consensus.
+
+1. **export-integrity [mid]** — N-01: re-entry latch as first line; flip status before the crypto awaits; try/catch/finally that disconnects all clients; function-local `backup`; ONE snapshot string for checksum + download; restrict the Enter default branch — port the `useFullBackupImport` latch pattern. + N-13: size caps before read/decompress (reuse the 64 KB account-cap precedent).
+2. **migration-lifecycle [mid]** — N-02: short-circuit engine re-run on a persisted non-terminal block. TRAP: the audit's recipe kills auto-retry — pair with a cool-down or gesture-gated retry on the barrier; keep the "reopen to retry" copy honest. + N-18: bump attempts on the resume-restore path. + N-27: count journal rows in `storage.local`. Adopt proof `c3-1`.
+3. **dapp-profile-binding [mid]** — N-04: terminate tuple-matching live sessions in `onActiveProfileChanged` (mirror the `onDappSessionDeleted` handler) OR stamp establishing-profileId and refuse mismatched dispatch — codex-mediate the choice. + N-26: TTL the pendingVerification marker. + N-19: fix `toJsonSafe` to track ancestors, not all visited nodes; make it test-reachable. Adopt proof `c6-2`.
+4. **lock-ownership [mid]** — N-11: owner token per acquisition; `leave(token)` no-ops on mismatch; watchdog uses its own token; update the deliberate-deferral pin in `packages/wallet-core/src/utils/lock.test.ts`; audit split `enter()`/`leave()` callers (~16 locks inherit). + N-17: post-await epoch re-checks in the incoming-transfer note-CS. + N-12 TRAP: wrapping `getActive`'s close in `runExclusive` DEADLOCKS (non-reentrant lock) — use an alarm-identity-aware clear or serialize only the off-lock entry points. Adopt proofs `p1-1`, `f1-1`.
+5. **data-safety [light]** — N-06: build the sweep's live-set from `rawStringEntries` key-parse (in-file F-B23 precedent). + N-24: `(account, hash)` dedupe in authwit restore (like tx restore). + N-20 hardening only: route `nextNumericId` through `canonicalNumericStorageId`; write a CORRECT pin; fix-or-drop the defective `c5-3` proof.
+6. **shell-identity-fences [mid]** — N-05: capture target network/profile ids at watcher entry; bail after every await (the `useProfileBootstrap` isCurrent pattern). + N-08: post-wait identity guard + a catch that releases `isAwaitingResponse`. + **N-09 REMOVAL (owner-authorized 2026-08-24)**: delete the vestigial aztecReset/sentinel path — the aztecReset template + `checkNotificationsForShow` in `apps/extension/src/composables/notification.js` (its only template; delete the file if it empties), the `auth.vue` call site + import + `auth.test.ts` mock, `checkSentinel`/`setSentinel`/`sentinelPath` in `apps/extension/src/utils/core.ts`, the four `setSentinel` call sites (`profile/new-profile-helpers.ts`, popup `pages/import.vue`, onboarding `pages/create.vue` + `pages/import.vue`) with their test assertions, `apps/extension/package.json#sentinel`, and the `__SENTINEL__` define in `apps/extension/vite.shared.ts`. KEEP the notification store + NotificationManager (they have other producers — profile create/import failure flows). The orphaned `nulo:ui:sentinel` storage key needs no migration pre-production. + N-23: watch the (profile, network, address) triple. + N-22: family-standard error toast.
+7. **service-fences [light]** — N-03: capture secret + epoch, `assertCurrent` before the durable write (mirror `apps/extension/src/wallet/services/transaction/service.ts:180-184`; the audit's `getSecretWithFence` helper does not exist — use the real ProfileDeletionState API). + N-14: deletion-fence the slice-restore writers. + N-10: generation capture at `syncBatch` entry; bail after the projector await and before writes.
+8. **journal-reaper [mid]** — N-07: codex-mediate the design — extend the executionWaiters heartbeat to session-FIFO waiters vs key queued-grace on claim-eligibility. Adopt proof `c2-1`. + N-16: bound `waitForTx`; honor task cancellation. + N-25: delete the controller under `queuedJournalId` in the finally when `journalId` is unset.
+9. **runtime-edges [light]** — N-15: typed duplicate-nullifier handling / cross-check on the first-tx init decision (minimal scope). + N-21: raise the PATH-B window budget constant. + N-28: `allSettled` + aggregate in ServiceCollection phases; gate handler registration.
+
+## Per batch, in order
+
+a. `/blueprint <tier>` scoped to the batch — full protocol (worktree homing, recon, the tier's codex audit loop). Blueprint's clarifying questions are answered by the session + codex consensus, never the owner.
+b. Implement per plan. Adopt the batch's audit proofs as colocated tests rewritten to repo conventions — they must flip green with the fix; leave the `audit/` copies untouched.
+c. Validate locally until green: `bun run audit:vue`; `bun run test:e2e` when popup/UI is touched; `bun run e2e:agent` when dApp/network/PXE behavior is touched (solo).
+d. Post-implementation protocol from the plan: `/code-review max --fix`, then the codex fix loop (no over-engineering).
+e. Conventional branch + commits; PR to dev, title ≤ 93 chars; `gh pr checks --watch`; babysit to green — flake → re-run, real breakage → fix; NEVER weaken, skip, or neutralize a gate.
+f. Once green and codex signs off on the final diff, squash-merge the PR into dev (`gh pr merge --squash --delete-branch`) — plain merge only, NEVER `--admin` or any gate bypass. A batch that stays blocked after honest effort (irreducibly red gate, unresolvable design) is PARKED: leave its PR open as a draft with a blocker comment, continue to the next batch, and report it at the end — never wedge the pipeline on one batch.
+g. `agent-worktree done`; update `implementations-plan/index.md`; cut the next batch's branch from the freshly-updated `origin/dev`.

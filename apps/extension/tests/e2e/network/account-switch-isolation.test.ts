@@ -27,16 +27,22 @@
  * gate is compiled in. Run zero-retry (`NULO_E2E_RETRY=0`): the file-scoped
  * `tokenReadyExtension` mutates on-chain + PXE state, so a retry would re-run
  * against a half-consumed sandbox.
+ *
+ * @requires-proverless — formal marker scanned by scripts/e2e/agent.sh; the
+ * beforeAll below is the belt for direct-vitest invocations that bypass it.
  */
-import { expect, inject } from "vitest"
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
+import { beforeAll, expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	createSecondAccount,
 	getAccountAddress,
 	refreshBalances,
 	sendTransfer,
 	switchAccountByAddress,
-	waitForBalance,
+	waitForFreshBalanceRow,
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { holdIncomingPoll, readIncomingPollStatus, releaseIncomingPoll, waitForIncomingPollPhase } from "../fixtures/incoming-poll-gate"
@@ -44,6 +50,25 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 import type { Page } from "puppeteer"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
+
+// Arming preflight (hard abort, file-level): the incoming-poll gate exists in
+// the bundle ONLY under a proverless-armed build; against an unarmed dist this
+// file's polls time out after minutes with no hint why. Scan the loaded dist
+// for the compile-time stamp and fail in seconds with the remedial command
+// instead. beforeAll (not a sibling test) so the expensive tests never start.
+beforeAll(() => {
+	const extensionPath = inject("extensionPath") as string
+	const assetsDir = join(extensionPath, "assets")
+	const armed = readdirSync(assetsDir).some(
+		(f) => f.endsWith(".js") && readFileSync(join(assetsDir, f), "utf8").includes("NULO_E2E_PROVERLESS_BUILD_STAMP"),
+	)
+	expect(
+		armed,
+		"The extension build at EXTENSION_PATH is NOT proverless-armed — the incoming-poll gate is compiled out, " +
+			"and every test in this file would silently time out. Rebuild + run with: " +
+			"NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts",
+	).toBe(true)
+})
 const hasConfig = aztecConfig !== undefined
 
 /** Minimal projection of the persisted incoming record we correlate on. */
@@ -85,27 +110,9 @@ test.skipIf(!hasConfig)(
 		expect(accountA).toBe(tokenReadyExtension.accountAddress)
 
 		// ── Resolve the active (profile, network, account) triple the gate arms
-		//    on. profileId lives under `nulo:ui:lastActiveProfile`; the active
-		//    network id under `nulo:core:active-network@<profileId>` (same reads
-		//    incoming-transfers.test.ts uses). contract is the fixture's token.
-		const triple = await page.evaluate(async () => {
-			const profileId = (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"]
-			const account = (await chrome.storage.local.get("nulo:ui:activeAccount"))["nulo:ui:activeAccount"]
-			let networkId: string | null = null
-			if (typeof profileId === "string") {
-				const activeKey = `nulo:core:active-network@${profileId}`
-				const activeId = (await chrome.storage.local.get(activeKey))[activeKey]
-				if (typeof activeId === "string") networkId = activeId
-			}
-			return {
-				profileId: typeof profileId === "string" ? profileId : null,
-				account: typeof account === "string" ? account : null,
-				networkId,
-			}
-		})
-		if (!triple.profileId || !triple.networkId || !triple.account) {
-			throw new Error(`could not resolve active (profile, network, account): ${JSON.stringify(triple)}`)
-		}
+		//    on (the same persisted keys incoming-transfers.test.ts reads).
+		//    contract is the fixture's token.
+		const triple = await resolveActiveTriple(page)
 		expect(triple.account).toBe(accountA)
 		const contract = aztecConfig.tokenAddress
 
@@ -142,19 +149,7 @@ test.skipIf(!hasConfig)(
 		//    (each fires a simulateTx); the incoming scheduler (30s cadence) then
 		//    discovers the just-synced note and — because the gate is armed for
 		//    exactly this note — parks in `scanContract`.
-		let held = false
-		for (let i = 0; i < 40 && !held; i++) {
-			await refreshBalances(page)
-			for (let j = 0; j < 15 && !held; j++) {
-				const status = await readIncomingPollStatus(page)
-				if (status?.phase === "discovery-held" && status.txHash === txHash) {
-					held = true
-					break
-				}
-				await new Promise((r) => setTimeout(r, 300))
-			}
-		}
-		expect(held).toBe(true)
+		expect(await driveScanUntilHeld(page, txHash)).toBe(true)
 		// Belt-and-suspenders: the fixture wait confirms the exact phase+hash.
 		await waitForIncomingPollPhase(page, "discovery-held", txHash, 5_000)
 		console.log("✓ Scan parked at discovery-held for A's note")
@@ -171,12 +166,7 @@ test.skipIf(!hasConfig)(
 
 		// ── A's incoming record THEN appears, correlated by the exact tx hash,
 		//    owned by A, and visible (auto-trusted token).
-		let record: StoredIncomingRecord | null = null
-		for (let i = 0; i < 25 && !record; i++) {
-			record = await findIncomingRecordByHash(page, txHash)
-			if (record) break
-			await new Promise((r) => setTimeout(r, 200))
-		}
+		const record = await pollIncomingRecordByHash(page, txHash)
 		expect(record).not.toBeNull()
 		expect(record?.accountAddress).toBe(accountA)
 		expect(record?.hidden).toBe(false)
@@ -213,6 +203,36 @@ async function resolveActiveTriple(page: Page): Promise<{ profileId: string; net
 		throw new Error(`could not resolve active (profile, network, account): ${JSON.stringify(triple)}`)
 	}
 	return { profileId: triple.profileId, networkId: triple.networkId, account: triple.account }
+}
+
+/** Drive the extension PXE forward until a scan discovers the note and parks at
+ *  `discovery-held` for `txHash`: at most 40 refreshes, each followed by up to 15
+ *  status reads 300 ms apart (the sleep follows every miss, none follows the hit). */
+async function driveScanUntilHeld(page: Page, txHash: string): Promise<boolean> {
+	let held = false
+	for (let i = 0; i < 40 && !held; i++) {
+		await refreshBalances(page)
+		for (let j = 0; j < 15 && !held; j++) {
+			const status = await readIncomingPollStatus(page)
+			if (status?.phase === "discovery-held" && status.txHash === txHash) {
+				held = true
+				break
+			}
+			await new Promise((r) => setTimeout(r, 300))
+		}
+	}
+	return held
+}
+
+/** The incoming record correlated by `txHash`, polled up to 25 times 200 ms apart. */
+async function pollIncomingRecordByHash(page: Page, txHash: string): Promise<StoredIncomingRecord | null> {
+	let record: StoredIncomingRecord | null = null
+	for (let i = 0; i < 25 && !record; i++) {
+		record = await findIncomingRecordByHash(page, txHash)
+		if (record) break
+		await new Promise((r) => setTimeout(r, 200))
+	}
+	return record
 }
 
 /** Deliver a real private note to `toAddress` from an independent EmbeddedWallet
@@ -298,8 +318,17 @@ test.skipIf(!hasConfig)(
 		//    needed (SponsoredFPC pays). The unique amount `7` keys the settled
 		//    `tx-card`.
 		const SETTLED_AMOUNT = "7"
-		await waitForBalance(page, "1,000", 60_000)
-		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA })
+		{
+			const baseline = await captureBalanceBaseline(page, accountA, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: accountA,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: baseline,
+				timeoutMs: 60_000,
+			})
+		}
+		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA, expect: "send" })
 		await waitForTxConfirmation(page, { amount: SETTLED_AMOUNT, fromType: "public", toType: "public" })
 		console.log(`✓ A has a settled extension tx (amount ${SETTLED_AMOUNT})`)
 

@@ -1,0 +1,228 @@
+<title>Aztec 5.2.0 Split Bump</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF9F6; --ink: #1C1D22; --muted: #5D5C57; --line: #E3E1DA;
+    --move: #5B4FC4; --move-soft: #EEEBFB;
+    --hold: #9A6A00; --hold-soft: #F6EEDC;
+    --ok: #2E7D4F; --ok-soft: #E4F1E9;
+    --card: #FFFFFF; --code-bg: #F0EFEA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14151A; --ink: #E9E8E4; --muted: #9B9A94; --line: #2A2C33;
+      --move: #8F84E8; --move-soft: #23213A;
+      --hold: #D9A94A; --hold-soft: #2E2617;
+      --ok: #63C68C; --ok-soft: #17291E;
+      --card: #1B1C22; --code-bg: #21222A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14151A; --ink: #E9E8E4; --muted: #9B9A94; --line: #2A2C33;
+    --move: #8F84E8; --move-soft: #23213A;
+    --hold: #D9A94A; --hold-soft: #2E2617;
+    --ok: #63C68C; --ok-soft: #17291E;
+    --card: #1B1C22; --code-bg: #21222A;
+  }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.6; margin: 0; padding: 0 1.25rem 5rem;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1, h2, h3 { font-family: Archivo, system-ui, sans-serif; text-wrap: balance; }
+  h1 { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.01em; margin: 3.2rem 0 0.4rem; }
+  h2 { font-size: 1.28rem; font-weight: 700; margin: 2.8rem 0 0.8rem; }
+  h3 { font-size: 1.02rem; font-weight: 700; margin: 1.4rem 0 0.4rem; }
+  p { margin: 0.7rem 0; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 3rem; }
+  .lede { font-size: 1.06rem; color: var(--muted); max-width: 62ch; }
+  code, pre { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.86em; }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 0.9rem 1rem; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  .tablewrap { overflow-x: auto; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: Archivo, sans-serif; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .pill { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+  .pill.move { background: var(--move-soft); color: var(--move); }
+  .pill.hold { background: var(--hold-soft); color: var(--hold); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .phase { border-left: 3px solid var(--move); background: var(--card); border-radius: 0 8px 8px 0; padding: 0.9rem 1.1rem; margin: 0.9rem 0; }
+  .phase .num { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: var(--move); letter-spacing: 0.1em; }
+  .phase p { margin: 0.35rem 0 0; }
+  .gate { font-size: 0.88rem; color: var(--muted); margin-top: 0.45rem; }
+  .gate::before { content: "proves itself by — "; color: var(--ok); font-weight: 600; }
+  .approval { background: var(--move-soft); border-left: 3px solid var(--move); border-radius: 0 8px 8px 0; padding: 1rem 1.2rem; margin: 1.4rem 0; }
+  .warn { color: var(--hold); font-weight: 600; }
+  .seedcard { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  .seedcard.rec { border-color: var(--move); }
+  .seedcard .tag { font-family: Archivo, sans-serif; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .rec .tag { color: var(--move); }
+  ul { padding-left: 1.2rem; } li { margin: 0.35rem 0; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  a { color: var(--move); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+</style>
+<main>
+  <p class="kicker">implementation plan · approval requested</p>
+  <h1>Aztec 5.2.0 Split Bump</h1>
+  <p class="lede">Move the wallet's Aztec <em>client software</em> from 5.0.1 to 5.2.0 — while
+  deliberately keeping every piece that fixes on-chain identity, compiled contracts, or the
+  native prover exactly where it is. Two small pull requests, heavy safety gates, no live
+  broadcasts.</p>
+
+  <h2>What moves, what stays</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Thing</th><th>Fate</th><th>Why</th></tr>
+    <tr><td>The 20 <code>@aztec/*</code> JS packages (client, PXE, proving JS, sandbox)</td>
+        <td><span class="pill move">moves → 5.2.0</span></td>
+        <td>Aligns the wallet with the live test network, which already runs 5.2.0 software.</td></tr>
+    <tr><td>Your users' <strong>account addresses</strong> (the vendored Schnorr artifact)</td>
+        <td><span class="pill hold">frozen — forever</span></td>
+        <td>Already vendored byte-exact with hash + identity pins and test vectors. Confirmed: the freeze you asked about is fully in place, and this bump is exactly the event it exists for — upstream's own account artifact DID change at 5.2.0, which would have moved every address.</td></tr>
+    <tr><td>Contract source + compiled contracts (aztec-nr, token standards)</td>
+        <td><span class="pill hold">held at 5.0.1</span></td>
+        <td>As you said: the token standards have no final 5.2.0 release yet (only a release candidate). Everything stays compiled and pinned as-is; tests enforce it.</td></tr>
+    <tr><td>The accelerator (native prover) — app, server binary, SDK</td>
+        <td><span class="pill hold">held at 5.0.1</span></td>
+        <td>Nothing 5.2.0-targeted exists (even the newest v2.0.0 says "built against 5.0.1"). Research says the pairing works — see below. The CI helper binary does get its planned 1.0.6 → 2.0.0 refresh, shipped separately first.</td></tr>
+    <tr><td>Fee-payment + standards helper packages</td>
+        <td><span class="pill hold">held at 5.0.1</span></td>
+        <td>No newer releases exist on npm. Their exact wiring into the new line was mapped in detail (three different modes) and each has its own check.</td></tr>
+  </table></div>
+
+  <h2>The two questions that decide safety — both answered</h2>
+  <p><strong>1. Can the old (5.0.1) prover still prove what the new (5.2.0) wallet produces?</strong>
+  Research went to the byte level: the entire set of proving circuits and verification keys is
+  <em>byte-identical</em> between the two versions (same content hash upstream), and the simulator
+  is unchanged too. So the pairing is expected to work — and a real end-to-end proving test (the
+  "canary") runs early in the plan and is the final judge. If the canary fails and it's real, the
+  default is to <span class="warn">hold the whole upgrade</span>, never to patch around it.</p>
+  <p><strong>2. Does anything on-chain silently shift?</strong> One thing: the address of the
+  ecosystem's shared fee-sponsor contract is derived from the installed package, so it changes
+  generation with the bump. Probed live, read-only: the new-generation instance is <strong>already
+  deployed AND funded</strong> (≈970 × 10<sup>18</sup> fee juice) on the test network. Nothing else
+  moves — the network itself did not reset (verified against its version counter).</p>
+
+  <h2>Why a mid-weight plan</h2>
+  <p>Scored against the risk rubric: blast radius is wallet-wide and outside services are involved
+  (test network, npm, the accelerator), but nothing is irreversible — no network reset, no data
+  migration, revertable pull requests. That lands at "mid": one plan plus a competing outline, two
+  independent expert reviews, and a final fresh-eyes review. All three reviews have now happened
+  (see below).</p>
+
+  <h2>The phases</h2>
+  <div class="phase"><span class="num">PHASE A · SHIPS FIRST AS ITS OWN PR</span>
+    <p>Refresh the CI prover helper binary (1.0.6 → 2.0.0) against the <em>current</em> version line,
+    so if the new binary misbehaves we know it's the binary — not the upgrade. Its behavior changes
+    (HTTPS, site authorization) get read and adapted to first.</p>
+    <p class="gate">workflow lint + a real proving test on the unchanged line, with proof-request evidence in the server log.</p></div>
+  <div class="phase"><span class="num">PHASE 0 · PROBES, NO EDITS</span>
+    <p>Check whether the upstream installer still needs our CI workaround (a broken dependency it
+    once shipped); install the 5.2.0 toolchain alongside 5.0.1; re-run the read-only on-chain
+    probes and record the numbers.</p>
+    <p class="gate">probe outputs recorded; both toolchains present.</p></div>
+  <div class="phase"><span class="num">PHASE 1 · PINS + LOCKFILE</span>
+    <p>Bump the 20 package pins across 8 manifests (counted precisely — the held packages are
+    excluded by name), regenerate the two install patches properly, and review every dependency
+    change one-by-one — including a script that proves the only remaining 5.0.1 pieces are the
+    ones we deliberately kept. Publisher signatures checked for what actually changed.</p>
+    <p class="gate">clean install, patch checks, residue script green, signature checks transcribed.</p></div>
+  <div class="phase"><span class="num">PHASE 2 · CODE ADJUSTMENTS</span>
+    <p>Fix what the compiler surfaces, verify the three held-package wiring modes, and — the
+    non-negotiable — every address-freeze test and derivation vector passes <strong>with zero
+    edits</strong>. A red freeze test stops everything.</p>
+    <p class="gate">typecheck + full unit suite + lint green; a pinned-baseline diff proves the frozen files are untouched.</p></div>
+  <div class="phase"><span class="num">PHASE 3 · THE CANARY, EARLY</span>
+    <p>First buildable moment: run the frozen-account proving test against the local network with
+    the native prover required. This answers the go/no-go questions before any further effort.</p>
+    <p class="gate">canary green with proof-request evidence, plus which prover version actually served it.</p></div>
+  <div class="phase"><span class="num">PHASE 4 · FULL BATTERY</span>
+    <p>Line-by-line re-check of every place we mirror upstream logic; all drift detectors; all
+    builds; the quick UI suite; then the <em>entire</em> local network test suite with native
+    proving — including the fee flows (this occupies the machine solo for a stretch).</p>
+    <p class="gate">every detector [OK], full suite green with fee-flow proving evidence.</p></div>
+  <div class="phase"><span class="num">PHASE 5 · CI TOUCH-UPS</span>
+    <p>Resolve the prover-binary seeding question with Phase 3's evidence; drop the installer
+    workaround if Phase 0 proved it fixed; optional hardening if you approve it (question 5).</p>
+    <p class="gate">workflow lint green; each change justified in the log.</p></div>
+  <div class="phase"><span class="num">PHASE 6 · DOCS + WRAP</span>
+    <p>Update the upgrade ledger and runbook with everything learned, then the quality loops
+    (automated review + external review until clean), a final full re-gate, and only then the
+    pull request.</p>
+    <p class="gate">full check trio green on the post-review code; PR opened last, labeled to force both CI test suites.</p></div>
+
+  <h2>What the reviewers said</h2>
+  <ul>
+    <li><strong>Review 1 (external model, fresh):</strong> rejected the first draft — it under-modeled
+    how the held packages wire into the new line, ran the decisive test too late, and had gates
+    that weren't copy-paste runnable. All of that was verified and fixed; two of its asks were
+    declined with written reasons (they were policy changes beyond this task's authority).</li>
+    <li><strong>Review 2 (independent Claude, fresh):</strong> conditionally approved with five
+    conditions — the sharpest being "prove the fee-sponsor contract is <em>funded</em>, not just
+    present." All five are resolved; the funding one was answered the same day with a read-only
+    probe.</li>
+    <li><strong>One genuine disagreement, your call implicitly included:</strong> reviewer 1 wanted
+    the binary refresh as a separate first PR; reviewer 2 preferred a single PR. The plan ships
+    two PRs (isolating the binary variable won), and the disagreement is recorded rather than
+    hidden.</li>
+    <li><strong>Final fresh-eyes review:</strong> <span id="final-verdict"><span class="pill ok">conditional
+    approve</span> — its conditions (make every check copy-paste runnable, forbid the silent
+    prover fallback across the whole test suite, tighten the two-PR handoff and rollback order,
+    turn the funding probe into a pass/fail floor) are ALL integrated into the plan. It judged
+    the merged result of the two earlier reviews "architecturally coherent".</span></li>
+  </ul>
+
+  <h2>Open questions for you</h2>
+  <ul>
+    <li><strong>1 · Version list note:</strong> a deploy-time checklist file lists which network
+    versions the fee contract was verified against. Add "5.2.0" (mirroring your July mainnet
+    ruling) or leave it? <em>Default: leave</em> — it only gates a manual deploy script, and that
+    script has a separate pre-existing quirk with nightly version strings anyway.</li>
+    <li><strong>2 · Live drip test:</strong> optionally send one sponsored (zero-cost) faucet drip
+    on the test network after merge, as an end-to-end proof. The funding question it existed for
+    is already answered read-only. <em>Default: skip.</em></li>
+    <li><strong>3 · Prover seeding:</strong> if the evidence shows CI hands the server a
+    mismatched prover binary, the seed gets dropped (slightly slower first proof in CI).
+    <em>Default: drop on mismatch.</em></li>
+    <li><strong>4 · If the canary goes red</strong> and it's real: hold the whole upgrade (the
+    alternative — a new extension major — is its own future decision). <em>Default: hold.</em></li>
+    <li><strong>5 · Optional hardening:</strong> make the CI canary fail loudly if zero proof
+    requests reached the native prover (today that count is informational; a separate required
+    check already guards it indirectly). Small change, but it tightens a required gate — and if
+    approved it ships in the FIRST PR so the gate everything else trusts is already guarded.
+    <em>The final reviewer recommends approving. Approve or defer?</em></li>
+  </ul>
+
+  <div class="approval">
+    <h2 style="margin-top:0">Status: APPROVED ✓</h2>
+    <p>Approved by the owner on 2026-08-26 with every open question resolved:
+    <strong>1</strong> leave the version list as-is · <strong>2</strong> skip the live drip test ·
+    <strong>3</strong> drop a mismatched prover seed · <strong>4</strong> a real red canary halts
+    the upgrade · <strong>5</strong> the CI hardening is approved and ships in the first PR.
+    The seeds below are final.</p>
+  </div>
+
+  <h2>Implementation seeds — FINAL</h2>
+  <p class="muted">Finalized against the approved scope. Run inside the plan's worktree
+  (<code>agent-worktree resume aztec-5.2.0-js-line</code>).</p>
+  <p class="warn">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+  <div class="seedcard rec">
+    <span class="tag">Recommended · /goal</span>
+    <pre><code>/goal All EIGHT phase headers in implementations-plan/aztec-5.2.0-js-line/plan.md (Phase A, Phase 0, 1, 2, 3, 4, 5, 6) marked ✓, each backed by its validation gate (as written in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-&lt;id&gt;.md; every freeze/KAT/detector test green with zero pin or vector edits (git diff 21244d4a...HEAD over packages/aztec-runtime/src/account/ and contracts/ is empty, quoted); the prover-ON frozen-account canary green locally with a "Received /prove request" line quoted (both on the old line in Phase A and post-bump in Phase 3); the full local network suite green with fee-flow /prove evidence; for EACH of the two PRs: /code-review max --fix complete with fixes committed separately AND the codex fix loop converged (resumed codex pass reporting no new material findings, quoted) BEFORE that PR was created; both PRs exist on GitHub with labels e2e:network and e2e:smoke (gh pr view output quoted); bun run test:all and bun run lint both exit 0 in the transcript.</code></pre>
+  </div>
+
+  <div class="seedcard">
+    <span class="tag">Fallback · /loop 15m</span>
+    <pre><code>/loop 15m Drive implementations-plan/aztec-5.2.0-js-line forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending plan.md step (order: Phase A → its quality loop → PR-0 → phases 0-6 → PR-1 loop); after each meaningful edit run bun run lint + the touched package's test; commit + push. (4) Stuck or facing a decision I'd normally get? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/. Hard limits: never merge, never publish/deploy, never broadcast to testnet (incl. drip canaries) without explicit owner authorization, never expand scope beyond plan.md, never edit freeze-surface pins/vectors — a red freeze test or canary means STOP and surface, not fix; never neutralize a required check. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase gate green (commands + pass criteria as written, incl. the 21244d4a...HEAD freeze diff)? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-&lt;id&gt;.md, advance. (7) All phases ✓? Run the Post-implementation section exactly, per PR (code-review max --fix → separate commits → codex xhigh loop with the plan's two verbatim rules → PR only after convergence, labels e2e:network e2e:smoke → gh pr checks --watch), then a wrap-up report: what shipped, contentious calls with ELI5 context, open items. Keep the ASCII checklist visible each firing.</code></pre>
+  </div>
+
+  <hr>
+  <p class="muted">Full technical plan: <code>implementations-plan/aztec-5.2.0-js-line/plan.md</code> ·
+  evidence base: <code>recon.md</code> · review transcripts: <code>audit-codex.md</code>,
+  <code>audit-fable.md</code> — all in the plan's worktree.</p>
+</main>

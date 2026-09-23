@@ -1,6 +1,5 @@
 import type { DappSession, DappMetadata } from "@/wallet/services/dapp-session/spec"
-import type { Operation } from "@/wallet/services/execution/spec"
-import type { LocalTxOrigin } from "@/wallet/services/transaction/spec"
+import type { OperationApprovalDelta } from "./approval-delta"
 import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult, IExecutionHooks } from "@nulo/wallet-bridge"
 
 /** Protocol-shape types (`ExecutionParams`, `ExecutionResult`,
@@ -8,6 +7,7 @@ import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResu
  *  variants, `CaipChain`, `CaipAccount`) live in `@nulo/wallet-bridge`.
  *  Re-exported here so extension consumers can keep importing them via
  *  this path. */
+export type { OperationApprovalDelta } from "./approval-delta"
 export type {
 	AztecCreateAuthWitRequest,
 	AztecExecuteUtilityRequest,
@@ -66,6 +66,11 @@ export type DappInteraction = {
 	payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload
 	handleId: string
 	cancellationToken: string
+	/** Set when the dApp cancelled the request. Durable on the record (not just
+	 *  the broadcast) so a popup that subscribes late can replay the state, and
+	 *  service-side approval can refuse — the record survives until the window
+	 *  is dismissed so overlay + WindowManager cleanup keep working. */
+	cancelledAt?: number
 	/**
 	 * Hooks bag carried across the popup handoff. `interaction()` sets it;
 	 * `approveInteraction → executeAndResolve` reads it back via storage
@@ -99,9 +104,21 @@ export type DiscoveryResult = {
 
 export type Methods = {
 	getInteractionPayload(id: string): ExecutionPayload | CapabilityPayload | DiscoveryPayload
-	approveInteraction(id: string, operations: Operation[], origin: LocalTxOrigin): void
+	/**
+	 * Execute the stored request of a live execution interaction. The SW
+	 * materializes every operation from the dApp's own payload; `deltas` is
+	 * index-aligned with it and carries only the popup's fee choice and the
+	 * SW-minted estimate/preview ids. Rejected with "Invalid id" before any
+	 * claim when the interaction is not an executable one or the lengths differ.
+	 */
+	approveInteraction(id: string, deltas: OperationApprovalDelta[]): void
 	resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): void
 	rejectInteraction(id: string, reason: string): void
+	/** Replay read for popups that mount after the cancel broadcast fired. */
+	isInteractionCancelled(id: string): boolean
+	/** Bring the approval popup of the live interaction for `journalId` to the
+	 *  front. `false` when there is none, or it belongs to another profile. */
+	focusInteractionWindow(journalId: string): boolean
 }
 
 export type Events = {

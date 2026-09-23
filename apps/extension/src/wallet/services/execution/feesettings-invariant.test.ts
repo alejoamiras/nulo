@@ -27,11 +27,10 @@ function makeExecutor(): DappSendExecutor {
 	}
 	return new DappSendExecutor({
 		planner: { processAztecJsPayload: unreachable } as never,
-		authwit: { discoverPrivateAuthwits: unreachable } as never,
+		estimateWithDiscovery: { estimate: unreachable } as never,
 		txBuilder: { buildStandard: unreachable, buildNoFrom: unreachable } as never,
 		coordinator: { proveAndSend: unreachable, simulateTxTask: unreachable } as never,
 		lane: {
-			registerController: unreachable,
 			deleteController: unreachable,
 			acquireSlot: async () => {
 				throw new Error("stub slot")
@@ -40,7 +39,19 @@ function makeExecutor(): DappSendExecutor {
 			beginJournal: unreachable as never,
 			markJournal: unreachable as never,
 		},
-		buildAndEstimate: unreachable as never,
+		operationEstimateReuse: { tryConsume: unreachable, stash: unreachable, evict: unreachable } as never,
+		previewSnapshots: { stash: unreachable, evict: unreachable, take: unreachable } as never,
+		getActiveProfile: unreachable as never,
+		captureExecutionFence: unreachable as never,
+		assertFence: unreachable as never,
+		isFenceLive: unreachable as never,
+		getNetwork: unreachable as never,
+		getNode: unreachable as never,
+		getPXE: unreachable as never,
+		getAccountContract: unreachable as never,
+		getPendingForAccount: unreachable as never,
+		getFpcInfo: unreachable as never,
+		buildAndEstimateValidated: unreachable as never,
 		addTransaction: unreachable as never,
 		recordPendingAuthwits: unreachable as never,
 		logDebug: () => {},
@@ -48,6 +59,7 @@ function makeExecutor(): DappSendExecutor {
 }
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test" }
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 // Build a minimal AztecSendTxOperation with feeSettings missing. The fields
 // not touched by the invariant check (exec, opts, etc.) are stubbed loosely
@@ -79,14 +91,14 @@ describe("DappSendExecutor.executeAztecSendTx: feeSettings invariant", () => {
 	test("undefined feeSettings on standard path → throws with attributable message", async () => {
 		const executor = makeExecutor()
 		const op = makeAztecSendTx({ executionMode: "account" })
-		await expect(executor.executeAztecSendTx(op, ORIGIN)).rejects.toThrow(/feeSettings is required/i)
+		await expect(executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)).rejects.toThrow(/feeSettings is required/i)
 	})
 
 	test("undefined executionMode (standard path) is also gated by the invariant", async () => {
 		const executor = makeExecutor()
 		// executionMode left undefined — same standard-path behavior.
 		const op = makeAztecSendTx()
-		await expect(executor.executeAztecSendTx(op, ORIGIN)).rejects.toThrow(/feeSettings is required/i)
+		await expect(executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)).rejects.toThrow(/feeSettings is required/i)
 	})
 
 	test("executionMode=default_entrypoint bypasses the invariant and routes to executeNoFromSendTx", async () => {
@@ -98,7 +110,7 @@ describe("DappSendExecutor.executeAztecSendTx: feeSettings invariant", () => {
 		// the invariant is expected with our stub deps and not the contract
 		// we're pinning here.
 		try {
-			await executor.executeAztecSendTx(op, ORIGIN)
+			await executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)
 		} catch (err) {
 			expect((err as Error).message).not.toMatch(/feeSettings is required for the standard execution path/)
 		}
@@ -109,6 +121,6 @@ describe("DappSendExecutor.executeSendTransaction: feeSettings invariant", () =>
 	test("undefined feeSettings → throws with attributable message", async () => {
 		const executor = makeExecutor()
 		const op = makeSendTransaction()
-		await expect(executor.executeSendTransaction(op, ORIGIN)).rejects.toThrow(/feeSettings is required/i)
+		await expect(executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)).rejects.toThrow(/feeSettings is required/i)
 	})
 })

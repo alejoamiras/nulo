@@ -70,6 +70,16 @@ describe("requiresFeeSelection", () => {
 		expect(requiresFeeSelection(op)).toBe(false)
 	})
 
+	test("aztec_sendTx whose payer is the account itself with no fee call → requires (a self-pay carries no payment)", () => {
+		const op = {
+			kind: "aztec_sendTx",
+			exec: { calls: [{ name: "transfer" }], feePayer: "0xabc" } as unknown as AztecSendTxOperation["exec"],
+			opts: { from: "0xabc" } as unknown as AztecSendTxOperation["opts"],
+		} as unknown as Parameters<typeof requiresFeeSelection>[0]
+		expect(requiresFeeSelection(op)).toBe(true)
+		expect(requiresFeeSelection({ ...op, feeSettings: { paymentMethod: { kind: "fj" } } } as never)).toBe(false)
+	})
+
 	test("aztec_sendTx with no feeSettings, no default_entrypoint, no feePayer → requires", () => {
 		const op = draftAztecSendTx()
 		expect(requiresFeeSelection(op)).toBe(true)

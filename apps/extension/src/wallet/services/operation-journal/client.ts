@@ -1,15 +1,12 @@
 import { ServiceClient } from "@nulo/extension-messaging/background"
 import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
-import type { JobError, JobProgress } from "@nulo/wallet-core/jobs"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceSpec } from "@/wallet/base"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import {
 	type Events,
 	type Methods,
-	type NewOperationInput,
 	OPERATION_JOURNAL_SERVICE_NAME,
-	type OperationCountFilter,
 	type OperationFilter,
 	OperationJournalMethodSchemas,
 	type OperationRecord,
@@ -23,25 +20,7 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 	public readonly onOperationDeleted = new EventHandler<OperationRecord>()
 
 	public constructor(name?: string) {
-		super(OPERATION_JOURNAL_SERVICE_NAME, new LoggerServiceClient(), name)
-	}
-
-	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
-		validateParams(OperationJournalMethodSchemas.createOperation.params, [input], "createOperation")
-		const result = await this.request("createOperation", input)
-		return validateResult(OperationJournalMethodSchemas.createOperation.result, result, "createOperation")
-	}
-
-	public async transitionOperation(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
-		validateParams(OperationJournalMethodSchemas.transitionOperation.params, [id, progress, error ?? null], "transitionOperation")
-		const result = await this.request("transitionOperation", id, progress, error ?? null)
-		return validateResult(OperationJournalMethodSchemas.transitionOperation.result, result, "transitionOperation")
-	}
-
-	public async setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): Promise<OperationRecord> {
-		validateParams(OperationJournalMethodSchemas.setOperationMeta.params, [id, meta], "setOperationMeta")
-		const result = await this.request("setOperationMeta", id, meta)
-		return validateResult(OperationJournalMethodSchemas.setOperationMeta.result, result, "setOperationMeta")
+		super(OPERATION_JOURNAL_SERVICE_NAME, documentLogger(), name)
 	}
 
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
@@ -54,17 +33,6 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 		validateParams(OperationJournalMethodSchemas.getOperations.params, [filter], "getOperations")
 		const result = await this.request("getOperations", filter)
 		return validateResult(OperationJournalMethodSchemas.getOperations.result, result, "getOperations")
-	}
-
-	public async countOperations(filter: OperationCountFilter): Promise<number> {
-		validateParams(OperationJournalMethodSchemas.countOperations.params, [filter], "countOperations")
-		const result = await this.request("countOperations", filter)
-		return validateResult(OperationJournalMethodSchemas.countOperations.result, result, "countOperations")
-	}
-
-	public async deleteOperation(id: string): Promise<void> {
-		validateParams(OperationJournalMethodSchemas.deleteOperation.params, [id], "deleteOperation")
-		await this.request("deleteOperation", id)
 	}
 
 	/**

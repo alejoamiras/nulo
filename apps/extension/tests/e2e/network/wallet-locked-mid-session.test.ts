@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { lockWallet } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -26,7 +26,7 @@ test.skipIf(!hasConfig)(
 		const beforeSeq = await snapshotResultSeq(page)
 		await clickByTestId(page, "pg-btn-getChainInfo")
 		const before = await waitForPgResult(page, "getChainInfo", beforeSeq, 15_000)
-		expect(before.status).toBe("ok")
+		await assertPgOk(page, before, "wallet-locked-mid-session:before")
 
 		// Lock the wallet via the popup UI
 		const popupPage = await openPopup(dappConnectedExtension)

@@ -4,7 +4,7 @@
  * proxy validates the response with `z.void()`, so the wallet MUST resolve
  * `undefined`. Returning the registered instance (the pre-5.0.1 shape) makes
  * every wallet-sdk dApp call reject with a ZodError AFTER a successful
- * wallet-side registration — caught live on the faucet connect flow, where
+ * wallet-side registration — caught live on the tools app connect flow, where
  * `registerAllContracts` failed the whole capability handshake.
  *
  * The unit layer is bb-free, so the stdlib schema/class-id computations (which

@@ -1,31 +1,17 @@
-import { consoleMethods, LogLevel } from "@/wallet/logger"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
-import { getErrorData } from "@nulo/wallet-core/utils"
+import { installConsoleForwarding } from "@/wallet/logger/console-forwarding"
 
-// catch console
-const logger = new LoggerServiceClient("popup")
-for (const [method, level] of consoleMethods) {
-	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
-	;(self as any)[`on${method}`] = (...args: any[]) => {
-		logger.log("ui", level, ...args)
-	}
-}
-
-// catch unhandled errors
-self.onunhandledrejection = (e: PromiseRejectionEvent) => {
-	logger.log("ui", LogLevel.Error, getErrorData(e.reason))
-}
+installConsoleForwarding("popup")
 
 import { createPinia } from "pinia"
 import { createApp } from "vue"
-import { createRouter, createWebHashHistory, type RouteLocationNormalized, type NavigationGuardNext } from "vue-router"
+import { createRouter, createWebHashHistory } from "vue-router"
 import App from "./app.vue"
 import routes from "~pages"
 import "@nulo/design/base.css"
 import "./index.scss"
 
 import { initAppServiceContext, managers } from "@/utils/core"
-import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { createPopupGuard } from "./route-guard"
 
 // Eagerly open profile + contact service-worker ports at boot. Matches the
 // timing of the previous module-eval init in core.js so no consumer sees a
@@ -47,52 +33,13 @@ const router = createRouter({
 	routes,
 })
 
-router.beforeEach(async (to: RouteLocationNormalized, from: RouteLocationNormalized, next: NavigationGuardNext) => {
-	const appStore = useAppStore()
-
-	if (to.meta.isPasskeyInteraction) {
-		next()
-		return
-	}
-
-	if (to.name === "popup-register" && appStore.isRegistered) {
-		next({ name: from.name || "popup-general" })
-		return
-	}
-
-	if (to.name === "popup-auth" && appStore.isLogined) {
-		next({ name: from.name || "popup-general" })
-		return
-	}
-
-	if (to.meta.isAuthRequired && !appStore.isLogined && appStore.isSessionChecked) {
-		next({ name: "popup-auth" })
-		return
-	}
-
-	if (to.meta.isAuthRequired && !appStore.isLogined && !appStore.isSessionChecked) {
-		next({ name: "popup-auth" })
-		return
-	}
-
-	if (!appStore.profile && to.name !== "popup-register" && to.name !== "popup-import" && to.name !== "popup-profile-new") {
-		const profiles = await managers.profile.getProfiles()
-		if (profiles.length) {
-			const lastActiveId = await getLastActiveProfileId()
-			const lastActive = lastActiveId ? profiles.find((p) => p.id === lastActiveId) : undefined
-			appStore.profile = lastActive ?? profiles[0]
-		} else {
-			next({ name: "popup-register" })
-			return
-		}
-	}
-
-	if (to.meta.requirePasswordProfile && appStore.profile?.type === "passkey") {
-		next({ path: "/popup/settings/profile" })
-		return
-	}
-
-	next()
-})
+// The guard's decision logic (and its synchronous-early-branch contract) lives in `route-guard.ts`,
+// where it is unit-tested; this module only mounts.
+router.beforeEach(
+	createPopupGuard(
+		() => useAppStore(),
+		() => managers.profile,
+	),
+)
 
 createApp(App).use(router).use(createPinia()).mount("#app")

@@ -181,7 +181,7 @@ export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("s
 	z.object({ stage: z.literal("queued") }),
 	z.object({ stage: z.literal("pending") }),
 	z.object({ stage: z.literal("simulating") }),
-	z.object({ stage: z.literal("proving"), enteredProveAt: z.number() }),
+	z.object({ stage: z.literal("proving"), enteredProveAt: z.number(), backend: z.enum(["presto", "browser"]).optional() }),
 	z.object({ stage: z.literal("submitting"), txHash: z.string().optional() }),
 	z.object({ stage: z.literal("succeeded"), txHash: z.string().optional() }),
 	z.object({ stage: z.literal("failed") }),
@@ -360,14 +360,14 @@ export const OperationJournalMethodSchemas = {
 	},
 } as const
 
+/** The popup-reachable surface: two READS, both answered for the ACTIVE profile only at the
+ *  RPC boundary (`invoke`) — a record owned by another profile reads as absent, and `[]` is the
+ *  answer while locked. Every write (`createOperation`, `transitionOperation`, `setOperationMeta`,
+ *  `deleteOperation`) and `countOperations` are in-process only: a popup that could create or
+ *  transition journal rows could forge its own history. */
 export type Methods = {
-	createOperation(input: NewOperationInput): OperationRecord
-	transitionOperation(id: string, progress: JobProgress, error?: JobError | null): OperationRecord
-	setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): OperationRecord
 	getOperation(id: string): OperationRecord | undefined
 	getOperations(filter?: OperationFilter): OperationRecord[]
-	countOperations(filter: OperationCountFilter): number
-	deleteOperation(id: string): void
 }
 
 export type Events = {

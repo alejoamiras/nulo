@@ -1,0 +1,10 @@
+.wrapper {
+	flex: 1;
+	overflow: auto;
+	background: var(--app-bg);
+	scrollbar-gutter: stable;
+}
+
+.content {
+	padding: 16px 24px var(--nav-clearance) 24px;
+}

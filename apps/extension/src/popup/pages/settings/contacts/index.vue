@@ -17,6 +17,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 
 /** Utils */
 import { stringCompare } from "@/utils"
+import { copyWithToast } from "@/utils/clipboard"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -119,8 +120,7 @@ function handleClickContact(contact) {
 	router.push("/popup/send")
 }
 const handleCopyContactAddress = (contact) => {
-	window.navigator.clipboard.writeText(contact.address)
-	openToast({ label: "Address is copied", icon: "copy" })
+	void copyWithToast(contact.address, openToast, "Address is copied")
 }
 function handleEditContact(contact) {
 	cacheStore.contactToEditIdx = contact.id
@@ -150,106 +150,65 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Contacts" :backTo="'/popup/settings'">
-			<template #trailing>
-				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Contact actions">
-						<MaterialIcon name="more_vert" :size="18" color="secondary" />
-					</button>
+	<SettingsPageShell title="Contacts" :backTo="'/popup/settings'" gap="12">
+		<template #trailing>
+			<Dropdown>
+				<button type="button" :class="$style.icon_btn" aria-label="Contact actions">
+					<MaterialIcon name="more_vert" :size="18" color="secondary" />
+				</button>
 
-					<template #popup>
-						<DropdownItem @click="importContacts">
-							<Flex align="center" gap="8">
-								<Icon name="upload-outline" size="14" color="secondary" />
-								Import contacts
-							</Flex>
-						</DropdownItem>
-						<DropdownItem @click="exportContacts" :disabled="!contacts.length">
-							<Flex align="center" gap="8">
-								<Icon name="download-outline" size="14" color="secondary" />
-								Export contacts
-							</Flex>
-						</DropdownItem>
-					</template>
-				</Dropdown>
-			</template>
-		</SubPageHeader>
+				<template #popup>
+					<DropdownItem @click="importContacts">
+						<Flex align="center" gap="8">
+							<Icon name="upload-outline" size="14" color="secondary" />
+							Import contacts
+						</Flex>
+					</DropdownItem>
+					<DropdownItem @click="exportContacts" :disabled="!contacts.length">
+						<Flex align="center" gap="8">
+							<Icon name="download-outline" size="14" color="secondary" />
+							Export contacts
+						</Flex>
+					</DropdownItem>
+				</template>
+			</Dropdown>
+		</template>
 
-		<Flex direction="column" gap="12" :class="$style.content">
-			<SectionLabel label="Contacts" :count="sortedContacts.length" />
+		<SectionLabel label="Contacts" :count="sortedContacts.length" />
 
-			<ItemsContainer v-if="sortedContacts.length">
-				<ContactRow
-					v-for="c in sortedContacts"
-					:key="c.id"
-					:contact="c"
-					:isSender="isContactSender(c.address)"
-					@select="handleClickContact"
-					@copy="handleCopyContactAddress"
-					@edit="handleEditContact"
-					@delete="handleDeleteContact"
-				/>
-			</ItemsContainer>
+		<ItemsContainer v-if="sortedContacts.length">
+			<ContactRow
+				v-for="c in sortedContacts"
+				:key="c.id"
+				:contact="c"
+				:isSender="isContactSender(c.address)"
+				@select="handleClickContact"
+				@copy="handleCopyContactAddress"
+				@edit="handleEditContact"
+				@delete="handleDeleteContact"
+			/>
+		</ItemsContainer>
 
-			<div v-else :class="$style.empty" data-testid="contacts-empty">
-				<span :class="$style.empty_headline">NO CONTACTS YET</span>
-				<span :class="$style.empty_sub">Save the people you send to or receive from often.</span>
-			</div>
+		<ListStatusMessage
+			v-else
+			headline="NO CONTACTS YET"
+			sub="Save the people you send to or receive from often."
+			testid="contacts-empty"
+		/>
 
-			<Button
-				@click="popupStore.open('new_contact')"
-				wide
-				variant="primary"
-				size="large"
-				data-testid="contacts-new-btn"
-			>
-				Add contact
-			</Button>
-		</Flex>
-	</Flex>
+		<Button
+			@click="popupStore.open('new_contact')"
+			wide
+			variant="primary"
+			size="large"
+			data-testid="contacts-new-btn"
+		>
+			Add contact
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
-.empty {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
-
-	text-align: center;
-}
-
-.empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
-}
-
 .icon_btn {
 	display: flex;
 	align-items: center;

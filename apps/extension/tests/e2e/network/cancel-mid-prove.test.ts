@@ -106,7 +106,7 @@ test.skipIf(!hasConfig)(
 		// built in non-proverless builds); load-bearing under proverless, where
 		// prove collapses to sub-second and the cancel would land post-submit.
 		await holdProofGate(execPopup)
-		await approveExecute(execPopup)
+		await approveExecute(execPopup, { approvableTimeoutMs: 120_000 })
 
 		// Open the wallet popup; wait for the in-flight awaiting card to render.
 		const walletPopup = await openPopup(dappConnectedExtension)

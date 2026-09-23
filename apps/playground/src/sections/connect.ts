@@ -18,6 +18,7 @@ export function renderConnect(): string {
 					<option data-bundle-id="accounts" value="accounts">accounts</option>
 					<option data-bundle-id="accounts-noAuthWit" value="accounts-noAuthWit">accounts-noAuthWit</option>
 					<option data-bundle-id="transaction" value="transaction">transaction</option>
+					<option data-bundle-id="transaction-contracts" value="transaction-contracts">transaction-contracts</option>
 					<option data-bundle-id="transaction-scoped" value="transaction-scoped">transaction-scoped</option>
 					<option data-bundle-id="data" value="data">data</option>
 					<option data-bundle-id="data-scopedEvents" value="data-scopedEvents">data-scopedEvents</option>

@@ -7,7 +7,7 @@
  *
  * SCOPE (narrow, on purpose): targets `parseTokenInterface` — the shallow
  * register + name-based candidate-extraction path. It does NOT touch
- * `fetchTokenMetadata`/`addToken`, which call `simulate(...)` (deep — e2e).
+ * `fetchTokenMetadata`/`addToken`, which run a view simulation (deep — e2e).
  * Candidate extraction is bb-FREE (it filters the artifact's functions by name/
  * params); the contract instance is a HARDCODED fake (deriving one needs the
  * Barretenberg WASM, which vitest/jsdom doesn't load). See
@@ -15,6 +15,7 @@
  */
 import { describe, expect, test, vi } from "vitest"
 import type { Fr } from "@aztec/foundation/curves/bn254"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
@@ -33,7 +34,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { fakeBrowser } from "@webext-core/fake-browser"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { TokenService } from "./service"
-import { PinMismatchError, TokenSeeder } from "./seeder"
+import { PinMismatchError, TokenSeeder, type TokenSeederDeps } from "./seeder"
 import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
 import type { Token, TokenInterface } from "./spec"
 
@@ -69,6 +70,8 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			getActiveProfile: async () => ({ id: "p1" }),
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
+			getDeletionState: () => new ProfileDeletionState(),
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }),
 		}),
 	)
 	collection.add(
@@ -76,15 +79,18 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			getNetwork: async () => NETWORK,
 			registerChainPurgeSubscriber: () => {},
 			onActiveNetworkChanged: new EventHandler(),
+			isNetworkLive: async () => true,
+			isChainLive: async () => true,
 		}),
 	)
-	collection.add(svc(AccountService.name, {}))
-	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
+	collection.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
+	const startNewTask = vi.fn(() => fakeTask)
+	collection.add(svc(TaskService.name, { startNewTask }))
 	collection.add(svc(OperationJournalService.name, {}))
 	const tokenService = new TokenService(logger, api, () => fake.client)
 	collection.add(tokenService)
 	await collection.start()
-	return { tokenService, fake, api }
+	return { tokenService, fake, api, fakeTask, startNewTask }
 }
 
 describe("TokenService composition — in-process, no sandbox", () => {
@@ -152,10 +158,10 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 	// covered at the seeder-deps seam in seeder.test.ts — D2 keeps it out of
 	// composition. This slice drives the REAL graph for everything else:
 	// register-free pin reads, the seed-only persist path + journal labeling,
-	// tombstone-on-delete, and the unlock/network-change hook wiring.
+	// tombstone-on-delete, and the three seed-trigger hooks.
 	const CUSD = DEFAULT_TOKEN_SEEDS[0].contract
 
-	async function seedHarness() {
+	async function seedHarness(seederOverrides?: ConstructorParameters<typeof TokenService>[3]) {
 		const fake = makeShallowPxeFake({
 			instances: new Map([[AztecAddress.fromStringUnsafe(CONTRACT).toString(), fakeTokenInstance()]]),
 			artifacts: new Map([[CLASS_ID, TokenContractArtifact]]),
@@ -169,6 +175,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 
 		const onActiveProfileChanged = new EventHandler<{ id: string } | undefined>()
 		const onActiveNetworkChanged = new EventHandler<unknown>()
+		const onAccountAdded = new EventHandler<unknown>()
 		const journal = {
 			createOperation: vi.fn(async (input: Record<string, unknown>) => ({ id: "op1", ...input })),
 			transitionOperation: vi.fn(async () => {}),
@@ -182,6 +189,8 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				getActiveProfile: async () => ({ id: "p1" }),
 				onProfileDeleted: { add: () => {} },
 				onActiveProfileChanged,
+				getDeletionState: () => new ProfileDeletionState(),
+				captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }),
 			}),
 		)
 		collection.add(
@@ -190,15 +199,17 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				getActiveNetwork: async () => NETWORK,
 				registerChainPurgeSubscriber: () => {},
 				onActiveNetworkChanged,
+				isNetworkLive: async () => true,
+				isChainLive: async () => true,
 			}),
 		)
-		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }] }))
+		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }], onAccountAdded }))
 		collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
 		collection.add(svc(OperationJournalService.name, journal))
-		const tokenService = new TokenService(logger, api, () => fake.client)
+		const tokenService = new TokenService(logger, api, () => fake.client, seederOverrides)
 		collection.add(tokenService)
 		await collection.start()
-		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged }
+		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged, onAccountAdded }
 	}
 
 	const seedIface = (chainId: number, contract: string) => ({ chainId, contract, isComplete: true }) as unknown as TokenInterface
@@ -246,6 +257,63 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		expect(await tokenService.getTokensRaw("p1", NETWORK.chainId)).toHaveLength(1)
 	})
 
+	test("(Q-01 ordering pin) a failed import journals 'failed' BEFORE the token lock releases", async () => {
+		// The catch lives INSIDE the withLock closure: a queued token op must
+		// never observe the operation mid-failure. If the catch ever moves
+		// outside the lock, the queued op below runs before the journal write
+		// and this ordering assertion reds.
+		const { tokenService, journal } = await seedHarness()
+		const events: string[] = []
+		let releaseFailed!: () => void
+		const failedGate = new Promise<void>((r) => {
+			releaseFailed = r
+		})
+		let startQueued!: () => void
+		const queuedStarted = new Promise<void>((r) => {
+			startQueued = r
+		})
+		;(journal.transitionOperation as ReturnType<typeof vi.fn>).mockImplementation(async (...args: unknown[]) => {
+			const stage = (args[1] as { stage: string }).stage
+			if (stage === "simulating") {
+				// We are UNDER the token lock now: let the test enqueue a second
+				// locked op behind us, give it a beat to reach the lock queue,
+				// then fail the import.
+				startQueued()
+				await new Promise((r) => setTimeout(r, 0))
+				throw new Error("sim boom")
+			}
+			if (stage === "failed") {
+				// The discriminator: the failed transition BLOCKS until the test
+				// releases it. With the catch inside the closure, the token lock
+				// is held through this await — the queued op below must stay
+				// blocked while the gate is closed. A catch outside the lock
+				// releases first and the mid-flight assertion reds.
+				await failedGate
+				events.push("journal:failed-complete")
+			}
+		})
+		const failing = tokenService
+			.addSeededToken({
+				profileId: "p1",
+				networkId: NETWORK.id,
+				accountAddress: "0xacc1",
+				tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+				name: "Compressed USD",
+				symbol: "cUSD",
+				decimals: 6,
+			})
+			.catch(() => {})
+		await queuedStarted
+		const queued = tokenService.restore([]).then(() => events.push("queued-op:ran"))
+		// Generous window for the queued op to (wrongly) slip in while the failed
+		// transition is still pending — it must not.
+		await new Promise((r) => setTimeout(r, 20))
+		expect(events).toEqual([])
+		releaseFailed()
+		await Promise.all([failing, queued])
+		expect(events).toEqual(["journal:failed-complete", "queued-op:ran"])
+	})
+
 	test("deleting a DEFAULT token writes the user tombstone marker", async () => {
 		const { tokenService } = await seedHarness()
 		const info = await tokenService.addSeededToken({
@@ -280,10 +348,20 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		expect(res["nulo:core:token-seeded@p1"]).toBeUndefined()
 	})
 
-	test("unlock + active-network-change both trigger a seed pass through the REAL init wiring", async () => {
+	test("an unarmed TokenService seeds from the SHIPPED list, not an injected one", async () => {
+		// Every other seeding test injects `getSeeds` or drives the armed e2e
+		// reader, so all of them would stay green if the production fallback
+		// regressed to `async () => []` — which would silently stop seeding
+		// defaults in a shipped wallet.
+		const { tokenService } = await seedHarness()
+		const { seeder } = tokenService as unknown as { seeder: { deps: TokenSeederDeps } }
+		expect(await seeder.deps.getSeeds()).toBe(DEFAULT_TOKEN_SEEDS)
+	})
+
+	test("unlock + active-network-change + account-added all trigger a seed pass through the REAL init wiring", async () => {
 		const runSpy = vi.spyOn(TokenSeeder.prototype, "run").mockResolvedValue(undefined)
 		try {
-			const { onActiveProfileChanged, onActiveNetworkChanged } = await seedHarness()
+			const { onActiveProfileChanged, onActiveNetworkChanged, onAccountAdded } = await seedHarness()
 			onActiveProfileChanged.invoke({ id: "p1" })
 			expect(runSpy).toHaveBeenCalledTimes(1)
 			// Lock (undefined) must NOT trigger a pass.
@@ -291,8 +369,46 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			expect(runSpy).toHaveBeenCalledTimes(1)
 			onActiveNetworkChanged.invoke(NETWORK)
 			expect(runSpy).toHaveBeenCalledTimes(2)
+			// The one that was missing: both events above fire before a chain's
+			// first account exists, so this is the only trigger that can seed a
+			// fresh profile.
+			onAccountAdded.invoke({ address: "0xacc1", chainId: NETWORK.chainId })
+			expect(runSpy).toHaveBeenCalledTimes(3)
 		} finally {
 			runSpy.mockRestore()
+		}
+	})
+
+	test("a fresh service graph with no popup connected: resumeSeeding runs a due default-token retry exactly once", async () => {
+		// The previous service worker recorded an attempt and its retry time, then
+		// died. Nothing but the boot-time resume exists in this one: no popup RPC, no
+		// profile/network/account event.
+		const seed = { ...DEFAULT_TOKEN_SEEDS[0], chainId: NETWORK.chainId }
+		const markerKey = "nulo:core:token-seeded@p1"
+		const seedKey = `${seed.chainId}:${seed.contract}`
+		// The metadata read is simulate-backed (deep): stubbed at the service seam.
+		const preview = vi.spyOn(TokenService.prototype, "previewTokenMetadata").mockRejectedValue(new Error("rpc down"))
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+		try {
+			const { tokenService } = await seedHarness({ getSeeds: async () => [seed], getVersion: () => "1.0.0" })
+			await fakeBrowser.storage.local.set({
+				[markerKey]: JSON.stringify({ [seedKey]: { attempts: 1, nextAttemptAt: Date.now() - 1 } }),
+			})
+			await tokenService.resumeSeeding()
+			await tokenService.resumeSeeding()
+			expect(preview).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(preview).toHaveBeenCalledTimes(1)
+			const stored = (await fakeBrowser.storage.local.get(markerKey))[markerKey] as string
+			expect(JSON.parse(stored)[seedKey].attempts).toBe(2)
+			expect((await tokenService.getSeedStatus(seed.chainId)).entries).toEqual([
+				expect.objectContaining({ contract: seed.contract, status: "pending" }),
+			])
+			const { seeder } = tokenService as unknown as { seeder: TokenSeeder }
+			seeder.dispose()
+		} finally {
+			vi.useRealTimers()
+			preview.mockRestore()
 		}
 	})
 

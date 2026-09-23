@@ -30,6 +30,18 @@ describe("Button (router-free base)", () => {
 		expect(w.attributes("aria-busy")).toBe("true")
 	})
 
+	test("disabled + loading stack BOTH classes (the saving-state opacity override's precondition)", () => {
+		// The stylesheet keys `.disabled.loading { opacity: 0.8 }` on this exact
+		// stacking so a running submit reads as "saving", not "invalid form",
+		// while the native disabled attribute still blocks activation.
+		const w = mountButton({ disabled: true, loading: true }, { default: "Saving" })
+		const cls = w.attributes("class") ?? ""
+		expect(cls).toMatch(/disabled/)
+		expect(cls).toMatch(/loading/)
+		expect(w.attributes("disabled")).toBeDefined()
+		expect(w.attributes("tabindex")).toBe("-1")
+	})
+
 	test("leftIcon + rightIcon render two Icon stubs flanking the slot", () => {
 		const w = mountButton({ leftIcon: "arrow-left", rightIcon: "arrow-right" }, { default: "Continue" })
 		expect(w.findAll('[data-testid="stub-icon"]')).toHaveLength(2)

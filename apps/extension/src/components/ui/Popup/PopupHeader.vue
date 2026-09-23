@@ -1,11 +1,12 @@
-<script setup>
-const emit = defineEmits(["onClose"])
-const props = defineProps({
+<script setup lang="ts">
+const emit = defineEmits<{ onClose: [] }>()
+defineProps({
 	closable: {
 		type: Boolean,
 		default: false,
 	},
 })
+defineSlots<{ title?(): unknown; right?(): unknown; description?(): unknown }>()
 </script>
 
 <template>
@@ -21,6 +22,7 @@ const props = defineProps({
 					@click="emit('onClose')"
 					type="button"
 					aria-label="Close"
+					data-testid="popup-close-btn"
 					:class="$style.close_btn"
 				>
 					<MaterialIcon name="close" :size="20" color="secondary" />

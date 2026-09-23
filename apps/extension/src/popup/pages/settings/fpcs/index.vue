@@ -12,6 +12,7 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
 import { stringCompare } from "@/utils/string"
+import { copyWithToast } from "@/utils/clipboard"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
@@ -24,6 +25,7 @@ import FpcRow from "@/popup/components/modules/settings/fpcs/FpcRow.vue"
 
 /** Helpers */
 import { fpcSortOrder, isSyntheticRow, prepareFpc, PUBLIC_FJ_ROW } from "@/popup/components/modules/settings/fpcs/fpc-helpers"
+import { mutateSendSelections, withoutFpc } from "@/popup/components/modules/send/fee-send-selection"
 
 const { openToast } = useToast()
 
@@ -50,6 +52,10 @@ const {
 	added: fpcService.onFpcAdded,
 	updated: fpcService.onFpcUpdated,
 	deleted: fpcService.onFpcDeleted,
+	// Events are global; the list is chain-scoped within the active profile — a
+	// mid-switch add/update for another chain OR another profile (the payload
+	// carries profileId; same chainId across profiles is common) must not render.
+	accept: (f) => f.chainId === appStore.network?.chainId && f.profileId === appStore.profile?.id,
 })
 
 const fpcs = computed(() =>
@@ -68,8 +74,7 @@ const displayedRows = computed(() => [PUBLIC_FJ_ROW, ...(fpcs.value ?? [])])
 
 /** Handlers */
 const handleCopyAddress = (address) => {
-	window.navigator.clipboard.writeText(address)
-	openToast({ label: "FPC's address is copied", icon: "copy" })
+	void copyWithToast(address, openToast, "FPC's address is copied")
 }
 
 const handleEdit = (fpc) => {
@@ -94,17 +99,22 @@ const handleDelete = (fpc) => {
 			}
 			await storageLocalSet({ [FEE_METHOD_LS_KEY]: fpms })
 		}
+		await mutateSendSelections((raw) => withoutFpc(raw, fpc.id))
 
 		openToast({ label: "FPC is deleted" })
 	}
 	popupStore.open("confirm")
 }
 
+// A profile/network switch emits no fpc events and this route is not
+// remounted — refetch explicitly. `clear` empties the foreign scope's rows
+// synchronously so a failed refetch cannot leave them rendered; the
+// composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => [appStore.network, appStore.account],
+	() => [appStore.profile?.id, appStore.network, appStore.account],
 	() => {
 		if (appStore.network && appStore.account) {
-			refreshFpcs()
+			void refreshFpcs({ clear: true })
 		}
 	},
 )
@@ -115,58 +125,35 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Manage FPCs" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage FPCs" :backTo="'/popup/settings'" gap="20">
+		<!-- The synthetic Public Fee Juice anchor is hardcoded + network-
+			independent, so the list (anchor first) always renders. Loading /
+			error apply only to the storage/protocol-backed rows and show
+			below — without this, no PXE (smoke / offline) left the whole list,
+			including the always-present anchor, hidden behind the spinner. -->
+		<Flex direction="column" gap="16">
+			<SectionLabel label="FPCs" :count="displayedRows.length" />
 
-		<Flex direction="column" gap="20" :class="$style.content">
-			<!-- The synthetic Public Fee Juice anchor is hardcoded + network-
-				independent, so the list (anchor first) always renders. Loading /
-				error apply only to the storage/protocol-backed rows and show
-				below — without this, no PXE (smoke / offline) left the whole list,
-				including the always-present anchor, hidden behind the spinner. -->
-			<Flex direction="column" gap="16">
-				<SectionLabel label="FPCs" :count="displayedRows.length" />
+			<ItemsContainer>
+				<FpcRow
+					v-for="row in displayedRows"
+					:key="row.id"
+					:fpc="row"
+					:synthetic="isSyntheticRow(row) ? 'public-fj' : undefined"
+					:protectedRow="!!row.isProtocol"
+					:nonEditable="row.isProtocol && row.type === FpcType.PrivateFpc"
+					@copyAddress="handleCopyAddress"
+					@edit="handleEdit"
+					@delete="handleDelete"
+				/>
+			</ItemsContainer>
 
-				<ItemsContainer>
-					<FpcRow
-						v-for="row in displayedRows"
-						:key="row.id"
-						:fpc="row"
-						:synthetic="isSyntheticRow(row) ? 'public-fj' : undefined"
-						:protectedRow="!!row.isProtocol"
-						:nonEditable="row.isProtocol && row.type === FpcType.PrivateFpc"
-						@copyAddress="handleCopyAddress"
-						@edit="handleEdit"
-						@delete="handleDelete"
-					/>
-				</ItemsContainer>
-
-				<LoadingState v-if="isLoading" label="FETCHING FPCS" />
-
-				<Tooltip v-else-if="error" wide>
-					<Banner :action="{ name: 'Try again', callback: () => refreshFpcs() }" variant="error" wide>
-						Something went wrong
-					</Banner>
-					<template #content>{{ error }}</template>
-				</Tooltip>
-			</Flex>
-
-			<Button @click="popupStore.open('new_fpc')" wide variant="primary" size="large" data-testid="fpc-new-btn">
-				Add FPC
-			</Button>
+			<AsyncListStatus v-if="isLoading || error" :loading="isLoading" :error="error" label="FETCHING FPCS" @retry="refreshFpcs()" />
 		</Flex>
-	</Flex>
+
+		<Button @click="popupStore.open('new_fpc')" wide variant="primary" size="large" data-testid="fpc-new-btn">
+			Add FPC
+		</Button>
+	</SettingsPageShell>
 </template>
 
-<style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-</style>

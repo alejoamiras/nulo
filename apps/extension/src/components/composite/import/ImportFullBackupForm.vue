@@ -1,4 +1,5 @@
 <script setup>
+import { newPasswordHint } from "@/utils/password"
 /**
  * Renders the full-backup-restore form: file picker, error/warning
  * banners, decryption-password section (when the backup is encrypted),
@@ -23,12 +24,7 @@ const repeatedPassword = defineModel("repeatedPassword", { default: "" })
 const isPasswordType = ref(true)
 const isDecryptionPasswordType = ref(true)
 
-const passwordHint = computed(() => {
-	if (!password.value || password.value?.length < 8) return "At least 8 characters"
-	if (password.value !== repeatedPassword.value) return "Passwords don't match"
-	if (password.value?.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
+const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeatedPassword.value ?? ""))
 </script>
 
 <template>
@@ -159,19 +155,11 @@ const passwordHint = computed(() => {
  * Input children already paint their own bottom borders, so the extra
  * divider stacked two 1px lines ~20px apart. */
 .section {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	padding: 20px 0;
+	composes: section from "./import-shared.module.css";
 }
 
 .section_label {
-	font-family: var(--font-headline);
-	font-size: 11px;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.18em;
-	color: var(--nulo-secondary);
+	composes: section_label from "./import-shared.module.css";
 }
 
 .visibility_btn {

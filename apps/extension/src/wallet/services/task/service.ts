@@ -3,7 +3,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import type { TxOrigin } from "@/wallet/services/transaction/service"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	TASK_SERVICE_NAME,
@@ -44,10 +44,7 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 	}
 
 	private createTask(content: ITaskContent, parentId?: string, origin?: TxOrigin, status: TaskStatus = TaskStatus.Pending): WrappedTask {
-		let taskId: string
-		do {
-			taskId = getRandomHex(8)
-		} while (this.tasks.has(taskId))
+		const taskId = randomIdNotIn((id) => this.tasks.has(id))
 
 		const parent = parentId ? this.getTaskById(parentId) : undefined
 		if (parent?.finishedAt) {
@@ -184,6 +181,13 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 		return task
 	}
 
+	/** Non-throwing existence check — unlike `getTaskById`/`startTask`/`getTaskSync`,
+	 *  which throw on a missing id. Lets callers distinguish a stale/cleared task id
+	 *  (e.g. after a profile switch wipes the map) from a genuine invariant failure. */
+	public hasTask(taskId: string): boolean {
+		return this.tasks.has(taskId)
+	}
+
 	public async getTask(taskId: string): Promise<Task> {
 		const task = this.getTaskById(taskId)
 		this.cleanupStaleTasks()
@@ -203,11 +207,6 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 	}
 
 	public async getTasks(): Promise<Task[]> {
-		this.cleanupStaleTasks()
-		return this.getRootTasks()
-	}
-
-	public getTasksSync(): Task[] {
 		this.cleanupStaleTasks()
 		return this.getRootTasks()
 	}

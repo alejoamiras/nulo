@@ -34,28 +34,26 @@ export function buildCapabilityItems(
 	delta: Capability[],
 	existingGrants: Capability[],
 	reRequestedTypes: ReadonlySet<string>,
+	opts: { accountsMembershipOnly?: boolean } = {},
 ): UICapabilityItem[] {
 	const items: UICapabilityItem[] = []
 
 	for (const cap of delta) {
-		// `accounts` is rendered as the dedicated account picker section,
-		// not as a card in the delta list (popup orchestration owns that
-		// split). Its `canCreateAuthWit` sub-permission DOES get a card — a
-		// rider the user can individually deselect (deselection strips the
-		// flag from the accounts grant on approve). Boolean() coercion
-		// mirrors the dispatcher/scope-checker read, so a dApp sending a
-		// truthy non-boolean (`canCreateAuthWit: 1`) can't dodge the card.
+		// `accounts` renders as the picker section, not a card; only its `canCreateAuthWit` rider
+		// gets one. Boolean() coercion mirrors enforcement, so a truthy non-boolean cannot dodge
+		// the card. On a membership-only widening the flag is already granted: the rider is an
+		// existing (non-deselectable) card, and the dispatcher keeps the stored grant regardless.
 		if (cap.type === "accounts") {
 			if (Boolean((cap as { canCreateAuthWit?: unknown }).canCreateAuthWit)) {
 				items.push({
 					capability: cap,
 					label: AUTHWIT_RIDER_INFO.label,
 					description: AUTHWIT_RIDER_INFO.description,
-					isNew: true,
+					isNew: !opts.accountsMembershipOnly,
 					isUnknown: false,
 					selected: true,
 					risk: AUTHWIT_RIDER_INFO.risk,
-					reRequested: reRequestedTypes.has(cap.type),
+					reRequested: !opts.accountsMembershipOnly && reRequestedTypes.has(cap.type),
 					authwitRider: true,
 				})
 			}

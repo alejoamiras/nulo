@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup } from "../fixtures/playground"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -23,6 +23,6 @@ test.skipIf(!hasConfig)("meta-getChainInfo — silent path, no popup", { timeout
 	const result = await callExpectingNoPopup(dappConnectedExtension, dappConnectedExtension.playgroundPage, "getChainInfo", async () => {
 		await clickByTestId(dappConnectedExtension.playgroundPage, "pg-btn-getChainInfo")
 	})
-	expect(result.status).toBe("ok")
+	await assertPgOk(dappConnectedExtension.playgroundPage, result, "meta-getChainInfo:result")
 	expect(result.resultJson).toBeDefined()
 })

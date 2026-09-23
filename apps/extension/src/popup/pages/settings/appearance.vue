@@ -38,11 +38,16 @@ const settings = {
 		description: "",
 		model: theme,
 	},
-	sidePanel: {
-		title: "Open as Side Panel",
-		description: "Open as side panel instead of popup",
-		model: isSidePanelEnabled,
-	},
+	// Chrome-only: Firefox has no side panel, so the row is not offered there.
+	...(chrome.sidePanel
+		? {
+				sidePanel: {
+					title: "Open as Side Panel",
+					description: "Open as side panel instead of popup",
+					model: isSidePanelEnabled,
+				},
+			}
+		: {}),
 	showNode: {
 		title: "Show network name",
 		description: "Always show network name in the header",
@@ -60,7 +65,8 @@ const settings = {
 	},
 	incomingTransfersVisible: {
 		title: "Show incoming transfers",
-		description: "Hide if you run the same seed on multiple devices and don't want one device's outgoing to appear as incoming here",
+		description:
+			"Hide if you run the same recovery phrase on multiple devices and don't want one device's outgoing to appear as incoming here",
 		model: isIncomingTransfersVisible,
 	},
 	showFiatValues: {
@@ -225,11 +231,11 @@ onBeforeUnmount(() => {
 				/>
 			</Flex>
 
-			<!-- D8 dust filter: hide incoming receipts worth less than this USD value. -->
+			<!-- One dust threshold for the wallet: the activity feed's receipts AND the Holdings fold. -->
 			<Flex justify="between" align="center" gap="12">
 				<Flex direction="column" gap="6">
-					<Text size="13" weight="600" color="primary"> Hide dust receipts </Text>
-					<Text size="12" weight="500" color="tertiary">Hide receipts below this value. 0 turns it off.</Text>
+					<Text size="13" weight="600" color="primary"> Hide dust </Text>
+					<Text size="12" weight="500" color="tertiary">Hide receipts and holdings below this value. 0 turns it off.</Text>
 				</Flex>
 
 				<!-- type="text" (not number) so there are no spinner arrows widening the field; the $ prefix
@@ -253,14 +259,11 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
+	composes: wrapper from "../../../components/composite/settings-page.module.css";
 }
 
 .content {
-	padding: 16px 24px var(--nav-clearance) 24px;
+	composes: content from "../../../components/composite/settings-page.module.css";
 }
 
 .item {

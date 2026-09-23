@@ -59,7 +59,7 @@ describe("ScopeClassId", () => {
 		// Clean ASCII input — clipboard value matches input verbatim, no
 		// truncation to the trimmed display form.
 		expect(writeText).toHaveBeenCalledWith("0xclass1")
-		expect(openToast).toHaveBeenCalledWith(expect.objectContaining({ label: "Class id is copied" }))
+		expect(openToast).toHaveBeenCalledWith(expect.objectContaining({ label: "Class id is copied" }), undefined)
 	})
 
 	test("clipboard payload is stripped of invisible/control chars (codex post-impl §3)", async () => {

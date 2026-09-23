@@ -1,104 +1,27 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.27;
 
-import {Test} from "forge-std/Test.sol";
-import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
-import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
-import {MintableERC20} from "../src/MintableERC20.sol";
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
+import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {WitnessHarness} from "./WitnessHash.t.sol";
-import {MockPermit2, MockTokenPortal, MockFeeJuicePortal, MockSwap} from "./SwapBridgeRouter.t.sol";
+import {RouterFixture} from "./mocks/RouterFixture.sol";
+import {ConfigurableSwap} from "./mocks/RouterMocks.sol";
 
-// ─── Fuzz-only mocks ─────────────────────────────────────────────────
-
-/// A swap target whose (consumed, returned, transferred) behavior is set per call,
-/// so a fuzzer can sweep the full lattice around the router's three fuel guards.
-contract ConfigurableSwap is IUniswapFuelSwap {
-    IERC20 public immutable fj;
-    uint256 public consumed;
-    uint256 public returned;
-    uint256 public transferred;
-
-    constructor(IERC20 _fj) {
-        fj = _fj;
-    }
-
-    function set(uint256 c, uint256 r, uint256 t) external {
-        consumed = c;
-        returned = r;
-        transferred = t;
-    }
-
-    function swap(address inputToken, uint256, uint256, PoolKey[] calldata, bool[] calldata)
-        external
-        override
-        returns (uint256)
-    {
-        if (consumed > 0) IERC20(inputToken).transferFrom(msg.sender, address(this), consumed);
-        if (transferred > 0) fj.transfer(msg.sender, transferred);
-        return returned;
-    }
-}
-
-/// A token portal that reports success but NEVER pulls the approved tokens — the
-/// residue-strand shape of the generic-router phishing boundary (a caller-named
-/// hostile `tokenPortal` that leaves the pulled tokens sweepable in the router).
-contract NonPullingPortal is ITokenPortal {
-    function depositToAztecPublic(bytes32, uint256, bytes32) external pure override returns (bytes32, uint256) {
-        return (bytes32(uint256(0xDEAD)), 0);
-    }
-
-    function depositToAztecPrivate(uint256, bytes32) external pure override returns (bytes32, uint256) {
-        return (bytes32(uint256(0xDEAD)), 0);
-    }
-}
-
-// ─── Fuzz suite ──────────────────────────────────────────────────────
-
-contract SwapBridgeRouterFuzzTest is Test {
-    // decimals=0 + a 2^128-1 whole-token cap ⇒ a single mint() can fund any fuzzed
-    // amount in [1, 2^128) without looping.
-    MintableERC20 tok;
-    MintableERC20 fj;
-    MockPermit2 permit2;
-    MockTokenPortal tokenPortal;
-    MockFeeJuicePortal feePortal;
-    MockSwap swap;
-    SwapBridgeRouter router;
+contract SwapBridgeRouterFuzzTest is RouterFixture {
     WitnessHarness harness;
-
-    bytes32 constant RECIPIENT = bytes32(uint256(0x1234));
-    bytes32 constant FUEL_RECIPIENT = bytes32(uint256(0x5678));
-    bytes32 constant SECRET = bytes32(uint256(0x5EC7E7));
     uint256 constant U128_MAX = type(uint128).max;
 
     function setUp() public {
-        tok = new MintableERC20("TOK", "TOK", 0, U128_MAX);
-        fj = new MintableERC20("FeeJuice", "FJ", 18, 1_000_000_000);
-        permit2 = new MockPermit2();
-        tokenPortal = new MockTokenPortal(IERC20(address(tok)));
-        feePortal = new MockFeeJuicePortal(IERC20(address(fj)));
-        swap = new MockSwap(IERC20(address(fj)));
-        router = new SwapBridgeRouter(address(permit2), address(feePortal), address(swap));
+        // decimals=0 + a 2^128-1 whole-token cap ⇒ a single mint() can fund any fuzzed
+        // amount in [1, 2^128) without looping.
+        _deployStack(0, U128_MAX);
         harness = new WitnessHarness();
-
-        fj.mint(address(swap), 100_000 ether);
-        tok.approve(address(permit2), type(uint256).max);
-    }
-
-    function _emptyRoute() internal pure returns (IUniswapFuelSwap.PoolKey[] memory p, bool[] memory d) {
-        p = new IUniswapFuelSwap.PoolKey[](1);
-        p[0] = IUniswapFuelSwap.PoolKey(address(0), address(0), 3000, 60, address(0));
-        d = new bool[](1);
-        d[0] = true;
-    }
-
-    function _permit() internal pure returns (SwapBridgeRouter.PermitParams memory) {
-        return SwapBridgeRouter.PermitParams({nonce: 1, deadline: type(uint256).max, signature: hex"00"});
+        usdc.approve(address(permit2), type(uint256).max);
+        fj.approve(address(permit2), type(uint256).max);
     }
 
     function _baseWitness() internal view returns (SwapBridgeRouter.BridgeWitness memory w) {
-        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _emptyRoute();
+        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _route();
         w = SwapBridgeRouter.BridgeWitness({
             tokenPortal: address(uint160(0x1111)),
             bridgeToken: address(uint160(0x2222)),
@@ -144,62 +67,87 @@ contract SwapBridgeRouterFuzzTest is Test {
         assertTrue(harness.hWitness(w) != base, "witness field does not bind");
     }
 
-    // 2. bridge() carries 100% of bridge-only + fuel-only volume after this plan: the portal must
-    //    receive EXACTLY `amount` and the router must retain zero residue (residue == owner-sweepable
-    //    == the theft-shaped failure mode).
+    // 2. bridge() over the whole u128 domain: the clone receives EXACTLY `amount`, the message
+    //    carries the same, and the router retains zero residue (residue == owner-sweepable ==
+    //    the theft-shaped failure mode).
     function testFuzz_bridgeAccounting(uint256 amount, bool isPrivate) public {
         amount = bound(amount, 1, U128_MAX);
-        tok.mint(address(this), amount);
+        usdc.mint(address(this), amount);
 
-        SwapBridgeRouter.SimpleBridgeParams memory p = SwapBridgeRouter.SimpleBridgeParams({
-            tokenPortal: address(tokenPortal),
-            bridgeToken: address(tok),
-            amount: amount,
-            aztecRecipient: RECIPIENT,
-            secretHash: SECRET,
-            isPrivate: isPrivate
-        });
-        router.bridge(p, _permit());
+        router.bridge(_simpleParams(address(usdc), amount, isPrivate), _permit(1));
 
-        assertEq(tokenPortal.lastAmount(), amount, "portal amount mismatch");
-        assertEq(tokenPortal.lastPrivate(), isPrivate, "privacy flag mismatch");
-        if (!isPrivate) assertEq(tokenPortal.lastTo(), RECIPIENT, "recipient mismatch");
-        assertEq(tok.balanceOf(address(router)), 0, "token residue");
-        assertEq(tok.allowance(address(router), address(tokenPortal)), 0, "allowance residue");
+        assertEq(portalBalance(address(usdc)), amount, "portal amount mismatch");
+        assertTrue(isPrivate ? lastMintWasPrivate(amount) : lastMintWasPublic(RECIPIENT, amount), "message mismatch");
+        assertEq(usdc.balanceOf(address(router)), 0, "token residue");
+        assertEq(usdc.allowance(address(router), portalFor(address(usdc))), 0, "allowance residue");
     }
 
-    // 3. The fuel split boundary: over the valid domain 0 < fuel < total the slices conserve exactly
-    //    and leave zero residue. Integer edges (total==2/fuel==1, fuel==total-1) are the strand-a-wei risk.
+    // 3. The fuel split boundary: over 0 < fuel < total the slices conserve exactly and leave zero
+    //    residue. Integer edges (total==2/fuel==1, fuel==total-1) are the strand-a-wei risk.
     function testFuzz_fuelSplit(uint256 total, uint256 fuel) public {
         total = bound(total, 2, U128_MAX);
         fuel = bound(fuel, 1, total - 1);
-        tok.mint(address(this), total);
+        usdc.mint(address(this), total);
         swap.setOutput(1, 0); // returns 1 wei FJ, >= the 1-wei floor below; pulls exactly `fuel`
 
-        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _emptyRoute();
-        SwapBridgeRouter.BridgeParams memory p = SwapBridgeRouter.BridgeParams({
-            tokenPortal: address(tokenPortal),
-            bridgeToken: address(tok),
-            totalAmount: total,
-            fuelAmount: fuel,
-            aztecRecipient: RECIPIENT,
-            fuelRecipient: FUEL_RECIPIENT,
-            tokenSecretHash: SECRET,
-            fuelSecretHash: SECRET,
-            minFuelOutput: 1,
-            path: path,
-            zeroForOnes: dirs,
-            isPrivate: false
-        });
-        router.bridgeWithFuel(p, _permit());
+        SwapBridgeRouter.BridgeParams memory p = _fuelParams(address(usdc), total, fuel, false);
+        p.minFuelOutput = 1;
+        router.bridgeWithFuel(p, _permit(1));
 
-        assertEq(tokenPortal.lastAmount(), total - fuel, "bridge slice mismatch");
+        assertEq(portalBalance(address(usdc)), total - fuel, "bridge slice mismatch");
+        assertTrue(lastMintWasPublic(RECIPIENT, total - fuel), "message mismatch");
         assertEq(feePortal.lastAmount(), 1, "fuel slice mismatch");
-        assertEq(tok.balanceOf(address(router)), 0, "token residue");
+        assertEq(usdc.balanceOf(address(router)), 0, "token residue");
         assertEq(fj.balanceOf(address(router)), 0, "fj residue");
     }
 
-    // 4. Generalize MaliciousPrefundSwap to the full behavior lattice of the owner-replaceable target:
+    // 4. Fuel-only over the whole domain: everything is swapped, nothing is deposited as a token,
+    //    no portal is created, zero residue.
+    function testFuzz_fuelOnly(uint256 total) public {
+        total = bound(total, 1, U128_MAX);
+        usdc.mint(address(this), total);
+        swap.setOutput(1, 0);
+
+        SwapBridgeRouter.BridgeParams memory p = _fuelParams(address(usdc), total, total, false);
+        p.tokenPortal = address(0);
+        p.aztecRecipient = bytes32(0);
+        p.tokenSecretHash = bytes32(0);
+        p.minFuelOutput = 1;
+        router.bridgeWithFuel(p, _permit(1));
+
+        assertEq(factory.portalOf(address(usdc)), address(0), "fuel-only created a portal");
+        assertEq(usdc.balanceOf(address(swap)), total, "swap target != total");
+        assertEq(feePortal.lastAmount(), 1);
+        assertEq(usdc.balanceOf(address(router)), 0, "token residue");
+    }
+
+    // 5. Identity swap over the whole domain: the fee asset splits 1:1 into the fee portal and its
+    //    own clone; the swap target is never touched.
+    function testFuzz_identitySplit(uint128 totalRaw, uint128 fuelRaw, bool isPrivate) public {
+        uint256 total = bound(uint256(totalRaw), 1, 1_000_000_000 ether);
+        uint256 fuel = bound(uint256(fuelRaw), 1, total);
+        fj.mint(address(this), total);
+        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _noRoute();
+
+        SwapBridgeRouter.BridgeParams memory p = _fuelParams(address(fj), total, fuel, isPrivate);
+        p.path = path;
+        p.zeroForOnes = dirs;
+        p.minFuelOutput = fuel;
+        if (fuel == total) {
+            p.tokenPortal = address(0);
+            p.aztecRecipient = bytes32(0);
+            p.tokenSecretHash = bytes32(0);
+        }
+        uint256 swapBefore = fj.balanceOf(address(swap));
+        router.bridgeWithFuel(p, _permit(1));
+
+        assertEq(feePortal.lastAmount(), fuel, "fuel leg != fuel");
+        assertEq(portalBalance(address(fj)), total - fuel, "token leg != total - fuel");
+        assertEq(fj.balanceOf(address(swap)), swapBefore, "swap target touched");
+        assertEq(fj.balanceOf(address(router)), 0, "fj residue");
+    }
+
+    // 6. Generalize MaliciousPrefundSwap to the full behavior lattice of the owner-replaceable target:
     //    bridgeWithFuel succeeds IFF the swap consumed exactly fuelAmount, returned >= the signed floor,
     //    AND actually transferred >= what it returned. Any other combination must revert (no residue theft).
     function testFuzz_hostileSwapConsumption(uint256 consumed, uint256 returned, uint256 transferred) public {
@@ -214,77 +162,48 @@ contract SwapBridgeRouterFuzzTest is Test {
         fj.mint(address(evil), 100 ether);
         router.setSwapTarget(address(evil));
         evil.set(consumed, returned, transferred);
-        tok.mint(address(this), total);
+        usdc.mint(address(this), total);
 
-        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _emptyRoute();
-        SwapBridgeRouter.BridgeParams memory p = SwapBridgeRouter.BridgeParams({
-            tokenPortal: address(tokenPortal),
-            bridgeToken: address(tok),
-            totalAmount: total,
-            fuelAmount: fuel,
-            aztecRecipient: RECIPIENT,
-            fuelRecipient: FUEL_RECIPIENT,
-            tokenSecretHash: SECRET,
-            fuelSecretHash: SECRET,
-            minFuelOutput: floor,
-            path: path,
-            zeroForOnes: dirs,
-            isPrivate: false
-        });
+        SwapBridgeRouter.BridgeParams memory p = _fuelParams(address(usdc), total, fuel, false);
+        p.minFuelOutput = floor;
 
         bool shouldSucceed = (consumed == fuel && returned >= floor && transferred >= returned);
         if (shouldSucceed) {
-            router.bridgeWithFuel(p, _permit());
+            router.bridgeWithFuel(p, _permit(1));
             // The user's input token is FULLY consumed (no user-fund residue), and the router deposits
             // EXACTLY what the swap returned. A swap that over-transfers donates the excess FJ, which
             // strands as owner-sweepable residue (== transferred - returned) — the swap's loss, never
             // the user's; the router deposits `fuelReceived`, not the whole balance delta.
-            assertEq(tok.balanceOf(address(router)), 0, "token residue on success");
+            assertEq(usdc.balanceOf(address(router)), 0, "token residue on success");
             assertEq(feePortal.lastAmount(), returned, "router bridged != returned");
             assertEq(fj.balanceOf(address(router)), transferred - returned, "fj residue != swap over-donation");
         } else {
             vm.expectRevert();
-            router.bridgeWithFuel(p, _permit());
+            router.bridgeWithFuel(p, _permit(1));
         }
     }
 
-    // 5. The newly-hot arbitrary-`tokenPortal` trust boundary. An HONEST portal leaves zero residue.
-    //    A caller-named portal that never pulls strands the amount as owner-sweepable residue — the
-    //    on-chain call TRUSTS the caller's portal, so only the faucet's manifest-pinning protects users
-    //    (documented as the A-1 phishing surface; the on-chain allowlist is tracked follow-up work).
-    function testFuzz_hostilePortal(uint256 amount) public {
-        amount = bound(amount, 1, U128_MAX);
+    // 7. The portal is derived from the token: ANY caller-named portal other than the factory's is
+    //    rejected before a single wei moves, on both entrypoints. (The old generic-router phishing
+    //    surface — a non-pulling portal stranding the pull in the router — no longer exists.)
+    function testFuzz_foreignPortalRejectedBeforePull(address portal, uint256 amount, bool fueled) public {
+        vm.assume(portal != portalFor(address(usdc)));
+        amount = bound(amount, 2, U128_MAX);
+        usdc.mint(address(this), amount);
 
-        // Honest portal → zero residue.
-        tok.mint(address(this), amount);
-        SwapBridgeRouter.SimpleBridgeParams memory ok = SwapBridgeRouter.SimpleBridgeParams({
-            tokenPortal: address(tokenPortal),
-            bridgeToken: address(tok),
-            amount: amount,
-            aztecRecipient: RECIPIENT,
-            secretHash: SECRET,
-            isPrivate: false
-        });
-        router.bridge(ok, _permit());
-        assertEq(tok.balanceOf(address(router)), 0, "honest portal left residue");
-
-        // Non-pulling hostile portal → the pulled amount strands in the router (the boundary is real;
-        // nothing on-chain stops it — this asserts the surface exists, it is not a router bug).
-        NonPullingPortal evil = new NonPullingPortal();
-        tok.mint(address(this), amount);
-        SwapBridgeRouter.SimpleBridgeParams memory bad = SwapBridgeRouter.SimpleBridgeParams({
-            tokenPortal: address(evil),
-            bridgeToken: address(tok),
-            amount: amount,
-            aztecRecipient: RECIPIENT,
-            secretHash: SECRET,
-            isPrivate: false
-        });
-        router.bridge(bad, _permit());
-        assertEq(tok.balanceOf(address(router)), amount, "expected strand into router (trust boundary)");
-
-        // Owner can recover the stranded residue via sweep (the safety valve).
-        router.sweep(address(tok), address(this));
-        assertEq(tok.balanceOf(address(router)), 0, "sweep did not clear residue");
+        if (fueled) {
+            SwapBridgeRouter.BridgeParams memory p = _fuelParams(address(usdc), amount, 1, false);
+            p.tokenPortal = portal;
+            vm.expectRevert(SwapBridgeRouter.ForeignPortal.selector);
+            router.bridgeWithFuel(p, _permit(1));
+        } else {
+            SwapBridgeRouter.SimpleBridgeParams memory p = _simpleParams(address(usdc), amount, false);
+            p.tokenPortal = portal;
+            vm.expectRevert(SwapBridgeRouter.ForeignPortal.selector);
+            router.bridge(p, _permit(1));
+        }
+        assertEq(permit2.calls(), 0, "a rejected intent pulled");
+        assertEq(usdc.balanceOf(address(this)), amount, "user balance moved");
+        assertEq(factory.portalOf(address(usdc)), address(0), "a rejected intent created a portal");
     }
 }

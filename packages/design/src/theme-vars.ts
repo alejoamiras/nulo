@@ -7,7 +7,7 @@ import { join } from "node:path"
  * actually declared in base.css. The token tests (`tokens.parity`) are one-way (contract -> base.css),
  * so a "ghost" var referenced by a component but declared NOWHERE (e.g. `--nulo-primary`, `--nulo-bg`)
  * slips past every existing structural check. This catches that class. Wired per-package: design scans
- * its own SFCs here; the extension + faucet scan theirs in their own test suites (Phases 1 + 3).
+ * its own SFCs here; the extension + tools scan theirs in their own test suites (Phases 1 + 3).
  */
 
 // Namespaces OWNED by the design system. A `var(--x)` in one of these MUST be declared in base.css;

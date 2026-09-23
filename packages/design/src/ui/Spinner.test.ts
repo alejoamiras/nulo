@@ -28,7 +28,7 @@ describe("Spinner (canonical superset)", () => {
 		expect(style).not.toMatch(/var\(currentcolor\)/i)
 	})
 
-	it("defaults color to currentColor (faucet-stable; not a fixed token)", () => {
+	it("defaults color to currentColor (tools-stable; not a fixed token)", () => {
 		// Vue folds borderTopColor into the `border-color` shorthand, so assert on the resolved color
 		// rather than a specific longhand: currentColor present, no fixed --txt-inverse token, no var().
 		const style = mount(Spinner).attributes("style") ?? ""

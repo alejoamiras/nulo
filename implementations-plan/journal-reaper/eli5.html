@@ -1,0 +1,23 @@
+<title>Journal Reaper Fences</title>
+<style>
+:root { --bg: #f7f8f6; --ink: #191c18; --accent: #3d6b4f; --dim: #66705f; --card: #eceee9; }
+body { background: var(--bg); color: var(--ink); font-family: Georgia, serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; color: var(--accent); margin-top: 1.6rem; }
+.card { background: var(--card); border-left: 3px solid var(--accent); padding: .7rem 1rem; margin: .8rem 0; }
+code { font-family: ui-monospace, monospace; font-size: .92em; }
+small { color: var(--dim); }
+</style>
+<h1>Journal reaper fences (batch 8 of the audit remediation)</h1>
+<p>The wallet keeps a durable journal of every in-flight dApp operation, and a "reaper" that declares abandoned entries failed so the UI never shows a stuck card forever. Three bugs around that machinery:</p>
+
+<h2>1 · The reaper cancels ops that are just waiting in line (N-07, the big one)</h2>
+<div class="card">When a dApp sends several transactions, they queue one behind another while you approve each popup — and each popup can legitimately sit open 10 minutes. But the reaper assumed any entry still "queued" after 10 minutes was dead, so request #3 could get auto-cancelled while you were still approving #1. You'd then approve #3's popup and be told it was cancelled. Fix: the existing 30-second "still alive" heartbeat — which already covers a later stage of the wait — now also covers the waiting-in-line stage, with a hard 90-minute ceiling so a genuinely hung queue still gets cleaned up honestly (never "spared forever"). The reaper also re-checks each entry at the moment of failing it, so an entry that got claimed mid-sweep is left alone.</div>
+
+<h2>2 · A wait that could spin forever (N-16)</h2>
+<div class="card">After revoking a permission, the wallet polls "has the transaction confirmed yet?" every 100 ms — with no time limit. If the wallet locked meanwhile, that poll spun for the whole lock. Now it gives up after 2 minutes with an honest "not confirmed yet (it may still go through)" instead of a misleading generic error.</div>
+
+<h2>3 · A small memory leak on cancelled claims (N-25)</h2>
+<div class="card">When a queued op was cancelled at the exact moment the wallet tried to claim it, an internal abort-controller entry was left behind until the next browser restart. The cleanup now covers that path (both possible keys, always before the slot is released).</div>
+
+<h2>Paper trail</h2>
+<p><small>Plan: <a href="plan.md">plan.md</a> · recon: <a href="recon.md">recon.md</a> · lessons: <a href="./lessons/phase-0-planning.md">phase-0-planning.md</a>. Gate arc: dual audit (codex + fable) with a genuine design fork, round-2 consensus, then a fresh-context final gate that REJECTED the consensus (it re-created a hazard both auditors had attributed to the losing design) — bounded-lease amendment adopted, re-verdict APPROVE-WITH-CHANGES (ownership migration + 90-min ceiling), all folded. Zero unresolved disagreements.</small></p>

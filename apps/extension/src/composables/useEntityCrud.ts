@@ -30,6 +30,14 @@ export interface UseEntityCrudOptions<T> {
 	 */
 	mode?: EntityCrudMode
 	/**
+	 * Live-scope filter for `"incremental"` mode. Service events are GLOBAL
+	 * broadcasts while `fetch` is scope-bound — without this, a mid-switch
+	 * event for another chain/profile/account splices a foreign row into the
+	 * list. Applied to add/update payloads only; deletes stay unfiltered
+	 * (removing by id is subtractive and scope-safe). Ignored in `"resync"`.
+	 */
+	accept?: (entity: T) => boolean
+	/**
 	 * Called if the initial fetch or a resync throws. Defaults to a no-op.
 	 * The composable still exposes `error` for template binding.
 	 */
@@ -40,7 +48,14 @@ export interface UseEntityCrudResult<T> {
 	entities: Ref<T[]>
 	isLoading: Ref<boolean>
 	error: Ref<unknown>
-	refresh: () => Promise<void>
+	/**
+	 * Re-run `fetch` and replace the list. `clear: true` empties the list
+	 * SYNCHRONOUSLY before fetching — for scope switches (profile/network/
+	 * account), where the old rows belong to another scope and must not
+	 * survive a failed refetch. Event-driven resyncs stay non-clearing so a
+	 * routine add/delete doesn't blank the whole list for a round-trip.
+	 */
+	refresh: (opts?: { clear?: boolean }) => Promise<void>
 	dispose: () => void
 }
 
@@ -53,7 +68,7 @@ const defaultIdentity = <T>(entity: T): string | number => {
 }
 
 export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCrudResult<T> {
-	const { fetch, added, updated, deleted, identity = defaultIdentity, mode = "incremental", onError } = options
+	const { fetch, added, updated, deleted, identity = defaultIdentity, mode = "incremental", accept, onError } = options
 
 	const entities = ref([]) as Ref<T[]>
 	const isLoading = ref(true)
@@ -62,8 +77,15 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 	let seq = 0
 	let disposed = false
 
-	const refresh = async () => {
+	const refresh = async (opts?: { clear?: boolean }) => {
 		const mySeq = ++seq
+		if (opts?.clear) {
+			// Synchronous with the seq bump: the foreign-scope rows are gone
+			// before ANY await, and a failed fetch below leaves the list empty
+			// rather than resurrecting them.
+			entities.value = []
+			error.value = null
+		}
 		isLoading.value = true
 		try {
 			const result = await fetch()
@@ -84,6 +106,7 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 			void refresh()
 			return
 		}
+		if (accept && !accept(entity)) return
 		const id = identity(entity)
 		if (entities.value.some((e) => identity(e) === id)) {
 			// Same id reappearing as `added` is treated as an update — common in
@@ -98,6 +121,7 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 			void refresh()
 			return
 		}
+		if (accept && !accept(entity)) return
 		const id = identity(entity)
 		const idx = entities.value.findIndex((e) => identity(e) === id)
 		if (idx === -1) {

@@ -7,6 +7,9 @@
 </route>
 
 <script setup>
+/** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
+
 /** Utils */
 import { getChainPosition } from "@/components/ui/utils"
 import { stringCompare } from "@/utils/string"
@@ -17,63 +20,71 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
+// Custom chains are a developer surface: "Add network" is offered only under Developer Mode.
+// Endpoints on the built-in networks, and rows that already exist, stay manageable for everyone.
+const isDeveloperModeEnabled = ref(false)
+const configService = new ConfigServiceClient()
+configService.onUpdate.add(onSettingUpdate)
+function onSettingUpdate(setting) {
+	if (setting.key === "developerMode") isDeveloperModeEnabled.value = setting.value === true
+}
+
 const networks = computed(() =>
 	[...appStore.networks].sort((a, b) => {
 		const chainPos = getChainPosition(a.chainId) - getChainPosition(b.chainId)
 		return chainPos ? chainPos : stringCompare(a.name, b.name)
 	}),
 )
+
+onBeforeMount(async () => {
+	isDeveloperModeEnabled.value = (await configService.getValue("developerMode")) === true
+})
+
+onBeforeUnmount(() => {
+	configService.disconnect()
+})
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Manage Networks" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage Networks" :backTo="'/popup/settings'" gap="16">
+		<SectionLabel label="Networks" :count="networks.length" />
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<SectionLabel label="Networks" :count="networks.length" />
+		<ItemsContainer>
+			<SettingItem
+				v-for="network in networks"
+				:key="network.id"
+				:to="`/popup/settings/networks/${network.id}`"
+				:title="network.name"
+				data-testid="network-row"
+				:data-network-id="network.id"
+				:data-network-name="network.name"
+			>
+				<template #dot>
+					<div v-if="appStore.network?.id === network.id" :class="$style.active_dot" data-testid="network-active-dot" />
+				</template>
+				<template #right>
+					<Flex align="center" gap="8">
+						<Badge v-if="appStore.network?.id === network.id" variant="info" data-testid="network-active-badge">Active</Badge>
+						<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
+					</Flex>
+				</template>
+			</SettingItem>
+		</ItemsContainer>
 
-			<ItemsContainer>
-				<SettingItem
-					v-for="network in networks"
-					:key="network.id"
-					:to="`/popup/settings/networks/${network.id}`"
-					:title="network.name"
-					data-testid="network-row"
-					:data-network-id="network.id"
-					:data-network-name="network.name"
-				>
-					<template #dot>
-						<div v-if="appStore.network?.id === network.id" :class="$style.active_dot" data-testid="network-active-dot" />
-					</template>
-					<template #right>
-						<Flex align="center" gap="8">
-							<Badge v-if="appStore.network?.id === network.id" variant="info" data-testid="network-active-badge">Active</Badge>
-							<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
-						</Flex>
-					</template>
-				</SettingItem>
-			</ItemsContainer>
-
-			<Button @click="popupStore.open('new_network')" wide variant="primary" size="large" data-testid="network-new-btn">
-				Add network
-			</Button>
-		</Flex>
-
-	</Flex>
+		<Button
+			v-if="isDeveloperModeEnabled"
+			@click="popupStore.open('new_network')"
+			wide
+			variant="primary"
+			size="large"
+			data-testid="network-new-btn"
+		>
+			Add network
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .icon_btn {
 	transition: all 0.2s var(--bezier);
 

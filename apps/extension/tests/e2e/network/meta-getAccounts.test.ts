@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -43,7 +43,7 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "getAccounts", async () => {
 			await clickByTestId(page, "pg-btn-getAccounts")
 		})
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "meta-getAccounts:result")
 		const accounts = result.resultJson as Array<{ alias: string; item: string }>
 		expect(accounts.length).toBeGreaterThan(0)
 		expect(accounts.map((a) => a.item)).toContain(firstAccount)

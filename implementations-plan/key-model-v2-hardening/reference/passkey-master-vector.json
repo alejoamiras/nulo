@@ -1,0 +1,6 @@
+{
+  "prfB64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "credentialIdB64": "dGVzdC1jcmVkZW50aWFsLWlk",
+  "hkdfOutputBytes": 64,
+  "expectedMasterHex": "23c252cf7215344c6fb3b35da3cf7be9ee99f92cae16ee1c235e26f5c4843e79"
+}

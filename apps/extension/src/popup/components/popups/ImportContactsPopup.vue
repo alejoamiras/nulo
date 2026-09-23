@@ -275,24 +275,12 @@ watch(
 }
 
 .contact {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
+	composes: select_row from "./popup-shared.module.css";
 
 	padding: 12px;
 
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border: 1px solid var(--nulo-outline);
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
+	&:hover .icons {
+		opacity: 1;
 	}
 }
 

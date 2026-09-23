@@ -59,6 +59,10 @@ class FakeProfileService implements IService {
 	public getDeletionState(): ProfileDeletionState {
 		return this.deletionState
 	}
+	public async captureExecutionFence(): Promise<{ profileId: string; epoch: number }> {
+		if (!this.active) throw new Error("Profile locked")
+		return { profileId: this.active.id, epoch: this.deletionState.capture(this.active.id) }
+	}
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
 		this.active = profile
 	}
@@ -88,8 +92,17 @@ const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscribe
 /** A ticker that never fires — lets token-balance's init run queue.start() without a poll loop. */
 const noopTicker: BackgroundTickerPort = { subscribe: () => ({ cancel: () => {} }) }
 
-const mkBalance = (id: number, token: number, account: string): TokenBalanceRaw =>
-	({ id, token, account, privateBalance: "0", publicBalance: "0", updatedAt: 0 }) as TokenBalanceRaw
+const mkBalance = (id: number, token: number, account: string, profileId: string): TokenBalanceRaw => ({
+	id,
+	token,
+	account,
+	profileId,
+	chainId: 1,
+	contract: `0xtok${token}`,
+	privateBalance: "0",
+	publicBalance: "0",
+	updatedAt: 0,
+})
 
 describe("cross-profile isolation (standing gate)", () => {
 	let api: FakeBrowserApi
@@ -144,7 +157,13 @@ describe("cross-profile isolation (standing gate)", () => {
 			const services = new ServiceCollection()
 			services.add(profile)
 			services.add(networkStub())
-			services.add(svc(AccountService.name, {}))
+			services.add(
+				svc(AccountService.name, {
+					registerAccountPurgeSubscriber: () => {},
+					onAccountAdded: new EventHandler(),
+					getAccountsRaw: async () => [],
+				}),
+			)
 			services.add(svc(TaskService.name, {}))
 			services.add(svc(OperationJournalService.name, { purgeForProfile: async () => {} }))
 			tokens = new TokenService(mkLogger(), api)
@@ -203,7 +222,13 @@ describe("cross-profile isolation (standing gate)", () => {
 			const services = new ServiceCollection()
 			services.add(profile)
 			services.add(svc(NetworkService.name, {}))
-			services.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
+			services.add(
+				svc(AccountService.name, {
+					registerAccountPurgeSubscriber: () => {},
+					onAccountAdded: new EventHandler(),
+					getAccountsRaw: async () => [],
+				}),
+			)
 			services.add(
 				svc(TokenService.name, {
 					onTokenAdded: new EventHandler(),
@@ -219,8 +244,8 @@ describe("cross-profile isolation (standing gate)", () => {
 			services.add(tbal)
 			await services.start()
 			// p1 owns token 1, p2 owns token 2 (balances are FK'd via `token`, no profileId).
-			await seedRepo.set(mkBalance(10, 1, "0xp1acct"))
-			await seedRepo.set(mkBalance(20, 2, "0xp2acct"))
+			await seedRepo.set(mkBalance(10, 1, "0xp1acct", p1.id))
+			await seedRepo.set(mkBalance(20, 2, "0xp2acct", p2.id))
 		})
 
 		test("backup() returns only the active profile's balances", async () => {
@@ -298,17 +323,31 @@ describe("cross-profile isolation (standing gate)", () => {
 		})
 	})
 
-	describe("auth-registry — revokeAuthwits account-scoped", () => {
+	describe("auth-registry — (profileId, chainId, account)-scoped", () => {
 		let profile: FakeProfileService
 		let authRegistry: AuthRegistryService
+		let accountPurgeSubs: Array<(profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>>
+		let chainPurgeSubs: Array<(profileId: string, chainId: number, networkId: string) => Promise<void>>
+		const NET_P1 = { id: "net", profileId: "p1", chainId: 1, l1ChainId: 1, name: "N", endpoints: [], primaryEndpointId: "e" }
 
 		beforeEach(async () => {
 			profile = new FakeProfileService()
 			profile.setActiveProfile(p1)
+			accountPurgeSubs = []
+			chainPurgeSubs = []
 			const services = new ServiceCollection()
 			services.add(profile)
-			services.add(svc(NetworkService.name, {}))
-			services.add(svc(AccountService.name, { onAccountDeleted: new EventHandler() }))
+			services.add(
+				svc(NetworkService.name, {
+					getNetwork: async () => NET_P1,
+					registerChainPurgeSubscriber: (fn: (typeof chainPurgeSubs)[number]) => chainPurgeSubs.push(fn),
+				}),
+			)
+			services.add(
+				svc(AccountService.name, {
+					registerAccountPurgeSubscriber: (fn: (typeof accountPurgeSubs)[number]) => accountPurgeSubs.push(fn),
+				}),
+			)
 			// A same-account revoke passes the ownership gate and reaches the send —
 			// throw a UNIQUE sentinel there so the control below can prove the gate
 			// was crossed WITHOUT stubbing the node-touching prove/sync tail.
@@ -324,6 +363,8 @@ describe("cross-profile isolation (standing gate)", () => {
 			// NOT a codec-hidden row (which would pass the assertion tautologically).
 			await seedRow(api, "nulo:core:auth-registry", "5", {
 				id: 5,
+				profileId: "p1",
+				chainId: 1,
 				account: "0xACCT-P2",
 				hash: "0xhash",
 				content: { kind: "call", contract: "0xregistry" },
@@ -331,11 +372,109 @@ describe("cross-profile isolation (standing gate)", () => {
 		})
 
 		test("revokeAuthwits(otherAccount, [foreignId]) rejects a PRESENT authwit owned by another account", async () => {
-			// authwits are FK-scoped by account (no profileId). Without the check a caller
-			// passing a foreign id revokes another account's authwit; the fix rejects it as
-			// "doesn't exist" (no cross-account existence oracle). The row is codec-valid and
-			// present, so the account mismatch — not row absence — is what rejects.
+			// Without the tuple check a caller passing a foreign id revokes another account's
+			// authwit; the fix rejects it as "doesn't exist" (no cross-scope existence oracle). The
+			// row is codec-valid and present, so the account mismatch — not row absence — rejects.
 			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P1", [5], {} as never)).rejects.toThrow(/doesn't exist/i)
+		})
+
+		test("revokeAuthwits rejects a PRESENT same-account row owned by another PROFILE or another CHAIN", async () => {
+			await seedRow(api, "nulo:core:auth-registry", "6", {
+				id: 6,
+				profileId: "p2",
+				chainId: 1,
+				account: "0xACCT-P2",
+				hash: "0xhash-p2",
+				content: { kind: "call", contract: "0xregistry" },
+			})
+			await seedRow(api, "nulo:core:auth-registry", "7", {
+				id: 7,
+				profileId: "p1",
+				chainId: 2,
+				account: "0xACCT-P2",
+				hash: "0xhash-c2",
+				content: { kind: "call", contract: "0xregistry" },
+			})
+			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P2", [6], {} as never)).rejects.toThrow(/doesn't exist/i)
+			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P2", [7], {} as never)).rejects.toThrow(/doesn't exist/i)
+		})
+
+		test("getAuthwits(chainId, account) with p1 active returns only p1/chain-1 rows for a shared address", async () => {
+			const seed = (id: number, profileId: string, chainId: number, hash: string) =>
+				seedRow(api, "nulo:core:auth-registry", `${id}`, {
+					id,
+					profileId,
+					chainId,
+					account: "0xSHARED",
+					hash,
+					content: { kind: "call", contract: "0xregistry" },
+				})
+			await seed(10, "p1", 1, "0xa")
+			await seed(11, "p2", 1, "0xb")
+			await seed(12, "p1", 2, "0xc")
+			expect((await authRegistry.getAuthwits(1, "0xSHARED")).map((r) => r.hash)).toEqual(["0xa"])
+			profile.setActiveProfile(p2)
+			expect((await authRegistry.getAuthwits(1, "0xSHARED")).map((r) => r.hash)).toEqual(["0xb"])
+		})
+
+		test("the F-07 trace: the account-purge subscriber for p2 removes ONLY p2/chain-1 rows + status; p1 and p2/chain-2 survive", async () => {
+			// The registrations are captured through the stubs' spies — a forgotten registration
+			// leaves the arrays empty and the assertions below red.
+			expect(accountPurgeSubs).toHaveLength(1)
+			expect(chainPurgeSubs).toHaveLength(1)
+			const seed = (id: number, profileId: string, chainId: number, hash: string) =>
+				seedRow(api, "nulo:core:auth-registry", `${id}`, {
+					id,
+					profileId,
+					chainId,
+					account: "0xSHARED",
+					hash,
+					content: { kind: "call", contract: "0xregistry" },
+				})
+			await seed(10, "p1", 1, "0xa")
+			await seed(11, "p2", 1, "0xb")
+			await seed(12, "p2", 2, "0xc")
+			const statusKey = (profileId: string, chainId: number) =>
+				`nulo:core:auth-registry-enabled@${JSON.stringify(["authwit-status", profileId, chainId, "0xSHARED"])}`
+			await api.storage.local.set({ [statusKey("p1", 1)]: "false", [statusKey("p2", 1)]: "false", [statusKey("p2", 2)]: "false" })
+
+			await accountPurgeSubs[0]("p2", [{ chainId: 1, address: "0xSHARED" }])
+
+			// Row @5 is the beforeEach seed (p1 / chain 1 / 0xACCT-P2) — untouched throughout.
+			const raw = (await api.storage.local.get(null)) as Record<string, unknown>
+			const ids = Object.keys(raw)
+				.filter((k) => k.startsWith("nulo:core:auth-registry@"))
+				.map((k) => k.split("@")[1])
+				.sort()
+			expect(ids).toEqual(["10", "12", "5"])
+			expect(statusKey("p1", 1) in raw).toBe(true)
+			expect(statusKey("p2", 1) in raw).toBe(false)
+			expect(statusKey("p2", 2) in raw).toBe(true)
+
+			// The chain-purge subscriber: p2/chain-2 goes, p1/chain-1 stays.
+			await chainPurgeSubs[0]("p2", 2, "net-x")
+			const after = (await api.storage.local.get(null)) as Record<string, unknown>
+			expect(
+				Object.keys(after)
+					.filter((k) => k.startsWith("nulo:core:auth-registry@"))
+					.sort(),
+			).toEqual(["nulo:core:auth-registry@10", "nulo:core:auth-registry@5"])
+			expect(statusKey("p2", 2) in after).toBe(false)
+			expect(statusKey("p1", 1) in after).toBe(true)
+
+			// purgeForProfile(p1): the last two rows (both p1) + the p1 status go.
+			await authRegistry.purgeForProfile("p1")
+			const last = (await api.storage.local.get(null)) as Record<string, unknown>
+			expect(Object.keys(last).some((k) => k.startsWith("nulo:core:auth-registry"))).toBe(false)
+		})
+
+		test("getRegistryEnabled is per (profile, chain, account): p1 disabled while p2 defaults to true for the same address", async () => {
+			const key = `nulo:core:auth-registry-enabled@${JSON.stringify(["authwit-status", "p1", 1, "0xSHARED"])}`
+			await api.storage.local.set({ [key]: "false" })
+			expect(await authRegistry.getRegistryEnabled(1, "0xSHARED")).toBe(false)
+			expect(await authRegistry.getRegistryEnabled(2, "0xSHARED")).toBe(true)
+			profile.setActiveProfile(p2)
+			expect(await authRegistry.getRegistryEnabled(1, "0xSHARED")).toBe(true)
 		})
 
 		test("revokeAuthwits(sameAccount, [ownId]) passes the ownership gate and proceeds to send", async () => {
@@ -362,7 +501,7 @@ describe("cross-profile isolation (standing gate)", () => {
 		const A1 = "0xa1-p1"
 		const A2 = "0xa2-p2"
 		const mkAccount = (address: string, profileId: string) =>
-			({ profileId, chainId: 1, address, index: 0, type: 0, name: address, visible: true }) as never
+			({ profileId, chainId: 1, address, index: 0, type: 0, l1ChainId: 1, name: address, visible: true }) as never
 		const mkTx = (hash: string, account: string) =>
 			({
 				chainId: 1,
@@ -427,7 +566,7 @@ describe("cross-profile isolation (standing gate)", () => {
 		test("(P2/B) restore never overwrites an existing tx — hash-collision is create-only", async () => {
 			// h1 already exists (seeded, owned by A1). A crafted backup reuses that
 			// hash with a DIFFERENT account; a pre-fix upsert would ERASE the original.
-			const [res] = await txService.restore([mkTx("h1", "0xattacker")])
+			const [res] = await txService.restore([mkTx("h1", "0xattacker")], p1.id)
 			expect(res.restoreError).toBeDefined()
 			expect((await txService.getTransaction("h1")).account).toBe(A1)
 		})
@@ -445,7 +584,7 @@ describe("cross-profile isolation (standing gate)", () => {
 				origin: { type: "wallet" },
 				calls: [{ contract: "0xc", method: "m", args: [] }],
 			}
-			const [res] = await txService.restore([pending as never])
+			const [res] = await txService.restore([pending as never], p1.id)
 			expect(res.restoreError).toBeDefined()
 			await expect(txService.getTransaction("hp")).rejects.toThrow()
 			expect((await txService.getTransactions(A1)).map((t) => t.hash)).not.toContain("hp")

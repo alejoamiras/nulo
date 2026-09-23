@@ -28,6 +28,8 @@
  * everyone behind it (the successor still waits for the real prior holder).
  */
 
+import { deferred } from "@nulo/wallet-core/utils"
+
 /** Thrown from `acquire` when the provided `AbortSignal` fires before the slot
  *  is granted. Distinct class so callers can map it onto their cancel pipeline
  *  (→ `JobCancelledSentinel` → EIP-1193 4001) rather than treating it as a
@@ -113,10 +115,7 @@ export class ExecutionMutex {
 		const prior = this.tails.get(key) ?? Promise.resolve()
 
 		// `mine` resolves when WE release. The next acquirer will await it.
-		let resolveMine!: () => void
-		const mine = new Promise<void>((resolve) => {
-			resolveMine = resolve
-		})
+		const { promise: mine, resolve: resolveMine } = deferred()
 		this.tails.set(key, mine)
 
 		let released = false

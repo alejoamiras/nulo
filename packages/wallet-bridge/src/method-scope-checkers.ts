@@ -62,43 +62,34 @@ function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecor
 
 // ── Per-method checkers ───────────────────────────────────────────────
 
+/** A contracts grant carrying `flag` must list `address`. No contracts grants at all — let
+ *  type-level enforcement handle it. */
+function requireContractsGrant(
+	method: string,
+	address: string,
+	flag: "canRegister" | "canGetMetadata",
+	grants: GrantedCapabilityRecord[],
+): void {
+	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
+	if (!caps.length) return
+	if (!caps.some((c) => c[flag] && inAddressList(address, c.contracts))) {
+		throw new Error(`Scope violation: ${method} targets ${address}, not permitted by granted contracts scope`)
+	}
+}
+
 export function checkRegisterContract(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const instance = args[0] as Record<string, unknown> | undefined
-	const address = String(instance?.address ?? instance)
-
-	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
-	if (!caps.length) return // No contracts grants — let type-level enforcement handle it
-
-	const permitted = caps.some((c) => c.canRegister && inAddressList(address, c.contracts))
-	if (!permitted) {
-		throw new Error(`Scope violation: registerContract targets ${address}, not permitted by granted contracts scope`)
-	}
+	requireContractsGrant("registerContract", String(instance?.address ?? instance), "canRegister", grants)
 }
 
 export function checkGetContractMetadata(args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const address = String(args[0])
-
-	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
-	if (!caps.length) return
-
-	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(address, c.contracts))
-	if (!permitted) {
-		throw new Error(`Scope violation: getContractMetadata targets ${address}, not permitted by granted contracts scope`)
-	}
+	requireContractsGrant("getContractMetadata", String(args[0]), "canGetMetadata", grants)
 }
 
+/** Registration state is wallet-local metadata about a granted contract — the same consent
+ *  surface as getContractMetadata. */
 export function checkIsTokenRegistered(args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const address = String(args[0])
-
-	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
-	if (!caps.length) return
-
-	// Registration state is wallet-local metadata about a granted contract - the same consent
-	// surface as getContractMetadata; the capability copy names the check explicitly.
-	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(address, c.contracts))
-	if (!permitted) {
-		throw new Error(`Scope violation: isTokenRegistered targets ${address}, not permitted by granted contracts scope`)
-	}
+	requireContractsGrant("isTokenRegistered", String(args[0]), "canGetMetadata", grants)
 }
 
 export function checkGetContractClassMetadata(args: unknown[], grants: GrantedCapabilityRecord[]): void {
@@ -367,11 +358,7 @@ export function checkGetAccounts(_args: unknown[], grants: GrantedCapabilityReco
  * whether the `addressBook` sub-bit was set.
  */
 export function checkGetAddressBook(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const caps = grantsOfType<DataCapability>(grants, "data")
-	if (!caps.length) return
-	if (!caps.some((c) => c.addressBook === true)) {
-		throw new Error("Scope violation: getAddressBook requires data.addressBook=true")
-	}
+	requireAddressBookGrant("getAddressBook", grants)
 }
 
 /**
@@ -380,10 +367,15 @@ export function checkGetAddressBook(_args: unknown[], grants: GrantedCapabilityR
  * inject sender aliases into the user's address book.
  */
 export function checkRegisterSender(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	requireAddressBookGrant("registerSender", grants)
+}
+
+/** The sub-bit must be literally `true`: a data grant with anything else denies. */
+function requireAddressBookGrant(method: string, grants: GrantedCapabilityRecord[]): void {
 	const caps = grantsOfType<DataCapability>(grants, "data")
 	if (!caps.length) return
 	if (!caps.some((c) => c.addressBook === true)) {
-		throw new Error("Scope violation: registerSender requires data.addressBook=true")
+		throw new Error(`Scope violation: ${method} requires data.addressBook=true`)
 	}
 }
 

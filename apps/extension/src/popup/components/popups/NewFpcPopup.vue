@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { isValidHex } from "@/utils/string"
 
@@ -6,7 +7,9 @@ import { isValidHex } from "@/utils/string"
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -48,6 +51,9 @@ const fpcAddressTerm = form.fields.address.value
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist")
 const isValidAddress = computed(() => isValidHex(fpcAddressTerm.value))
 const isAvailableToAddFpc = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false
@@ -91,26 +97,28 @@ const onFpcUpdated = (fpc) => {
 const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			fpcService.disconnect()
-			fpcService = null
-			fpcs.value = []
-			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
+	{
+		submit: handleAddFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
 			fpcService.onFpcUpdated.add(onFpcUpdated)
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcs.value = []
+			form.reset()
+		},
 	},
+	// Duplicate-name knowledge arrives with getFpcs — a premature first submit
+	// must stay inert, exactly as when the hand-rolled watcher installed its
+	// listener only after this await.
+	{ submitWaitsForShow: true },
 )
 watch(
 	() => fpcAddressTerm.value,
@@ -118,13 +126,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-const onKeydown = (e) => {
-	// Only fire on input/textarea fields — see NewContactPopup for rationale.
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddFpc()
-}
 </script>
 
 <template>
@@ -150,10 +151,7 @@ const onKeydown = (e) => {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
+					<FieldWarning v-if="isAlreadyExist"> Already exist </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -167,43 +165,13 @@ const onKeydown = (e) => {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="!isValidAddress && fpcAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Invalid FPC address </Text>
-					</Flex>
+					<FieldWarning v-if="!isValidAddress && fpcAddressTerm"> Invalid FPC address </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
 
 		<template #aboveSubmit>
-			<Transition name="fade">
-				<Tooltip
-					v-if="processingError.show"
-					side="top"
-					position="start"
-					wide
-					:disabled="!processingError.tooltip"
-					:style="{ marginTop: '-12px' }"
-				>
-					<Flex align="center" wide>
-						<Icon
-							name="info"
-							size="14"
-							:color="processingError.type === 'warning' ? 'orange' : 'red'"
-						/>
-
-						<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
-							{{ processingError.title }}
-						</Text>
-					</Flex>
-
-					<template #content>
-						<Text size="12" color="secondary">
-							{{ processingError.tooltip }}
-						</Text>
-					</template>
-				</Tooltip>
-			</Transition>
+			<ProcessingErrorNote :show="processingError.show" :title="processingError.title" :tooltip="processingError.tooltip" color="red" />
 		</template>
 	</FormPopup>
 </template>

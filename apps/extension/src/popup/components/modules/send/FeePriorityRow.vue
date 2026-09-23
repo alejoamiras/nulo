@@ -37,20 +37,11 @@ const emit = defineEmits(["update:modelValue"])
 
 <style module>
 .detail_row {
-	background: transparent;
-	overflow: hidden;
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
-
-	padding: 10px 12px;
+	composes: detail_row from "./fee-shared.module.css";
 }
 
 .fee_label {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	color: var(--nulo-secondary);
+	composes: fee_label from "./fee-shared.module.css";
 }
 
 .priority_grid {

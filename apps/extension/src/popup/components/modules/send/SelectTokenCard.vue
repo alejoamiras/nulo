@@ -36,7 +36,7 @@ const handleSelectToken = () => {
 				</Flex>
 
 				<Flex direction="column" gap="2">
-					<span :class="$style.token_symbol">{{ token.symbol }}</span>
+					<span :class="$style.token_symbol" data-testid="send-token-symbol">{{ token.symbol }}</span>
 					<span :class="$style.token_name">{{ token.name }}</span>
 				</Flex>
 			</Flex>

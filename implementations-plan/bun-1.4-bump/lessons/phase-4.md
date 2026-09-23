@@ -1,0 +1,7 @@
+# Phase 4 — Script parallelization
+
+- `audit:vue` → `bun run --parallel typecheck:all test lint && bun run build`; `dev:full` → `bun run --parallel dev:chrome dev:firefox`; `concurrently@^10.0.3` removed from `apps/extension` devDependencies.
+- Lockfile diff perfectly scoped to concurrently's subtree: `concurrently`/`rxjs`/`shell-quote`/`tree-kill` removed; `chalk` and `supports-color` re-flattened to the sole remaining consumer's versions (5.6.2→4.1.2 / 10.2.2→7.2.0 — removal-driven re-flatten, `ts-command-line-args` is now the only chalk consumer and needs ^4; not a semantic downgrade for anything left). Lockfile stayed v1. The `concurrently > shell-quote` HIGH advisory chain from phase 3's triage is now eliminated.
+- Gate: full `bun run audit:vue` end-to-end under 1.4.0 — parallel legs exit 0 with Foreman-prefixed output (420 prefixed lines; evidence: `PARALLEL_EXIT=0`), then the chrome build succeeded (`✓ built in 4.60s`). `timeout 45 bun run dev:full`: BOTH streams reached their definitive startup lines — `dev:chrome | VITE v8.1.4 ready in 670 ms`, `dev:firefox | built in 4507ms.` + `watching for file changes...` (514 prefixed lines); exit 124 is the timeout kill, expected.
+- No memory pressure observed on this host during the three concurrent legs (typecheck:all + vitest + biome).
+- Note: vite 8 prints rolldown deprecation warnings (`optimizeDeps.esbuildOptions`, `server.hmr.*`) in dev — pre-existing, unrelated to this arc.

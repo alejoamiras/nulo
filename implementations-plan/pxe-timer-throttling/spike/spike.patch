@@ -1,0 +1,995 @@
+diff --git a/apps/extension/src/offscreen/index.ts b/apps/extension/src/offscreen/index.ts
+index 1feb3fcb..3a8de501 100644
+--- a/apps/extension/src/offscreen/index.ts
++++ b/apps/extension/src/offscreen/index.ts
+@@ -1,3 +1,4 @@
++import "./timer-probe"
+ import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT, PRESTO_REQUIRED, PRESTO_REQUIRED_BUILD_STAMP } from "@/presto/config"
+ import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
+ import { consoleMethods, LogLevel } from "@/wallet/logger"
+diff --git a/apps/extension/src/offscreen/timer-probe.ts b/apps/extension/src/offscreen/timer-probe.ts
+new file mode 100644
+index 00000000..d25e340f
+--- /dev/null
++++ b/apps/extension/src/offscreen/timer-probe.ts
+@@ -0,0 +1,182 @@
++// SPIKE ONLY — never ships. Armed by VITE_NULO_SPIKE_TIMERS=probe|shim at build time.
++//   probe: wraps the page's timers and records, per call site, how late each one fired.
++//   shim:  same recording, but every timer is scheduled on a dedicated worker instead.
++// Must be the first import of the offscreen entry so every later module sees the wrapped globals.
++import TimerWorker from "./timer-probe.worker?worker"
++
++type Mode = "probe" | "shim"
++const mode = import.meta.env.VITE_NULO_SPIKE_TIMERS as Mode | undefined
++
++interface Site {
++	n: number
++	requestedMs: number
++	lateMs: number
++	maxLateMs: number
++}
++
++const SHIM_ID_BASE = 1_000_000_000
++const MAX_STACKS = 50_000
++
++function arm(armed: Mode): void {
++	const nativeSet = self.setTimeout.bind(self)
++	const nativeClear = self.clearTimeout.bind(self)
++	let sites = new Map<string, Site>()
++	let scheduledBySite = new Map<string, number>()
++	let total = 0
++	let stacks = 0
++
++	const worker = new TimerWorker()
++	const pending = new Map<number, () => void>()
++	let nextId = SHIM_ID_BASE
++	worker.onmessage = (event: MessageEvent<number>) => {
++		const run = pending.get(event.data)
++		if (!run) return
++		pending.delete(event.data)
++		run()
++	}
++	const workerSet = (run: () => void, delay: number): number => {
++		const id = nextId++
++		pending.set(id, run)
++		worker.postMessage({ id, delay })
++		return id
++	}
++	const workerClear = (id: number): void => {
++		if (pending.delete(id)) worker.postMessage({ id, clear: true })
++	}
++
++	const siteOf = (): string => {
++		if (stacks++ > MAX_STACKS) return "(stack budget spent)"
++		// The first two frames are this probe (siteOf + the wrapper); a minified bundle leaves no
++		// file name to filter them by.
++		const lines = (new Error().stack ?? "").split("\n").filter((line) => line.trim() !== "" && line.trim() !== "Error")
++		return lines
++			.slice(2, 7)
++			.map((line) =>
++				line
++					.trim()
++					.replace(/^at /, "")
++					.replace(/(moz|chrome)-extension:\/\/[^/]+\//g, ""),
++			)
++			.join(" < ")
++	}
++
++	const record = (site: string, requested: number, startedAt: number): void => {
++		const late = Math.max(0, performance.now() - startedAt - requested)
++		const entry = sites.get(site) ?? { n: 0, requestedMs: 0, lateMs: 0, maxLateMs: 0 }
++		entry.n++
++		entry.requestedMs += requested
++		entry.lateMs += late
++		entry.maxLateMs = Math.max(entry.maxLateMs, late)
++		sites.set(site, entry)
++	}
++
++	const schedule = (run: () => void, delay: number): number => (armed === "shim" ? workerSet(run, delay) : (nativeSet(run, delay) as unknown as number))
++
++	const wrappedSetTimeout = (handler: TimerHandler, delay?: number, ...args: unknown[]): number => {
++		const requested = Math.max(0, Number(delay) || 0)
++		const site = siteOf()
++		const startedAt = performance.now()
++		total++
++		scheduledBySite.set(site, (scheduledBySite.get(site) ?? 0) + 1)
++		return schedule(() => {
++			record(site, requested, startedAt)
++			if (typeof handler === "function") handler(...args)
++		}, requested)
++	}
++
++	const intervals = new Map<number, number>()
++	const wrappedSetInterval = (handler: TimerHandler, delay?: number, ...args: unknown[]): number => {
++		const requested = Math.max(0, Number(delay) || 0)
++		const site = `[interval] ${siteOf()}`
++		const key = nextId++
++		const tick = (): void => {
++			const startedAt = performance.now()
++			total++
++			intervals.set(
++				key,
++				schedule(() => {
++					if (!intervals.has(key)) return
++					record(site, requested, startedAt)
++					tick()
++					if (typeof handler === "function") handler(...args)
++				}, requested),
++			)
++		}
++		tick()
++		return key
++	}
++
++	const wrappedClear = (id?: number): void => {
++		if (id === undefined) return
++		const inner = intervals.get(id)
++		if (inner !== undefined) {
++			intervals.delete(id)
++			wrappedClear(inner)
++			return
++		}
++		if (id >= SHIM_ID_BASE) workerClear(id)
++		else nativeClear(id)
++	}
++
++	Object.assign(self, { setTimeout: wrappedSetTimeout, clearTimeout: wrappedClear, setInterval: wrappedSetInterval, clearInterval: wrappedClear })
++
++	const chain = async (hop: () => Promise<void>, hops: number): Promise<number> => {
++		const startedAt = performance.now()
++		for (let i = 0; i < hops; i++) await hop()
++		return (performance.now() - startedAt) / hops
++	}
++	const selfTest = async () => {
++		const channel = new MessageChannel()
++		const viaChannel = () =>
++			new Promise<void>((resolve) => {
++				channel.port1.onmessage = () => resolve()
++				channel.port2.postMessage(0)
++			})
++		return {
++			nativeZeroMs: await chain(() => new Promise<void>((resolve) => void nativeSet(resolve, 0)), 5),
++			nativeFiftyMs: await chain(() => new Promise<void>((resolve) => void nativeSet(resolve, 50)), 5),
++			workerZeroMs: await chain(() => new Promise<void>((resolve) => void workerSet(resolve, 0)), 5),
++			workerFiftyMs: await chain(() => new Promise<void>((resolve) => void workerSet(resolve, 50)), 5),
++			messageChannelMs: await chain(viaChannel, 50),
++		}
++	}
++
++	chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
++		const request = message as { type?: string; reset?: boolean; selfTest?: boolean } | null
++		if (request?.type !== "NULO_SPIKE_TIMER_DUMP") return false
++		const top = [...sites.entries()]
++			.sort((a, b) => b[1].lateMs - a[1].lateMs)
++			.slice(0, 25)
++			.map(([site, s]) => ({ site, ...s, requestedMs: Math.round(s.requestedMs), lateMs: Math.round(s.lateMs), maxLateMs: Math.round(s.maxLateMs) }))
++		const snapshot = {
++			mode: armed,
++			visibility: document.visibilityState,
++			hasFocus: document.hasFocus(),
++			framed: window.top !== window,
++			timeOrigin: Math.round(performance.timeOrigin),
++			instance: new URLSearchParams(location.search).get("instance"),
++			crossOriginIsolated: self.crossOriginIsolated,
++			timers: total,
++			distinctSites: sites.size,
++			totalLateMs: Math.round([...sites.values()].reduce((sum, s) => sum + s.lateMs, 0)),
++			top,
++			topScheduled: [...scheduledBySite.entries()]
++				.sort((a, b) => b[1] - a[1])
++				.slice(0, 12)
++				.map(([site, n]) => ({ site, n })),
++		}
++		if (request.reset) {
++			sites = new Map()
++			scheduledBySite = new Map()
++			total = 0
++		}
++		if (!request.selfTest) {
++			sendResponse(snapshot)
++			return false
++		}
++		void selfTest().then((result) => sendResponse({ ...snapshot, selfTest: result }))
++		return true
++	})
++}
++
++if (mode === "probe" || mode === "shim") arm(mode)
+diff --git a/apps/extension/src/offscreen/timer-probe.worker.ts b/apps/extension/src/offscreen/timer-probe.worker.ts
+new file mode 100644
+index 00000000..b1153c93
+--- /dev/null
++++ b/apps/extension/src/offscreen/timer-probe.worker.ts
+@@ -0,0 +1,20 @@
++// SPIKE ONLY — never ships. Timers owned by a dedicated worker, to measure whether they escape
++// the background-window clamp that applies to the owning page's main thread.
++const live = new Map<number, ReturnType<typeof setTimeout>>()
++
++self.onmessage = (event: MessageEvent<{ id: number; delay?: number; clear?: boolean }>) => {
++	const { id, delay, clear } = event.data
++	if (clear) {
++		const handle = live.get(id)
++		if (handle !== undefined) clearTimeout(handle)
++		live.delete(id)
++		return
++	}
++	live.set(
++		id,
++		setTimeout(() => {
++			live.delete(id)
++			self.postMessage(id)
++		}, delay ?? 0),
++	)
++}
+diff --git a/apps/extension/src/wallet/index.ts b/apps/extension/src/wallet/index.ts
+index 1a91d2b2..85bc5dd7 100644
+--- a/apps/extension/src/wallet/index.ts
++++ b/apps/extension/src/wallet/index.ts
+@@ -12,6 +12,7 @@
+  */
+ 
+ import "@/utils/console-sniffer"
++import "./spike-bg-selftest"
+ import { RealChromeBrowserApi, SystemClock } from "@/core/adapters"
+ import { ConfigStore } from "./config"
+ import { consoleMethods, LoggerStore, LogLevel } from "./logger"
+@@ -85,6 +86,10 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
+ logger.log("wallet", LogLevel.Info, "Runtime configured")
+ 
+ const runtime = createWalletRuntime({ browserApi, clock, config, logger, manifestVersion: chrome.runtime.getManifest().version })
++if (import.meta.env.VITE_NULO_SPIKE_TIMERS) {
++	// SPIKE ONLY — lets the self-test report whether boot settled and what it logged.
++	;(globalThis as { __nuloSpike?: unknown }).__nuloSpike = { runtime, logger }
++}
+ 
+ // MV3: when an alarm WAKES the SW, only listeners registered synchronously
+ // at module scope receive the triggering event — a listener added inside
+diff --git a/apps/extension/src/wallet/runtime.ts b/apps/extension/src/wallet/runtime.ts
+index af6953b6..8ed2fde4 100644
+--- a/apps/extension/src/wallet/runtime.ts
++++ b/apps/extension/src/wallet/runtime.ts
+@@ -253,6 +253,8 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
+ 	initWalletSdkHandler(services, logger, { windows: browserApi.windows, clock })
+ 
+ 	writeInitialLiveness(browserApi, clock, logger)
++	// SPIKE ONLY — lets a run show what Firefox does to the background without the heartbeat.
++	if (import.meta.env.VITE_NULO_SPIKE_NO_HEARTBEAT === "1") return
+ 	// Heartbeat — keeps MV3 service worker alive long enough for cross-SW
+ 	// calls. Routed through browserApi.storage + clock for testability.
+ 	state.heartbeatHandle = clock.setInterval(() => {
+diff --git a/apps/extension/src/wallet/spike-bg-selftest.ts b/apps/extension/src/wallet/spike-bg-selftest.ts
+new file mode 100644
+index 00000000..707d4e23
+--- /dev/null
++++ b/apps/extension/src/wallet/spike-bg-selftest.ts
+@@ -0,0 +1,52 @@
++// SPIKE ONLY — never ships. Answers one message with how long the background's own timers take,
++// to tell whether the background context is throttled like the minimized PXE window is.
++if (import.meta.env.VITE_NULO_SPIKE_TIMERS) {
++	const chain = async (delay: number, hops: number): Promise<number> => {
++		const startedAt = performance.now()
++		for (let i = 0; i < hops; i++) await new Promise<void>((resolve) => void setTimeout(resolve, delay))
++		return (performance.now() - startedAt) / hops
++	}
++	// The sender shape the PXE host's READY arrives with — what sender auth must accept.
++	let readySender: Record<string, unknown> | null = null
++	chrome.runtime.onMessage.addListener((message: unknown, sender) => {
++		if (message !== "OFFSCREEN_READY") return false
++		readySender = {
++			keys: Object.keys(sender).sort(),
++			url: sender.url?.replace(/^moz-extension:\/\/[^/]+/, "moz-extension://<uuid>"),
++			hasTab: sender.tab !== undefined,
++			frameId: sender.frameId ?? null,
++			idMatches: sender.id === chrome.runtime.id,
++			origin: (sender as { origin?: string }).origin ?? null,
++		}
++		return false
++	})
++	chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
++		if ((message as { type?: string } | null)?.type !== "NULO_SPIKE_BG_SELFTEST") return false
++		void (async () => {
++			const spike = (
++				globalThis as { __nuloSpike?: { runtime: { start(): Promise<void> }; logger: { get(count: number): unknown[] } } }
++			).__nuloSpike
++			const boot = spike
++				? await Promise.race([
++						spike.runtime.start().then(
++							() => "started",
++							(error: unknown) => `failed: ${String(error).slice(0, 300)}`,
++						),
++						new Promise<string>((resolve) => void setTimeout(() => resolve("pending after 5s"), 5_000)),
++					])
++				: "no-handle"
++			const logs = (spike?.logger.get(60) ?? []).map((entry) => JSON.stringify(entry).slice(0, 260))
++			sendResponse({
++				boot,
++				logs,
++				context: typeof document === "undefined" ? "service-worker" : `page:${document.visibilityState}`,
++				timeOrigin: Math.round(performance.timeOrigin),
++				frames: typeof document === "undefined" ? 0 : document.querySelectorAll("iframe").length,
++				readySender,
++				nativeZeroMs: await chain(0, 5),
++				nativeFiftyMs: await chain(50, 5),
++			})
++		})()
++		return true
++	})
++}
+diff --git a/apps/extension/src/wallet/utils/offscreen.ts b/apps/extension/src/wallet/utils/offscreen.ts
+index 470afd99..42b95e0b 100644
+--- a/apps/extension/src/wallet/utils/offscreen.ts
++++ b/apps/extension/src/wallet/utils/offscreen.ts
+@@ -216,6 +216,11 @@ async function closeOffscreen() {
+ 		}
+ 		return
+ 	}
++	if (spikeIframe !== null) {
++		spikeIframe.remove()
++		spikeIframe = null
++		return
++	}
+ 	if (firefoxOffscreenWindowId !== null) {
+ 		try {
+ 			await chrome.windows.remove(firefoxOffscreenWindowId)
+@@ -283,8 +288,24 @@ async function createOffscreenChromium(passId: number) {
+  *  refuses (rare, but typed that way) — fail loud so the caller's create-promise
+  *  rejection path runs and the ready-gate can time out cleanly instead of hanging on a
+  *  missing window id. */
++// SPIKE ONLY (VITE_NULO_SPIKE_HOST=iframe): host the PXE page as a frame of the background page
++// instead of a minimized window, to measure whether it inherits the background's visible state.
++let spikeIframe: HTMLIFrameElement | null = null
++const SPIKE_IFRAME_HOST = import.meta.env.VITE_NULO_SPIKE_HOST === "iframe"
++
+ async function createOffscreenFirefox(passId: number) {
+ 	const token = firefoxInstanceToken()
++	if (SPIKE_IFRAME_HOST && typeof document !== "undefined") {
++		const frame = document.createElement("iframe")
++		frame.src = `${chrome.runtime.getURL(path)}?instance=${token}`
++		;(document.body ?? document.documentElement).appendChild(frame)
++		if (passId !== passSeq) {
++			frame.remove()
++			return
++		}
++		spikeIframe = frame
++		return
++	}
+ 	const win = await chrome.windows.create({
+ 		url: `${chrome.runtime.getURL(path)}?instance=${token}`,
+ 		state: "minimized",
+@@ -335,7 +356,7 @@ async function isOffscreenAlreadyRunning(): Promise<boolean> {
+ 		return existingContexts.length > 0
+ 	}
+ 	// Firefox: trust the module-local tracker (see SW-restart caveat above).
+-	return firefoxOffscreenWindowId !== null
++	return firefoxOffscreenWindowId !== null || spikeIframe !== null
+ }
+ 
+ /**
+diff --git a/apps/extension/tests/e2e/fixtures/browser/chrome.ts b/apps/extension/tests/e2e/fixtures/browser/chrome.ts
+index c9747cef..934ad18f 100644
+--- a/apps/extension/tests/e2e/fixtures/browser/chrome.ts
++++ b/apps/extension/tests/e2e/fixtures/browser/chrome.ts
+@@ -32,7 +32,11 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions):
+ 			// deletion past the reset specs' waits and fails three of them.
+ 			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP api.coingecko.com 127.0.0.1:1"] : []),
+ 		],
+-		ignoreDefaultArgs: ["--disable-extensions"],
++		// SPIKE: NULO_E2E_SPIKE_DEFAULT_TIMERS=1 lets Chrome throttle background timers as it does for a user.
++		ignoreDefaultArgs: [
++			"--disable-extensions",
++			...(process.env.NULO_E2E_SPIKE_DEFAULT_TIMERS === "1" ? ["--disable-background-timer-throttling"] : []),
++		],
+ 		// The default 180s is not enough for a cold first run: argon2 unlock plus the bb.js wasm
+ 		// boot can hold a CDP reply past it while the worker pool has the host under memory
+ 		// pressure, and the call then times out on work that did complete.
+diff --git a/apps/extension/tests/e2e/fixtures/browser/firefox.ts b/apps/extension/tests/e2e/fixtures/browser/firefox.ts
+index 04ea3524..4a836cc3 100644
+--- a/apps/extension/tests/e2e/fixtures/browser/firefox.ts
++++ b/apps/extension/tests/e2e/fixtures/browser/firefox.ts
+@@ -246,9 +246,14 @@ function capabilities({ profileDir, headless }: { profileDir: string; headless:
+ 				// The PXE lives in a minimized window, and Firefox clamps a background window's
+ 				// timers to one a second and then budgets them further. The Chrome driver turns
+ 				// the same behaviour off with its backgrounding flags.
+-				"dom.min_background_timeout_value": 4,
+-				"dom.min_background_timeout_value_without_budget_throttling": 4,
+-				"dom.timeout.enable_budget_timer_throttling": false,
++				// SPIKE: NULO_E2E_SPIKE_DEFAULT_TIMERS=1 leaves Firefox's own throttling on.
++				...(process.env.NULO_E2E_SPIKE_DEFAULT_TIMERS === "1"
++					? {}
++					: {
++							"dom.min_background_timeout_value": 4,
++							"dom.min_background_timeout_value_without_budget_throttling": 4,
++							"dom.timeout.enable_budget_timer_throttling": false,
++						}),
+ 			},
+ 		},
+ 	}
+diff --git a/apps/extension/tests/e2e/network/_spike-lifetime.test.ts b/apps/extension/tests/e2e/network/_spike-lifetime.test.ts
+new file mode 100644
+index 00000000..c38bc64c
+--- /dev/null
++++ b/apps/extension/tests/e2e/network/_spike-lifetime.test.ts
+@@ -0,0 +1,199 @@
++/**
++ * SPIKE ONLY — gated on NULO_E2E_SPIKE_LIFETIME=1, Firefox only. Does the wallet recover when Firefox
++ * terminates the background page, and does a live PXE host survive idling with no tab open?
++ *   1. snapshot the background's and the PXE page's identities
++ *   2. terminate the background with Firefox's own privileges
++ *   3. open a FRESH dApp connection, send a transaction — a recreated PXE must serve it
++ *   4. close the dApp tab, idle, snapshot — identities must be present and unchanged
++ * Results go to NULO_SPIKE_OUT as JSON lines.
++ */
++import { appendFileSync } from "node:fs"
++import { expect, inject } from "vitest"
++import type { Page } from "puppeteer"
++import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
++import { TEST_PASSWORD } from "../fixtures/constants"
++import { ensureUnlocked } from "../fixtures/helpers"
++import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
++import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
++import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
++import { actionPopupContext } from "../fixtures/browser/firefox"
++
++const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
++const enabled = aztecConfig !== undefined && process.env.NULO_E2E_SPIKE_LIFETIME === "1" && process.env.NULO_E2E_BROWSER === "firefox"
++const OUT = process.env.NULO_SPIKE_OUT ?? "/tmp/nulo-spike-timers.jsonl"
++const IDLE_ALONE_MS = Number(process.env.NULO_SPIKE_IDLE_ALONE_MS ?? 300_000)
++
++function emit(record: Record<string, unknown>): void {
++	appendFileSync(OUT, `${JSON.stringify({ arm: process.env.NULO_SPIKE_ARM ?? "?", at: new Date().toISOString(), ...record })}\n`)
++}
++
++const idle = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
++
++async function ask(page: Page, type: string): Promise<Record<string, unknown>> {
++	// No responder (the PXE page is created on demand, so it is absent right after a restart)
++	// resolves undefined on Firefox rather than rejecting.
++	const answer = await page
++		.evaluate((messageType) => chrome.runtime.sendMessage({ type: messageType }), type)
++		.catch((err: unknown) => ({ error: String(err) }))
++	return (answer as Record<string, unknown> | undefined) ?? { absent: true }
++}
++
++interface Identities {
++	background: number | undefined
++	pxe: number | undefined
++	frames: number | undefined
++}
++
++async function snapshot(ctx: ExtensionContext, label: string): Promise<Identities> {
++	const popup = await openPopup(ctx)
++	try {
++		const { logs, ...background } = await ask(popup, "NULO_SPIKE_BG_SELFTEST")
++		// Log lines stay out of the results file, which is kept with the plan.
++		appendFileSync(`${OUT}.logs`, `${JSON.stringify({ arm: process.env.NULO_SPIKE_ARM ?? "?", phase: label, logs })}\n`)
++		const probe = await ask(popup, "NULO_SPIKE_TIMER_DUMP")
++		const pxe = {
++			timeOrigin: probe.timeOrigin,
++			instance: probe.instance,
++			framed: probe.framed,
++			visibility: probe.visibility,
++			absent: probe.absent,
++		}
++		const windows = (await actionPopupContext(ctx.browser).session.listWindows()).length
++		emit({ phase: label, background, pxe, windows })
++		return {
++			background: background.timeOrigin as number | undefined,
++			pxe: probe.timeOrigin as number | undefined,
++			frames: background.frames as number | undefined,
++		}
++	} finally {
++		await popup.close().catch(() => {})
++	}
++}
++
++async function sendOnce(ctx: ExtensionContext, page: Page): Promise<string> {
++	await page.evaluate(
++		({ token, recipient }: { token: string; recipient: string }) => {
++			const setVal = (sel: string, v: string) => {
++				const input = document.querySelector<HTMLInputElement>(sel)
++				if (!input) return
++				Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, v)
++				input.dispatchEvent(new Event("input", { bubbles: true }))
++			}
++			setVal('[data-testid="pg-input-tokenAddress"]', token)
++			setVal('[data-testid="pg-input-recipient"]', recipient)
++			setVal('[data-testid="pg-input-amount"]', "1")
++		},
++		{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
++	)
++	const seq = await snapshotResultSeq(page)
++	try {
++		const execPopupP = waitForPopup(ctx, "execute", { timeout: 60_000 })
++		await clickByTestId(page, "pg-btn-sendTx-default")
++		const execPopup = await execPopupP
++		await waitForExecuteContent(execPopup, 60_000)
++		await approveExecute(execPopup)
++		const settled = await waitForPgResult(page, "sendTx", seq, 600_000)
++		// The helper resolves on "error" too: only an ok status is a send that worked.
++		return settled.status === "ok" ? "ok" : `error: ${JSON.stringify(settled.errorJson).slice(0, 300)}`
++	} catch (err) {
++		return `failed: ${String(err).slice(0, 300)}`
++	}
++}
++
++async function recoverAndSend(ctx: ExtensionContext, page: Page): Promise<string> {
++	const popup = await openPopup(ctx)
++	await ensureUnlocked(popup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
++	await popup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
++	await popup.close()
++	emit({ phase: "unlocked-after-restart" })
++
++	await page.reload({ waitUntil: "domcontentloaded" })
++	await page.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
++	// The verify popup re-fires unless the session was trusted; tolerate both.
++	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 }).catch(() => undefined)
++	await clickByTestId(page, "pg-btn-connect")
++	const verifyPage = await Promise.race([
++		verifyP,
++		page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }).then(() => undefined),
++	])
++	if (verifyPage) await approveVerify(verifyPage)
++	await page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 })
++	emit({ phase: "reconnected", verifyPopup: verifyPage !== undefined })
++
++	await page.evaluate(() => {
++		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
++		if (!select) throw new Error("pg-bundle-select not present")
++		select.value = "transaction"
++		select.dispatchEvent(new Event("change", { bubbles: true }))
++	})
++	const seqCaps = await snapshotResultSeq(page)
++	await clickByTestId(page, "pg-btn-requestCapabilities")
++	const caps = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
++	if (caps.status !== "ok") throw new Error(`requestCapabilities settled ${caps.status}: ${JSON.stringify(caps.errorJson).slice(0, 200)}`)
++	return sendOnce(ctx, page)
++}
++
++test.skipIf(!enabled)(
++	"spike — PXE host lifetime: termination, fresh-connection recovery, idle alone",
++	{ timeout: 1_800_000 },
++	async ({ dappConnectedExtensionWithTransactionCap: ctx }) => {
++		await mintPublicTokensForAccount(aztecConfig!, ctx.accountAddress)
++		const start = await snapshot(ctx, "start")
++
++		const { session, addonId } = actionPopupContext(ctx.browser)
++		const terminated = await session.chromeScript<string>(
++			`const [id, done] = arguments;
++		(async () => {
++			try {
++				const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
++				const extension = ExtensionParent.GlobalManager.getExtension(id);
++				if (!extension) return done("no-extension");
++				await extension.terminateBackground({ ignoreDevToolsAttached: true });
++				done("terminated");
++			} catch (err) { done("error: " + err); }
++		})();`,
++			[addonId],
++		)
++		emit({ phase: "terminate-background", terminated })
++		await idle(3_000)
++		const afterKill = await snapshot(ctx, "after-termination-and-wake")
++		emit({
++			phase: "verdict-termination",
++			backgroundRestarted: afterKill.background !== start.background,
++			pxeGoneWithBackground: afterKill.pxe === undefined,
++		})
++
++		// A background restart drops the session by design (strict security mode): unlock, reload the
++		// dApp, reconnect, re-request the already-granted bundle — the restart canary's recipe.
++		const startedAt = Date.now()
++		let outcome: string
++		const freshPage: Page | undefined = ctx.playgroundPage
++		try {
++			outcome = await recoverAndSend(ctx, ctx.playgroundPage)
++		} catch (err) {
++			outcome = `failed: ${String(err).slice(0, 300)}`
++		}
++		emit({ phase: "fresh-connection-send", outcome, ms: Date.now() - startedAt })
++
++		const recovered = await snapshot(ctx, "after-fresh-send")
++		emit({
++			phase: "verdict-recovery",
++			pxePresent: recovered.pxe !== undefined,
++			frames: recovered.frames,
++			pxeIsNew: recovered.pxe !== start.pxe,
++		})
++
++		await freshPage?.close().catch(() => {})
++		await idle(IDLE_ALONE_MS)
++		const afterAlone = await snapshot(ctx, "after-idle-alone")
++		const comparable = recovered.pxe !== undefined && recovered.background !== undefined
++		emit({
++			phase: "verdict-idle-alone",
++			comparable,
++			backgroundSurvived: comparable && afterAlone.background === recovered.background,
++			pxeSurvived: comparable && afterAlone.pxe === recovered.pxe,
++		})
++		expect(outcome).toBe("ok")
++		expect(comparable && afterAlone.pxe === recovered.pxe).toBe(true)
++	},
++)
+diff --git a/apps/extension/tests/e2e/network/_spike-suspend.test.ts b/apps/extension/tests/e2e/network/_spike-suspend.test.ts
+new file mode 100644
+index 00000000..7b612ef4
+--- /dev/null
++++ b/apps/extension/tests/e2e/network/_spike-suspend.test.ts
+@@ -0,0 +1,264 @@
++/**
++ * SPIKE ONLY — Firefox only, never ships. Two lifetime questions about the PXE host:
++ *   NULO_E2E_SPIKE_SUSPEND=1  (wallet built with VITE_NULO_SPIKE_NO_HEARTBEAT=1): with no heartbeat, does
++ *     Firefox suspend the background on its own, and does the wallet recover from THAT the same way?
++ *   NULO_E2E_SPIKE_MIDPROVE=1 (real proving): the background is terminated while a proof runs — does the
++ *     dApp get an answer, does the next send work, and did the interrupted send land zero or one time?
++ * Results go to NULO_SPIKE_OUT as JSON lines.
++ */
++import { appendFileSync } from "node:fs"
++import { expect, inject } from "vitest"
++import type { Page } from "puppeteer"
++import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
++import { TEST_PASSWORD } from "../fixtures/constants"
++import { ensureUnlocked } from "../fixtures/helpers"
++import { openPlayground, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
++import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
++import { waitForDappExecuteStagesPresent } from "../fixtures/journal"
++import { createTestWallet, mintPublicTokensForAccount, readPublicTokenBalance, type AztecTestConfig } from "../fixtures/aztec"
++import { actionPopupContext } from "../fixtures/browser/firefox"
++
++const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
++const onFirefox = aztecConfig !== undefined && process.env.NULO_E2E_BROWSER === "firefox"
++const suspendEnabled = onFirefox && process.env.NULO_E2E_SPIKE_SUSPEND === "1"
++const midProveEnabled = onFirefox && process.env.NULO_E2E_SPIKE_MIDPROVE === "1"
++const OUT = process.env.NULO_SPIKE_OUT ?? "/tmp/nulo-spike-timers.jsonl"
++const SUSPEND_IDLE_MS = Number(process.env.NULO_SPIKE_SUSPEND_IDLE_MS ?? 120_000)
++const KILL_AFTER_PROVING_MS = Number(process.env.NULO_SPIKE_KILL_AFTER_MS ?? 5_000)
++
++function emit(record: Record<string, unknown>): void {
++	appendFileSync(OUT, `${JSON.stringify({ arm: process.env.NULO_SPIKE_ARM ?? "?", at: new Date().toISOString(), ...record })}\n`)
++}
++
++const idle = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
++
++async function ask(page: Page, type: string): Promise<Record<string, unknown>> {
++	const answer = await page
++		.evaluate((messageType) => chrome.runtime.sendMessage({ type: messageType }), type)
++		.catch((err: unknown) => ({ error: String(err) }))
++	return (answer as Record<string, unknown> | undefined) ?? { absent: true }
++}
++
++interface Identities {
++	background: number | undefined
++	pxe: number | undefined
++	frames: number | undefined
++}
++
++async function snapshot(ctx: ExtensionContext, label: string): Promise<Identities> {
++	const popup = await openPopup(ctx)
++	try {
++		const { logs, ...background } = await ask(popup, "NULO_SPIKE_BG_SELFTEST")
++		appendFileSync(`${OUT}.logs`, `${JSON.stringify({ arm: process.env.NULO_SPIKE_ARM ?? "?", phase: label, logs })}\n`)
++		const probe = await ask(popup, "NULO_SPIKE_TIMER_DUMP")
++		const windows = (await actionPopupContext(ctx.browser).session.listWindows()).length
++		emit({
++			phase: label,
++			background,
++			pxe: {
++				timeOrigin: probe.timeOrigin,
++				instance: probe.instance,
++				framed: probe.framed,
++				visibility: probe.visibility,
++				absent: probe.absent,
++			},
++			windows,
++		})
++		return {
++			background: background.timeOrigin as number | undefined,
++			pxe: probe.timeOrigin as number | undefined,
++			frames: background.frames as number | undefined,
++		}
++	} finally {
++		await popup.close().catch(() => {})
++	}
++}
++
++async function terminateBackground(ctx: ExtensionContext): Promise<string> {
++	const { session, addonId } = actionPopupContext(ctx.browser)
++	return session.chromeScript<string>(
++		`const [id, done] = arguments;
++		(async () => {
++			try {
++				const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
++				const extension = ExtensionParent.GlobalManager.getExtension(id);
++				if (!extension) return done("no-extension");
++				await extension.terminateBackground({ ignoreDevToolsAttached: true });
++				done("terminated");
++			} catch (err) { done("error: " + err); }
++		})();`,
++		[addonId],
++	)
++}
++
++async function fillSend(page: Page): Promise<void> {
++	await page.evaluate(
++		({ token, recipient }: { token: string; recipient: string }) => {
++			const setVal = (sel: string, v: string) => {
++				const input = document.querySelector<HTMLInputElement>(sel)
++				if (!input) return
++				Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, v)
++				input.dispatchEvent(new Event("input", { bubbles: true }))
++			}
++			setVal('[data-testid="pg-input-tokenAddress"]', token)
++			setVal('[data-testid="pg-input-recipient"]', recipient)
++			setVal('[data-testid="pg-input-amount"]', "1")
++		},
++		{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
++	)
++}
++
++async function sendOnce(ctx: ExtensionContext, page: Page): Promise<string> {
++	await fillSend(page)
++	const seq = await snapshotResultSeq(page)
++	try {
++		const execPopupP = waitForPopup(ctx, "execute", { timeout: 60_000 })
++		await clickByTestId(page, "pg-btn-sendTx-default")
++		const execPopup = await execPopupP
++		await waitForExecuteContent(execPopup, 60_000)
++		await approveExecute(execPopup)
++		const settled = await waitForPgResult(page, "sendTx", seq, 600_000)
++		// The helper resolves on "error" too: only an ok status is a send that worked.
++		return settled.status === "ok" ? "ok" : `error: ${JSON.stringify(settled.errorJson).slice(0, 300)}`
++	} catch (err) {
++		return `failed: ${String(err).slice(0, 300)}`
++	}
++}
++
++/** Unlock, reload the dApp, reconnect, re-request the granted bundle, send — the restart canary's recipe. */
++async function recoverAndSend(ctx: ExtensionContext, page: Page): Promise<string> {
++	const popup = await openPopup(ctx)
++	await ensureUnlocked(popup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
++	await popup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
++	await popup.close()
++
++	await page.reload({ waitUntil: "domcontentloaded" })
++	await page.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
++	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 }).catch(() => undefined)
++	await clickByTestId(page, "pg-btn-connect")
++	const verifyPage = await Promise.race([
++		verifyP,
++		page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }).then(() => undefined),
++	])
++	if (verifyPage) await approveVerify(verifyPage)
++	await page.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 })
++
++	await page.evaluate(() => {
++		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
++		if (!select) throw new Error("pg-bundle-select not present")
++		select.value = "transaction"
++		select.dispatchEvent(new Event("change", { bubbles: true }))
++	})
++	const seqCaps = await snapshotResultSeq(page)
++	await clickByTestId(page, "pg-btn-requestCapabilities")
++	const caps = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
++	if (caps.status !== "ok") throw new Error(`requestCapabilities settled ${caps.status}: ${JSON.stringify(caps.errorJson).slice(0, 200)}`)
++	return sendOnce(ctx, page)
++}
++
++async function senderBalance(address: string): Promise<bigint> {
++	const { wallet, accounts, cleanup } = await createTestWallet(aztecConfig!.nodeUrl)
++	try {
++		const reader = accounts[0]
++		if (!reader) throw new Error("expected a sandbox test account")
++		return await readPublicTokenBalance(wallet, reader, aztecConfig!.tokenAddress, address)
++	} finally {
++		await cleanup()
++	}
++}
++
++test.skipIf(!suspendEnabled)(
++	"spike — no heartbeat: Firefox suspends the background on its own; the wallet recovers",
++	{ timeout: 1_200_000 },
++	async ({ dappConnectedExtensionWithTransactionCap: ctx }) => {
++		await mintPublicTokensForAccount(aztecConfig!, ctx.accountAddress)
++		const start = await snapshot(ctx, "start")
++		// No extension page and no dApp tab stay open, so nothing but the wallet's own timers runs.
++		await ctx.playgroundPage.close().catch(() => {})
++		await idle(SUSPEND_IDLE_MS)
++		const after = await snapshot(ctx, "after-natural-idle")
++		emit({
++			phase: "verdict-natural-suspension",
++			idleMs: SUSPEND_IDLE_MS,
++			backgroundRestarted: after.background !== start.background,
++			pxeGone: after.pxe === undefined,
++			frames: after.frames,
++		})
++		const page = await openPlayground(ctx)
++		const startedAt = Date.now()
++		const outcome = await recoverAndSend(ctx, page).catch((err: unknown) => `failed: ${String(err).slice(0, 300)}`)
++		emit({ phase: "recover-after-natural-suspension", outcome, ms: Date.now() - startedAt })
++		const recovered = await snapshot(ctx, "after-recovery")
++		emit({ phase: "verdict-recovery", pxePresent: recovered.pxe !== undefined, frames: recovered.frames })
++		expect(outcome).toBe("ok")
++	},
++)
++
++test.skipIf(!midProveEnabled)(
++	"spike — background terminated mid-proof: the dApp hears back, the next send works, nothing lands twice",
++	{ timeout: 1_800_000 },
++	async ({ dappConnectedExtensionWithTransactionCap: ctx }) => {
++		const page = ctx.playgroundPage
++		await mintPublicTokensForAccount(aztecConfig!, ctx.accountAddress)
++		const balanceBefore = await senderBalance(ctx.accountAddress)
++		await snapshot(ctx, "start")
++
++		await fillSend(page)
++		const seq = await snapshotResultSeq(page)
++		const execPopupP = waitForPopup(ctx, "execute", { timeout: 60_000 })
++		await clickByTestId(page, "pg-btn-sendTx-default")
++		const execPopup = await execPopupP
++		await waitForExecuteContent(execPopup, 60_000)
++		await approveExecute(execPopup)
++		// The kill must land while the proof runs: wait for the journal to say so, then a few seconds in.
++		const watcher = await openPopup(ctx)
++		await waitForDappExecuteStagesPresent(watcher, ["proving"], { timeout: 120_000 })
++		await watcher.close()
++		await idle(KILL_AFTER_PROVING_MS)
++		const killedAt = Date.now()
++		emit({
++			phase: "terminate-mid-proof",
++			terminated: await terminateBackground(ctx),
++			stageAtKill: "proving",
++			afterProvingMs: KILL_AFTER_PROVING_MS,
++		})
++
++		// Does the dApp's pending call ever settle, and how?
++		const interrupted = await waitForPgResult(page, "sendTx", seq, 120_000).then(
++			(result) => ({ settled: true, result: JSON.stringify(result).slice(0, 300) }),
++			(err: unknown) => ({ settled: false, result: String(err).slice(0, 200) }),
++		)
++		emit({ phase: "interrupted-send", ...interrupted, msAfterKill: Date.now() - killedAt })
++		await snapshot(ctx, "after-mid-proof-termination")
++		const landedBeforeRecovery = balanceBefore - (await senderBalance(ctx.accountAddress))
++
++		const startedAt = Date.now()
++		const outcome = await recoverAndSend(ctx, page).catch((err: unknown) => `failed: ${String(err).slice(0, 300)}`)
++		emit({ phase: "recover-after-mid-proof", outcome, ms: Date.now() - startedAt })
++		const recovered = await snapshot(ctx, "after-recovery")
++		// Give an orphaned prover (the window host keeps its old window) time to land a late send.
++		await idle(90_000)
++		const landedTotal = balanceBefore - (await senderBalance(ctx.accountAddress))
++		const journal = await openPopup(ctx)
++		const stages = await journal.evaluate(async () => {
++			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
++			return Object.entries(all)
++				.filter(([key]) => key.startsWith("nulo:journal@"))
++				.map(([, raw]) => (typeof raw === "string" ? JSON.parse(raw) : raw) as { kind?: string; progress?: { stage?: string } })
++				.filter((record) => record.kind === "dapp_execute")
++				.map((record) => record.progress?.stage ?? "?")
++		})
++		await journal.close()
++		emit({
++			phase: "verdict-mid-proof",
++			pxePresent: recovered.pxe !== undefined,
++			frames: recovered.frames,
++			landedBeforeRecovery: landedBeforeRecovery.toString(),
++			landedTotal: landedTotal.toString(),
++			journalStages: stages,
++		})
++		expect(outcome).toBe("ok")
++		expect(landedBeforeRecovery).toBe(0n)
++		expect(landedTotal).toBe(1n)
++	},
++)
+diff --git a/apps/extension/tests/e2e/network/_spike-timer-throttle.test.ts b/apps/extension/tests/e2e/network/_spike-timer-throttle.test.ts
+new file mode 100644
+index 00000000..09817232
+--- /dev/null
++++ b/apps/extension/tests/e2e/network/_spike-timer-throttle.test.ts
+@@ -0,0 +1,108 @@
++/**
++ * SPIKE ONLY — gated on NULO_E2E_SPIKE=1. One dApp sendTx through the execute window, timed stage
++ * by stage, with the offscreen page's timer-probe dumped before and after. Needs a wallet built
++ * with VITE_NULO_SPIKE_TIMERS=probe|shim; results are appended to NULO_SPIKE_OUT as JSON lines.
++ */
++import { appendFileSync } from "node:fs"
++import { expect, inject } from "vitest"
++import type { Page } from "puppeteer"
++import { clickByTestId, openPopup, test } from "../fixtures/extension"
++import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
++import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
++import { waitForDappExecuteWorked } from "../fixtures/journal"
++import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
++
++const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
++const enabled = aztecConfig !== undefined && process.env.NULO_E2E_SPIKE === "1"
++const OUT = process.env.NULO_SPIKE_OUT ?? "/tmp/nulo-spike-timers.jsonl"
++const REPEAT = Number(process.env.NULO_SPIKE_REPEAT ?? 1)
++const REPEAT_GAP_MS = Number(process.env.NULO_SPIKE_REPEAT_GAP_MS ?? 0)
++const loadedAt = Date.now()
++
++function emit(record: Record<string, unknown>): void {
++	appendFileSync(OUT, `${JSON.stringify({ arm: process.env.NULO_SPIKE_ARM ?? "?", at: new Date().toISOString(), ...record })}\n`)
++}
++
++async function dump(page: Page, options: { reset: boolean; selfTest: boolean }): Promise<unknown> {
++	return page
++		.evaluate((request) => chrome.runtime.sendMessage({ type: "NULO_SPIKE_TIMER_DUMP", ...request }), options)
++		.catch((err: unknown) => ({ dumpError: String(err) }))
++}
++
++test.skipIf(!enabled)(
++	"spike — sendTx stage timings and offscreen timer lateness",
++	{ timeout: 900_000 },
++	async ({ dappConnectedExtensionWithTransactionCap: ctx }) => {
++		const { playgroundPage: page, accountAddress } = ctx
++		const stages: Record<string, number> = { fixtureSetupMs: Date.now() - loadedAt }
++		const mark = async <T>(name: string, work: () => Promise<T>): Promise<T> => {
++			const startedAt = Date.now()
++			try {
++				return await work()
++			} finally {
++				stages[name] = Date.now() - startedAt
++			}
++		}
++		let walletPopup = await openPopup(ctx)
++		try {
++			emit({ phase: "after-setup", probe: await dump(walletPopup, { reset: true, selfTest: true }) })
++			emit({
++				phase: "background-selftest",
++				background: await walletPopup
++					.evaluate(() => chrome.runtime.sendMessage({ type: "NULO_SPIKE_BG_SELFTEST" }))
++					.catch((err: unknown) => ({ error: String(err) })),
++			})
++			// Closed again so the execute-window wait sees the same set of pages the real spec does.
++			await walletPopup.close().catch(() => {})
++			await mark("mintMs", () => mintPublicTokensForAccount(aztecConfig!, accountAddress))
++			await page.evaluate(
++				({ token, recipient }: { token: string; recipient: string }) => {
++					const setVal = (sel: string, v: string) => {
++						const input = document.querySelector<HTMLInputElement>(sel)
++						if (!input) return
++						Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, v)
++						input.dispatchEvent(new Event("input", { bubbles: true }))
++					}
++					setVal('[data-testid="pg-input-tokenAddress"]', token)
++					setVal('[data-testid="pg-input-recipient"]', recipient)
++					setVal('[data-testid="pg-input-amount"]', "1")
++				},
++				{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
++			)
++			const seq = await snapshotResultSeq(page)
++			const execPopupP = waitForPopup(ctx, "execute", { timeout: 120_000 })
++			await clickByTestId(page, "pg-btn-sendTx-default")
++			const execPopup = await mark("clickToExecuteWindowMs", () => execPopupP)
++			await mark("executeContentMs", () => waitForExecuteContent(execPopup, 120_000))
++			await mark("approveMs_includesFeeEstimate", () => approveExecute(execPopup))
++			walletPopup = await openPopup(ctx)
++			await mark("journalWorkedMs", () => waitForDappExecuteWorked(walletPopup))
++			const result = await mark("dappResultMs", () => waitForPgResult(page, "sendTx", seq, 600_000))
++			expect(result.status).toBe("ok")
++			// Extra samples of the same send, for the spread: click to dApp result, one line each.
++			for (let sample = 2; sample <= REPEAT; sample++) {
++				// The first send deploys the account; the wallet refuses another first-tx until it has synced.
++				await new Promise((resolve) => setTimeout(resolve, REPEAT_GAP_MS))
++				const startedAt = Date.now()
++				const nextSeq = await snapshotResultSeq(page)
++				const nextPopupP = waitForPopup(ctx, "execute", { timeout: 120_000 })
++				await clickByTestId(page, "pg-btn-sendTx-default")
++				const nextPopup = await nextPopupP
++				await waitForExecuteContent(nextPopup, 120_000)
++				await approveExecute(nextPopup)
++				const settled = await waitForPgResult(page, "sendTx", nextSeq, 600_000)
++				emit({
++					phase: "repeat",
++					sample,
++					status: settled.status,
++					error: settled.status === "ok" ? undefined : JSON.stringify(settled.errorJson).slice(0, 400),
++					clickToResultMs: Date.now() - startedAt,
++				})
++				expect(settled.status).toBe("ok")
++			}
++		} finally {
++			if (walletPopup.isClosed()) walletPopup = await openPopup(ctx)
++			emit({ phase: "after-sendTx", stages, probe: await dump(walletPopup, { reset: false, selfTest: true }) })
++		}
++	},
++)

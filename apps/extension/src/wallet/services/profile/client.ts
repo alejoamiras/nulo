@@ -1,117 +1,38 @@
-import type { Restored, ServiceSpec } from "@/wallet/base"
-import { ServiceClient } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import type { MethodsSpec, Restored, ServiceSpec } from "@/wallet/base"
+import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { PROFILE_SERVICE_NAME, type ProfileInfo, type Events, type Methods, type RestoreSecret } from "./spec"
 
 export * from "./spec"
 
+// Declaration-merge the passthrough signatures onto the class type. Bodies are
+// installed at runtime by `definePassthroughs`; this is what satisfies
+// `implements ServiceSpec` and gives consumers full inference.
+export interface ProfileServiceClient extends MethodsSpec<Methods> {}
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughsExhaustive below, whose signature proves the name list covers every Methods key, so no advertised method is missing.
 export class ProfileServiceClient extends ServiceClient<Methods, Events> implements ServiceSpec<Methods, Events> {
 	public readonly onProfileAdded = new EventHandler<ProfileInfo>()
 	public readonly onProfileUpdated = new EventHandler<ProfileInfo>()
 	public readonly onProfileDeleted = new EventHandler<ProfileInfo>()
 	public readonly onActiveProfileChanged = new EventHandler<ProfileInfo | undefined>()
+	public readonly onImportedKeysDegraded = new EventHandler<ProfileInfo>()
 
 	public constructor(name?: string) {
-		super(PROFILE_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(PROFILE_SERVICE_NAME, documentLogger(), name)
 	}
 
-	public getActiveProfile(): Promise<ProfileInfo | undefined> {
-		return this.request("getActiveProfile")
-	}
-
-	public getProfiles(): Promise<ProfileInfo[]> {
-		return this.request("getProfiles")
-	}
-
-	public generateProfileId(): Promise<string> {
-		return this.request("generateProfileId")
-	}
-
-	public createProfile(name: string, password: string): Promise<ProfileInfo> {
-		return this.request("createProfile", name, password)
-	}
-
-	public createPasskeyProfile(name: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("createPasskeyProfile", name, credentialData)
-	}
-
-	public unlockProfile(id: string, password: string): Promise<ProfileInfo> {
-		return this.request("unlockProfile", id, password)
-	}
-
-	public unlockPasskeyProfile(id: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("unlockPasskeyProfile", id, credentialData)
-	}
-
-	public getPasskeyCredentialId(id: string): Promise<string> {
-		return this.request("getPasskeyCredentialId", id)
-	}
-
-	public lockActiveProfile(): Promise<void> {
-		return this.request("lockActiveProfile")
-	}
-
-	public refreshSession(): Promise<void> {
-		return this.request("refreshSession")
-	}
-
-	public changeProfileName(id: string, newName: string): Promise<ProfileInfo> {
-		return this.request("changeProfileName", id, newName)
-	}
-
-	public changeProfilePassword(id: string, oldPassword: string, newPassword: string): Promise<ProfileInfo> {
-		return this.request("changeProfilePassword", id, oldPassword, newPassword)
-	}
-
-	public confirmProfileOperation(id: string, password?: string): Promise<boolean> {
-		return this.request("confirmProfileOperation", id, password)
-	}
-
-	public deleteProfile(id: string): Promise<ProfileInfo> {
-		return this.request("deleteProfile", id)
-	}
-
-	public importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importEncrypted", name, secret, password)
-	}
-
-	public importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importPlain", name, secret, password)
-	}
-
-	public importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
-		return this.request("importMnemonic", name, mnemonic, password)
-	}
-
-	public importPasskey(name: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("importPasskey", name, credentialData)
-	}
-
-	public exportEncrypted(id: string): Promise<string> {
-		return this.request("exportEncrypted", id)
-	}
-
-	public exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
-		return this.request("exportPlain", id, password, credentialData)
-	}
-
-	public exportMnemonic(id: string, password: string): Promise<string[]> {
-		return this.request("exportMnemonic", id, password)
-	}
-
-	public restore(
+	/** Declared here (and re-installed by the exhaustive list below) because the base client's
+	 *  untyped `restore(...unknown[])` convenience stub would otherwise shadow the merged signature. */
+	public override restore(
 		profile: ProfileInfo,
 		secret: RestoreSecret,
 		password?: string,
 		credentialData?: PasskeyCredentialData,
+		allowDuplicate?: boolean,
 	): Promise<Restored<ProfileInfo>> {
-		return this.request("restore", profile, secret, password, credentialData)
-	}
-
-	public finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {
-		return this.request("finalizeRestore", id, password)
+		return this.request("restore", profile, secret, password, credentialData, allowDuplicate)
 	}
 
 	/**
@@ -133,14 +54,28 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 	 * the reconnect hook. Consumers **should** call it from `onBeforeUnmount`.
 	 *
 	 * Known edge case: an event fired between the snapshot `getActiveProfile`
-	 * resolve and the `add(...)` call below is lost. In practice the
-	 * window is one microtask — acceptable for the pilot. A future hardening
-	 * could buffer emits during this window and flush after the snapshot.
+	 * resolve and the `add(...)` call below is lost. The window is a real RPC
+	 * round-trip (not a microtask) — accepted; a future hardening could buffer
+	 * emits during this window and flush after the snapshot.
 	 */
 	public async subscribeActiveProfile(handler: (profile: ProfileInfo | undefined) => void): Promise<() => void> {
+		// Latch + sequence: an in-flight snapshot RPC must not deliver into an
+		// unsubscribed (unmounted) consumer, and reconnect snapshots resolving
+		// out of order — or after a fresher LIVE event — must stand down rather
+		// than overwrite the newer profile. Live events bump the seq so a stale
+		// snapshot can never win; snapshots bump it so only the latest delivers.
+		let unsubscribed = false
+		let seq = 0
+		const liveHandler = (profile: ProfileInfo | undefined) => {
+			if (unsubscribed) return
+			seq += 1
+			handler(profile)
+		}
 		const emitSnapshot = async () => {
+			const mySeq = ++seq
 			try {
 				const snapshot = await this.getActiveProfile()
+				if (unsubscribed || mySeq !== seq) return
 				handler(snapshot)
 			} catch {
 				// Fetch failed (port disconnected, service errored). The
@@ -148,11 +83,40 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 			}
 		}
 		await emitSnapshot()
-		this.onActiveProfileChanged.add(handler)
+		this.onActiveProfileChanged.add(liveHandler)
 		this.onConnected.add(emitSnapshot)
 		return () => {
-			this.onActiveProfileChanged.remove(handler)
+			unsubscribed = true
+			this.onActiveProfileChanged.remove(liveHandler)
 			this.onConnected.remove(emitSnapshot)
 		}
 	}
 }
+// Every RPC method is a pure request-passthrough (`subscribeActiveProfile` above is client-side
+// composition, not an RPC); the installer's signature checks the name list in both directions.
+definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [
+	"getActiveProfile",
+	"getProfiles",
+	"generateProfileId",
+	"createProfile",
+	"createPasskeyProfile",
+	"unlockProfile",
+	"unlockPasskeyProfile",
+	"getPasskeyCredentialId",
+	"getSessionHandle",
+	"lockActiveProfile",
+	"refreshSession",
+	"changeProfileName",
+	"changeProfilePassword",
+	"confirmProfileOperation",
+	"deleteProfile",
+	"importMnemonic",
+	"importPasskey",
+	"exportPlain",
+	"exportBackupMaterial",
+	"exportPasskeyBackupMaterial",
+	"getProfileDekSealed",
+	"exportMnemonic",
+	"restore",
+	"finalizeRestore",
+])

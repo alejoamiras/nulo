@@ -23,8 +23,15 @@ export const usePopupStore = defineStore("popup", () => {
 	const getPayload = (target: string) => {
 		return popups.value[target]?.payload
 	}
+	// Orders stay 0..len-1 with no gaps, so a popup closed underneath a newer one never leaves its
+	// slot for the next `open` to duplicate.
 	const close = (target: string) => {
-		if (target in popups.value) delete popups.value[target]
+		const closed = popups.value[target]
+		if (!closed) return
+		delete popups.value[target]
+		for (const entry of Object.values(popups.value)) {
+			if (entry.order > closed.order) entry.order -= 1
+		}
 	}
 	const closeAll = () => {
 		popups.value = {}

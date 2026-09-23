@@ -1,35 +1,22 @@
 /**
- * Shared request→operation materializer (Phase 2 follow-up, Layer 4).
+ * The one place a stored dApp request becomes an operation. Both the silent auto-approve path and
+ * the service worker's popup-approval path call `materializeRequest(req, deps)` and get the same
+ * `DraftOperation` shape after CAIP resolution; `feeSettings` is honestly optional on a draft.
  *
- * Two callers used to duplicate this logic:
- *   - silentInteraction() in dapp-interaction/service.ts (auto-approve path)
- *   - the popup Execute window init() loop
+ * The silent path narrows Draft → executable `Operation` with `assertSilentExecutable` (it only
+ * ever sees self-fee'd requests — `isConfirmationNeeded` gates the rest — so a non-executable draft
+ * there is a drift alarm). The popup path materializes for display; the executable operation is
+ * rebuilt SW-side from the stored request at confirm, and the popup supplies only a per-index fee
+ * selection, never an operation.
  *
- * They diverged: the popup branch lied about `feeSettings` via
- * `undefined!`, the silent branch blanket-set `{ paymentMethod: { kind: "embedded" } }`.
- * That mismatch is exactly what caused the goswap `aztec_sendTx`
- * "Cannot read properties of undefined (reading 'priorityLevel')" crash.
- *
- * Now: both paths call `materializeRequest(req, deps)` and get the same
- * `DraftOperation` shape. Each caller narrows it to the executable `Operation`
- * with a TS assertion (no `as unknown as Operation` cast):
- *   - silent: `assertSilentExecutable(materialized)` — the silent path only sees
- *     self-fee'd dApp requests (`isConfirmationNeeded` gates the rest), so this is
- *     a drift alarm; it narrows Draft → Operation.
- *   - popup: stores rows as DraftUIOperation; user picks fee via FeeSettingsCard;
- *     approve() runs `requiresFeeSelection` + `assertExecutableOperation`
- *     (both shared from `@nulo/wallet-bridge`) before sending to the SW.
- *
- * The materializer is the ONE place where "what does kind X look like
- * after CAIP resolution + draft feeSettings policy" is defined.
- *
- * Network/account resolution is injected via `MaterializeDeps` so the
- * function is unit-testable without service-collection setup.
+ * Network/account resolution is injected via `MaterializeDeps` so the function is unit-testable
+ * without service-collection setup.
  */
 
 import type { Account } from "@/wallet/services/account/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { DraftOperation, Operation } from "@nulo/wallet-bridge"
+import { isEmbeddedFeePayment } from "@nulo/wallet-bridge"
 import type { OperationRequest } from "./spec"
 
 export type MaterializeDeps = {
@@ -80,23 +67,23 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		}
 		case "aztec_sendTx": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
-			const isNoFrom = request.executionMode === "default_entrypoint"
-			const hasEmbeddedFeePayer = request.exec?.feePayer !== undefined
+			// A requested self-pay (the account named as payer with no fee call) starts with NO
+			// settings: the fee card, locked to Fee Juice, derives them only once a verified balance
+			// can pay — a pre-filled method would leave Confirm live over an empty or unread balance.
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: isNoFrom || hasEmbeddedFeePayer ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings: isEmbeddedFeePayment(request) ? { paymentMethod: { kind: "embedded" } } : undefined,
 			} as DraftOperation
 		}
 		case "send_transaction": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
-			const hasEmbeddedFee = request.fee?.embeddedFeePayment !== undefined
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: hasEmbeddedFee ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings: isEmbeddedFeePayment(request) ? { paymentMethod: { kind: "embedded" } } : undefined,
 			} as DraftOperation
 		}
 		default: {

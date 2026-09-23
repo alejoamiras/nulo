@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
 
@@ -10,6 +11,7 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -44,6 +46,9 @@ const fillFromEndpoint = () => {
 const isDirty = form.isDirty
 
 const isAvailableToSave = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isSubmitting.value) return false
 	if (!endpoint.value || !network.value) return false
 	if (urlTerm.value.length < 5) return false
 	if (errorText.value) return false
@@ -61,7 +66,7 @@ const handleSave = async () => {
 		emit("onClose")
 		openToast({ label: "Endpoint updated" })
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
 			errorText.value = `Wrong chain — this network is chain ${network.value.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
@@ -120,10 +125,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="errorText" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary">{{ errorText }}</Text>
-					</Flex>
+					<FieldWarning v-if="errorText">{{ errorText }}</FieldWarning>
 				</Transition>
 			</template>
 		</Input>

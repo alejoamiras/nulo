@@ -9,9 +9,32 @@
 </route>
 
 <script setup>
+/** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
+import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+
+/** Utils */
+import { rowDescriptionFor } from "@/utils/presto-ui-state"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
+
+/** Proving row: Presto's live status plus the SW's memory of the last prove attempt. */
+const configService = new ConfigServiceClient()
+const { state: prestoState, start: startPresto, dispose: disposePresto } = usePrestoCheck(configService)
+const lastProve = ref(null)
+const provingDescription = computed(() => rowDescriptionFor(prestoState.value, lastProve.value))
+const executionService = new ExecutionServiceClient()
+
+onBeforeMount(async () => {
+	void startPresto()
+	try {
+		lastProve.value = await executionService.getLastProveOutcome()
+	} catch {
+		lastProve.value = null
+	}
+})
 
 /** Hero visibility → compact sticky title fade */
 const heroRef = useTemplateRef("heroRef")
@@ -32,6 +55,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	heroObserver?.disconnect()
+	executionService.disconnect()
+	configService.disconnect()
+	disposePresto()
 })
 </script>
 
@@ -107,7 +133,7 @@ onBeforeUnmount(() => {
 				<SettingItem
 					to="/popup/settings/security"
 					title="Security & Backup"
-					description="Auto-lock, seed phrase, secret key"
+					description="Auto-lock, recovery phrase"
 					materialIcon="lock"
 					chevron
 					data-testid="setting-nav-security"
@@ -130,6 +156,15 @@ onBeforeUnmount(() => {
 					materialIcon="palette"
 					chevron
 					data-testid="setting-nav-appearance"
+				/>
+				<SettingItem
+					to="/popup/settings/proving"
+					title="Proving"
+					:description="provingDescription"
+					materialIcon="speed"
+					chevron
+					data-testid="setting-nav-proving"
+					:data-status="prestoState.kind"
 				/>
 				<SettingItem
 					to="/popup/settings/advanced"

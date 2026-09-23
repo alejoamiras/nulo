@@ -1,0 +1,141 @@
+name: _Extension smoke e2e (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to checkout.
+        required: false
+        type: string
+        default: ""
+      extension_path:
+        description: |
+          Optional absolute path to a prebuilt extension directory.
+          When empty, builds Chrome from source in this job. Used by release.yml
+          to point at the unzipped artifact.
+        required: false
+        type: string
+        default: ""
+      artifact_name:
+        description: |
+          If set, downloads this workflow-run artifact into ./_e2e-extension/ and
+          uses it as the extension path. Skips the local build.
+        required: false
+        type: string
+        default: ""
+      browser:
+        description: |
+          chrome | firefox. Firefox adds geckodriver and the Firefox build; every name a run
+          publishes (logs artifact, browser cache) carries the browser so lanes never collide.
+        required: false
+        type: string
+        default: chrome
+
+jobs:
+  smoke:
+    name: Vitest + Puppeteer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NULO_E2E_BROWSER: ${{ inputs.browser }}
+      EXTENSION_PATH: ${{ inputs.extension_path }}
+      # Explicit artifact-mode flag for BOTH prod-artifact delivery paths (downloaded artifact_name
+      # AND caller-supplied extension_path) - the suite's skips/contracts key off this, never off
+      # bare EXTENSION_PATH (review CONFIRMED the asymmetry when only the artifact_name step set it).
+      NULO_E2E_ARTIFACT_RUN: ${{ (inputs.artifact_name != '' || inputs.extension_path != '') && '1' || '' }}
+      # Single source for BOTH the build stamp and the runner flag below: if
+      # these ever diverge, migration.test.ts silently skips (build armed,
+      # runner unaware) or times out (runner armed, build without the fixture).
+      MIGRATION_FIXTURE_ARMED: ${{ (inputs.artifact_name == '' && inputs.extension_path == '') && '1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: ./.github/actions/setup-bun
+
+      # The suite rejects an unknown browser too, but only after the build has been paid for.
+      - name: Validate the browser input
+        env:
+          BROWSER: ${{ inputs.browser }}
+        run: |
+          case "$BROWSER" in
+            chrome|firefox) ;;
+            *) echo "::error::browser must be chrome or firefox, got '$BROWSER'"; exit 1 ;;
+          esac
+
+      - uses: ./.github/actions/setup-puppeteer
+        with:
+          browser: ${{ inputs.browser }}
+
+      - uses: ./.github/actions/setup-geckodriver
+        if: inputs.browser == 'firefox'
+
+      - name: Download extension artifact
+        if: inputs.artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: _e2e-extension
+
+      - name: Set EXTENSION_PATH from downloaded artifact
+        if: inputs.artifact_name != ''
+        run: echo "EXTENSION_PATH=${{ github.workspace }}/_e2e-extension" >> "$GITHUB_ENV"
+
+      - name: Build the extension (no artifact, no override)
+        if: inputs.artifact_name == '' && inputs.extension_path == ''
+        # The migration-fixture stamp arms the e2e-only v2 migration so
+        # tests/e2e/migration.test.ts can drive the migrator end-to-end. It is
+        # inert for every other smoke test (fresh installs stamp max and run
+        # nothing) and never ships: prod builds omit the env, and
+        # _build-extension.yml greps release bundles for the marker.
+        run: bun run --cwd apps/extension "build:${BROWSER}"
+        env:
+          BROWSER: ${{ inputs.browser }}
+          VITE_NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
+          # Pin the seeded ACTIVE network to Testnet for smoke: CI runners cannot reliably reach the
+          # public Alpha mainnet RPC, and a blackholed default RPC makes chain-adjacent flows eat the
+          # node client's full timeout envelope. Test-build-only; prod defaults stay Alpha.
+          VITE_NULO_E2E_DEFAULT_NET: testnet
+          # Arm the e2e token-seed source with NO storage key, so the seed list
+          # resolves EMPTY. Testnet carries a real default-token seed, and every
+          # smoke profile now creates an account — which triggers seeding. Without
+          # this, each fresh profile would call the public dRPC endpoint and a
+          # required gate would depend on a server we don't own.
+          VITE_NULO_E2E_TOKEN_SEEDS: "1"
+          VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM: "1"
+
+      # Both literals, because an unused export can tree-shake away even in an
+      # armed build (see price-map.ts): the stamp proves the flag propagated,
+      # the key proves the reader module survived. A silent miss here would send
+      # every smoke profile back to the live seed list.
+      - name: Assert the e2e token-seed source propagated (source build only)
+        if: inputs.artifact_name == '' && inputs.extension_path == ''
+        env:
+          BROWSER: ${{ inputs.browser }}
+        run: |
+          for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
+            if ! grep -rq "$marker" "apps/extension/dist/${BROWSER}"; then
+              echo "::error::token-seed source did not propagate ($marker absent from dist/${BROWSER})" >&2
+              exit 1
+            fi
+          done
+          echo "e2e token-seed source present in the smoke build"
+
+      - name: Run smoke e2e
+        run: bun run --cwd apps/extension test:e2e
+        env:
+          # Tell the suite whether the loaded build carries the fixture. Unset
+          # on the release-artifact path (prod zips exclude the fixture by
+          # design), where migration.test.ts skips itself.
+          NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.browser == 'chrome' && 'smoke-e2e-logs' || format('smoke-e2e-logs-{0}', inputs.browser) }}
+          path: |
+            apps/extension/.e2e-state
+          if-no-files-found: ignore
+          retention-days: 7

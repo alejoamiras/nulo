@@ -3,25 +3,27 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*", "infra/*"
   ],
   "scripts": {
     "dev": "bun run --cwd apps/extension dev",
     "dev:playground": "bun run --cwd apps/playground dev",
     "dev:landing": "bun run --cwd apps/landing dev",
-    "dev:faucet": "bun run --cwd apps/faucet dev",
+    "dev:tools": "bun run --cwd apps/tools dev",
     "build": "bun run --cwd apps/extension build",
     "build:chrome": "bun run --cwd apps/extension build:chrome",
     "build:firefox": "bun run --cwd apps/extension build:firefox",
-    "build:faucet": "bun run --cwd apps/faucet build",
+    "build:tools": "bun run --cwd apps/tools build",
     "test": "bun run --cwd apps/extension test",
-    "test:faucet": "bun run --cwd apps/faucet test",
+    "test:tools": "bun run --cwd apps/tools test",
     "test:e2e": "bun run --cwd apps/extension test:e2e",
     "test:e2e:network": "bun run --cwd apps/extension vitest run --config vitest.e2e.network.config.ts",
     "test:e2e:all": "bun run --cwd apps/extension vitest run --config vitest.e2e.all.config.ts",
     "e2e:agent": "bash apps/extension/scripts/e2e/agent.sh",
     "e2e:reap": "bun apps/extension/tests/e2e/reap.ts",
-    "lint": "biome check",
+    "e2e:tools": "bash apps/tools/scripts/e2e/agent.sh",
+    "e2e:tools:reap": "bash apps/tools/scripts/e2e/agent.sh reap",
+    "lint": "biome check && bun scripts/complexity-baseline/check.ts",
     "lint:fix": "biome check --fix",
     "lint:actions": "actionlint",
     "format": "biome format --write",
@@ -31,23 +33,29 @@
     "test:all": "bun run --filter '@nulo/*' --if-present test",
     "test:release": "bun test scripts/release/",
     "test:ci-gating": "bun test scripts/ci-cd/",
+    "baseline:complexity": "bun scripts/complexity-baseline/generate.ts",
+    "baseline:rescore": "bun scripts/complexity-baseline/rescore.ts",
+    "audit:dup": "bun scripts/dup-trend/report.ts",
     "check:imports": "biome check apps/ packages/",
-    "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
-    "audit:faucet": "bun run typecheck:all && bun run test:faucet && bun run lint && bun run --cwd apps/faucet verify:deployments && bun run build:faucet",
-    "prepare": "git config core.hooksPath .githooks"
+    "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",
+    "audit:tools": "bun run typecheck:all && bun run test:tools && bun run lint && bun run --cwd apps/tools verify:deployments && bun run build:tools",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.1",
+    "@biomejs/biome": "2.5.13",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "version": "0.27.0",
+  "license": "Apache-2.0",
   "overrides": {
     "vite": "^8.0.0"
   },
   "patchedDependencies": {
     "@aztec/noir-noirc_abi@5.0.1": "patches/@aztec%2Fnoir-noirc_abi@5.0.1.patch",
-    "@aztec/noir-acvm_js@5.0.1": "patches/@aztec%2Fnoir-acvm_js@5.0.1.patch"
+    "@aztec/noir-acvm_js@5.0.1": "patches/@aztec%2Fnoir-acvm_js@5.0.1.patch",
+    "@aztec/noir-acvm_js@5.2.0": "patches/@aztec%2Fnoir-acvm_js@5.2.0.patch",
+    "@aztec/noir-noirc_abi@5.2.0": "patches/@aztec%2Fnoir-noirc_abi@5.2.0.patch"
   }
 }

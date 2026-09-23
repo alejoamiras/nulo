@@ -21,13 +21,12 @@
  *   - `JobCancelledSentinel` never crosses the RPC boundary —
  *     `rpc-cancel.ts` stays the conversion point, caller-side.
  *   - Sync-register: the pre-acquire controller is registered under the
- *     queued id BEFORE the mutex acquire's first await, so a user-cancel
+ *     queued id BEFORE `acquireSlot`'s first await, so a user-cancel
  *     during the wait always finds its controller.
  */
 
 import { JobCancelledSentinel, type JobError, type JobProgress, normalizeError } from "@nulo/wallet-core/jobs"
-import { TooManyPendingError } from "@nulo/extension-messaging/errors"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { SessionEndedError, TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/service"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
@@ -51,18 +50,26 @@ export interface ExecutionLaneDeps {
 	 *  create fence so a profile deleted (or deleted-and-reimported) between
 	 *  capture and persist refuses the row. Optional: absent means unfenced. */
 	captureProfileEpoch?(profileId: string): number
+	assertFence(fence: ExecutionFence): Promise<void>
+	peekLiveSerial(): number | undefined
 	getNetwork(networkId: string): Promise<Network>
 	logDebug(msg: string, ...rest: unknown[]): void
 	logInfo(msg: string, ...rest: unknown[]): void
 	logError(msg: string, ...rest: unknown[]): void
 }
 
+/** The stages the ended-session sweep cancels. After the `submitting` write the broadcast can beat
+ *  the sweep, and a sent transaction must never read `cancelled`, so those sends are left to the
+ *  fence check just before `node.sendTx`. */
+const PRE_SUBMIT_STAGES = ["queued", "pending", "simulating", "proving"] as const
+
 export class ExecutionLane {
-	/** Cancel surface: jobId → AbortController. SW-internal only, never
-	 *  crosses the wire. `cancelJob(id)` aborts the controller; the
-	 *  in-flight prove pipeline checks `signal.aborted` at each stage
-	 *  boundary and short-circuits with {@link JobCancelledSentinel}. */
-	private readonly activeControllers = new Map<string, AbortController>()
+	/** Cancel surface: jobId → AbortController, tagged with the serial of the
+	 *  session that authorized the job. SW-internal only, never crosses the
+	 *  wire. `cancelJob(id)` aborts the controller; the in-flight prove
+	 *  pipeline checks `signal.aborted` at each stage boundary and
+	 *  short-circuits with {@link JobCancelledSentinel}. */
+	private readonly activeControllers = new Map<string, { controller: AbortController; serial: number }>()
 
 	/** Per-(profileId, chainId) FIFO mutex serializing dApp sendTx
 	 *  EXECUTION (build → simulate → prove → submit). Once the session-FIFO
@@ -79,16 +86,36 @@ export class ExecutionLane {
 	 *  waiting record "stuck" — the Nth concurrent sendTx can wait (N-1)×per-tx
 	 *  while queued, which can exceed the 10-min queued / 2-min pending grace. */
 	private readonly executionWaiters = new Set<string>()
+	/** Journal ids in the PRE-CLAIM window (message arrival → mutex enqueue):
+	 *  the session-FIFO wait behind earlier same-session requests plus this
+	 *  request's own approval popup — a legitimate wait the reaper's queued
+	 *  grace cannot distinguish from a lost handler. id → registeredAt. The
+	 *  heartbeat vouches for these only within {@link MAX_QUEUED_WAIT_HEARTBEAT_MS}:
+	 *  unbounded vouching would shield a genuinely hung queue from the reaper
+	 *  forever, defeating the grace's purpose. Ownership migrates to
+	 *  `executionWaiters` at mutex enqueue (`acquireSlot`). */
+	private readonly queuedWaiters = new Map<string, number>()
 	private executionHeartbeatTimer?: ReturnType<typeof setInterval>
 	private static readonly EXECUTION_WAIT_HEARTBEAT_MS = 30_000
+	/** Deliberate product ceiling on pre-claim vouching, sized to the admission
+	 *  cap: 8 queued per session permits a target behind seven legitimate
+	 *  ≤10-min approval popups plus its own (≈80 min). Beyond the ceiling the
+	 *  heartbeat stops and the reaper's queued grace takes over, so a hung
+	 *  queue resolves honestly (~ceiling + grace) instead of never. */
+	private static readonly MAX_QUEUED_WAIT_HEARTBEAT_MS = 90 * 60_000
 
 	private static readonly EXECUTION_ORIGIN_CAP = 8
 	private static readonly EXECUTION_LANE_CAP = 32
 
 	public constructor(private readonly deps: ExecutionLaneDeps) {}
 
-	public registerController(journalId: string, controller: AbortController): void {
-		this.activeControllers.set(journalId, controller)
+	/** The only way into the controller map. Synchronous, so a caller registers before its next
+	 *  await; a `serial` that is not the live session's registers nothing and reports
+	 *  `live: false`, and the caller terminalizes its record. */
+	public registerInFlight(journalId: string, serial: number, controller: AbortController): { live: boolean } {
+		if (this.deps.peekLiveSerial() !== serial) return { live: false }
+		this.activeControllers.set(journalId, { controller, serial })
+		return { live: true }
 	}
 
 	public deleteController(journalId: string): void {
@@ -129,7 +156,7 @@ export class ExecutionLane {
 			})
 			return op.id
 		} catch (error) {
-			this.deps.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
+			this.deps.logError("Failed to create dapp_execute journal record", error)
 			return undefined
 		}
 	}
@@ -180,27 +207,59 @@ export class ExecutionLane {
 		try {
 			await this.deps.operationJournal.transitionOperation(jobId, { stage: "cancelled" })
 		} catch (err) {
-			this.deps.logDebug("cancelJob: too late to cancel — dropping signal", getErrorMessage(err))
+			this.deps.logDebug("cancelJob: too late to cancel — dropping signal", err)
 			return
 		}
 
-		const controller = this.activeControllers.get(jobId)
-		if (controller) {
-			controller.abort()
-			this.activeControllers.delete(jobId)
+		this.abortCancelled(jobId)
+	}
+
+	/**
+	 * Cancel every registered job whose session has ended: `cancelJob`'s journal-first body without
+	 * its principal check, since no live session owns these jobs.
+	 *
+	 * Liveness is read as each record is reached, never passed in, so a session that opens while the
+	 * sweep awaits keeps the jobs it registers. A record at `submitting` or later is left to the
+	 * broadcast tick's own check. A failure on one record is logged and the sweep moves on.
+	 */
+	public async abandonDeadSessions(): Promise<void> {
+		for (const [journalId, { serial }] of this.activeControllers) {
+			try {
+				if (serial === this.deps.peekLiveSerial()) continue
+				const result = await this.deps.operationJournal.transitionIfStage(journalId, PRE_SUBMIT_STAGES, {
+					stage: "cancelled",
+				})
+				if (result.outcome === "transitioned") this.abortCancelled(journalId)
+			} catch (error) {
+				this.deps.logError("Failed to cancel a job whose session ended", { journalId, error })
+			}
 		}
 	}
 
+	/** Abort and forget a job whose record is already `cancelled`. */
+	private abortCancelled(jobId: string): void {
+		const inFlight = this.activeControllers.get(jobId)
+		if (inFlight) {
+			inFlight.controller.abort()
+			this.activeControllers.delete(jobId)
+		}
+		// A pre-acquire cancel has no controller to abort, but the record may
+		// still be vouched for in the pre-claim window — prune it, or repeated
+		// cancel/arrival cycles grow the map past the admission cap (which
+		// counts only live `queued` rows).
+		this.endQueuedWait(jobId)
+	}
+
 	/** Resolve the execution-mutex key for a dApp sendTx: `(profileId, chainId)`,
-	 *  matching PXE's `chainGuard` scope exactly. Both lookups are metadata-only
-	 *  (no PXE call), so calling them before acquiring the mutex is safe — they
-	 *  don't contend on the chain guard. `getNetwork` is re-resolved inside
-	 *  the build later; the duplicate lookup is a negligible in-memory cost
-	 *  paid for keying correctness. */
-	private async resolveExecutionMutexKey(networkId: string): Promise<string> {
-		const profile = await this.deps.getActiveProfile()
+	 *  matching PXE's `chainGuard` scope exactly. The profile is the fence's —
+	 *  an op keyed on whichever profile is active would serialize against the
+	 *  wrong lane. The lookup is metadata-only (no PXE call), so calling it
+	 *  before acquiring the mutex is safe — it doesn't contend on the chain
+	 *  guard. `getNetwork` is re-resolved inside the build later; the duplicate
+	 *  lookup is a negligible in-memory cost paid for keying correctness. */
+	private async resolveExecutionMutexKey(fence: ExecutionFence, networkId: string): Promise<string> {
 		const network = await this.deps.getNetwork(networkId)
-		return `${profile?.id ?? "noprofile"}:${network.chainId}`
+		return `${fence.profileId}:${network.chainId}`
 	}
 
 	/**
@@ -217,33 +276,34 @@ export class ExecutionLane {
 	 * The waiting record is heartbeated (updatedAt bumped) for the duration of
 	 * the wait so the periodic reaper doesn't declare it stuck.
 	 *
+	 * The fence is asserted before the slot is keyed or taken: an op whose
+	 * authorizing session ended never waits on, or holds, any lane. That
+	 * refusal terminalizes `queuedJournalId` here, like a capacity rejection —
+	 * the caller's claim never runs to fail it.
+	 *
 	 * Returns the mutex release callback (call in `finally`) and the
 	 * pre-acquire controller to thread into the claim.
 	 */
 	public async acquireSlot(
 		networkId: string,
 		queuedJournalId: string | undefined,
+		fence: ExecutionFence,
 		onEnqueued?: () => void,
 		originKey?: string,
 	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }> {
-		const mutexKey = await this.resolveExecutionMutexKey(networkId)
-		// Per-origin + total-lane backpressure cap. `originKey` is the canonical
-		// dApp origin (threaded from ctx.origin); the sentinel keeps an unexpected
-		// absent origin capped under one bucket rather than bypassing the cap.
-		const caps: AcquireCaps = {
-			originKey: originKey ?? "__no_origin__",
-			maxOriginDepth: ExecutionLane.EXECUTION_ORIGIN_CAP,
-			maxLaneDepth: ExecutionLane.EXECUTION_LANE_CAP,
-		}
-
-		let preController: AbortController | undefined
-		if (queuedJournalId) {
-			preController = new AbortController()
-			this.activeControllers.set(queuedJournalId, preController)
-			this.beginExecutionWait(queuedJournalId)
-		}
+		const preController = await this.registerWaitingRecord(queuedJournalId, fence)
 
 		try {
+			await this.deps.assertFence(fence)
+			const mutexKey = await this.resolveExecutionMutexKey(fence, networkId)
+			// Per-origin + total-lane backpressure cap. `originKey` is the canonical
+			// dApp origin (threaded from ctx.origin); the sentinel keeps an unexpected
+			// absent origin capped under one bucket rather than bypassing the cap.
+			const caps: AcquireCaps = {
+				originKey: originKey ?? "__no_origin__",
+				maxOriginDepth: ExecutionLane.EXECUTION_ORIGIN_CAP,
+				maxLaneDepth: ExecutionLane.EXECUTION_LANE_CAP,
+			}
 			// `acquire` installs this request as the FIFO tail SYNCHRONOUSLY, before
 			// its first await (execution-mutex.ts). The instant we've called it we
 			// are enqueued ahead of anyone who calls `acquire` later. Fire the baton
@@ -272,6 +332,10 @@ export class ExecutionLane {
 				await this.markJournal(queuedJournalId, { stage: "failed" }, normalizeError(err, "dapp_execute"))
 				throw new TooManyPendingError()
 			}
+			if (err instanceof SessionEndedError) {
+				await this.markSessionEnded(queuedJournalId)
+				throw err
+			}
 			// Aborted while waiting (user cancelled the Queued record) — surface via
 			// the cancelled pipeline.
 			if (err instanceof ExecutionMutexAbortError) throw new JobCancelledSentinel(queuedJournalId ?? "")
@@ -284,8 +348,54 @@ export class ExecutionLane {
 		}
 	}
 
+	/** Registers the waiting record's controller in the call's synchronous prefix, so a cancel
+	 *  landing during any later await finds it; an ended session registers nothing and fails
+	 *  the record. */
+	private async registerWaitingRecord(queuedJournalId: string | undefined, fence: ExecutionFence): Promise<AbortController | undefined> {
+		if (!queuedJournalId) return undefined
+		const controller = new AbortController()
+		if (!this.registerInFlight(queuedJournalId, fence.session, controller).live) {
+			await this.markSessionEnded(queuedJournalId)
+			throw new SessionEndedError()
+		}
+		this.beginExecutionWait(queuedJournalId)
+		return controller
+	}
+
+	private markSessionEnded(journalId: string | undefined): Promise<void> {
+		return this.markJournal(journalId, { stage: "failed" }, normalizeError(new SessionEndedError(), "session_ended"))
+	}
+
 	private beginExecutionWait(journalId: string): void {
+		// Ownership migration: a pre-claim waiter reaching the mutex hands its
+		// liveness vouching to the execution set — exactly one owner per id.
+		this.queuedWaiters.delete(journalId)
 		this.executionWaiters.add(journalId)
+		this.ensureHeartbeatTimer()
+	}
+
+	private endExecutionWait(journalId: string): void {
+		this.executionWaiters.delete(journalId)
+		this.maybeStopHeartbeatTimer()
+	}
+
+	/** Start vouching for a record in the pre-claim window (see
+	 *  {@link queuedWaiters}). Called by the wallet-sdk handler at
+	 *  queued-record creation via the {@link ExecutionService} delegator. */
+	public beginQueuedWait(journalId: string): void {
+		if (this.executionWaiters.has(journalId)) return
+		this.queuedWaiters.set(journalId, Date.now())
+		this.ensureHeartbeatTimer()
+	}
+
+	/** Stop vouching (handler settled without reaching the mutex, or the
+	 *  backstop after settlement). Idempotent. */
+	public endQueuedWait(journalId: string): void {
+		this.queuedWaiters.delete(journalId)
+		this.maybeStopHeartbeatTimer()
+	}
+
+	private ensureHeartbeatTimer(): void {
 		if (!this.executionHeartbeatTimer) {
 			this.executionHeartbeatTimer = setInterval(() => {
 				void this.heartbeatExecutionWaiters()
@@ -293,16 +403,16 @@ export class ExecutionLane {
 		}
 	}
 
-	private endExecutionWait(journalId: string): void {
-		this.executionWaiters.delete(journalId)
-		if (this.executionWaiters.size === 0 && this.executionHeartbeatTimer) {
+	private maybeStopHeartbeatTimer(): void {
+		if (this.executionWaiters.size === 0 && this.queuedWaiters.size === 0 && this.executionHeartbeatTimer) {
 			clearInterval(this.executionHeartbeatTimer)
 			this.executionHeartbeatTimer = undefined
 		}
 	}
 
 	private async heartbeatExecutionWaiters(): Promise<void> {
-		// Snapshot — touchOperation awaits and the set can mutate mid-iteration.
+		// Snapshot — touchOperation awaits and the collections can mutate
+		// mid-iteration.
 		for (const id of [...this.executionWaiters]) {
 			try {
 				await this.deps.operationJournal.touchOperation(id)
@@ -311,6 +421,21 @@ export class ExecutionLane {
 				// settle removes it from the wait-set.
 			}
 		}
+		const now = Date.now()
+		for (const [id, registeredAt] of [...this.queuedWaiters]) {
+			// Lease expiry: stop vouching past the ceiling — the reaper's grace
+			// takes over and a hung queue resolves honestly instead of never.
+			if (now - registeredAt > ExecutionLane.MAX_QUEUED_WAIT_HEARTBEAT_MS) {
+				this.queuedWaiters.delete(id)
+				continue
+			}
+			try {
+				await this.deps.operationJournal.touchOperation(id)
+			} catch {
+				// Record gone — harmless; the settle backstop removes it.
+			}
+		}
+		this.maybeStopHeartbeatTimer()
 	}
 
 	/**
@@ -328,13 +453,14 @@ export class ExecutionLane {
 		origin: LocalTxOrigin,
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
-		reuseController?: AbortController,
-		fence?: ExecutionFence,
+		reuseController: AbortController | undefined,
+		fence: ExecutionFence,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
 		return claimOrCreateDappExecuteJournalImpl(
 			{
 				operationJournal: this.deps.operationJournal,
-				activeControllers: this.activeControllers,
+				registerInFlight: (journalId, serial, controller) => this.registerInFlight(journalId, serial, controller),
+				deleteController: (journalId) => this.deleteController(journalId),
 				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c, fence),
 				logger: {
 					debug: (msg) => this.deps.logDebug(msg),
@@ -345,12 +471,11 @@ export class ExecutionLane {
 			{
 				networkId,
 				accountAddress,
-				// The profile execution was AUTHORIZED under (the fence capture).
-				// Preferred over a fresh active-profile read: after the FIFO wait
-				// the active profile can be a successor that reused the same id.
-				// Without a profileId the claim's scope check cannot see a profile
-				// mismatch at all.
-				profileId: fence?.profileId ?? (await this.deps.getActiveProfile())?.id,
+				// The profile execution was AUTHORIZED under (the fence capture), never
+				// a fresh active-profile read: after the FIFO wait the active profile
+				// can be a successor that reused the same id.
+				profileId: fence.profileId,
+				session: fence.session,
 				origin,
 				calls,
 				queuedJournalId: hooks?.queuedJournalId,
@@ -364,7 +489,7 @@ export class ExecutionLane {
 		try {
 			await this.deps.operationJournal.transitionOperation(journalId, progress, error)
 		} catch (err) {
-			this.deps.logError("Failed to update journal operation", getErrorMessage(err))
+			this.deps.logError("Failed to update journal operation", err)
 		}
 	}
 }

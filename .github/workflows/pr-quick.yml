@@ -3,11 +3,35 @@ name: Quality
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, dev]
+    # NO `branches:` filter, deliberately. That key filters on the PR's BASE, so
+    # `[main, dev]` silently gave ZERO CI to every stacked PR — a stack's middle
+    # arcs target their parent feature branch, never dev, so no workflow fired and
+    # the PRs sat with no checks at all rather than with red ones. Gating every PR
+    # regardless of base costs CI minutes and makes each arc independently
+    # verifiable; a bad middle arc is otherwise invisible until it reaches dev.
     # `ready_for_review` so a draft marked ready WITHOUT a new push still re-runs
     # CI — otherwise the required `… / Status` checks never report on the PR and
     # hang "Expected" forever → mergeStateStatus=BLOCKED.
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+    #
+    # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so for a
+    # SHA this workflow has already covered a label event only re-does that work
+    # — cancelling the in-flight run (whose `quality-status` then concludes
+    # FAILURE via `always()` + the cancelled-is-failure branch, leaving a
+    # duplicate FAILURE check-run behind) or re-running everything from
+    # scratch. It can
+    # incidentally recover a head with no run of its own, which is why the gap
+    # below matters. The label-gated suites keep both types: their gates read
+    # labels.
+    #
+    # Gap: a PR RETARGETED to dev/main fires `edited`, not listed here, so a head
+    # that never got a run can sit at required `quality-status: Expected`
+    # forever. `edited` is not the fix — it also fires on every title/body edit,
+    # so unrelated edits would re-run the full suite and cancel in-flight runs,
+    # manufacturing exactly the duplicate churn this line removes. Recover with
+    # `gh workflow run pr-quick.yml --ref <branch>`, where <branch> still
+    # resolves to the PR's current head, then confirm `quality-status` reported
+    # on that exact SHA.
+    types: [opened, reopened, synchronize, ready_for_review]
 
 concurrency:
   group: pr-quick-${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -29,15 +53,16 @@ jobs:
       extension: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
       playground: ${{ steps.override.outputs.full || steps.filter.outputs.playground }}
       landing: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
-      faucet: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
+      tools: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
       workflows: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
       root-config: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
       firefox-touching: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
       needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
       needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
-      needs-faucet-build: ${{ steps.compute.outputs.needs-faucet-build }}
+      needs-tools-build: ${{ steps.compute.outputs.needs-tools-build }}
+      needs-landing-build: ${{ steps.compute.outputs.needs-landing-build }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: paths-filter needs the merge-base with the comparison
           # branch. On a shallow clone it falls back to a `fetch --deepen` loop,
@@ -45,7 +70,7 @@ jobs:
           # whenever the merge-base sits beyond the initial depth (structural on
           # long-running branches ~100+ commits from the base).
           fetch-depth: 0
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
@@ -71,22 +96,40 @@ jobs:
             extension:
               # Built target — whole package; design + bridge-core dep libs — src + manifest.
               - 'apps/extension/**'
+              - 'packages/legal/src/**'
+              - 'packages/legal/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
+              # The licence texts and the expected-minimum list are build inputs too.
+              - 'packages/third-party-notices/src/**'
+              - 'packages/third-party-notices/package.json'
+              - 'packages/third-party-notices/texts/**'
+              - 'packages/third-party-notices/bin/**'
+              - 'packages/third-party-notices/expected-minimum.txt'
             playground:
               - 'apps/playground/**'
             landing:
-              # Dead filter — no job consumes it; kept positive-only for the no-`!` invariant.
+              # Built target — landing (whole package) + the legal documents it renders and
+              # the dep libs it builds from.
               - 'apps/landing/**'
-            faucet:
-              # Built target — faucet (whole package) + its transitive dep libs
-              # (bridge-core → wallet-crypto → wallet-core, + design) + the faucet build
-              # workflow. Closes the prior under-gate (was faucet + design only).
-              - 'apps/faucet/**'
+              - 'legal/**'
+              - 'packages/legal/src/**'
+              - 'packages/legal/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+            tools:
+              # Built target — tools (whole package) + its transitive dep libs
+              # (bridge-core → wallet-crypto → wallet-core, + design) + the tools app build
+              # workflow. Closes the prior under-gate (was tools + design only).
+              - 'apps/tools/**'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
               - 'packages/wallet-crypto/src/**'
               - 'packages/wallet-crypto/package.json'
               - 'packages/wallet-core/src/**'
@@ -95,7 +138,7 @@ jobs:
               - 'packages/wallet-sdk-schema-patch/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
-              - '.github/workflows/_build-faucet.yml'
+              - '.github/workflows/_build-tools.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -116,11 +159,18 @@ jobs:
               - 'apps/extension/vite.firefox.config.mts'
               - 'apps/extension/manifest/manifest.config.ts'
               - 'apps/extension/vite.config.ts'
+              - 'apps/extension/scripts/**'
               - 'apps/extension/package.json'
               - 'bun.lock'
               - 'bunfig.toml'
               - '.github/workflows/_build-extension.yml'
               - '.github/actions/setup-bun/**'
+              # The notices are generated per build, and the zip-content assertion runs per target.
+              - 'packages/third-party-notices/src/**'
+              - 'packages/third-party-notices/package.json'
+              - 'packages/third-party-notices/texts/**'
+              - 'packages/third-party-notices/bin/**'
+              - 'packages/third-party-notices/expected-minimum.txt'
       - name: Override for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         id: override
@@ -132,7 +182,8 @@ jobs:
           RUNTIME: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
           BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
           EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
-          FAUCET: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
+          TOOLS: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
+          LANDING: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
           WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
           ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
           FIREFOX_TOUCHING: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
@@ -154,12 +205,17 @@ jobs:
           else
             echo "needs-firefox-build=false" >> "$GITHUB_OUTPUT"
           fi
-          # Faucet build runs on faucet-touching PRs + any workflow / root
+          # Tools build runs on tools-touching PRs + any workflow / root
           # config change that could affect its bundle.
-          if [ "$FAUCET" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
-            echo "needs-faucet-build=true" >> "$GITHUB_OUTPUT"
+          if [ "$TOOLS" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-tools-build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "needs-faucet-build=false" >> "$GITHUB_OUTPUT"
+            echo "needs-tools-build=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$LANDING" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-landing-build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-landing-build=false" >> "$GITHUB_OUTPUT"
           fi
 
   commitlint:
@@ -169,20 +225,10 @@ jobs:
     timeout-minutes: 5
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - uses: actions/cache@v6
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-1.3.14-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-1.3.14-
-            ${{ runner.os }}-bun-
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup-bun
       - name: Lint PR commits
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -239,6 +285,7 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: chrome
       upload_artifacts: true
+      version_suffix: ${{ github.event.pull_request.number && format('pr.{0}', github.event.pull_request.number) || '' }}
 
   build-firefox:
     name: Build Firefox
@@ -249,29 +296,111 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: firefox
       upload_artifacts: true
+      version_suffix: ${{ github.event.pull_request.number && format('pr.{0}', github.event.pull_request.number) || '' }}
 
-  build-faucet:
-    name: Build Faucet (${{ matrix.target }})
+  # The extension builds above are workflow artifacts nobody finds from the PR. This job keeps ONE
+  # sticky comment on the PR pointing at them, edited in place on every push, the way a Cloudflare
+  # preview comment does for a site. The script re-reads the PR head right before writing and
+  # leaves the comment alone when the PR has moved on, so a slow run cannot overwrite a newer one.
+  # Same-repo PRs only: a fork's token is read-only. Advisory twice over — not in quality-status's
+  # needs, and continue-on-error so a comment failure cannot red the run either.
+  preview-comment:
+    name: Preview build comment
+    needs: [changes, build-chrome, build-firefox]
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.outputs.needs-extension-build == 'true'
+      && needs.build-chrome.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # The head sha, not the merge commit the default checkout gives a pull_request run: the version
+      # printed must be the one the builds (also checked out at head.sha) stamped.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: |
+            /package.json
+            /scripts/ci-cd/
+            /apps/extension/package.json
+          sparse-checkout-cone-mode: false
+      # The script has no dependencies, so no `bun install` (and no setup-bun composite, which
+      # always installs). The Bun line is read from root package.json's `packageManager` — not a
+      # third pin site.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Upsert the preview comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CHROME_RESULT: ${{ needs.build-chrome.result }}
+          CHROME_URL: ${{ needs.build-chrome.outputs.chrome_artifact_url }}
+          FIREFOX_RESULT: ${{ needs.build-firefox.result }}
+          FIREFOX_URL: ${{ needs.build-firefox.outputs.firefox_artifact_url }}
+        run: |
+          PREVIEW_VERSION="$(bun -e "console.log(require('./apps/extension/package.json').version)")-pr.${PR_NUMBER}"
+          export PREVIEW_VERSION
+          bun scripts/ci-cd/preview-comment.ts
+
+  build-tools:
+    name: Build Tools (${{ matrix.target }})
     needs: changes
-    if: needs.changes.outputs.needs-faucet-build == 'true'
+    if: needs.changes.outputs.needs-tools-build == 'true'
     strategy:
       fail-fast: false
       matrix:
         target: [testnet, mainnet]
-    uses: ./.github/workflows/_build-faucet.yml
+    uses: ./.github/workflows/_build-tools.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: ${{ matrix.target }}
       upload_artifacts: true
 
-  # Smoke e2e moved to its own pr-smoke-e2e.yml workflow:
+  # The landing deploys from Cloudflare's own Git integration, so without this job the first
+  # build of a change is the production one. No network: the release stub stands in for the
+  # GitHub API call `prebuild` makes, and the legal pages are generated from legal/*.md.
+  build-landing:
+    name: Build Landing
+    needs: changes
+    if: needs.changes.outputs.needs-landing-build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - uses: ./.github/actions/setup-bun
+      - name: Generate the release stub and the legal pages
+        working-directory: apps/landing
+        run: bun run scripts/ensure-release-json.ts && bun run scripts/build-legal.ts
+      - name: Build
+        working-directory: apps/landing
+        run: bunx vite build
+      - name: Verify the legal pages shipped
+        working-directory: apps/landing
+        run: |
+          for f in terms.html privacy.html terms/v1.0/index.html privacy/v1.0/index.html; do
+            test -s "dist/$f" || { echo "::error::missing dist/$f"; exit 1; }
+          done
+
+  # Extension smoke e2e lives in its own pr-extension-smoke-e2e.yml workflow:
   # auto-runs on PRs to main, on changes within the `smoke-surface`
-  # filter, or via the `e2e:smoke` label. Mirrors pr-network-e2e.yml.
+  # filter, or via the `e2e:extension-smoke` label. Mirrors pr-extension-network-e2e.yml.
 
   status:
     name: quality-status
     if: always()
-    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-faucet]
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-tools, build-landing]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -284,7 +413,8 @@ jobs:
             "${{ needs.unit-tests.result }}" \
             "${{ needs.build-chrome.result }}" \
             "${{ needs.build-firefox.result }}" \
-            "${{ needs.build-faucet.result }}" \
+            "${{ needs.build-tools.result }}" \
+            "${{ needs.build-landing.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required job failed or was cancelled: $r"

@@ -8,13 +8,18 @@ defineProps({
 		type: [String, Number],
 		default: null,
 	},
+	/** Forwarded as the count span's data-testid, for surfaces whose e2e reads the number. */
+	countTestid: {
+		type: String,
+		default: undefined,
+	},
 })
 </script>
 
 <template>
 	<div :class="$style.wrapper">
 		<span>{{ label }}</span>
-		<span v-if="count !== null" :class="$style.count">{{ count }}</span>
+		<span v-if="count !== null" :class="$style.count" :data-testid="countTestid">{{ count }}</span>
 	</div>
 </template>
 

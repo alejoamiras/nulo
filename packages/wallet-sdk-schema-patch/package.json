@@ -2,6 +2,7 @@
 	"name": "@nulo/wallet-sdk-schema-patch",
 	"private": true,
 	"version": "0.1.0",
+	"license": "Apache-2.0",
 	"type": "module",
 	"exports": {
 		"./apply": "./src/apply.ts",
@@ -9,11 +10,11 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.1",
-		"@aztec/stdlib": "5.0.1",
+		"@aztec/aztec.js": "5.2.0",
+		"@aztec/stdlib": "5.2.0",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

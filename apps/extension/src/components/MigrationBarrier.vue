@@ -1,7 +1,7 @@
 <script setup>
 /** Utils */
 import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
-import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY } from "@/wallet/storage/migrations"
+import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY, SCHEMA_RETRY_REQUESTED_KEY } from "@/wallet/storage/migrations"
 
 /** Reactive state */
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban):
@@ -27,8 +27,32 @@ const blockedCopy = computed(() => {
 			}
 		: {
 				title: "UPDATE INTERRUPTED",
-				sub: "Your funds are safe. Close and reopen the extension to retry the update.",
+				sub: "Your funds are safe. Tap Retry update — the wallet restarts and retries.",
 			}
+})
+const retryRequested = ref(false)
+// Hold the Retry button while an authorized run may still be in flight:
+// `claimedAt` is stamped by the gate's claim writes and cleared by every
+// run-END persist, so its presence means "a run this button (or the backstop)
+// authorized hasn't concluded" — an impatient second tap would kill that run
+// mid-write and spend another attempt. Bounded at 5 min so a crashed run
+// can't hold the affordance forever (the next boot's resume clears it by
+// persisting a fresh status anyway). Gating on the `running` marker instead
+// would hide the button in the restore-failure state, which persists
+// running + blocked together with NO run in flight.
+const CLAIM_HOLD_MS = 5 * 60_000
+const nowTick = ref(Date.now())
+const cooldownTimer = setInterval(() => {
+	nowTick.value = Date.now()
+}, 1_000)
+const retryOnCooldown = computed(() => {
+	const at = blocked.value?.claimedAt
+	if (typeof at !== "number" || !Number.isFinite(at)) return false
+	// Raw-storage read — no decoder ran here, so clamp both sides: a crafted
+	// or clock-skewed FUTURE claimedAt must not wedge the button (negative age
+	// would otherwise read as "on cooldown" indefinitely).
+	const age = nowTick.value - at
+	return age >= 0 && age < CLAIM_HOLD_MS
 })
 
 /** Handlers */
@@ -65,6 +89,22 @@ function onStorageChanged(changes, area) {
 function dismissDegraded() {
 	degraded.value = null
 }
+// Same allowlisted raw-storage channel as the reads above, plus a
+// DETERMINISTIC restart: closing the popup does not kill the service worker
+// (its rejected single-flight memo is sticky for the lifetime), so the only
+// honest "retry" is writing the one-shot gesture token and reloading the
+// extension — the fresh boot's gate consumes the token and runs the engine.
+async function requestRetry() {
+	if (retryRequested.value) return
+	retryRequested.value = true
+	try {
+		await chrome.storage.local.set({ [SCHEMA_RETRY_REQUESTED_KEY]: { requestedAt: Date.now() } })
+		chrome.runtime.reload()
+	} catch {
+		// The write failed — nothing was requested; let the user tap again.
+		retryRequested.value = false
+	}
+}
 
 /** Service subscriptions (before the initial read, so no change is missed) */
 chrome.storage.onChanged.addListener(onStorageChanged)
@@ -72,28 +112,34 @@ void refresh()
 
 /** Lifecycle */
 onBeforeUnmount(() => {
+	clearInterval(cooldownTimer)
 	chrome.storage.onChanged.removeListener(onStorageChanged)
 })
 </script>
 
 <template>
 	<Teleport to="body">
-		<div v-if="state === 'blocked'" :class="$style.wrapper" data-testid="migration-blocked">
-			<div :class="$style.card">
-				<MaterialIcon name="warning" size="24" color="--red" />
-				<span :class="$style.title">{{ blockedCopy.title }}</span>
-				<span :class="$style.sub">{{ blockedCopy.sub }}</span>
-				<span :class="$style.detail" data-testid="migration-blocked-detail">{{ blocked.detail }}</span>
-			</div>
-		</div>
+		<BarrierOverlay v-if="state === 'blocked'" testid="migration-blocked" detailTestid="migration-blocked-detail">
+			<template #title>{{ blockedCopy.title }}</template>
+			<template #sub>{{ blockedCopy.sub }}</template>
+			<template #detail>{{ blocked.detail }}</template>
+			<button
+					v-if="!blocked.terminal"
+					type="button"
+					:class="$style.retryBtn"
+					:disabled="retryRequested || retryOnCooldown"
+					data-testid="migration-retry-btn"
+					@click="requestRetry"
+				>
+					{{ retryRequested ? "Restarting…" : retryOnCooldown ? "Retrying…" : "Retry update" }}
+			</button>
+		</BarrierOverlay>
 
-		<div v-else-if="state === 'updating'" :class="$style.wrapper" data-testid="migration-updating">
-			<div :class="$style.card">
-				<Spinner size="24" color="--txt-primary" />
-				<span :class="$style.title">UPDATING</span>
-				<span :class="$style.sub">Adapting your saved data to the new version</span>
-			</div>
-		</div>
+		<BarrierOverlay v-else-if="state === 'updating'" testid="migration-updating">
+			<template #icon><Spinner size="24" color="--txt-primary" /></template>
+			<template #title>UPDATING</template>
+			<template #sub>Adapting your saved data to the new version</template>
+		</BarrierOverlay>
 
 		<div v-else-if="state === 'degraded'" :class="$style.banner" data-testid="migration-degraded">
 			<span :class="$style.bannerText">Part of the last update didn't apply — some data may look outdated.</span>
@@ -103,46 +149,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style module>
-.wrapper {
-	position: fixed;
-	inset: 0;
-
-	display: flex;
-	justify-content: center;
-	align-items: center;
-
-	background-color: rgba(10, 9, 8, 0.92);
-	z-index: 10000;
-}
-
-.card {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	max-width: 280px;
-	text-align: center;
-}
-
-.title {
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	color: var(--txt-primary);
-}
-
-.sub {
-	font-size: 12px;
-	color: var(--txt-secondary);
-}
-
-.detail {
-	font-size: 10px;
-	color: var(--txt-tertiary);
-	word-break: break-word;
-}
-
 .banner {
 	position: fixed;
 	top: 0;
@@ -170,5 +176,24 @@ onBeforeUnmount(() => {
 	color: var(--txt-primary);
 	cursor: pointer;
 	font-size: 11px;
+}
+
+.retryBtn {
+	margin-top: 8px;
+	padding: 8px 16px;
+
+	border: 1px solid var(--nulo-border);
+	background-color: var(--nulo-surface-low);
+	color: var(--txt-primary);
+
+	font-family: var(--font-headline);
+	font-weight: 700;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.retryBtn:disabled {
+	opacity: 0.6;
+	cursor: default;
 }
 </style>

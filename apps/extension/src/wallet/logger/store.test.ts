@@ -6,14 +6,43 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 
 // ── Mock IConfig ──────────────────────────────────────────────────────
 
-function mockConfig(debugMode = false): IConfig {
+function mockConfig(debugMode = false, developerMode = false): IConfig {
 	return {
 		onUpdate: new EventHandler<ConfigProp>(),
 		get: ((key: string) => {
 			if (key === "debugMode") return debugMode
+			if (key === "developerMode") return developerMode
 			return undefined
 		}) as IConfig["get"],
 	}
+}
+
+/**
+ * A config whose values can change AFTER construction — the production shape, where the store is
+ * built on schema defaults and `config.load()` supplies the real values later.
+ */
+function mutableConfig(initial: { debugMode?: boolean; developerMode?: boolean } = {}) {
+	const state = { debugMode: false, developerMode: false, ...initial }
+	return {
+		onUpdate: new EventHandler<ConfigProp>(),
+		get: ((key: string) => state[key as keyof typeof state]) as IConfig["get"],
+		/** Stand-in for what `config.load()` → `apply()` does to the in-memory config. */
+		set(key: "debugMode" | "developerMode", value: boolean) {
+			state[key] = value
+		},
+	}
+}
+
+/** chrome.storage.session double that records what the flush actually wrote. */
+function mockSessionStorage(initial?: unknown) {
+	const session = {
+		get: vi.fn().mockResolvedValue(initial === undefined ? {} : { "nulo:logs": initial }),
+		set: vi.fn(),
+		remove: vi.fn().mockResolvedValue(undefined),
+	}
+	// biome-ignore lint/suspicious/noExplicitAny: test setup — mocking chrome.storage.session
+	;(globalThis as any).chrome = { storage: { session } }
+	return session
 }
 
 // print() calls console._debug/_log/_warn/_error (originals saved by console-sniffer).
@@ -174,6 +203,20 @@ describe("LoggerStore", () => {
 			store.clear()
 			expect(store.get(10)).toHaveLength(0)
 		})
+
+		test("also drops the persisted copy, so a restart cannot resurrect it", async () => {
+			// Emptying only the ring buffer left `nulo:logs` intact and rehydrate() brought the
+			// cleared entries straight back — the button looked like it worked.
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(true, true))
+			store.log("a", LogLevel.Error, "msg")
+
+			// Awaiting the returned promise is the point: `clearLogs()` must not resolve before the
+			// persisted copy is gone. Sleeping instead would pass even if clear() returned nothing.
+			await store.clear()
+
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
 	})
 
 	describe("circular buffer behavior", () => {
@@ -201,22 +244,13 @@ describe("LoggerStore", () => {
 		})
 
 		test("rehydrates from session storage", async () => {
-			// Mock chrome.storage.session
 			const savedLogs = [
 				{ id: 5, timestamp: 1000, source: "test", level: LogLevel.Info, context: "sw" as const, data: ["saved"] },
 				{ id: 10, timestamp: 2000, source: "test", level: LogLevel.Debug, context: "offscreen" as const, data: ["saved2"] },
 			]
-			// biome-ignore lint/suspicious/noExplicitAny: test setup — mocking chrome.storage.session
-			;(globalThis as any).chrome = {
-				storage: {
-					session: {
-						get: vi.fn().mockResolvedValue({ "nulo:logs": savedLogs }),
-						set: vi.fn(),
-					},
-				},
-			}
+			mockSessionStorage(savedLogs)
 
-			const store = new LoggerStore(mockConfig(true))
+			const store = new LoggerStore(mockConfig(true, true))
 			await store.rehydrate()
 
 			const logs = store.get(10)
@@ -228,6 +262,202 @@ describe("LoggerStore", () => {
 			store.log("new", LogLevel.Debug, "after rehydrate")
 			const all = store.get(10)
 			expect(all[2].id).toBeGreaterThan(10)
+		})
+	})
+
+	// Retention is opt-in with developer mode. Without it, captured lines must never outlive this
+	// worker — that is what keeps the wide capture surface off a normal user's machine.
+	describe("retention gate", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		test("does NOT persist when developer mode is off", async () => {
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(false, false))
+
+			store.log("a", LogLevel.Error, "sensitive")
+			await vi.advanceTimersByTimeAsync(5000)
+
+			expect(session.set).not.toHaveBeenCalled()
+		})
+
+		test("persists when developer mode is on", async () => {
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(false, true))
+
+			store.log("a", LogLevel.Error, "diagnostic")
+			await vi.advanceTimersByTimeAsync(5000)
+
+			expect(session.set).toHaveBeenCalledTimes(1)
+			const written = session.set.mock.calls[0][0]["nulo:logs"] as Array<{ data: unknown[] }>
+			expect(written[0].data).toEqual(["diagnostic"])
+		})
+
+		test("turning developer mode off purges what was already written", async () => {
+			const session = mockSessionStorage()
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "captured while on")
+			await vi.advanceTimersByTimeAsync(5000)
+			expect(session.set).toHaveBeenCalledTimes(1)
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.runAllTimersAsync()
+
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+
+			// And it must stop writing from here on.
+			store.log("a", LogLevel.Error, "after opt-out")
+			await vi.advanceTimersByTimeAsync(5000)
+			expect(session.set).toHaveBeenCalledTimes(1)
+		})
+
+		test("a flush that ALREADY STARTED cannot resurrect the key after a purge", async () => {
+			// Cancelling the timer cannot stop a write already in progress; the purge has to be
+			// ordered after it, or `set()` lands on top of `remove()`.
+			const session = mockSessionStorage()
+			let resolveSet: () => void = () => {}
+			session.set.mockImplementation(() => new Promise<void>((r) => (resolveSet = r)))
+
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+			store.log("a", LogLevel.Error, "queued")
+
+			await vi.advanceTimersByTimeAsync(2500) // the flush FIRES and its set() is now pending
+			expect(session.set).toHaveBeenCalledTimes(1)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await Promise.resolve()
+			// The purge must still be waiting on the in-flight write.
+			expect(session.remove).not.toHaveBeenCalled()
+
+			resolveSet()
+			await vi.runAllTimersAsync()
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
+
+		test("a write queued behind a hung one still cannot land after a purge", async () => {
+			// Written to FAIL against the previous single-slot implementation: there, flush B's
+			// callback called set() immediately while A was still pending, so the mid-test
+			// "still only one set" assertion breaks and a purge awaiting only B could be overtaken
+			// by A. Each step below pins one link of the ordering.
+			const session = mockSessionStorage()
+			const resolvers: Array<() => void> = []
+			session.set.mockImplementation(() => new Promise<void>((r) => resolvers.push(r)))
+
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "first")
+			await vi.advanceTimersByTimeAsync(2500) // flush A fires; its set() hangs
+			expect(session.set).toHaveBeenCalledTimes(1)
+
+			store.log("a", LogLevel.Error, "second")
+			await vi.advanceTimersByTimeAsync(2500) // B's timer fires — it must QUEUE, not start
+			expect(session.set).toHaveBeenCalledTimes(1)
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			resolvers[0]() // A completes → B may now start
+			await vi.advanceTimersByTimeAsync(0)
+			expect(session.set).toHaveBeenCalledTimes(2)
+			expect(session.remove).not.toHaveBeenCalled() // …and remove is still behind B
+
+			resolvers[1]() // B completes → the removal finally runs
+			await vi.runAllTimersAsync()
+
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+			const removeOrder = session.remove.mock.invocationCallOrder[0]
+			const lastSetOrder = Math.max(...session.set.mock.invocationCallOrder)
+			expect(removeOrder).toBeGreaterThan(lastSetOrder)
+		})
+
+		test("a pending flush cannot recreate the file after opt-out", async () => {
+			const session = mockSessionStorage()
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "queued")
+			// Opt out mid-debounce, before the 2s flush fires.
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.runAllTimersAsync()
+
+			expect(session.set).not.toHaveBeenCalled()
+		})
+	})
+
+	/**
+	 * Production boot order: the store is constructed at module scope on SCHEMA DEFAULTS, then
+	 * `rehydrate()` runs, and only later does `config.load()` supply the user's real setting
+	 * (inside `runtime.start()`, after migrations — an ordering that must not change). Tests that
+	 * inject an already-loaded config cannot see this, which is how the first version of this arc
+	 * shipped a bug that wiped every developer's logs on each worker restart.
+	 */
+	describe("retention across the real boot order", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		const saved = [{ id: 1, timestamp: 1, source: "s", level: LogLevel.Info, context: "sw" as const, data: ["from-last-lifecycle"] }]
+
+		test("rehydrate restores even though the constructor saw the default", async () => {
+			// REGRESSION: gating rehydrate on the constructor's value purged here, before the
+			// loaded config could say "developer mode is on".
+			mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+
+			await store.rehydrate()
+
+			expect(store.get(10)).toHaveLength(1)
+		})
+
+		test("a developer's rehydrated logs SURVIVE the config load", async () => {
+			const session = mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.rehydrate()
+
+			config.set("developerMode", true) // what config.load() does
+			await store.applyRetentionPolicy()
+
+			expect(store.get(10)).toHaveLength(1)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			// …and persistence resumes.
+			store.log("a", LogLevel.Error, "new")
+			await vi.advanceTimersByTimeAsync(5000)
+			expect(session.set).toHaveBeenCalled()
+		})
+
+		test("a non-developer's rehydrated logs are dropped once the config loads", async () => {
+			// Covers the case no config-update event can: `apply()` only emits on a CHANGE, so a
+			// stored `developerMode: false` matching the default is silent.
+			const session = mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.rehydrate()
+			expect(store.get(10)).toHaveLength(1)
+
+			await store.applyRetentionPolicy()
+
+			expect(store.get(10)).toHaveLength(0)
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
+
+		test("retention stays off after the load, so nothing is written", async () => {
+			const session = mockSessionStorage()
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.applyRetentionPolicy()
+
+			store.log("a", LogLevel.Error, "sensitive")
+			await vi.advanceTimersByTimeAsync(5000)
+
+			expect(session.set).not.toHaveBeenCalled()
 		})
 	})
 })

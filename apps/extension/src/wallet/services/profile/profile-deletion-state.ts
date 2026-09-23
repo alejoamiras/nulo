@@ -10,11 +10,12 @@
  * is loaded ONCE from the tombstone raw keys at startup and mutated only by the
  * sole tombstone writer under the facade lock.
  */
-/** Binds a tx write to the profile + deletion-epoch that AUTHORIZED the
- *  execution, captured at op-start (before the slow prove). `addTransaction`
- *  asserts it's still current under the tx lock, so a purge that began mid-prove
- *  can't be out-raced by a completing execution recreating a pending tx (D13). */
-export type ExecutionFence = { profileId: string; epoch: number }
+/** Binds work to the profile, deletion epoch and session that AUTHORIZED it, captured at op-start
+ *  (before the slow prove). `addTransaction` asserts the epoch under the tx lock, so a purge that
+ *  began mid-prove can't be out-raced by a completing execution recreating a pending tx (D13).
+ *  `session` is the authorizing session's serial: any lock, expiry or unlock since — the same
+ *  profile's re-unlock included — makes the fence dead (`ProfileService.assertFence`). */
+export type ExecutionFence = { profileId: string; epoch: number; session: number }
 
 export class ProfileDeletionState {
 	private readonly reserved = new Set<string>()

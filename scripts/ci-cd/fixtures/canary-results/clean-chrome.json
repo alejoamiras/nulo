@@ -1,0 +1,135 @@
+{
+  "numTotalTestSuites": 6,
+  "numPassedTestSuites": 6,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1790036626763,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "frozen-account canary — the execution gate every @aztec bump runs, on both browsers"
+          ],
+          "fullName": "frozen-account canary — the execution gate every @aztec bump runs, on both browsers agent-runner contract: a live sandbox must be configured (no false skip)",
+          "status": "passed",
+          "title": "agent-runner contract: a live sandbox must be configured (no false skip)",
+          "duration": 1.1603159999995114,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "frozen-account canary — the execution gate every @aztec bump runs, on both browsers"
+          ],
+          "fullName": "frozen-account canary — the execution gate every @aztec bump runs, on both browsers frozen-account canary — derive, ctor-deploy with real proof, authwit consume, SW-restart re-derive",
+          "status": "passed",
+          "title": "frozen-account canary — derive, ctor-deploy with real proof, authwit consume, SW-restart re-derive",
+          "duration": 58688.39518500001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1790036678012,
+      "endTime": 1790036736702.3953,
+      "status": "passed",
+      "message": "",
+      "name": "/repo/apps/extension/tests/e2e/network/frozen-account-canary.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "passkey canary — the KDF-change execution gate, on both browsers"
+          ],
+          "fullName": "passkey canary — the KDF-change execution gate, on both browsers agent-runner contract: a live sandbox must be configured (no false skip)",
+          "status": "passed",
+          "title": "agent-runner contract: a live sandbox must be configured (no false skip)",
+          "duration": 1.2059269999999742,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "passkey canary — the KDF-change execution gate, on both browsers"
+          ],
+          "fullName": "passkey canary — the KDF-change execution gate, on both browsers passkey canary — register via PRF ceremony, ctor-deploy with real proof, authwit consume, SW-restart ceremony re-unlock",
+          "status": "passed",
+          "title": "passkey canary — register via PRF ceremony, ctor-deploy with real proof, authwit consume, SW-restart ceremony re-unlock",
+          "duration": 53962.652134,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1790036739362,
+      "endTime": 1790036793326.652,
+      "status": "passed",
+      "message": "",
+      "name": "/repo/apps/extension/tests/e2e/network/passkey-execution-canary.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "transfers scenario — mint, 4 transfer types, token detail, send entry, activity history",
+          "status": "passed",
+          "title": "transfers scenario — mint, 4 transfer types, token detail, send entry, activity history",
+          "duration": 111018.597753,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1790036793915,
+      "endTime": 1790036904933.5977,
+      "status": "passed",
+      "message": "",
+      "name": "/repo/apps/extension/tests/e2e/network/transfers.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "tx-sendTx-default — popup opens, fee picker shown, confirm submits with real proof (prover-ON canary)",
+          "status": "passed",
+          "title": "tx-sendTx-default — popup opens, fee picker shown, confirm submits with real proof (prover-ON canary)",
+          "duration": 22934.386542,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1790036907598,
+      "endTime": 1790036930532.3865,
+      "status": "passed",
+      "message": "",
+      "name": "/repo/apps/extension/tests/e2e/network/tx-sendTx-default.test.ts"
+    }
+  ]
+}

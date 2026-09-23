@@ -1,0 +1,210 @@
+<title>Console Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#f5f5f7;--card:#fff;--ink:rgba(0,0,0,.88);--sec:#6b655c;--tert:rgba(0,0,0,.56);--line:#c9c5bd;--soft:#f0efec;--accent:#a8480c;--mint:#109373;--sand:#9a6a3a;
+  --head:"Space Grotesk",system-ui,sans-serif;--body:Inter,system-ui,-apple-system,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0908;--card:#141312;--ink:#f5f0e6;--sec:#999187;--tert:rgba(245,240,230,.56);--line:#4a463f;--soft:#1d1b1a;--accent:#f8f1e7;--mint:#18d2a5;--sand:#b88555}}
+:root[data-theme="dark"]{--bg:#0a0908;--card:#141312;--ink:#f5f0e6;--sec:#999187;--tert:rgba(245,240,230,.56);--line:#4a463f;--soft:#1d1b1a;--accent:#f8f1e7;--mint:#18d2a5;--sand:#b88555}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15.5px/1.6 var(--body);-webkit-font-smoothing:antialiased}
+main{max-width:760px;margin:0 auto;padding:56px 24px 120px}
+h1,h2,h3{margin:0;font-family:var(--head);letter-spacing:-.02em;text-wrap:balance}
+h1{font-size:44px;line-height:1.02;font-weight:700;margin-top:12px}
+h2{font-size:24px;line-height:1.15;margin-top:56px;padding-top:20px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin-bottom:6px}
+p{margin:0}
+p+p{margin-top:12px}
+.eyebrow{font:600 11px/1.4 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sec)}
+.lede{font-size:17px;color:var(--sec);margin-top:18px;max-width:62ch}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);background:var(--card);margin-top:28px}
+.facts div{padding:14px 16px;border-right:1px solid var(--line)}
+.facts div:last-child{border-right:0}
+.facts .k{font:600 10.5px/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--tert)}
+.facts .v{font-size:14px;color:var(--ink);margin-top:2px}
+.rubric{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+.rubric td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.rubric td:first-child{font:500 12.5px/1.6 var(--mono);white-space:nowrap;color:var(--sec);width:150px}
+.rubric td:nth-child(2){font:600 11px/1.6 var(--mono);letter-spacing:.1em;text-transform:uppercase;width:70px}
+.low{color:var(--mint)}.med{color:var(--sand)}
+.phase{margin-top:18px;padding:18px 20px;border:1px solid var(--line);background:var(--card)}
+.phase .n{font:600 10.5px/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.phase p{font-size:14.5px;color:var(--sec);margin-top:6px}
+.phase .gate{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font:500 12.5px/1.6 var(--mono);color:var(--tert)}
+.phase .gate b{color:var(--sec);font-weight:600}
+ul{margin:12px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14.5px;color:var(--sec)}
+li b{color:var(--ink);font-weight:600}
+.rules{margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rule{padding:14px 16px;border:1px solid var(--line);background:var(--card);font-size:14px;color:var(--sec)}
+.rule b{display:block;color:var(--ink);font-family:var(--head);font-size:15px;margin-bottom:4px}
+.approval{margin-top:24px;padding:20px 22px;border:1px solid var(--accent);background:var(--card)}
+.approval h3{color:var(--accent)}
+.approval ul{margin-top:10px}
+.verdicts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.verdict{padding:14px 16px;border:1px solid var(--line);background:var(--card);font-size:14px;color:var(--sec)}
+.verdict b{display:block;font:600 11px/1.6 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink);margin-bottom:4px}
+.verdict .tag{display:inline-block;font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:4px 6px;border:1px solid var(--mint);color:var(--mint);margin-top:8px}
+pre{margin:0;padding:16px 18px;background:var(--soft);border:1px solid var(--line);overflow-x:auto;font:12.5px/1.6 var(--mono);color:var(--ink);white-space:pre-wrap;word-break:break-word}
+.seed{margin-top:16px}
+.seed.rec{border-left:3px solid var(--accent);padding-left:14px}
+.seed h3 span{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-left:8px;vertical-align:middle}
+.warn{margin-top:14px;font:600 13px/1.5 var(--mono);color:var(--sand)}
+.muted{font-size:13px;color:var(--tert);margin-top:40px}
+code{font-family:var(--mono);font-size:.92em}
+
+/* figures for the explained choices */
+.fig{margin-top:14px;border:1px solid var(--line);background:var(--soft);padding:16px;display:grid;gap:14px}
+.fig.two{grid-template-columns:1fr 1fr}
+.fig .cap{grid-column:1/-1;font:500 12px/1.6 var(--mono);color:var(--tert)}
+.fig .cap b{color:var(--sec)}
+.mini{background:var(--card);border:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) 108px;min-height:150px;font-family:var(--mono);font-size:10.5px;line-height:1.35;overflow:hidden}
+.mini.nodock{grid-template-columns:minmax(0,1fr) 22px}
+.mini .main{padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mini .t{font:700 12px/1 var(--head);color:var(--ink)}
+.mini .step{display:flex;gap:8px;align-items:baseline;color:var(--sec)}
+.mini .step i{font-style:normal;width:10px;color:var(--mint)}
+.mini .step i.on{color:var(--accent)}
+.mini .step i.off{color:var(--tert)}
+.mini .box{border:1px solid var(--line);padding:8px 10px;color:var(--sec)}
+.mini .dock{border-left:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:8px}
+.mini .dock .h{font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--tert);display:flex;justify-content:space-between}
+.mini .row{display:grid;grid-template-columns:8px 1fr auto;column-gap:5px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.mini .row .d{width:5px;height:5px;background:var(--sec)}
+.mini .row .d.live{background:var(--ink)}
+.mini .row .d.needs{background:var(--accent)}
+.mini .row .a{color:var(--ink);font-weight:600;grid-column:2}
+.mini .row .m{grid-column:2/4;color:var(--tert);font-size:9.5px}
+.mini .row .side{grid-column:3;grid-row:1;color:var(--sec);font-size:9px;letter-spacing:.06em;text-transform:uppercase}
+.mini .row .side.btn{background:var(--accent);color:var(--card);padding:4px 7px;font-weight:700;grid-row:1/3;text-transform:none;letter-spacing:.04em}
+.mini .strip{border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:8px;position:relative}
+.mini .strip .badge{position:absolute;top:4px;right:2px;min-width:12px;height:12px;background:var(--accent);color:var(--card);font:700 8px/12px var(--mono);text-align:center;padding:0 3px}
+.mini .strip .lbl{writing-mode:vertical-rl;font:500 8px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--tert);margin-top:14px}
+.mini .ghost{border:1px dashed var(--line);padding:6px 8px;color:var(--tert);font-size:9.5px}
+.mini .rail{display:flex;gap:10px;font-size:10px;color:var(--sec);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:2px}
+.mini .rail b{color:var(--ink);font-weight:600}
+.explain{margin-top:22px}
+.explain h3{font-size:17px}
+.explain p{font-size:14.5px;color:var(--sec);margin-top:6px}
+.explain p b{color:var(--ink)}
+@media (max-width:640px){.fig.two{grid-template-columns:1fr}}
+
+@media (max-width:640px){h1{font-size:34px}.facts,.rules,.verdicts{grid-template-columns:1fr}.facts div{border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+<main>
+<p class="eyebrow">Blueprint · tools app · mid tier · approved 2026-09-05</p>
+<h1>Console Blueprint</h1>
+<p class="lede">Turn the round-3 Console mock into the real tools app: a left rail, wallet chips in the header, the wizard card with its step rail, and the Activity dock that lists your bridges as two-line rows and hides to a strip with one badge. The three bridge steps you signed off (token, amount, review) do not change by a single byte.</p>
+<div class="facts">
+  <div><div class="k">One PR</div><div class="v">Branch <code>worktree-tools-console</code> into dev</div></div>
+  <div><div class="k">Frozen</div><div class="v">Nine step components, checked at every gate</div></div>
+  <div><div class="k">Reviewed by</div><div class="v">Codex twice, Fable once; all three said "go, with conditions" — every condition folded in</div></div>
+</div>
+
+<h2>Why a mid-sized plan</h2>
+<p>The work is one app, no wallet code, no contracts, no data migration. What earns it a real plan rather than a quick edit is the journal: the dock has to say "this bridge needs you" using the same logic the existing cards use, and that logic is buried in a 720-line component with watchers in it. Getting that extraction wrong is how a bridge silently stops showing its CLAIM button.</p>
+<table class="rubric">
+  <tr><td>Novelty</td><td class="low">low</td><td>Vue shell over composables that already exist.</td></tr>
+  <tr><td>Blast radius</td><td class="med">medium</td><td>Everything the tools app shows, but nothing the wallet does.</td></tr>
+  <tr><td>Irreversibility</td><td class="low">low</td><td>Pure UI; revert is a git revert.</td></tr>
+  <tr><td>Migration</td><td class="low">none</td><td>Two new browser preferences, both optional.</td></tr>
+  <tr><td>External coupling</td><td class="low">none</td><td>No new services or dependencies.</td></tr>
+  <tr><td>Security</td><td class="low">low</td><td>No keys; the one real risk (a restore file carrying nasty text) is handled.</td></tr>
+</table>
+
+<h2>The five phases</h2>
+<div class="phase"><div class="n">Phase 1 · the logic, no visible change</div><h3>One rulebook for "what can this bridge do"</h3><p>Today the rules live inside the bridge card. They move into a small pure file the card and the new dock both read, so CLAIM, FINISH, RETRY and "switch account" mean the same thing in both places. The dock's grouping (Needs you / Running / Done) is a table with a test per row, and a parity test proves the dock only offers a button where the card would. The completion toast moves to the shell so it keeps firing even when the dock is hidden. Two tiny state modules: which section is open, and whether the dock is open.</p><div class="gate"><b>Proves itself by:</b> lint + typecheck + all tools unit tests + the tools smoke + the frozen-steps check, all green; the existing 42 card tests unchanged.</div></div>
+<div class="phase"><div class="n">Phase 2 · the shell</div><h3>Rail, header, three sections</h3><p>The tab pill becomes the left rail (Send, Faucet, Activity with a plain count). Wallet chips move into a header and lose the chip-inside-a-chip look. Send and Faucet pages lose their big titles and wallet rows. Activity is a real page: your bridges as full cards, or on first visit the two action tiles. The "Activity" link on a backgrounded send opens that page instead of scrolling.</p><div class="gate"><b>Proves itself by:</b> the same gates plus a new shell smoke that mounts the whole app: switch sections, see the chips, dock hidden by default, a completion toast still appears while you are on Faucet with the dock hidden.</div></div>
+<div class="phase"><div class="n">Phase 3 · the dock</div><h3>Two-line rows, one badge</h3><p>The right column lists bridges as amount over route · visibility · age, with CLAIM, the phase word, or "Bridged ✓" on the right. Hide it and a 44px strip remains with the badge, only while something needs you. It opens itself once per bridge when that bridge starts needing you, never for progress and never for a blocked one; hiding it again keeps it hidden for that bridge, even in another tab. Discard never appears in the dock. The bridge whose progress is on screen beside the dock is not listed until you background it.</p><div class="gate"><b>Proves itself by:</b> the same gates plus dock tests: hidden by default, hide moves focus to the strip, badge count equals the number of buttons on the Activity page, auto-open fires once, a double-click on Claim gas starts one claim.</div></div>
+<div class="phase"><div class="n">Phase 4 · the wizard card and the quiet rules</div><h3>Vertical step rail, calm stepper, glow budget</h3><p>The step strip turns vertical with a hint under each step. The in-flight stepper becomes a timeline with one slow pulse. Accent is spent on three things per screen at most; mint marks only what is done. Below 1100px the dock becomes a slide-in panel; below 760px the rail becomes a top row.</p><div class="gate"><b>Proves itself by:</b> the same gates, with the frozen-steps check quoted explicitly.</div></div>
+<div class="phase"><div class="n">Phase 5 · your walk</div><h3>Preview, sign-off, docs</h3><p>The branch preview builds. You walk one send to its first claim, one faucet drip, hide and reopen the dock, both themes, keyboard only, and the two narrow widths. Feedback is fixed in place; the README's file map is updated.</p><div class="gate"><b>Proves itself by:</b> <code>bun run audit:vue</code> and the testnet build green, and your sign-off written into the lessons file.</div></div>
+
+<h2>What the reviews changed</h2>
+<p>My first draft had two mistakes both reviewers caught. Hiding the dock would have unmounted the thing that shows completion toasts, so backgrounded sends would finish silently. And I planned to share the card's logic as a Vue composable created per row, which would have spawned watchers on every re-render. Both are fixed: the logic is a pure function, and the toast lives in the shell.</p>
+<div class="rules">
+  <div class="rule"><b>Follow the card exactly</b>I wanted the dock to show "running" for a deposit that is still crossing. The card already calls that one claimable. The dock now agrees with the card, always.</div>
+  <div class="rule"><b>No Discard in the dock</b>Discard destroys a private bridge's only recovery secret. It stays on the full card behind its two-step confirm.</div>
+  <div class="rule"><b>Blocked bridges</b>They count in the badge (you owe a decision) but never pop the dock open, and the dock shows the word "Blocked", never the stored reason text.</div>
+  <div class="rule"><b>The bridge on screen</b>The mock showed it in the dock marked "on screen". The engine has a rule that the progress view is that bridge's only surface, and both Codex passes held me to it: the dock skips it until you background it. This is the one visible change from the mock.</div>
+</div>
+<div class="verdicts">
+  <div class="verdict"><b>Codex · round 1</b>"Use the hybrid: pure shared record policy plus a dedicated dock feed; resolve the syncing, foreground and auto-open semantics; keep destructive confirmation; add shell-level coverage."<span class="tag">conditional approve</span></div>
+  <div class="verdict"><b>Fable · round 1</b>"Plan A's structure with a pure recordState(), classify following the card, toasts in the shell, the dock as its own component, no Discard in the dock, test resets and the missing tests."<span class="tag">conditional approve</span></div>
+</div>
+<div class="verdicts" style="margin-top:12px"><div class="verdict"><b>Codex · final, fresh context</b>"Hide the foreground record from the Send dock, fix completion precedence and dock mounting, make seen-state retention explicit, guard Claim gas, use canonical handoff ids, preserve the restore-file safeguards, and get owner confirmation for the product choices." All folded in; the confirmation is the list below.<span class="tag">conditional approve</span></div><div class="verdict"><b>What that pass added</b>Done beats busy when both are true; the "seen" list is pruned to live bridges instead of capped; a second Claim gas click cannot start a second claim; the restore link on the first-visit page is the existing guarded one, not a copy.</div></div>
+
+<h2>Six choices that need your yes or no</h2>
+<p>You said ok to (a), (c), (d) and (e). Here are the three you asked about, with pictures. Say "approve" to accept all six, or name the ones you want changed.</p>
+
+<div class="explain"><h3>(b) A blocked bridge counts in the badge but never pops the dock open</h3>
+<p><b>What "blocked" means.</b> When the app starts, it re-checks every saved bridge against the chain. If the chain disagrees with what the bridge file says — the token's portal on Ethereum is not the one recorded, or the record came from a previous bridge generation — the app refuses to ever run that bridge again. That is a blocked bridge. The only thing you can do with it is discard it, from its full card on the Activity page.</p>
+<p><b>The choice.</b> It still needs a decision from you, so it counts in the badge on the strip. But there is nothing the dock can do with it, so the dock never opens itself for it — otherwise it would reopen on every reload until you discard it. In the dock it shows the word "Blocked" and no button; clicking the row takes you to its card.</p>
+<div class="fig two">
+  <div class="mini nodock"><div class="main"><div class="t">Send</div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:52px">USDC · USDT · EURC …</div></div><div class="strip"><span style="color:var(--tert)">‹</span><span class="badge">1</span><span class="lbl">Activity</span></div></div>
+  <div class="mini"><div class="main"><div class="t">Send</div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:52px">USDC · USDT · EURC …</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side">Blocked</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>0</span></div></div></div>
+  <div class="cap"><b>Left:</b> dock hidden — the badge says one bridge needs you. <b>Right:</b> dock open — the blocked bridge shows the word, no button. Neither state opened the dock by itself.</div>
+</div></div>
+
+<div class="explain"><h3>(d) Networks without a bridge get no dock and no Activity list</h3>
+<p><b>What a "network without a bridge" is.</b> The tools app is built per network from a manifest. Right after a testnet reset (before the bridge is redeployed), and on mainnet today, that manifest has no bridge in it. On those networks the Send page already shows "Bridging is being upgraded" and, on purpose, starts none of the bridge machinery underneath.</p>
+<p><b>The choice.</b> Keep that rule for the new parts: no dock, no strip, and the Activity page shows the same note. The faucet keeps working. Nothing bridge-related runs until a bridge exists.</p>
+<div class="fig two">
+  <div class="mini nodock" style="grid-template-columns:1fr"><div class="main"><div class="rail"><span>Send</span><span>Faucet</span><b>Activity</b></div><div class="t">Activity</div><div class="ghost">Bridging is being upgraded. Back with the next generation on this network. The faucet keeps working meanwhile.</div></div></div>
+  <div class="mini nodock" style="grid-template-columns:1fr"><div class="main"><div class="rail"><span>Send</span><b>Faucet</b><span>Activity</span></div><div class="t">Faucet</div><div class="box">NULO · fixed drip 1,000</div><div class="box">OLUN · fixed drip 1</div></div></div>
+  <div class="cap"><b>Left:</b> Activity on a network without a bridge — the note, no list, no strip. <b>Right:</b> the faucet is unaffected.</div>
+</div></div>
+
+<div class="explain"><h3>(f) The bridge on screen is not listed in the dock</h3>
+<p><b>The situation.</b> You press Sign &amp; send. The Send page turns into the progress view for that bridge (the phase list: Permission ✓, Seal ✓, Crossing …). The round-3 mock also showed that same bridge in the dock, as a row marked "on screen".</p>
+<p><b>The rule I was held to.</b> The journal engine has a written rule: while the progress view is showing a bridge, that bridge appears nowhere else — the receipt and progress view are its one surface. Both Codex passes ruled the plan must keep it. So the dock skips that one bridge while you are watching it. The moment you press <b>Run in background</b>, the progress view goes away and the bridge appears in the dock under Running. Every other bridge is in the dock the whole time.</p>
+<div class="fig two">
+  <div class="mini"><div class="main"><div class="t">Bridging · 250 USDC</div><div class="step"><i>✓</i>Permission</div><div class="step"><i>✓</i>Seal</div><div class="step"><i>✓</i>Deposit + fuel</div><div class="step"><i class="on">●</i>Crossing · 2m 14s</div><div class="step"><i class="off">○</i>Claim</div><div class="box" style="margin-top:4px;align-self:flex-start">Run in background</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side btn">Claim</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>1</span></div><div class="row"><span class="d live"></span><span class="a">100 UNI</span><span class="side">prove</span><span class="m">Aztec → ETH · 1h ago</span></div></div></div>
+  <div class="mini"><div class="main"><div class="t">Send</div><div class="ghost">● Bridging 250 USDC · crossing · <u>Activity</u></div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:40px">USDC · USDT · EURC …</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side btn">Claim</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>2</span></div><div class="row"><span class="d live"></span><span class="a">250 USDC</span><span class="side">crossing</span><span class="m">ETH → Aztec · private + gas</span></div><div class="row"><span class="d live"></span><span class="a">100 UNI</span><span class="side">prove</span><span class="m">Aztec → ETH · 1h ago</span></div></div></div>
+  <div class="cap"><b>Left:</b> the 250 USDC bridge is on screen, so the dock lists the other two only. <b>Right:</b> after Run in background — the wizard resets, the status strip narrates, and 250 USDC now sits in the dock under Running.</div>
+</div></div>
+
+<ul style="margin-top:22px">
+  <li><b>(a) Dock buttons</b> — Claim, Finish, Retry, Switch account, Claim gas. Never Discard. <span style="color:var(--mint)">ok</span></li>
+  <li><b>(b) Blocked bridges</b> — count in the badge, never pop the dock open. <span style="color:var(--mint)">yes</span></li>
+  <li><b>(c) Auto-open</b> — once per bridge, remembered across reloads and tabs; never overrides your explicit "hide". <span style="color:var(--mint)">ok</span></li>
+  <li><b>(d) Networks without a bridge</b> — no dock, no Activity list; the note instead. <span style="color:var(--mint)">ok</span>, explained above</li>
+  <li><b>(e) Breakpoints</b> — 1100px (dock becomes a panel) and 760px (rail becomes a top row). <span style="color:var(--mint)">ok</span></li>
+  <li><b>(f) The bridge on screen</b> — not in the dock until you background it. <span style="color:var(--mint)">fair</span></li>
+</ul>
+
+<h2>Small fixes now inside this plan</h2>
+<p style="font-size:14.5px;color:var(--sec)">At your request these ride along instead of waiting for a follow-up PR.</p>
+<ul>
+  <li><b>The raw viem error.</b> Pick a token with no Ethereum wallet connected and today you get "An unknown RPC error occurred. Details: Connect your Ethereum wallet first. Version: viem@2.55.17". The wallet check throws inside the Ethereum client, and viem wraps it. Fix: unwrap viem's error to its plain sentence, and do not try to read balances at all until an Ethereum wallet is connected. Phase 1.</li>
+  <li><b>Stored text on the full card.</b> A bridge file can carry a token symbol or a "blocked" reason written by whoever made the file. The card will pass both through the same look-alike and length guard the token list already uses. Phase 1.</li>
+  <li><b>Two near-identical Aztec wallet panels</b> (the Faucet one and the Send one) become one component, since the header takes both anyway. Phase 2.</li>
+  <li>A stale code comment that references an old plan, and the README naming a file that no longer exists. Phases 1 and 5.</li>
+</ul>
+
+<div class="approval">
+  <h3>Approved</h3>
+  <p style="font-size:14px;color:var(--sec)">Owner, 2026-09-05: (a) ok · (b) yes · (c) ok · (d) ok · (e) ok · (f) fair. The list below is what that approval covered.</p>
+  <ul>
+    <li>Confirm the scope: shell + dock + card chrome, frozen steps, single PR into dev.</li>
+    <li>Confirm the tier (mid) and the gates: lint, typecheck, unit, tools smoke and the frozen check every phase; your walk last.</li>
+    <li>No <code>/harden</code> pass is proposed: the change touches no trust boundary.</li>
+  </ul>
+</div>
+
+<h2>Implementation seeds</h2>
+<p style="font-size:14px;color:var(--sec)">Final, against the approved scope. Paste exactly one into a session that is already inside the <code>tools-console</code> worktree (<code>agent-worktree resume tools-console</code>).</p>
+<p class="warn">Use exactly ONE per session. They do not compose.</p>
+<div class="seed rec"><h3>/goal <span>Recommended</span></h3>
+<pre>/goal All five phases marked ✓ in implementations-plan/tools-console/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript: `bun run lint`, `bun run --cwd apps/tools typecheck`, `bun run --cwd apps/tools test`, `bun run --cwd apps/tools test:e2e`, and `git diff --quiet 91074a74 -- &lt;the nine frozen step files listed in plan.md&gt;` all exit 0, plus each phase's own gate line (Phase 1: the parity pin green and BridgeJournalCard.test.ts byte-identical to 91074a74; Phase 2: shell-smoke.test.ts green; Phase 3: the shell smoke's dock cases green; Phase 4: the frozen diff quoted; Phase 5: `bun run audit:vue` and `bun run --cwd apps/tools build:testnet` exit 0 and the owner's preview sign-off recorded in implementations-plan/tools-console/lessons/phase-5.md); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md` in the transcript; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 91074a74 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the six owner-confirmed choices (a)–(f) in plan.md's Assumptions are implemented as written, including no DISCARD in the dock and the foreground record absent from the Send dock; a single PR from worktree-tools-console into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/tools test` both report exit 0 in the transcript.</pre></div>
+<div class="seed"><h3>/loop 15m <span style="color:var(--tert)">Alternative</span></h3>
+<pre>/loop 15m Drive implementations-plan/tools-console forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/tools-console/plan.md and lessons/ (authoritative state — not the chat); native task list empty? rebuild it from plan.md, one task per remaining step; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. Waiting on CI is fine — confirm it is progressing (`gh run watch <run-id>` up to 10 minutes; stuck past that → inspect logs, log it as blocked in lessons). Use the wait to review the diff, prep the next phase, strengthen tests.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint` and `bun run --cwd apps/tools test` — catch mistakes in-step. Then commit (signed, conventional, lower-case subject ≤100 chars) and push the branch.
+4. Stuck, or facing a decision you would normally bring to me? Do not wait. Call `/codex xhigh` with full context and go back and forth until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never publish or deploy, never touch the nine frozen step components, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? Green means THE PHASE'S VALIDATION GATE as written in plan.md passes (every command + the phase's own line). Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md`, run `agent-worktree status tools-console "phase N green: <next>"`, advance. Phase 5 needs my preview walk: push, post the preview URL, and hold that phase open until my sign-off is in lessons/phase-5.md.
+7. All phases ✓? Close out per plan.md's Post-implementation section: NO /code-review; codex audit (`/codex xhigh`, net diff from origin/dev + plan.md + the no-over-engineering and comment-quality rules) → apply accepted fixes, commit, RESUME the same codex session with the fix diff — loop until a round yields nothing material (3 rounds still churning → surface and stop). Then `gh pr create` into dev with the plan-linked body, then `gh pr checks --watch`. Write the wrap-up: what shipped, every contentious decision with its options and why, open items. Surface and stop.
+Keep the native task list current; plan.md stays the source of truth.</pre></div>
+
+<p class="muted">Full plan: <code>implementations-plan/tools-console/plan.md</code> · recon: <code>recon.md</code> · audits: <code>audit-codex.md</code>, <code>audit-fable.md</code> · lessons: <code>lessons/</code></p>
+</main>

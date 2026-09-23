@@ -15,8 +15,9 @@
  *
  * ## Error contract (frozen by call site)
  *
- * Every throw is preserved verbatim from the original:
- *   - `"Wallet locked"` — no active profile
+ * The throws callers depend on:
+ *   - `SessionEndedError` — the fence's session has ended (lock, expiry,
+ *     another profile, a re-unlock); a begun deletion throws its epoch error
  *   - `"Contract not found"` / `"Contract artifact not found"` /
  *     `"Method not found"` — per-action resolution failures
  *   - `"Invalid authwit content kind"` — unrecognized authwit `content.kind`
@@ -54,14 +55,15 @@ import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtim
 import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { ProfileService } from "@/wallet/services/profile/service"
-import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
-import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
+import { fenceChecks } from "./execution-coordinator"
 import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
@@ -72,6 +74,11 @@ export interface BuiltStandardTx {
 	pxe: IPXE
 	account: IAccountContract
 	network: Network
+	/** The EXACT chain-identity pair the build asserted and signed under —
+	 *  consumers snapshotting chain identity must use THIS, never refetch
+	 *  (a refetch after an endpoint flip would bind the snapshot to a chain
+	 *  the request was not built for). */
+	chainIdentity: { l1ChainId: number; rollupVersion: number }
 	nonce: Fr
 	txCalls: TxCall[]
 	/** Public authwits this build will write on-chain (`set_authorized`). Recording
@@ -79,6 +86,16 @@ export interface BuiltStandardTx {
 	 *  during fee estimate, or a rejected approval — records nothing. NO_FROM builds
 	 *  carry an empty array (they emit no `add_public_authwit`). */
 	pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[]
+	/** Node-advertised per-tx gas admission limit, snapshotted from the SAME
+	 *  `getNodeInfo()` the build asserted chain identity against — the
+	 *  finalize-time clamp reads THIS, never a live refetch (zero extra RPCs,
+	 *  and no chance of clamping against a flipped endpoint). */
+	txsLimits: Gas
+	/** True iff this build wrapped the account constructor (first-tx
+	 *  multicall). Send-path provenance for the existing-nullifier
+	 *  classification — the flag lives here because `TxExecutionRequest`
+	 *  itself cannot carry it. */
+	initializesAccount: boolean
 }
 
 /** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
@@ -97,11 +114,13 @@ export class TxRequestBuilder {
 		private readonly logger: ILogger,
 	) {}
 
-	/** Standard Nulo path: wallet-lock check, resolve contracts, process
-	 *  every action (authwit / call / capsule / extraArgs), build via the
-	 *  account contract's entrypoint. */
+	/** Standard Nulo path: fence check, resolve contracts, process every
+	 *  action (authwit / call / capsule / extraArgs), build via the account
+	 *  contract's entrypoint. The account is the fence's profile's, never the
+	 *  active one's. */
 	public async buildStandard(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
+		fence: ExecutionFence,
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		parentTask?: WrappedTask,
 		gasSettings?: PartialGasSettingsRPC,
@@ -110,262 +129,249 @@ export class TxRequestBuilder {
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
 		try {
-			const profile = await requireActiveProfile(this.profileService, "Wallet locked")
-			const network = await this.networkService.getNetwork(op.networkId)
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-			const node = await this.networkService.getNode(network.chainId)
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-			const nodeInfo = await node.getNodeInfo()
-			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
-			// identity has drifted from the network the user selected. Without
-			// this, a malicious or drifted RPC endpoint can change the signing
-			// context after enrollment.
-			assertLiveChainIdentity(network, nodeInfo)
-			const contracts = this.resolver.extractContracts(op.actions)
-			const instances = await this.resolver.resolveInstances(pxe, contracts)
-			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
-
-			await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
-				onRegister: () => this.log("Register contract"),
-			})
-
-			const capsules: Capsule[] = []
-			const authwits: AuthWitness[] = []
-			const extraHashedArgs: HashedValues[] = []
-			const calls: FunctionCall[] = []
-			const nonce = Fr.random()
-			const txCalls: TxCall[] = []
-			const pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[] = []
+			const ctx = await this.resolveBuildContext(op, fence)
+			const { account, nodeInfo, instances, artifacts } = ctx
+			const collected = newCollectedActions()
 
 			for (const action of op.actions) {
 				switch (action.kind) {
 					case "add_capsule": {
 						this.log("Adding capsule...")
-						capsules.push(
-							new Capsule(
-								AztecAddress.fromStringUnsafe(action.contract),
-								Fr.fromString(action.storageSlot),
-								action.capsule.map(Fr.fromString),
-							),
-						)
+						collected.capsules.push(newCapsule(action))
 						this.log("Capsule added.")
 						break
 					}
 					case "add_extra_args": {
 						this.log("Adding extra args...")
-						extraHashedArgs.push(await HashedValues.fromArgs(action.args.map((x) => Fr.fromString(x))))
+						collected.extraHashedArgs.push(await HashedValues.fromArgs(action.args.map((x) => Fr.fromString(x))))
 						this.log("Extra args added.")
 						break
 					}
 					case "add_private_authwit": {
 						this.log("Adding private authwit...")
-
-						let messageHash: Fr
-						switch (action.content.kind) {
-							case "call": {
-								messageHash = await this.authwit.computeCallMessageHash(action.content, nodeInfo, instances, artifacts)
-								break
-							}
-							case "encoded_call": {
-								messageHash = await this.authwit.computeEncodedCallMessageHash(
-									action.content,
-									nodeInfo,
-									instances,
-									artifacts,
-								)
-								break
-							}
-							case "intent": {
-								messageHash = await this.authwit.computeIntentMessageHash(action.content, nodeInfo)
-								break
-							}
-							case "message_hash": {
-								messageHash = Fr.fromString(action.content.messageHash)
-								break
-							}
-							default: {
-								throw new Error("Invalid authwit content kind")
-							}
-						}
-
+						assertKnownAuthwitKind(action.content)
+						// The `message_hash` kind stays a caller-side ternary — with a
+						// PROVIDED witness the whole arm is synchronous today, and the
+						// helper hop must not change that.
+						const messageHash =
+							action.content.kind === "message_hash"
+								? Fr.fromString(action.content.messageHash)
+								: await this.resolveAuthwitMessageHash(action.content, nodeInfo, instances, artifacts)
 						const authwit = action.authwit
 							? new AuthWitness(
 									messageHash,
 									action.authwit.map((x) => Fr.fromString(x)),
 								)
 							: await account.createAuthWit(messageHash)
-
-						authwits.push(authwit)
+						collected.authwits.push(authwit)
 						this.log("Private authwit added.")
 						break
 					}
 					case "add_public_authwit": {
 						this.log("Adding public authwit...")
-
-						let messageHash: Fr
-						switch (action.content.kind) {
-							case "call": {
-								messageHash = await this.authwit.computeCallMessageHash(action.content, nodeInfo, instances, artifacts)
-								break
-							}
-							case "encoded_call": {
-								messageHash = await this.authwit.computeEncodedCallMessageHash(
-									action.content,
-									nodeInfo,
-									instances,
-									artifacts,
-								)
-								break
-							}
-							case "intent": {
-								messageHash = await this.authwit.computeIntentMessageHash(action.content, nodeInfo)
-								break
-							}
-							case "message_hash": {
-								messageHash = Fr.fromString(action.content.messageHash)
-								break
-							}
-							default: {
-								throw new Error("Invalid authwit content kind")
-							}
-						}
-						// Collect for POST-send recording (pending → reconcile). Build stays PURE:
-						// no trackAuthwit side-effect, so a fee-estimate or a rejected approval
-						// records nothing. The post-send tail persists these as pending rows.
-						pendingPublicAuthwits.push({
-							account: account.address.toString(),
-							hash: messageHash.toString(),
-							content: action.content,
-						})
-
-						const fn = getSetAuthorizedFn()
-						calls.push(
-							new FunctionCall(
-								fn.name,
-								getAuthRegistryAddress(),
-								await getSetAuthorizedSelector(),
-								fn.functionType,
-								false,
-								fn.isStatic,
-								encodeArguments(fn, [messageHash, true]),
-								fn.returnTypes,
-							),
-						)
-						txCalls.push({
-							contract: getAuthRegistryAddress().toString(),
-							method: fn.name,
-							args: [messageHash, true],
-						})
-
+						assertKnownAuthwitKind(action.content)
+						const messageHash =
+							action.content.kind === "message_hash"
+								? Fr.fromString(action.content.messageHash)
+								: await this.resolveAuthwitMessageHash(action.content, nodeInfo, instances, artifacts)
+						collected.pendingPublicAuthwits.push(pendingAuthwitRecord(account, messageHash, action.content))
+						const registry = await buildSetAuthorizedCall(messageHash)
+						collected.calls.push(registry.functionCall)
+						collected.txCalls.push(registry.txCall)
 						this.log("Public authwit added.")
 						break
 					}
 					case "call": {
-						const instance = instances.get(action.contract)
-						if (!instance) {
-							throw new Error("Contract not found")
-						}
-						const artifact = artifacts.get(instance.currentContractClassId.toString())
-						if (!artifact) {
-							throw new Error("Contract artifact not found")
-						}
-						const fn = findFunctionByName(artifact, action.method)
-						if (!fn) {
-							throw new Error("Method not found")
-						}
+						const fn = resolveCallFn(action, instances, artifacts)
 						const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-						calls.push(
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromStringUnsafe(action.contract),
-								fnSelector,
-								fn.functionType,
-								action.hideSender === true,
-								fn.isStatic,
-								encodeArguments(fn, action.args),
-								fn.returnTypes,
-							),
-						)
-						txCalls.push({ contract: action.contract, method: action.method, args: action.args })
+						collected.calls.push(newCallFunctionCall(action, fn, fnSelector))
+						collected.txCalls.push({ contract: action.contract, method: action.method, args: action.args })
 						this.log("Call enqueued.")
 						break
 					}
 					case "encoded_call": {
-						// Resolve the ABI UNCONDITIONALLY and bind the dApp-supplied `name` to the
-						// selector's real function. Resolving only when `action.type`/`isStatic`
-						// were absent let a dApp supply them to skip the lookup and execute a
-						// selector that did not match the authorized `name` — scope authorizes the
-						// name, execution ran the selector. Build the call from ABI truth; never
-						// trust dApp-supplied type/isStatic/returnTypes for execution metadata.
-						const instance = instances.get(action.to)
-						if (!instance) {
-							throw new Error("Contract not found")
-						}
-						const artifact = artifacts.get(instance.currentContractClassId.toString())
-						if (!artifact) {
-							throw new Error("Contract artifact not found")
-						}
-						const fn = await findFunctionBySelector(artifact, action.selector)
-						if (!fn) {
-							throw new Error("Method not found")
-						}
-						if (action.name !== undefined && action.name !== fn.name) {
-							throw new Error(
-								`Scope violation: call name "${action.name}" does not match selector's function "${fn.name}" on ${action.to}`,
-							)
-						}
-						action.type = fn.functionType
-						action.isStatic = fn.isStatic
-						calls.push(
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromStringUnsafe(action.to),
-								FunctionSelector.fromString(action.selector),
-								fn.functionType,
-								action.hideMsgSender === true,
-								fn.isStatic,
-								action.args.map((x) => Fr.fromString(x)),
-								fn.returnTypes ?? [],
-							),
-						)
-						txCalls.push({ contract: action.to, method: fn.name, args: action.args })
+						const artifact = requireArtifact(instances, artifacts, action.to)
+						const fn = validateEncodedCallFn(action, await findFunctionBySelector(artifact, action.selector))
+						collected.calls.push(newEncodedCallFunctionCall(action, fn))
+						collected.txCalls.push({ contract: action.to, method: fn.name, args: action.args })
 						this.log("EncodedCall enqueued.")
 						break
 					}
 				}
 			}
 
-			// Per-BUILD cap (pre-send gate): block a grant that would push the account past the
-			// tracked-authwit ceiling. Delegated to the auth-registry service so the
-			// existing+pending+unique-new ceiling logic is unit-testable in isolation.
-			if (pendingPublicAuthwits.length > 0) {
-				await this.authRegistryService.assertWithinCap(
-					account.address.toString(),
-					pendingPublicAuthwits.map((p) => p.hash),
-				)
-			}
-
-			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
-			const txRequest = await account.buildTxExecutionRequest(
-				node,
-				pxe,
-				payload,
-				{
-					cancellable: false,
-					txNonce: nonce,
-					feePaymentMethodOptions: feePaymentMethod,
-				},
-				chainInfoFrom(nodeInfo),
-				gasSettings,
-			)
-
+			const result = await this.finalizeStandardBuild(ctx, feePaymentMethod, gasSettings, collected)
 			task.complete()
-			return { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits }
+			return result
 		} catch (error) {
 			task.fail(error)
 			throw error
 		}
+	}
+
+	/** Build prelude: fence → network → account → node → PXE, then the live
+	 *  chain-identity assert, then contract resolution + registration. The
+	 *  drift assert runs BEFORE any resolver/registration/action work — a
+	 *  malicious or drifted RPC endpoint must be rejected before it can shape
+	 *  the signing context. */
+	private async resolveBuildContext(
+		op: { networkId: string; accountAddress: string; actions: Action[] },
+		fence: ExecutionFence,
+	): Promise<BuildContext> {
+		await this.profileService.assertFence(fence)
+		const network = await this.networkService.getNetwork(op.networkId)
+		const account = await this.resolveAccount(fence, network.chainId, op.accountAddress)
+		const node = await this.networkService.getNode(network.chainId)
+		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+
+		const nodeInfo = await node.getNodeInfo()
+		assertLiveChainIdentity(network, nodeInfo)
+		const contracts = this.resolver.extractContracts(op.actions)
+		const instances = await this.resolver.resolveInstances(pxe, contracts)
+		const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
+
+		await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+			onRegister: () => this.log("Register contract"),
+		})
+		return { network, account, node, pxe, nodeInfo, instances, artifacts }
+	}
+
+	/** Account lookups read the keys of whichever session is live when they run, so the fence is
+	 *  checked again once the lookup returns: a lock and re-unlock of the same profile meanwhile
+	 *  would otherwise hand this build the next session's keys. */
+	private async resolveAccount(fence: ExecutionFence, chainId: number, accountAddress: string): Promise<IAccountContract> {
+		const account = await this.accountService.getAccountContract(fence.profileId, chainId, accountAddress)
+		fenceChecks(this.profileService, fence).assertLive()
+		return account
+	}
+
+	/** The genuinely-awaited authwit hash computations, deduplicated across the
+	 *  private/public arms. The sync `message_hash` kind never routes here (the
+	 *  caller ternary keeps it synchronous); the invalid-kind throw stays a
+	 *  caller-side sync guard (`assertKnownAuthwitKind`). */
+	private async resolveAuthwitMessageHash(
+		content: Exclude<AuthwitContent, { kind: "message_hash" }>,
+		nodeInfo: NodeInfo,
+		instances: ResolvedInstances,
+		artifacts: ResolvedArtifacts,
+	): Promise<Fr> {
+		switch (content.kind) {
+			case "call":
+				return this.authwit.computeCallMessageHash(content, nodeInfo, instances, artifacts)
+			case "encoded_call":
+				return this.authwit.computeEncodedCallMessageHash(content, nodeInfo, instances, artifacts)
+			case "intent":
+				return this.authwit.computeIntentMessageHash(content, nodeInfo)
+		}
+	}
+
+	/** Build tail: the per-build authwit cap gate, then the entrypoint build,
+	 *  then result assembly. One contiguous always-awaited span — the payload →
+	 *  buildTxExecutionRequest → provenance ordering is preserved verbatim,
+	 *  and `chainInfoFrom(nodeInfo)` commits the SAME asserted identity the
+	 *  prelude validated. */
+	private async finalizeStandardBuild(
+		ctx: BuildContext,
+		feePaymentMethod: AccountFeePaymentMethodOptions,
+		gasSettings: PartialGasSettingsRPC | undefined,
+		collected: CollectedActions,
+	): Promise<BuiltStandardTx> {
+		const { node, pxe, account, network, nodeInfo } = ctx
+		const { nonce, txCalls, pendingPublicAuthwits } = collected
+		// Per-BUILD cap (pre-send gate): block a grant that would push the account past the
+		// tracked-authwit ceiling. Delegated to the auth-registry service so the
+		// existing+pending+unique-new ceiling logic is unit-testable in isolation.
+		if (pendingPublicAuthwits.length > 0) {
+			await this.authRegistryService.assertWithinCap(
+				{ profileId: network.profileId, chainId: network.chainId, account: account.address.toString() },
+				pendingPublicAuthwits.map((p) => p.hash),
+			)
+		}
+
+		const payload = new ExecutionPayload(collected.calls, collected.authwits, collected.capsules, collected.extraHashedArgs)
+		const buildMeta: { initializesAccount?: boolean } = {}
+		const txRequest = await account.buildTxExecutionRequest(
+			node,
+			pxe,
+			payload,
+			{
+				cancellable: false,
+				txNonce: nonce,
+				feePaymentMethodOptions: feePaymentMethod,
+			},
+			chainInfoFrom(nodeInfo),
+			gasSettings,
+			buildMeta,
+		)
+
+		return {
+			txRequest,
+			initializesAccount: buildMeta.initializesAccount === true,
+			node,
+			pxe,
+			account,
+			network,
+			chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+			nonce,
+			txCalls,
+			pendingPublicAuthwits,
+			txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+		}
+	}
+
+	/**
+	 * Parse + validate the single NO_FROM call: bind the dApp-supplied name to the
+	 * selector's real ABI function, and derive the function type from the ABI — never
+	 * trust call.name/type. The NO_FROM path resolved no artifact, so a dApp could name
+	 * a benign function while running a different selector.
+	 */
+	private async resolveNoFromCall(
+		op: AztecSendTxOperation,
+		instances: Awaited<ReturnType<TxRequestBuilder["resolver"]["resolveInstances"]>>,
+		artifacts: Awaited<ReturnType<TxRequestBuilder["resolver"]["resolveArtifacts"]>>,
+	): Promise<FunctionCall> {
+		const rawCalls = op.exec.calls ?? []
+		if (rawCalls.length !== 1) {
+			throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
+		}
+		const call = await FunctionCall.schema.parseAsync(rawCalls[0])
+		const noFromArtifact = requireArtifact(instances, artifacts, call.to.toString())
+		const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
+		if (!noFromFn) {
+			throw new Error("Method not found")
+		}
+		if (call.name !== undefined && call.name !== noFromFn.name) {
+			throw new Error(
+				`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
+			)
+		}
+		if (noFromFn.functionType !== FunctionType.PRIVATE) {
+			throw new Error("DefaultEntrypoint only supports private functions")
+		}
+		return call
+	}
+
+	/** Parse authwits/capsules/extra args from both exec and opts (same merge as
+	 *  processAztecJsPayload) through the Zod schemas — the RPC bridge serializes to
+	 *  plain objects. */
+	private async parseNoFromExtras(op: AztecSendTxOperation): Promise<{
+		parsedAuthWits: AuthWitness[]
+		parsedCapsules: Capsule[]
+		parsedExtraArgs: HashedValues[]
+	}> {
+		const parsedAuthWits: AuthWitness[] = []
+		for (const raw of (op.exec.authWitnesses ?? []).concat(op.opts.authWitnesses ?? [])) {
+			parsedAuthWits.push(await AuthWitness.schema.parseAsync(raw))
+		}
+		const parsedCapsules: Capsule[] = []
+		for (const raw of (op.exec.capsules ?? []).concat(op.opts.capsules ?? [])) {
+			parsedCapsules.push(await Capsule.schema.parseAsync(raw))
+		}
+		const parsedExtraArgs: HashedValues[] = []
+		for (const raw of op.exec.extraHashedArgs ?? []) {
+			parsedExtraArgs.push(await HashedValues.schema.parseAsync(raw))
+		}
+		return { parsedAuthWits, parsedCapsules, parsedExtraArgs }
 	}
 
 	/** DefaultEntrypoint variant: Aztec.js `aztec_sendTx` with
@@ -373,19 +379,24 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
+	public async buildNoFrom(op: AztecSendTxOperation, fence: ExecutionFence, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
 		try {
 			this.log(`buildNoFrom: starting, accountAddress=${op.accountAddress}, networkId=${op.networkId}`)
-			const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+			await this.profileService.assertFence(fence)
 
 			const network = await this.networkService.getNetwork(op.networkId)
 			const node = await this.networkService.getNode(network.chainId)
 			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
+			const account = await this.resolveAccount(fence, network.chainId, op.accountAddress)
 			this.log(`buildNoFrom: account resolved, address=${account.address.toString()}`)
+
+			// Same order as `resolveBuildContext`: refuse a drifted endpoint before any PXE
+			// registration or resolver work runs against it.
+			const nodeInfo = await node.getNodeInfo()
+			assertLiveChainIdentity(network, nodeInfo)
 
 			// Register account in PXE (needed for scopes)
 			await account.ensureRegistered(pxe)
@@ -394,7 +405,7 @@ export class TxRequestBuilder {
 			// Register contracts referenced in the payload (same pattern as buildStandard)
 			const callAddresses = (op.exec.calls ?? []).map((c) => c.to?.toString()).filter(Boolean)
 			const uniqueAddresses = [...new Set(callAddresses)]
-			this.log(`buildNoFrom: registering contracts, callAddresses=${JSON.stringify(callAddresses)}, unique=${uniqueAddresses.length}`)
+			this.log(`buildNoFrom: registering contracts, callAddresses=${callAddresses.length}, unique=${uniqueAddresses.length}`)
 			const instances = await this.resolver.resolveInstances(pxe, uniqueAddresses)
 			this.log(`buildNoFrom: got ${instances.size} instances`)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
@@ -407,56 +418,10 @@ export class TxRequestBuilder {
 
 			// Inline DefaultEntrypoint logic — calls the function directly, msg_sender = None.
 			// Cannot import @aztec/entrypoints/default in service worker (references `window`).
-			// Must parse raw JSON fields through Zod schemas (RPC bridge serializes to plain objects).
-			const rawCalls = op.exec.calls ?? []
-			if (rawCalls.length !== 1) {
-				throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
-			}
-			const call = await FunctionCall.schema.parseAsync(rawCalls[0])
-			// Bind the dApp-supplied name to the selector's real ABI function, and derive
-			// the function type from the ABI — never trust call.name/type. The NO_FROM path
-			// resolved no artifact, so a dApp could name a benign function while running a
-			// different selector.
-			const noFromInstance = instances.get(call.to.toString())
-			if (!noFromInstance) {
-				throw new Error("Contract not found")
-			}
-			const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
-			if (!noFromArtifact) {
-				throw new Error("Contract artifact not found")
-			}
-			const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
-			if (!noFromFn) {
-				throw new Error("Method not found")
-			}
-			if (call.name !== undefined && call.name !== noFromFn.name) {
-				throw new Error(
-					`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
-				)
-			}
-			if (noFromFn.functionType !== FunctionType.PRIVATE) {
-				throw new Error("DefaultEntrypoint only supports private functions")
-			}
-
-			// Parse authwits from both exec and opts (same as processAztecJsPayload)
-			const parsedAuthWits: AuthWitness[] = []
-			for (const raw of (op.exec.authWitnesses ?? []).concat(op.opts.authWitnesses ?? [])) {
-				parsedAuthWits.push(await AuthWitness.schema.parseAsync(raw))
-			}
-			const parsedCapsules: Capsule[] = []
-			for (const raw of (op.exec.capsules ?? []).concat(op.opts.capsules ?? [])) {
-				parsedCapsules.push(await Capsule.schema.parseAsync(raw))
-			}
-			const parsedExtraArgs: HashedValues[] = []
-			for (const raw of op.exec.extraHashedArgs ?? []) {
-				parsedExtraArgs.push(await HashedValues.schema.parseAsync(raw))
-			}
+			const call = await this.resolveNoFromCall(op, instances, artifacts)
+			const { parsedAuthWits, parsedCapsules, parsedExtraArgs } = await this.parseNoFromExtras(op)
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
-			const nodeInfo = await node.getNodeInfo()
-			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
-			// identity has drifted from the network the user selected.
-			assertLiveChainIdentity(network, nodeInfo)
 			const currentMinFees = await node.getCurrentMinFees()
 			// 5.0: `fallback` requires explicit gasLimits — fill the network's per-tx admission limit.
 			const gasSettings = GasSettings.fallback({
@@ -482,7 +447,22 @@ export class TxRequestBuilder {
 
 			task.complete()
 			// NO_FROM emits no add_public_authwit, so there is nothing to record.
-			return { txRequest, node, pxe, account, network, txCalls, pendingPublicAuthwits: [] }
+			// A NO_FROM build never wraps an account ctor (it targets a contract
+			// entrypoint directly), so it can never lose an initialization race.
+			return {
+				initializesAccount: false,
+				txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				txCalls,
+				pendingPublicAuthwits: [],
+				// NO_FROM gasSettings are ALREADY capped by construction — the
+				// `GasSettings.fallback` above uses these limits directly.
+				txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -492,4 +472,144 @@ export class TxRequestBuilder {
 	private log(...data: unknown[]): void {
 		this.logger.log(LOG_SOURCE, LogLevel.Debug, ...data)
 	}
+}
+
+// ── Action-processing helpers (module-scope, no service access) ─────────
+
+type NodeInfo = Awaited<ReturnType<AztecNode["getNodeInfo"]>>
+type ResolvedInstances = Awaited<ReturnType<ContractResolver["resolveInstances"]>>
+type ResolvedArtifacts = Awaited<ReturnType<ContractResolver["resolveArtifacts"]>>
+
+type BuildContext = {
+	network: Network
+	account: IAccountContract
+	node: AztecNode
+	pxe: IPXE
+	nodeInfo: NodeInfo
+	instances: ResolvedInstances
+	artifacts: ResolvedArtifacts
+}
+
+/** Per-build accumulators the action loop fills; the nonce is drawn at the
+ *  same pre-loop position it always occupied. */
+type CollectedActions = ReturnType<typeof newCollectedActions>
+
+function newCollectedActions() {
+	return {
+		capsules: [] as Capsule[],
+		authwits: [] as AuthWitness[],
+		extraHashedArgs: [] as HashedValues[],
+		calls: [] as FunctionCall[],
+		nonce: Fr.random(),
+		txCalls: [] as TxCall[],
+		pendingPublicAuthwits: [] as { account: string; hash: string; content: AuthwitContent }[],
+	}
+}
+
+const AUTHWIT_CONTENT_KINDS: ReadonlySet<string> = new Set(["call", "encoded_call", "intent", "message_hash"])
+
+/** Sync guard — fires BEFORE any hash computation, at the same position the
+ *  pre-extraction switch `default` threw. */
+function assertKnownAuthwitKind(content: AuthwitContent): void {
+	if (!AUTHWIT_CONTENT_KINDS.has(content.kind)) {
+		throw new Error("Invalid authwit content kind")
+	}
+}
+
+function newCapsule(action: Extract<Action, { kind: "add_capsule" }>): Capsule {
+	return new Capsule(AztecAddress.fromStringUnsafe(action.contract), Fr.fromString(action.storageSlot), action.capsule.map(Fr.fromString))
+}
+
+/** Collect for POST-send recording (pending → reconcile). Build stays PURE:
+ *  no trackAuthwit side-effect, so a fee-estimate or a rejected approval
+ *  records nothing. The post-send tail persists these as pending rows. */
+function pendingAuthwitRecord(
+	account: IAccountContract,
+	messageHash: Fr,
+	content: AuthwitContent,
+): { account: string; hash: string; content: AuthwitContent } {
+	return { account: account.address.toString(), hash: messageHash.toString(), content }
+}
+
+/** The `set_authorized` registry call each public authwit enqueues, paired
+ *  with its history `txCall`. */
+async function buildSetAuthorizedCall(messageHash: Fr): Promise<{ functionCall: FunctionCall; txCall: TxCall }> {
+	const fn = getSetAuthorizedFn()
+	const functionCall = new FunctionCall(
+		fn.name,
+		getAuthRegistryAddress(),
+		await getSetAuthorizedSelector(),
+		fn.functionType,
+		false,
+		fn.isStatic,
+		encodeArguments(fn, [messageHash, true]),
+		fn.returnTypes,
+	)
+	return {
+		functionCall,
+		txCall: { contract: getAuthRegistryAddress().toString(), method: fn.name, args: [messageHash, true] },
+	}
+}
+
+function resolveCallFn(action: Extract<Action, { kind: "call" }>, instances: ResolvedInstances, artifacts: ResolvedArtifacts) {
+	const artifact = requireArtifact(instances, artifacts, action.contract)
+	const fn = findFunctionByName(artifact, action.method)
+	if (!fn) {
+		throw new Error("Method not found")
+	}
+	return fn
+}
+
+function newCallFunctionCall(
+	action: Extract<Action, { kind: "call" }>,
+	fn: NonNullable<ReturnType<typeof findFunctionByName>>,
+	fnSelector: FunctionSelector,
+): FunctionCall {
+	return new FunctionCall(
+		fn.name,
+		AztecAddress.fromStringUnsafe(action.contract),
+		fnSelector,
+		fn.functionType,
+		action.hideSender === true,
+		fn.isStatic,
+		encodeArguments(fn, action.args),
+		fn.returnTypes,
+	)
+}
+
+/** Resolve the ABI UNCONDITIONALLY and bind the dApp-supplied `name` to the
+ *  selector's real function. Resolving only when `action.type`/`isStatic`
+ *  were absent let a dApp supply them to skip the lookup and execute a
+ *  selector that did not match the authorized `name` — scope authorizes the
+ *  name, execution ran the selector. Build the call from ABI truth; never
+ *  trust dApp-supplied type/isStatic/returnTypes for execution metadata. */
+function validateEncodedCallFn(
+	action: Extract<Action, { kind: "encoded_call" }>,
+	fn: Awaited<ReturnType<typeof findFunctionBySelector>>,
+): NonNullable<Awaited<ReturnType<typeof findFunctionBySelector>>> {
+	if (!fn) {
+		throw new Error("Method not found")
+	}
+	if (action.name !== undefined && action.name !== fn.name) {
+		throw new Error(`Scope violation: call name "${action.name}" does not match selector's function "${fn.name}" on ${action.to}`)
+	}
+	action.type = fn.functionType
+	action.isStatic = fn.isStatic
+	return fn
+}
+
+function newEncodedCallFunctionCall(
+	action: Extract<Action, { kind: "encoded_call" }>,
+	fn: NonNullable<Awaited<ReturnType<typeof findFunctionBySelector>>>,
+): FunctionCall {
+	return new FunctionCall(
+		fn.name,
+		AztecAddress.fromStringUnsafe(action.to),
+		FunctionSelector.fromString(action.selector),
+		fn.functionType,
+		action.hideMsgSender === true,
+		fn.isStatic,
+		action.args.map((x) => Fr.fromString(x)),
+		fn.returnTypes ?? [],
+	)
 }

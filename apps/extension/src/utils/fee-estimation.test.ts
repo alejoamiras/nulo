@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { buildFeeEstimate, feeJuicePricingFromUsd, feeToUsd } from "./fee-estimation"
+import { buildFeeEstimate, feeJuicePricingFromUsd, feeToUsd, formatGasBalance } from "./fee-estimation"
 
 const FJ = 10n ** 18n // 1 Fee Juice (18 decimals)
 
@@ -37,6 +37,17 @@ describe("feeToUsd — live pricing only", () => {
 
 	test("no pricing → null", () => {
 		expect(feeToUsd(FJ, undefined)).toBeNull()
+	})
+})
+
+describe("formatGasBalance — per-surface precision", () => {
+	test("defaults to 4 decimals (send fee card: sub-cent amounts carry signal)", () => {
+		expect(formatGasBalance((421239n * 10n ** 14n).toString())).toBe("42.1239")
+	})
+
+	test("maxDecimals=2 truncates (never rounds) — the home card's precision", () => {
+		expect(formatGasBalance((421239n * 10n ** 14n).toString(), 2)).toBe("42.12")
+		expect(formatGasBalance((99n * 10n ** 16n).toString(), 2)).toBe("0.99")
 	})
 })
 

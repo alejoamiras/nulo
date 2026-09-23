@@ -16,9 +16,6 @@ import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
-/** Services */
-import { setSentinel } from "@/utils/core"
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
@@ -31,6 +28,7 @@ import { useNotificationStore } from "@/stores/notification.store"
 import { usePopupStore } from "@/stores/popup.store"
 
 /** Components */
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
 import ImportFullBackupForm from "@/components/composite/import/ImportFullBackupForm.vue"
 import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
 import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
@@ -45,10 +43,6 @@ const router = useRouter()
 
 const type = computed(() => (route.query.type === "recovery" ? "recovery" : "import"))
 const backTo = computed(() => String(route.query.from || "/popup/register"))
-
-const wrapperRef = useTemplateRef("wrapperRef")
-const heroVisible = ref(true)
-let scrollEl = null
 
 // First-time install / deep-link bypass: redirect to onboarding tab when
 // no profile exists AND onboarding hasn't been completed. Shared helper at
@@ -73,7 +67,6 @@ onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 const { hydrateKnownProfile } = useProfileBootstrap()
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: (ms) => waitForProfileActive(appStore, profile.id, ms),
 		recover: async () => (await hydrateKnownProfile())?.id === profile.id && appStore.isLogined,
@@ -99,19 +92,16 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -120,8 +110,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -166,111 +154,82 @@ const onKeydown = (e) => {
 	else if (action === "continue") completeImport(importedProfile.value)
 }
 
-const handleScroll = () => {
-	if (!scrollEl) return
-	heroVisible.value = scrollEl.scrollTop < 40
-}
-
 /** Lifecycle */
-onMounted(async () => {
+onMounted(() => {
 	document.addEventListener("keydown", onKeydown)
-	await nextTick()
-	scrollEl = wrapperRef.value?.wrapper
-	if (!scrollEl) return
-	scrollEl.addEventListener("scroll", handleScroll, { passive: true })
-	handleScroll()
 })
 
 onBeforeUnmount(() => {
 	dispose()
 	document.removeEventListener("keydown", onKeydown)
-	scrollEl?.removeEventListener("scroll", handleScroll)
-	scrollEl = null
 })
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
-		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
-			<SubPageHeader :backTo="backTo">
-				<template #title>
-					<span :class="[$style.collapsing_label, !heroVisible && $style.collapsing_label_visible]">
-						{{ type === "recovery" ? "Recover Profile" : "Import Profile" }}
-					</span>
-				</template>
-			</SubPageHeader>
-
-			<div :class="$style.content">
-				<!-- Hero -->
-				<div :class="$style.hero">
-					<div :class="$style.title_stack">
-						<span :class="$style.title_main">{{ type === "recovery" ? "Recover" : "Import" }}</span>
-						<span :class="$style.title_sub">Profile</span>
-					</div>
-					<div :class="$style.hero_bar" />
-				</div>
-
-				<div :class="$style.name_section">
-					<span :class="$style.section_label">Profile name</span>
-					<div :class="[shakeName && $style.shake]">
-						<Input
-							ref="nameInputRef"
-							v-model="profileName"
-							type="text"
-							placeholder="My Profile"
-							:maxLength="32"
-							:error="!!nameError"
-							:ariaInvalid="!!nameError"
-							sanitize
-							data-testid="import-name-input"
-							@input="handleNameInput"
-						/>
-					</div>
-					<Text v-if="nameError" size="12" color="red" height="150" role="alert">
-						{{ nameError }}
-					</Text>
-				</div>
-
-				<ImportMethodPicker
-					v-if="!selectedImportOption"
-					:type="type"
-					@select="selectedImportOption = $event"
-					@passkey="handleImportPasskey"
-				/>
-
-				<ImportFullBackupForm
-					v-if="selectedImportOption === 'full_backup'"
-					v-model:decryptionPassword="decryptionPassword"
-					v-model:password="password"
-					v-model:repeatedPassword="repeatedPassword"
-					:selectedBackup="selectedBackup"
-					:restoreStatus="restoreStatus"
-					:isRestoreHasErrors="isRestoreHasErrors"
-					:error="error"
-					:isCopied="isCopied"
-					:maxPasswordLength="maxPasswordLength"
-					@pickFile="pickBackupFile"
-					@copyError="handleCopyError"
-					@passwordInput="handlePasswordInput"
-				/>
-
-				<ImportSecretForm
-					v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
-					v-model:seedPhrase="seedPhrase"
-					v-model:privateKey="privateKey"
-					v-model:publicKey="publicKey"
-					v-model:password="password"
-					v-model:repeatedPassword="repeatedPassword"
-					:method="selectedImportOption"
-					:error="error"
-					:maxPasswordLength="maxPasswordLength"
-					@secretInput="handleSecretInput"
-					@passwordInput="handlePasswordInput"
+	<CollapsingHeroLayout
+		:heroMain="type === 'recovery' ? 'Recover' : 'Import'"
+		heroSub="Profile"
+		:collapsingLabel="type === 'recovery' ? 'Recover Profile' : 'Import Profile'"
+		:backTo="backTo"
+		:data-restore-stage="restoreStage"
+	>
+		<div :class="$style.name_section">
+			<span :class="$style.section_label">Profile name</span>
+			<div :class="[shakeName && $style.shake]">
+				<Input
+					ref="nameInputRef"
+					v-model="profileName"
+					type="text"
+					placeholder="My Profile"
+					:maxLength="32"
+					:error="!!nameError"
+					:ariaInvalid="!!nameError"
+					sanitize
+					data-testid="import-name-input"
+					@input="handleNameInput"
 				/>
 			</div>
-		</Flex>
+			<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+				{{ nameError }}
+			</Text>
+		</div>
 
-		<div v-if="selectedImportOption" :class="$style.bottom">
+		<ImportMethodPicker
+			v-if="!selectedImportOption"
+			:type="type"
+			@select="selectedImportOption = $event"
+			@passkey="handleImportPasskey"
+		/>
+
+		<ImportFullBackupForm
+			v-if="selectedImportOption === 'full_backup'"
+			v-model:decryptionPassword="decryptionPassword"
+			v-model:password="password"
+			v-model:repeatedPassword="repeatedPassword"
+			:selectedBackup="selectedBackup"
+			:restoreStatus="restoreStatus"
+			:isRestoreHasErrors="isRestoreHasErrors"
+			:error="error"
+			:isCopied="isCopied"
+			:maxPasswordLength="maxPasswordLength"
+			@pickFile="pickBackupFile"
+			@copyError="handleCopyError"
+			@passwordInput="handlePasswordInput"
+		/>
+
+		<ImportSecretForm
+			v-if="selectedImportOption === 'seed'"
+			v-model:seedPhrase="seedPhrase"
+			v-model:password="password"
+			v-model:repeatedPassword="repeatedPassword"
+			:method="selectedImportOption"
+			:error="error"
+			:maxPasswordLength="maxPasswordLength"
+			@secretInput="handleSecretInput"
+			@passwordInput="handlePasswordInput"
+		/>
+
+		<template v-if="selectedImportOption" #bottom>
 			<Flex direction="column" gap="8">
 				<!-- Full backup CTAs -->
 				<template v-if="selectedImportOption === 'full_backup'">
@@ -308,6 +267,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="completeImport(importedProfile)"
+						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>
 						Continue
@@ -315,6 +275,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="showRestoreErrorLog"
+						data-testid="import-full-backup-view-errors-btn"
 						variant="cta_outline"
 					>
 						View Errors
@@ -329,127 +290,26 @@ onBeforeUnmount(() => {
 					:disabled="!isAllowedToImportBySeedPhrase"
 					variant="cta"
 				>
-					Use Seed Phrase
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'private_key'"
-					@click="handleImportPrivateKey"
-					data-testid="import-private-key-submit-btn"
-					:disabled="!isAllowedToImportByPrivateKey"
-					variant="cta"
-				>
-					Use Plain Key
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'public_key'"
-					@click="handleImportPublicKey"
-					data-testid="import-public-key-submit-btn"
-					:disabled="!isAllowedToImportByPublicKey"
-					variant="cta"
-				>
-					Use Encrypted Key
+					Use Recovery Phrase
 				</Button>
 
 				<Button @click="handleBack" :disabled="restoreStatus === 'progress'" variant="cta_outline">Back</Button>
 			</Flex>
-		</div>
+		</template>
 
-		<!-- Path A: in-page passkey ceremony for import flow. -->
-		<PasskeyCeremonyDialog
-			v-if="ceremonyRequest"
-			:request="ceremonyRequest"
-			@resolve="onCeremonyResolve"
-			@reject="onCeremonyReject"
-		/>
-	</Flex>
+		<template #overlay>
+			<!-- Path A: in-page passkey ceremony for import flow. -->
+			<PasskeyCeremonyDialog
+				v-if="ceremonyRequest"
+				:request="ceremonyRequest"
+				@resolve="onCeremonyResolve"
+				@reject="onCeremonyReject"
+			/>
+		</template>
+	</CollapsingHeroLayout>
 </template>
 
 <style module>
-.page {
-	flex: 1;
-	min-height: 0;
-	background: var(--app-bg);
-}
-
-.wrapper {
-	flex: 1;
-	min-height: 0;
-	overflow: auto;
-	scrollbar-gutter: stable;
-}
-
-.collapsing_label {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	text-decoration: underline;
-	text-decoration-color: var(--nulo-accent);
-	text-decoration-thickness: 2px;
-	text-underline-offset: 4px;
-
-	opacity: 0;
-	pointer-events: none;
-
-	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
-}
-
-.collapsing_label_visible {
-	opacity: 1;
-	pointer-events: auto;
-}
-
-.content {
-	flex: 1;
-	display: flex;
-	flex-direction: column;
-	padding: 0 24px;
-}
-
-.hero {
-	padding: 20px 0;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 1.02;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.hero_bar {
-	width: 32px;
-	height: 2px;
-	background: var(--nulo-accent);
-	margin-top: 10px;
-}
-
-.bottom {
-	flex-shrink: 0;
-	padding: 20px 24px;
-	background: var(--app-bg);
-	border-top: 1px solid var(--nulo-border);
-}
 
 .name_section {
 	display: flex;

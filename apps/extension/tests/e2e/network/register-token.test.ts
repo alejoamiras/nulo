@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup } from "../fixtures/popups"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
+import { approveExecute, waitForPopup } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -20,9 +20,8 @@ const hasConfig = aztecConfig !== undefined
  *     pre-fetched via parseTokenInterface (D7 — anti-phishing surface).
  *   - User Allow → tokenService.addToken with origin "dapp" + dappOrigin set.
  *
- * Drives via the playground rather than the faucet because the playground
- * helpers are mature; the faucet-driven e2e (using FAUCET_DEV_PORT +
- * faucetUrl fixture) is a separate spec.
+ * Drives via the playground rather than the tools app because the playground
+ * helpers are mature.
  *
  * Uses `dappConnectedExtensionWithAccountsCap` so the cap-popup round-trip
  * happens during fixture setup (hookTimeout=300s) rather than during this
@@ -73,14 +72,14 @@ test.skipIf(!hasConfig)(
 		const addressDisplayed = await execPopup.$('[data-testid="register-token-address"]')
 		expect(addressDisplayed).not.toBeNull()
 
-		// Approve and wait for the dApp's promise to settle. Use clickByTestId
-		// (NOT raw page.click) so we wait for the Confirm button to become
-		// enabled — the :disabled gate is initComplete + tokenMetadataLoading
-		// + operations.length, all async. Raw click races the init and the
-		// approve() handler silently no-ops on the missing guards.
-		await clickByTestId(execPopup, "execute-confirm-btn")
+		// Approve via approveExecute: it gates on the confirm button's live
+		// disabled state (initComplete + tokenMetadataLoading + operations, all
+		// async) PLUS the CSS-only loading state, and carries the timeout
+		// diagnostics + timing telemetry the suite standardized — a bare
+		// clickByTestId waits on the same disabled bit but loses all of that.
+		await approveExecute(execPopup)
 		const result = await waitForPgResult(page, "registerToken", seqRegister, 30_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "register-token:result")
 
 		expect(dappConnectedExtensionWithAccountsCap.consoleErrors).toEqual([])
 		expect(dappConnectedExtensionWithAccountsCap.pageErrors).toEqual([])

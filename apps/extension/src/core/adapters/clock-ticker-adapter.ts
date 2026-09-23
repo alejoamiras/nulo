@@ -35,7 +35,7 @@ export class ClockTickerAdapter implements BackgroundTickerPort {
 			try {
 				await onTick()
 			} catch (err) {
-				this.logger?.log(this.logSource, LogLevel.Error, `Ticker error: ${err instanceof Error ? err.message : String(err)}`)
+				this.logger?.log(this.logSource, LogLevel.Error, "Ticker error", err)
 			} finally {
 				running = false
 				if (pending && !cancelled) {

@@ -13,10 +13,12 @@ import { OperationJournalServiceClient } from "@/wallet/services/operation-journ
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
+import { DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { OriginType } from "@/wallet/services/transaction/spec"
+import { createRunFence } from "@/composables/runFence"
 
 /** Utils */
 import { usePrices } from "@/composables/usePrices"
@@ -24,10 +26,12 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
-import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
-import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
+import { buildIncomingCardProps } from "@/utils/received-display"
+import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
+import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
+import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
 
 /** Store */
@@ -89,49 +93,28 @@ const recentActivityRows = computed(() => {
 	// chain here so the math matches the DOM.
 	const journalCount = renderedInFlightOps.value.length
 	const orphanCount = hasOrphanExecutingTask.value ? 1 : 0
-	const fallbackRendered =
-		journalCount === 0 && orphanCount === 0 && (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0)
-	const inFlightCount = journalCount + orphanCount + (fallbackRendered ? 1 : 0)
-	const remaining = Math.max(0, ROW_BUDGET - inFlightCount)
+	const fallbackRendered = journalCount === 0 && orphanCount === 0 && showFallbackAwaiting.value
+	const remaining = remainingRowSlots({ journalCount, orphanCount, fallbackRendered, budget: ROW_BUDGET })
 	if (remaining === 0) return []
 	// Layer-A containment (defense-in-depth): scope tx rows to the active
 	// account + chain and incoming rows to the active account + network, exactly
 	// as `buildActivityRows` does — so both feed surfaces make identical scope
 	// decisions. The store (`syncTransactions`/`onTxAdded`) and the incoming
 	// composable already ingest-filter; a foreign-scope row reaching here would
-	// be a second missed guard, so it is dropped anyway. Tolerant when a scope
-	// field is unknown (mirrors `buildActivityRows`), never "active-now".
-	const activeAccountAddress = appStore.account?.address
-	const activeChainId = appStore.network?.chainId
-	const activeNetworkId = appStore.network?.id
-	const activeProfileId = appStore.profile?.id
-	// Two profiles can derive the same address, so a row naming a profile must
-	// match the one being viewed; rows naming none stay visible.
-	const wrongProfile = (rowProfileId) => activeProfileId !== undefined && rowProfileId !== undefined && rowProfileId !== activeProfileId
-	const rows = []
-	for (const op of recentlyTerminalJournalOps.value) {
-		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt ?? 0, op })
-	}
-	for (const tx of filteredRecentTransactions.value) {
-		if (activeAccountAddress !== undefined && tx.account !== activeAccountAddress) continue
-		if (activeChainId !== undefined && tx.chainId !== activeChainId) continue
-		if (wrongProfile(tx.profileId)) continue
-		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
-	}
-	for (const inc of incomingTransfers.value) {
-		// Token-scoped views (token-detail page) only show incoming for the
-		// active token. The home view shows all.
-		if (props.token && inc.tokenId !== props.token.id) continue
-		if (activeAccountAddress !== undefined && inc.accountAddress !== activeAccountAddress) continue
-		if (activeNetworkId !== undefined && inc.networkId !== activeNetworkId) continue
-		if (wrongProfile(inc.profileId)) continue
-		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
-		// Fall back to discoveredAt for legacy records or when PXE didn't
-		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
-		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
-	}
-	rows.sort((a, b) => b.sortKey - a.sortKey)
+	// be a second missed guard, so it is dropped anyway. Every input is read
+	// HERE (inside the computed) so its dependency tracking is unchanged.
+	const rows = buildRecentActivityRows({
+		journalOps: recentlyTerminalJournalOps.value,
+		transactions: filteredRecentTransactions.value,
+		incomingTransfers: incomingTransfers.value,
+		scope: {
+			accountAddress: appStore.account?.address,
+			chainId: appStore.network?.chainId,
+			networkId: appStore.network?.id,
+			profileId: appStore.profile?.id,
+		},
+		token: props.token,
+	})
 	return rows.slice(0, remaining)
 })
 const isTokenAwaitingTx = computed(() => {
@@ -142,6 +125,7 @@ const isTokenAwaitingTx = computed(() => {
 const awaitingAccountTxs = computed(() => {
 	return appStore.awaitingTransactions.filter((t) => t.account === appStore.account?.address)
 })
+const showFallbackAwaiting = computed(() => (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0))
 
 /** Unified in-flight task: covers both dapp-initiated (ExecuteOperation) and
  *  UI-initiated (Transfer) sends. The backend emits task+subtasks with progress
@@ -149,13 +133,35 @@ const awaitingAccountTxs = computed(() => {
 const executingTask = ref(null)
 const executingSubtasks = ref([])
 
+/** PER-LOADER scope fences: a newer trigger of the SAME loader supersedes its
+ *  older in-flight run (A→B→A cannot revalidate a stale run — captured-equality
+ *  alone would), while independent loaders never cross-cancel — one shared
+ *  fence let a standalone journal reconnect silently kill parked token/task
+ *  loads AFTER the switch-clear, starving the feed until an unrelated event.
+ *  The scope watcher begins all three so its clear + reloads form one
+ *  supersede unit per loader. */
+const journalFence = createRunFence()
+const taskFence = createRunFence()
+const tokensFence = createRunFence()
+
 /** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
  *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
 const tokens = ref([])
 const tokenService = new TokenServiceClient()
-async function loadTokens() {
+async function loadTokens(isCurrent = tokensFence.begin()) {
 	if (!appStore.profile || !appStore.network) return
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	let fetched
+	try {
+		fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	} catch (error) {
+		// A port that cannot open rejects at once. The map is a label lookup: keep what we have so a
+		// mount-time failure cannot abort the rest of mount, and a fire-and-forget reload cannot go unhandled.
+		console.debug("recent activity token lookup failed", { error })
+		return
+	}
+	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
+	if (!isCurrent()) return
+	tokens.value = fetched
 }
 
 // Keep the local tokens map fresh as new tokens are added during this
@@ -163,7 +169,12 @@ async function loadTokens() {
 // render with the "Token" placeholder until the user re-opens the
 // extension: the tokenById lookup misses because `tokens` was only
 // populated once at mount.
-tokenService.onTokenAdded.add(loadTokens)
+// Wrapped: EventHandler invokes callbacks WITH the payload — a bare
+// registration would feed the TokenInfo object into loadTokens' isCurrent
+// default parameter and TypeError after the first await (the listener dies).
+tokenService.onTokenAdded.add(() => {
+	loadTokens()
+})
 
 function tokenById(id) {
 	return tokens.value.find((t) => t.id === id)
@@ -241,16 +252,19 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
 })
+/** Account mode only: whether the active network's incoming scan has stalled. Same client as the
+ *  receipts above — the parent owns its connect/disconnect. */
+const syncHealth = useIncomingSyncHealth({
+	client: incomingTransferService,
+	getScope: () =>
+		!props.token && appStore.profile?.id && appStore.network?.id
+			? { profileId: appStore.profile.id, networkId: appStore.network.id }
+			: undefined,
+})
+const showStalledLine = computed(() => !props.token && syncHealth.stalled.value)
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
-	return {
-		tokenSymbol: token?.symbol || "Token",
-		amountRaw: inc.amountRaw,
-		tokenDecimals: token?.decimals || 0,
-		txHash: inc.txHash,
-		amountFiat: token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
-		receivedLabel: receivedLabel(resolveReceivedType(inc)),
-	}
+	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
 }
 function handleSelectIncoming(inc) {
 	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
@@ -275,6 +289,9 @@ const executionService = new ExecutionServiceClient()
  *  correlation has no such fragility. */
 const pendingCancelJobIds = ref(new Set())
 const onCancelInFlight = buildCancelHandler(executionService, (jobId) => pendingCancelJobIds.value.add(jobId))
+
+const dappInteractionService = new DappInteractionServiceClient()
+const onFocusInFlight = buildFocusHandler(dappInteractionService)
 
 /** Shared account / network / token scoping for journal-record filters.
  *  Same rules apply to in-flight and recently-terminal surfaces. */
@@ -430,6 +447,9 @@ function journalTerminalCardProps(op) {
  *  which op the subtask belongs to. */
 function cardSubtitleFor(op) {
 	if (!op) return "Processing..."
+	// Backend evidence outranks the task label: the label only says a proof is
+	// being generated, the journal says where.
+	if (op.progress?.stage === "proving" && op.progress.backend) return stageSubtitle("proving", op.progress.backend)
 	if (executingTask.value) {
 		const account = appStore.account?.address
 		if (isMatchingTask(executingTask.value, op, account)) {
@@ -588,14 +608,16 @@ journalService.onOperationDeleted.add(onJournalDeleted)
  * `subscribeWithSnapshot`). The Phase 2 reaper is what generates those
  * terminal transitions during SW down windows.
  */
-async function resnapshotJournal() {
+async function resnapshotJournal(isCurrent = journalFence.begin()) {
 	try {
-		// Captured-account guard: snapshot the account we FETCH for and drop the
-		// result if the active account changed during the await (A→B, A→B→A). A late
-		// A snapshot must never clobber B's journal view.
+		// Generation guard (not captured-equality): equality re-validates on
+		// A→B→A, letting the ABA run's stale snapshot land. Every trigger is a
+		// run on the shared scope fence — a standalone call (mount, reconnect,
+		// journal event) begins its own run; the scope watcher passes ITS run
+		// so the clear + both reloads share one supersede unit.
 		const captured = appStore.account?.address
 		const ops = await journalService.getOperations({ accountAddress: captured })
-		if (captured !== appStore.account?.address) return
+		if (!isCurrent() || captured !== appStore.account?.address) return
 		journalOps.value = ops.sort((a, b) => b.createdAt - a.createdAt)
 		// v4 cancel-dupe (snapshot path): catches close-popup-mid-cancel-and-
 		// reopen + SW disconnect mid-cancel. Uses 30s window to avoid
@@ -622,6 +644,11 @@ function isExecutingTask(task) {
 	// (matches the active account AND, in token-mode, the page's token).
 	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
 		if (task.content.senderAddress !== appStore.account?.address) return false
+		// Network scoping when the task carries it: same-address profiles/networks
+		// otherwise render a foreign network's in-flight card (TaskService clears
+		// on PROFILE change only). Tasks minted before the field keep the
+		// address-only semantics.
+		if (task.content.networkId !== undefined && task.content.networkId !== appStore.network?.id) return false
 		if (props.token && task.content.tokenId !== props.token.id) return false
 		return true
 	}
@@ -678,12 +705,12 @@ const handleSelectTerminal = (op) => {
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
  *  the new account's view. `isExecutingTask` already fails closed on uncorrelated
  *  dApp tasks and scopes UI transfers by `senderAddress`. */
-async function loadExecutingTaskSnapshot() {
+async function loadExecutingTaskSnapshot(isCurrent = taskFence.begin()) {
 	const captured = appStore.account?.address
 	try {
 		// Newest-first replay — otherwise concurrent tasks could surface the older one.
 		const allTasks = await taskService.getTasks()
-		if (captured !== appStore.account?.address) return
+		if (!isCurrent() || captured !== appStore.account?.address) return
 		const matching = allTasks.filter((t) => isExecutingTask(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
 		const activeExec = matching[0]
 		if (activeExec) {
@@ -700,30 +727,53 @@ async function loadExecutingTaskSnapshot() {
  *  feed root), so a switch A→B must synchronously clear what B could SEE of A's
  *  progress, then reload for B. `flush: 'sync'` clears BEFORE Vue paints the new
  *  account — a default (post-nextTick) watcher would leave a one-tick window
- *  rendering A's journal/task rows under B. The reload is captured-account
- *  guarded (see `resnapshotJournal` / `loadExecutingTaskSnapshot`). Keyed on
- *  address so a rename (same address) does not reset the feed. Incoming transfers
- *  are reset separately by `useIncomingTransfers`' own sync scope watcher. */
+ *  rendering A's journal/task rows under B. Keyed on the FULL scope triple
+ *  (profile, network, address): two profiles restored from one phrase share an
+ *  address, so an address-only key no-oped on a same-address switch and left
+ *  the predecessor's progress card rendering. The key COLLAPSES to "" while any
+ *  part is missing (bare interpolation would stringify undefined into a
+ *  never-falsy key, killing the not-ready guard and firing throwaway RPCs on
+ *  every bootstrap transition). A rename (same triple) still does not reset.
+ *  Incoming transfers are reset separately by `useIncomingTransfers`' own sync
+ *  scope watcher. */
+const scopeTripleKey = () => {
+	const p = appStore.profile?.id
+	const n = appStore.network?.id
+	const a = appStore.account?.address
+	return p && n && a ? `${p} ${n} ${a}` : ""
+}
 watch(
-	() => appStore.account?.address,
+	scopeTripleKey,
 	(nv, ov) => {
 		if (nv === ov) return
+		const journalRun = journalFence.begin()
+		const taskRun = taskFence.begin()
+		const tokensRun = tokensFence.begin()
 		journalOps.value = []
 		executingTask.value = null
 		executingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
+		tokens.value = []
 		if (!nv) return
-		resnapshotJournal()
-		loadExecutingTaskSnapshot()
+		resnapshotJournal(journalRun)
+		loadExecutingTaskSnapshot(taskRun)
+		loadTokens(tokensRun)
 	},
 	{ flush: "sync" },
+)
+
+// Token mode is part of the scope: leaving it changes neither profile nor network, yet the account feed
+// it reveals has never fetched its health.
+watch(
+	() => `${props.token ? "token" : "account"}|${appStore.profile?.id ?? ""}|${appStore.network?.id ?? ""}`,
+	() => void syncHealth.refresh(),
 )
 
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
  *  captured-account guards at the STATE level (a render filter alone can mask a
  *  containment gap). Placed after the declarations it references (temporal dead
  *  zone) rather than in the macro block. */
-defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows })
+defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows, tokens })
 
 onMounted(async () => {
 	await loadTokens()
@@ -743,6 +793,7 @@ onMounted(async () => {
 	} catch {
 		// Non-fatal; the widget will still render outgoing rows.
 	}
+	void syncHealth.refresh()
 
 	// Snapshot the active account's executingTask (captured-account guarded).
 	await loadExecutingTaskSnapshot()
@@ -757,17 +808,20 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	journalService.disconnect()
 	executionService.disconnect()
+	dappInteractionService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
 	incomingPrices.dispose()
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
+	syncHealth.dispose()
 })
 </script>
 
 <template>
 	<Flex
-		v-if="token && (executingTask || showJournalAwaiting || isTokenAwaitingTx || recentActivityRows.length)"
+		v-if="executingTask || showJournalAwaiting || showFallbackAwaiting || recentActivityRows.length || showStalledLine"
+		:key="token ? 'token' : 'account'"
 		direction="column"
 		gap="16"
 		data-testid="activity-feed-root"
@@ -777,6 +831,20 @@ onBeforeUnmount(() => {
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
 			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
 		</Flex>
+
+		<div v-if="showStalledLine" :class="$style.stalled_line" data-testid="incoming-sync-stalled">
+			<span>Older incoming transfers may be missing</span>
+			<span aria-hidden="true">·</span>
+			<button
+				type="button"
+				:class="$style.stalled_retry"
+				:disabled="syncHealth.retrying.value"
+				data-testid="incoming-sync-retry"
+				@click="syncHealth.retry()"
+			>
+				Retry
+			</button>
+		</div>
 
 		<div :class="$style.list">
 			<!-- One awaiting card per in-flight journal op, oldest-first by
@@ -798,7 +866,9 @@ onBeforeUnmount(() => {
 				:cancellable="true"
 				:jobId="op.id"
 				:stage="op.progress?.stage ?? null"
+				:backend="op.progress?.backend ?? null"
 				@cancel="onCancelInFlight"
+				@focus="onFocusInFlight"
 			/>
 			<!-- Orphan executingTask fallback: an active TaskService entry
 			     with no matching journal record (rare; legacy paths /
@@ -813,62 +883,9 @@ onBeforeUnmount(() => {
 				:amount="executingAmount"
 				:amountSymbol="executingAmountSymbol"
 			/>
-			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && isTokenAwaitingTx" />
+			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && showFallbackAwaiting" />
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
-			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
-				<TransactionIncomingCard
-					v-else-if="row.type === 'incoming'"
-					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectIncoming(row.inc)"
-				/>
-				<TransactionTerminalCard
-					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
-					v-bind="journalTerminalCardProps(row.op)"
-					@click="handleSelectTerminal(row.op)"
-				/>
-			</template>
-		</div>
-	</Flex>
-	<Flex
-		v-else-if="!token && (executingTask || showJournalAwaiting || recentActivityRows.length || awaitingAccountTxs.length)"
-		direction="column"
-		gap="16"
-		data-testid="activity-feed-root"
-		:data-active-account="appStore.account?.address"
-	>
-		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
-			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
-		</Flex>
-
-		<div :class="$style.list">
-			<TransactionAwaitingCard
-				v-for="op in renderedInFlightOps"
-				:key="`awaiting:${op.id}`"
-				:title="cardTitleFor(op)"
-				:subtitle="cardSubtitleFor(op)"
-				:icon="cardIconFor(op)"
-				:originLabel="cardOriginLabelFor(op)"
-				:amount="cardAmountFor(op)"
-				:amountSymbol="cardAmountSymbolFor(op)"
-				:transferTypeLabel="cardTransferTypeFor(op)"
-				:cancellable="true"
-				:jobId="op.id"
-				:stage="op.progress?.stage ?? null"
-				@cancel="onCancelInFlight"
-			/>
-			<TransactionAwaitingCard
-				v-if="hasOrphanExecutingTask"
-				:title="executingProgressTitle"
-				:subtitle="executingProgressSubtitle"
-				:icon="isUiTransfer ? 'arrow-narrow-up-right' : 'zap'"
-				:originLabel="executingOriginLabel"
-				:amount="executingAmount"
-				:amountSymbol="executingAmountSymbol"
-			/>
-			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && awaitingAccountTxs.length" />
 			<template v-for="row in recentActivityRows" :key="row.key">
 				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 				<TransactionIncomingCard
@@ -927,6 +944,45 @@ onBeforeUnmount(() => {
 	}
 }
 
+.stalled_line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+
+	padding: 8px 12px;
+	border: 1px dashed var(--nulo-border);
+
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--nulo-outline);
+}
+
+.stalled_retry {
+	padding: 0;
+	border: 0;
+	background: none;
+
+	font: inherit;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+	cursor: pointer;
+
+	transition: color 0.2s var(--bezier);
+
+	&:hover:not(:disabled),
+	&:focus-visible {
+		color: var(--nulo-accent);
+	}
+
+	&:disabled {
+		cursor: default;
+		opacity: 0.5;
+	}
+}
+
 .list {
 	display: flex;
 	flex-direction: column;
@@ -934,30 +990,14 @@ onBeforeUnmount(() => {
 }
 
 .empty_state {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
-
-	text-align: center;
+	composes: empty_state from "./list-empty.module.css";
 }
 
 .empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: empty_headline from "./list-empty.module.css";
 }
 
 .empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
+	composes: empty_sub from "./list-empty.module.css";
 }
 </style>

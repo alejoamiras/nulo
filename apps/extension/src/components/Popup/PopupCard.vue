@@ -7,9 +7,23 @@ const props = defineProps({
 	displaceIdx: {
 		type: Number,
 	},
+	/** Size to the content instead of the fullscreen setting; the handle still expands it for this open. */
+	fit: {
+		type: Boolean,
+		default: false,
+	},
 })
 
-const showFullscreen = useFullscreenPopupSetting()
+const { showFullscreen, start, dispose } = useFullscreenPopupSetting()
+const expanded = ref(false)
+const fills = computed(() => (props.fit ? expanded.value : showFullscreen.value))
+const toggle = () => {
+	if (props.fit) expanded.value = !expanded.value
+	else showFullscreen.value = !showFullscreen.value
+}
+
+onMounted(start)
+onBeforeUnmount(dispose)
 </script>
 
 <template>
@@ -19,10 +33,10 @@ const showFullscreen = useFullscreenPopupSetting()
 		:class="[$style.wrapper, large && $style.large, displaceIdx > 1 && $style.displace]"
 		:style="{
 			'--displace': displaceIdx - 1,
-			flex: showFullscreen ? '10' : null,
+			flex: fills ? '10' : null,
 		}"
 	>
-		<div @click="showFullscreen = !showFullscreen" :class="$style.handle_zone">
+		<div @click="toggle" :class="$style.handle_zone">
 			<div :class="$style.bar" />
 		</div>
 

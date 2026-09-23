@@ -35,12 +35,12 @@ function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	}
 }
 
-// Icon-name regression pin (Phase 1 codex/opus audit).
+// Icon-name regression pin.
 // v0.15.3 shipped invented icon names (`circle-minus`, `refresh-cw`) that
-// don't exist in `assets/icons.json`. Icon.vue silently rendered empty SVG.
+// don't exist in the `@nulo/design` icon set. Icon.vue silently rendered empty SVG.
 // These tests assert the canonical names actually present in the icon set,
 // so a future regression to an invented name fails CI.
-describe("journalTerminalDisplay — icon names match assets/icons.json", () => {
+describe("journalTerminalDisplay — icon names exist in the @nulo/design icon set", () => {
 	test("cancelled → `cancel`", () => {
 		const op = recordWith({ progress: { stage: "cancelled" }, error: null })
 		expect(journalTerminalDisplay(op)?.icon).toBe("cancel")
@@ -130,6 +130,21 @@ describe("journalTerminalDisplay — Failed state (catch-all + per-kind subtitle
 	test("error.kind === 'popup_bound' → generic 'Transaction failed'", () => {
 		const op = recordWith({ error: { kind: "popup_bound", message: "...", normalizedRaw: null } })
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Transaction failed")
+	})
+
+	test("(N-15) error.kind === 'duplicate_initialization' → the honest init-race subtitle", () => {
+		const op = recordWith({ error: { kind: "duplicate_initialization", message: "...", normalizedRaw: null } })
+		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized — retry after sync")
+	})
+
+	test("error.kind === 'session_ended' → 'Stopped — wallet was locked'", () => {
+		const op = recordWith({ error: { kind: "session_ended", message: "...", normalizedRaw: null } })
+		expect(journalTerminalDisplay(op)).toEqual({
+			state: "failed",
+			subtitle: "Stopped — wallet was locked",
+			icon: "close-circle",
+			color: "red",
+		})
 	})
 
 	test("error.kind === 'transfer' (executeTransfer catch-all) → generic 'Transaction failed'", () => {

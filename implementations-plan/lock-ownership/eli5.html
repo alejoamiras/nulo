@@ -1,0 +1,39 @@
+<title>Lock Ownership</title>
+<style>
+  :root { --bg: #faf9f6; --ink: #1c1917; --muted: #6b6560; --accent: #b45309; --card: #ffffff; --line: #e7e2da; }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #161412; --ink: #ece8e2; --muted: #a39c93; --accent: #f59e0b; --card: #201d1a; --line: #35302a; }
+  }
+  :root[data-theme="dark"] { --bg: #161412; --ink: #ece8e2; --muted: #a39c93; --accent: #f59e0b; --card: #201d1a; --line: #35302a; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; } h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; color: var(--accent); }
+  p, li { color: var(--ink); } .sub { color: var(--muted); margin-top: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  code { background: var(--line); padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+  a { color: var(--accent); }
+</style>
+
+<h1>Lock Ownership</h1>
+<p class="sub">Batch 4 of the audit remediation — three concurrency fixes (N-11, N-12, N-17). Plan of record: <a href="plan.md">plan.md</a> (rev 4, gate-approved after a 3-round dual audit).</p>
+
+<div class="card">
+<h2>The wristband problem (N-11 — the launch gate)</h2>
+<p>Every wallet service shares one kind of mutex. If a job holds it longer than 5 minutes, a watchdog assumes it crashed and lets the next job in. But the old holder, when it finally finishes, still "returns" the lock — releasing the NEW holder's turn to a third job. Two jobs then mutate the same state believing they're alone. And one hold is <em>designed</em> to take up to 30 minutes: deleting a network drains behind an in-flight proof.</p>
+<p><strong>Fix:</strong> every acquisition now gets an unforgeable wristband (a ticket). Returning the lock without the CURRENT wristband does nothing. The watchdog carries its own wristband too, and the network service's lock simply turns the watchdog off — waiting your turn behind a legitimate 30-minute job is correct, being let in halfway through it is not.</p>
+</div>
+
+<div class="card">
+<h2>The hotel-key problem (N-12)</h2>
+<p>When your session expires, a background cleanup deletes its stored key and cancels its auto-lock timer. But if you unlock again while that cleanup is mid-flight, the stale cleanup could delete the NEW session's key and cancel the NEW session's timer — leaving a wallet that never auto-locks.</p>
+<p><strong>Fix:</strong> session open/close artifact operations now serialize through a private mutex, and opening "commits" by bumping a generation counter as its <em>last</em> act. A stale cleanup re-checks the counter inside the mutex: if a newer session committed, it stands down entirely.</p>
+</div>
+
+<div class="card">
+<h2>The stale-shelf problem (N-17)</h2>
+<p>The incoming-transfer scanner checks "is my world still valid?" once when it starts writing a note, but then waits on a slow network call before the actual writes. If the world changed during the wait (token deleted, profile switched), it wrote anyway — resurrecting purged records.</p>
+<p><strong>Fix:</strong> re-check the validity counter right after each slow wait, before anything is written.</p>
+</div>
+
+<h2>How we know it works</h2>
+<p>The audit's two red proof tests are adopted as permanent regression tests (they fail on the old code, pass on the fix), plus pins chosen specifically so that quietly reverting any mechanism turns something red — including a composed test that drives the watchdog handoff and the epoch re-check together, exactly like the production hazard.</p>

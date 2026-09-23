@@ -7,7 +7,6 @@ const accountInstance = {
 vi.mock("@/utils/core", () => ({
 	managers: { account: undefined as unknown },
 	initTransactionService: vi.fn(),
-	setSentinel: vi.fn(async () => undefined),
 }))
 
 vi.mock("@/utils/lastActiveProfile", () => ({
@@ -15,7 +14,6 @@ vi.mock("@/utils/lastActiveProfile", () => ({
 }))
 
 vi.mock("@/wallet/services/account/client", () => ({
-	// biome-ignore lint/complexity/useArrowFunction: vitest 4 needs a function expression for `new`-instantiated mocks
 	AccountServiceClient: vi.fn(function () {
 		return accountInstance
 	}),
@@ -25,8 +23,9 @@ vi.mock("@/wallet/utils", () => ({
 	sleep: vi.fn(async () => undefined),
 }))
 
-import { initTransactionService, setSentinel } from "@/utils/core"
+import { initTransactionService, managers } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { AccountServiceClient } from "@/wallet/services/account/client"
 import { activateCreatedProfile, makeCreateKeydownHandler, shouldHandleEnter } from "./new-profile-helpers"
 
 type AppStoreLike = Parameters<typeof activateCreatedProfile>[1]["appStore"]
@@ -49,6 +48,7 @@ function makeAppStore(overrides: Partial<Record<string, unknown>> = {}): AppStor
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	managers.account = undefined as never
 	// Promise-form `get` returning no migration marker so the storage facade's
 	// barrier check passes straight through; `onChanged` for its listener path.
 	vi.stubGlobal("chrome", {
@@ -60,7 +60,7 @@ beforeEach(() => {
 })
 
 describe("activateCreatedProfile (popup manual sequence)", () => {
-	test("runs the sequence in order: setLastActiveProfileId -> getAccounts -> storage -> setSentinel -> route", async () => {
+	test("runs the sequence in order: setLastActiveProfileId -> getAccounts -> storage -> route", async () => {
 		const router = { push: vi.fn() } as unknown as RouterLike
 		const appStore = makeAppStore()
 		await activateCreatedProfile({ id: "p1" }, { appStore, router })
@@ -69,17 +69,32 @@ describe("activateCreatedProfile (popup manual sequence)", () => {
 		expect(accountInstance.getAccounts).toHaveBeenCalledWith("p1", "1", true)
 		expect(storageSet).toHaveBeenCalledWith({ "nulo:ui:activeAccount": "0xACC" })
 		expect(initTransactionService).toHaveBeenCalled()
-		expect(setSentinel).toHaveBeenCalled()
 		expect(router.push).toHaveBeenCalledWith("/popup/general")
 
 		// Ordering invariants (codex final #2): the active-profile id is persisted
-		// BEFORE accounts are loaded, and the session is opened BEFORE navigating.
+		// BEFORE accounts are loaded, and the active-account storage write lands
+		// BEFORE navigating (the durable state a reopened popup reads).
 		const setIdOrder = (setLastActiveProfileId as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		const getAccountsOrder = accountInstance.getAccounts.mock.invocationCallOrder[0]
-		const setSentinelOrder = (setSentinel as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+		const storageOrder = storageSet.mock.invocationCallOrder[0]
 		const pushOrder = (router.push as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		expect(setIdOrder).toBeLessThan(getAccountsOrder)
-		expect(setSentinelOrder).toBeLessThan(pushOrder)
+		expect(storageOrder).toBeLessThan(pushOrder)
+	})
+
+	test("keeps an account client the wallet already holds instead of abandoning it connected", async () => {
+		const existing = { getAccounts: vi.fn(async () => [{ address: "0xEXISTING", index: 0, visible: true }]) }
+		managers.account = existing as never
+		const router = { push: vi.fn() } as unknown as RouterLike
+		const appStore = makeAppStore()
+
+		await activateCreatedProfile({ id: "p1" }, { appStore, router })
+
+		expect(AccountServiceClient).not.toHaveBeenCalled()
+		expect(managers.account).toBe(existing)
+		expect(existing.getAccounts).toHaveBeenCalledWith("p1", "1", true)
+		expect(appStore.accounts).toEqual([{ address: "0xEXISTING", index: 0, visible: true }])
+		expect(router.push).toHaveBeenCalledWith("/popup/general")
 	})
 
 	test("throws 'Network not set' and does not load accounts or route when network is missing", async () => {
@@ -87,7 +102,6 @@ describe("activateCreatedProfile (popup manual sequence)", () => {
 		const appStore = makeAppStore({ network: undefined })
 		await expect(activateCreatedProfile({ id: "p1" }, { appStore, router })).rejects.toThrow("Network not set")
 		expect(accountInstance.getAccounts).not.toHaveBeenCalled()
-		expect(setSentinel).not.toHaveBeenCalled()
 		expect(router.push).not.toHaveBeenCalled()
 	})
 })

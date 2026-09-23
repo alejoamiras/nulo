@@ -296,6 +296,34 @@ describe("useEntityCrud", () => {
 		scope.stop()
 	})
 
+	it("refresh({clear:true}) empties synchronously and a FAILED refetch leaves the list empty, not stale", async () => {
+		// Scope-switch semantics: the foreign scope's rows must vanish before any
+		// await, and a failed refetch must not resurrect them (rendering another
+		// profile's rows indefinitely was the reviewed failure mode).
+		const fetch = vi
+			.fn(async (): Promise<Item[]> => [])
+			.mockResolvedValueOnce([{ id: "foreign", name: "F" }])
+			.mockRejectedValueOnce(new Error("switch refetch failed"))
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useEntityCrud<Item>({
+				fetch,
+				added,
+				updated,
+				deleted,
+			}),
+		)!
+		await flush()
+		expect(result.entities.value.map((e) => e.id)).toEqual(["foreign"])
+
+		const refreshing = result.refresh({ clear: true })
+		expect(result.entities.value).toEqual([]) // synchronous, pre-await
+		await refreshing
+		expect(result.entities.value).toEqual([]) // failed fetch does NOT restore
+		expect(result.error.value).toBeInstanceOf(Error)
+		scope.stop()
+	})
+
 	it("throws a clear error if no id field and no identity provided", async () => {
 		const scope = effectScope()
 		const onError = vi.fn()
@@ -314,5 +342,82 @@ describe("useEntityCrud", () => {
 		// fallback by calling the underlying default at a unit level via update flow.
 		expect(() => result.entities.value).not.toThrow() // still populated by fetch
 		scope.stop()
+	})
+
+	describe("accept — live-scope filter (incremental)", () => {
+		it("an out-of-scope add is ignored; an in-scope add splices", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "A" }],
+					added,
+					accept: (e) => e.name.startsWith("scope:"),
+				}),
+			)!
+			await flush()
+
+			added.invoke({ id: "x", name: "foreign" })
+			expect(result.entities.value.map((e) => e.id)).toEqual(["a"])
+
+			added.invoke({ id: "b", name: "scope:B" })
+			expect(result.entities.value.map((e) => e.id)).toEqual(["a", "b"])
+			scope.stop()
+		})
+
+		it("an out-of-scope update neither patches nor appends", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "scope:A" }],
+					updated,
+					accept: (e) => e.name.startsWith("scope:"),
+				}),
+			)!
+			await flush()
+
+			updated.invoke({ id: "a", name: "foreign-rename" })
+			updated.invoke({ id: "z", name: "foreign-new" })
+			expect(result.entities.value).toEqual([{ id: "a", name: "scope:A" }])
+			scope.stop()
+		})
+
+		it("deletes stay UNFILTERED — subtractive events apply regardless of scope", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "scope:A" }],
+					deleted,
+					accept: () => false,
+				}),
+			)!
+			await flush()
+
+			deleted.invoke({ id: "a", name: "whatever" })
+			expect(result.entities.value).toEqual([])
+			scope.stop()
+		})
+
+		it("accept is ignored in resync mode (the re-fetch is the filter)", async () => {
+			let calls = 0
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => {
+						calls += 1
+						return [{ id: `fetch-${calls}`, name: "F" }]
+					},
+					added,
+					mode: "resync",
+					accept: () => false,
+				}),
+			)!
+			await flush()
+
+			added.invoke({ id: "x", name: "anything" })
+			await flush()
+			expect(calls).toBe(2)
+			expect(result.entities.value.map((e) => e.id)).toEqual(["fetch-2"])
+			scope.stop()
+		})
 	})
 })

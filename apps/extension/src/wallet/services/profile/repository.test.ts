@@ -6,7 +6,7 @@
  * locked re-verify" contract via a stubbed random source.
  */
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { beforeEach, describe, expect, test } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { Profile } from "./spec"
 import { PROFILE_STORAGE_ROOT, ProfileRepository } from "./repository"
@@ -23,8 +23,12 @@ const samplePasswordProfile = (id: string): Profile => ({
 	name: "test",
 	type: "password",
 	pxeGeneration: "gen-test",
+	dekSealed: "ZGVrLXNlYWxlZA==",
+	walletFingerprint: "fp-test",
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
+	entropy: "ZW50cm9weQ==",
+	envelopeMac: "bWFj",
 })
 
 describe("ProfileRepository", () => {

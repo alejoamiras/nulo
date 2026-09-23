@@ -4,6 +4,7 @@ import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileNameField } from "@/composables/useProfileNameField"
 import { managers } from "@/utils/core"
 import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
+import { isNewPasswordValid, newPasswordHint } from "@/utils/password"
 
 /**
  * Shared orchestration for the profile-CREATE flow, consumed by both the popup
@@ -47,22 +48,15 @@ export function useProfileCreateFlow(opts: UseProfileCreateFlowOptions) {
 	const repeatedPassword = ref("")
 	const isCreating = ref(false)
 
-	const strengthHint = computed(() => {
-		if (authMethod.value === "passkey") return ""
-		if (!password.value || password.value.length < 8) return "At least 8 characters"
-		if (password.value !== repeatedPassword.value) return "Passwords don't match"
-		if (password.value.length > 24) return "Long enough. Don't forget it."
-		return "Strong password"
-	})
+	const strengthHint = computed(() =>
+		authMethod.value === "passkey" ? "" : newPasswordHint(password.value ?? "", repeatedPassword.value ?? ""),
+	)
 
 	// Name check is excluded on purpose — name is validated at submit time so an
 	// empty name shakes the input instead of silently disabling the button.
-	const isAllowedToContinue = computed(() => {
-		if (authMethod.value === "passkey") return true
-		if (!password.value || password.value.length < 8) return false
-		if (password.value !== repeatedPassword.value) return false
-		return true
-	})
+	const isAllowedToContinue = computed(
+		() => authMethod.value === "passkey" || isNewPasswordValid(password.value ?? "", repeatedPassword.value ?? ""),
+	)
 
 	// Runs the passkey-create ceremony in-page, then creates the profile via the
 	// SW. Retries ONCE on ProfileIdConflictError via the shared helper.

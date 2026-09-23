@@ -1,4 +1,7 @@
 <script setup>
+/** Composables */
+import { useToast } from "@/composables/toast"
+
 /** Utils */
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
@@ -9,6 +12,8 @@ import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
+
+const { openToast } = useToast()
 
 const router = useRouter()
 
@@ -27,10 +32,34 @@ const displaceIdx = computed(() => {
 	return popupStore.len - popupStore.popups.select_profile?.order
 })
 
+// B-09: serialize switches — two quick taps on different rows would otherwise
+// both await `commitScopeChange` and race, with whichever's `refreshInFlight`
+// resolved first winning rather than the last tap. Drop re-entry while a switch
+// is in flight.
+const isSwitching = ref(false)
+
 const handleSelectProfile = async (profile) => {
-	appStore.profile = profile
-	await setLastActiveProfileId(profile.id)
-	emit("onClose")
+	if (isSwitching.value) return
+	isSwitching.value = true
+	try {
+		// A profile switch changes the active scope exactly like an account or
+		// network switch, and a send in flight is still reading the current scope as
+		// it builds and proves. Route through the same guard the other scope-mutating
+		// call sites use (AccountsPopup, NewAccountPopup, …) instead of assigning
+		// `appStore.profile` directly, and persist the last-active id only once the
+		// switch is actually admitted.
+		const switched = await appStore.commitScopeChange(() => {
+			appStore.profile = profile
+		})
+		if (!switched) {
+			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			return
+		}
+		await setLastActiveProfileId(profile.id)
+		emit("onClose")
+	} finally {
+		isSwitching.value = false
+	}
 }
 
 const handleImportProfile = () => {
@@ -143,24 +172,5 @@ watch(
 
 	color: var(--txt-primary);
 	margin: 0;
-}
-
-.token {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px 16px 12px 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border: 1px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
 }
 </style>

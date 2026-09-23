@@ -1,0 +1,219 @@
+<title>Orphaned Balances</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --surface: #ffffff;
+    --ink: #1c2321;
+    --muted: #5c6662;
+    --line: #dcdad2;
+    --accent: #177e6d;        /* verdigris — live / canonical */
+    --accent-soft: #e2f0ec;
+    --stale: #b4552a;         /* rust — orphan / stale */
+    --stale-soft: #f6e7dd;
+    --code-bg: #eeece6;
+    --shadow: 0 1px 3px rgba(28,35,33,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16201d;
+      --surface: #1d2925;
+      --ink: #e8ece9;
+      --muted: #93a09a;
+      --line: #31403a;
+      --accent: #4cc2ab;
+      --accent-soft: #1e3a34;
+      --stale: #e08a5c;
+      --stale-soft: #3c2a1f;
+      --code-bg: #121a17;
+      --shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16201d;
+    --surface: #1d2925;
+    --ink: #e8ece9;
+    --muted: #93a09a;
+    --line: #31403a;
+    --accent: #4cc2ab;
+    --accent-soft: #1e3a34;
+    --stale: #e08a5c;
+    --stale-soft: #3c2a1f;
+    --code-bg: #121a17;
+    --shadow: 0 1px 3px rgba(0,0,0,.35);
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Archivo", system-ui, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 {
+    font-weight: 900;
+    font-size: clamp(1.9rem, 4.5vw, 2.6rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 .4rem;
+  }
+  .sub { color: var(--muted); font-size: 1.02rem; margin: 0 0 2.2rem; max-width: 38rem; }
+  h2 {
+    font-weight: 700;
+    font-size: 1.22rem;
+    letter-spacing: -0.01em;
+    margin: 2.6rem 0 .7rem;
+    text-wrap: balance;
+  }
+  h2 .no { color: var(--accent); font-family: "JetBrains Mono", monospace; font-size: .85em; margin-right: .5rem; }
+  p { margin: .65rem 0; }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--accent);
+    margin: 0 0 .5rem;
+  }
+  code, pre {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .84em;
+  }
+  code { background: var(--code-bg); padding: .12em .38em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: .9rem 1rem;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem;
+    margin: 1rem 0;
+    box-shadow: var(--shadow);
+  }
+  .flow {
+    display: flex; flex-direction: column; gap: .45rem;
+    font-size: .93rem; margin: 1rem 0;
+  }
+  .flow .step {
+    display: flex; gap: .8rem; align-items: baseline;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: .55rem .9rem;
+  }
+  .flow .step.bad { border-left-color: var(--stale); }
+  .flow .step .n {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .75rem; color: var(--muted); min-width: 1.2rem;
+  }
+  .pill {
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .72rem;
+    padding: .12rem .55rem;
+    border-radius: 999px;
+    vertical-align: middle;
+  }
+  .pill.live { background: var(--accent-soft); color: var(--accent); }
+  .pill.stale { background: var(--stale-soft); color: var(--stale); }
+  table {
+    width: 100%; border-collapse: collapse; font-size: .9rem; margin: 1rem 0;
+  }
+  .tablewrap { overflow-x: auto; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); font-weight: 600;
+  }
+  td:first-child { font-weight: 500; white-space: nowrap; }
+  .verdict {
+    display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin: 1rem 0;
+  }
+  @media (max-width: 560px) { .verdict { grid-template-columns: 1fr; } }
+  .verdict .card { margin: 0; }
+  .verdict h3 { margin: 0 0 .3rem; font-size: .95rem; }
+  .verdict .tag { font-family: "JetBrains Mono", monospace; font-size: .72rem; color: var(--accent); }
+  ul { padding-left: 1.2rem; margin: .6rem 0; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+  .seedlabel {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .75rem; color: var(--muted);
+    margin: 1.2rem 0 .3rem;
+  }
+  a { color: var(--accent); }
+  .foot { margin-top: 3rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+</style>
+
+<main>
+  <p class="eyebrow">Nulo · implementation plan · blueprint mid</p>
+  <h1>Orphaned Balances</h1>
+  <p class="sub">Why a deleted account can leave its old balances haunting the wallet, and the schema-level fix — ruled <strong>architectural, not a patch</strong> — that two independent auditors converged on.</p>
+
+  <h2><span class="no">01</span>The bug, in one story</h2>
+  <p>Every token balance the wallet shows is a row keyed by <code>(token&nbsp;id, account&nbsp;address)</code> — and <em>nothing else</em>. The row doesn't know which profile owns it, which chain it lives on, or which contract it describes. That's the gap everything below flows from.</p>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span>You import a full backup. It carries an imported account <em>without</em> its signing key (corrupt — or hostile — backup).</span></div>
+    <div class="step"><span class="n">2</span><span>The restore writes the account's balance rows, then notices the missing key and deletes the account. <strong>Only the account.</strong> The balance rows stay behind. <span class="pill stale">orphan</span></span></div>
+    <div class="step bad"><span class="n">3</span><span>Later you re-import the key. Same key → same address. The wallet goes to create fresh balance rows — and <strong>skips</strong>, because the stale rows already occupy the <code>token:account</code> slot.</span></div>
+    <div class="step bad"><span class="n">4</span><span>You see the <em>pre-deletion</em> balances, silently, until some unrelated refresh happens to run. The refreshes are user-action-dependent — there is no timer guaranteed to fix it.</span></div>
+  </div>
+  <p>The same missing fields also explain a family of workarounds already living in the code: a manual chain join, a token-map-only cross-profile guard, and a documented "not solvable from this schema" residual where a recycled numeric token id can attach old rows to a brand-new token.</p>
+
+  <h2><span class="no">02</span>The ruling: fix the schema, not the symptom</h2>
+  <p>The owner's question was whether this deserves architectural work or a point patch. Both auditors — Codex (GPT‑5.6 xhigh) and an independent Claude reviewer — ruled <strong>architectural</strong>. The decisive fact: a token's <code>profileId</code>/<code>chainId</code>/<code>contract</code> triple is <em>immutable by contract</em> (the service hard-rejects any change), so copying it onto each balance row creates a stable identity that can never silently drift.</p>
+  <div class="card">
+    <p style="margin:0"><strong>The point patch</strong> (scope deletions through a token-id join) was seriously considered and rejected: it's ~40 lines, but it leaves every workaround in place, keeps the id-reuse residual open, and moves the schema decision to a future where it costs a real migration. Today — pre-production, zero migrations — the schema change is the cheapest it will ever be.</p>
+  </div>
+
+  <h2><span class="no">03</span>What actually changes</h2>
+  <ul>
+    <li><strong>Three required fields</strong> on every balance row: <code>profileId</code>, <code>chainId</code>, <code>contract</code>. Old-shape rows are swept once at startup and rebuilt fresh by the existing reconciler — balances are recomputable projections, so nothing of value is lost.</li>
+    <li><strong>One shared identity predicate</strong> used at <em>every</em> place a raw row is read, refreshed, projected, exported, or counted — about a dozen sites, including two the audit proved were silently fail-open. Wrong-identity rows can never render, never export, never block a repair.</li>
+    <li><strong>A real deletion cascade</strong>: <code>purgeForAccounts</code>, scoped to <code>(profileId, chainId, address)</code> tuples. The balance service <em>registers</em> it with the account service (an existing in-repo pattern), so account removal awaits the purge internally — no new RPC surface, and every future removal path inherits the cascade for free.</li>
+    <li><strong>Safer ordering</strong>: list the doomed accounts → purge their balances → only then delete the account rows. A crash mid-way now leaves harmless missing balances (auto-repaired), never immortal orphans. A failed purge aborts the whole import into the existing rollback instead of committing damage.</li>
+    <li><strong>Restore trusts nothing from the backup blob</strong>: the service derives all three identity fields from its own token table, rejects rows pointing at tokens the profile doesn't own, and collapses duplicate pairs a hostile blob could mint.</li>
+  </ul>
+
+  <h2><span class="no">04</span>Why the scoping is subtle — two near-miss hazards</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Hazard</th><th>Why it bites</th><th>Pin</th></tr>
+    <tr><td>Bare address</td><td>Two <em>profiles</em> can legitimately hold the same address (same mnemonic). An address-only purge destroys the sibling's rows.</td><td>Test proven RED against a bare-address purge</td></tr>
+    <tr><td>Address + profile</td><td>The <em>same profile</em> can hold the same address on two <em>chains</em> (found by Codex, verified in source). Dropping the key on chain X must not purge chain Y.</td><td>Test proven RED against an address-scoped purge</td></tr>
+  </table></div>
+
+  <h2><span class="no">05</span>The audit trail</h2>
+  <div class="verdict">
+    <div class="card">
+      <h3>Codex leg <span class="tag">conditional approve</span></h3>
+      <p style="margin:.2rem 0 0;font-size:.9rem">Found the multi-chain purge hazard, the occupancy-set gap that would have made the repair fiction, the duplicate-pair hole, and the fail-open refresh paths. All conditions adopted.</p>
+    </div>
+    <div class="card">
+      <h3>Claude leg <span class="tag">conditional approve</span></h3>
+      <p style="margin:.2rem 0 0;font-size:.9rem">Caught a false security claim in the draft, the registration pattern that eliminates new RPC surface, service-side stamping, and the purge-before-delete ordering. All conditions adopted.</p>
+    </div>
+  </div>
+  <p>Two genuine disputes were resolved in the decision ledger (in <a href="plan.md">plan.md</a>): stale-row deletion (the two rulings turned out compatible — delete only when a <em>live</em> token proves the row stale) and the legacy sweep (Codex's argument won: debris taxes every future row allocation, and swept rows rebuild themselves). Every load-bearing claim from both reports was independently re-verified against source before adoption — the trail is in <a href="lessons/phase-0.md">lessons/phase-0.md</a>.</p>
+
+  <h2><span class="no">06</span>How it's proven</h2>
+  <p>Five phases, each with a written gate: schema + stamping + a ≥200-row transition test → complete identity enforcement → the purge with <strong>two documented RED runs</strong> (each hazard above shown failing under the naive implementation before the fix goes in) → an end-to-end test replaying the exact bug story (doctored backup, re-import, assert fresh balances) with a documented pre-fix RED → full regression sweep.</p>
+
+  <h2><span class="no">07</span>Seeds</h2>
+  <p class="seedlabel">/goal — paste to pin the finish line</p>
+  <pre><code>/goal All five phases marked ✓ in implementations-plan/account-balance-orphans/plan.md (per-phase headers in the file), each ✓ backed by its gate as written reported passing in the transcript — including Phase 3's TWO documented RED runs (sibling-profile vs bare-address purge; same-profile multi-chain vs address-scoped purge) and Phase 4's documented pre-fix RED run; per phase LESSONS_FILE=implementations-plan/account-balance-orphans/lessons/phase-N.md printed; /code-review medium --fix applied and committed separately; the codex fix loop converged (resumed pass with no new material findings quoted); a PR against dev exists, created only after convergence, with gh pr view output in the transcript; bun run audit:vue and both smoke modes and NULO_E2E_PROVERLESS=1 bun run e2e:agent all exit 0 in the transcript.</code></pre>
+  <p class="seedlabel">/loop — paste to run it autonomously</p>
+  <pre><code>/loop 15m Drive implementations-plan/account-balance-orphans forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status, git log --oneline -5; PR? gh pr view --json statusCheckRollup. (2) CI waits are fine — prep the next phase meanwhile. (3) No task? Take the next pending plan step; after each edit run bun run lint + bun run --cwd apps/extension test for touched dirs; commit → push. (4) Decision needed? /codex xhigh, decide, act, log the consult in lessons/. Hard limits: never merge, never publish, never expand scope beyond plan.md. (5) Same step failed 5×? Stop; reassess with codex. (6) Phase green = its WRITTEN gate passes; paste result, mark ✓, print LESSONS_FILE, advance. (7) All ✓? /code-review medium --fix → commit separately → codex audit loop until clean → gh pr create --base dev → gh pr checks --watch → wrap-up and stop.</code></pre>
+
+  <p class="foot">Full detail: <a href="plan.md">plan.md</a> · <a href="recon.md">recon.md</a> · <a href="audit-codex.md">audit-codex.md</a> · <a href="audit-fable.md">audit-fable.md</a>. Worktree <code>account-balance-orphans</code>, base <code>dev@9103dea0</code>.</p>
+</main>

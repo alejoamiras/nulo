@@ -1,0 +1,30 @@
+.header {
+	padding-top: 4px;
+}
+
+.pre_title {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.2em;
+	text-transform: uppercase;
+
+	color: var(--nulo-secondary);
+}
+
+.select_row {
+	border-radius: 0;
+	cursor: pointer;
+	border: 1px solid var(--nulo-border);
+
+	transition: all 0.2s var(--bezier);
+
+	&:hover {
+		background: var(--nulo-surface-low);
+		border: 1px solid var(--nulo-outline);
+	}
+
+	&:active {
+		background: var(--nulo-surface-high);
+	}
+}

@@ -59,6 +59,7 @@ const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 
 const route = useRoute()
@@ -122,7 +123,7 @@ const methodLabel = computed(() => {
 const recipientLabel = computed(() => {
 	const r = op.value?.recipientAddress
 	if (!r) return null
-	return `${r.slice(0, 6)}…${r.slice(-4)}`
+	return trimAddress(r, 6, 4, "…")
 })
 
 // Sanitize the dApp-controlled subtitle before rendering. A malicious dApp
@@ -353,35 +354,24 @@ onBeforeUnmount(() => {
 	padding: 4px 20px 24px 20px;
 }
 
-/* Hero — mirrors tx/[id].vue */
 .hero_meta {
-	flex-wrap: wrap;
-	row-gap: 4px;
+	composes: hero_meta from "../detail-page.module.css";
 }
 
 .tx_time {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
+	composes: tx_time from "../detail-page.module.css";
 }
 
-/* Amount block — verbatim from tx/[id].vue tokens */
 .amount_value {
-	font-family: var(--font-mono);
-	font-size: 24px;
-	font-weight: 500;
-	color: var(--txt-primary);
+	composes: amount_value from "../detail-page.module.css";
 }
 
 .amount_symbol {
-	color: var(--nulo-secondary);
+	composes: amount_symbol from "../detail-page.module.css";
 }
 
-/* Mirrors tx/[id].vue's amount_fiat. */
 .amount_fiat {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
+	composes: amount_fiat from "../detail-page.module.css";
 }
 
 
@@ -423,27 +413,16 @@ onBeforeUnmount(() => {
 	word-break: break-all;
 }
 
-/* Details box — mirrors tx/[id].vue details_box */
 .details_box {
-	padding: 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
+	composes: details_box from "../detail-page.module.css";
 }
 
 .detail_key {
-	font-family: var(--font-headline);
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: detail_key from "../detail-page.module.css";
 }
 
 .detail_value_mono {
-	font-family: var(--font-mono);
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--txt-primary);
+	composes: detail_value_mono from "../detail-page.module.css";
 }
 
 .detail_context {
@@ -472,21 +451,11 @@ onBeforeUnmount(() => {
 	margin: 0;
 }
 
-/* Empty state — mirrors tx/[id].vue */
 .empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-	margin-top: 48px;
+	composes: empty_headline from "../detail-page.module.css";
 }
 
 .empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-	text-align: center;
+	composes: empty_sub from "../detail-page.module.css";
 }
 </style>

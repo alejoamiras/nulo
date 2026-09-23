@@ -22,7 +22,7 @@ const emit = defineEmits(["toggleTrust"])
 			<EmojiGrid :emojis="emojis" />
 		</Flex>
 		<Text size="12" color="tertiary" :style="{ lineHeight: '1.4' }">
-			These emojis should match what the connected app displays
+			Emojis from the most recent connection — they should have matched what the app showed then
 		</Text>
 		<Flex align="center" justify="between" gap="12" wide>
 			<Flex direction="column" gap="4">

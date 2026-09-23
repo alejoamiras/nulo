@@ -1,12 +1,6 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { ExecutionPayload, type NestedProcessReturnValues } from "@aztec/stdlib/tx"
-import { type AbiType, encodeArguments, type FunctionAbi, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { IAccountContract } from "@nulo/aztec-runtime/account"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { chainInfoFrom } from "@nulo/aztec-runtime/utils"
+import type { Fr } from "@aztec/foundation/curves/bn254"
+import { type AbiType, encodeArguments, type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
+import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 
 export class FnImpl {
 	constructor(
@@ -53,75 +47,20 @@ export abstract class ViewFn extends Fn {
 	public abstract unpackResult(values: Fr[]): unknown
 }
 
-export async function simulate(
-	node: AztecNode,
-	pxe: IPXE,
-	account: IAccountContract,
-	contract: string,
-	viewFn: ViewFn,
-	args: unknown[],
-): Promise<unknown> {
-	const contractAddress = AztecAddress.fromStringUnsafe(contract)
-	const fnSelector = await viewFn.getSelector()
-	const encodedArgs = viewFn.encodeArgs(args)
-
-	if (viewFn.type === FunctionType.UTILITY) {
-		const call = new FunctionCall(
-			viewFn.name,
-			contractAddress,
-			fnSelector,
-			viewFn.type,
-			false,
-			viewFn.isStatic,
-			encodedArgs,
-			viewFn.getReturnTypes(),
-		)
-		const { result } = await pxe.executeUtility(call, { scopes: [account.address] })
-		return viewFn.unpackResult(result)
+/** The `batchedViewSimulation` call for `viewFn` on `contract`. A utility goes by name with plain
+ *  args (the helper resolves it against the artifact); anything tx-shaped goes pre-encoded by
+ *  selector, so it needs no artifact lookup by name. */
+export async function buildViewCall(contract: string, viewFn: ViewFn, args: unknown[]): Promise<CallAction | EncodedCallAction> {
+	if (viewFn.type === FunctionType.UTILITY) return { kind: "call", contract, method: viewFn.name, args }
+	const selector = await viewFn.getSelector()
+	return {
+		kind: "encoded_call",
+		to: contract,
+		selector: selector.toString(),
+		args: viewFn.encodeArgs(args).map((x) => x.toString()),
+		name: viewFn.name,
+		type: viewFn.type,
+		isStatic: viewFn.isStatic,
+		returnTypes: viewFn.getReturnTypes(),
 	}
-
-	const call = new FunctionCall(
-		viewFn.name,
-		contractAddress,
-		fnSelector,
-		viewFn.type,
-		false,
-		viewFn.isStatic,
-		encodedArgs,
-		viewFn.getReturnTypes(),
-	)
-
-	const payload = new ExecutionPayload([call], [], [], [])
-	const txRequest = await account.buildTxExecutionRequest(
-		node,
-		pxe,
-		payload,
-		{
-			cancellable: false,
-			txNonce: Fr.random(),
-			feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-		},
-		chainInfoFrom(await node.getNodeInfo()),
-	)
-
-	const tx = await pxe.simulateTx(txRequest, {
-		simulatePublic: true,
-		skipFeeEnforcement: true,
-		scopes: [account.address],
-	})
-
-	return viewFn.type === FunctionType.PUBLIC
-		? viewFn.unpackResult(extractReturnValues(tx.getPublicReturnValues()))
-		: viewFn.unpackResult(extractReturnValues([tx.getPrivateReturnValues()]))
-}
-
-function extractReturnValues(values: NestedProcessReturnValues[]): Fr[] {
-	const res = []
-	for (const v of values) {
-		for (const value of v.values ?? []) {
-			res.push(value)
-		}
-		res.push(...extractReturnValues(v.nested))
-	}
-	return res
 }

@@ -1,6 +1,6 @@
 import type { ServiceSpec } from "@/wallet/base"
 import { ServiceClient } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { CONFIG_SERVICE_NAME, type Config, type ConfigKey, type ConfigProp, type Events, type Methods } from "./spec"
 
@@ -10,7 +10,7 @@ export class ConfigServiceClient extends ServiceClient<Methods, Events> implemen
 	public readonly onUpdate = new EventHandler<ConfigProp>()
 
 	public constructor(name?: string) {
-		super(CONFIG_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(CONFIG_SERVICE_NAME, documentLogger(), name)
 	}
 
 	public getProps(): Promise<ConfigProp[]> {

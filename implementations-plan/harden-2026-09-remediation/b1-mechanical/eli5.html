@@ -1,0 +1,54 @@
+<title>Harden B1 Mechanical Fixes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#f6f4ef;--fg:#1c1a17;--muted:#6b655c;--hairline:#dcd6ca;--surface:#fbfaf7;--code:#eeeae1;--accent:#175e63;--green:#2b6b3f;--green-bg:#e3efe6;--med:#9a5b07;--med-bg:#f9ecd6;--display:"Fraunces",Georgia,serif;--body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}}
+:root[data-theme="dark"]{--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 var(--body);padding-block:2.5rem 4rem;padding-inline:clamp(16px,4vw,40px)}
+.page{max-width:760px;margin:0 auto}h1,h2,h3{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0}
+h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.1}h2{font-size:1.4rem;margin-block:2.4rem .8rem;padding-top:1.2rem;border-top:1px solid var(--hairline)}h3{font-size:1.05rem;margin-block:1.2rem .3rem}
+p{margin:0 0 .8rem;max-width:66ch}code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:.08em .35em;border-radius:3px}
+pre{font-family:var(--mono);font-size:.82rem;background:var(--code);padding:.8rem 1rem;border-radius:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.lede{color:var(--muted);font-size:1.05rem;margin-top:.5rem}
+.phase{background:var(--surface);border:1px solid var(--hairline);border-radius:8px;padding:1rem 1.2rem;margin:.8rem 0}.phase p{margin-bottom:.5rem}.gate{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.callout{border-left:4px solid var(--green);background:var(--green-bg);padding:.9rem 1.1rem;border-radius:0 6px 6px 0;margin:1.2rem 0}.callout.amber{border-color:var(--med);background:var(--med-bg)}.callout h3{margin-top:0}
+ul{margin:.3rem 0 .8rem;padding-left:1.2rem}li{margin:.25rem 0}.foot{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--hairline);color:var(--muted);font-size:.86rem}
+</style>
+<div class="page">
+<div class="eyebrow">Blueprint · light · batch 1 of 4 · 2026-09-14</div>
+<h1>Harden B1 Mechanical Fixes</h1>
+<p class="lede">The first of four batches fixing the 2026-09-13 security audit. Every change here is a small, hours-scale fix that copies a pattern already in the wallet's code. No storage migration, no redesign.</p>
+
+<h2>What this batch fixes</h2>
+<ul>
+  <li><strong>F-01</strong> The check that the RPC node is really on the selected chain compared a single mixed number. It now checks the L1 chain id exactly, bounds both values to 32 bits (Codex found a second way to alias the mixed number), and keeps the mixed compare as well. One helper, no caller churn.</li>
+  <li><strong>F-08</strong> The simulation fast path trusted the function <em>name</em> a dApp sent while executing the <em>selector</em> it sent. It now resolves the selector against the contract's ABI first, rejects a mismatch, and falls back to the slow, fully-validated path if a call turns out not to be public and static.</li>
+  <li><strong>F-03 (half)</strong> The fee-payer picker chose the first "Private Fee Juice" row of that type; it now requires the protocol-derived one, and the execution path refuses any other. The backup slice that let a fake row in is dropped in batch 2.</li>
+  <li><strong>F-10</strong> RPC error strings that carried an endpoint URL (with an API key) reached the log; the logger now scrubs URLs in plain strings and the two demonstrated sites log the error object.</li>
+  <li><strong>F-12</strong> Restored contact names get the same sanitizer the import path uses; restored balances are marked stale so they refresh.</li>
+  <li><strong>F-13</strong> Account lookups by key now also require the row's address to equal the requested one, so a transplanted row cannot redirect signing.</li>
+  <li><strong>F-15</strong> A pending passkey-restore secret now expires as designed and is wiped on lock.</li>
+  <li><strong>F-17</strong> The wallet logo is no longer web-accessible to every site; the discovery response carries it inline.</li>
+  <li><strong>Hygiene</strong> Zeroize password and token buffers after use; <code>autocomplete</code> on secret inputs (off for the recovery phrase); neutralize spreadsheet formulas in the log export; two write-before-check orderings fixed; the account-import preview shows the full address.</li>
+</ul>
+
+<div class="callout amber"><h3>Known limit</h3><p>An inline (data URI) icon will not render on a dApp whose Content-Security-Policy forbids <code>data:</code> images. Narrowing the manifest instead would break icons on every dApp not listed, so inline wins. Verified against the playground before the PR opens.</p></div>
+
+<h2>Phases and how each proves itself</h2>
+<div class="phase"><h3>1 · Chain identity</h3><p>F-01, plus moving the node check ahead of any registration in the no-sender build path, plus the one caller that never checked.</p><p class="gate">Gate: aztec-runtime unit tests (collision and alias vectors) · extension execution/utils tests · lint · typecheck</p></div>
+<div class="phase"><h3>2 · Authorization sinks</h3><p>F-08 fast path bind; registerContract computes and compares the address before writing anything.</p><p class="gate">Gate: execution tests (mismatch throws before simulation; forged static flag falls back; happy path still simulates) · aztec-runtime tests · lint · typecheck</p></div>
+<div class="phase"><h3>3 · Fee-payer picker</h3><p>F-03 half.</p><p class="gate">Gate: send/fpc/execution tests (poisoned row first → canonical row selected; non-protocol row refused) · lint · typecheck</p></div>
+<div class="phase"><h3>4 · Restore and storage reads</h3><p>F-12, F-13.</p><p class="gate">Gate: contact/token-balance/account tests · lint · typecheck</p></div>
+<div class="phase"><h3>5 · Session and crypto hygiene</h3><p>F-15; buffer zeroization in wallet-crypto and the account export.</p><p class="gate">Gate: profile integration tests · wallet-crypto tests · key vectors byte-identical · lint · typecheck</p></div>
+<div class="phase"><h3>6 · Shell and UI</h3><p>F-17, F-10, autocomplete, CSV, import preview.</p><p class="gate">Gate: <code>bun run audit:vue</code> (typecheck, all tests, lint, build) · <code>bun run test:e2e</code> (smoke). The network suite runs on the PR in CI.</p></div>
+
+<h2>Why light</h2>
+<p>Zero high-risk dimensions: no novelty (every fix mirrors an existing pattern), bounded blast radius, reversible, no migration, no external coupling. Security-sensitive by subject but not by mechanism. The owner set the tier in the seed.</p>
+
+<h2>Codex review</h2>
+<p>Round 1 verdict: <em>reject</em>, one blocking finding (the rollup-version alias under the 32-bit compare). All findings adopted, none rejected; the F-01 design changed accordingly. Round 2 verdict: <em>approve</em>, with four coverage notes folded into the phase tests.</p>
+
+<div class="callout"><h3>Approval</h3><p>Pre-granted by the owner's decision table in <code>implementations-plan/harden-2026-09-remediation/seed.md</code> (2026-09-14). This page is the record; the arc-wide <code>/goal</code> in the seed drives implementation, so there is no per-batch seed.</p></div>
+
+<div class="foot"><p>Repo: <code>implementations-plan/harden-2026-09-remediation/b1-mechanical/plan.md</code> · <code>recon.md</code> · <code>audit-codex.md</code> · lessons in <code>../lessons/b1.md</code>. Stack: <code>dev ← worktree-harden-security-prerelease ← harden-b1-mechanical</code>.</p></div>
+</div>

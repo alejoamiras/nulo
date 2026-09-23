@@ -62,8 +62,7 @@ export const normalizeAmount = (target: string): string | undefined => {
 /**
  * Format a base-units value for display, with optional total-string-length
  * truncation + small-value hint. Returns `{ value, slashed }` so callers
- * can render an "expand" affordance when truncation fired (BalanceView,
- * SplittedBalancesView).
+ * can render an "expand" affordance when truncation fired (BalanceView).
  *
  * `length` is the OUTPUT-string length cap, not a decimal-places count:
  * - String shorter than `length`  → returned as-is, slashed=false.
@@ -235,6 +234,7 @@ export interface FormatBaseUnitsOpts {
  *   formatBaseUnits(1500000000n, 6, { thousandsSep: "," }) → "1,500"
  *   formatBaseUnits(150n, 6, { minDecimals: 4 })        → "0.0001"  (truncated; trailing zero kept by minDecimals)
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 22 — sign, truncation, padding, zero trimming and separators ARE the integer-formatting algorithm
 export const formatBaseUnits = (units: bigint | string | null | undefined, decimals: number, opts: FormatBaseUnitsOpts = {}): string => {
 	if (decimals < 0 || !Number.isInteger(decimals)) {
 		throw new Error("Invalid decimals: must be a non-negative integer")

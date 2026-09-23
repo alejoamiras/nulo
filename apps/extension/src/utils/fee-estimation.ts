@@ -1,7 +1,18 @@
 import { formatBaseUnits } from "@/utils/amount"
 
-/** FeeJuice has 18 decimals */
-const FEE_JUICE_DECIMALS = 18
+/**
+ * Aztec Fee Juice has a fixed 18-decimal scale; the wallet does not
+ * read this from chain and the value is unlikely to change for the
+ * lifetime of the network.
+ */
+export const FEE_JUICE_DECIMALS = 18
+
+/** The ONE gas-balance display formatter (both cards render through it). Truncates (round-down) so
+ *  the shown balance is always ≤ actual. Default 4 decimals for the send fee card, where sub-cent
+ *  fee amounts carry signal; the home card passes 2 — fee juice is cheap, the tail digits are noise. */
+export function formatGasBalance(raw: string | null | undefined, maxDecimals = 4): string {
+	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals })
+}
 
 export type AssetPricing = {
 	address: string

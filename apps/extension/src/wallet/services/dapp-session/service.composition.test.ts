@@ -13,6 +13,7 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { svc } from "@/wallet/services/composition-harness"
 import { DappSessionService } from "./service"
 import { AccessLevel, type GrantedCapabilityRecord } from "./spec"
@@ -35,6 +36,7 @@ async function makeHarness() {
 	// key from ProfileService. Provide a stable HMAC key so persisted rows
 	// verify on read-back.
 	const macKey = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+	const deletionState = new ProfileDeletionState()
 
 	const collection = new ServiceCollection()
 	collection.add(
@@ -42,6 +44,8 @@ async function makeHarness() {
 			getActiveProfile: async () => ({ id: "p1" }),
 			onProfileDeleted,
 			deriveDappSessionMacKey: async () => macKey,
+			getDeletionState: () => deletionState,
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 		}),
 	)
 	const service = new DappSessionService(logger, api)

@@ -30,6 +30,8 @@ const displaceIdx = computed(() => {
 })
 
 const isDestructive = computed(() => cacheStore.confirm.confirm_color === "red")
+/** Informational use: one button, no Cancel, no callback required; cleared with the rest on close. */
+const isSingle = computed(() => cacheStore.confirm.single === true)
 
 const confirmationInputEl = useTemplateRef("confirmationInputEl")
 const confirmationTerm = ref()
@@ -58,7 +60,7 @@ async function handlePasskeyConfirmation() {
 }
 
 const handleConfirm = () => {
-	cacheStore.confirm.callback()
+	cacheStore.confirm.callback?.()
 	emit("onClose")
 }
 
@@ -86,13 +88,13 @@ watch(
 			<Flex direction="column" gap="32" :class="$style.wrapper" wide>
 				<Flex direction="column" align="center" gap="12" :class="$style.header">
 					<Icon name="warning" size="16" color="primary" />
-					<span :class="$style.pre_title">
-						{{ isDestructive ? 'Irreversible' : 'Action required' }}
+					<span :class="$style.pre_title" data-testid="confirm-pre-title">
+						{{ cacheStore.confirm.pre_title || (isDestructive ? 'Irreversible' : 'Action required') }}
 					</span>
-					<h2 :class="$style.title">
+					<h2 :class="$style.title" data-testid="confirm-title">
 						{{ cacheStore.confirm.title ? cacheStore.confirm.title : "Are you sure?" }}
 					</h2>
-					<Text size="13" weight="500" color="body" height="150" align="center" :class="$style.description">
+					<Text size="13" weight="500" color="body" height="150" align="center" :class="$style.description" data-testid="confirm-description">
 						{{ cacheStore.confirm.description }}
 					</Text>
 				</Flex>
@@ -133,6 +135,7 @@ watch(
 
 				<Flex gap="12">
 					<Button
+						v-if="!isSingle"
 						@click="emit('onClose')"
 						wide
 						variant="primary_outline"
@@ -164,17 +167,11 @@ watch(
 }
 
 .header {
-	padding-top: 4px;
+	composes: header from "./popup-shared.module.css";
 }
 
 .pre_title {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-
-	color: var(--nulo-secondary);
+	composes: pre_title from "./popup-shared.module.css";
 }
 
 .toggle_row {

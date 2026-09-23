@@ -44,12 +44,16 @@ const {
 	refresh: refreshAuthwits,
 } = useEntityCrud({
 	fetch: async () => {
-		const list = await authwitsService.getAuthwits(appStore.account.address)
+		const list = await authwitsService.getAuthwits(appStore.network.chainId, appStore.account.address)
 		return list?.map(decorateAuthwit) ?? []
 	},
 	added: authwitsService.onAuthwitAdded,
 	deleted: authwitsService.onAuthwitDeleted,
 	identity: (aw) => aw.id,
+	// The list is (profile, chain, account)-scoped: the same address on another chain or profile
+	// must not splice in mid-switch.
+	accept: (aw) =>
+		aw.profileId === appStore.profile?.id && aw.chainId === appStore.network?.chainId && aw.account === appStore.account?.address,
 })
 
 const filteredAuthwits = computed(() => {
@@ -61,11 +65,13 @@ const filteredAuthwits = computed(() => {
 
 const isErrorOccurred = computed(() => !!error.value)
 
-function onRegistryEnabled(account) {
-	if (appStore.account?.address === account) isRegistryEnabled.value = true
+const isShownScope = (scope) =>
+	scope.profileId === appStore.profile?.id && scope.chainId === appStore.network?.chainId && scope.account === appStore.account?.address
+function onRegistryEnabled(scope) {
+	if (isShownScope(scope)) isRegistryEnabled.value = true
 }
-function onRegistryDisabled(account) {
-	if (appStore.account?.address === account) isRegistryEnabled.value = false
+function onRegistryDisabled(scope) {
+	if (isShownScope(scope)) isRegistryEnabled.value = false
 }
 authwitsService.onRegistryEnabled.add(onRegistryEnabled)
 authwitsService.onRegistryDisabled.add(onRegistryDisabled)
@@ -73,7 +79,7 @@ authwitsService.onRegistryDisabled.add(onRegistryDisabled)
 async function fetchRegistryStatus() {
 	isFetchingRegistryStatus.value = true
 	try {
-		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.account.address)
+		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.network.chainId, appStore.account.address)
 	} catch {
 		// surfaced via the entity-crud error ref already
 	} finally {
@@ -100,11 +106,15 @@ const handleOpenAuthwit = (aw) => {
 	popupStore.open("data_viewer")
 }
 
+// A profile/account switch emits no authwit events and this route is not
+// remounted — refetch explicitly. `clear` empties the foreign scope's rows
+// synchronously so a failed refetch cannot leave them rendered; the
+// composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => appStore.account,
+	() => [appStore.profile?.id, appStore.network?.chainId, appStore.account?.address],
 	() => {
-		refreshAuthwits()
-		fetchRegistryStatus()
+		void refreshAuthwits({ clear: true })
+		void fetchRegistryStatus()
 	},
 )
 
@@ -165,14 +175,7 @@ onBeforeUnmount(() => {
 				@clear="searchTerm = ''"
 			/>
 
-			<LoadingState v-if="isFetchingAuthwits" label="FETCHING AUTHWITS" />
-
-			<Tooltip v-else-if="isErrorOccurred" wide>
-				<Banner :action="{ name: 'Try again', callback: handleRefetch }" variant="error" wide>
-					Something went wrong
-				</Banner>
-				<template #content>{{ error }}</template>
-			</Tooltip>
+			<AsyncListStatus v-if="isFetchingAuthwits || isErrorOccurred" :loading="isFetchingAuthwits" :error="error" label="FETCHING AUTHWITS" @retry="handleRefetch" />
 
 			<Flex v-else-if="filteredAuthwits.length" direction="column" gap="8">
 				<AuthwitCard
@@ -184,28 +187,20 @@ onBeforeUnmount(() => {
 				/>
 			</Flex>
 
-			<div v-else-if="filteredAuthwits.length === 0 && searchTerm" :class="$style.no_results">
-				NO MATCHES · TRY A DIFFERENT TERM
-			</div>
+			<ListStatusMessage v-else-if="filteredAuthwits.length === 0 && searchTerm" variant="no-results" />
 
-			<div v-else :class="$style.empty">
-				<span :class="$style.empty_headline">NO AUTHWITS YET</span>
-				<span :class="$style.empty_sub">Approved authorizations you grant will appear here.</span>
-			</div>
+			<ListStatusMessage v-else headline="NO AUTHWITS YET" sub="Approved authorizations you grant will appear here." />
 		</Flex>
 	</Flex>
 </template>
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
+	composes: wrapper from "../../../../../../components/composite/settings-page.module.css";
 }
 
 .content {
-	padding: 16px 24px var(--nav-clearance) 24px;
+	composes: content from "../../../../../../components/composite/settings-page.module.css";
 }
 
 .icon_btn {
@@ -231,45 +226,7 @@ onBeforeUnmount(() => {
 	padding: 4px;
 }
 
-.empty {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
 
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
 
-	text-align: center;
-}
 
-.empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.empty_sub {
-	width: 100%;
-
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
-	overflow-wrap: break-word;
-}
-
-.no_results {
-	padding: 24px 16px;
-	text-align: center;
-
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	color: var(--nulo-outline);
-}
 </style>

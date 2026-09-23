@@ -13,5 +13,10 @@ import { expect, test } from "vitest"
 test("base.css content is pinned (edits must be deliberate + visually re-verified)", () => {
 	const css = readFileSync(join(process.cwd(), "src/base.css"), "utf8")
 	const hash = createHash("sha256").update(css).digest("hex")
-	expect(hash).toBe("2e4e52d3ef5b3a0d2096489130285a74761946785900b744211b01de79796d04")
+	// 2026-08-13 (home-refresh): .copyable cursor: copy → pointer. Deliberate; visually re-verified
+	// in the Phase-5 manual pass (the copy cursor is a drag-and-drop signal, wrong for click-to-copy).
+	// 2026-09-20 (firefox): `* { scrollbar-width: none }` beside the `::-webkit-scrollbar` rule Firefox
+	// ignores, and `-moz-osx-font-smoothing` on the icon font. Deliberate; re-verified by screenshotting
+	// 16 popup routes in both browsers — Chrome unchanged, Firefox matching it.
+	expect(hash).toBe("fa81d2f7b50e2bcf6b7caafb40055942c5191d44b1e80d2ca60f991ac9485a3f")
 })

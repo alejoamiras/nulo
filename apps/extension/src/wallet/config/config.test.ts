@@ -67,4 +67,11 @@ describe("ConfigSchema — domain validation (Q-20)", () => {
 		expect(ConfigSchema.shape.sessionTtl.safeParse(0).success).toBe(true)
 		expect(ConfigSchema.shape.sessionTtl.safeParse("1800000").success).toBe(false)
 	})
+
+	test("incomingDustUsdThreshold: bounded so the micro-USD conversion can never overflow", () => {
+		expect(ConfigSchema.shape.incomingDustUsdThreshold.safeParse(1_000_000).success).toBe(true)
+		expect(ConfigSchema.shape.incomingDustUsdThreshold.safeParse(1_000_001).success).toBe(false)
+		expect(ConfigSchema.shape.incomingDustUsdThreshold.safeParse(1e308).success).toBe(false)
+		expect(ConfigSchema.shape.incomingDustUsdThreshold.safeParse(-1).success).toBe(false)
+	})
 })

@@ -1,4 +1,5 @@
 import type { MigrationArea, MinimalStorageArea } from "./types"
+import { errorMessageFromUnknown } from "../utils/errors"
 
 /** Accumulates a migration's writes so the engine commits them as ONE batched
  *  diff after `up()` succeeds. Reads overlay staged writes on the live store
@@ -14,7 +15,7 @@ export class StagingArea implements MigrationArea {
 		try {
 			return JSON.parse(raw as string)
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err)
+			const msg = errorMessageFromUnknown(err)
 			throw new Error(`migration read: malformed row "${fullKey}" — ${msg}`)
 		}
 	}

@@ -15,6 +15,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
 import { MessageType } from "../messages"
 import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
@@ -40,10 +41,108 @@ class TestClient extends ServiceClient<Methods> {
 		return this.request("echo", val)
 	}
 
+	public echoAlreadyReady(val: string): Promise<string> {
+		return this.requestAlreadyReady("echo", val)
+	}
+
 	public multiply(a: number, b: number): Promise<number> {
 		return this.request("multiply", a, b)
 	}
 }
+
+describe("event sender gate", () => {
+	type Events = { onPing: { n: number } }
+	class EventClient extends ServiceClient<Methods, Events> {
+		public readonly onPing = new EventHandler<{ n: number }>()
+		public constructor() {
+			super("test-service", silentLogger, "event-client", new MemoryTelemetrySink())
+		}
+		public echo(val: string): Promise<string> {
+			return this.request("echo", val)
+		}
+	}
+	const OFFSCREEN = "chrome-extension://nulo/src/offscreen/index.html"
+	class ExactUrlEventClient extends EventClient {
+		protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+			return sender?.id === chrome.runtime.id && sender.url?.split(/[?#]/, 1)[0] === OFFSCREEN
+		}
+	}
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+	const event = { type: MessageType.Event, from: "test-service", content: { event: "onPing", payload: { n: 1 } } }
+	const popup = sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" })
+
+	function mounted(Client: new () => EventClient) {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		const runtime = (globalThis as any).chrome.runtime
+		runtime.id = "nulo"
+		// The default policy compares `sender.url` against this extension's base URL.
+		runtime.getURL = (path: string) => `chrome-extension://nulo/${path}`
+		const client = new Client()
+		client.connect()
+		const seen = vi.fn()
+		client.onPing.add(seen)
+		return Object.assign(seen, { client })
+	}
+
+	test("default policy: a foreign extension and a content script are dropped; a same-extension page passes", () => {
+		const seen = mounted(EventClient)
+		emitMessage(event, sender({ id: "other-ext", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: "https://dapp.example/", tab: { id: 1 } }))
+		expect(seen).not.toHaveBeenCalled()
+		emitMessage(event, popup)
+		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
+	})
+
+	test("exact-URL override: only the offscreen document (bare, ?instance=, tab-hosted) feeds events — addressing the client's uid earns no exemption", async () => {
+		const seen = mounted(ExactUrlEventClient)
+		const pending = seen.client.echo("hi")
+		pending.catch(() => {})
+		await flush()
+		const { fromUid } = getLastRequest()
+		emitMessage(event, popup)
+		emitMessage({ ...event, to: fromUid }, popup)
+		emitMessage(event, sender({ id: "nulo" }))
+		expect(seen).not.toHaveBeenCalled()
+		emitMessage(event, sender({ id: "nulo", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: `${OFFSCREEN}?instance=abc123`, tab: { id: 9 } }))
+		expect(seen).toHaveBeenCalledTimes(2)
+		seen.client.disconnect()
+	})
+})
+
+describe("frozen transport error contract", () => {
+	// Mirror of the background transport's pin suite: same base-built VALUES
+	// (class + details), offscreen-specific wording frozen exactly.
+	type ErrorHooks = {
+		makeTimeoutError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeSendFailureError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeDisconnectError(): unknown
+	}
+	const hooks = new TestClient() as unknown as ErrorHooks
+
+	test("timeout → RpcTimeoutError with exact message + details", () => {
+		const err = hooks.makeTimeoutError({ requestId: 7, methodName: "echo", timeoutMs: 500 })
+		expect(err).toBeInstanceOf(RpcTimeoutError)
+		expect((err as RpcTimeoutError).code).toBe("RPC_TIMEOUT") // literal: pins static + instance code together
+		expect((err as RpcTimeoutError).message).toBe("Offscreen request timed out: echo")
+		expect((err as RpcTimeoutError).details).toEqual({ requestId: 7, methodName: "echo" })
+	})
+
+	test("send failure → RpcDisconnectedError with exact message + stringified cause", () => {
+		const err = hooks.makeSendFailureError({ requestId: 8, methodName: "echo", cause: new Error("gone") })
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as RpcDisconnectedError).code).toBe("RPC_DISCONNECTED") // literal: pins static + instance code together
+		expect((err as RpcDisconnectedError).message).toBe("Offscreen send failed: echo")
+		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 8, methodName: "echo", cause: "Error: gone" })
+	})
+
+	test("disconnect → plain Error (NOT WalletError) with the shared teardown message", () => {
+		const err = hooks.makeDisconnectError()
+		expect(err).toBeInstanceOf(Error)
+		expect(err).not.toBeInstanceOf(WalletError)
+		expect((err as Error).message).toBe("Client disconnected")
+	})
+})
 
 /** Capture the request envelope (requestId + from-uid) from the most recent
  *  chrome.runtime.sendMessage call so we can build a matching response. */
@@ -520,5 +619,108 @@ describe("leak guards for the unified correlator (single pending entry)", () => 
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+describe("requestAlreadyReady (internal readiness bypass)", () => {
+	// The bypass exists for a caller that already awaited readiness and must
+	// not allow a SECOND readiness pass (offscreen recreation window) between
+	// an authority check and the wire. The flag is consumed synchronously —
+	// `request()` invokes `ensureTransportReady()` in the same call stack — so
+	// concurrent ordinary requests can never inherit it.
+
+	test("skips onReady and reaches the wire SYNCHRONOUSLY (zero microtask gap)", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const p = client.echoAlreadyReady("hi")
+		// The authority-to-wire guarantee: sendMessage has ALREADY been invoked
+		// when control returns to the caller — a resolved-Promise readiness
+		// would defer the send by a microtask, reopening the recreation gap.
+		expect(captureMessage()).toHaveBeenCalledTimes(1)
+		expect(client.readyHook).not.toHaveBeenCalled()
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "hi"))
+		await expect(p).resolves.toBe("hi")
+	})
+
+	test("a concurrent ordinary request issued in the same tick still runs onReady", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("bypass")
+		const b = client.echo("ordinary")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		const sendMessageMock = captureMessage()
+		for (const call of sendMessageMock.mock.calls) {
+			const [request] = call as [{ content: { requestId: number }; from: string }]
+			emitMessage(makeResponse(request.content.requestId, request.from, "done"))
+		}
+		await expect(a).resolves.toBe("done")
+		await expect(b).resolves.toBe("done")
+	})
+
+	test("the bypass is one-call: the next ordinary request runs onReady again", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("first")
+		await flush()
+		let { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "first"))
+		await expect(a).resolves.toBe("first")
+
+		const b = client.echo("second")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		;({ requestId, fromUid } = getLastRequest())
+		emitMessage(makeResponse(requestId, fromUid, "second"))
+		await expect(b).resolves.toBe("second")
+	})
+})
+
+describe("response sender authentication", () => {
+	const OFFSCREEN = "chrome-extension://nulo/src/offscreen/index.html"
+	class ExactUrlClient extends TestClient {
+		protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+			return sender?.id === chrome.runtime.id && sender.url?.split(/[?#]/, 1)[0] === OFFSCREEN
+		}
+	}
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+
+	test("a well-formed response from a FOREIGN extension id leaves the request pending (default policy)", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		;(globalThis as any).chrome.runtime.id = "nulo"
+		const client = new TestClient()
+		const promise = client.echo("hi")
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		let settled = false
+		promise.then(() => (settled = true))
+		emitMessage(makeResponse(requestId, fromUid, "forged"), sender({ id: "other-ext", url: OFFSCREEN }))
+		await flush()
+		expect(settled).toBe(false)
+		emitMessage(makeResponse(requestId, fromUid, "echo:hi"), sender({ id: "nulo" }))
+		await expect(promise).resolves.toBe("echo:hi")
+	})
+
+	test("exact-URL override: a same-extension POPUP url is ignored; the offscreen document (bare, ?instance=, tab-hosted) settles", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		;(globalThis as any).chrome.runtime.id = "nulo"
+		const client = new ExactUrlClient()
+		const results: string[] = []
+		for (const url of [OFFSCREEN, `${OFFSCREEN}?instance=t1`]) {
+			const promise = client.echo("hi")
+			await flush()
+			const { requestId, fromUid } = getLastRequest()
+			emitMessage(
+				makeResponse(requestId, fromUid, "forged"),
+				sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" }),
+			)
+			emitMessage(makeResponse(requestId, fromUid, "forged"), sender({ id: "nulo" }))
+			await flush()
+			emitMessage(makeResponse(requestId, fromUid, "echo:hi"), sender({ id: "nulo", url, tab: { id: 9 } }))
+			results.push(await promise)
+		}
+		expect(results).toEqual(["echo:hi", "echo:hi"])
 	})
 })

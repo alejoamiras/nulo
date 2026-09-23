@@ -9,19 +9,20 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
-import {IV4Quoter} from "../script/DeployBridgeMainnet.s.sol";
-import {Harness, IPermit2Domain, MockTokenPortal} from "./SwapBridgeRouterPermit2Fork.t.sol";
+import {IV4Quoter} from "../src/interfaces/IV4Quoter.sol";
+import {Harness, IPermit2Domain} from "./SwapBridgeRouterPermit2Fork.t.sol";
+import {MockTokenPortal, FakePortalFactory} from "./mocks/RouterMocks.sol";
 
 /// Forks ETHEREUM MAINNET and executes the production two-hop fuel route against the CANONICAL
 /// liquidity the shipped app will ride (D23: mainnet discovers, never seeds): real Circle USDC in
 /// via Permit2 witness-transfer, real Uniswap V4 USDC/WETH 500-tier → native-ETH/AZTEC 10000-tier
 /// swap, real fee-asset deposit into the LIVE Aztec FeeJuicePortal. The token leg uses the mock
-/// portal (mainnet's NuloTokenPortal is a Phase-8 conductor deploy — it does not exist yet).
+/// portal (mainnet has no token portal yet — the factory creates one per ERC-20 on first use).
 /// Quoting a route is not the same as swapping it; this is the executing proof.
 /// Floors are quoted live in-test (canonical pool prices move with the market — a hardcoded FJ
 /// floor would rot). Opt-in: skips unless ETH_RPC_URL is set.
 contract MainnetFuelForkTest is Test {
-    // Same canonical pins as DeployBridgeMainnet.s.sol (cross-checked there on every run).
+    // The canonical mainnet pins; `discover-mainnet-fuel.ts` is what finds and re-checks them.
     address constant POOL_MANAGER = 0x000000000004444c5dc75cB358380D2e3dE08A90;
     address constant V4_QUOTER = 0x52F0E24D1c21C8A0cB1e5a5dD6198556BD9E1203;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -61,8 +62,11 @@ contract MainnetFuelForkTest is Test {
         user = vm.addr(userPk);
 
         swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE_ASSET, WETH);
-        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap));
-        tokenPortal = new MockTokenPortal(IERC20(CIRCLE_USDC));
+        // The token leg is out of scope here (it is the clone suites' job); an honest factory
+        // model binds Circle USDC to a recording portal so the router's portal derivation passes.
+        FakePortalFactory factory = new FakePortalFactory();
+        tokenPortal = MockTokenPortal(factory.bind(CIRCLE_USDC));
+        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap), address(factory));
         swapEthBefore = address(swap).balance;
         routerEthBefore = address(router).balance;
 

@@ -1,0 +1,5 @@
+# Phase 6 — Docs + dep-review workflow
+
+- SECURITY.md "Dependency policy": the 14d→7d rationale paragraph now records the 1.4.0 retest (frozen-gate bug fixed; 14d viable as a deliberate future policy PR); the #25305 paragraph replaced with the closed-on-1.4 verdict + the never-re-gates-locked-versions nuance; the "Bun pinned" paragraph corrected (commitlint inline pin gone, composite is the only second site) + the local ≥1.4 requirement; NEW "1.4 pm review workflow" block (`bun pm diff` per bump/Renovate review, `bun audit fix --dry-run` triage, `bun pm licenses --prod --json` at release prep, `bun pm ls --trusted` on trust changes, advisory `dedupe --check` rationale).
+- CLAUDE.md dependency-policy TL;DR bullet: #25305 closed + pm-workflow pointer.
+- Gate (all under the 1.4.0 binary): `./scripts/check-no-brand.sh` ok · `bun test scripts/release/ scripts/ci-cd/` 94 pass / 0 fail · `bun run lint:actions` exit 0 · `bun run audit:vue` exit 0 (parallel legs + chrome build ✓ 4.15s) · `bun run test:all` exit 0 — 11 package suites report passed, zero failures.

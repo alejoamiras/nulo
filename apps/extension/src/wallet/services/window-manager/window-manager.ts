@@ -12,9 +12,23 @@
  */
 
 import { LogLevel, type ILogger } from "@/wallet/logger"
-import { getRandomHex } from "@/wallet/utils"
-import type { ClockPort, TimerHandle, WindowPort } from "@nulo/wallet-core/ports"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
+import type { ClockPort, TimerHandle, WindowBounds, WindowPort } from "@nulo/wallet-core/ports"
 import type { Unsubscribe } from "@nulo/wallet-core/ports"
+import { deferred, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+
+/** Center a `width`×`height` window on `anchor`. Signed arithmetic: a display
+ *  left of or above the primary has negative coordinates, so never clamp.
+ *  `{}` (let Chrome pick) when the anchor or any of its bounds is missing. */
+export function centerOn(anchor: WindowBounds | undefined, width: number, height: number): { left?: number; top?: number } {
+	if (!anchor) return {}
+	const { left, top, width: anchorWidth, height: anchorHeight } = anchor
+	if ([left, top, anchorWidth, anchorHeight].some((n) => typeof n !== "number")) return {}
+	return {
+		left: Math.round((left as number) + ((anchorWidth as number) - width) / 2),
+		top: Math.round((top as number) + ((anchorHeight as number) - height) / 2),
+	}
+}
 
 export type OpenAndAwaitOpts = {
 	url: string
@@ -32,7 +46,7 @@ export type AwaitedWindow<T> = {
 
 type Handle<T> = {
 	resolve: (value: T) => void
-	reject: (reason: string) => void
+	reject: (reason: unknown) => void
 	windowId: number | undefined
 	settled: boolean
 	unsubOnRemoved: Unsubscribe | null
@@ -49,18 +63,9 @@ export class WindowManager {
 	) {}
 
 	public openAndAwait<T>(opts: OpenAndAwaitOpts): AwaitedWindow<T> {
-		let handleId: string
-		do {
-			handleId = getRandomHex(8)
-		} while (this.handles.has(handleId))
+		const handleId = randomIdNotIn((id) => this.handles.has(id))
 
-		let resolve!: (value: T) => void
-		let reject!: (reason: string) => void
-
-		const promise = new Promise<T>((res, rej) => {
-			resolve = res
-			reject = rej
-		})
+		const { promise, resolve, reject } = deferred<T>()
 
 		const handle: Handle<T> = {
 			resolve,
@@ -81,9 +86,28 @@ export class WindowManager {
 		handle.timeoutHandle = timeoutHandle
 
 		this.windows
-			.create({ type: "popup", url: opts.url, width: opts.width, height: opts.height })
+			.getLastFocused()
+			.then((anchor) => {
+				// A timeout or cancel during the bounds lookup must prevent creation.
+				if (this.handles.get(handleId) !== handle) return undefined
+				return this.windows.create({
+					type: "popup",
+					url: opts.url,
+					width: opts.width,
+					height: opts.height,
+					...centerOn(anchor, opts.width, opts.height),
+				})
+			})
 			.then((created) => {
-				if (!this.handles.has(handleId)) return
+				if (created === undefined) return
+				// Identity, not membership: a settled handle's 8-hex id is re-mintable,
+				// so `has(handleId)` could match a NEWER handle and adopt this stale
+				// create. And a handle lost mid-create (timeout settled first) leaves
+				// a window nothing owns — close it, or a stray popup lingers.
+				if (this.handles.get(handleId) !== handle) {
+					if (created.id !== undefined) void this.windows.remove(created.id)
+					return
+				}
 
 				if (created.id === undefined) {
 					this._settle(handleId, undefined, "Failed to open window.")
@@ -100,15 +124,16 @@ export class WindowManager {
 					this._settleUserClose(handleId)
 				})
 
-				if (!this.handles.has(handleId)) {
+				if (this.handles.get(handleId) !== handle) {
 					unsub()
+					void this.windows.remove(created.id)
 					return
 				}
 
 				handle.unsubOnRemoved = unsub
 			})
 			.catch((err: unknown) => {
-				const msg = err instanceof Error ? err.message : String(err)
+				const msg = errorMessageFromUnknown(err)
 				this.logger.log("window-manager", LogLevel.Error, `[${opts.kind}/${handleId}] window.create threw: ${msg}`)
 				this._settle(handleId, undefined, msg)
 			})
@@ -120,8 +145,23 @@ export class WindowManager {
 		this._settle(handleId, value, undefined)
 	}
 
-	public cancel(handleId: string, reason: string): void {
+	/** An `Error` reason reaches the awaiting caller as that same instance — the
+	 *  wallet-sdk envelope classifies dApp-facing errors by class, never by text. */
+	public cancel(handleId: string, reason: string | Error): void {
 		this._settle(handleId, undefined, reason)
+	}
+
+	/** Bring a live handle's window to the front. `false` when the handle or
+	 *  its window is gone (including a window closed between lookup and update). */
+	public async focus(handleId: string): Promise<boolean> {
+		const windowId = this.handles.get(handleId)?.windowId
+		if (windowId === undefined) return false
+		try {
+			await this.windows.update(windowId, { focused: true, drawAttention: true, state: "normal" })
+			return true
+		} catch {
+			return false
+		}
 	}
 
 	/** Stop watching the popup window without settling the promise. Clears the
@@ -135,6 +175,10 @@ export class WindowManager {
 	public detach(handleId: string): void {
 		const handle = this.handles.get(handleId)
 		if (!handle || handle.settled) return
+		this.stopWatching(handle)
+	}
+
+	private stopWatching(handle: Handle<unknown>): void {
 		if (handle.timeoutHandle !== null) {
 			this.clock.clearTimeout(handle.timeoutHandle)
 			handle.timeoutHandle = null
@@ -158,7 +202,7 @@ export class WindowManager {
 		handle.reject("Window closed by user.")
 	}
 
-	private _settle(handleId: string, value: unknown, error: string | undefined): void {
+	private _settle(handleId: string, value: unknown, error: string | Error | undefined): void {
 		const handle = this.handles.get(handleId)
 		if (!handle) return
 		if (handle.settled) {
@@ -169,14 +213,7 @@ export class WindowManager {
 		handle.settled = true
 		this.handles.delete(handleId)
 
-		if (handle.timeoutHandle !== null) {
-			this.clock.clearTimeout(handle.timeoutHandle)
-			handle.timeoutHandle = null
-		}
-		if (handle.unsubOnRemoved !== null) {
-			handle.unsubOnRemoved()
-			handle.unsubOnRemoved = null
-		}
+		this.stopWatching(handle)
 
 		if (handle.windowId !== undefined) {
 			this.windows.remove(handle.windowId).catch(() => {

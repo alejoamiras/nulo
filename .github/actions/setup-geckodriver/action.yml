@@ -1,0 +1,124 @@
+name: Setup geckodriver
+description: |
+  Install geckodriver (Linux x86_64), which the Firefox e2e driver spawns.
+
+  Trust posture, same as setup-presto-server: BOTH the release tarball and the
+  extracted `geckodriver` binary are pinned by SHA-256. The tarball pin is
+  checked on download, before anything is extracted; the archive must hold
+  exactly one member, a regular file named `geckodriver`; only that member is
+  extracted; the binary pin is re-checked on EVERY run, cache hits included,
+  because `actions/cache` restores the binary, not the tarball. The pins are
+  pins, not independent provenance (SECURITY.md "Binary dependencies").
+
+  The pins live HERE rather than in each caller: several workflows install
+  geckodriver, and one bump must not be able to reach only some of them.
+
+  Exports GECKODRIVER (the driver reads it) and adds the binary to PATH at
+  $RUNNER_TEMP/geckodriver-bin. No sudo, nothing outside RUNNER_TEMP.
+
+  Bumping: update all three `env` values below in one commit. Compute them with:
+    curl -sSfLO https://github.com/mozilla/geckodriver/releases/download/v<VER>/geckodriver-v<VER>-linux64.tar.gz
+    sha256sum geckodriver-v<VER>-linux64.tar.gz
+    tar -xzf geckodriver-v<VER>-linux64.tar.gz geckodriver && sha256sum geckodriver
+
+runs:
+  using: composite
+  steps:
+    - name: Pins and install dir
+      id: pins
+      shell: bash
+      env:
+        VERSION: "0.37.1"
+        TARBALL_SHA256: e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
+        BINARY_SHA256: f831b7e61454804e8a307edd951bf8a5f373efe3f718e75454a6485a51f6e39f
+      run: |
+        {
+          echo "version=${VERSION}"
+          echo "tarball_sha256=${TARBALL_SHA256}"
+          echo "binary_sha256=${BINARY_SHA256}"
+          echo "bin_dir=$RUNNER_TEMP/geckodriver-bin"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Cache geckodriver binary
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pins.outputs.bin_dir }}
+        key: ${{ runner.os }}-geckodriver-${{ steps.pins.outputs.version }}-${{ steps.pins.outputs.binary_sha256 }}
+
+    - name: Download, verify the tarball, extract the single member (cache miss)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VER: ${{ steps.pins.outputs.version }}
+        BIN_DIR: ${{ steps.pins.outputs.bin_dir }}
+        EXPECTED_TARBALL_SHA: ${{ steps.pins.outputs.tarball_sha256 }}
+      run: |
+        set -euo pipefail
+        TARBALL="geckodriver-v${VER}-linux64.tar.gz"
+        TMP=$(mktemp -d)
+        cd "$TMP"
+        curl -sSfL "https://github.com/mozilla/geckodriver/releases/download/v${VER}/${TARBALL}" -o "${TARBALL}"
+
+        ACTUAL_TARBALL_SHA=$(sha256sum "${TARBALL}" | awk '{print $1}')
+        if [ "${ACTUAL_TARBALL_SHA}" != "${EXPECTED_TARBALL_SHA}" ]; then
+          echo "::error::geckodriver tarball SHA-256 mismatch against the repo pin."
+          echo "  expected: ${EXPECTED_TARBALL_SHA}"
+          echo "  actual:   ${ACTUAL_TARBALL_SHA}"
+          exit 1
+        fi
+
+        # Exactly one member, a regular file (`-`) named geckodriver: a symlink, hard link,
+        # duplicate or extra entry could plant a file or redirect the hashed path.
+        tar -tvf "${TARBALL}" > members.txt
+        if [ "$(wc -l < members.txt)" -ne 1 ]; then
+          echo "::error::geckodriver tarball must contain exactly one member:"
+          cat members.txt
+          exit 1
+        fi
+        MEMBER_TYPE=$(cut -c1 members.txt)
+        MEMBER_NAME=$(awk '{print $NF}' members.txt)
+        if [ "${MEMBER_TYPE}" != "-" ] || [ "${MEMBER_NAME}" != "geckodriver" ]; then
+          echo "::error::geckodriver tarball member is not a regular file named geckodriver:"
+          cat members.txt
+          exit 1
+        fi
+        mkdir -p "${BIN_DIR}"
+        tar -xzf "${TARBALL}" -C "${BIN_DIR}" geckodriver
+        echo "Tarball SHA-256 verified: ${ACTUAL_TARBALL_SHA}"
+
+    # On a cache hit the restored directory is untrusted until re-checked: exactly the one regular
+    # file we cached, hashing to the pin, before it is made executable or put on PATH.
+    - name: Verify the restored directory and the binary SHA-256
+      shell: bash
+      env:
+        EXPECTED_SHA: ${{ steps.pins.outputs.binary_sha256 }}
+        BIN_DIR: ${{ steps.pins.outputs.bin_dir }}
+      run: |
+        set -euo pipefail
+        BINARY="${BIN_DIR}/geckodriver"
+        ENTRIES=$(find "${BIN_DIR}" -mindepth 1 | wc -l)
+        if [ "${ENTRIES}" -ne 1 ] || [ ! -f "${BINARY}" ] || [ -L "${BINARY}" ]; then
+          echo "::error::${BIN_DIR} must contain exactly one regular file, geckodriver:"
+          ls -la "${BIN_DIR}" || true
+          exit 1
+        fi
+        ACTUAL=$(sha256sum "${BINARY}" | awk '{print $1}')
+        if [ "${ACTUAL}" != "${EXPECTED_SHA}" ]; then
+          echo "::error::geckodriver binary SHA-256 mismatch (cache poisoning?)."
+          echo "  expected: ${EXPECTED_SHA}"
+          echo "  actual:   ${ACTUAL}"
+          echo "  Drop the cache + retry, or update the pins if upstream changed."
+          exit 1
+        fi
+        chmod +x "${BINARY}"
+        echo "Binary SHA-256 verified: ${ACTUAL}"
+
+    - name: Export GECKODRIVER and add to PATH
+      shell: bash
+      env:
+        BIN_DIR: ${{ steps.pins.outputs.bin_dir }}
+      run: |
+        echo "GECKODRIVER=${BIN_DIR}/geckodriver" >> "$GITHUB_ENV"
+        echo "${BIN_DIR}" >> "$GITHUB_PATH"
+        "${BIN_DIR}/geckodriver" --version | head -1

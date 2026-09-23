@@ -27,30 +27,62 @@
 // Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
 import "@nulo/wallet-sdk-schema-patch/register"
 
-import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import logoDataUri from "@/assets/logo.png?inline"
+import {
+	BackgroundConnectionHandler,
+	type BackgroundTransport,
+	type PendingDiscovery,
+	type ActiveSession,
+} from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
-import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
-import { toWalletResponseError } from "./error-envelope"
+import { attachContentListener } from "./content-message-relay"
+import { type ContentScriptMessageEnvelope, isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
+import { sessionDisconnectedMessage, sessionKnownTo, staleSessionVerdict } from "./stale-session"
+import { SESSION_INVALID_ERROR, toWalletResponseError } from "./error-envelope"
+import { toJsonSafe } from "./to-json-safe"
+import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
+import {
+	enforceSessionProfileBinding,
+	type ProfileSwitchEpoch,
+	stampSessionProfileGuarded,
+	trackProfileSwitchEpoch,
+	wireProfileSwitchTeardown,
+} from "./profile-switch-teardown"
 
 import type { ServiceCollection } from "@/wallet/base"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import { TokenService } from "@/wallet/services/token/service"
+import { LegalAcceptanceService, type LegalAdmission } from "@/wallet/services/legal/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
-import { tryCreateQueuedJournal } from "./queued-journal"
+import {
+	describeExternalId,
+	describeWireMethod,
+	DISCOVERY_STALE_MS,
+	type DispatchHooks,
+	DiscoveryQueue,
+	isDiscoveryExpired,
+	type SessionContext,
+	WalletSdkDispatcher,
+} from "@nulo/wallet-bridge"
+import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
+import { TermsAcceptanceRequiredError, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
+import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
+import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
+import { approveOrRollbackDiscoverySession } from "./discovery-approval"
+import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
+import { chainSendTxWithVouching } from "./queued-wait-vouching"
 import { createSessionBaton } from "./session-baton"
+import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
+import { wireTabLifecycle } from "./tab-lifecycle"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
-import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
 
@@ -73,7 +105,83 @@ const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME
  *
  * Call this after `services.start()` in the service worker entry point.
  */
-export function initWalletSdkHandler(services: ServiceCollection, logger: ILogger): BackgroundConnectionHandler {
+export function initWalletSdkHandler(
+	services: ServiceCollection,
+	logger: ILogger,
+	ports: { windows: WindowPort; clock: ClockPort },
+): BackgroundConnectionHandler {
+	const deps = resolveSdkDeps(services, logger)
+	const state = createSdkHandlerState(ports.clock)
+
+	const handler = new BackgroundConnectionHandler(
+		{
+			walletId: "nulo",
+			walletName: "Nulo",
+			walletVersion: __VERSION__,
+			// Inline so no resource has to be web-accessible: a URL would let every origin probe
+			// for the extension. The SDK forwards the string verbatim.
+			walletIcon: logoDataUri,
+			// 5.0 added a required `logger`; NOOP preserves the prior no-SDK-logging behavior.
+			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
+			logger: NOOP_LOGGER,
+		},
+		buildContentTransport(logger, (sessionId, tabId) => sessionKnownTo(state.late.handler, sessionId, tabId)),
+		buildHandlerCallbacks(deps, state, ports.windows),
+	)
+	state.late.handler = handler
+	state.late.discoveryQueue = new DiscoveryQueue(handler, logger)
+	// A verify window's slot is freed only when the window itself is gone.
+	ports.windows.onRemoved((windowId) => state.admission.windowRemoved(windowId))
+
+	serializeDecryption(handler, state.decryptLocks)
+	wireSessionTeardown(handler, deps.dappSessionService, logger)
+
+	// Profile-bound channel teardown: a switch disconnects every live session
+	// stamped to another profile (and unstamped debris) BEFORE the discovery
+	// drain below can serve the new profile. The epoch tracker feeds the
+	// response-delivery gate in handleWalletMessage.
+	state.late.switchEpoch = trackProfileSwitchEpoch(deps.profileService.onActiveProfileChanged)
+	wireProfileSwitchTeardown({
+		onActiveProfileChanged: deps.profileService.onActiveProfileChanged,
+		getActiveSessions: () => handler.getActiveSessions(),
+		sessionProfiles: state.sessionProfiles,
+		terminateSession: (sessionId) => handler.terminateSession(sessionId),
+		logger,
+	})
+	wireDiscoveryDrain(deps, state)
+
+	// Tab lifecycle (close + cross-origin navigation → session termination)
+	// lives in `tab-lifecycle.ts` (Q-04 pilot); it MUST stay registered before
+	// `handler.initialize()`. Handler methods are arrow-wrapped to keep `this`.
+	wireTabLifecycle({
+		onTabTeardown: (tabId) => deletePendingVerificationForTab(state.pendingVerification, tabId),
+		terminateForTab: (tabId) => handler.terminateForTab(tabId),
+		terminateSession: (sessionId) => handler.terminateSession(sessionId),
+		getActiveSessions: () => handler.getActiveSessions(),
+		logger,
+	})
+
+	handler.initialize()
+	logger.log("wallet-sdk", LogLevel.Info, "BackgroundConnectionHandler initialized")
+
+	return handler
+}
+
+type SdkDeps = {
+	networkService: NetworkService
+	accountService: AccountService
+	executionService: ExecutionService
+	profileService: ProfileService
+	dappInteractionService: DappInteractionService
+	dappSessionService: DappSessionService
+	operationJournal: OperationJournalService
+	tokenService: TokenService
+	legal: LegalAdmission
+	dispatcher: WalletSdkDispatcher
+	logger: ILogger
+}
+
+function resolveSdkDeps(services: ServiceCollection, logger: ILogger): SdkDeps {
 	const networkService: NetworkService = services.get(NetworkService.name)
 	const accountService: AccountService = services.get(AccountService.name)
 	const executionService: ExecutionService = services.get(ExecutionService.name)
@@ -82,6 +190,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
 	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
 	const tokenService: TokenService = services.get(TokenService.name)
+	const legal: LegalAcceptanceService = services.get(LegalAcceptanceService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -99,15 +208,39 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			},
 		},
 	)
+	return {
+		networkService,
+		accountService,
+		executionService,
+		profileService,
+		dappInteractionService,
+		dappSessionService,
+		operationJournal,
+		tokenService,
+		legal,
+		dispatcher,
+		logger,
+	}
+}
 
+/** SW-lifetime state shared by the handler callbacks and the wiring around them. */
+type SdkHandlerState = {
 	/**
-	 * Track new connections (user-approved via popup) keyed by
-	 * `(origin, chainId)` so verification fires for the right session when
-	 * the dApp holds concurrent sessions on different chains for the same
-	 * origin.
+	 * Track new connections (user-approved via popup) keyed by the discovery
+	 * REQUEST id — which upstream reuses verbatim as the sessionId — so
+	 * establishment can only ever read its OWN approval's marker: concurrent
+	 * same-`(origin, chainId)` handshakes and reconnects can't cross-consume,
+	 * and the entry's `profileId` pins WHO approved for the skew check.
 	 */
-	const pendingVerification = new Set<string>()
-
+	pendingVerification: Map<string, PendingVerificationEntry>
+	/**
+	 * Live-channel identity binding: sessionId → owning profileId, stamped at
+	 * establishment from the validated DappSession row (approver-checked via
+	 * the pending-verification marker). Consumed by the dispatch guard and the
+	 * profile-switch teardown; same lifetime as the upstream activeSessions
+	 * (both die with the SW), cleaned in onSessionTerminated.
+	 */
+	sessionProfiles: Map<string, string>
 	/**
 	 * Guard against concurrent discoveries for the same `(origin, chainId)`
 	 * pair (prevents duplicate connect popups). Stores a promise that
@@ -117,242 +250,360 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 * and chain B concurrently without one waiting on the other (and without
 	 * the chain-B discovery being auto-approved against a chain-A session).
 	 */
-	const pendingDiscoveryPromises = new Map<string, Promise<void>>()
-
-	/** Composite key used by both maps above. */
-	const pendingKey = (origin: string, chainId: string) => `${origin}|${chainId}`
-
+	pendingDiscoveryPromises: Map<string, Promise<void>>
 	/**
 	 * Per-session message queue — ensures messages from the same dApp session
 	 * are processed sequentially (FIFO). Without this, the fire-and-forget
 	 * onWalletMessage callback processes messages concurrently, causing race
 	 * conditions (e.g. executeUtility runs before registerContract completes).
 	 */
-	const sessionQueues = new Map<string, Promise<void>>()
+	sessionQueues: Map<string, Promise<void>>
+	/**
+	 * Per-session establishment-validation result (B-13). The SDK sends the
+	 * key-exchange response BEFORE invoking `onSessionEstablished`, whose async
+	 * validation (row lookup, hash persist, verify-window open) may then TERMINATE
+	 * the session as unverified. `onWalletMessage` awaits this promise before
+	 * dispatching, so a message can never ride a session that's concurrently being
+	 * torn down. Resolves `true` when established, `false` when terminated.
+	 */
+	establishmentStatus: Map<string, Promise<boolean>>
+	/** Per-session decryption serializer (see `serializeDecryption`). */
+	decryptLocks: KeyedLock
+	/** Per-origin reconnect throttle and verify-window budget (see `verify-admission.ts`). */
+	admission: VerifyAdmissionGate
+	/** Handshakes currently waiting on another popup for the same `(origin, chainId)`, bounded. */
+	dedupeWaiters: Map<string, number>
+	/**
+	 * Bound right after the handler is constructed, before `initialize()`
+	 * attaches any listener; callbacks read these at call time, never earlier.
+	 */
+	late: { handler?: BackgroundConnectionHandler; discoveryQueue?: DiscoveryQueue; switchEpoch?: ProfileSwitchEpoch }
+}
 
-	let discoveryQueue: DiscoveryQueue
+function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
+	return {
+		pendingVerification: new Map(),
+		sessionProfiles: new Map(),
+		pendingDiscoveryPromises: new Map(),
+		sessionQueues: new Map(),
+		establishmentStatus: new Map(),
+		// maxHoldMs: null — the prior hand-rolled decrypt chain had no watchdog (Q-08).
+		decryptLocks: new KeyedLock({ maxHoldMs: null }),
+		admission: new VerifyAdmissionGate(clock),
+		dedupeWaiters: new Map(),
+		late: {},
+	}
+}
 
-	const handler = new BackgroundConnectionHandler(
-		{
-			walletId: "nulo",
-			walletName: "Nulo",
-			walletVersion: __VERSION__,
-			walletIcon: chrome.runtime.getURL("/src/assets/logo.png"),
-			// 5.0 added a required `logger`; NOOP preserves the prior no-SDK-logging behavior.
-			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
-			logger: NOOP_LOGGER,
+/** What the content wrapper needs besides the SDK's listener. */
+type ContentWrapperDeps = {
+	logger: ILogger
+	/** Whether the sender's tab holds the session, per the handler that exists right now; asked only for a session-bound message. */
+	sessionKnown: (sessionId: string, tabId: number) => boolean
+	sendToTab: BackgroundTransport["sendToTab"]
+}
+
+function buildContentTransport(logger: ILogger, sessionKnown: ContentWrapperDeps["sessionKnown"]): BackgroundTransport {
+	// The handler's `sendToTab` returns void, so the send's rejection is nobody's to observe. A
+	// tab that navigated away (or lost its content script) has nowhere to deliver to; every
+	// other failure still surfaces as an unhandled rejection.
+	const sendToTab: BackgroundTransport["sendToTab"] = (tabId, message) => {
+		chrome.tabs.sendMessage(tabId, message).catch((err: unknown) => {
+			if (!isReceiverGoneRejection(err)) throw err
+		})
+	}
+	return {
+		sendToTab,
+		addContentListener: (listener) => {
+			// The chrome.runtime.onMessage registration lives in the module-scope
+			// content-message-relay (cold-wake fix): registering a SECOND chrome
+			// listener here would double-deliver — a duplicate discovery's
+			// coalesce→reject path deletes the entry its twin queued, and a
+			// duplicate secure-message double-journals a sendTx. Attach to the
+			// relay instead; buffered cold-wake messages flush through this same
+			// validated wrapper.
+			attachContentListener(admitContentMessage(listener, { logger, sessionKnown, sendToTab }))
 		},
-		{
-			sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
-			addContentListener: (listener) => {
-				// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
-				chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender) => {
-					// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
-					// attributes origin via `sender.tab?.url` (top-frame URL), so an
-					// iframe at https://evil.com/x.html embedded in https://app.example.com
-					// would be credited to https://app.example.com — inheriting any
-					// grants the user gave to the parent page.
-					//
-					// Nulo-side defense-in-depth: reject content-script messages
-					// from subframes at the wrapper layer. `sender.frameId === 0`
-					// is the top frame; any other value (or undefined for
-					// non-tab senders) is a subframe.
-					//
-					// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
-					// disables this check. Default is "reject subframes" because
-					// research found NO legitimate iframe-dApp use cases in the
-					// Nulo ecosystem. If a counterexample surfaces, set the env
-					// var rather than removing this check.
-					//
-					// Frame-targeted send replies (F-002 full fix) require upstream
-					// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
-					// in `BackgroundConnectionHandler`'s sendToTab signature —
-					// upstream's `(tabId, msg)` interface doesn't pass frameId
-					// through, so this remains an upstream coordination item.
-					if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
-						logger.log(
-							"wallet-sdk-bg",
-							LogLevel.Debug,
-							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
-						)
-						return undefined
-					}
+	}
+}
 
-					// Zod-validate content-script-originated envelopes before
-					// forwarding to the upstream handler. `passthrough` lets
-					// non-content-script messages through (ServiceClient
-					// responses, offscreen pings, etc.) — the upstream handler
-					// filters those by `origin`. `invalid` drops adversarial /
-					// malformed envelopes early with a structured debug log.
-					const verdict = validateContentScriptMessage(message)
-					if (verdict.kind === "invalid") {
-						logger.log("wallet-sdk-bg", LogLevel.Debug, "Dropping malformed content-script envelope", verdict.reason)
-						return undefined
-					}
-					listener(message, sender)
-					return undefined
-				})
-			},
+/**
+ * The checks every content-script message passes before the SDK handler sees it, in this order:
+ * top frame, envelope schema, then a session this background knows.
+ */
+function admitContentMessage(
+	listener: Parameters<BackgroundTransport["addContentListener"]>[0],
+	deps: ContentWrapperDeps,
+): (message: unknown, sender: chrome.runtime.MessageSender) => undefined {
+	const { logger } = deps
+	return (message, sender) => {
+		// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
+		// attributes origin via `sender.tab?.url` (top-frame URL), so an
+		// iframe at https://evil.com/x.html embedded in https://app.example.com
+		// would be credited to https://app.example.com — inheriting any
+		// grants the user gave to the parent page.
+		//
+		// Nulo-side defense-in-depth: reject content-script messages
+		// from subframes at the wrapper layer. `sender.frameId === 0`
+		// is the top frame; any other value (or undefined for
+		// non-tab senders) is a subframe.
+		//
+		// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
+		// disables this check. Default is "reject subframes" because
+		// research found NO legitimate iframe-dApp use cases in the
+		// Nulo ecosystem. If a counterexample surfaces, set the env
+		// var rather than removing this check.
+		//
+		// Frame-targeted send replies (F-002 full fix) require upstream
+		// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
+		// in `BackgroundConnectionHandler`'s sendToTab signature —
+		// upstream's `(tabId, msg)` interface doesn't pass frameId
+		// through, so this remains an upstream coordination item.
+		if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
+			logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Debug,
+				// The tab and sender URLs are the user's browsing history, and any subframe on any
+				// page can trigger this line. The frame identity is what diagnoses the rejection.
+				`Rejected content-script message from subframe (frameId=${sender.frameId}, tabId=${sender.tab?.id}) — F-001 defense-in-depth`,
+			)
+			return undefined
+		}
+
+		// Zod-validate content-script-originated envelopes before
+		// forwarding to the upstream handler. `passthrough` lets
+		// non-content-script messages through (ServiceClient
+		// responses, offscreen pings, etc.) — the upstream handler
+		// filters those by `origin`. `invalid` drops adversarial /
+		// malformed envelopes early with a structured debug log.
+		const verdict = validateContentScriptMessage(message)
+		if (verdict.kind === "invalid") {
+			logger.log("wallet-sdk-bg", LogLevel.Debug, "Dropping malformed content-script envelope", verdict.reason)
+			return undefined
+		}
+		if (verdict.kind === "valid" && replyIfStale(verdict.message, sender.tab?.id, deps)) return undefined
+		listener(message, sender)
+		return undefined
+	}
+}
+
+/**
+ * A validated message for a session the sender's tab does not hold is answered with the SDK's
+ * own disconnect instead of being forwarded: the handler would drop it in silence, and the page
+ * would wait out its 300 s ceiling for a background that forgot it (see `stale-session.ts`).
+ * Returns whether the message was answered here.
+ */
+function replyIfStale(envelope: ContentScriptMessageEnvelope, tabId: number | undefined, deps: ContentWrapperDeps): boolean {
+	const stale = staleSessionVerdict(envelope, tabId, deps.sessionKnown)
+	if (stale === "forward") return false
+	// A connected page repeats this every heartbeat until it reconnects; debug keeps it out of
+	// every user's log buffer.
+	deps.logger.log("wallet-sdk-bg", LogLevel.Debug, "Answering a message for a session the sender's tab does not hold", {
+		type: envelope.type,
+		session: describeExternalId(stale.sessionId),
+	})
+	deps.sendToTab(stale.disconnectTab, sessionDisconnectedMessage(stale.sessionId))
+	return true
+}
+
+function buildHandlerCallbacks(
+	deps: SdkDeps,
+	state: SdkHandlerState,
+	windows: WindowPort,
+): ConstructorParameters<typeof BackgroundConnectionHandler>[2] {
+	return {
+		onPendingDiscovery: (discovery) => {
+			handleDiscovery(discovery, discoveryDeps(deps, state))
 		},
-		{
-			onPendingDiscovery: (discovery) => {
-				handleDiscovery(
-					discovery,
-					handler,
-					profileService,
-					dappInteractionService,
-					dappSessionService,
-					pendingVerification,
-					pendingDiscoveryPromises,
-					discoveryQueue,
-					logger,
-				)
-			},
 
-			onSessionEstablished: async (session) => {
-				// Sessions are per-`(origin, chainId)`. The upstream
-				// `ActiveSession` carries `chainInfo` (set from the matching
-				// discovery during key exchange — see the wallet-sdk
-				// `BackgroundConnectionHandler` source), so derive `chainId`
-				// directly from the session being established. No side-channel
-				// map needed.
-				const chainId = String(chainInfoToChainId(session))
-				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
-				if (dappSession) {
-					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
-				} else {
-					// F-006 (Round 2 B-2): if a session was established but the
-					// backing DappSession is gone, the user revoked between
-					// approveDiscovery and key-exchange. Terminate immediately
-					// so the dApp can't ride a stale approved-pending-discovery
-					// into a live ActiveSession. Without this, the upstream
-					// state machine would let the dApp re-key-exchange after
-					// revocation (see audit-codex-final.md B-2).
-					logger.log(
-						"wallet-sdk-bg",
-						LogLevel.Warn,
-						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
-					)
-					handler.terminateSession(session.sessionId)
-					return
-				}
-
-				const verifKey = pendingKey(session.origin, chainId)
-				const isNewConnection = pendingVerification.has(verifKey)
-				if (isNewConnection) pendingVerification.delete(verifKey)
-
-				const needsVerification = isNewConnection || (dappSession && !dappSession.trustedVerification)
-
-				if (needsVerification && dappSession) {
-					chrome.windows.create({
-						type: "popup",
-						url: chrome.runtime.getURL(
-							`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
-						),
-						height: 800,
-						width: 400,
-					})
-				}
-			},
-
-			onSessionTerminated: (sessionId) => {
-				sessionQueues.delete(sessionId)
-				decryptQueues.delete(sessionId)
-			},
-
-			onWalletMessage: (session, message) => {
-				const key = session.sessionId
-				const prev = sessionQueues.get(key) ?? Promise.resolve()
-
-				// Baton-based FIFO (see `session-baton.ts` for mechanics).
-				// Resolves when the sendTx handler enqueues on the execution mutex
-				// (via `onExecutionEnqueued`) OR when the handler completes
-				// (safety-net `.finally(releaseFifo)`), whichever fires first.
-				const { baton, releaseFifo } = createSessionBaton()
-
-				// Only top-level `sendTx` messages get a pre-allocated queued
-				// journal record. `batch` is excluded by design — the recursive
-				// dispatch in WalletSdkDispatcher.handleBatch can't safely
-				// route hooks per-leg, so we'd end up with a batch-level
-				// queued record that no inner leg knows to claim.
-				// TODO(queued-visibility-for-batch): batched sendTx legs
-				// currently bypass the queued-record creation path. Lifting
-				// this requires a per-leg queued-record model or a relaxation
-				// of the batch contract; out of scope for the
-				// concurrent-dApp-sendTx fix.
-				const queuedJournalIdPromise: Promise<string | undefined> =
-					message.type === "sendTx"
-						? tryCreateQueuedJournal(message, session, {
-								journal: operationJournal,
-								profile: profileService,
-								dappSession: dappSessionService,
-								networkSvc: networkService,
-								account: accountService,
-								logger,
-							})
-						: Promise.resolve(undefined)
-
-				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
-					prev.then(() =>
-						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-							// Bind the baton release into the `onExecutionEnqueued`
-							// slot — fired downstream by ExecutionService the instant
-							// the approved request enqueues on the execution mutex
-							// (which preserves execution order). The field name is
-							// shared across DispatchHooks → ExecutionHooks so the wiring
-							// is type-checked end-to-end (a past field-name drift here
-							// is exactly what left this release dead before).
-							onExecutionEnqueued: releaseFifo,
-							queuedJournalId,
-						}),
+		onSessionEstablished: (session) => {
+			const handler = state.late.handler!
+			// Record the validation promise SYNCHRONOUSLY (before its first await)
+			// so onWalletMessage can gate on it even if a message arrives in the
+			// gap between the SDK's key-exchange response and this validation (B-13).
+			const validated = handleSessionEstablished(session, {
+				dappSessionService: deps.dappSessionService,
+				terminateSession: (sessionId) => handler.terminateSession(sessionId),
+				pendingVerification: state.pendingVerification,
+				stampSessionProfile: (sessionId, profileId) =>
+					stampSessionProfileGuarded(state.sessionProfiles, sessionId, profileId, (id) =>
+						handler.getActiveSessions().some((s) => s.sessionId === id),
 					),
-				)
-				// Safety-net release for handlers that don't call releaseFifo
-				// explicitly (every non-sendTx path) — preserves backward-
-				// compatible FIFO semantics for those. `.catch(() => {})` on
-				// the ignored side prevents an unhandled-rejection warning
-				// if the handler throws.
-				handlerChain.finally(releaseFifo).catch(() => {})
-				sessionQueues.set(
-					key,
-					baton.catch(() => {}),
-				)
-			},
+				isSessionLive: (sessionId) => handler.getActiveSessions().some((s) => s.sessionId === sessionId),
+				windows,
+				reservations: state.admission,
+				logger: deps.logger,
+			})
+			state.establishmentStatus.set(session.sessionId, validated)
+			return validated.then(() => undefined)
 		},
+
+		onSessionTerminated: (sessionId) => {
+			state.admission.onSessionGone(sessionId)
+			state.sessionProfiles.delete(sessionId)
+			state.sessionQueues.delete(sessionId)
+			state.decryptLocks.delete(sessionId)
+			state.establishmentStatus.delete(sessionId)
+		},
+
+		onWalletMessage: (session, message) => onWalletMessage(session, message, deps, state),
+	}
+}
+
+function onWalletMessage(session: ActiveSession, message: WalletMessage, deps: SdkDeps, state: SdkHandlerState): void {
+	const key = session.sessionId
+	const prev = state.sessionQueues.get(key) ?? Promise.resolve()
+
+	// Baton-based FIFO (see `session-baton.ts` for mechanics).
+	// Resolves when the sendTx handler enqueues on the execution mutex
+	// (via `onExecutionEnqueued`) OR when the handler completes
+	// (safety-net `.finally(releaseFifo)`), whichever fires first.
+	const { baton, releaseFifo } = createSessionBaton()
+
+	// B-13: gate on establishment validation. Between the SDK's
+	// key-exchange response and onSessionEstablished's async validation, a
+	// message must not ride a session being terminated as unverified — and
+	// must not persist a durable journal record for it. Capture the
+	// per-session validation promise and re-check its identity after the
+	// await: a termination during the wait deletes (or replaces) the entry,
+	// so an already-waiting handler drops. This gate is computed on message
+	// ARRIVAL, NOT behind the FIFO baton — so a queued sibling still gets its
+	// durable queued-journal record immediately. Two concurrent `sendTx`
+	// requests must BOTH show as `queued` before either is approved (the
+	// anti-lost-tx invariant `concurrent-sendtx.test.ts` pins); serializing
+	// only execution — never record creation — behind the baton preserves it.
+	const validation = state.establishmentStatus.get(key)
+	const establishedPromise = (validation ?? Promise.resolve(false)).then(
+		(established) => established && state.establishmentStatus.get(key) === validation,
 	)
 
-	discoveryQueue = new DiscoveryQueue(handler, logger)
+	// Queued journal is created on arrival (concurrent across siblings),
+	// gated on establishment. Only top-level `sendTx` gets a pre-allocated
+	// record — `batch` is excluded by design: the recursive dispatch in
+	// WalletSdkDispatcher.handleBatch can't safely route hooks per-leg, so
+	// we'd end up with a batch-level record no inner leg knows to claim.
+	// TODO(queued-visibility-for-batch): batched sendTx legs currently
+	// bypass the queued-record creation path.
+	const queuedJournalIdPromise: Promise<string | undefined> =
+		message.type === "sendTx"
+			? establishedPromise.then((ok) => createQueuedJournalIfStamped(ok, message, session, deps, state))
+			: Promise.resolve(undefined)
 
-	/**
-	 * Serialize decryption per-session to prevent message reordering.
-	 * The wallet-sdk uses `void this.handleEncryptedMessage(...)` (fire-and-forget),
-	 * so two messages can have their decryptions race.
-	 * TODO: Remove this monkey-patch if wallet-sdk adds a proper serialization API.
-	 */
+	// Pre-claim liveness: the record ages in `queued` through the whole
+	// session-FIFO wait + its own approval popup — a legitimate wait
+	// the reaper's grace cannot distinguish from a lost handler. The
+	// begin/end PLACEMENT invariants live (unit-pinned) in
+	// `queued-wait-vouching.ts`.
+	chainSendTxWithVouching({
+		queuedJournalIdPromise,
+		prev,
+		vouch: deps.executionService,
+		releaseFifo,
+		run: (queuedJournalId) => runEstablishedMessage(queuedJournalId, establishedPromise, releaseFifo, session, message, deps, state),
+	})
+	state.sessionQueues.set(
+		key,
+		baton.catch(() => {}),
+	)
+}
+
+/** The stamp guard runs BEFORE the durable journal write: this path
+ *  independently resolves profile/session/account/network, so without the
+ *  anchor an A-era message racing a switch could persist a B-profile
+ *  operation. Establishment stamps before its validation promise resolves, so
+ *  a missing stamp here means a superseded/foreign session — skip the record
+ *  (the handler's own guard rejects the message itself). */
+function createQueuedJournalIfStamped(
+	ok: boolean,
+	message: WalletMessage,
+	session: ActiveSession,
+	deps: SdkDeps,
+	state: SdkHandlerState,
+): ReturnType<typeof tryCreateQueuedJournal> | undefined {
+	const stampedProfileId = state.sessionProfiles.get(session.sessionId)
+	return ok && stampedProfileId !== undefined
+		? tryCreateQueuedJournal(message, session, {
+				journal: deps.operationJournal,
+				profile: deps.profileService,
+				dappSession: deps.dappSessionService,
+				networkSvc: deps.networkService,
+				account: deps.accountService,
+				stampedProfileId,
+				logger: deps.logger,
+			})
+		: undefined
+}
+
+async function runEstablishedMessage(
+	queuedJournalId: string | undefined,
+	establishedPromise: Promise<boolean>,
+	releaseFifo: ReturnType<typeof createSessionBaton>["releaseFifo"],
+	session: ActiveSession,
+	message: WalletMessage,
+	deps: SdkDeps,
+	state: SdkHandlerState,
+): Promise<void> {
+	// B-13: re-gate execution behind the baton. A session that
+	// failed/lost establishment must not execute either — not just skip
+	// its journal. Same promise as the journal gate, so it resolves once.
+	if (!(await establishedPromise)) {
+		deps.logger.log(
+			"wallet-sdk-bg",
+			LogLevel.Warn,
+			`Dropping message for session ${describeExternalId(session.sessionId)}: failed/lost establishment validation`,
+		)
+		return
+	}
+	return handleWalletMessage(
+		session,
+		message,
+		state.late.handler!,
+		deps.dispatcher,
+		deps.profileService,
+		deps.operationJournal,
+		state.sessionProfiles,
+		state.late.switchEpoch!,
+		deps.logger,
+		deps.legal,
+		{
+			// Bind the baton release into the `onExecutionEnqueued`
+			// slot — fired downstream by ExecutionService the instant
+			// the approved request enqueues on the execution mutex
+			// (which preserves execution order). The field name is
+			// shared across DispatchHooks → ExecutionHooks so the wiring
+			// is type-checked end-to-end (a past field-name drift here
+			// is exactly what left this release dead before).
+			onExecutionEnqueued: releaseFifo,
+			queuedJournalId,
+		},
+	)
+}
+
+/**
+ * Serialize decryption per-session to prevent message reordering.
+ * The wallet-sdk uses `void this.handleEncryptedMessage(...)` (fire-and-forget),
+ * so two messages can have their decryptions race.
+ * TODO: Remove this monkey-patch if wallet-sdk adds a proper serialization API.
+ */
+function serializeDecryption(handler: BackgroundConnectionHandler, decryptLocks: KeyedLock): void {
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
 	const origDecrypt = (handler as any).handleEncryptedMessage.bind(handler)
-	const decryptQueues = new Map<string, Promise<void>>()
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
-	;(handler as any).handleEncryptedMessage = async (sessionId: string, encrypted: unknown) => {
-		const prev = decryptQueues.get(sessionId) ?? Promise.resolve()
-		const next = prev.then(() => origDecrypt(sessionId, encrypted))
-		decryptQueues.set(
-			sessionId,
-			next.catch(() => {}),
-		)
-		return next
-	}
+	;(handler as any).handleEncryptedMessage = (sessionId: string, encrypted: unknown) =>
+		decryptLocks.withLock(sessionId, () => origDecrypt(sessionId, encrypted))
+}
 
-	/** F-006: when a stored DappSession is deleted (settings disconnect OR
-	 *  TTL expiry — both emit the same event), tear down every matching
-	 *  live wallet-sdk ActiveSession so the dApp can't keep calling
-	 *  network-only methods over the still-open channel.
-	 *
-	 *  Tuple-match by `(origin, chainId)` — per audit Round 1 reversal of
-	 *  Decision 8, NOT a single `walletSdkSessionId` field, because a single
-	 *  stored DappSession may correspond to MULTIPLE live ActiveSessions
-	 *  (multi-tab same dApp). O(n) iteration where n is bounded by tabs-with-
-	 *  dApp-loaded — typically <10. */
+/** F-006: when a stored DappSession is deleted (settings disconnect OR
+ *  TTL expiry — both emit the same event), tear down every matching
+ *  live wallet-sdk ActiveSession so the dApp can't keep calling
+ *  network-only methods over the still-open channel.
+ *
+ *  Tuple-match by `(origin, chainId)` — per audit Round 1 reversal of
+ *  Decision 8, NOT a single `walletSdkSessionId` field, because a single
+ *  stored DappSession may correspond to MULTIPLE live ActiveSessions
+ *  (multi-tab same dApp). O(n) iteration where n is bounded by tabs-with-
+ *  dApp-loaded — typically <10. */
+function wireSessionTeardown(handler: BackgroundConnectionHandler, dappSessionService: DappSessionService, logger: ILogger): void {
 	dappSessionService.onDappSessionDeleted.add((deleted) => {
 		try {
 			const origin = deleted.dappMetadata?.url
@@ -370,7 +621,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Info,
-					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+					`Terminating live session ${describeExternalId(match.sessionId)} on chain ${chainId} — dApp access revoked`,
 				)
 				handler.terminateSession(match.sessionId)
 			}
@@ -378,75 +629,63 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			logger.log("wallet-sdk-bg", LogLevel.Error, `Failed to terminate live sessions on dapp-session-deleted: ${err}`)
 		}
 	})
+}
 
-	/** On unlock, drain any queued discovery requests */
+/** On unlock, drain any queued discovery requests */
+function wireDiscoveryDrain(deps: SdkDeps, state: SdkHandlerState): void {
+	const { profileService, logger } = deps
 	profileService.onActiveProfileChanged.add((profile) => {
+		const discoveryQueue = state.late.discoveryQueue!
 		if (profile) {
 			logger.log("wallet-sdk", LogLevel.Info, `Profile unlocked, draining discovery queue (${discoveryQueue.size} queued)`)
-			discoveryQueue.drain(async (discovery) => {
-				const p = await profileService.getActiveProfile()
-				if (!p) {
-					logger.log("wallet-sdk", LogLevel.Warn, "Wallet locked mid-drain, stopping")
-					return false
-				}
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Info,
-					`Processing queued discovery: ${discovery.origin} (requestId: ${discovery.requestId})`,
-				)
-				await handleDiscovery(
-					discovery,
-					handler,
-					profileService,
-					dappInteractionService,
-					dappSessionService,
-					pendingVerification,
-					pendingDiscoveryPromises,
-					discoveryQueue,
-					logger,
-				)
-				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: ${discovery.origin}`)
-				return true
-			})
+			discoveryQueue.drain((discovery) => drainQueuedDiscovery(discovery, deps, state))
 		} else {
 			logger.log("wallet-sdk", LogLevel.Info, `Profile locked (${discoveryQueue.size} in queue)`)
 		}
 	})
+}
 
-	// Terminate sessions when a tab is closed
-	chrome.tabs.onRemoved.addListener((tabId) => {
-		handler.terminateForTab(tabId)
-	})
+async function drainQueuedDiscovery(discovery: PendingDiscovery, deps: SdkDeps, state: SdkHandlerState): Promise<boolean> {
+	const { profileService, logger } = deps
+	const p = await profileService.getActiveProfile()
+	if (!p) {
+		logger.log("wallet-sdk", LogLevel.Warn, "Wallet locked mid-drain, stopping")
+		return false
+	}
+	logger.log("wallet-sdk", LogLevel.Info, `Processing queued discovery: request ${describeExternalId(discovery.requestId)}`)
+	await handleDiscovery(discovery, discoveryDeps(deps, state))
+	logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: request ${describeExternalId(discovery.requestId)}`)
+	return true
+}
 
-	// Terminate sessions when a tab navigates to a different origin.
-	// SPA navigations (e.g. Next.js router.push) fire tabs.onUpdated with
-	// status "loading" but stay on the same origin — these must NOT kill
-	// the session. (backport of upstream #56)
-	chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-		if (changeInfo.status === "loading" && changeInfo.url) {
-			try {
-				const newOrigin = new URL(changeInfo.url).origin
-				const sessions = handler.getActiveSessions().filter((s) => s.tabId === tabId)
-				for (const session of sessions) {
-					if (session.origin !== newOrigin) {
-						logger.log(
-							"wallet-sdk",
-							LogLevel.Info,
-							`Tab ${tabId} navigated to ${newOrigin}, terminating session ${session.sessionId}`,
-						)
-						handler.terminateSession(session.sessionId)
-					}
-				}
-			} catch {
-				handler.terminateForTab(tabId)
-			}
-		}
-	})
+type DiscoveryDeps = {
+	handler: BackgroundConnectionHandler
+	profileService: ProfileService
+	dappInteractionService: DappInteractionService
+	dappSessionService: DappSessionService
+	pendingVerification: Map<string, PendingVerificationEntry>
+	pendingDiscoveryPromises: Map<string, Promise<void>>
+	discoveryQueue: DiscoveryQueue
+	legal: LegalAdmission
+	admission: VerifyAdmissionGate
+	dedupeWaiters: Map<string, number>
+	logger: ILogger
+}
 
-	handler.initialize()
-	logger.log("wallet-sdk", LogLevel.Info, "BackgroundConnectionHandler initialized")
-
-	return handler
+function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
+	return {
+		handler: state.late.handler!,
+		profileService: deps.profileService,
+		dappInteractionService: deps.dappInteractionService,
+		dappSessionService: deps.dappSessionService,
+		pendingVerification: state.pendingVerification,
+		pendingDiscoveryPromises: state.pendingDiscoveryPromises,
+		discoveryQueue: state.late.discoveryQueue!,
+		legal: deps.legal,
+		admission: state.admission,
+		dedupeWaiters: state.dedupeWaiters,
+		logger: deps.logger,
+	}
 }
 
 // F-04: caps on concurrent connect popups — the unlocked-path analog of the
@@ -455,6 +694,10 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 // requests are rejected before any popup work.
 const DISCOVERY_PENDING_GLOBAL_CAP = 32
 const DISCOVERY_PENDING_PER_ORIGIN_CAP = 4
+/** Handshakes allowed to wait on one connect popup: past this a same-tuple flood is rejected, never parked. */
+const DEDUPE_WAITERS_CAP = 8
+
+const discoveryDeadline = (discovery: PendingDiscovery): number => discovery.timestamp + DISCOVERY_STALE_MS
 
 /**
  * Handle a new discovery request from a dApp.
@@ -466,24 +709,23 @@ const DISCOVERY_PENDING_PER_ORIGIN_CAP = 4
  *    - If no: show connect popup via DappInteractionService
  * 3. On approval, the wallet-sdk proceeds with ECDH key exchange
  */
-async function handleDiscovery(
-	discovery: PendingDiscovery,
-	handler: BackgroundConnectionHandler,
-	profileService: ProfileService,
-	dappInteractionService: DappInteractionService,
-	dappSessionService: DappSessionService,
-	pendingVerification: Set<string>,
-	pendingDiscoveryPromises: Map<string, Promise<void>>,
-	discoveryQueue: DiscoveryQueue,
-	logger: ILogger,
-): Promise<void> {
+/** Fail closed: an answer that cannot be read is "no". */
+async function isLegalCurrent(legal: LegalAdmission): Promise<boolean> {
+	return legal.assertCurrent().then(
+		() => true,
+		() => false,
+	)
+}
+
+async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps): Promise<void> {
+	const { handler, logger } = deps
 	try {
 		// F-04: resolve chainId up-front — the locked-queue coalesce/cap and the
 		// popup caps below all key on `(origin,chainId)`, not just the
 		// auto-approve lookup and new-session creation.
 		const chainId = String(chainInfoToChainId(discovery))
 
-		const profile = await profileService.getActiveProfile()
+		const profile = await deps.profileService.getActiveProfile()
 		if (!profile) {
 			// F-04: `enqueue` returns false when it coalesces a duplicate or hits a
 			// cap. The upstream `pendingDiscoveries` map (keyed by the dApp-controlled
@@ -492,19 +734,32 @@ async function handleDiscovery(
 			// requestIds under a single (origin,chainId) would grow it without limit,
 			// defeating the queue cap. The still-queued first entry has a different
 			// requestId and is untouched; it drains on unlock.
-			if (!discoveryQueue.enqueue(discovery.requestId, discovery.origin, chainId)) {
+			if (!deps.discoveryQueue.enqueue(discovery.requestId, discovery.origin, chainId)) {
 				handler.rejectDiscovery(discovery.requestId)
 			}
 			return
 		}
 
+		// Read BEFORE the session lookup, never after it: the lookup must stay the last yield ahead
+		// of the popup-promise registration below.
+		const legalCurrent = await isLegalCurrent(deps.legal)
+
 		// Check for existing valid session (returning user on this chain → auto-approve).
 		// Lookup is by `(origin, chainId)` so a session remembered on testnet does
-		// NOT silently auto-approve on mainnet (AUDIT plan A12).
-		const existingSession = await dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
+		// NOT silently auto-approve on mainnet (AUDIT plan A12). The lookup is awaited
+		// HERE: from its resolution to the popup-promise registration below there is
+		// no yield, so two same-key discoveries can never both miss the dedupe map.
+		const existingSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
 		if (existingSession) {
-			handler.approveDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Info, `Discovery auto-approved (existing session): ${discovery.origin} chain=${chainId}`)
+			autoApproveExistingSession(discovery, chainId, deps, existingSession.trustedVerification === true)
+			return
+		}
+
+		// A NEW connection is an app request like any other: none without a current Terms
+		// acceptance. An existing session keeps its transport above, which moves nothing and is
+		// what lets that dApp receive the typed refusal for its next call.
+		if (!legalCurrent) {
+			handler.rejectDiscovery(discovery.requestId)
 			return
 		}
 
@@ -519,109 +774,296 @@ async function handleDiscovery(
 		// outcome of a chain-A discovery (which is what would happen with
 		// origin-only keying).
 		const dedupeKey = `${discovery.origin}|${chainId}`
-		const pendingPopup = pendingDiscoveryPromises.get(dedupeKey)
+		const pendingPopup = deps.pendingDiscoveryPromises.get(dedupeKey)
 		if (pendingPopup) {
-			await pendingPopup
-			// The popup may have resolved with rejection (or with approval
-			// for a different chain — impossible under tuple keying, but
-			// defense in depth): re-check the session exists for THIS
-			// `(origin, chainId)` before auto-approving. If the user
-			// declined, reject this duplicate too instead of inheriting an
-			// approval the user never gave.
-			const settledSession = await dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
-			if (settledSession) {
-				handler.approveDiscovery(discovery.requestId)
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Info,
-					`Discovery auto-approved (pending popup resolved): ${discovery.origin} chain=${chainId}`,
-				)
-			} else {
-				handler.rejectDiscovery(discovery.requestId)
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Info,
-					`Discovery rejected (pending popup resolved without session): ${discovery.origin} chain=${chainId}`,
-				)
-			}
+			await awaitPendingPopupDedupe(pendingPopup, discovery, chainId, dedupeKey, deps)
 			return
 		}
 
-		// F-04: cap concurrent connect popups per-origin and globally. The
-		// `(origin,chainId)` dedupe above collapses exact duplicates; this bounds
-		// the distinct-key fan-out so a dApp can't spawn unbounded popup work via
-		// many chainIds (or a botnet of origins).
-		const originPopups = [...pendingDiscoveryPromises.keys()].filter((k) => k.startsWith(`${discovery.origin}|`)).length
-		if (originPopups >= DISCOVERY_PENDING_PER_ORIGIN_CAP || pendingDiscoveryPromises.size >= DISCOVERY_PENDING_GLOBAL_CAP) {
-			handler.rejectDiscovery(discovery.requestId)
-			logger.log(
-				"wallet-sdk",
-				LogLevel.Warn,
-				`Discovery rejected (popup cap): ${discovery.origin} [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
-			)
-			return
-		}
+		if (checkDiscoveryPopupCaps(discovery, deps)) return
 
-		// New dApp → show discovery popup (Allow/Deny). Sanitize dApp-controlled
-		// strings at the persistence boundary so downstream render sites never
-		// see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
-		const rawAppName = discovery.appName ?? discovery.appId
-		const params: DiscoveryParams = {
-			dappMetadata: {
-				name: sanitizeWireString(rawAppName, 64),
-				url: discovery.origin,
-			},
-		}
-
-		// Store a promise that resolves when the popup completes so duplicate
-		// discoveries can await it.
-		let resolvePopup: () => void
-		const popupPromise = new Promise<void>((r) => {
-			resolvePopup = r
-		})
-		pendingDiscoveryPromises.set(dedupeKey, popupPromise)
-
-		try {
-			const result = await dappInteractionService.discover(params, discovery.requestId)
-			if (!result.approved) {
-				handler.rejectDiscovery(discovery.requestId)
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: ${discovery.origin}`)
-				return
-			}
-
-			// User approved — create a DappSession with empty accounts.
-			// Accounts will be shared later via the getAccounts authorization
-			// popup. Sessions are per-`(origin, chainId, profileId)`; the
-			// `chainId` is required and scopes the entire session. No
-			// `chains` field on `DappPermissions` — it would duplicate the
-			// parent session's `chainId`.
-			const newSession = await dappSessionService.addDappSession(
-				params.dappMetadata,
-				[{ methods: [] }],
-				[], // empty accounts — populated via requestCapabilities() (or the dApp falls back when getAccounts() throws CAPABILITY_NOT_GRANTED)
-				AccessLevel.Transactions,
-				chainId,
-			)
-
-			// Initialize with empty capability grants so enforceCapability()
-			// blocks non-exempt methods until requestCapabilities() is called.
-			await dappSessionService.setCapabilityGrants(newSession.id, [])
-
-			pendingVerification.add(dedupeKey)
-			handler.approveDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
-		} finally {
-			resolvePopup!()
-			pendingDiscoveryPromises.delete(dedupeKey)
-		}
-	} catch (error) {
+		await runDiscoveryPopup(discovery, chainId, dedupeKey, profile.id, deps)
+	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
-		logger.log(
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected for request ${describeExternalId(discovery.requestId)}`)
+	}
+}
+
+/** B-16: reject an approval the dApp can no longer receive. The drain-gate
+ *  staleness check is not enough — an interactive Allow/Deny popup (or a wait
+ *  on a concurrent popup for the same (origin, chainId)) can resolve after the
+ *  dApp's 60s discovery window closes. Re-check immediately before EVERY
+ *  approval, and before the durable DappSession write, so a slow approval
+ *  doesn't strand a half-open handshake or persist a session the dApp never
+ *  learns about. */
+function rejectIfExpired(discovery: PendingDiscovery, deps: DiscoveryDeps): boolean {
+	if (isDiscoveryExpired(discovery)) {
+		deps.handler.rejectDiscovery(discovery.requestId)
+		deps.logger.log(
 			"wallet-sdk",
 			LogLevel.Warn,
-			`Discovery rejected for ${discovery.origin}: ${error instanceof Error ? error.message : String(error)}`,
+			`Discovery rejected (past Nulo's 55s freshness cutoff): request ${describeExternalId(discovery.requestId)}`,
 		)
+		return true
+	}
+	return false
+}
+
+/** Approve an admitted handshake, or give its window slot back when the approval cannot land. */
+function approveAdmitted(
+	discovery: PendingDiscovery,
+	chainId: string,
+	deps: DiscoveryDeps,
+	reservation: WindowReservation | undefined,
+	why: string,
+): void {
+	if (rejectIfExpired(discovery, deps)) {
+		reservation?.releaseIfUnstarted()
+		return
+	}
+	if (!deps.handler.approveDiscovery(discovery.requestId)) {
+		reservation?.releaseIfUnstarted()
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Discovery approve did not land (already gone): request ${describeExternalId(discovery.requestId)}`,
+		)
+		return
+	}
+	deps.logger.log(
+		"wallet-sdk",
+		LogLevel.Info,
+		`Discovery auto-approved (${why}): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+	)
+}
+
+function rejectThrottled(discovery: PendingDiscovery, deps: DiscoveryDeps, why: string): void {
+	deps.handler.rejectDiscovery(discovery.requestId)
+	deps.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (${why}): request ${describeExternalId(discovery.requestId)}`)
+}
+
+/** Returning user on this chain: approve through the origin's reconnect budget. A remembered
+ *  handshake is the one a reload loop repeats, so it always spends a token; only an untrusted
+ *  session needs a verify window and so a slot. Synchronous when admitted at once. */
+function autoApproveExistingSession(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps, trusted: boolean): void {
+	const outcome = deps.admission.admit(
+		{
+			id: discovery.requestId,
+			origin: discovery.origin,
+			deadline: discoveryDeadline(discovery),
+			needsWindow: !trusted,
+			consumesToken: true,
+		},
+		(reservation) => approveAdmitted(discovery, chainId, deps, reservation, "existing session"),
+		() => rejectThrottled(discovery, deps, "expired while queued"),
+	)
+	if (outcome === "rejected") rejectThrottled(discovery, deps, "reconnect queue full")
+	else if (outcome === "queued") {
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Info,
+			`Discovery queued behind the origin's reconnect budget: request ${describeExternalId(discovery.requestId)}`,
+		)
+	}
+}
+
+async function awaitPendingPopupDedupe(
+	pendingPopup: Promise<void>,
+	discovery: PendingDiscovery,
+	chainId: string,
+	dedupeKey: string,
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const waiting = deps.dedupeWaiters.get(dedupeKey) ?? 0
+	if (waiting >= DEDUPE_WAITERS_CAP) {
+		rejectThrottled(discovery, deps, "too many handshakes waiting on one popup")
+		return
+	}
+	deps.dedupeWaiters.set(dedupeKey, waiting + 1)
+	try {
+		await pendingPopup
+		await approveAfterPopup(discovery, chainId, deps)
+	} finally {
+		const left = (deps.dedupeWaiters.get(dedupeKey) ?? 1) - 1
+		if (left > 0) deps.dedupeWaiters.set(dedupeKey, left)
+		else deps.dedupeWaiters.delete(dedupeKey)
+	}
+}
+
+async function approveAfterPopup(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps): Promise<void> {
+	// The popup may have resolved with rejection (or with approval
+	// for a different chain — impossible under tuple keying, but
+	// defense in depth): re-check the session exists for THIS
+	// `(origin, chainId)` before auto-approving. If the user
+	// declined, reject this duplicate too instead of inheriting an
+	// approval the user never gave.
+	const settledSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
+	if (!settledSession) {
+		deps.handler.rejectDiscovery(discovery.requestId)
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Info,
+			`Discovery rejected (pending popup resolved without session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+		)
+		return
+	}
+	// A duplicate of a fresh connection verifies like one: it needs a window slot, but the
+	// user's Allow on the twin popup covers it, so it spends no reconnect token.
+	const admitted = await admitAsync(deps.admission, {
+		id: discovery.requestId,
+		origin: discovery.origin,
+		deadline: discoveryDeadline(discovery),
+		needsWindow: true,
+		consumesToken: false,
+	})
+	if (admitted === "rejected" || admitted === "expired") {
+		rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
+		return
+	}
+	approveAdmitted(discovery, chainId, deps, admitted, "pending popup resolved")
+}
+
+/** F-04: cap concurrent connect popups per-origin and globally. The
+ *  `(origin,chainId)` dedupe collapses exact duplicates; this bounds the
+ *  distinct-key fan-out so a dApp can't spawn unbounded popup work via many
+ *  chainIds (or a botnet of origins). Returns true when rejected at the cap. */
+function checkDiscoveryPopupCaps(discovery: PendingDiscovery, deps: DiscoveryDeps): boolean {
+	const { pendingDiscoveryPromises } = deps
+	const originPopups = [...pendingDiscoveryPromises.keys()].filter((k) => k.startsWith(`${discovery.origin}|`)).length
+	if (originPopups >= DISCOVERY_PENDING_PER_ORIGIN_CAP || pendingDiscoveryPromises.size >= DISCOVERY_PENDING_GLOBAL_CAP) {
+		deps.handler.rejectDiscovery(discovery.requestId)
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Discovery rejected (popup cap) [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
+		)
+		return true
+	}
+	return false
+}
+
+/** New dApp → show discovery popup (Allow/Deny), then persist + approve. The
+ *  dedupe registration, the durable writes and the `finally` release are one
+ *  unit: no await separates registering the popup promise from creating it. */
+async function runDiscoveryPopup(
+	discovery: PendingDiscovery,
+	chainId: string,
+	dedupeKey: string,
+	profileId: string,
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const { handler, pendingDiscoveryPromises, logger } = deps
+	// Sanitize dApp-controlled strings at the persistence boundary so downstream
+	// render sites never see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
+	const rawAppName = discovery.appName ?? discovery.appId
+	const params: DiscoveryParams = {
+		dappMetadata: {
+			name: sanitizeWireString(rawAppName, 64),
+			url: discovery.origin,
+		},
+	}
+
+	// Store a promise that resolves when the popup completes so duplicate
+	// discoveries can await it.
+	const { promise: popupPromise, resolve: resolvePopup } = deferred()
+	pendingDiscoveryPromises.set(dedupeKey, popupPromise)
+
+	try {
+		const result = await deps.dappInteractionService.discover(params, discovery.requestId)
+		if (!result.approved) {
+			handler.rejectDiscovery(discovery.requestId)
+			logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${describeExternalId(discovery.requestId)}`)
+			return
+		}
+
+		// B-16: the user may have taken longer than the dApp's 60s window to
+		// click Allow. Reject BEFORE the durable DappSession write so we never
+		// persist a session the dApp has already stopped waiting for.
+		if (rejectIfExpired(discovery, deps)) return
+
+		// The verify window this connection will open is reserved BEFORE the session is written,
+		// while the dedupe promise stays pending, so waiters cannot be released against a session
+		// that is still queued for its slot.
+		const admitted = await admitAsync(deps.admission, {
+			id: discovery.requestId,
+			origin: discovery.origin,
+			deadline: discoveryDeadline(discovery),
+			needsWindow: true,
+			consumesToken: false,
+		})
+		if (admitted === "rejected" || admitted === "expired") {
+			rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
+			return
+		}
+		await persistAndApprove(discovery, chainId, params, profileId, admitted, deps)
+	} finally {
+		resolvePopup()
+		pendingDiscoveryPromises.delete(dedupeKey)
+	}
+}
+
+/** Write the approved session and approve the discovery. The window reservation is owned by the
+ *  session only once the approval lands; every other exit gives it back. */
+async function persistAndApprove(
+	discovery: PendingDiscovery,
+	chainId: string,
+	params: DiscoveryParams,
+	profileId: string,
+	reservation: WindowReservation | undefined,
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const { handler, dappSessionService, logger } = deps
+	let approved = false
+	try {
+		// The Allow was given under `profileId`; a switch during the admission wait must not bind
+		// that approval to a session row written under another profile.
+		const active = await deps.profileService.getActiveProfile()
+		if (active?.id !== profileId) {
+			rejectThrottled(discovery, deps, "profile changed while waiting for a verify-window slot")
+			return
+		}
+		if (rejectIfExpired(discovery, deps)) return
+
+		// User approved — create a DappSession with empty accounts.
+		// Accounts will be shared later via the getAccounts authorization
+		// popup. Sessions are per-`(origin, chainId, profileId)`; the
+		// `chainId` is required and scopes the entire session. No
+		// `chains` field on `DappPermissions` — it would duplicate the
+		// parent session's `chainId`.
+		const newSession = await dappSessionService.addDappSession(
+			params.dappMetadata,
+			[{ methods: [] }],
+			[], // empty accounts — populated via requestCapabilities() (or the dApp falls back when getAccounts() throws CAPABILITY_NOT_GRANTED)
+			AccessLevel.Transactions,
+			chainId,
+		)
+
+		// Initialize with empty capability grants so enforceCapability()
+		// blocks non-exempt methods until requestCapabilities() is called.
+		await dappSessionService.setCapabilityGrants(newSession.id, [])
+
+		// B-16: re-check freshness AFTER the durable writes (which can
+		// themselves cross the deadline) and approve, or roll back + reject.
+		approved = await approveOrRollbackDiscoverySession({
+			discovery,
+			sessionId: newSession.id,
+			approverProfileId: newSession.profileId,
+			approveDiscovery: (id) => handler.approveDiscovery(id),
+			rejectDiscovery: (id) => handler.rejectDiscovery(id),
+			deleteSession: (id) => dappSessionService.deleteDappSession(id),
+			pendingVerification: deps.pendingVerification,
+			logger,
+		})
+		if (approved) {
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Info,
+				`Discovery approved: request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+			)
+		}
+	} finally {
+		if (!approved) reservation?.releaseIfUnstarted()
 	}
 }
 
@@ -635,33 +1077,82 @@ async function handleDiscovery(
  * local mirror) so the `onExecutionEnqueued` baton wiring is type-checked
  * against the dispatcher's expectation — preventing a recurrence of the
  * field-name drift that left the release dead. `onExecutionEnqueued` rides
- * to the sendTx path; `queuedJournalId` is used here (catch block) to decide
- * whether an unclaimed `queued` record should be transitioned to `failed`.
+ * to the sendTx path; `queuedJournalId` is used here (identity-guard fail
+ * and catch paths) to decide whether an unclaimed `queued` record should be
+ * transitioned to `failed`.
  */
-async function handleWalletMessage(
+export async function handleWalletMessage(
 	session: ActiveSession,
 	message: WalletMessage,
 	handler: BackgroundConnectionHandler,
 	dispatcher: WalletSdkDispatcher,
 	profileService: ProfileService,
 	operationJournal: OperationJournalService,
+	sessionProfiles: Map<string, string>,
+	switchEpoch: ProfileSwitchEpoch,
 	logger: ILogger,
+	legal: LegalAdmission,
 	hooks?: DispatchHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
 		messageId: message.messageId,
 		walletId: "nulo",
 	}
+	// The switch epoch the response is composed under — gates delivery at the
+	// tail. Captured BEFORE the awaited profile read: a switch landing inside
+	// that await must register as a bump AFTER this baseline, or the stale
+	// `profile` would pass the entry guard and the tail would see no change.
+	const preEntryEpoch = switchEpoch.current()
+	let entryEpoch: number | undefined
 
 	try {
-		const profile = await requireActiveProfile(profileService, "Wallet is locked")
+		// The admission moment: capture the execution fence (profile + deletion epoch +
+		// live session serial) that every fenced op this message dispatches runs under, in
+		// place of a bare active-profile read. Throws when locked, same as before.
+		const fence = await profileService.captureExecutionFence()
+		entryEpoch = preEntryEpoch
+
+		// Identity guard: the channel serves ONLY the profile that established
+		// it (map-miss = fail closed). The dApp gets the error envelope, then
+		// the standard disconnect. `ctx.profileId` below is therefore always
+		// the session's OWN profile, and the dispatcher's session lookup
+		// anchors on it — an in-flight message that outlives a later switch
+		// stays A-consistent or fails closed; it can never observe the new
+		// profile.
+		const mayProceed = await enforceSessionProfileBinding({
+			sessionId: session.sessionId,
+			origin: session.origin,
+			activeProfileId: fence.profileId,
+			sessionProfiles,
+			respond: () => {
+				response.error = SESSION_INVALID_ERROR
+				return handler.sendResponse(session.sessionId, response)
+			},
+			terminateSession: (sessionId) => handler.terminateSession(sessionId),
+			logger,
+		})
+		if (!mayProceed) {
+			// The guard's early return bypasses the catch below — close a
+			// pre-created queued record here too, or it sits at "Queued..."
+			// until the reaper's stuck sweep.
+			if (hooks?.queuedJournalId) {
+				await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, "Session no longer valid — reconnect", logger)
+			}
+			return
+		}
 
 		const ctx: SessionContext = {
 			chainId: chainInfoToChainId(session),
-			profileId: profile.id,
+			profileId: fence.profileId,
 			origin: session.origin,
 			sessionId: session.sessionId,
+			fence,
 		}
+
+		// Once per top-level request, before the dispatcher sees a method name: no dApp request is
+		// served without a current Terms acceptance. The catch below answers with the typed envelope
+		// and closes any queued journal row, exactly as for every other refusal.
+		await legal.assertCurrent()
 
 		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so
 		// `dispatch("batch", ...)`'s recursive ctx forwarding can't leak them
@@ -679,100 +1170,45 @@ async function handleWalletMessage(
 		// unit-tested in isolation; everything not recognised collapses to a
 		// string, preserving the original wire contract.
 		response.error = toWalletResponseError(error)
-		// `response.error` may be an object now — stringify for the log line so
-		// logs don't read "[object Object]".
-		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
-		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+		const refusedForTerms = error instanceof TermsAcceptanceRequiredError
+		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
+		// logger's redaction, so interpolating it here would smuggle whatever the error carries
+		// (endpoint URLs, argument values) straight into the log store.
+		// A connected dApp polls; an expected refusal at `error` would flood every user's log buffer.
+		logger.log(
+			"wallet-sdk",
+			refusedForTerms ? LogLevel.Debug : LogLevel.Error,
+			`Method ${describeWireMethod(message.type)} failed for session ${describeExternalId(session.sessionId)}`,
+			response.error,
+		)
 
-		// If a queued journal record exists and is STILL at queued stage,
-		// the handler failed before claiming it. Transition to failed so
-		// the UI doesn't show a permanently-stuck "Queued..." card.
-		// Use the journal record as source of truth (not a mutable flag)
-		// to disambiguate "handler claimed and then failed" (terminal state
-		// already correct) from "handler failed before claim" (we own the
-		// terminal state).
 		if (hooks?.queuedJournalId) {
-			try {
-				const record = await operationJournal.getOperation(hooks.queuedJournalId)
-				if (record?.progress?.stage === "queued") {
-					await operationJournal.transitionOperation(
-						hooks.queuedJournalId,
-						{ stage: "failed" },
-						{
-							kind: "popup_bound",
-							message: getErrorMessage(error),
-							normalizedRaw: null,
-						},
-					)
-				}
-			} catch (transitionError) {
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Warn,
-					`Failed to mark queued record ${hooks.queuedJournalId} as failed: ${getErrorMessage(transitionError)}`,
-				)
-			}
+			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
 		}
+	}
+
+	// The entry guard is one-shot: a switch landing mid-dispatch normally tears
+	// the session down (upstream sendResponse then no-ops), but a teardown
+	// hiccup can leave the channel live — and a response composed with the NEW
+	// profile's reads must never reach the old channel. The EPOCH comparison
+	// (not an active-identity check) also catches switch-then-lock, where the
+	// active profile reads `undefined` and an identity check would wave the
+	// response through. Pure lock/unlock-to-same bumps nothing, so those
+	// pinned flows still deliver.
+	if (entryEpoch !== undefined && switchEpoch.current() !== entryEpoch) {
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Suppressing ${describeWireMethod(message.type)} response for session ${describeExternalId(session.sessionId)}: profile switched mid-dispatch`,
+		)
+		return
 	}
 
 	try {
 		await handler.sendResponse(session.sessionId, response)
 	} catch (sendError) {
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Error,
-			`Failed to send response for ${message.type}: ${sendError instanceof Error ? sendError.message : String(sendError)}`,
-		)
+		// The error goes as an OBJECT, not interpolated: this is an internal transport failure worth
+		// diagnosing, and passing it whole lets the logger's projection scrub and cap it.
+		logger.log("wallet-sdk", LogLevel.Error, `Failed to send response for ${describeWireMethod(message.type)}`, sendError)
 	}
-}
-
-/**
- * Recursively convert a value to a JSON-safe structure.
- *
- * JSON.stringify cannot handle BigInt (throws) and silently drops undefined.
- * PXE results are full of BigInt (Fr fields, addresses, etc). This function
- * converts BigInt → string and recurses through arrays/objects so the
- * wallet-sdk's plain JSON.stringify call succeeds.
- */
-function toJsonSafe(value: unknown, seen = new WeakSet()): unknown {
-	if (value === null || value === undefined) return value
-	if (typeof value === "bigint") return value.toString()
-	if (typeof value !== "object") return value
-
-	if (seen.has(value as object)) return "[Circular]"
-	seen.add(value as object)
-
-	if (Array.isArray(value)) return value.map((v) => toJsonSafe(v, seen))
-	if (value instanceof Map) {
-		return Array.from(value.entries(), ([k, v]) => [toJsonSafe(k, seen), toJsonSafe(v, seen)])
-	}
-	if (value instanceof Set) {
-		return Array.from(value, (v) => toJsonSafe(v, seen))
-	}
-	// Objects with a toJSON method (Fr, AztecAddress, etc.) — let JSON.stringify
-	// call it naturally, but still recurse in case the result contains BigInts.
-	const obj = value as Record<string, unknown>
-	if (typeof obj.toJSON === "function") {
-		return toJsonSafe(obj.toJSON(), seen)
-	}
-	const out: Record<string, unknown> = {}
-	for (const key of Object.keys(obj)) {
-		out[key] = toJsonSafe(obj[key], seen)
-	}
-	return out
-}
-
-/**
- * Extract numeric chain ID from ChainInfo or ActiveSession/PendingDiscovery.
- *
- * ChainInfo arrives as serialized JSON (hex strings) after passing through
- * postMessage + JSON.parse, not as Fr instances. We parse the hex strings
- * to numbers and XOR chainId with rollup version, matching the convention
- * used by NetworkService (chainId = l1ChainId ^ rollupVersion).
- */
-function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
-	const raw = obj.chainInfo
-	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
-	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
-	return (chainId ^ version) >>> 0
 }

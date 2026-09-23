@@ -36,6 +36,14 @@ import type { ProfileService } from "@/wallet/services/profile/service"
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { createTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"
 import { TransferType } from "@/wallet/services/transaction/spec"
+
+/** Which token function each transfer type executes; a type outside this table is invalid. */
+const TRANSFER_FN_BY_TYPE = {
+	[TransferType.Private]: { field: "transferPrivateFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPrivate },
+	[TransferType.PrivateToPublic]: { field: "transferPrivateToPublicFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPrivateToPublic },
+	[TransferType.Public]: { field: "transferPublicFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPublic },
+	[TransferType.PublicToPrivate]: { field: "transferPublicToPrivateFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPublicToPrivate },
+} as const satisfies Record<TransferType, { field: string; descriptor: unknown }>
 import type { Fn } from "@/wallet/utils/fn"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type {
@@ -50,7 +58,7 @@ import type {
 	Operation,
 	SendTransactionOperation,
 } from "./spec"
-import { detectEmbeddedFeePayment } from "./utils/fee-detection"
+import { type FeePayerRoute, classifyFeePayer } from "@nulo/wallet-bridge"
 
 /** The transfer-request value object used below the RPC seam. The wire
  *  (`spec.ts`) stays positional — RPC entry points construct this at the
@@ -74,6 +82,30 @@ export interface ProcessedAztecJsPayload {
 	feeOptions: FeeOptions
 }
 
+/** The wire fee options of a dApp payload: what its payer route carries (an embedded payment, or a
+ *  requested self-pay), and every cap the dApp set. `maxPriorityFeesPerGas` is plumbed through so
+ *  the standard path's gas settings match what the dApp requested — it used to be dropped here. */
+function feeOptionsOf(
+	route: FeePayerRoute | undefined,
+	opts: SimulateOptions | ProfileOptions | SendOptions<InteractionWaitOptions>,
+): FeeOptions {
+	const maxFeesUpstream = opts.fee?.gasSettings?.maxFeesPerGas
+	const maxPriorityFeesUpstream = opts.fee?.gasSettings?.maxPriorityFeesPerGas
+	return {
+		embeddedFeePayment: route === "fjwc" || route === "fpc" ? route : undefined,
+		requestedPayment: route === "self-pay" ? "fj" : undefined,
+		gasLimits: opts.fee?.gasSettings?.gasLimits,
+		teardownGasLimits: opts.fee?.gasSettings?.teardownGasLimits,
+		maxFeesPerGas: maxFeesUpstream
+			? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
+			: undefined,
+		maxPriorityFeesPerGas: maxPriorityFeesUpstream
+			? { feePerDaGas: maxPriorityFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxPriorityFeesUpstream.feePerL2Gas.toString() }
+			: undefined,
+		gasPadding: 1,
+	}
+}
+
 export class OperationPlanner {
 	public constructor(
 		private readonly profileService: ProfileService,
@@ -95,52 +127,16 @@ export class OperationPlanner {
 		}
 		const token = await this.tokenService.getTokenRaw(tokenId)
 
-		let fn: Fn
-		let args: unknown[]
-		switch (transferType) {
-			case TransferType.Private: {
-				if (!token.transferPrivateFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, token.transferPrivateFn.name, token.transferPrivateFn.impl)
-				args = fn.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.PrivateToPublic: {
-				if (!token.transferPrivateToPublicFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(
-					TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
-					token.transferPrivateToPublicFn.name,
-					token.transferPrivateToPublicFn.impl,
-				)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.Public: {
-				if (!token.transferPublicFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, token.transferPublicFn.name, token.transferPublicFn.impl)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.PublicToPrivate: {
-				if (!token.transferPublicToPrivateFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(
-					TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
-					token.transferPublicToPrivateFn.name,
-					token.transferPublicToPrivateFn.impl,
-				)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			default:
-				throw new Error("Invalid transfer type")
-		}
+		// A plain index would coerce "0" / ["0"] and reach inherited names; the enum is numeric and own.
+		const transfer =
+			typeof transferType === "number" && Object.hasOwn(TRANSFER_FN_BY_TYPE, transferType)
+				? TRANSFER_FN_BY_TYPE[transferType]
+				: undefined
+		if (!transfer) throw new Error("Invalid transfer type")
+		const tokenFn = token[transfer.field]
+		if (!tokenFn) throw new Error("Transfer type not supported")
+		const fn: Fn = createTokenFn(transfer.descriptor, tokenFn.name, tokenFn.impl)
+		const args = fn.buildArgs(accountAddress, recipientAddress, amount)
 		const selector = await fn.getSelector()
 		const encodedArgs = fn.encodeArgs(args)
 
@@ -169,7 +165,7 @@ export class OperationPlanner {
 	/** Parse an Aztec.js `ExecutionPayload` + call-options into a normalized
 	 *  `Action[]` array. Collects capsules, private authwits, extra-hashed
 	 *  args, and encoded calls into a flat list. Also infers the fee
-	 *  payment method from `feePayer` via `detectEmbeddedFeePayment`. */
+	 *  payment method from the payer and the calls via `classifyFeePayer`. */
 	public async processAztecJsPayload(
 		exec: ExecutionPayload,
 		opts: SimulateOptions | ProfileOptions | SendOptions<InteractionWaitOptions>,
@@ -222,31 +218,12 @@ export class OperationPlanner {
 			} satisfies EncodedCallAction)
 		}
 
-		const maxFeesUpstream = opts.fee?.gasSettings?.maxFeesPerGas
-		const maxPriorityFeesUpstream = opts.fee?.gasSettings?.maxPriorityFeesPerGas
-		const feeOptions: FeeOptions = {
-			embeddedFeePayment: detectEmbeddedFeePayment(exec.feePayer, opts.from),
-			gasLimits: opts.fee?.gasSettings?.gasLimits,
-			teardownGasLimits: opts.fee?.gasSettings?.teardownGasLimits,
-			maxFeesPerGas: maxFeesUpstream
-				? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
-				: undefined,
-			// Plumbed through so the standard path's gas settings match
-			// what the dApp requested. Previously, this field was dropped
-			// here.
-			maxPriorityFeesPerGas: maxPriorityFeesUpstream
-				? {
-						feePerDaGas: maxPriorityFeesUpstream.feePerDaGas.toString(),
-						feePerL2Gas: maxPriorityFeesUpstream.feePerL2Gas.toString(),
-					}
-				: undefined,
-			gasPadding: 1,
-		}
-
+		const route = classifyFeePayer(exec.feePayer, opts.from, exec.calls)
+		const feeOptions = feeOptionsOf(route, opts)
 		const feePaymentMethod =
-			feeOptions.embeddedFeePayment === "fjwc"
+			route === "fjwc"
 				? AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM
-				: feeOptions.embeddedFeePayment === "fpc"
+				: route === "fpc"
 					? AccountFeePaymentMethodOptions.EXTERNAL
 					: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE
 

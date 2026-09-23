@@ -1,16 +1,16 @@
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ValidationError } from "@nulo/extension-messaging/errors"
 import { validateParams } from "@nulo/extension-messaging/zod"
-import { type JobError, type JobProgress, assertCanTransition, isTerminal } from "@nulo/wallet-core/jobs"
+import { type JobError, type JobProgress, assertCanTransition, isTerminal, type ProveBackend } from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex } from "@/wallet/utils"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import {
 	type Events,
 	type Methods,
@@ -44,15 +44,7 @@ export * from "./spec"
  *   #6  attempts counter defaults to 0; consumers increment on retry
  */
 export class OperationJournalService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
-	protected readonly rpcMethods = defineRpcMethods<Methods>()(
-		"createOperation",
-		"transitionOperation",
-		"setOperationMeta",
-		"getOperation",
-		"getOperations",
-		"countOperations",
-		"deleteOperation",
-	)
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getOperation", "getOperations")
 	public static name = OPERATION_JOURNAL_SERVICE_NAME
 
 	public readonly onOperationAdded = new EventHandler<OperationRecord>()
@@ -115,6 +107,48 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		this.transitionLock = new Lock("operation-journal:transition", logger)
 	}
 
+	/**
+	 * The RPC boundary's ownership gate. Reached ONLY from the Port path (`handleRequest`); the
+	 * in-process callers — the reaper's cross-profile sweep, the GC, the claim and dApp paths
+	 * whose record's profile may not be active — call the method bodies directly and stay
+	 * unfiltered. A popup sees only the ACTIVE profile's records: a foreign id reads as absent
+	 * and a foreign filter yields `[]` (existence non-disclosing, like `cancelJob`); locked, or
+	 * no `ProfileService` wired, is fail-closed. The framework methods (`backup`/`restore`) keep
+	 * their defaults.
+	 */
+	protected override async invoke(method: string, params: unknown[]): Promise<unknown> {
+		if (method !== "getOperation" && method !== "getOperations") return super.invoke(method, params)
+		const active = await this.activeProfileId()
+		if (method === "getOperation") {
+			if (!active) return undefined
+			const record = await this.getOperation(params[0] as string)
+			return record?.profileId === active ? record : undefined
+		}
+		if (!active) return []
+		const filter = (params[0] ?? undefined) as OperationFilter | undefined
+		if (filter?.profileId !== undefined && filter.profileId !== active) return []
+		return this.getOperations({ ...filter, profileId: active })
+	}
+
+	/** Wire events carry a record's ids, metadata, errors and timing to EVERY connected popup —
+	 *  so a background operation of a switched-away profile is filtered here, the same gate as
+	 *  the reads. In-process listeners (`emit`'s second leg) are untouched. The active-profile
+	 *  read is async, so the fan-out is deferred a tick; a Port event is best-effort already. */
+	protected override sendEvent(content: { event: keyof Events; payload: Events[keyof Events] }): void {
+		void this.activeProfileId().then((active) => {
+			if (active && content.payload.profileId === active) super.sendEvent(content)
+		})
+	}
+
+	private async activeProfileId(): Promise<string | undefined> {
+		if (!this.profileService) return undefined
+		try {
+			return (await this.profileService.getActiveProfile())?.id
+		} catch {
+			return undefined
+		}
+	}
+
 	protected async init(services: ServiceCollection): Promise<void> {
 		// Cascade registration is optional — minimal test fixtures don't
 		// register NetworkService, and the journal still works as a standalone
@@ -172,17 +206,14 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// unserialized purge lets a transition that has already read a row write
 		// it back afterwards, and a snapshot outside the hold misses a row a
 		// concurrent `createOperation` (same lock) is about to land.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
 			await purgeRows(
 				records,
 				(record) => this.storage.delete(record.id),
 				(record) => this.emit("onOperationDeleted", record),
 			)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	/** Awaited profile-scoped journal purge — the deletion coordinator calls this
@@ -194,17 +225,21 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// writes under the same lock, so a row can never land between the
 		// snapshot and the sweep. A snapshot taken outside missed exactly that
 		// row, leaving a record for the deleted profile behind.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
 			await purgeRows(
 				records,
 				(record) => this.storage.delete(record.id),
 				(record) => this.emit("onOperationDeleted", record),
 			)
-		} finally {
-			this.transitionLock.leave()
-		}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to _loadAllValidated() and would otherwise survive forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed journal row ${id}`),
+			)
+		})
 	}
 
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
@@ -217,12 +252,9 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Without this, a creator that captured its profile before a deletion
 		// began could persist durable dApp metadata for an erased profile after
 		// its purge ran, and nothing would ever sweep it.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			return await this._createOperationLocked(input)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	private async _createOperationLocked(input: NewOperationInput): Promise<OperationRecord> {
@@ -254,13 +286,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			}
 		}
 
-		let id: string
-		do {
-			// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
-			// codex round-1 (defense-in-depth against requestId / journal-id
-			// collisions once concurrent dApp interactions are possible).
-			id = getRandomHex(16)
-		} while (await this.storage.contains(id))
+		// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
+		// codex round-1 (defense-in-depth against requestId / journal-id
+		// collisions once concurrent dApp interactions are possible).
+		const id = await nextRandomId(this.storage, 16)
 
 		const now = Date.now()
 		const record: OperationRecord = {
@@ -306,12 +335,9 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Serialize ALL transitions globally — see `transitionLock` doc for
 		// the claim-vs-cancel race this closes. Critical section is small
 		// (one load + one validate + one write), so global is acceptable.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			return await this._transitionLocked(id, progress, error)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	private async _transitionLocked(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
@@ -322,57 +348,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 
 		// FSM legality — throws IllegalTransitionError on a bad transition.
 		assertCanTransition(existing.progress.stage, progress.stage)
-
-		// "error iff failed" invariant.
-		if (progress.stage === "failed") {
-			if (!error) {
-				throw new ValidationError("transitionOperation: `error` is required when stage is 'failed'")
-			}
-		} else if (error) {
-			throw new ValidationError(`transitionOperation: \`error\` must be null when stage is '${progress.stage}' (got failed envelope)`)
-		}
-
-		// Phase 2.5: kind ↔ succeeded.txHash invariant + shortcut gate.
-		// On-chain ops (transfer, dapp_execute) must succeed with a txHash AND
-		// must go through the full prove + submit path (no `simulating → succeeded`
-		// shortcut). Non-tx ops (token_import) must succeed without a txHash and
-		// take the shortcut. Both halves of the invariant matter — codex caught
-		// that a buggy caller could otherwise drag an on-chain kind through the
-		// shortcut by attaching a fake txHash.
+		assertErrorInvariant(progress, error)
 		if (progress.stage === "succeeded") {
-			const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
-			const cameFromSimulating = existing.progress.stage === "simulating"
-			if (existing.kind === "transfer" || existing.kind === "dapp_execute") {
-				if (!hasTxHash) {
-					throw new ValidationError(`transitionOperation: succeeded ${existing.kind} requires a txHash`)
-				}
-				if (cameFromSimulating) {
-					throw new ValidationError(
-						`transitionOperation: ${existing.kind} cannot use the simulating → succeeded shortcut (must prove + submit)`,
-					)
-				}
-			} else if (existing.kind === "token_import") {
-				if (hasTxHash) {
-					throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
-				}
-			}
-
-			// v2 Layer A: pin `submitting.txHash === succeeded.txHash` when both
-			// are populated. The four execution paths emit the canonical
-			// `tx.getTxHash().toString()` at BOTH the submitting and succeeded
-			// transitions; if they ever drift the RecentActivityView per-hash
-			// pending-suppression filter (`filterPendingDoubleRender`) silently
-			// no-ops and the disappearing-card bug returns. Catch the drift here
-			// at the FSM layer rather than letting it surface as a UI
-			// regression. The check is conditional on submitting carrying a
-			// hash so older records / non-tx kinds aren't affected.
-			if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
-				if (existing.progress.txHash !== progress.txHash) {
-					throw new ValidationError(
-						`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
-					)
-				}
-			}
+			assertSucceededKindInvariant(existing, progress)
+			assertNoHashDrift(existing, progress)
 		}
 
 		const now = Date.now()
@@ -407,8 +386,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Load → merge → write on the same row, so it takes the same lock as
 		// `transitionOperation`: otherwise a transition landing in between is
 		// overwritten by this stale snapshot and its stage change is lost.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) {
 				throw new Error(`Operation not found: ${id}`)
@@ -422,9 +400,36 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			await this.storage.set(id, updated)
 			this.emit("onOperationUpdated", updated)
 			return updated
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
+	}
+
+	/**
+	 * Copy the prover's backend evidence onto a record that is CURRENTLY
+	 * `proving`. SW-internal (the execution coordinator calls it from the
+	 * prove-phase event path); never an RPC. Runs under the same lock as
+	 * `transitionOperation` and re-reads the row inside it, so a stage change
+	 * that lands first wins: a late event after the op left `proving` is a
+	 * no-op, never a resurrection. `enteredProveAt` is preserved — the stuck-
+	 * prove reaper keys on it. Returns whether the row was written.
+	 */
+	public async updateProvingBackend(id: string, backend: ProveBackend): Promise<boolean> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (existing?.progress.stage !== "proving") {
+				this.logDebug("updateProvingBackend skipped", { stage: existing?.progress.stage ?? "missing" })
+				return false
+			}
+			if (existing.progress.backend === backend) return false
+			const updated: OperationRecord = {
+				...existing,
+				progress: { ...existing.progress, backend },
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return true
+		})
 	}
 
 	/**
@@ -448,15 +453,12 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// the write entirely once the record is terminal — a heartbeat must
 		// never resurrect a just-cancelled/failed/succeeded record's updatedAt
 		// (which could briefly hide it from a terminal-state consumer).
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return
 			if (isTerminal(existing.progress.stage)) return
 			await this.storage.set(id, { ...existing, updatedAt: Date.now() })
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
@@ -508,15 +510,44 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		await this.ensureInitialized()
 		// Serialized against transitions: a transition that has already read the
 		// row would otherwise write it back after the delete and resurrect it.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return
 			await this.storage.delete(id)
 			this.emit("onOperationDeleted", existing)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
+	}
+
+	/**
+	 * Conditionally transition: re-reads under the transition lock and no-ops
+	 * (with a discriminant) when the record left `allowedStages` or — when
+	 * `ifUpdatedAtIs` is given — when `updatedAt` moved since the caller's
+	 * snapshot (equality CAS; a monotonic check would mishandle clock rollback).
+	 * The reaper's sweep decisions ride this: its snapshot goes stale across the
+	 * per-record awaits, and an unconditional transition would fail a record
+	 * that was claimed or heartbeat-touched mid-sweep.
+	 */
+	public async transitionIfStage(
+		id: string,
+		allowedStages: readonly JobProgress["stage"][],
+		progress: JobProgress,
+		error?: JobError | null,
+		opts?: { ifUpdatedAtIs?: number },
+	): Promise<
+		| { outcome: "transitioned"; record: OperationRecord }
+		| { outcome: "missing" }
+		| { outcome: "stage"; stage: JobProgress["stage"] }
+		| { outcome: "touched" }
+	> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (!existing) return { outcome: "missing" }
+			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
+			if (opts?.ifUpdatedAtIs !== undefined && existing.updatedAt !== opts.ifUpdatedAtIs) return { outcome: "touched" }
+			const record = await this._transitionLocked(id, progress, error)
+			return { outcome: "transitioned", record }
+		})
 	}
 
 	/**
@@ -539,8 +570,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		{ outcome: "refiled"; record: OperationRecord } | { outcome: "missing" } | { outcome: "stage"; stage: JobProgress["stage"] }
 	> {
 		await this.ensureInitialized()
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return { outcome: "missing" }
 			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
@@ -554,8 +584,61 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			await this.storage.set(id, updated)
 			this.emit("onOperationUpdated", updated)
 			return { outcome: "refiled", record: updated }
-		} finally {
-			this.transitionLock.leave()
+		})
+	}
+}
+
+// ── Transition invariants (pure, throw ValidationError) ─────────────────
+
+/** "error iff failed". */
+function assertErrorInvariant(progress: JobProgress, error: JobError | null | undefined): void {
+	if (progress.stage === "failed") {
+		if (!error) {
+			throw new ValidationError("transitionOperation: `error` is required when stage is 'failed'")
+		}
+	} else if (error) {
+		throw new ValidationError(`transitionOperation: \`error\` must be null when stage is '${progress.stage}' (got failed envelope)`)
+	}
+}
+
+/** Kind ↔ succeeded.txHash invariant + shortcut gate. On-chain ops (transfer,
+ *  dapp_execute) must succeed with a txHash AND must go through the full prove +
+ *  submit path (no `simulating → succeeded` shortcut). Non-tx ops (token_import)
+ *  must succeed without a txHash and take the shortcut. Both halves matter — a
+ *  buggy caller could otherwise drag an on-chain kind through the shortcut by
+ *  attaching a fake txHash. */
+function assertSucceededKindInvariant(existing: OperationRecord, progress: Extract<JobProgress, { stage: "succeeded" }>): void {
+	const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
+	const cameFromSimulating = existing.progress.stage === "simulating"
+	if (existing.kind === "transfer" || existing.kind === "dapp_execute") {
+		if (!hasTxHash) {
+			throw new ValidationError(`transitionOperation: succeeded ${existing.kind} requires a txHash`)
+		}
+		if (cameFromSimulating) {
+			throw new ValidationError(
+				`transitionOperation: ${existing.kind} cannot use the simulating → succeeded shortcut (must prove + submit)`,
+			)
+		}
+	} else if (existing.kind === "token_import") {
+		if (hasTxHash) {
+			throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
+		}
+	}
+}
+
+/** Pin `submitting.txHash === succeeded.txHash` when both are populated. The
+ *  execution paths emit the canonical `tx.getTxHash().toString()` at BOTH
+ *  transitions; if they ever drift, the RecentActivityView per-hash
+ *  pending-suppression filter silently no-ops and the disappearing-card bug
+ *  returns — catch the drift at the FSM layer. Conditional on submitting
+ *  carrying a hash so older records / non-tx kinds aren't affected. */
+function assertNoHashDrift(existing: OperationRecord, progress: Extract<JobProgress, { stage: "succeeded" }>): void {
+	const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
+	if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
+		if (existing.progress.txHash !== progress.txHash) {
+			throw new ValidationError(
+				`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
+			)
 		}
 	}
 }

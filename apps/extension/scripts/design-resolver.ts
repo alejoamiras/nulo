@@ -26,6 +26,7 @@ export const NULO_DESIGN_COMPONENTS = new Set([
 	"Popover",
 	// round 2 — P6 Input
 	"Input",
+	"Skeleton",
 ])
 
 export function nuloDesignResolver(): ComponentResolver {

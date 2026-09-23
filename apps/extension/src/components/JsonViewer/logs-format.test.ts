@@ -26,6 +26,41 @@ describe("JsonViewer/logs-format", () => {
 		expect(formatArg([1, [2, 3]])).toEqual([1, [2, 3]])
 	})
 
+	test("formatArg renders bigint fields as digits", () => {
+		expect(formatArg({ amount: 10n ** 20n, nested: [1n] })).toBe('{"amount":"100000000000000000000","nested":["1"]}')
+	})
+
+	test("formatArg renders a self-referential object and a self-referential array without throwing or '[object Object]'", () => {
+		const obj: Record<string, unknown> = { name: "loop" }
+		obj.self = obj
+		expect(formatArg(obj)).toBe('{"name":"loop","self":"[circular]"}')
+
+		const arr: unknown[] = ["head"]
+		arr.push(arr)
+		expect(formatArg(arr)).toEqual(["head", "[circular]"])
+
+		const holder: Record<string, unknown> = { tag: "holder" }
+		const mixed: unknown[] = [holder]
+		holder.list = mixed
+		expect(formatLogData(mixed)).toBe('{"tag":"holder","list":["[circular]"]}')
+	})
+
+	test("formatArg names the type when serialization still fails", () => {
+		class Boom {
+			toJSON(): never {
+				throw new Error("no")
+			}
+		}
+		expect(formatArg(new Boom())).toBe("[unserializable Boom]")
+		expect(
+			formatArg({
+				toJSON: () => {
+					throw new Error("no")
+				},
+			}),
+		).toBe("[unserializable Object]")
+	})
+
 	test("formatArg passes primitives through unchanged", () => {
 		expect(formatArg("hi")).toBe("hi")
 		expect(formatArg(42)).toBe(42)

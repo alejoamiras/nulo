@@ -14,6 +14,9 @@ export type BackupContract = {
 }
 export type BackupAccountState = {
 	networkId: string
+	/** The chain the item's network served; the import binds the item to the seeded network
+	 *  of this chain, never to the exported id. Absent on older exports. */
+	chainId?: number
 	senders: Restored<BackupSender>[]
 	contracts: Restored<BackupContract>[]
 }

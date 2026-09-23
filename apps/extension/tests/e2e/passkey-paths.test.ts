@@ -22,7 +22,7 @@ import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
-import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
+import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "./fixtures/passkey"
 
 /** Read the active account address from chrome.storage.local. The wallet
  *  writes this key after the post-register account derivation settles. */
@@ -33,35 +33,8 @@ async function readActiveAccount(page: Page): Promise<string> {
 	})
 }
 
-/** Drive the passkey-register flow on a fresh extension at /popup/register.
- *  Preconditions: `setupPasskeyVirtualAuth` has been called against the
- *  popup target (otherwise navigator.credentials.create routes to the
- *  platform authenticator and times out under headless). */
-async function registerPasskeyProfile(page: Page): Promise<void> {
-	await waitForHash(page, "#/popup/register", 15_000)
-	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-		timeout: 15_000,
-		polling: 500,
-	})
-
-	await clickByTestId(page, "register-create-btn")
-
-	// Wait for the create page to mount before typing the name.
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
-
-	// Switch the method-tabs from password (default) → passkey.
-	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })
-	await clickByTestId(page, "register-method-passkey")
-
-	await page.waitForSelector('[data-testid="register-submit-btn"]', { visible: true, timeout: 10_000 })
-	await clickByTestId(page, "register-submit-btn")
-
-	// The in-page modal opens, runs WebAuthn against the virtual
-	// authenticator (resolves in ms), self-dismisses on success. Assert on
-	// the page hash transitioning to /popup/general.
-	await waitForHash(page, "#/popup/general", 60_000)
-}
+// registerPasskeyProfile moved to ./fixtures/passkey (shared with the network
+// passkey-execution-canary); this file keeps its original call sites.
 
 test("create passkey profile: register flow lands on /popup/general", async ({ freshExtensionPerTest }) => {
 	const page = await openPopup(freshExtensionPerTest)

@@ -27,23 +27,10 @@ import { z } from "zod"
 
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
-/**
- * Per-`(networkId, contract)` public-scan progress, surfaced to the token card as the "Catching up…"
- * affordance. `backfilling` = the scan cursor is materially behind the checkpointed tip (cold-start
- * hydration from far back, or a fresh add / SW restart); `caught-up` = at/near the tip (the steady
- * every-30s poll). Derived from data the scan already reads — the tip + the persisted cursor — so it
- * costs no extra node call. Fails toward `caught-up` at every gap so a bug can never strand a token in a
- * permanent spinner.
- */
-export type IncomingSyncState = "backfilling" | "caught-up"
+/** `since` is when the oldest stalled contract started failing; `null` while healthy. */
+export type IncomingSyncHealth = { stalled: boolean; since: number | null }
 
-/** Transition payload for {@link Events.onIncomingSyncStateChanged} — per contract (the scan serves all
- *  of a network's accounts; the token card keys on `contract` + the active `networkId`). */
-export type IncomingSyncStateChanged = {
-	networkId: string
-	contract: string
-	state: IncomingSyncState
-}
+export type IncomingSyncHealthChanged = { profileId: string; networkId: string }
 
 import { type PublicEventCursor, PublicEventCursorSchema } from "@nulo/aztec-runtime/pxe/public-events"
 export type { PublicEventCursor }
@@ -306,9 +293,8 @@ export type Events = {
 	 *  contract per pending cycle. */
 	onIncomingTransferPending: IncomingTransferPending
 	onIncomingTrustChanged: IncomingTrustRecord
-	/** Fires on a `(networkId, contract)` sync-state TRANSITION only (backfilling ↔ caught-up), so a
-	 *  steady poll doesn't spam it. Drives the token card's "Catching up…" indicator. */
-	onIncomingSyncStateChanged: IncomingSyncStateChanged
+	/** Invalidation only: the health of `(profileId, networkId)` changed — refetch it. */
+	onIncomingSyncHealthChanged: IncomingSyncHealthChanged
 }
 
 export type Methods = {
@@ -336,10 +322,11 @@ export type Methods = {
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState
-	/** Current public-scan sync state for a `(networkId, contract)` — the initial snapshot the token card
-	 *  reads on mount (thereafter it tracks {@link Events.onIncomingSyncStateChanged}). Returns
-	 *  `caught-up` for an unknown / never-scanned key (fail toward "no indicator"). */
-	getSyncState(networkId: string, contract: string): IncomingSyncState
+	/** Whether the active profile's public scan on `networkId` has been failing repeatedly for long
+	 *  enough that older incoming transfers may be missing. Healthy for an unknown network. */
+	getIncomingSyncHealth(networkId: string): IncomingSyncHealth
+	/** Let the network's backed-off scans run now and wait for them. Never resets a failure streak. */
+	retryIncomingScan(networkId: string): void
 	/** User accepted the first-receive prompt: `pending → trusted`. Flips
 	 *  all hidden records for this contract to visible; emits
 	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract

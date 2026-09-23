@@ -35,10 +35,10 @@ export const FEE_JUICE_ENTRY: PriceMapEntry = {
 
 const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 /** Nulo's bridged Circle USDC on Alpha — the L2 side of the tools.nulo.sh bridge
- *  (apps/faucet/public/mainnet-bridge.json `l2.token`; 1:1 against L1 USDC 0xA0b8…eB48). */
+ *  (apps/tools/public/mainnet-bridge.json `l2.token`; 1:1 against L1 USDC 0xA0b8…eB48). */
 const NULO_BRIDGED_USDC_MAINNET = "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4"
 /** Testnet "Test USDC" — the L2 side of the tools bridge on Testnet
- *  (apps/faucet/public/testnet-bridge.json `l2.token`; faucet-minted, priced as USDC). */
+ *  (apps/tools/public/testnet-bridge.json `l2.token`; faucet-minted, priced as USDC). */
 const NULO_BRIDGED_USDC_TESTNET = "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae"
 
 /**

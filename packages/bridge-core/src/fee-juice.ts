@@ -44,10 +44,16 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 		// an argless call defaults the node to Target, which under-prices the cap under rising congestion.
 		predicted = await node.getPredictedMinFees(ManaUsageEstimate.Limit)
 	} catch (e) {
-		// Only fall back for old nodes that don't implement the method — NOT for transient RPC errors,
-		// which must propagate (a silent fallback to current-min would under-price the inclusion-safe cap).
+		// Only fall back for old nodes that don't IMPLEMENT the method — NOT for
+		// transient RPC errors (a silent fallback to current-min would under-price
+		// the inclusion-safe cap → the tx can be rejected for insufficient fee).
+		// Mirror BaseWallet's method-missing predicate: Aztec's JSON-RPC server
+		// emits `Method not found: <m>` with code -32601 and the client rethrows it
+		// verbatim with `cause = response.error`. A bare "not found" (e.g. "block
+		// not found") is a transient error and MUST propagate.
+		const code = (e as { cause?: { code?: number } } | null | undefined)?.cause?.code
 		const msg = e instanceof Error ? e.message : String(e)
-		if (/not found|not supported|unknown method|unimplemented|method.*not/i.test(msg)) return node.getCurrentMinFees()
+		if (code === -32601 || /method not found/i.test(msg)) return node.getCurrentMinFees()
 		throw e
 	}
 	if (!predicted || predicted.length === 0) return node.getCurrentMinFees()
@@ -96,15 +102,34 @@ export const publicFeeJuicePayment = (sender: AztecAddress, claim: FeeJuiceClaim
 export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMethod => new SponsoredFeePaymentMethod(fpc)
 
 /**
- * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance. aztec.js 5.x ships no
- * class for this because the protocol needs no calls at all — the account entrypoint detects a
- * zero-call fee payload and routes it as PREEXISTING_FEE_JUICE (see aztec.js
- * account_entrypoint_meta_payment_method), with the sender as fee payer. This is the mainnet
- * deploy sequence's steady-state method after the claim-in-tx bootstrap.
+ * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance, through an aztec.js /
+ * wallet-sdk EmbeddedWallet. aztec.js 5.x ships no class for this because the protocol needs no
+ * calls at all: the account entrypoint's meta payment method routes a zero-call fee payload as
+ * PREEXISTING_FEE_JUICE, and wallet-sdk's `completeFeeOptions` routes an ABSENT payer the same
+ * way — while a payload naming the sender as payer is routed as a claim in setup
+ * (FEE_JUICE_WITH_CLAIM), which never ends setup without a `claim_and_end_setup` call. So the
+ * payload must stay empty and name nobody. This is the mainnet deploy sequence's steady-state
+ * method after the claim-in-tx bootstrap. It is NOT a way for a dApp to name the account's public
+ * Fee Juice through the Nulo wallet, where an absent payer means the user's own fee picker.
  */
 export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
 	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),
 	getExecutionPayload: () => Promise.resolve(ExecutionPayload.empty()),
+	getFeePayer: () => Promise.resolve(sender),
+	getGasSettings: () => undefined,
+})
+
+/**
+ * Name the account's own public Fee Juice as a dApp transaction's payer through the NULO wallet:
+ * the payload carries the sender as payer and no fee call, which that wallet routes as a
+ * requested self-pay (its own Fee Juice method over the preexisting balance, the fee card locked
+ * to it). Only for a wallet that advertises the routing (`getWalletFeatures` → "dapp-self-pay"):
+ * an aztec.js / wallet-sdk EmbeddedWallet routes this same shape as a claim in setup and builds
+ * an invalid transaction — use {@link preexistingFeeJuicePayment} there.
+ */
+export const selfPaidFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
+	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),
+	getExecutionPayload: () => Promise.resolve(new ExecutionPayload([], [], [], [], sender)),
 	getFeePayer: () => Promise.resolve(sender),
 	getGasSettings: () => undefined,
 })

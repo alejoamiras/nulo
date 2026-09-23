@@ -1,64 +1,47 @@
 /**
- * `ProductionPxeFactory` accelerator-required-mode unit tests.
+ * `ProductionPxeFactory` proving-mode unit tests.
  *
- * Covers the env-gated runtime hard-fail path used by CI's `network-e2e`
- * when `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. Default
- * mode (no options or `provingMode: "default"`) must preserve the SDK's silent
- * WASM fallback — production end-users without Aztec Accelerator must NOT
- * see any new behavior from this code path.
- *
- * Strategy: mock `@alejoamiras/aztec-accelerator` so we control the
- * `checkAcceleratorStatus` result and capture the `onPhase` callback the
- * factory wires in. We don't exercise real proving here.
+ * Default mode (no options or `provingMode: "default"`) must keep the SDK's silent WASM fallback
+ * for end users and must prove over HTTPS only; required mode (`VITE_NULO_PRESTO_REQUIRED=1`, CI)
+ * is the env-gated hard-fail path. `@alejoamiras/presto` is mocked to capture the options the
+ * factory hands the prover and to program `checkPrestoStatus`; no real proving here.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import type { AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
+import type { PrestoConfig, PrestoPhase, PrestoStatus } from "@alejoamiras/presto"
 
-// Plain stand-in for `@aztec/pxe/client/bundle`'s `createPXE` — never
-// touched by the required-mode path under test (we throw before reaching
-// it) but needed so the import graph is satisfied.
 vi.mock("@aztec/pxe/client/bundle", () => ({
 	createPXE: vi.fn(async () => ({}) as unknown),
 }))
-
-// Same for the simulator + PXE config helpers — irrelevant to these tests
-// but pulled in by the SUT's import block.
 vi.mock("@aztec/pxe/config", () => ({ getPXEConfig: () => ({}) }))
 vi.mock("@aztec/simulator/client", () => ({ WASMSimulator: class {} }))
 
-// AcceleratorProver mock: capture the constructor args (especially
-// `onPhase`) and let each test program `checkAcceleratorStatus`'s
-// resolved value.
-const checkAcceleratorStatusMock = vi.fn()
-const acceleratorProverInstances: Array<{
-	onPhase: ((phase: AcceleratorPhase) => void) | undefined
-	accelerator: { host?: string; port?: number } | undefined
+const checkPrestoStatusMock = vi.fn()
+const proverInstances: Array<{
+	onPhase: ((phase: PrestoPhase) => void) | undefined
+	presto: PrestoConfig | undefined
 }> = []
 
-vi.mock("@alejoamiras/aztec-accelerator", () => ({
-	AcceleratorProver: class {
-		public onPhase: ((phase: AcceleratorPhase) => void) | undefined
-		public accelerator: { host?: string; port?: number } | undefined
-		constructor(opts: {
-			onPhase?: (phase: AcceleratorPhase) => void
-			accelerator?: { host?: string; port?: number }
-		}) {
-			this.onPhase = opts.onPhase
-			this.accelerator = opts.accelerator
-			acceleratorProverInstances.push({
-				onPhase: opts.onPhase,
-				accelerator: opts.accelerator,
-			})
+vi.mock("@alejoamiras/presto", () => ({
+	PrestoProver: class {
+		constructor(opts: { onPhase?: (phase: PrestoPhase) => void; presto?: PrestoConfig }) {
+			proverInstances.push({ onPhase: opts.onPhase, presto: opts.presto })
 		}
-		checkAcceleratorStatus() {
-			return checkAcceleratorStatusMock()
+		checkPrestoStatus() {
+			return checkPrestoStatusMock()
 		}
 	},
 }))
 
 import { createPXE } from "@aztec/pxe/client/bundle"
-import { ChainRuntime, ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import {
+	advanceProve,
+	ChainRuntime,
+	ChainRuntimeRegistry,
+	ProductionPxeFactory,
+	type ProvePhaseEvent,
+	type PxeFactory,
+} from "./chain-runtime"
 import type { NodeFactory } from "../ports/node-factory-port"
 
 // The injected encrypted store is unit-mocked (real OPFS needs a browser; the production-build
@@ -71,14 +54,17 @@ const createPXEMock = vi.mocked(createPXE)
 
 const fakeNodeFactory: NodeFactory = {
 	createNode: () => ({ getL1ContractAddresses: async () => ({ rollupAddress: undefined }) }) as never,
+	probeChainId: async () => 0,
 }
 
 const fakeNetwork = { profileId: "p", chainId: 31337, rpcUrl: "http://node.local" }
 const fakeStoreKey = new Uint8Array(32)
+const available: PrestoStatus = { available: true, needsDownload: false, protocol: "http" }
+const fallbackClass = ["fallback", "denied", "secure-connection-unavailable", "version-mismatch"] as const
 
 beforeEach(() => {
-	acceleratorProverInstances.length = 0
-	checkAcceleratorStatusMock.mockReset()
+	proverInstances.length = 0
+	checkPrestoStatusMock.mockReset()
 })
 
 afterEach(() => {
@@ -86,85 +72,103 @@ afterEach(() => {
 })
 
 describe("ProductionPxeFactory default (production) mode", () => {
-	test("constructs AcceleratorProver without onPhase callback", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: false }) // would be ignored
+	test("passes httpsOnly: true explicitly and no endpoint when none is configured", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory)
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(acceleratorProverInstances).toHaveLength(1)
-		expect(acceleratorProverInstances[0].onPhase).toBeUndefined()
+		expect(proverInstances).toHaveLength(1)
+		expect(proverInstances[0].presto).toEqual({ httpsOnly: true })
 	})
 
-	test("does NOT invoke checkAcceleratorStatus preflight", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+	test("does NOT run the preflight", async () => {
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory)
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(checkAcceleratorStatusMock).not.toHaveBeenCalled()
+		expect(checkPrestoStatusMock).not.toHaveBeenCalled()
 	})
 
-	test("does NOT pass host/port to AcceleratorProver when not configured", async () => {
-		const factory = new ProductionPxeFactory(fakeNodeFactory)
+	test("onPhase never throws on a fallback-class phase (silent WASM fallback preserved)", async () => {
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "default" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(acceleratorProverInstances[0].accelerator).toBeUndefined()
+		const onPhase = proverInstances[0].onPhase
+		for (const p of fallbackClass) {
+			expect(() => onPhase?.(p)).not.toThrow()
+		}
 	})
 
-	test("succeeds even when accelerator is reported unavailable", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
+	test("succeeds even when Presto is reported unavailable", async () => {
+		checkPrestoStatusMock.mockResolvedValue({ available: false, reason: "offline" })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "default" })
 		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
 	})
 })
 
 describe("ProductionPxeFactory required mode", () => {
-	test("preflight throws when checkAcceleratorStatus reports unavailable", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).rejects.toThrow(/accelerator-required.*unavailable/)
+	test("derives httpsOnly: false from the mode and passes the endpoint through", async () => {
+		checkPrestoStatusMock.mockResolvedValue(available)
+		const factory = new ProductionPxeFactory(fakeNodeFactory, {
+			provingMode: "required",
+			host: "127.0.0.1",
+			port: 59833,
+			httpsPort: 59834,
+		})
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
+		expect(proverInstances[0].presto).toEqual({ host: "127.0.0.1", port: 59833, httpsPort: 59834, httpsOnly: false })
 	})
 
-	test("preflight does NOT throw when available", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+	test("preflight names the reason when Presto is unavailable", async () => {
+		checkPrestoStatusMock.mockResolvedValue({ available: false, reason: "permission-blocked" })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).rejects.toThrow(
+			/\[presto-required\] presto-server unavailable: reason=permission-blocked/,
+		)
+	})
+
+	test("preflight names the diagnosis on secure-connection-unavailable", async () => {
+		checkPrestoStatusMock.mockResolvedValue({
+			available: false,
+			reason: "secure-connection-unavailable",
+			diagnosis: "https-disabled",
+		})
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).rejects.toThrow(
+			/reason=secure-connection-unavailable diagnosis=https-disabled/,
+		)
+	})
+
+	test("preflight runs exactly once and does NOT throw when available", async () => {
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
-	})
-
-	test("preflight invokes checkAcceleratorStatus exactly once", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(checkAcceleratorStatusMock).toHaveBeenCalledTimes(1)
+		expect(checkPrestoStatusMock).toHaveBeenCalledTimes(1)
 	})
 
 	test("warns (does NOT throw) when status.needsDownload === true", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true, needsDownload: true, sdkAztecVersion: "4.2.0" })
+		checkPrestoStatusMock.mockResolvedValue({ ...available, needsDownload: true, sdkAztecVersion: "5.2.0" })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/needsDownload=true/))
 	})
 
-	test('onPhase throws on phase="fallback"', async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+	test("onPhase throws on every fallback-class phase", async () => {
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		const onPhase = acceleratorProverInstances[0].onPhase
+		const onPhase = proverInstances[0].onPhase
 		expect(onPhase).toBeDefined()
-		expect(() => onPhase?.("fallback")).toThrow(/SDK emitted phase="fallback"/)
-	})
-
-	test('onPhase throws on phase="denied"', async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		const onPhase = acceleratorProverInstances[0].onPhase
-		expect(() => onPhase?.("denied")).toThrow(/SDK emitted phase="denied"/)
+		// The last two precede `fallback` on the paths that detect them: redundant, but precise. A
+		// legacy health-version mismatch reaches `fallback` without its own phase and is caught there.
+		for (const p of fallbackClass) {
+			expect(() => onPhase?.(p)).toThrow(new RegExp(`SDK emitted phase="${p}"`))
+		}
 	})
 
 	test("onPhase does NOT throw on benign phases", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		const onPhase = acceleratorProverInstances[0].onPhase
-		const benign: AcceleratorPhase[] = ["detect", "serialize", "transmit", "proving", "proved", "receive"]
+		const onPhase = proverInstances[0].onPhase
+		const benign: PrestoPhase[] = ["detect", "serialize", "transmit", "proving", "proved", "receive"]
 		for (const p of benign) {
 			expect(() => onPhase?.(p)).not.toThrow()
 		}
@@ -172,40 +176,86 @@ describe("ProductionPxeFactory required mode", () => {
 
 	test('onPhase warns (does NOT throw) on phase="downloading"', async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		const onPhase = acceleratorProverInstances[0].onPhase
+		const onPhase = proverInstances[0].onPhase
 		expect(() => onPhase?.("downloading")).not.toThrow()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/phase="downloading"/))
 	})
+})
 
-	test("passes host/port through to AcceleratorProver when configured", async () => {
-		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
+describe("ProductionPxeFactory prove-phase observer", () => {
+	const nativeSequence: PrestoPhase[] = ["detect", "serialize", "transmit", "proving", "proved", "receive"]
+
+	async function runtimeWithObserver(mode: "default" | "required" = "default") {
+		const events: ProvePhaseEvent[] = []
+		checkPrestoStatusMock.mockResolvedValue(available)
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: mode, onProvePhase: (e) => events.push(e) })
+		const runtime = await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
+		const onPhase = proverInstances[0].onPhase
+		if (!onPhase) throw new Error("prover constructed without onPhase")
+		return { runtime, events, onPhase }
+	}
+
+	test("every phase reaches the observer with the runtime's activeProve evidence, in order", async () => {
+		const { runtime, events, onPhase } = await runtimeWithObserver()
+		runtime.activeProve = { proveId: "attempt-1", seq: 0 }
+		for (const p of nativeSequence) onPhase(p)
+		expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6])
+		expect(events.every((e) => e.proveId === "attempt-1")).toBe(true)
+		expect(events.map((e) => e.backend)).toEqual([undefined, undefined, "presto", "presto", "presto", "presto"])
+		expect(runtime.activeProve).toEqual({ proveId: "attempt-1", seq: 6, backend: "presto" })
+	})
+
+	test("no phase reaches the observer while activeProve is unset", async () => {
+		const { runtime, events, onPhase } = await runtimeWithObserver()
+		for (const p of nativeSequence) onPhase(p)
+		expect(events).toEqual([])
+		expect(runtime.activeProve).toBeUndefined()
+	})
+
+	test("a throwing observer does not propagate into the prover (default mode)", async () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {})
+		checkPrestoStatusMock.mockResolvedValue(available)
 		const factory = new ProductionPxeFactory(fakeNodeFactory, {
-			provingMode: "required",
-			host: "127.0.0.1",
-			port: 59833,
+			onProvePhase: () => {
+				throw new Error("observer exploded")
+			},
 		})
-		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(acceleratorProverInstances[0].accelerator).toEqual({
-			host: "127.0.0.1",
-			port: 59833,
-		})
+		const runtime = await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
+		runtime.activeProve = { proveId: "a", seq: 0 }
+		expect(() => proverInstances[0].onPhase?.("transmit")).not.toThrow()
+		expect(runtime.activeProve.seq).toBe(1)
+	})
+
+	test("required mode: the guard fires before the observer, so a forbidden phase is never reported", async () => {
+		const { runtime, events, onPhase } = await runtimeWithObserver("required")
+		runtime.activeProve = { proveId: "a", seq: 0 }
+		expect(() => onPhase("fallback")).toThrow(/presto-required/)
+		expect(events).toEqual([])
+	})
+
+	test("advanceProve: transmit then fallback ends as browser; proved never changes the backend", () => {
+		const active = { proveId: "a", seq: 0 }
+		expect(advanceProve(active, "transmit").backend).toBe("presto")
+		expect(advanceProve(active, "fallback").backend).toBe("browser")
+		expect(advanceProve(active, "proved")).toEqual({ proveId: "a", seq: 3, phase: "proved", backend: "browser" })
 	})
 })
 
 describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
-	test("does NOT construct an AcceleratorProver", async () => {
+	test("does NOT construct a PrestoProver", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		expect(acceleratorProverInstances).toHaveLength(0)
+		expect(proverInstances).toHaveLength(0)
 	})
 
 	test("sets proverEnabled:false and omits proverOrOptions (default fakeProofs prover)", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
 		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
-		const lastCall = createPXEMock.mock.calls.at(-1)!
+		const lastCall = createPXEMock.mock.calls.at(-1)
+		if (!lastCall) throw new Error("createPXE was not called")
 		const config = lastCall[1] as { proverEnabled?: boolean }
 		const options = lastCall[2] as { proverOrOptions?: unknown; simulator?: unknown }
 		expect(config.proverEnabled).toBe(false)

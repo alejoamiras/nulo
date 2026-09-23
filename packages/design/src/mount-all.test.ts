@@ -14,6 +14,7 @@ import Input from "./ui/Input.vue"
 import LoadingState from "./ui/LoadingState.vue"
 import Popover from "./ui/Popover.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
+import Skeleton from "./ui/Skeleton.vue"
 import Spinner from "./ui/Spinner.vue"
 import SubPageHeaderBase from "./ui/SubPageHeaderBase.vue"
 import ToastManagerBase from "./ui/ToastManagerBase.vue"
@@ -22,7 +23,7 @@ import Toggle from "./ui/Toggle.vue"
 
 /**
  * Producer-side gate: every migrated SFC must mount with EXPLICIT imports — no reliance on the
- * extension's auto-import (the package + the faucet have none). Fails on a Vue "failed to resolve
+ * extension's auto-import (the package + the tools app have none). Fails on a Vue "failed to resolve
  * component" warning or a runtime throw — the exact bug class (e.g. a missing `import { computed }`)
  * that vue-tsc + build silently pass on JS SFCs. Grows as later phases migrate more components.
  */
@@ -37,6 +38,7 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["SectionLabel", SectionLabel, { label: "X" }],
 	["Toggle", Toggle, {}],
 	["Spinner", Spinner, {}],
+	["Skeleton", Skeleton, {}],
 	// isLoading:true exercises Banner's <Spinner> branch — the missing-import trap mount-all guards.
 	["Banner", Banner, { isLoading: true }],
 	["LoadingState", LoadingState, { label: "Loading" }],

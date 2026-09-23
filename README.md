@@ -5,7 +5,7 @@
 > **Nulo is a demo for evaluation and feedback. It is not a production wallet.**
 >
 > - **No security audit.** The code has not been reviewed by an external security firm.
-> - **Do not use with real funds or mainnet keys.** Aztec testnet only. Treat any key material you import as compromised.
+> - **Aztec mainnet is the default network, and assets on it have real value.** Use only what you can afford to lose entirely. Treat any key material you import as compromised.
 > - **Storage format is unstable.** Profiles, sessions, and on-disk schemas may change between builds. Expect data wipes and full reseeds.
 > - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
 > - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.
@@ -66,8 +66,8 @@ The package layer hierarchy (`wallet-core` → … → `extension`) is enforced 
 bun run dev                   # Chrome extension dev server, port 8088
 bun run build                 # Production Chrome build
 bun run test                  # Unit + component tests (vitest)
-bun run test:e2e              # Smoke e2e (no Aztec sandbox)
-bun run e2e:agent             # Network e2e — owns anvil + aztec + playground per worktree
+bun run test:e2e              # Extension smoke e2e (no Aztec sandbox)
+bun run e2e:agent             # Extension network e2e — owns anvil + aztec + playground per worktree
 bun run audit:vue             # One-shot pre-PR gate: typecheck → test → lint → build
 bun run lint                  # biome check
 bun run format                # biome format --write

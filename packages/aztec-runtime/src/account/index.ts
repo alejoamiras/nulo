@@ -14,6 +14,7 @@ export * from "./fee-options"
 export * from "./address-freeze"
 export * from "./frozen-artifact"
 export * from "./instantiation-descriptor"
+export * from "./account-export"
 
 export interface IAccountContract {
 	readonly address: AztecAddress
@@ -26,6 +27,13 @@ export interface IAccountContract {
 
 	createAuthWit(messageHash: Fr): Promise<AuthWitness>
 
+	/** `outMeta`, when supplied, receives build provenance the request object
+	 *  itself cannot carry (`TxExecutionRequest` is an upstream class):
+	 *  `initializesAccount` is set true iff THIS build wrapped the account
+	 *  constructor (first-tx multicall). An out-param rather than a widened
+	 *  return: the request flows through many downstream consumers typed on
+	 *  the upstream shape, and only the send-path error classifier needs the
+	 *  flag. */
 	buildTxExecutionRequest(
 		node: AztecNode,
 		pxe: IPXE,
@@ -33,6 +41,7 @@ export interface IAccountContract {
 		options: DefaultAccountEntrypointOptions,
 		chainInfo: ChainInfo,
 		gasSettings?: PartialGasSettingsRPC,
+		outMeta?: { initializesAccount?: boolean },
 	): Promise<TxExecutionRequest>
 
 	/** Returns `true` when this account's on-chain init nullifier is NOT

@@ -25,7 +25,7 @@ import TransactionIncomingCard from "@/components/composite/activity/Transaction
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
-import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
+import { buildIncomingCardProps } from "@/utils/received-display"
 
 const router = useRouter()
 
@@ -82,14 +82,7 @@ onBeforeUnmount(() => {
 })
 function incomingCardProps(inc) {
 	const token = props.tokensById[inc.tokenId]
-	return {
-		tokenSymbol: token?.symbol || "Token",
-		amountRaw: inc.amountRaw,
-		tokenDecimals: token?.decimals || 0,
-		txHash: inc.txHash,
-		amountFiat: token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
-		receivedLabel: receivedLabel(resolveReceivedType(inc)),
-	}
+	return buildIncomingCardProps(inc, token, token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
 }
 
 /** Map a journal record row → TransactionTerminalCard props via the shared

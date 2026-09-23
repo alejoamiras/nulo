@@ -21,7 +21,14 @@ import { beforeAll, describe, expect, test } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { Capability } from "./capabilities"
 import { WalletSdkDispatcher } from "./dispatcher"
-import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+import type {
+	IAccountProvisioner,
+	IAccountReader,
+	IDappInteractionRunner,
+	IDappSessionWriter,
+	IExecutionRunner,
+	INetworkReader,
+} from "./services-contract"
 import type { IDappSessionRef, INetworkRef } from "./session-types"
 
 beforeAll(() => {
@@ -61,10 +68,15 @@ function makeDispatcher(): { dispatcher: WalletSdkDispatcher; sent: () => string
 		setAccountAliases: async () => session,
 		setCapabilityGrants: async () => session,
 		setCapabilityRejections: async () => session,
+		applyCapabilityDecision: async (_id, decision) => ({
+			...session,
+			accounts: decision.addAccounts.length > 0 ? [...new Set([...session.accounts, ...decision.addAccounts])] : session.accounts,
+		}),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: CHAIN }
-	const networkReader: INetworkReader = { getNetworks: async () => [network] }
-	const accountReader: IAccountReader = {
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
+	const accountReader: IAccountReader & IAccountProvisioner = {
+		provisionDefaultAccount: async () => {},
 		getAccounts: async () => [
 			{ address: ADDR_A, name: "Account 1", chainId: CHAIN },
 			{ address: ADDR_B, name: "Account 2", chainId: CHAIN },

@@ -28,6 +28,13 @@ export type {
 	GasBalances,
 	PriorityLevel,
 	TransferFeeEstimate,
+	DiscoveredAuthwit,
+	OperationAuthwitPreview,
+	DecodedCall,
+	DecodedParam,
+	DecodedValue,
+	DisplayCallInput,
+	UndecodedReason,
 } from "@nulo/wallet-bridge"
 export { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 export type {
@@ -61,19 +68,41 @@ export type {
 	SkippedOperationResult,
 } from "@nulo/wallet-bridge"
 
-import type { RegisterTokenOperation } from "@nulo/wallet-bridge"
-import type { TokenInterface } from "@/wallet/services/token/spec"
+/** Where a popup approval binds one operation's execution: the stored dApp
+ *  interaction and the operation's index in it, plus the SW-minted ids the
+ *  popup handed back. The silent path carries none — its executions are not
+ *  held to a preview. */
+export type OperationApprovalEnvelope = {
+	readonly interactionId: string
+	readonly index: number
+	/** Estimate→confirm reuse id (standard-mode `aztec_sendTx`). */
+	readonly estimateId?: string
+	/** Preview-snapshot key: the discovered authorizations the card showed. */
+	readonly previewId?: string
+}
+
+/** The `(interactionId, index)` a preview or estimate is written under. */
+export type PreviewContext = Pick<OperationApprovalEnvelope, "interactionId" | "index">
+import type { PrestoPhase } from "@alejoamiras/presto"
+import type { ProveBackend } from "@nulo/wallet-core/jobs"
+
+/** The Presto SDK's phase vocabulary; the coordinator's wire schema pins the members it accepts. */
+export type ProvePhaseName = PrestoPhase
+
+/** The latest accepted prove-phase event, as a hint for the UI. */
+export interface ProveOutcomeHint {
+	at: number
+	phase: ProvePhaseName
+	backend?: ProveBackend
+}
 
 /**
- * Materialized form of `RegisterTokenOperation` carrying the optional
- * `previewedInterface` hint that the popup attaches in its approve mapper
- * after `previewTokenMetadata` resolves. The wire `RegisterTokenOperation`
- * in `@nulo/wallet-bridge` stays clean of any `TokenInterface` import
- * (wallet-bridge has no dependency on extension types — layer hierarchy
- * forbids it). The executor accepts this extended type, validates
- * `previewedInterface.contract === op.address` + `chainId === network.chainId`
- * before trusting the hint, and falls back to `parseTokenInterface` on mismatch.
+ * SW-memory records (both reset on SW restart — the journal is the record,
+ * these are hints). `denial` is held apart from `outcome` because later phases
+ * of the same attempt (`fallback`, `proving`, `proved`) would otherwise bury
+ * the one phase Settings needs to explain a WASM proof.
  */
-export type MaterializedRegisterTokenOperation = RegisterTokenOperation & {
-	readonly previewedInterface?: TokenInterface
+export interface LastProveOutcome {
+	outcome: ProveOutcomeHint | null
+	denial: { at: number } | null
 }

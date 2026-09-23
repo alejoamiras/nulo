@@ -8,7 +8,7 @@
  * with the outgoing `TransactionCard`, the in-flight `TransactionAwaiting-
  * Card`, and the `TransactionTerminalCard`. Visual difference:
  *   - Activity-row icon = `download` (down-pointing arrow, the closest
- *     "incoming" semantic in `assets/icons.json`).
+ *     "incoming" semantic in the `@nulo/design` icon set).
  *   - Status badge = green `check-circle` (mirrors the settled card's
  *     success state in incoming-positive coloring).
  *   - Title row carries a "Received" chip to distinguish from outgoing-

@@ -12,15 +12,15 @@ import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
-import { checkNotificationsForShow } from "@/composables/notification"
+import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
+import { TOAST_DURATION, useToast } from "@/composables/toast"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 
 /** Utils */
 import { AccountServiceClient } from "@/wallet/services/account/client"
-import { InvalidPasswordError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { InvalidPasswordError, RestoreTornError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { getLastActiveProfileId, setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { initTransactionService, managers, refreshBalances } from "@/utils/core"
-import { sleep } from "@/wallet/utils"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -28,7 +28,13 @@ import { usePopupStore } from "@/stores/popup.store.ts"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
+const { openToast } = useToast()
+
 const router = useRouter()
+
+// 30 s matches the e2e suite's dominant post-unlock envelope; the transport
+// RPC bound is 60 s and the analogous import handshake allows 30 s.
+const UNLOCK_WAIT_MS = 30_000
 
 if (appStore.isLogined) {
 	router.go(-1)
@@ -37,10 +43,23 @@ if (appStore.isLogined) {
 const passwordInput = ref(null)
 const password = ref("")
 const isWrongPassword = ref(false)
+// The profile's backup import never finished (typed RestoreTornError from the
+// unlock chokepoint): unlock is withheld — explain, and point at the existing
+// delete + re-import path on this screen. Cleared on profile switch.
+const isTornImport = ref(false)
 const isPasswordType = ref(true)
 const isAwaitingResponse = ref(false)
 
 const isPasskeyProfile = computed(() => appStore.profile?.type === "passkey")
+
+// The shell's boot outcome. "failed" = an OPEN session whose activation bootstrap threw: the
+// banner's RETRY is the only true recovery, and a password typed here would unlock an already-
+// open session and repair nothing — so the form is withheld, not merely disabled, and stays
+// withheld while that retry runs (the outcome clears at retry start; the flag bridges the gap).
+// An "unreachable" boot keeps the form: the password path IS its recovery.
+const bootOutcome = inject("bootOutcome", ref(""))
+const bootRetrying = inject("bootRetrying", ref(false))
+const isBootWithheld = computed(() => bootOutcome.value === "failed" || bootRetrying.value)
 
 // Path A: in-page passkey ceremony. The dialog is mounted via `v-if="ceremonyRequest"`
 // in the template; we drive it imperatively via `runCeremony` to keep the
@@ -58,58 +77,120 @@ const isAllowedToContinue = computed(() => {
 	return true
 })
 
+/** The single post-unlock advance. Two sites want to leave this screen — the submit handler
+ *  when its isLogined poll releases, and the isLogined watcher (which also covers unlocks this
+ *  handler never sees, e.g. a silent restore landing here) — and both used to push blindly:
+ *  the loser's late push yanked the user from wherever they had navigated to in the gap. The
+ *  claim flag elects one winner atomically (a hash comparison alone cannot — the winner's
+ *  navigation moves the hash only after async route resolution). The exact-path check keeps
+ *  the advance on THIS screen only: a substring test also matched off-screen routes carrying
+ *  `?from=/popup/auth` (profile import / new-profile from the select-profile popup). A failed
+ *  navigation releases the claim so a later attempt isn't locked out. */
+let postAuthNavClaimed = false
+const advancePastAuth = async () => {
+	if (postAuthNavClaimed) return
+	if (window.location.hash.split("?")[0] !== "#/popup/auth") return
+	postAuthNavClaimed = true
+	const failure = await router.push(appStore.pageAwaitingAuth || "/popup/general")
+	if (failure) postAuthNavClaimed = false
+}
+
+/** Path A pulls credentialId so the ceremony targets THIS profile's credential (not a discovery
+ *  picker that would let the user choose any of their passkeys). `appStore.profile.id` is read at
+ *  each site, as before — never captured once across the awaits. */
+const unlockActiveProfile = async () => {
+	if (isPasskeyProfile.value) {
+		const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
+		const credData = await runCeremony({ mode: "get", credentialId })
+		return managers.profile.unlockPasskeyProfile(appStore.profile.id, credData)
+	}
+	return managers.profile.unlockProfile(appStore.profile.id, password.value)
+}
+
+/** The unlock failure ladder — one synchronous pass, in this order, on the original error. */
+const handleUnlockError = (error, activeProfileId) => {
+	// Service throws `InvalidPasswordError` (a WalletError subclass).
+	// Client reconstructs the instance across the RPC boundary so the
+	// instanceof check holds. Legacy-message fallback covers the
+	// short window where the service has been redeployed but the
+	// popup hasn't reloaded yet.
+	const isInvalid =
+		error instanceof InvalidPasswordError || (error instanceof Error && error.message === InvalidPasswordError.LEGACY_MESSAGE)
+	if (isInvalid) isWrongPassword.value = true
+	if (error instanceof RestoreTornError) {
+		isTornImport.value = true
+		return
+	}
+	// Path A user cancel surfaces here; silent return matches the
+	// existing profile/new.vue behavior (no error toast on Escape /
+	// "user closed").
+	if (error instanceof UserRejectedError) return
+	if (error instanceof UnlockTimeoutError) {
+		// Silent yield when a DIFFERENT profile won the race — its UI is
+		// live and a "try again" toast would race a successful
+		// navigation. Otherwise the wait genuinely expired: say so.
+		if (appStore.isLogined && appStore.profile?.id !== activeProfileId) return
+		openToast({ label: "Unlock timed out — please try again", icon: "warning" }, TOAST_DURATION.LONG)
+		return
+	}
+	if (error instanceof BootstrapFailedError) {
+		// The shell already toasted the failure (with stale-suppression);
+		// the join's job here is only to release the spinner immediately.
+		return
+	}
+}
+
 const handleUnlockWallet = async () => {
 	if (!isAllowedToContinue.value) return
+	// Reentry guard: two programmatic submits while the first unlock awaits
+	// must not mint duplicate same-profile continuations.
+	if (isAwaitingResponse.value) return
 
 	try {
 		let activeProfile
 		try {
 			isAwaitingResponse.value = true
-			if (isPasskeyProfile.value) {
-				// Path A: pull credentialId so the ceremony targets THIS
-				// profile's credential (not a discovery picker that would
-				// let the user choose any of their passkeys).
-				const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
-				const credData = await runCeremony({ mode: "get", credentialId })
-				activeProfile = await managers.profile.unlockPasskeyProfile(appStore.profile.id, credData)
-			} else {
-				activeProfile = await managers.profile.unlockProfile(appStore.profile.id, password.value)
-			}
-			while (!appStore.isLogined) {
-				await sleep(100)
-			}
+			// A stale failure record from a PRIOR attempt must not insta-reject
+			// this attempt's activation wait.
+			appStore.bootstrapFailure = null
+			activeProfile = await unlockActiveProfile()
+			if (!activeProfile?.id) return
+			// Bounded, identity-aware, failure-joined wait — replaces an
+			// unbounded isLogined poll whose finally was unreachable when
+			// bootstrap starved it (bricked spinner). 30 s matches the e2e
+			// suite's dominant post-unlock envelope (transport bound is 60 s;
+			// the analogous import handshake allows 30 s).
+			await awaitProfileActivation(appStore, activeProfile.id, UNLOCK_WAIT_MS)
 		} catch (error) {
-			// Service throws `InvalidPasswordError` (a WalletError subclass).
-			// Client reconstructs the instance across the RPC boundary so the
-			// instanceof check holds. Legacy-message fallback covers the
-			// short window where the service has been redeployed but the
-			// popup hasn't reloaded yet.
-			const isInvalid =
-				error instanceof InvalidPasswordError || (error instanceof Error && error.message === InvalidPasswordError.LEGACY_MESSAGE)
-			if (isInvalid) isWrongPassword.value = true
-			// Path A user cancel surfaces here; silent return matches the
-			// existing profile/new.vue behavior (no error toast on Escape /
-			// "user closed").
-			if (error instanceof UserRejectedError) return
+			handleUnlockError(error, activeProfile?.id)
 			return
 		} finally {
 			isAwaitingResponse.value = false
 		}
 
+		// IMMEDIATE post-wait identity check — the wait can resolve for this
+		// profile and a different unlock can win before this continuation runs;
+		// a stale continuation must have nothing to write (the redundant
+		// `appStore.profile = activeProfile` assignment is gone for the same
+		// reason: bootstrap already established identity).
+		if (!appStore.isLogined || appStore.profile?.id !== activeProfile.id) return
+
 		password.value = ""
 
-		appStore.profile = activeProfile
-		if (activeProfile?.id) await setLastActiveProfileId(activeProfile.id)
-		managers.account = new AccountServiceClient()
+		await setLastActiveProfileId(activeProfile.id)
+		// Second identity check: the await above is its own drift window — a
+		// resumed continuation must not replace the winner's managers.
+		if (!appStore.isLogined || appStore.profile?.id !== activeProfile.id) return
+		// Keep an existing client: replacing it abandoned a connected port, and disconnecting it
+		// would reject the calls of any flow still holding it (the network-switch handler does).
+		managers.account ??= new AccountServiceClient()
 
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 
-		await appStore.syncTransactions()
-		refreshBalances(10, appStore.accounts)
+		void advancePastAuth()
 
-		router.push(appStore.pageAwaitingAuth || "/popup/general")
-
-		await checkNotificationsForShow(router)
+		void appStore.syncTransactions().catch((err) => console.error(err))
+		void refreshBalances(appStore.accounts).catch((err) => console.error(err))
 	} catch (err) {
 		console.error(err)
 	}
@@ -127,11 +208,15 @@ onMounted(async () => {
 	}
 })
 watch(
+	() => appStore.profile?.id,
+	() => {
+		isTornImport.value = false
+	},
+)
+watch(
 	() => appStore.isLogined,
 	async () => {
-		if (appStore.isLogined) {
-			router.push(appStore.pageAwaitingAuth || "/popup/general")
-		}
+		if (appStore.isLogined) await advancePastAuth()
 	},
 )
 </script>
@@ -149,14 +234,17 @@ watch(
 
 			<Flex direction="column" align="center" gap="8">
 				<h1 :class="$style.heading">
-					{{ isPasskeyProfile ? 'Passkey required' : 'Password required' }}
+					{{ isBootWithheld ? 'Wallet not ready' : isPasskeyProfile ? 'Passkey required' : 'Password required' }}
 				</h1>
-				<p :class="$style.subheading">
+				<p v-if="isBootWithheld" :class="$style.subheading" role="status" data-testid="auth-boot-failed">
+					{{ bootRetrying ? 'Retrying the wallet start-up…' : 'Your session is open, but the wallet could not finish starting up. Use RETRY above.' }}
+				</p>
+				<p v-else :class="$style.subheading">
 					{{ isPasskeyProfile ? 'Use your passkey to continue' : 'Enter your profile password to continue' }}
 				</p>
 			</Flex>
 
-			<form @submit.prevent="handleUnlockWallet" :class="$style.form">
+			<form v-if="!isBootWithheld" @submit.prevent="handleUnlockWallet" :class="$style.form">
 				<template v-if="!isPasskeyProfile">
 					<div :class="[isWrongPassword && $style.shake]">
 						<Input
@@ -196,6 +284,12 @@ watch(
 					</Transition>
 				</template>
 
+				<Transition name="fade">
+					<span v-if="isTornImport" :class="$style.error_text" role="alert" data-testid="auth-restore-torn">
+						This profile's import didn't finish — delete it below and re-import your backup.
+					</span>
+				</Transition>
+
 				<Button
 					type="submit"
 					data-testid="auth-submit"
@@ -220,7 +314,7 @@ watch(
 					Delete profile
 				</button>
 				<template #content>
-					Forgot your password? Delete this profile and re-import it with your seed phrase or secret key.
+					Forgot your password? Delete this profile and re-import it with your recovery phrase.
 				</template>
 			</Tooltip>
 		</Flex>

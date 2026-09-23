@@ -18,6 +18,10 @@ import type { Profile } from "./spec"
  *  `PasskeyCredential.deriveMasterSecret()` return shape. */
 const frBytes = (byte: string): Buffer<ArrayBuffer> => Fr.fromHexString(`0x${byte.repeat(32)}`).toBuffer() as Buffer<ArrayBuffer>
 
+/** Real (deterministic) AES-GCM key — mirrors `PasskeyCredential.deriveDekWrapKey()`'s shape. */
+const fakeAesKey = (): Promise<CryptoKey> =>
+	crypto.subtle.importKey("raw", new Uint8Array(32).fill(0x42), { name: "AES-GCM" }, false, ["encrypt", "decrypt"])
+
 /** Minimal PasskeyService stand-in. Returns credential objects that
  *  expose `id`, `userHandle`, and a `deriveMasterSecret` that resolves
  *  to deterministic Fr-canonical bytes derived from the credential id. */
@@ -33,6 +37,7 @@ function makeFakePasskeyService(
 			id,
 			userHandle,
 			deriveMasterSecret: async () => frBytes("01"),
+			deriveDekWrapKey: async () => fakeAesKey(),
 		}) as unknown as PasskeyCredential
 
 	const fake = {
@@ -57,6 +62,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: `cred-${userHandle}`,
 				userHandle,
 				deriveMasterSecret: async () => frBytes("02"),
+				deriveDekWrapKey: async () => fakeAesKey(),
 			})) as unknown as PasskeyService["createKey"]
 			const passkeys = makeFakePasskeyService({ create: createKey as never })
 			const coord = newCoordinator(passkeys)
@@ -87,6 +93,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: credentialId ?? "unknown",
 				userHandle: "handle-from-credential",
 				deriveMasterSecret: async () => frBytes("03"),
+				deriveDekWrapKey: async () => fakeAesKey(),
 			})) as unknown as PasskeyService["getKey"]
 			const passkeys = makeFakePasskeyService({ get: getKey as never })
 			const coord = newCoordinator(passkeys)
@@ -106,6 +113,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: "picked-by-user",
 				userHandle: "user-handle-xyz",
 				deriveMasterSecret: async () => frBytes("04"),
+				deriveDekWrapKey: async () => fakeAesKey(),
 			})) as unknown as PasskeyService["getKey"]
 			const passkeys = makeFakePasskeyService({ get: getKey as never })
 			const coord = newCoordinator(passkeys)
@@ -124,6 +132,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 					id: "cred-without-userhandle",
 					// no userHandle
 					deriveMasterSecret: async () => frBytes("05"),
+					deriveDekWrapKey: async () => fakeAesKey(),
 				})) as never,
 			})
 			const coord = newCoordinator(passkeys)
@@ -139,6 +148,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: data.id,
 				userHandle: data.userHandle,
 				deriveMasterSecret: async () => frBytes("06"),
+				deriveDekWrapKey: async () => fakeAesKey(),
 			})) as unknown as PasskeyService["materializeCredential"]
 			const passkeys = makeFakePasskeyService({ materialize: materialize as never })
 			const coord = newCoordinator(passkeys)
@@ -162,6 +172,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 					id: "cred-no-handle",
 					// no userHandle
 					deriveMasterSecret: async () => frBytes("07"),
+					deriveDekWrapKey: async () => fakeAesKey(),
 				})) as never,
 			})
 			const coord = newCoordinator(passkeys)
@@ -201,6 +212,8 @@ describe("PasskeyRecoveryCoordinator", () => {
 				name: "P",
 				type: "passkey",
 				pxeGeneration: "gen-test",
+				dekSealed: "ZGVrLXNlYWxlZA==",
+				walletFingerprint: "fp-test",
 				credentialId: "stored-credential",
 			}
 
@@ -236,6 +249,8 @@ describe("PasskeyRecoveryCoordinator", () => {
 				name: "P",
 				type: "passkey",
 				pxeGeneration: "gen-test",
+				dekSealed: "ZGVrLXNlYWxlZA==",
+				walletFingerprint: "fp-test",
 				credentialId: "stored-credential",
 			}
 

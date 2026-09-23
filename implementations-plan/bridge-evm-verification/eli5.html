@@ -1,0 +1,323 @@
+<title>The Untested Guard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+  :root {
+    --ground:  #FBFBFA;
+    --surface: #F3F3F1;
+    --sunk:    #EAEAE7;
+    --ink:     #1A1B1E;
+    --muted:   #63656B;
+    --rule:    #DFDFDC;
+    --accent:  #2C4A7C;
+    --bad:     #9E2B2B;
+    --good:    #2F6B4F;
+    --bad-bg:  #F7ECEC;
+    --good-bg: #EBF2EE;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:  #141517;
+      --surface: #1C1E21;
+      --sunk:    #232629;
+      --ink:     #E8E8E6;
+      --muted:   #979AA1;
+      --rule:    #2D3035;
+      --accent:  #85A9DE;
+      --bad:     #DE8080;
+      --good:    #6FB693;
+      --bad-bg:  #241A1A;
+      --good-bg: #182320;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:  #141517;
+    --surface: #1C1E21;
+    --sunk:    #232629;
+    --ink:     #E8E8E6;
+    --muted:   #979AA1;
+    --rule:    #2D3035;
+    --accent:  #85A9DE;
+    --bad:     #DE8080;
+    --good:    #6FB693;
+    --bad-bg:  #241A1A;
+    --good-bg: #182320;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 4rem 1.25rem 6rem;
+  }
+
+  main { max-width: 41rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.15rem; }
+
+  h1, h2, h3 { font-family: Newsreader, Georgia, serif; font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: 2.5rem; line-height: 1.12; letter-spacing: -0.01em; }
+  h2 { font-size: 1.5rem; margin-top: 2.6rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.13rem; margin-top: 1.6rem; }
+
+  p, li { margin: 0; }
+  ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  strong { font-weight: 600; }
+  a { color: var(--accent); }
+
+  .lede { font-size: 1.16rem; color: var(--muted); line-height: 1.6; }
+
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.72rem; letter-spacing: 0.13em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 0.9rem;
+  }
+
+  code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace; }
+  code { font-size: 0.855em; background: var(--sunk); padding: 0.1em 0.34em; border-radius: 3px; }
+  pre {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 0.95rem 1.1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; margin: 0;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
+  .scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 0.73rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .hash { font-family: "JetBrains Mono", monospace; font-size: 0.8rem; }
+  .yes { color: var(--good); font-weight: 700; }
+  .no  { color: var(--bad);  font-weight: 700; }
+
+  .phase {
+    border-left: 2px solid var(--rule);
+    padding: 0.15rem 0 0.15rem 1.15rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .phase h3 { margin-top: 0; }
+  .proves {
+    font-size: 0.9rem; color: var(--muted);
+    border-top: 1px dashed var(--rule); padding-top: 0.5rem;
+  }
+  .proves b { color: var(--ink); font-weight: 600; }
+
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0; padding: 1rem 1.15rem;
+    display: flex; flex-direction: column; gap: 0.6rem;
+  }
+  .callout.alarm { border-left-color: var(--bad); }
+  .callout h3 { margin-top: 0; }
+
+  .decision {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1.15rem 1.35rem; display: flex; flex-direction: column; gap: 0.75rem;
+  }
+
+  figure { margin: 0.6rem 0; display: flex; flex-direction: column; gap: 0.55rem; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: 0.87rem; color: var(--muted); line-height: 1.5; }
+
+  .cut { font-size: 0.95rem; }
+  .cut td:first-child { font-weight: 600; }
+
+  .warn {
+    color: var(--bad); font-weight: 600; font-size: 0.93rem;
+    background: var(--bad-bg); border-radius: 4px; padding: 0.55rem 0.8rem;
+  }
+
+  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); font-size: 0.87rem; color: var(--muted); }
+</style>
+
+<main>
+
+  <div>
+    <div class="eyebrow">Blueprint · mid · approval needed</div>
+    <h1>The Untested Guard</h1>
+  </div>
+
+  <p class="lede">Two jobs on the Ethereum side of the bridge: delete a copied contract file that no longer earns its keep, and write one proof for a safety check that — as it turns out — nothing tests. Planning it also uncovered a separate live bug, already fixed in its own PR.</p>
+
+  <h2>The short version</h2>
+
+  <p>You asked for two things. Along the way, two surprises showed up that changed what the work is worth.</p>
+
+  <div class="callout alarm">
+    <h3>Surprise 1 — a safety check nobody tests</h3>
+    <p>The contract that holds your USDC has two guards on its setup function. One stops a stranger claiming it before you. The other stops anyone re-pointing it afterwards.</p>
+    <p>I deleted each guard in turn and ran all 62 tests. Deleting the first breaks a test — good. <strong>Deleting the second breaks nothing at all.</strong> The test named for it passes, because it checks a hand-written <em>copy</em> of the guard rather than the real contract.</p>
+    <p>So the plan isn't "add proofs to code that's already fine." It's closing a real gap and removing the test that was hiding it.</p>
+  </div>
+
+  <div class="callout alarm">
+    <h3>Surprise 2 — the deploy path was broken on <code>dev</code></h3>
+    <p>Unrelated to your request, and found by an auditor reading the same files: a hash pin had drifted, so <code>verify-l1</code> and both deploy scripts died on startup. Your next deploy would have hit it.</p>
+    <p>Already fixed and out for review as <strong>PR #481</strong>, separate from this plan. It fails closed, so nothing unsafe could have shipped — the path was simply unusable.</p>
+  </div>
+
+  <h2>What the pin bug was</h2>
+
+  <p>Three things have to agree: the contract's source file, the pre-built artifact the deploy actually ships, and the hashes recorded in code that gate them. They're supposed to move together, as one deliberate act. A change last month moved only the third.</p>
+
+  <figure>
+    <svg viewBox="0 0 620 200" role="img" aria-label="Source and artifact agree on hash 0x5e81eaad; the recorded pin says 0xde14278d and disagrees with both, which makes the deploy refuse to run.">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <polygon points="0 0, 9 3.5, 0 7" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <rect x="8" y="18" width="176" height="62" rx="5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <text x="96" y="42" text-anchor="middle" font-size="13" fill="currentColor" font-family="Source Sans 3, sans-serif">the source file</text>
+      <text x="96" y="63" text-anchor="middle" font-size="12" fill="currentColor" font-family="JetBrains Mono, monospace">0x5e81eaad</text>
+
+      <rect x="222" y="18" width="176" height="62" rx="5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <text x="310" y="42" text-anchor="middle" font-size="13" fill="currentColor" font-family="Source Sans 3, sans-serif">the built artifact</text>
+      <text x="310" y="63" text-anchor="middle" font-size="12" fill="currentColor" font-family="JetBrains Mono, monospace">0x5e81eaad</text>
+
+      <rect x="436" y="18" width="176" height="62" rx="5" fill="none" stroke="#9E2B2B" stroke-width="1.8"/>
+      <text x="524" y="42" text-anchor="middle" font-size="13" fill="#9E2B2B" font-family="Source Sans 3, sans-serif">the recorded pin</text>
+      <text x="524" y="63" text-anchor="middle" font-size="12" fill="#9E2B2B" font-family="JetBrains Mono, monospace">0xde14278d</text>
+
+      <line x1="184" y1="49" x2="216" y2="49" stroke="currentColor" stroke-width="1.4"/>
+      <text x="200" y="40" text-anchor="middle" font-size="14" fill="#2F6B4F" font-weight="700">=</text>
+
+      <line x1="398" y1="49" x2="430" y2="49" stroke="#9E2B2B" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <text x="414" y="40" text-anchor="middle" font-size="14" fill="#9E2B2B" font-weight="700">≠</text>
+
+      <line x1="524" y1="80" x2="524" y2="128" stroke="#9E2B2B" stroke-width="1.4" marker-end="url(#ar)"/>
+      <rect x="352" y="132" width="260" height="50" rx="5" fill="none" stroke="#9E2B2B" stroke-width="1.4"/>
+      <text x="482" y="152" text-anchor="middle" font-size="12.5" fill="#9E2B2B" font-family="Source Sans 3, sans-serif">deploy + verify refuse to start</text>
+      <text x="482" y="170" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="Source Sans 3, sans-serif">fails closed — nothing unsafe ships</text>
+    </svg>
+    <figcaption>The source and the artifact agreed with each other, and with what's deployed. Only the recorded pin was wrong — so the fix changes no contract code and no bytecode.</figcaption>
+  </figure>
+
+  <p>Nothing caught it because nothing in CI runs that path: no job installs the compiler toolchain, and the contracts workflow only watches the contracts folder. PR #481 re-pins to what the source actually compiles to and adds a fast test so the three can't drift apart silently again.</p>
+
+  <h2>The plan itself</h2>
+
+  <h3>Job 1 — retire the copied file</h3>
+  <p>There's a copy of Aztec's example portal in the repo. It exists because Aztec ships the compiled artifact but not the source, so verifying a canonically-deployed portal on Etherscan would have nothing to compile.</p>
+  <p>Every deployment now uses <em>your</em> forked portal instead, whose source you own — so that branch never runs. Deleting it is a genuine <strong>retirement</strong>, not dead-code removal: old pre-fork deployments were verified from this file and won't be re-verifiable afterwards. Those portals are superseded, and you've chosen deletion knowing that. Worth stating plainly rather than pretending nothing is lost.</p>
+
+  <h3>Job 2 — prove the guard nothing tests</h3>
+  <p>A normal test tries one attacker address you thought of. A proof checks every possible address at once, mathematically. We already have four such proofs on the router; this adds one to the contract that holds the money.</p>
+
+  <p>Getting it right turned out to be delicate, and the first draft got it wrong in exactly the way this whole effort exists to prevent:</p>
+
+  <figure>
+    <svg viewBox="0 0 620 224" role="img" aria-label="With a symbolic caller excluding the deployer, every path exits through the first guard, so the second guard is never reached and the proof passes even when that guard is deleted.">
+      <rect x="8" y="14" width="604" height="86" rx="5" fill="none" stroke="#9E2B2B" stroke-width="1.5"/>
+      <text x="24" y="36" font-size="12.5" fill="#9E2B2B" font-family="Source Sans 3, sans-serif" font-weight="600">The draft: "try every caller except the deployer"</text>
+      <text x="24" y="60" font-size="12" fill="currentColor" font-family="Source Sans 3, sans-serif">every such caller is stopped by guard 1 &#8594; never reaches guard 2</text>
+      <text x="24" y="82" font-size="12" fill="#9E2B2B" font-family="Source Sans 3, sans-serif" font-weight="600">delete guard 2 &#8594; proof still passes. It could not fail.</text>
+
+      <rect x="8" y="122" width="604" height="86" rx="5" fill="none" stroke="#2F6B4F" stroke-width="1.5"/>
+      <text x="24" y="144" font-size="12.5" fill="#2F6B4F" font-family="Source Sans 3, sans-serif" font-weight="600">The fix: call as the deployer, the only caller who gets that far</text>
+      <text x="24" y="168" font-size="12" fill="currentColor" font-family="Source Sans 3, sans-serif">passes guard 1 &#8594; lands squarely on guard 2</text>
+      <text x="24" y="190" font-size="12" fill="#2F6B4F" font-family="Source Sans 3, sans-serif" font-weight="600">delete guard 2 &#8594; proof goes red. It can fail, so it means something.</text>
+    </svg>
+    <figcaption>A reviewer constructed this from the draft's own text — no exotic setup needed. It's the same failure the previous arc spent ten PRs removing, so it's the one thing the plan checks hardest.</figcaption>
+  </figure>
+
+  <h2>What we cut</h2>
+
+  <p>The scope shrank three times under review, and that's the part I'd most want you to sanity-check. Four candidates went in; one ships.</p>
+
+  <div class="scroll">
+    <table class="cut">
+      <thead><tr><th>Candidate</th><th>Outcome</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Init-once guard</td><td class="yes">SHIPS</td><td>The only guard no test covers</td></tr>
+        <tr><td>Deployer-only guard</td><td class="no">cut</td><td>Already caught by an existing test; it's a single address comparison, so checking all addresses adds nothing</td></tr>
+        <tr><td>Swap-route validation</td><td class="no">cut</td><td>"Almost a restatement of the guard" — real but speculative value, not this job</td></tr>
+        <tr><td>Withdraw</td><td class="no">cut</td><td>Can't be proven without assuming the answer</td></tr>
+        <tr><td>A CI truncation guard</td><td class="no">cut</td><td>Insurance against a hazard nothing in scope can hit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Each cut came from pushing the reviewers to justify a lukewarm "keep" rather than accepting it. The finding behind the cut CI guard is still written down, so whoever writes the next proof inherits it.</p>
+
+  <h2>Phases</h2>
+
+  <div class="phase">
+    <h3>Phase 0 — baseline <span class="mono" style="color:var(--good);font-size:0.8rem">✓ done</span></h3>
+    <p>Set up the build, record what passes before anything changes, and run the experiments that found the untested guard.</p>
+    <p class="proves"><b>Proves itself by:</b> the build succeeding, 62 tests green, and the four existing proofs passing — all numbers written down so later claims have something to compare against.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 1 — retire the copied file</h3>
+    <p>Delete it and the code path that fed it. Every config now goes through the existing strict validator, which already refuses anything but the current format.</p>
+    <p class="proves"><b>Proves itself by:</b> unit tests including a new case for the rejection, lint and typecheck clean, and a real dry-run against the live testnet config still producing verification input for all four contracts.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2 — the proof, and repairing the broken test</h3>
+    <p>Write the proof against the real contract. Delete the stand-in copy and rewrite the test that was checking it so it checks the actual thing.</p>
+    <p class="proves"><b>Proves itself by:</b> the proof passing — and then <b>deliberately deleting the guard and watching it go red</b>, restoring it, watching it go green. A proof nobody has seen fail is not evidence.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3 — make CI able to notice</h3>
+    <p>Today the check would still pass if the proof file were deleted. Bind the expected count to the contract by name and remove that escape hatch.</p>
+    <p class="proves"><b>Proves itself by:</b> a real CI run, plus checking that hiding a proof file makes the step <em>fail</em> rather than quietly skip.</p>
+  </div>
+
+  <h2>Context worth having</h2>
+
+  <ul>
+    <li><strong>Why a copy exists at all.</strong> Aztec marks nothing in their portal as overridable, so a security fix couldn't be added by extending their contract — the file had to be copied and edited. That's a language constraint, not a style choice.</li>
+    <li><strong>Why the contract file is now untouched.</strong> The compiler folds a hash of the source — comments included — into the bytecode. Editing even a stale comment would change the deployed bytes and invalidate the trust anchor for a live contract. Two comments stay out of date on purpose; that's the cheaper cost.</li>
+    <li><strong>None of this blocks a merge yet.</strong> The contracts check is advisory, not required. Making it required is a separate decision you scoped out.</li>
+  </ul>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>PR #481 has to land first.</strong> Phase 1's check can't pass until it does, so this plan waits on it.</li>
+    <li><strong>Both audits rejected the draft</strong>, and every blocking finding is fixed — but neither has re-read the revision. That's what this approval is for.</li>
+    <li><strong>Two things deliberately parked:</strong> library versions recorded in git disagree with the ones CI installs, and the contracts check stays advisory.</li>
+  </ul>
+
+  <div class="decision">
+    <h2 style="margin-top:0;border:0;padding:0">What I need from you</h2>
+    <ul>
+      <li>Confirm the <strong>scope</strong>: retire the copied file, ship one proof, repair one broken test, tighten the CI check.</li>
+      <li>Confirm the <strong>cuts</strong> above — especially dropping the deployer-only proof.</li>
+      <li>Confirm <strong>retiring old-format verification</strong> is acceptable (pre-fork portals become non-re-verifiable).</li>
+      <li>Confirm the <strong>two PRs stacked</strong>, merged on your call as always.</li>
+      <li>Reply <strong>approve</strong>, <strong>conditional approve</strong> (with conditions), or <strong>reject</strong> (with blockers).</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds</h2>
+  <p>For the session that does the work. <span class="warn">Use exactly one — they don't compose.</span></p>
+
+  <h3>Recommended — <code>/goal</code></h3>
+  <p style="font-size:0.93rem;color:var(--muted)">Completion here is visible in the transcript, so a goal is the better fit than a timer.</p>
+  <pre><code>/goal All phases marked ✓ in implementations-plan/bridge-evm-verification/plan.md,
+each ✓ backed by its validation gate reported passing in the transcript —
+including Phase 2's FULL mutation matrix (guard deleted → proof red with a
+counterexample implicating that guard; restored → green), pasted into lessons/;
+/code-review low --fix per arc, committed separately; the codex fix loop
+converged for every reviewed diff, each convergence quoted; the PR topology
+exists on GitHub, created only after all loops converged.</code></pre>
+
+  <h3>Alternative — <code>/loop 15m</code></h3>
+  <p style="font-size:0.93rem;color:var(--muted)">The full text is in <code>plan.md</code> under Seeds. Use it if you'd rather have a fixed cadence than a completion condition.</p>
+
+  <footer>
+    Full plan, audits and lesson logs: <code>implementations-plan/bridge-evm-verification/</code> ·
+    Blueprint tier <strong>mid</strong> — one high-risk dimension (security sensitivity), everything else low.
+  </footer>
+
+</main>

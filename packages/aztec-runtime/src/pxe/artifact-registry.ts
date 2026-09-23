@@ -1,3 +1,4 @@
+import { memoizeAsync } from "./async-memo"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { ContractArtifact } from "@aztec/stdlib/abi"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
@@ -49,7 +50,16 @@ export function defaultPolicy(): ArtifactPolicy {
  */
 export class ArtifactRegistry {
 	private known: KnownArtifacts | null = null
-	private initPromise: Promise<void> | null = null
+	// `known` stays the synchronous resolved-value store (read directly by
+	// getKnownInstance and friends); the memo only guards the one-shot load.
+	// Pre-existing and unchanged: an old still-in-flight loader that SUCCEEDS
+	// after a concurrent clear() repopulates `known` — the memo's identity
+	// guard covers rejections only.
+	private readonly knownMemo = memoizeAsync<void>(() =>
+		this.loader().then((known) => {
+			this.known = known
+		}),
+	)
 	private policy: ArtifactPolicy
 	/**
 	 * Cache of class-ids whose artifact has been recomputed and verified
@@ -98,17 +108,7 @@ export class ArtifactRegistry {
 	 *  concurrent calls (shared promise). */
 	public async ensureKnown(): Promise<void> {
 		if (this.known) return
-		if (!this.initPromise) {
-			this.initPromise = this.loader()
-				.then((known) => {
-					this.known = known
-				})
-				.catch((err) => {
-					this.initPromise = null
-					throw err
-				})
-		}
-		await this.initPromise
+		await this.knownMemo.get()
 	}
 
 	public getKnownInstance(address: string): ContractInstanceWithAddress | undefined {
@@ -129,7 +129,7 @@ export class ArtifactRegistry {
 	 *  between profiles. */
 	public clear(): void {
 		this.known = null
-		this.initPromise = null
+		this.knownMemo.reset()
 		this.verifiedClassIds.clear()
 	}
 
@@ -168,27 +168,30 @@ export class ArtifactRegistry {
 
 		for (const source of order) {
 			if (pxeOnly && source !== "pxe-local") continue
-			switch (source) {
-				case "pxe-local": {
-					const found = await pxeLookup(classId)
-					if (found) {
-						const verified = await this.verifyAndCache(classId, found)
-						if (verified) return verified
-					}
-					break
-				}
-				case "known": {
-					await this.ensureKnown()
-					const found = this.known?.artifacts.get(classId.toString())
-					// "known" branch is keyed by load-time-computed class-id;
-					// `Map.get(classId.toString())` is itself the class-id
-					// equality check. Skip recompute.
-					if (found) return found
-					break
-				}
-			}
+			const found = await this.resolveFromSource(source, classId, pxeLookup)
+			if (found) return found
 		}
 		return undefined
+	}
+
+	private async resolveFromSource(
+		source: "pxe-local" | "known",
+		classId: Fr,
+		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
+	): Promise<ContractArtifact | undefined> {
+		switch (source) {
+			case "pxe-local": {
+				const found = await pxeLookup(classId)
+				return found ? await this.verifyAndCache(classId, found) : undefined
+			}
+			case "known": {
+				await this.ensureKnown()
+				// "known" branch is keyed by load-time-computed class-id;
+				// `Map.get(classId.toString())` is itself the class-id
+				// equality check. Skip recompute.
+				return this.known?.artifacts.get(classId.toString())
+			}
+		}
 	}
 
 	/**

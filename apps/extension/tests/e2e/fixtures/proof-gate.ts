@@ -1,5 +1,9 @@
 import type { Page } from "puppeteer"
-import { PROOF_GATE_KEY } from "@/e2e/chrome-storage-proof-gate"
+import { PROOF_GATE_KEY, SAFETY_TIMEOUT_MS } from "@/e2e/chrome-storage-proof-gate"
+
+/** How long after a send's `enteredProveAt` its held gate still certainly holds: the gate starts its
+ *  own release timer later than that stamp, and the margin covers polling and clock reads. */
+export const PROOF_GATE_HOLD_MS = SAFETY_TIMEOUT_MS - 2_000
 
 /**
  * Drive the proverless proof gate from an e2e test.

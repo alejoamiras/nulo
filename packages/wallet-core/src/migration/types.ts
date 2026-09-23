@@ -96,5 +96,10 @@ export type MigrationResult =
 	/** The engine refuses to guess: a stale legacy marker, a corrupt/out-of-range
 	 *  version, an invalid journal backup, or a failing restore. `retryable`
 	 *  distinguishes "the next boot retries this automatically" (transient
-	 *  restore failure) from a genuinely terminal state (reinstall guidance). */
-	| { kind: "needs-recovery"; reason: string; retryable: boolean }
+	 *  restore failure) from a genuinely terminal state (reinstall guidance).
+	 *  `spentAttempt: false` marks the one outcome that recorded NOTHING on the
+	 *  durable attempt counter (the engine's outer catch — a transient throw
+	 *  before any counted work): the host's gate may re-run immediately instead
+	 *  of charging the episode's retry allowance for a free failure. Absent ⇒
+	 *  the attempt was recorded. */
+	| { kind: "needs-recovery"; reason: string; retryable: boolean; spentAttempt?: false }

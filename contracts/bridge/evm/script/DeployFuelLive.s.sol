@@ -14,15 +14,16 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
-import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
+import {PoolSetupHelper, IWETH} from "./PoolSetupHelper.sol";
+import {GenerationDeployer} from "./DeployGeneration.s.sol";
 
 /**
- * @notice LIVE-Sepolia deployment for the fuel arc: UniswapFuelSwap + SwapBridgeRouter
- *         against the EXISTING AZLO token + canonical Aztec portals, and the two route
- *         pools (AZLO/WETH + our own ETH/FeeJuice tier).
- *
- *         `DeployBridge.s.sol` stays untouched as the fork-fixture (it deploys a FRESH
- *         6-dec token and assumes its price shape); this script owns the live topology.
+ * @notice Sepolia fuel topology: UniswapFuelSwap + SwapBridgeRouter against the EXISTING
+ *         AZLO token + canonical Aztec portals, and the two route pools (AZLO/WETH + our own
+ *         ETH/FeeJuice tier). The fork fixture for `DeployFuelLive.fork.t.sol`; the live
+ *         generation is deployed by the TypeScript conductor, which leaves this script one
+ *         live job — re-seeding the token-independent ETH/FeeJuice pool when the fee asset
+ *         moves (`SEED_AZLO_WETH=false SEED_ETH_FJ=true` with the reuse flags below).
  *
  * Idempotent split (partial-failure recovery): set `FUEL_SWAP_ADDRESS` / `ROUTER_ADDRESS`
  * to reuse already-deployed contracts and re-run seeding only.
@@ -32,7 +33,7 @@ import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
  * uninitialized or already within tolerance of the target price - never seeds liquidity
  * into a mispriced pool.
  */
-contract DeployFuelLive is Script {
+contract DeployFuelLive is GenerationDeployer {
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
@@ -85,7 +86,7 @@ contract DeployFuelLive is Script {
             ? new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH)
             : UniswapFuelSwap(payable(vm.envAddress("FUEL_SWAP_ADDRESS")));
         SwapBridgeRouter router = vm.envOr("ROUTER_ADDRESS", address(0)) == address(0)
-            ? new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swapTarget))
+            ? new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swapTarget), _resolveFactory())
             : SwapBridgeRouter(vm.envAddress("ROUTER_ADDRESS"));
         console.log("UniswapFuelSwap:", address(swapTarget));
         console.log("SwapBridgeRouter:", address(router));

@@ -8,7 +8,10 @@ import {
 	hashRoute,
 	type PoolKey,
 	ensurePermit2Allowance,
+	PERMIT_DEADLINE_SECONDS,
 } from "./l1"
+
+// separate import so the pin reads standalone
 
 // Reference values from contracts/bridge/evm/test/WitnessHash.t.sol — the Solidity router's
 // _hashRoute / _hashBridgeWitness for the SAME fixed inputs. If TS drifts from
@@ -136,5 +139,15 @@ describe("ensurePermit2Allowance — the one approval state machine (app + smoke
 				needed: 1n,
 			}),
 		).rejects.toThrow(/still insufficient/)
+	})
+})
+
+describe("PERMIT_DEADLINE_SECONDS", () => {
+	it("is pinned to a bounded MEV window - neither dust nor a half-hour market window", () => {
+		// The deadline bounds how long a signed fuel-leg intent stays executable against the quote
+		// it was derived from. 60s floor: congestion must not strand signatures mid-flight.
+		// 900s ceiling: a "convenience" bump toward an effectively-unbounded window trips this.
+		expect(PERMIT_DEADLINE_SECONDS >= 60n).toBe(true)
+		expect(PERMIT_DEADLINE_SECONDS <= 900n).toBe(true)
 	})
 })

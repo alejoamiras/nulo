@@ -2,17 +2,22 @@
 	"name": "@nulo/landing",
 	"private": true,
 	"version": "0.1.0",
+	"license": "Apache-2.0",
 	"type": "module",
 	"scripts": {
-		"predev": "bun run scripts/ensure-release-json.ts",
+		"predev": "bun run scripts/ensure-release-json.ts && bun run scripts/build-legal.ts",
 		"dev": "vite",
-		"prebuild": "bun run scripts/fetch-latest-release.ts",
+		"prebuild": "bun run scripts/fetch-latest-release.ts && bun run scripts/build-legal.ts",
 		"build": "vite build",
 		"preview": "vite preview",
 		"pretypecheck": "bun run scripts/ensure-release-json.ts",
 		"typecheck": "tsc --noEmit",
 		"pretest": "bun run scripts/ensure-release-json.ts",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
+	},
+	"dependencies": {
+		"@nulo/design": "workspace:*",
+		"@nulo/legal": "workspace:*"
 	},
 	"devDependencies": {
 		"typescript": "^6.0.3",

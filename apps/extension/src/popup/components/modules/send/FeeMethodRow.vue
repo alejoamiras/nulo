@@ -15,7 +15,9 @@
 defineProps({
 	method: { type: Object, default: null },
 	isLoading: { type: Boolean, default: false },
-	feeJuiceBalanceFormatted: { type: String, default: "0" },
+	/** Null = balance unknown (read failed/timed out) — rendered as an em
+	 *  dash, never as a fabricated zero. */
+	feeJuiceBalanceFormatted: { type: String, default: null },
 	privateFeeJuiceFormatted: { type: String, default: null },
 })
 </script>
@@ -26,7 +28,7 @@ defineProps({
 		<Text size="12" weight="600" color="secondary">Available</Text>
 		<span v-if="isLoading" :class="$style.skeleton" />
 		<Text v-else size="12" weight="600" color="primary">
-			{{ feeJuiceBalanceFormatted }} Fee Juice
+			{{ feeJuiceBalanceFormatted ?? '—' }} Fee Juice
 		</Text>
 	</Flex>
 
@@ -47,33 +49,11 @@ defineProps({
 
 <style module>
 .detail_row {
-	background: transparent;
-	overflow: hidden;
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
-
-	padding: 10px 12px;
+	composes: detail_row from "./fee-shared.module.css";
 }
 
 .skeleton {
-	display: inline-block;
-	width: 60px;
-	height: 12px;
-	background: linear-gradient(
-		90deg,
-		var(--nulo-surface-high) 25%,
-		var(--nulo-surface) 50%,
-		var(--nulo-surface-high) 75%
-	);
-	background-size: 200% 100%;
-	animation: shimmer 1.5s infinite;
+	composes: skeleton from "./fee-shared.module.css";
 }
 
-@keyframes shimmer {
-	0% {
-		background-position: 200% 0;
-	}
-	100% {
-		background-position: -200% 0;
-	}
-}
 </style>

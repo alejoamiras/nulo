@@ -2,11 +2,12 @@
  * Round-trip corpus + drift-policy pins for the durable-store codecs.
  * Each store now injects its zod row schema into `EntityStorage` (the
  * operation-journal precedent), which gives it the wallet-core `decodeRow`
- * guarantees:
- *   - JSON-SYNTAX failure → legacy policy (row dropped);
+ * guarantees (B-23: the read path NEVER deletes):
+ *   - JSON-SYNTAX failure → row KEPT on disk, read as undefined;
  *   - CODEC-VALIDATION failure → row KEPT on disk, read as undefined
  *     ("present but unreadable") — NEVER deleted. A too-strict schema can
- *     hide a row but can never destroy it.
+ *     hide a row but can never destroy it. Removal happens only in the
+ *     serialized purge second pass (`purgeMalformedRows`, F-B23).
  *
  * Per store: (a) a full-fidelity corpus row and a minimal row (optionals
  * absent) survive write→read byte-equal; (b) a drifted row (wrong type /
@@ -62,6 +63,7 @@ const CORPUS = [
 			address: "0xacc",
 			index: 0,
 			type: AccountType.Nulo_v1,
+			l1ChainId: 1,
 			name: "A",
 			visible: true,
 		} satisfies Account,
@@ -71,6 +73,7 @@ const CORPUS = [
 			address: "0xacc2",
 			index: 1,
 			type: AccountType.Nulo_v1,
+			l1ChainId: 1,
 			name: "B",
 			visible: false,
 		} satisfies Account,
@@ -82,21 +85,43 @@ const CORPUS = [
 		parse: (raw: unknown) => AuthwitSchema.parse(raw),
 		full: {
 			id: 1,
+			profileId: "p1",
+			chainId: 1,
 			account: "0xa",
 			hash: "0xh",
 			content: { kind: "intent", consumer: "0xc", intent: ["i1"] },
 			pending: true,
 			txHash: "0xt",
 		} as Authwit,
-		minimal: { id: 2, account: "0xa", hash: "0xh2", content: { kind: "message_hash" } } as Authwit,
-		drifted: { id: 3, account: "0xa", hash: "0xh3", content: "not-an-object" },
+		minimal: { id: 2, profileId: "p1", chainId: 1, account: "0xa", hash: "0xh2", content: { kind: "message_hash" } } as Authwit,
+		// A legacy row without provenance is drifted too: the scope tuple is required, never defaulted.
+		drifted: { id: 3, account: "0xa", hash: "0xh3", content: { kind: "message_hash" } },
 	},
 	{
 		name: "token-balance",
 		root: "nulo:core:token-balances",
 		parse: (raw: unknown) => TokenBalanceRawSchema.parse(raw),
-		full: { id: 10, token: 1, account: "0xa", publicBalance: "5", privateBalance: "7", updatedAt: 123 } satisfies TokenBalanceRaw,
-		minimal: { id: 11, token: 1, account: "0xa", updatedAt: 0 } satisfies TokenBalanceRaw,
+		full: {
+			id: 10,
+			token: 1,
+			account: "0xa",
+			profileId: "p1",
+			chainId: 1,
+			contract: "0xc1",
+			publicBalance: "5",
+			privateBalance: "7",
+			updatedAt: 123,
+			syncFailure: { at: 456, message: "sim failed" },
+		} satisfies TokenBalanceRaw,
+		minimal: {
+			id: 11,
+			token: 1,
+			account: "0xa",
+			profileId: "p1",
+			chainId: 1,
+			contract: "0xc1",
+			updatedAt: 0,
+		} satisfies TokenBalanceRaw,
 		drifted: { id: 12, token: "one", account: "0xa", updatedAt: 0 },
 	},
 	{
@@ -125,6 +150,7 @@ const CORPUS = [
 			id: "n1",
 			profileId: "p1",
 			chainId: 7,
+			l1ChainId: 7,
 			name: "Net",
 			primaryEndpointId: "e1",
 			endpoints: [
@@ -137,6 +163,7 @@ const CORPUS = [
 			id: "n2",
 			profileId: "p1",
 			chainId: 8,
+			l1ChainId: 8,
 			name: "Min",
 			primaryEndpointId: "e1",
 			endpoints: [{ id: "e1", rpcUrl: "http://h" }],

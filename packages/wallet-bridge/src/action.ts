@@ -1,4 +1,5 @@
 import type { AuthwitContent } from "./authwit-content"
+import type { CallPayload, EncodedCallPayload } from "./call-shapes"
 
 export type ActionKind = Action["kind"]
 
@@ -34,22 +35,6 @@ export type AddPublicAuthwitAction = {
 	readonly content: AuthwitContent
 }
 
-export type CallAction = {
-	readonly kind: "call"
-	readonly contract: string
-	readonly method: string
-	readonly args: unknown[]
-	readonly hideSender?: boolean
-}
+export type CallAction = { readonly kind: "call" } & CallPayload
 
-export type EncodedCallAction = {
-	readonly kind: "encoded_call"
-	readonly to: string
-	readonly selector: string
-	readonly args: string[]
-	readonly hideMsgSender?: boolean
-	name?: string
-	type?: string
-	isStatic?: boolean
-	returnTypes?: unknown[]
-}
+export type EncodedCallAction = { readonly kind: "encoded_call" } & EncodedCallPayload

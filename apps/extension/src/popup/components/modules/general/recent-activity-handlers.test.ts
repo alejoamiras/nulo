@@ -2,7 +2,13 @@ import { describe, expect, test, vi } from "vitest"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { ContentKind } from "@/wallet/services/task/spec"
 import { TxStatus } from "@/wallet/services/transaction/spec"
-import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask, type MinimalChainTx } from "./recent-activity-handlers"
+import {
+	buildCancelHandler,
+	buildFocusHandler,
+	filterPendingDoubleRender,
+	isMatchingTask,
+	type MinimalChainTx,
+} from "./recent-activity-handlers"
 
 function makeOp(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
@@ -86,6 +92,30 @@ describe("buildCancelHandler", () => {
 
 		expect(onInitiated).not.toHaveBeenCalled()
 		expect(cancelJob).not.toHaveBeenCalled()
+	})
+})
+
+describe("buildFocusHandler", () => {
+	test("calls focusInteractionWindow with the jobId passed by the emit", () => {
+		const focusInteractionWindow = vi.fn().mockResolvedValue(true)
+		buildFocusHandler({ focusInteractionWindow })("abc123")
+		expect(focusInteractionWindow).toHaveBeenCalledWith("abc123")
+	})
+
+	test("a falsy jobId is a no-op", () => {
+		const focusInteractionWindow = vi.fn().mockResolvedValue(true)
+		const handler = buildFocusHandler({ focusInteractionWindow })
+		handler(null)
+		handler(undefined)
+		handler("")
+		expect(focusInteractionWindow).not.toHaveBeenCalled()
+	})
+
+	test("a rejecting RPC is swallowed (the click is a courtesy)", async () => {
+		const focusInteractionWindow = vi.fn().mockRejectedValue(new Error("disconnected"))
+		expect(() => buildFocusHandler({ focusInteractionWindow })("abc123")).not.toThrow()
+		await new Promise((r) => setTimeout(r, 0))
+		expect(focusInteractionWindow).toHaveBeenCalledTimes(1)
 	})
 })
 

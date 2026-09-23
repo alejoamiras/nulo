@@ -1,25 +1,17 @@
 import type { Ref } from "vue"
-import { onBeforeUnmount, onMounted, ref } from "vue"
-
+import { ref } from "vue"
 import { defaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /**
- * Reactive `showPopupFullscreen` config flag with the auto-fullscreen
- * behavior on tall windows that `PopupCard` had inline.
+ * Reactive `showPopupFullscreen` config flag with the auto-fullscreen behavior on tall windows.
  *
- * Per-instance: each call creates its own ConfigServiceClient
- * subscription and disposes it on the parent's unmount. Returns a
- * writable Ref so consumers can toggle locally (e.g. drag handle);
+ * Per-instance: each call owns one ConfigServiceClient subscription. The parent calls `start()` in
+ * its `onMounted` (refresh from config, force `true` on a tall window) and `dispose()` in its
+ * `onBeforeUnmount`. The ref is writable so consumers can toggle locally (e.g. the drag handle);
  * writes do NOT propagate back to the config service.
- *
- * Mirrors the prior PopupCard.vue lifecycle 1:1 (no behavior change):
- *   - initial: Config().showPopupFullscreen default
- *   - onUpdate: subscribed to config service "showPopupFullscreen" key
- *   - onMounted: refresh from config + force `true` if window is tall
- *   - onBeforeUnmount: dispose the client
  */
-export function useFullscreenPopupSetting(): Ref<boolean> {
+export function useFullscreenPopupSetting(): { showFullscreen: Ref<boolean>; start: () => Promise<void>; dispose: () => void } {
 	const showFullscreen = ref<boolean>(defaultConfig().showPopupFullscreen)
 
 	const client = new ConfigServiceClient()
@@ -29,16 +21,14 @@ export function useFullscreenPopupSetting(): Ref<boolean> {
 		}
 	})
 
-	onMounted(async () => {
-		showFullscreen.value = await client.getValue("showPopupFullscreen")
-		if (window.innerHeight > 600) {
-			showFullscreen.value = true
-		}
-	})
-
-	onBeforeUnmount(() => {
-		client.disconnect()
-	})
-
-	return showFullscreen
+	return {
+		showFullscreen,
+		start: async () => {
+			showFullscreen.value = await client.getValue("showPopupFullscreen")
+			if (window.innerHeight > 600) {
+				showFullscreen.value = true
+			}
+		},
+		dispose: () => client.disconnect(),
+	}
 }

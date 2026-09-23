@@ -1,5 +1,5 @@
 /**
- * Minimal SwapBridgeRouter ABI for browser callers (the faucet can't read forge artifacts at
+ * Minimal SwapBridgeRouter ABI for browser callers (the tools app can't read forge artifacts at
  * runtime). Hand-written and PINNED against the forge artifact by router-abi.test.ts — any
  * drift between this const and the compiled router fails the suite.
  */
@@ -65,7 +65,7 @@ export const SWAP_BRIDGE_ROUTER_ABI = [
 			{ name: "isPrivate", type: "bool", indexed: false },
 		],
 	},
-	// bridge-only + fuel-only (via tokenPortal = FeeJuicePortal) both go through this entrypoint.
+	// bridge-only, plus direct gas for the fee asset (tokenPortal = FeeJuicePortal, public only).
 	{
 		type: "function",
 		name: "bridge",
@@ -107,4 +107,16 @@ export const SWAP_BRIDGE_ROUTER_ABI = [
 			{ name: "isPrivate", type: "bool", indexed: false },
 		],
 	},
+	// Cross-binding readbacks: the router's factory and fee asset must match the manifest's.
+	{ type: "function", name: "FACTORY", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "FEE_ASSET", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "feeJuicePortal", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	// The router's own refusals, decoded for the wizard's error copy.
+	{ type: "error", name: "ForeignPortal", inputs: [] },
+	{ type: "error", name: "FuelOnlyLeg", inputs: [] },
+	{ type: "error", name: "RouteRequired", inputs: [] },
+	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
+	// A fee-on-transfer token trips this on the Permit2 pull — the likeliest arbitrary-token refusal.
+	{ type: "error", name: "InexactPull", inputs: [] },
 ] as const

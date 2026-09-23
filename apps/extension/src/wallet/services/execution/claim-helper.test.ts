@@ -12,6 +12,7 @@
  *   - transition fails + record still queued  → re-throw original error
  *   - controller is registered immediately (no awaitable gap)
  */
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
@@ -24,18 +25,26 @@ function makeDeps(overrides: Partial<ClaimHelperDeps> = {}): {
 	journal: ReturnType<typeof makeJournal>
 	activeControllers: Map<string, AbortController>
 	createFreshRecord: ReturnType<typeof vi.fn>
+	registerInFlight: ReturnType<typeof vi.fn>
 } {
 	const journal = makeJournal()
 	const activeControllers = new Map<string, AbortController>()
 	const createFreshRecord = vi.fn(async () => "fresh-id")
+	const registerInFlight = vi.fn((journalId: string, _serial: number, controller: AbortController) => {
+		activeControllers.set(journalId, controller)
+		return { live: true }
+	})
 	const deps: ClaimHelperDeps = {
 		operationJournal: journal as never,
-		activeControllers,
+		registerInFlight,
+		deleteController: (journalId) => {
+			activeControllers.delete(journalId)
+		},
 		createFreshRecord,
 		logger: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
 		...overrides,
 	}
-	return { deps, journal, activeControllers, createFreshRecord }
+	return { deps, journal, activeControllers, createFreshRecord, registerInFlight }
 }
 
 function makeJournal() {
@@ -54,14 +63,65 @@ function makeJournal() {
 const INPUT_NO_QUEUED = {
 	networkId: "net1",
 	accountAddress: "0xabc",
+	session: 7,
 	origin: ORIGIN,
 	calls: [{ method: "drip_to_public" }],
 }
+
+/** The three registration sites, each driven to its register call. */
+const REGISTRATION_SITES = [
+	{
+		site: "queued claim",
+		journalId: "queued-id",
+		arrange: (journal: ReturnType<typeof makeJournal>) => {
+			journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
+			return { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" }
+		},
+	},
+	{
+		site: "fresh record",
+		journalId: "fresh-id",
+		arrange: () => INPUT_NO_QUEUED,
+	},
+	{
+		site: "re-filed pending row",
+		journalId: "queued-id",
+		arrange: (journal: ReturnType<typeof makeJournal>) => {
+			journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xOTHER", progress: { stage: "pending" } })
+			journal.refileOperationScope.mockResolvedValueOnce({
+				outcome: "refiled",
+				record: { networkId: "net1", accountAddress: "0xabc", progress: { stage: "pending" } },
+			})
+			return { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" }
+		},
+	},
+]
 
 describe("claimOrCreateDappExecuteJournal", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
+
+	test.each(REGISTRATION_SITES)("$site: registers under the authorizing session's serial", async ({ journalId, arrange }) => {
+		const { deps, journal, registerInFlight } = makeDeps()
+		const result = await claimOrCreateDappExecuteJournal(deps, arrange(journal))
+		expect(registerInFlight).toHaveBeenCalledWith(journalId, 7, result.controller)
+		expect(result.journalId).toBe(journalId)
+	})
+
+	test.each(REGISTRATION_SITES)(
+		"$site: a refused registration fails the row as session_ended and throws",
+		async ({ journalId, arrange }) => {
+			const { deps, journal, activeControllers } = makeDeps({ registerInFlight: vi.fn(() => ({ live: false })) })
+			await expect(claimOrCreateDappExecuteJournal(deps, arrange(journal))).rejects.toBeInstanceOf(SessionEndedError)
+			expect(journal.transitionOperation).toHaveBeenLastCalledWith(
+				journalId,
+				{ stage: "failed" },
+				expect.objectContaining({ kind: "session_ended" }),
+			)
+			expect(activeControllers.size).toBe(0)
+		},
+	)
 
 	test("a queued record filed under another account is re-filed IN PLACE — same id, same controller", async () => {
 		// The row was written when the message arrived; execution then resolved a
@@ -327,12 +387,11 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.get("match-id")).toBe(result.controller)
 	})
 
-	test("createFreshRecord returning undefined → no controller registered", async () => {
-		const { deps, activeControllers, createFreshRecord } = makeDeps()
+	test("createFreshRecord returning undefined → refuses, registers no controller", async () => {
+		const { deps, activeControllers, createFreshRecord, registerInFlight } = makeDeps()
 		createFreshRecord.mockResolvedValueOnce(undefined)
-		const result = await claimOrCreateDappExecuteJournal(deps, INPUT_NO_QUEUED)
-		expect(result.journalId).toBeUndefined()
-		expect(result.controller).toBeUndefined()
+		await expect(claimOrCreateDappExecuteJournal(deps, INPUT_NO_QUEUED)).rejects.toThrow(/could not be recorded/)
+		expect(registerInFlight).not.toHaveBeenCalled()
 		expect(activeControllers.size).toBe(0)
 	})
 

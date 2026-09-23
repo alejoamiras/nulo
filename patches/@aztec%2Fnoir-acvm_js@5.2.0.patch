@@ -1,0 +1,18 @@
+diff --git a/package.json b/package.json
+index 1d6ca9f59a1c53ec6f0eef13976bd8b7fe5c3d9d..cbab2b774a3967ae92ffbea0d321ea5181277817 100644
+--- a/package.json
++++ b/package.json
+@@ -19,7 +19,12 @@
+   "license": "MIT",
+   "main": "./nodejs/acvm_js.js",
+   "types": "./web/acvm_js.d.ts",
+-  "module": "./web/acvm_js.js",
++  "exports": {
++    ".": {
++      "node": "./nodejs/acvm_js.js",
++      "default": "./web/acvm_js.js"
++    }
++  },
+   "files": [
+     "nodejs",
+     "web",

@@ -17,18 +17,16 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { BatchCall, Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { Gas } from "@aztec/stdlib/gas"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { predictedWorstMinFees } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPrivateFuelDeposit } from "../src/fuel"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateMintAndPayFee } from "../src/private-fuel"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
+import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 const ETH_RPC = process.env.ETH_RPC_URL ?? "https://ethereum-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k"
@@ -57,12 +55,7 @@ const ERC20_MIN = [
 	{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
 ] as const
 
-const mainnet = defineChain({
-	id: 1,
-	name: "ethereum",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [ETH_RPC] } },
-})
+const mainnet = mainnetChain(ETH_RPC)
 
 async function nodeL1(): Promise<{ portal: `0x${string}`; asset: `0x${string}` }> {
 	const res = await fetch(NODE_URL, {
@@ -75,11 +68,11 @@ async function nodeL1(): Promise<{ portal: `0x${string}`; asset: `0x${string}` }
 	return { portal: pick(a.feeJuicePortalAddress), asset: pick(a.feeJuiceAddress) }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 23 — the live canary binds fee sizing, deposit evidence, repriced retries and balance-delta acceptance
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
-	const node = createAztecNodeClient(NODE_URL)
+	const node = createNode(NODE_URL)
 	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 	if (!(await node.getContract(fpc))) throw new Error("PrivateFPC not deployed — run deploy-private-fpc-mainnet.ts first; STOP")
 
@@ -92,11 +85,10 @@ async function main() {
 	// 2. L1 deposit, claimer-bound to the FPC.
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
 	if (account.address.toLowerCase() !== requirePinnedSigner("mainnet").toLowerCase()) throw new Error("wrong L1 key; STOP")
-	const wallet = createWalletClient({ account, chain: mainnet, transport: http(ETH_RPC) })
-	const pub = createPublicClient({ chain: mainnet, transport: http(ETH_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: mainnet, rpcUrl: ETH_RPC, account })
 	const { portal, asset } = await nodeL1()
 
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const { secret, salt } = resolveDeployerKeys("mainnet")
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
@@ -182,7 +174,7 @@ async function main() {
 	const gained = after - before
 	if (gained <= 0n || gained >= dust) throw new Error(`FPC private balance delta ${gained} out of (0, ${dust}) — canary FAILED`)
 	console.log(`\n✅ FPC DUST CANARY PASSED — private balance +${gained} FJ-wei (fee ${dust - gained}) in ${mins()}.`)
-	console.log(`   Calibrated minFuelFj (2× live ceiling): ${dust} — set l1.fuel.swap.minFuelFj in the candidate.`)
+	console.log(`   Calibrated minFuelFj (2× live ceiling): ${dust} — set bridge.l1.swap.minFuelFj in the candidate.`)
 }
 
 main().catch((e) => {

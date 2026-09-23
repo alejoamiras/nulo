@@ -5,12 +5,12 @@
  * the underlying `ConfigServiceClient`. Verifies:
  *   - returns a writable Ref<boolean>
  *   - subscribes to config service onUpdate for the showPopupFullscreen key
- *   - refreshes from config on mount
+ *   - refreshes from config when the host calls start() on mount
  *   - forces fullscreen=true when window.innerHeight > 600
- *   - disconnects the client on unmount
+ *   - disconnects the client when the host calls dispose() on unmount
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { defineComponent, nextTick } from "vue"
+import { defineComponent, nextTick, onBeforeUnmount, onMounted } from "vue"
 import { mount } from "@vue/test-utils"
 
 type Listener = (setting: { key: string; value: unknown }) => void
@@ -37,8 +37,10 @@ import { useFullscreenPopupSetting } from "./fullscreenPopupSetting"
 const makeHost = () =>
 	defineComponent({
 		setup() {
-			const value = useFullscreenPopupSetting()
-			return { value }
+			const { showFullscreen, start, dispose } = useFullscreenPopupSetting()
+			onMounted(start)
+			onBeforeUnmount(dispose)
+			return { value: showFullscreen }
 		},
 		template: '<div :data-fs="value">{{ value }}</div>',
 	})

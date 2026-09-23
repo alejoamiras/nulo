@@ -35,6 +35,12 @@ describe("pass-through methods", () => {
 	test("getAddressBook passes with empty grants (caller's enforceCapability gate handles missing grant)", () => {
 		expect(() => enforceScope("getAddressBook", [], [])).not.toThrow()
 	})
+
+	test("a non-boolean addressBook sub-bit denies both methods (only literal true grants)", () => {
+		const grants = [grant({ type: "data", addressBook: "yes" } as unknown as Capability)]
+		expect(() => enforceScope("getAddressBook", [], grants)).toThrow(/addressBook=true/)
+		expect(() => enforceScope("registerSender", [], grants)).toThrow(/addressBook=true/)
+	})
 })
 
 // ── F-003: getAccounts canGet sub-grant ──────────────────────────────

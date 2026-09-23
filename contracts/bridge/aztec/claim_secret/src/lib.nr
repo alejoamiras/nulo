@@ -1,5 +1,5 @@
 // Recipient-committed private-claim secret derivation. The one code object BOTH the
-// token_bridge contract (which consumes with it) and the keystone (which pins it against
+// hub contract (which consumes with it) and the keystone (which pins it against
 // the TS mirror in packages/bridge-core/src/claim-secret.ts) depend on — a single source
 // so the two toolchains cannot drift a deposit into an unclaimable state.
 //
@@ -9,7 +9,7 @@
 // recipient other than the one bound at deposit time yields a different secret whose hash
 // can't match — so a relayer holding (salt, recipient, amount, leaf) can submit the claim
 // FOR a user but can never redirect the funds. Binding rests on poseidon2 preimage
-// resistance + this being the sole consumption path (enforced in token_bridge + the
+// resistance + this being the sole consumption path (enforced in the hub + the
 // sole-consumer static check).
 use aztec::protocol::address::AztecAddress;
 use aztec::protocol::hash::poseidon2_hash_with_separator;

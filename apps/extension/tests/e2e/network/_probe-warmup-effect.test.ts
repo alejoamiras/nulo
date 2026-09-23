@@ -99,7 +99,7 @@ async function runCapPopupCycle(label: string): Promise<TrialResult> {
 		log(`[probe ${label}] capPopup=${result.capPopupMs}ms capAccountItem=${result.capAccountItemMs}ms`)
 		return result
 	} finally {
-		await ctx.browser.close()
+		await ctx.close()
 	}
 }
 

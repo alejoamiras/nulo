@@ -1,0 +1,7 @@
+INTEGRATION SOUND.
+
+- **#433:** Both page export stages call `AccountService.exportAccount`, which always fresh-authenticates through `ProfileService.exportPlain`; imported accounts additionally use `exportImportedKeysDek` before unsealing their AAD-bound key row. No UI code reads the DEK or signing key directly. The page stores the resulting file body only in memory for `downloadFile`; it never renders or copies it.
+- Import still follows `previewImportAccount → decodeAccountExport`, showing only the recomputed address. `importAccount` independently decodes again and requires that address to equal the confirmed value before writing.
+- Full passkey backup remains on the existing `exportPlain` fingerprint/credential/DEK-probe path; password backup remains on atomic `exportBackupMaterial`. #433 did not modify these methods.
+- **#431:** Fixtures use real UI-created profiles and exported files. No raw profile creation, MAC computation, v2 label, or v2-shaped fixture exists. Its sole profile mutation generically corrupts the existing `envelopeMac`, so it now exercises v3. One stale test comment still says “MAC v2”; code does not.
+- **Other delta:** `8a76ae69..origin/dev` contains no content changes to ProfileRepository, EntityStorage, auth-registry, or profile storage shapes beyond the audited crypto stack. #432 is UI lifecycle consolidation. The security-critical trees at old `fb77354d` and rebuilt `445c2130` are byte-identical.

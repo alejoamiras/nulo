@@ -1,6 +1,6 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
-import { encodeAbiParameters, keccak256, numberToHex, toHex } from "viem"
+import { encodeAbiParameters, keccak256, toHex } from "viem"
 import { describe, expect, it, vi } from "vitest"
 import { tokenClaimSecretHash } from "./claim-secret"
 import { runSwapBridge } from "./flows"
@@ -9,30 +9,11 @@ import { SWAP_BRIDGE_ROUTER_ABI } from "./router-abi"
 
 const RECIPIENT = `0x${"3".padStart(64, "0")}` as const
 
-// A hand-built Inbox MessageSent log (leaf index 42) so parseEventLogs decodes it
-// from the deposit receipt — exercising the receipt-based (non-racy) index path.
-// (The @aztec/viem fork has no encodeEventLog, so we assemble topics+data directly.)
-const depositLog = {
-	address: "0x0000000000000000000000000000000000000002",
-	topics: [
-		keccak256(toHex("MessageSent(uint256,uint256,bytes32,bytes16)")),
-		numberToHex(1n, { size: 32 }), // checkpointNumber (indexed)
-		`0x${"0".repeat(64)}`, // hash (indexed)
-	],
-	data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes16" }], [42n, `0x${"0".repeat(32)}`]),
-	blockNumber: 1n,
-	blockHash: `0x${"0".repeat(64)}`,
-	logIndex: 0,
-	transactionHash: `0x${"0".repeat(64)}`,
-	transactionIndex: 0,
-	removed: false,
-}
-
 const AZTEC_RECIPIENT = `0x${"a".padStart(64, "0")}` as const
 const ADDR = "0x1111111111111111111111111111111111111111" as const
 
 // Hand-built BridgeWithFuel log (tokenIndex 3, fuelIndex 7, fuelAmount 5000): 1 indexed
-// (aztecRecipient) + 9 non-indexed in data, mirroring the depositLog technique above.
+// (aztecRecipient) + 9 non-indexed in data, assembled by hand (the @aztec/viem fork has no encodeEventLog).
 const bridgeWithFuelLog = {
 	address: ADDR,
 	topics: [

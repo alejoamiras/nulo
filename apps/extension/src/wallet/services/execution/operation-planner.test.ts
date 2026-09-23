@@ -189,6 +189,25 @@ describe("OperationPlanner.buildTransferOperation", () => {
 		).rejects.toThrow(/Transfer type not supported/)
 	})
 
+	test.each([
+		["a numeric string", "0"],
+		["an array", ["0"]],
+		["an inherited property name", "toString"],
+	])("throws 'Invalid transfer type' for %s (no key coercion)", async (_label, transferType) => {
+		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+		await expect(
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: transferType as never,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
+		).rejects.toThrow(/Invalid transfer type/)
+	})
+
 	test("throws 'Invalid transfer type' for an unknown enum value", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
 		await expect(
@@ -214,6 +233,51 @@ describe("OperationPlanner.processAztecJsPayload", () => {
 		// No feePayer → detectEmbeddedFeePayment returns undefined → FeeJuice.
 		expect(method).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 		expect(feeOptions.gasPadding).toBe(1)
+	})
+
+	test("a payer that is the sender with no fee call is a requested self-pay: preexisting Fee Juice, the wallet's own method, not embedded", async () => {
+		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+		const from = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
+		const exec = { calls: [], authWitnesses: [], capsules: [], extraHashedArgs: [], feePayer: from } as unknown as ExecutionPayload
+		const { feePaymentMethod: method, feeOptions } = await planner.processAztecJsPayload(exec, { from } as never)
+		expect(method).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(feeOptions.embeddedFeePayment).toBeUndefined()
+		expect(feeOptions.requestedPayment).toBe("fj")
+	})
+
+	test("the payload FeeJuicePaymentMethodWithClaim emits - the Fee Juice contract's claim_and_end_setup - is still a claim in setup", async () => {
+		// The wire shape the planner parses: field for field what aztec.js's method builds, with the
+		// selector pinned (computing it from the signature needs poseidon, which this runner's WASM
+		// lacks; the wallet-bridge suite pins the constant against the signature).
+		const { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT } = await import("@nulo/wallet-bridge")
+		const sender = "0x0000000000000000000000000000000000000000000000000000000000001234"
+		const claim = {
+			name: CLAIM_AND_END_SETUP,
+			to: FEE_JUICE_CONTRACT,
+			selector: CLAIM_AND_END_SETUP_SELECTOR,
+			type: "private",
+			hideMsgSender: false,
+			isStatic: false,
+			args: [sender, `0x${"0".repeat(63)}5`, `0x${"0".repeat(63)}7`, `0x${"0".repeat(63)}9`],
+			returnTypes: [],
+		}
+		const exec = {
+			calls: [claim],
+			authWitnesses: [],
+			capsules: [],
+			extraHashedArgs: [],
+			feePayer: sender,
+		} as unknown as ExecutionPayload
+		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+		const { feePaymentMethod: method, feeOptions } = await planner.processAztecJsPayload(exec, { from: sender } as never)
+		expect(method).toBe(AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM)
+		expect(feeOptions.embeddedFeePayment).toBe("fjwc")
+		expect(feeOptions.requestedPayment).toBeUndefined()
+		// The same call to another contract is a label, not the claim: a self-pay.
+		const impostor = { ...exec, calls: [{ ...claim, to: sender }] } as unknown as ExecutionPayload
+		const routed = await planner.processAztecJsPayload(impostor, { from: sender } as never)
+		expect(routed.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(routed.feeOptions.requestedPayment).toBe("fj")
 	})
 
 	// Regression pin: the planner previously extracted only
@@ -290,7 +354,7 @@ describe("OperationPlanner.extractPrimaryMethod", () => {
 })
 
 // FEE_METHODS-filter regression: when the planner's input includes a fee
-// method as the first call (faucet drip wraps the user's drip_to_private
+// method as the first call (the drip wraps the user's drip_to_private
 // behind a wallet-injected sponsor_unconditionally), the in-flight task
 // title MUST be derived from the USER call, not the fee call. Pinned here
 // so a future refactor of the planner or the shared pickPrimaryMethod helper

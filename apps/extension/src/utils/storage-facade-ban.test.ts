@@ -25,8 +25,10 @@ const ALLOWLIST: RegExp[] = [
 	// excluded from this allowance — they execute in popup/onboarding pages,
 	// so a raw access there would bypass the barrier (see DENYLIST).
 	/^wallet\//,
-	// The barrier component observes the reserved `nulo:schema:*` keys; going
-	// through the facade would deadlock on the very marker it displays.
+	// The barrier component reads the reserved `nulo:schema:*` keys (going
+	// through the facade would deadlock on the very marker it displays) and
+	// writes exactly one of them — the Retry button's one-shot gesture token.
+	// Reserved-namespace-only either way; never user data.
 	/^components\/MigrationBarrier\.vue$/,
 	// Same observe-only pattern for the integrity coordinator's durable blocking
 	// records (`nulo:core:account-integrity-blocked@*`): presence must render the

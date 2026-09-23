@@ -1,6 +1,6 @@
 <script setup>
 /**
- * Password-gate section shared by `key.vue` and `seed.vue`. Hosts the
+ * Password-gate section for the recovery-phrase export page. Hosts the
  * "Unlock" label, the password input, and the inline "Wrong password"
  * indicator. The page owns the password state + unlock attempt; this
  * composite is the visual treatment.
@@ -35,6 +35,7 @@ const onClick = () => emit("clearError")
 				type="password"
 				label="Password"
 				placeholder="Enter password"
+				autocomplete="current-password"
 				autofocus
 				data-testid="unlock-password-input"
 			/>

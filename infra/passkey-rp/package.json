@@ -1,0 +1,19 @@
+{
+	"name": "@nulo/passkey-rp",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"private": true,
+	"type": "module",
+	"description": "The content-less WebAuthn relying-party host for Nulo passkeys (passkey.nulo.sh).",
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "bun test",
+		"deploy": "wrangler deploy",
+		"deploy:dry": "wrangler deploy --dry-run --outdir dist",
+		"test:live": "RP_HOST_LIVE=1 bun test test/live.test.ts"
+	},
+	"devDependencies": {
+		"typescript": "^6.0.3",
+		"wrangler": "^4"
+	}
+}

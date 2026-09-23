@@ -68,16 +68,10 @@ body {
 }
 
 .wrapper {
-	width: 100%;
-	background: var(--app-bg);
+	composes: viewer_wrapper from "../window-shell.module.css";
 }
 
 .json_viewer {
-	width: 100%;
-	height: 100%;
-	max-height: 100%;
-
-	border: 1px solid var(--nulo-border);
-	border-radius: 8px;
+	composes: json_viewer from "../window-shell.module.css";
 }
 </style>

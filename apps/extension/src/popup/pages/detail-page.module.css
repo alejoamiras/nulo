@@ -1,0 +1,66 @@
+.amount_fiat {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-secondary);
+}
+
+.amount_symbol {
+	color: var(--nulo-secondary);
+}
+
+.amount_value {
+	font-family: var(--font-mono);
+	font-size: 24px;
+	font-weight: 500;
+	color: var(--txt-primary);
+}
+
+.detail_key {
+	font-family: var(--font-headline);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.details_box {
+	padding: 12px;
+	border: 1px solid var(--nulo-border);
+	background: transparent;
+}
+
+.detail_value_mono {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--txt-primary);
+}
+
+.empty_headline {
+	font-family: var(--font-headline);
+	font-size: 14px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+	margin-top: 48px;
+}
+
+.empty_sub {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-outline);
+	text-align: center;
+}
+
+.hero_meta {
+	flex-wrap: wrap;
+	row-gap: 4px;
+}
+
+.tx_time {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-secondary);
+}

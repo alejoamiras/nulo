@@ -2,12 +2,17 @@
 /** Utils */
 import { isValidHex } from "@/utils/string"
 
+/** Components */
+import ContactFormFields from "@/popup/components/modules/settings/contacts/ContactFormFields.vue"
+import ProcessingErrorNote from "@/components/composite/ProcessingErrorNote.vue"
+
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -99,6 +104,9 @@ const isAlreadyExistName = computed(() => form.fields.name.error.value === "Alre
 const isAlreadyExistAddress = computed(() => form.fields.address.error.value === "Already exist" && isStartedEditingAddress.value)
 const isValidAddress = computed(() => isValidHex(contactAddressTerm.value))
 const isAvailableToUpdateContact = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value?.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false
@@ -158,10 +166,19 @@ const handleUpdateContact = async () => {
 	}
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
+	{
+		submit: handleUpdateContact,
+		onShow: async () => {
+			contacts.value = await contactService.getContacts()
+			contactToEdit.value = cacheStore.importContact
+				? cacheStore.importContact
+				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
+			nameTerm.value = contactToEdit.value?.name ?? ""
+			contactAddressTerm.value = contactToEdit.value?.address ?? ""
+		},
+		onHide: () => {
 			cacheStore.contactToEditIdx = ""
 
 			contactService.disconnect()
@@ -170,19 +187,12 @@ watch(
 			contacts.value = []
 
 			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
-			contacts.value = await contactService.getContacts()
-			contactToEdit.value = cacheStore.importContact
-				? cacheStore.importContact
-				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
-			nameTerm.value = contactToEdit.value?.name ?? ""
-			contactAddressTerm.value = contactToEdit.value?.address ?? ""
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	// The edit target (import mode included) arrives with the await above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after it.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -191,16 +201,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	// Only fire on input/textarea fields. Pressing Enter while focused on
-	// the Update button would otherwise double-fire (button activation
-	// triggers @submit on its own).
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateContact()
-}
 </script>
 
 <template>
@@ -219,73 +219,20 @@ const onKeydown = (e) => {
 		submitTestId="edit-contact-submit"
 		@submit="handleUpdateContact"
 	>
-		<Input
-			label="Name"
-			placeholder="New contact"
-			autofocus
-			sanitize
-			:maxLength="25"
-			v-model="nameTerm"
-		>
-			<template #right>
-				<Transition name="fade">
-					<Flex v-if="isAlreadyExistName" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
-				</Transition>
-			</template>
-		</Input>
-
-		<AddressInput
-			label="Address"
-			placeholder="0x15c4ac6afcffdf59aa8a1fb3317ff0c86aee3eb02f9e52c3612e1163d4701446"
-			v-model="contactAddressTerm"
-			sanitize
-		>
-			<template #right>
-				<Transition name="fade">
-					<Flex v-if="!isValidAddress && contactAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Invalid address </Text>
-					</Flex>
-					<Flex v-else-if="isAlreadyExistAddress && contactAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
-				</Transition>
-			</template>
-		</AddressInput>
+		<ContactFormFields
+			v-model:name="nameTerm"
+			v-model:address="contactAddressTerm"
+			:nameExists="isAlreadyExistName"
+			:addressValid="isValidAddress"
+			:addressExists="isAlreadyExistAddress"
+		/>
 
 		<template #aboveSubmit>
-			<Transition name="fade">
-				<Tooltip
-					v-if="processingError.show"
-					side="top"
-					position="start"
-					wide
-					:disabled="!processingError.tooltip"
-					:style="{ marginTop: '-12px' }"
-				>
-					<Flex align="center" wide>
-						<Icon
-							name="info"
-							size="14"
-							color="primary"
-						/>
-
-						<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
-							{{ processingError.title }}
-						</Text>
-					</Flex>
-
-					<template #content>
-						<Text size="12" color="secondary">
-							{{ processingError.tooltip }}
-						</Text>
-					</template>
-				</Tooltip>
-			</Transition>
+			<ProcessingErrorNote
+				:show="processingError.show"
+				:title="processingError.title"
+				:tooltip="processingError.tooltip"
+			/>
 		</template>
 
 		<template #belowSubmit>
@@ -296,24 +243,3 @@ const onKeydown = (e) => {
 	</FormPopup>
 </template>
 
-<style module>
-.shake {
-	animation: shake 0.5s ease;
-}
-
-@keyframes shake {
-	0%,
-	100% {
-		transform: translateX(0);
-	}
-	25% {
-		transform: translateX(-2px);
-	}
-	50% {
-		transform: translateX(2px);
-	}
-	75% {
-		transform: translateX(-2px);
-	}
-}
-</style>

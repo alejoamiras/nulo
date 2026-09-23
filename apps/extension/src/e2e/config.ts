@@ -63,3 +63,37 @@ export const E2E_PROVERLESS_BUILD_STAMP: "NULO_E2E_PROVERLESS_BUILD_STAMP" | nul
  * only rows under its own test-only root, which no real install has.
  */
 export const E2E_MIGRATION_FIXTURE = (import.meta.env.VITE_NULO_E2E_MIGRATION_FIXTURE ?? "") === "1"
+
+/**
+ * E2E-only default-token seed source. When armed at BUILD time, the token
+ * seeder reads its seed list from `chrome.storage.session` instead of
+ * `DEFAULT_TOKEN_SEEDS` — the sandbox mints a fresh token address per run, so
+ * no build-time list can cover it (same problem `price-map.ts` solves for
+ * pricing).
+ *
+ * Double opt-in, like proverless and unlike the migration fixture: an armed
+ * build REPLACES the production seed list, so a stray single flag would not be
+ * inert — it would silently stop seeding defaults in a shipped wallet. Both
+ * flags required, exactly-one throws.
+ */
+const TOKEN_SEEDS = (import.meta.env.VITE_NULO_E2E_TOKEN_SEEDS ?? "") === "1"
+const TOKEN_SEEDS_CONFIRM = (import.meta.env.VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM ?? "") === "1"
+
+if (TOKEN_SEEDS !== TOKEN_SEEDS_CONFIRM) {
+	throw new Error(
+		"[e2e-token-seeds] exactly one of VITE_NULO_E2E_TOKEN_SEEDS / " +
+			"VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM is set. Both are required to arm " +
+			"the e2e seed source (fail-closed double opt-in). Set both, or neither.",
+	)
+}
+
+export const E2E_TOKEN_SEEDS = TOKEN_SEEDS && TOKEN_SEEDS_CONFIRM
+
+/**
+ * Build-time marker, pinned as live data in `wallet/runtime.ts` — a bare
+ * exported constant is tree-shaken even in ARMED builds, which is exactly what
+ * made an earlier release grep a false-negative guard (see `price-map.ts`).
+ */
+export const E2E_TOKEN_SEEDS_BUILD_STAMP: "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" | null = E2E_TOKEN_SEEDS
+	? "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP"
+	: null

@@ -1,0 +1,589 @@
+<title>Faucet · Multi-Account UX Proposals</title>
+<style>
+  /* ---------- Nulo tokens (dark default, byte-faithful to packages/design/src/base.css) ---------- */
+  :root {
+    --app-bg: #0a0908;
+    --card-bg: #141312;
+    --dropdown-bg: #1d1b1a;
+    --nulo-surface: #141312;
+    --nulo-surface-low: #1d1b1a;
+    --nulo-surface-high: #2b2a28;
+    --nulo-surface-highest: #363433;
+    --nulo-accent: #f8f1e7;
+    --nulo-outline: #4a463f;
+    --nulo-border: #231f1c;
+    --nulo-secondary: #999187;
+    --txt-primary: #f5f0e6;
+    --txt-secondary: #999187;
+    --txt-inverse: rgba(0, 0, 0, 0.9);
+    --mint: #18d2a5;
+    --red: #f03c3c;
+    --sand: #b88555;
+    --scrim: rgba(0, 0, 0, 0.7);
+    --font-headline: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "InterVariable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --bezier: cubic-bezier(0.19, 1, 0.22, 1);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --app-bg: #f5f5f7;
+      --card-bg: #fff;
+      --dropdown-bg: #fff;
+      --nulo-surface: #ffffff;
+      --nulo-surface-low: #f0efec;
+      --nulo-surface-high: #e7e5e1;
+      --nulo-surface-highest: #dcd9d3;
+      --nulo-accent: #a8480c;
+      --nulo-outline: #c9c5bd;
+      --nulo-border: #d8d4cc;
+      --nulo-secondary: #6b655c;
+      --txt-primary: rgba(0, 0, 0, 0.88);
+      --txt-secondary: rgba(0, 0, 0, 0.6);
+      --txt-inverse: rgba(255, 255, 255, 0.9);
+      --scrim: rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --app-bg: #0a0908;
+    --card-bg: #141312;
+    --dropdown-bg: #1d1b1a;
+    --nulo-surface: #141312;
+    --nulo-surface-low: #1d1b1a;
+    --nulo-surface-high: #2b2a28;
+    --nulo-surface-highest: #363433;
+    --nulo-accent: #f8f1e7;
+    --nulo-outline: #4a463f;
+    --nulo-border: #231f1c;
+    --nulo-secondary: #999187;
+    --txt-primary: #f5f0e6;
+    --txt-secondary: #999187;
+    --txt-inverse: rgba(0, 0, 0, 0.9);
+    --scrim: rgba(0, 0, 0, 0.7);
+  }
+  :root[data-theme="light"] {
+    --app-bg: #f5f5f7;
+    --card-bg: #fff;
+    --dropdown-bg: #fff;
+    --nulo-surface: #ffffff;
+    --nulo-surface-low: #f0efec;
+    --nulo-surface-high: #e7e5e1;
+    --nulo-surface-highest: #dcd9d3;
+    --nulo-accent: #a8480c;
+    --nulo-outline: #c9c5bd;
+    --nulo-border: #d8d4cc;
+    --nulo-secondary: #6b655c;
+    --txt-primary: rgba(0, 0, 0, 0.88);
+    --txt-secondary: rgba(0, 0, 0, 0.6);
+    --txt-inverse: rgba(255, 255, 255, 0.9);
+    --scrim: rgba(0, 0, 0, 0.45);
+  }
+
+  /* ---------- Page chrome (speaks nulo: 0-radius, hairlines, mono labels) ---------- */
+  body {
+    background: var(--app-bg);
+    color: var(--txt-primary);
+    font-family: var(--font-body);
+    line-height: 1.55;
+    margin: 0;
+    padding: 72px 24px 120px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+
+  .masthead { display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid var(--nulo-outline); padding-bottom: 32px; }
+  .eyebrow {
+    font: 500 11px/1 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--txt-secondary);
+  }
+  .masthead h1 {
+    font-family: var(--font-headline);
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 44px);
+    letter-spacing: -0.02em;
+    line-height: 1.04;
+    text-transform: uppercase;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .masthead h1 em { font-style: normal; color: var(--nulo-secondary); display: block; }
+  .masthead p { margin: 0; max-width: 62ch; color: var(--txt-secondary); font-size: 15px; }
+  .masthead p strong { color: var(--txt-primary); font-weight: 600; }
+
+  .context { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; background: var(--nulo-outline); border: 1px solid var(--nulo-outline); }
+  .context > div { background: var(--nulo-surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+  .context .k { font: 500 10px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--txt-secondary); }
+  .context .v { font-size: 13px; color: var(--txt-primary); }
+  .context .v code { font-family: var(--font-mono); font-size: 12px; color: var(--sand); }
+
+  /* ---------- Proposal sections ---------- */
+  .proposal { display: flex; flex-direction: column; gap: 20px; }
+  .p-head { display: flex; flex-direction: column; gap: 10px; }
+  .p-head .tag-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .p-num {
+    font: 700 12px/1 var(--font-mono);
+    letter-spacing: 0.14em;
+    background: var(--nulo-accent);
+    color: var(--txt-inverse);
+    padding: 5px 9px;
+  }
+  .p-effort {
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--txt-secondary);
+    border: 1px solid var(--nulo-outline);
+    padding: 5px 8px;
+  }
+  .p-head h2 {
+    font-family: var(--font-headline);
+    font-weight: 700;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .p-head .thesis { margin: 0; max-width: 68ch; color: var(--txt-secondary); font-size: 15px; }
+  .p-head .thesis strong { color: var(--txt-primary); font-weight: 600; }
+
+  .stages { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .stages { grid-template-columns: 1fr; } }
+  .stage-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .stage-label { font: 500 10px/1.4 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--txt-secondary); }
+  .stage {
+    position: relative;
+    background: var(--app-bg);
+    border: 1px solid var(--nulo-outline);
+    padding: 26px 22px;
+    min-height: 210px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .stage.tall { min-height: 300px; }
+
+  /* faucet-context furniture inside stages */
+  .m-hero { font-family: var(--font-headline); font-weight: 700; font-size: 21px; letter-spacing: -0.02em; text-transform: uppercase; line-height: 1.05; }
+  .m-strip {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+    padding: 13px 0;
+    border-top: 1px solid var(--nulo-outline);
+    border-bottom: 1px solid var(--nulo-outline);
+  }
+  .m-ghost { color: var(--nulo-border); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* chip (existing WalletPanel connected chip) */
+  .m-chip { display: inline-flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--nulo-outline); background: transparent; }
+  .m-chip .net { color: var(--txt-secondary); font: 500 11px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; }
+  .m-addr { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12.5px; color: var(--txt-primary); border: 1px solid var(--nulo-outline); padding: 5px 9px; background: var(--nulo-surface-low); }
+  .m-alias { font: 600 12px/1 var(--font-body); color: var(--txt-primary); }
+  .m-x { color: var(--txt-secondary); font: 600 12px/1 var(--font-mono); padding: 2px 4px; }
+  .m-caret { color: var(--txt-secondary); font-size: 10px; padding: 2px 2px; }
+  .m-chip.clickable { border-color: var(--nulo-outline); cursor: pointer; transition: border-color 0.15s ease; }
+  .m-chip.clickable:hover { border-color: var(--nulo-accent); }
+
+  /* popover (packages/design Popover: the one 10px-radius surface) */
+  .m-pop {
+    width: 264px;
+    border-radius: 10px;
+    background: var(--dropdown-bg);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--txt-primary) 8%, transparent),
+      0 14px 34px rgba(0, 0, 0, 0.15), 0 4px 14px rgba(0, 0, 0, 0.05);
+    padding: 6px 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .m-pop .hdr { font: 500 10px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--txt-secondary); padding: 8px 14px 6px; }
+  .m-pop .row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; transition: background 0.15s ease; }
+  .m-pop .row:hover { background: var(--nulo-surface-high); }
+  .m-pop .row .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .m-pop .row .who .name { font-size: 13px; font-weight: 600; color: var(--txt-primary); }
+  .m-pop .row .who .addr { font-family: var(--font-mono); font-size: 11px; color: var(--txt-secondary); }
+  .m-pop .row .check { color: var(--mint); font-size: 13px; width: 14px; text-align: center; }
+  .m-pop .row .check.off { color: transparent; }
+  .m-pop .foot { border-top: 1px solid var(--nulo-border); margin-top: 4px; padding: 9px 14px 5px; display: flex; justify-content: space-between; align-items: center; }
+  .m-pop .foot .dis { color: var(--txt-secondary); font: 500 11px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+  .m-pop .foot .dis:hover { color: var(--red); }
+
+  /* modal (WalletPickerModal grammar) */
+  .m-overlay { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .m-modal { background: var(--nulo-surface); border: 1px solid var(--nulo-outline); padding: 20px; display: flex; flex-direction: column; gap: 12px; max-width: 340px; width: 100%; }
+  .m-modal .title { font-family: var(--font-headline); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .m-modal .sub { font-size: 12px; color: var(--txt-secondary); margin: 0; }
+  .m-rows { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; }
+  .m-row { display: flex; align-items: center; gap: 10px; border: 1px solid var(--nulo-border); padding: 9px 11px; }
+  .m-row.active { border-color: var(--nulo-outline); background: var(--nulo-surface-low); }
+  .m-row .sq { width: 26px; height: 26px; border: 1px solid var(--nulo-outline); display: grid; place-items: center; color: var(--txt-secondary); font: 600 10px var(--font-mono); flex: none; }
+  .m-row .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .m-row .who .name { font-size: 12.5px; font-weight: 600; color: var(--txt-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-row .who .addr { font-family: var(--font-mono); font-size: 10.5px; color: var(--txt-secondary); }
+  .m-badge { font: 500 9px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--mint); color: var(--mint); padding: 3px 6px; flex: none; }
+  .m-btn-outline {
+    font-family: var(--font-headline); font-weight: 700; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    background: transparent; color: var(--txt-primary); border: 2px solid var(--nulo-outline);
+    padding: 6px 10px; cursor: pointer; flex: none; transition: background 0.15s ease;
+  }
+  .m-btn-outline:hover { background: var(--nulo-surface-low); }
+  .m-btn-primary {
+    font-family: var(--font-headline); font-weight: 700; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    background: var(--nulo-accent); color: var(--txt-inverse); border: none;
+    padding: 10px 16px; cursor: pointer;
+  }
+
+  /* segmented rail (proposal C) */
+  .m-rail { display: inline-flex; gap: 4px; padding: 4px; background: color-mix(in srgb, var(--txt-primary) 4%, transparent); }
+  .m-rail .seg {
+    display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+    padding: 8px 14px; cursor: pointer; border: none; background: transparent;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .m-rail .seg .name { font-family: var(--font-headline); font-weight: 600; font-size: 12.5px; letter-spacing: -0.01em; color: var(--txt-secondary); }
+  .m-rail .seg .addr { font-family: var(--font-mono); font-size: 10px; color: var(--txt-secondary); opacity: 0.75; }
+  .m-rail .seg.on { background: color-mix(in srgb, var(--txt-primary) 10%, transparent); }
+  .m-rail .seg.on .name { color: var(--txt-primary); }
+  .m-rail .seg:hover:not(.on) { background: color-mix(in srgb, var(--txt-primary) 6%, transparent); }
+
+  .note { font-size: 13px; color: var(--txt-secondary); max-width: 70ch; margin: 0; }
+  .note strong { color: var(--txt-primary); font-weight: 600; }
+
+  .p-selected {
+    font: 700 10px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase;
+    border: 1px solid var(--mint); color: var(--mint); padding: 5px 8px;
+  }
+  .m-toast {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--nulo-surface);
+    border: 1px solid var(--nulo-outline);
+    border-left: 3px solid var(--mint);
+    font-size: 12.5px; color: var(--txt-primary);
+    align-self: flex-start;
+  }
+  .m-toast .m-toast-addr { font-family: var(--font-mono); font-size: 11px; color: var(--txt-secondary); }
+
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--nulo-outline); border: 1px solid var(--nulo-outline); }
+  @media (max-width: 640px) { .pros-cons { grid-template-columns: 1fr; } }
+  .pros-cons > div { background: var(--nulo-surface); padding: 14px 16px; }
+  .pros-cons h3 { font: 500 10px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px; }
+  .pros-cons .for h3 { color: var(--mint); }
+  .pros-cons .against h3 { color: var(--sand); }
+  .pros-cons ul { margin: 0; padding-left: 16px; font-size: 13px; color: var(--txt-secondary); display: flex; flex-direction: column; gap: 4px; }
+  .pros-cons li strong { color: var(--txt-primary); font-weight: 600; }
+
+  /* ---------- Comparison matrix ---------- */
+  .matrix-wrap { overflow-x: auto; border: 1px solid var(--nulo-outline); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--nulo-border); }
+  th { font: 500 10px/1.4 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--txt-secondary); background: var(--nulo-surface); }
+  td { color: var(--txt-secondary); background: var(--nulo-surface); font-variant-numeric: tabular-nums; }
+  td:first-child { color: var(--txt-primary); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td .good { color: var(--mint); }
+  td .meh { color: var(--sand); }
+
+  .closing { border-top: 1px solid var(--nulo-outline); padding-top: 28px; display: flex; flex-direction: column; gap: 12px; }
+  .closing h2 { font-family: var(--font-headline); font-weight: 700; font-size: 18px; text-transform: uppercase; letter-spacing: 0.02em; margin: 0; }
+  .closing p { margin: 0; max-width: 68ch; color: var(--txt-secondary); font-size: 14.5px; }
+  .closing p strong { color: var(--txt-primary); font-weight: 600; }
+
+  :focus-visible { outline: 2px solid var(--nulo-accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">Nulo Faucet · Design review · 4 proposals · direction D selected</span>
+    <h1>Multi-account<em>choose one direction</em></h1>
+    <p>The wallet can grant the faucet <strong>several accounts</strong>, but today the app silently uses the first one and hides the rest. These four proposals add a way to see, choose, and switch the active account — each rendered with the real nulo tokens (flip your theme toggle to compare dark/light). All are dApp-side only; no wallet or protocol changes.</p>
+  </header>
+
+  <section class="context" aria-label="Current state">
+    <div><span class="k">Today</span><span class="v">Connected chip shows one address; <code>granted[0]</code> is hardcoded, extra accounts dropped.</span></div>
+    <div><span class="k">Raw material</span><span class="v">Wallet already sends alias + address per account. Every RPC takes an explicit <code>from</code>.</span></div>
+    <div><span class="k">Design grammar</span><span class="v">0-radius surfaces, hairline borders; the dropdown (10px radius) is the sanctioned floating surface.</span></div>
+  </section>
+
+  <!-- ═══════════════════════ PROPOSAL A ═══════════════════════ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="tag-row"><span class="p-num">PROPOSAL A</span><span class="p-effort">Effort · S</span></div>
+      <h2>The quiet dropdown</h2>
+      <p class="thesis">The connected chip grows an alias and a caret. Clicking it opens the design system's dropdown with every granted account — <strong>one click to switch</strong>. Disconnect moves into the menu's footer.</p>
+    </div>
+    <div class="stages">
+      <div class="stage-block">
+        <span class="stage-label">Closed — chip gains alias + caret</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Main</span>
+              <span class="m-addr">0x1a2b…9f3c</span>
+              <span class="m-caret">▾</span>
+            </span>
+            <span class="m-ghost">· token cards below ·</span>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">Open — dropdown anchored under the chip</span>
+        <div class="stage tall">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable" style="border-color: var(--nulo-accent);">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Main</span>
+              <span class="m-addr">0x1a2b…9f3c</span>
+              <span class="m-caret">▴</span>
+            </span>
+          </div>
+          <div class="m-pop" role="menu" aria-label="Switch account">
+            <span class="hdr">Granted accounts · 3</span>
+            <div class="row"><span class="check">✓</span><span class="who"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></span></div>
+            <div class="row"><span class="check off">✓</span><span class="who"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></span></div>
+            <div class="row"><span class="check off">✓</span><span class="who"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></span></div>
+            <div class="foot"><span class="dis">Disconnect</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <div class="for"><h3>For</h3><ul>
+        <li><strong>Fastest switch</strong>: one click, no modal ceremony.</li>
+        <li>Matches the existing split-button "▾" precedent on the connect button.</li>
+        <li>Reuses the design package's dropdown surface as-is.</li>
+      </ul></div>
+      <div class="against"><h3>Against</h3><ul>
+        <li>The dropdown surface is new to the faucet (exists in the design package, unused here).</li>
+        <li>Accounts stay hidden until you click — low discoverability if you forget you granted several.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ PROPOSAL B ═══════════════════════ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="tag-row"><span class="p-num">PROPOSAL B</span><span class="p-effort">Effort · S–M</span></div>
+      <h2>The switch-account modal</h2>
+      <p class="thesis">Clicking the chip opens a modal in the exact grammar of the wallet picker you saw when connecting: bordered rows, uppercase title, outline buttons. <strong>Room to grow</strong> — per-account balances or badges fit naturally in the rows later.</p>
+    </div>
+    <div class="stages">
+      <div class="stage-block">
+        <span class="stage-label">Closed — whole chip is the trigger</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Main</span>
+              <span class="m-addr">0x1a2b…9f3c</span>
+              <span class="m-caret">▾</span>
+            </span>
+            <span class="m-ghost">· token cards below ·</span>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">Open — modal, wallet-picker grammar</span>
+        <div class="stage tall">
+          <div class="m-hero" style="opacity:.35">Drip test assets</div>
+          <div class="m-overlay">
+            <div class="m-modal" role="dialog" aria-label="Switch account">
+              <span class="title">Switch account</span>
+              <p class="sub">Drips and bridge actions will use the selected account.</p>
+              <ul class="m-rows">
+                <li class="m-row active"><span class="sq">1A</span><span class="who"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></span><span class="m-badge">Active</span></li>
+                <li class="m-row"><span class="sq">8E</span><span class="who"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></span><button class="m-btn-outline">Switch</button></li>
+                <li class="m-row"><span class="sq">77</span><span class="who"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></span><button class="m-btn-outline">Switch</button></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <div class="for"><h3>For</h3><ul>
+        <li><strong>Familiar</strong>: users already met this exact surface when choosing a wallet.</li>
+        <li>Most room per account — balances, tags, copy-address all fit.</li>
+        <li>Modal focus suits a "deliberate" switch on a money-adjacent app.</li>
+      </ul></div>
+      <div class="against"><h3>Against</h3><ul>
+        <li>Two clicks + a context switch for what is usually a quick toggle.</li>
+        <li>Heaviest interruption of the four for the common case (2 accounts).</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ PROPOSAL C ═══════════════════════ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="tag-row"><span class="p-num">PROPOSAL C</span><span class="p-effort">Effort · S</span></div>
+      <h2>The account rail</h2>
+      <p class="thesis">No hidden state at all: every granted account sits in the wallet strip as a segment, in the same segmented-pill language as the Faucet / Bridge / Fuel tabs. <strong>The active account is always visible</strong>; switching is a single glance-and-click.</p>
+    </div>
+    <div class="stages">
+      <div class="stage-block">
+        <span class="stage-label">Connected — all accounts visible, "Main" active</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-rail" role="tablist" aria-label="Active account">
+              <button class="seg on" role="tab" aria-selected="true"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></button>
+              <button class="seg" role="tab" aria-selected="false"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></button>
+              <button class="seg" role="tab" aria-selected="false"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></button>
+            </span>
+            <span class="m-x" title="Disconnect">✕</span>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">After clicking "Savings"</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-rail" role="tablist" aria-label="Active account">
+              <button class="seg" role="tab" aria-selected="false"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></button>
+              <button class="seg on" role="tab" aria-selected="true"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></button>
+              <button class="seg" role="tab" aria-selected="false"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></button>
+            </span>
+            <span class="m-x" title="Disconnect">✕</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <div class="for"><h3>For</h3><ul>
+        <li><strong>Zero hidden state</strong> — most brutalist-honest of the four; nothing to open.</li>
+        <li>One click to switch; reuses the tab-pill pattern already in the top bar.</li>
+        <li>No new floating surfaces, no modal, minimal code.</li>
+      </ul></div>
+      <div class="against"><h3>Against</h3><ul>
+        <li><strong>Scales poorly</strong> past ~4 accounts; strip wraps awkwardly on mobile.</li>
+        <li>Two segmented controls on one page (tabs above, accounts below) may compete visually.</li>
+        <li>Nowhere obvious for per-account extras (copy address, badges) without crowding.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ PROPOSAL D ═══════════════════════ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="tag-row"><span class="p-num">PROPOSAL D</span><span class="p-effort">Effort · M</span><span class="p-selected">✓ Selected direction</span></div>
+      <h2>Choose-on-connect + dropdown</h2>
+      <p class="thesis">The SDK-endorsed flow: when the wallet grants more than one account, the connect sequence gains a <strong>"choose your main account"</strong> step (same grammar as the verify-emoji modal). The choice is remembered per wallet; afterwards the chip carries the quiet dropdown for switching at any time. The full lifecycle:</p>
+    </div>
+    <div class="stages">
+      <div class="stage-block">
+        <span class="stage-label">1 · On connect — new step, only when &gt;1 account granted</span>
+        <div class="stage tall">
+          <div class="m-hero" style="opacity:.35">Drip test assets</div>
+          <div class="m-overlay">
+            <div class="m-modal" role="dialog" aria-label="Choose main account">
+              <span class="title">Choose main account</span>
+              <p class="sub">Your wallet shared 3 accounts. Pick the one this app should use — you can switch anytime from the account chip.</p>
+              <ul class="m-rows">
+                <li class="m-row active"><span class="sq">1A</span><span class="who"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></span><span class="m-badge">Selected</span></li>
+                <li class="m-row"><span class="sq">8E</span><span class="who"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></span></li>
+                <li class="m-row"><span class="sq">77</span><span class="who"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></span></li>
+              </ul>
+              <button class="m-btn-primary">Continue</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">2 · At rest — chip carries the remembered choice</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Main</span>
+              <span class="m-addr">0x1a2b…9f3c</span>
+              <span class="m-caret">▾</span>
+            </span>
+            <span class="m-ghost">· token cards below ·</span>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">3 · Changing later — chip opens the quiet dropdown</span>
+        <div class="stage tall">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable" style="border-color: var(--nulo-accent);">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Main</span>
+              <span class="m-addr">0x1a2b…9f3c</span>
+              <span class="m-caret">▴</span>
+            </span>
+          </div>
+          <div class="m-pop" role="menu" aria-label="Switch account">
+            <span class="hdr">Granted accounts · 3</span>
+            <div class="row"><span class="check">✓</span><span class="who"><span class="name">Main</span><span class="addr">0x1a2b…9f3c</span></span></div>
+            <div class="row" style="background: var(--nulo-surface-high);"><span class="check off">✓</span><span class="who"><span class="name">Savings</span><span class="addr">0x8e4d…21aa</span></span></div>
+            <div class="row"><span class="check off">✓</span><span class="who"><span class="name">Testing</span><span class="addr">0x77c0…b1e5</span></span></div>
+            <div class="foot"><span class="dis">Disconnect</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="stage-block">
+        <span class="stage-label">4 · After switching — chip updates, toast confirms, choice re-saved</span>
+        <div class="stage">
+          <div class="m-hero">Drip test assets</div>
+          <div class="m-strip">
+            <span class="m-chip clickable">
+              <span class="net">Aztec</span>
+              <span class="m-alias">Savings</span>
+              <span class="m-addr">0x8e4d…21aa</span>
+              <span class="m-caret">▾</span>
+            </span>
+          </div>
+          <div class="m-toast" role="status">Active account: <strong>Savings</strong><span class="m-toast-addr">0x8e4d…21aa</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <div class="for"><h3>For</h3><ul>
+        <li><strong>Only proposal with a true "main account" moment</strong> — an explicit, remembered choice instead of a silent default.</li>
+        <li>Follows the wallet-SDK's documented onboarding pattern (account-selection phase).</li>
+        <li>Skips itself entirely when only one account is granted — zero added friction for most users.</li>
+      </ul></div>
+      <div class="against"><h3>Against</h3><ul>
+        <li>Extra step in an already multi-step connect flow (discover → verify → grant → choose).</li>
+        <li>Two surfaces to build and test (modal step + dropdown) — largest scope of the four.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ MATRIX ═══════════════════════ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="tag-row"><span class="p-num" style="background: var(--nulo-surface-high); color: var(--txt-primary);">COMPARE</span></div>
+      <h2>Side by side</h2>
+    </div>
+    <div class="matrix-wrap">
+      <table>
+        <thead>
+          <tr><th>Proposal</th><th>Clicks to switch</th><th>Accounts visible at rest</th><th>"Main" concept</th><th>Scales to N accounts</th><th>New surfaces</th><th>Effort</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>A · Quiet dropdown</td><td><span class="good">2</span> (open + pick)</td><td>Active only</td><td>Implicit (last picked)</td><td><span class="good">Yes</span> (list scrolls)</td><td>Dropdown</td><td>S</td></tr>
+          <tr><td>B · Switch modal</td><td><span class="meh">3</span> (open + switch)</td><td>Active only</td><td>Implicit (last picked)</td><td><span class="good">Yes</span></td><td>Modal</td><td>S–M</td></tr>
+          <tr><td>C · Account rail</td><td><span class="good">1</span></td><td><span class="good">All</span></td><td>Implicit (selected segment)</td><td><span class="meh">~4 max</span></td><td>None</td><td>S</td></tr>
+          <tr><td>D · Choose-on-connect</td><td><span class="good">2</span> (via A's dropdown)</td><td>Active only</td><td><span class="good">Explicit + remembered</span></td><td><span class="good">Yes</span></td><td>Modal step + dropdown</td><td>M</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="closing">
+    <h2>Decision</h2>
+    <p><strong>Proposal D was selected.</strong> The connect flow gains a choose-main-account step (only when the wallet grants more than one account); the choice is <strong>remembered per wallet</strong> and drives <strong>all three tabs</strong> (Faucet, Bridge, Fuel). Changing it later is always available through the account chip's dropdown — one click to open, one to switch, with a toast confirming the new active account (stages 3–4 above). Proposals A, B, and C remain documented for the record: A survives inside D as the switching mechanism; B's modal grammar is the fallback if the row content ever outgrows a dropdown; C was set aside because it caps out around four accounts and crowds the strip on mobile.</p>
+  </footer>
+
+</div>

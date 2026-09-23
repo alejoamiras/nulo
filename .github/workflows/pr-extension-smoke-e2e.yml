@@ -1,0 +1,161 @@
+name: Extension smoke e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # NO `branches:` filter — see pr-quick.yml: that key filters on the PR's BASE,
+    # so a stacked PR targeting its parent feature branch got no CI whatsoever.
+    # `labeled` so adding `e2e:extension-smoke` (or the legacy `e2e:smoke`, honored until the next stable cut) after open triggers a fresh run;
+    # `unlabeled` so removing it re-evaluates the gate instead of leaving
+    # a stale failing result; `ready_for_review` so a draft marked ready
+    # (without a new push) re-runs CI instead of hanging the required check.
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: pr-extension-smoke-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      smoke-surface: ${{ steps.override.outputs.full || steps.filter.outputs.smoke-surface }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: paths-filter needs the merge-base with the comparison
+          # branch. On a shallow clone it falls back to a `fetch --deepen` loop,
+          # which hits git's "shallow file has changed since we read it" race
+          # whenever the merge-base sits beyond the initial depth (structural on
+          # long-running branches ~100+ commits from the base).
+          fetch-depth: 0
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            smoke-surface:
+              # Derived from the extension dependency graph (see CI.md "CI gating").
+              # Whole-package for the built target (covers src/manifest/public/scripts/
+              # vite/tsconfig + the e2e harness — can't miss a build input); src + the
+              # package manifest for each dependency library. NO `!` negations (the dorny
+              # `some`-quantifier footgun). Pinned by scripts/ci-cd/behavior-gating.test.ts.
+              # Built target — extension (whole package):
+              - 'apps/extension/**'
+              # Dependency libraries — consumed source + manifest:
+              - 'packages/aztec-runtime/src/**'
+              - 'packages/aztec-runtime/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+              - 'packages/extension-messaging/src/**'
+              - 'packages/extension-messaging/package.json'
+              - 'packages/legal/src/**'
+              - 'packages/legal/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
+              - 'packages/third-party-notices/src/**'
+              - 'packages/third-party-notices/package.json'
+              - 'packages/third-party-notices/texts/**'
+              - 'packages/wallet-bridge/src/**'
+              - 'packages/wallet-bridge/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
+              # Repo-wide build inputs:
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'tsconfig.json'
+              - 'patches/**'
+              # Smoke workflow + composite actions:
+              - '.github/workflows/_extension-smoke-e2e.yml'
+              - '.github/workflows/_build-extension.yml'
+              - '.github/workflows/pr-extension-smoke-e2e.yml'
+              - '.github/actions/setup-bun/**'
+              - '.github/actions/setup-puppeteer/**'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+
+  decide:
+    name: Decide
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          SMOKE: ${{ needs.changes.outputs.smoke-surface }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:extension-smoke') || contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
+        run: |
+          # The paths filter already answers "does this diff touch the surface?" — gating it on
+          # the base branch as well only creates a hole, because a stacked PR's `github.base_ref`
+          # is the branch below it. Only the bottom arc of a stack targets `dev`; every arc above
+          # it could reach this suite by LABEL alone, and a gate miss reports success-on-skip.
+          # `main` and `workflow_dispatch` still force-run, so dropping the base test only widens.
+          if [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE" = "main" ] \
+             || [ "$LABEL_HIT" = "true" ] \
+             || [ "$SMOKE" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # PR smoke builds IN-JOB (no artifact): the in-job build arms the migration fixture (artifact
+  # runs skip those e2es by the arming contract - they were silently skipped on PRs before) and
+  # carries the VITE_NULO_E2E_DEFAULT_NET=testnet pin (CI cannot reach the Alpha mainnet RPC, and
+  # the seeded-ACTIVE default is baked at build time). Prod-shaped build coverage on PRs stays with
+  # the quality lane's `Build / vite build (chrome)`; the RELEASE chain still smokes the real
+  # artifact (prod-shaped by design - its chain-adjacent legs are the known queued follow-up).
+  smoke:
+    name: Run
+    needs: [decide]
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+  status:
+    name: extension-smoke-e2e-status
+    if: always()
+    needs: [changes, decide, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          # An exact state machine, not a denylist of bad results — see the network gate for why.
+          RUN="${{ needs.decide.outputs.run }}"
+          for r in "${{ needs.changes.result }}" "${{ needs.decide.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A gate-control job did not succeed: $r"
+              exit 1
+            fi
+          done
+          case "$RUN" in
+            true) want="success" ;;
+            false) want="skipped" ;;
+            *) echo "::error::decide.outputs.run is not true/false: '$RUN'"; exit 1 ;;
+          esac
+          if [ "${{ needs.smoke.result }}" != "$want" ]; then
+            echo "::error::gate said run=$RUN, so the smoke suite must be '$want' — got '${{ needs.smoke.result }}'"
+            exit 1
+          fi
+          echo "Extension smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."

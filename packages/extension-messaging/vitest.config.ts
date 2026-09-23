@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from "node:url"
 import { defineConfig } from "vitest/config"
+import { sharedTest } from "../../vitest.base"
 
 export default defineConfig({
 	resolve: {
@@ -8,6 +9,7 @@ export default defineConfig({
 		},
 	},
 	test: {
+		...sharedTest,
 		globals: true,
 		environment: "jsdom",
 		setupFiles: ["./src/testing/setup.ts"],

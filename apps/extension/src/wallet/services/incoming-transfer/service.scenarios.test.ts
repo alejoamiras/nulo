@@ -25,7 +25,7 @@ import { flushPromises } from "@vue/test-utils"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 // Static (module-scope) import: pays Vite's cold transform of this service +
 // its inlined @nulo/* graph during the file's import phase, NOT inside the first
@@ -33,10 +33,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 // shared runner, which timed out the first `bootService()` when the import was
 // dynamic. vi.mock("./repository") is hoisted above this, so the mock still applies.
 import { IncomingTransferService } from "./service"
-import { noteRecordId } from "./spec"
+import { PublicScanCursorSchema, noteRecordId } from "./spec"
 import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 import { TaskStatus } from "@/wallet/services/task/spec"
 import type { PublicEventReader } from "./public-event-indexer"
+import { SCAN_EPISODES_KEY } from "./scan-episodes"
+import type { ScanOutcome } from "./scan-health"
 import type {
 	PublicScanTips,
 	PublicTokenClassStatus,
@@ -91,6 +93,7 @@ vi.mock("./repository", () => ({
 					for (const [k, v] of records) if (v.profileId === p) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p) trust.delete(k)
 				},
+				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 30 — clearing a chain atomically covers records, trust, cursors and outbox under one scope predicate
 				clearChain: async (p: string, n: string) => {
 					for (const [k, v] of records) if (v.profileId === p && v.networkId === n) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)
@@ -348,6 +351,7 @@ async function bootService(
 		price?: ReturnType<typeof makePriceStub>
 		publicReader?: PublicEventReader
 	} = {},
+	opts: { keepStorage?: boolean } = {},
 ) {
 	const fixture = {
 		profile: stubs.profile ?? makeProfileStub(),
@@ -366,7 +370,8 @@ async function bootService(
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
 	// the scan path via the public surface or via direct method calls.
 	const browserApi = new FakeBrowserApi()
-	browserApi.reset()
+	// `keepStorage` models a service-worker restart: a new service graph over the same storage areas.
+	if (!opts.keepStorage) browserApi.reset()
 	const service = new IncomingTransferService(logger, browserApi, 1_000_000, stubs.publicReader)
 	const collection = new ServiceCollection()
 	for (const stub of Object.values(fixture)) collection.add(stub as never)
@@ -772,7 +777,8 @@ describe("IncomingTransferService — account lifecycle (P5 carry)", () => {
 		expect(schedulers.has("n2|0xa")).toBe(true)
 		expect(schedulers.has("n1|0xb")).toBe(true)
 
-		// Fire delete for 0xa.
+		// Fire delete for 0xa — the real service removes the row before it emits.
+		account.getAccounts.mockResolvedValue([{ profileId: "p1", chainId: 1, address: "0xb" }])
 		account.onAccountDeleted.invoke({ profileId: "p1", chainId: 1, address: "0xa" })
 		await flushPromises()
 
@@ -827,6 +833,111 @@ describe("IncomingTransferService — account lifecycle (P5 carry)", () => {
 })
 
 describe("IncomingTransferService — scanContract dedup + emit semantics", () => {
+	test("(N-17 composed pin) a watchdog handoff mid-park lets onTokenDeleted wipe — the revoked CS writes nothing", async () => {
+		// The production hazard end-to-end: the note-CS parks on its PXE-bound
+		// blockTimestamp await while HOLDING the serviceLock; the queued
+		// onTokenDeleted (which bumps the lifecycle epoch FIRST inside the
+		// lock) cannot run until the lock's 5-minute watchdog hands over; the
+		// revoked CS then resumes with a moved epoch and must write NOTHING —
+		// no record resurrection, no outbox row, no Added emit. Trust is
+		// pre-seeded `trusted` so every pre-park branch is quiet and the
+		// assertions are pure post-handoff effects (an unknown-trust write
+		// lands BEFORE the park and could never discriminate the re-check).
+		vi.useFakeTimers()
+		try {
+			const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+			const token = makeTokenStub([tokenA])
+			const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+			let releaseTimestamp!: () => void
+			noteSvc.getBlockTimestamp.mockImplementation(
+				() =>
+					new Promise<number>((resolve) => {
+						releaseTimestamp = () => resolve(1_234)
+					}),
+			)
+			const { service } = await bootService({ network, token, note: noteSvc })
+			trust.set(trustKey("p1", "n1", tokenA.contract), {
+				profileId: "p1",
+				networkId: "n1",
+				contract: tokenA.contract,
+				state: "trusted",
+				updatedAt: 0,
+			})
+			const added = vi.fn()
+			service.onIncomingTransferAdded.add(added)
+
+			const scanP = scan(service) // parks at blockTimestampFor, serviceLock held
+			await vi.advanceTimersByTimeAsync(0)
+			// The deletion queues BEHIND the parked CS (its epoch bump is inside
+			// the same lock) — nothing has been wiped or written yet.
+			token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(records.size).toBe(0)
+
+			// The serviceLock watchdog fires → handoff → the deletion bumps the
+			// epoch and wipes the token's rows.
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+
+			// The revoked CS resumes — its post-park re-check must stand down.
+			releaseTimestamp()
+			await scanP
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(records.size).toBe(0) // no resurrection
+			expect(outbox.size).toBe(0) // no post-park outbox write
+			expect(added).not.toHaveBeenCalled() // no post-park emit
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("(N-17 composed pin, backfill branch) a handoff mid-park cannot resurrect an existing record via the timestamp backfill", async () => {
+		// Same watchdog-handoff composition as the new-record pin, driven down
+		// the EXISTING-record branch: the CS parks on the backfill's
+		// blockTimestamp await; the queued deletion wipes the record; the
+		// revoked CS's backfill upsert must stand down (its re-check), never
+		// re-add the wiped record.
+		vi.useFakeTimers()
+		try {
+			const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+			const token = makeTokenStub([tokenA])
+			const n = note()
+			const noteSvc = makeNoteStub({ [tokenA.contract]: [n] })
+			let releaseTimestamp!: () => void
+			noteSvc.getBlockTimestamp.mockImplementation(
+				() =>
+					new Promise<number>((resolve) => {
+						releaseTimestamp = () => resolve(1_234)
+					}),
+			)
+			const { service } = await bootService({ network, token, note: noteSvc })
+			// Existing record for the SAME nullifier, timestamp missing → the
+			// scan takes the backfill branch and parks.
+			seedNote({
+				siloedNullifier: n.siloedNullifier,
+				contract: tokenA.contract,
+				tokenId: tokenA.id,
+				blockTimestamp: undefined,
+			})
+
+			const scanP = scan(service)
+			await vi.advanceTimersByTimeAsync(0)
+			token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" })
+			await vi.advanceTimersByTimeAsync(0)
+
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1) // handoff → wipe
+			expect(records.size).toBe(0)
+
+			releaseTimestamp()
+			await scanP
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(records.size).toBe(0) // the backfill did not resurrect it
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("first note from unknown contract → pending state + Pending emit (visibility=true)", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([tokenA])
@@ -1480,12 +1591,14 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		expect(firstPersist.blockTimestamp).toBe(1_700_000_000)
 
 		// Delete the token → records + trust wiped.
+		tokenStub.getTokensRaw.mockResolvedValue([])
 		tokenStub.onTokenDeleted.invoke(tokenA as never)
 		await flushPromises()
 		expect(records.size).toBe(0)
 
 		// Simulate re-add: setTrust back to trusted (mimics the popup-add
 		// auto-trust path), then re-scan.
+		tokenStub.getTokensRaw.mockResolvedValue([tokenA])
 		trust.set(trustKey("p1", "n1", tokenA.contract), {
 			profileId: "p1",
 			networkId: "n1",
@@ -2122,6 +2235,170 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
+	test("(B-20 PIN) a profile switch during onTokenAdded fences out its stale scheduler install", async () => {
+		// onTokenAdded resolves the active profile, network, trust, and accounts across
+		// several awaits before installing per-account note schedulers + watching the new
+		// contract. A profile switch mid-flight bumps serviceEpoch (via hydrateSchedulers);
+		// the resumed add must NOT graft its contract onto the now-current scheduler set.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Defer the add's trust read so it parks (holding the service lock, which the
+		// lock-free hydrate path does not contend) right before the scheduler install.
+		const repo = (service as never as { repo: { getTrust: (...a: unknown[]) => Promise<unknown> } }).repo
+		let resolveTrust!: (v: unknown) => void
+		const getTrustSpy = vi.spyOn(repo, "getTrust").mockImplementation(() => new Promise((r) => (resolveTrust = r as never)))
+
+		const addPromise = tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(getTrustSpy).toHaveBeenCalled() // parked on the trust read
+
+		// Profile switch fires → hydrateSchedulers bumps the epoch (invalidating the
+		// in-flight add) and re-installs from current tokens only (tokenA).
+		await profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		resolveTrust(undefined) // release the trust read; the add resumes
+		await addPromise
+		await flushPromises()
+
+		// The stale add must not have watched tokenB's contract on the live scheduler.
+		expect([...(watched.get(key) ?? [])]).not.toContain(tokenB.contract)
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract])
+	})
+
+	test("(B-20 lost-update PIN) a slow hydration can't overwrite a concurrent token-add's install", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Make getAccounts deferrable via a resolver queue so hydration and the
+		// token-add each park in it independently.
+		const accountResolvers: ((v: unknown) => void)[] = []
+		accountStub.getAccounts.mockImplementation(() => new Promise((r) => accountResolvers.push(r as never)))
+
+		// Re-hydration starts (bumps epoch, snapshots tokens [A]) and parks in getAccounts.
+		void profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(accountResolvers).toHaveLength(1)
+
+		// A token-add for a NEW contract fires while hydration is parked mid-fan-out.
+		tokenStub.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		void tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(accountResolvers.length).toBeGreaterThanOrEqual(2)
+
+		// Let the token-add finish first: it installs tokenB's contract on the account.
+		accountResolvers[1]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// Then let the SLOW hydration resume; its descriptor set predates the add.
+		accountResolvers[0]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// Both must survive: the token-add rebuilds from the CURRENT set (A+B), and the
+		// bumped-behind slow hydration bails without clearing. Neither token is lost —
+		// an epoch-bump-then-incremental-install would have kept only B (A cleared).
+		expect([...(watched.get(key) ?? [])].sort()).toEqual([tokenA.contract, tokenB.contract].sort())
+	})
+
+	test("both scheduler arms register their interval BEFORE the immediate first poll", async () => {
+		vi.useFakeTimers()
+		try {
+			const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+			const { service } = await bootService({
+				profile: makeProfileStub({ id: "p1" }),
+				network: makeNetworkStub(),
+				account: accountStub,
+				token: makeTokenStub([tokenA]),
+			})
+			await vi.advanceTimersByTimeAsync(0)
+			const s = service as never as {
+				schedulers: Map<string, unknown>
+				publicSchedulers: Map<string, unknown>
+				startScheduler(profileId: string, networkId: string, account: string): void
+				startPublicScheduler(profileId: string, networkId: string, contract: string): void
+				schedulerKey(networkId: string, account: string): string
+				publicSchedulerKey(networkId: string, contract: string): string
+				poll(...a: unknown[]): Promise<void>
+				pollPublic(key: string): Promise<void>
+			}
+			const noteKey = s.schedulerKey("n1", "0xfresh")
+			const publicKey = s.publicSchedulerKey("n1", "0xfreshcontract")
+			let noteMapAtKick: boolean | undefined
+			let publicMapAtKick: boolean | undefined
+			vi.spyOn(s, "poll").mockImplementation(async () => {
+				noteMapAtKick = s.schedulers.has(noteKey)
+			})
+			vi.spyOn(s, "pollPublic").mockImplementation(async () => {
+				publicMapAtKick = s.publicSchedulers.has(publicKey)
+			})
+
+			s.startScheduler("p1", "n1", "0xfresh")
+			s.startPublicScheduler("p1", "n1", "0xfreshcontract")
+
+			expect(noteMapAtKick).toBe(true)
+			expect(publicMapAtKick).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("(B-20 stale-tick PIN) an old scheduler ticking during a hydration's construction window does not scan", async () => {
+		vi.useFakeTimers()
+		try {
+			const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+			const tokenStub = makeTokenStub([tokenA])
+			const profileStub = makeProfileStub({ id: "p1" })
+			const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+			await vi.advanceTimersByTimeAsync(0) // drain the bootstrap hydrate
+
+			// Poll is what a scheduler tick calls; spy AFTER boot so only later ticks count.
+			const pollSpy = vi.spyOn(service as never as { poll: (...a: unknown[]) => Promise<void> }, "poll").mockResolvedValue(undefined)
+
+			// A re-hydration bumps the epoch and PARKS in construction (deferred getAccounts),
+			// so it hasn't committed (the old scheduler is not yet torn down).
+			accountStub.getAccounts.mockImplementation(() => new Promise(() => {}))
+			void profileStub.onActiveProfileChanged.invoke()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Fire the OLD scheduler's periodic tick (installed at the pre-bump epoch).
+			await vi.advanceTimersByTimeAsync(1_000_000)
+
+			// Its tick must bail on the creation-epoch guard: no scan under the bumped epoch.
+			expect(pollSpy).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
 		// Two onTransactionAdded events for the same tx hash. The serviceLock
 		// serializes them: the first runs to completion (deletes record,
@@ -2339,8 +2616,8 @@ function makePublicReader(init?: { tips?: Partial<PublicScanTips>; classStatus?:
 	return { reader, state }
 }
 
-async function scanPublic(service: unknown, contract: string = tokenA.contract, networkId = "n1", profileId = "p1"): Promise<void> {
-	await (service as { scanPublicContract: (p: string, n: string, c: string) => Promise<void> }).scanPublicContract(
+function scanPublic(service: unknown, contract: string = tokenA.contract, networkId = "n1", profileId = "p1"): Promise<ScanOutcome> {
+	return (service as { scanPublicContract: (p: string, n: string, c: string) => Promise<ScanOutcome> }).scanPublicContract(
 		profileId,
 		networkId,
 		contract,
@@ -2361,8 +2638,9 @@ async function bootPublic(
 	reader: PublicEventReader,
 	state: ReturnType<typeof makePublicReader>["state"],
 	stubs: Parameters<typeof bootService>[0] = {},
+	opts: Parameters<typeof bootService>[1] = {},
 ) {
-	const booted = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), ...stubs, publicReader: reader })
+	const booted = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), ...stubs, publicReader: reader }, opts)
 	await flushPromises()
 	cursors.clear()
 	outbox.clear()
@@ -3498,112 +3776,207 @@ describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", ()
 	})
 })
 
-describe("IncomingTransferService — public-scan sync state (§3 Catching up)", () => {
-	type SyncEvent = { networkId: string; contract: string; state: string }
-	const capture = (service: unknown): SyncEvent[] => {
-		const events: SyncEvent[] = []
-		;(service as { onIncomingSyncStateChanged: { add: (h: (e: SyncEvent) => void) => void } }).onIncomingSyncStateChanged.add((e) =>
-			events.push(e),
-		)
-		return events
-	}
-	const getSync = (service: unknown, contract = tokenA.contract, networkId = "n1") =>
-		(service as { getSyncState: (n: string, c: string) => Promise<string> }).getSyncState(networkId, contract)
-	// bootPublic's initial scheduler kick already emits + seeds the dedup baseline. Clear it so each test
-	// drives from a known-empty state (parity with how bootPublic clears cursors/outbox).
-	const resetSync = (service: unknown) => (service as { syncState: Map<string, string> }).syncState.clear()
-
-	// A budget-INCOMPLETE scan: maxPages(5) full pages with advancing cursors → the indexer aggregates
-	// hasMore=true → the pass did NOT reach the tip → backfilling.
-	const budgetIncomplete = () =>
-		[10, 20, 30, 40, 50].map((blockNumber) => ({
+describe("IncomingTransferService — public-scan tick outcomes", () => {
+	const at = (blockNumber: number, txIndexWithinBlock = 0) => ({ blockNumber, txIndexWithinBlock, logIndexWithinTx: 0 })
+	// A budget-exhausting pass: maxPages(5) full, strictly-advancing pages → the indexer reports hasMore.
+	const partialPass = (positions: Array<[number, number]>) =>
+		positions.map(([blockNumber, txIndexWithinBlock]) => ({
 			events: [],
-			scannedThrough: { blockNumber, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			scannedThrough: at(blockNumber, txIndexWithinBlock),
 			hasMore: true,
 			dropped: false,
 		}))
-	// A validator-dropped page: nothing confirmed this tick → still backfilling.
-	const droppedPage = { events: [], scannedThrough: null, hasMore: false, dropped: true }
+	// An anchored cursor runs a boundary-ancestry probe that consumes ONE reader response before the pages.
+	const probeAck = () => ({ events: [], scannedThrough: null, hasMore: false, dropped: false })
+	const anchored = { cursor: at(10), lastSyncedBlockHash: "0xanchor", lastScanFinalized: 5 }
 
-	test("(CRITICAL) a quiet token whose last event is far back but which SCANS THROUGH to the tip → caught-up", async () => {
-		// The regression guard for the cursor-vs-tip bug: cursor sits at block 10 (its last event), the tip
-		// is 100, and the reader returns an empty EOF (nothing new up to the tip). Coverage — not the
-		// last-event cursor — must decide, so this is CAUGHT-UP, not a permanent "Catching up…".
-		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		const events = capture(service)
-		seedCursor({ cursor: { blockNumber: 10, txIndexWithinBlock: 0, logIndexWithinTx: 0 } }) // lastSyncedBlockHash null → no probe
-		await scanPublic(service)
-		expect(await getSync(service)).toBe("caught-up")
-		expect(events).toEqual([{ networkId: "n1", contract: tokenA.contract, state: "caught-up" }])
-	})
-
-	test("a budget-incomplete pass (hasMore) → backfilling", async () => {
-		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		const events = capture(service)
-		state.responses.push(...budgetIncomplete())
-		await scanPublic(service)
-		expect(await getSync(service)).toBe("backfilling")
-		expect(events.map((e) => e.state)).toEqual(["backfilling"])
-	})
-
-	test("a dropped/suspect page → backfilling (nothing confirmed this tick)", async () => {
-		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		state.responses.push(droppedPage)
-		await scanPublic(service)
-		expect(await getSync(service)).toBe("backfilling")
-	})
-
-	test("a non-advancing (hostile) page → backfilling, NOT a false caught-up (§3 R2 #1)", async () => {
-		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		seedCursor({ cursor: { blockNumber: 50, txIndexWithinBlock: 0, logIndexWithinTx: 0 } }) // lastSyncedBlockHash null → no probe
-		// A page whose scannedThrough does NOT advance past the cursor: the indexer stops + marks it dropped,
-		// so it must read as still-working, never as "covered to the tip".
-		state.responses.push({
-			events: [],
-			scannedThrough: { blockNumber: 50, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
-			hasMore: true,
-			dropped: false,
-		})
-		await scanPublic(service)
-		expect(await getSync(service)).toBe("backfilling")
-	})
-
-	test("emits on TRANSITION only — backfilling → caught-up, then no re-emit of caught-up", async () => {
-		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		const events = capture(service)
-
-		state.responses.push(droppedPage) // pass 1: dropped → backfilling (cursor stays null)
-		await scanPublic(service)
-		await scanPublic(service) // pass 2: empty EOF → caught-up
-		await scanPublic(service) // pass 3: empty EOF → still caught-up → no re-emit
-
-		expect(events.map((e) => e.state)).toEqual(["backfilling", "caught-up"])
-	})
-
-	test("a non-standard token is not scanned → caught-up (no indicator), never stranded", async () => {
-		const { reader, state } = makePublicReader({ classStatus: "non-standard" })
-		const { service } = await bootPublic(reader, state)
-		resetSync(service)
-		const events = capture(service)
-		await scanPublic(service)
-		expect(await getSync(service)).toBe("caught-up")
-		expect(events.map((e) => e.state)).toEqual(["caught-up"])
-	})
-
-	test("getSyncState fails toward caught-up for an unknown / never-scanned key", async () => {
+	test("tips unavailable → failed, and the cursor row (pending page included) is untouched", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
-		expect(await getSync(service, "0xneverscanned")).toBe("caught-up")
+		const pendingPage = { fromCursor: null, toScannedThrough: at(10), upperHash: "0xcheckpoint" }
+		seedCursor({ pendingPage })
+		reader.getScanTips = async () => {
+			throw new Error("node down")
+		}
+
+		expect(await scanPublic(service)).toBe("failed")
+		expect(cursorFor()).toEqual({ cursor: null, lastSyncedBlockHash: null, lastScanFinalized: null, startBlock: 0, pendingPage })
+		expect(state.fetchArgs).toEqual([])
+	})
+
+	test.each<[PublicTokenClassStatus, string]>([
+		["unresolved", "failed"],
+		["non-standard", "ineligible"],
+	])("class gate %s → %s, nothing fetched", async (classStatus, outcome) => {
+		const { reader, state } = makePublicReader({ classStatus })
+		const { service } = await bootPublic(reader, state)
+
+		expect(await scanPublic(service)).toBe(outcome)
+		expect(state.fetchArgs).toEqual([])
+	})
+
+	test("no checkpoint hash this tick → no-progress: the class gate is not consulted and nothing is written", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockHash: null } })
+		const { service } = await bootPublic(reader, state)
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(state.classCalls).toBe(0)
+		expect(cursorFor()).toBeUndefined()
+	})
+
+	test("a quiet token whose last event is far behind the tip reads a validated empty page → idle-at-tip", async () => {
+		// The cursor of a quiet token sits at its last event forever; judging the tick on the distance
+		// between cursor and tip would report it as permanently behind.
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ cursor: at(10) })
+
+		expect(await scanPublic(service)).toBe("idle-at-tip")
+	})
+
+	test("a dropped page → no-progress, and the finalized floor does not move", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ cursor: at(10), lastScanFinalized: 5 })
+		state.responses.push(pubDroppedPage())
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()).toMatchObject({ cursor: at(10), lastScanFinalized: 5 })
+	})
+
+	test("a valid page followed by a dropped one → no-progress, though the valid prefix is committed", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push({ events: [], scannedThrough: at(20), hasMore: true, dropped: false }, pubDroppedPage())
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.cursor).toEqual(at(20))
+	})
+
+	test("a commit the epoch fence rejects is never a success: EOF → no-progress, reconciliation end → no-progress", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const eofAfterBump = () => {
+			;(service as unknown as { bumpServiceEpoch: () => void }).bumpServiceEpoch()
+			return probeAck()
+		}
+
+		seedCursor({ cursor: at(10) })
+		state.responses.push(eofAfterBump)
+		expect(await scanPublic(service)).toBe("no-progress")
+
+		const reconciling = { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] }
+		seedCursor({ ...anchored, reconciling })
+		state.responses.push(eofAfterBump)
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.reconciling).toEqual(reconciling)
+	})
+
+	test("a non-advancing (hostile) page → no-progress, never a false idle-at-tip", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ cursor: at(50) })
+		state.responses.push({ events: [], scannedThrough: at(50), hasMore: true, dropped: false })
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.cursor).toEqual(at(50))
+	})
+
+	test("many pages inside ONE busy block → progress every tick, though no new block is covered", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const inBlock = (from: number) => partialPass([0, 1, 2, 3, 4].map((i) => [70, from + i] as [number, number]))
+
+		state.responses.push(...inBlock(0))
+		expect(await scanPublic(service)).toBe("progress")
+		state.responses.push(probeAck(), ...inBlock(5))
+		expect(await scanPublic(service)).toBe("progress")
+		expect(cursorFor()?.cursor).toEqual(at(70, 9))
+	})
+
+	test("a multi-tick reconciliation → progress per step, then the forward scan settles at idle-at-tip", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		seedCursor({
+			...anchored,
+			cursor: at(90),
+			reconciling: { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] },
+		})
+
+		state.responses.push(
+			...partialPass([
+				[61, 0],
+				[62, 0],
+				[63, 0],
+				[64, 0],
+				[65, 0],
+			]),
+		)
+		expect(await scanPublic(service)).toBe("progress")
+		expect(cursorFor()?.reconciling).toMatchObject({ progress: at(65) })
+
+		expect(await scanPublic(service)).toBe("progress") // empty EOF → the window is exhausted → finished
+		expect(cursorFor()?.reconciling).toBeUndefined()
+
+		state.responses.push(probeAck())
+		expect(await scanPublic(service)).toBe("idle-at-tip")
+	})
+
+	test("a dropped reconciliation page → no-progress and the marker is kept", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const reconciling = { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] }
+		seedCursor({ ...anchored, reconciling })
+		state.responses.push(pubDroppedPage())
+
+		expect(await scanPublic(service)).toBe("no-progress")
+		expect(cursorFor()?.reconciling).toEqual(reconciling)
+	})
+
+	test("an anchored throw → failed AND a reconciliation begins; a transient one recovers to idle-at-tip", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		seedCursor(anchored)
+		state.responses.push(new Error("transient node error")) // the boundary-ancestry probe throws
+
+		expect(await scanPublic(service)).toBe("failed")
+		// The reconcile scan ran over the rewind window, pinned to the checkpoint it was staged against.
+		expect(state.fetchArgs.at(-1)).toMatchObject({ fromBlock: 6, toBlock: 100, referenceBlock: "0xcheckpoint" })
+		expect(cursorFor()).toMatchObject({ cursor: at(10), lastSyncedBlockHash: "0xcheckpoint" })
+
+		state.responses.push(probeAck())
+		expect(await scanPublic(service)).toBe("idle-at-tip")
+	})
+
+	test("an unanchored throw (first scan) → failed, nothing to reconcile, the cursor does not move", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push(new Error("node error"))
+
+		expect(await scanPublic(service)).toBe("failed")
+		expect(cursorFor()).toBeUndefined()
+	})
+
+	test("a reorged pending page → failed, and the marker hands over to a reconciliation", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ ...anchored, pendingPage: { fromCursor: at(10), toScannedThrough: at(20), upperHash: "0xgone" } })
+		state.responses.push(new Error("upperHash is not an ancestor"))
+
+		expect(await scanPublic(service)).toBe("failed")
+		expect(state.fetchArgs.at(-1)).toMatchObject({ fromBlock: 6, referenceBlock: "0xcheckpoint" })
+		expect(cursorFor()?.pendingPage).toBeUndefined()
+	})
+
+	test("PublicScanCursorSchema round-trips a reconciling cursor (the repository parses every read through it)", () => {
+		const cursor = {
+			cursor: { blockNumber: 90, txIndexWithinBlock: 1, logIndexWithinTx: 2 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 50,
+			startBlock: 0,
+			reconciling: { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] },
+		}
+		expect(PublicScanCursorSchema.parse(cursor)).toEqual(cursor)
 	})
 })
 
@@ -3652,5 +4025,631 @@ describe("IncomingTransferService — public-scan cursor resume (SW-restart, cas
 		)
 		expect(resumed).toBeDefined()
 		expect(resumed?.fromBlock).toBeUndefined()
+	})
+})
+
+describe("IncomingTransferService — public arm post-park epoch discipline", () => {
+	// The note arm re-checks the service epoch after every parked await inside its
+	// critical sections (the N-17 pins above drive the real watchdog for it). The
+	// public arm's writes carry the same obligation; these pins manufacture the
+	// post-handoff state directly — a bump from inside the CS's own awaited read,
+	// exactly where a handoff-admitted wipe would leave it.
+
+	test("commitPublicEvent: an epoch bump inside the in-CS token read suppresses record/trust/outbox writes", async () => {
+		const { reader, state } = makePublicReader()
+		const pending = vi.fn()
+		const { service } = await bootPublic(reader, state)
+		service.onIncomingTransferPending.add(pending)
+		const svc = service as unknown as { serviceEpoch: number; tokenService: { getTokensRaw: (p: string) => Promise<unknown[]> } }
+		const realGetTokensRaw = svc.tokenService.getTokensRaw.bind(svc.tokenService)
+		let bumped = false
+		svc.tokenService.getTokensRaw = async (p: string) => {
+			const tokens = await realGetTokensRaw(p)
+			if (!bumped) {
+				bumped = true
+				svc.serviceEpoch += 1
+			}
+			return tokens
+		}
+		state.responses.push(pubPage([pubEvent({ txHash: "0xparked" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xparked|0")).toBeUndefined()
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))).toBeUndefined()
+		expect(outboxFor()).toBeUndefined()
+		expect(pending).not.toHaveBeenCalled()
+	})
+
+	test("resolvePublicClassGate: an epoch bump during the class fetch leaves the wiped cache empty", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const svc = service as unknown as { serviceEpoch: number; classGateCache: Map<string, unknown> }
+		const realClassStatus = reader.getTokenClassStatus.bind(reader)
+		reader.getTokenClassStatus = async (...args: Parameters<typeof realClassStatus>) => {
+			svc.serviceEpoch += 1
+			return realClassStatus(...args)
+		}
+		state.responses.push(pubPage([pubEvent({ txHash: "0xgate" })]))
+
+		await scanPublic(service)
+
+		expect(svc.classGateCache.size).toBe(0)
+	})
+
+	test("drain: a fresh dirtyAt bump during the refresh request is not reverted by the anchor write", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+			// A receipt lands while the request is in flight: fresh dirt, anchor cleared.
+			outbox.set("p1|n1|0xa|1", { dirtyAt: 999 })
+			return { taskId: "T1" }
+		})
+
+		await drain(service)
+
+		expect(outboxFor()).toEqual({ dirtyAt: 999 })
+	})
+
+	test("drain: a DISPLACED holder (watchdog handoff) cannot land its anchor over a successor's receipt", async () => {
+		// The re-read CAS is blind when the successor's receipt carries the SAME
+		// dirtyAt (same-ms receipt — realistic under a frozen/coarse clock): only
+		// the lock-ownership probe stops the stale anchor write. The successor
+		// interleaves by ACQUIRING the service lock after the watchdog displaces
+		// the parked drain, which permanently flips the ticket.
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		vi.useFakeTimers()
+		try {
+			tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+				// Drain is parked here holding the lock. Fire its watchdog, then run
+				// the receipt writer under a REAL lock acquisition (ticket flips).
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+				await (service as unknown as { withServiceLock: (fn: () => Promise<void>) => Promise<void> }).withServiceLock(async () => {
+					outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+				})
+				return { taskId: "T1" }
+			})
+
+			await drain(service)
+
+			// The displaced drain must NOT have anchored: the row keeps the
+			// receipt's shape (no pendingTaskId), so the next drain re-requests.
+			expect(outboxFor()).toEqual({ dirtyAt: 100 })
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("drain: a row wiped during the refresh request is not resurrected by the anchor write", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+			outbox.delete("p1|n1|0xa|1")
+			return { taskId: "T1" }
+		})
+
+		await drain(service)
+
+		expect(outboxFor()).toBeUndefined()
+	})
+})
+
+// ── Seam pins (round-2 plan 4, codex conditions) — pre-extraction, byte-identical
+//    across the refactor commits. They fence the register-immediately spans the
+//    decomposition must not split: D4 outbox-before-record in both arms, trust
+//    write-before-emit, and the ticket `isCurrent()` read fresh at write time. ──
+
+describe("IncomingTransferService — seam pins (D4 order, trust order, fresh isCurrent)", () => {
+	function seedTrusted() {
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+	}
+
+	test("(D4 ORDER, note arm) the outbox row is written BEFORE the record", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		seedTrusted()
+		const outboxSet = vi.spyOn(outbox, "set")
+		const recordSet = vi.spyOn(records, "set")
+		try {
+			await scan(service)
+			expect(outboxSet).toHaveBeenCalledTimes(1)
+			expect(recordSet).toHaveBeenCalledTimes(1)
+			expect(outboxSet.mock.invocationCallOrder[0]).toBeLessThan(recordSet.mock.invocationCallOrder[0])
+		} finally {
+			outboxSet.mockRestore()
+			recordSet.mockRestore()
+		}
+	})
+
+	test("(D4 ORDER, public arm) the outbox row is written BEFORE the record", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedTrusted()
+		state.responses.push(pubPage([pubEvent({ txHash: "0xorder" })]))
+		const outboxSet = vi.spyOn(outbox, "set")
+		const recordSet = vi.spyOn(records, "set")
+		try {
+			await scanPublic(service)
+			expect(outboxSet).toHaveBeenCalledTimes(1)
+			expect(recordSet).toHaveBeenCalledTimes(1)
+			expect(outboxSet.mock.invocationCallOrder[0]).toBeLessThan(recordSet.mock.invocationCallOrder[0])
+		} finally {
+			outboxSet.mockRestore()
+			recordSet.mockRestore()
+		}
+	})
+
+	test("(TRUST ORDER) unknown→pending persists the trust row BEFORE onIncomingTrustChanged fires", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		const seenAtEmit: string[] = []
+		const changed = vi.fn(() => {
+			seenAtEmit.push(trust.get(trustKey("p1", "n1", tokenA.contract))?.state ?? "absent")
+		})
+		service.onIncomingTrustChanged.add(changed)
+		const trustSet = vi.spyOn(trust, "set")
+		try {
+			await scan(service)
+			expect(trustSet).toHaveBeenCalledTimes(1)
+			expect(changed).toHaveBeenCalledTimes(1)
+			expect(trustSet.mock.invocationCallOrder[0]).toBeLessThan(changed.mock.invocationCallOrder[0])
+			expect(seenAtEmit).toEqual(["pending"])
+		} finally {
+			trustSet.mockRestore()
+		}
+	})
+
+	test("(FRESH isCurrent) an anchored terminal-success row displaced while getOutbox awaits is NOT deleted", async () => {
+		// The drain's per-row critical section parks on `await repo.getOutbox`
+		// while HOLDING the serviceLock; the lock's watchdog hands the ticket
+		// over; the revoked CS resumes with a terminal-success anchor and must
+		// re-read `isCurrent()` at the write — a helper that cached the ticket
+		// verdict before the await would delete the row here.
+		vi.useFakeTimers()
+		try {
+			const { reader, state } = makePublicReader()
+			const tokenBalance = makeTokenBalanceStub()
+			const task = makeTaskStub()
+			const { service } = await bootPublic(reader, state, { tokenBalance, task })
+			outbox.set("p1|n1|0xa|1", { dirtyAt: 100, pendingTaskId: "T1" })
+			task.setTask("T1", TaskStatus.Completed, Date.now())
+			let releaseRow!: () => void
+			const parked = new Promise<unknown>((resolve) => {
+				releaseRow = () => resolve({ dirtyAt: 100, pendingTaskId: "T1" })
+			})
+			const getSpy = vi.spyOn(outbox, "get").mockImplementationOnce(() => parked as never)
+			try {
+				const drainP = drain(service) // parks inside getOutbox, serviceLock held
+				await vi.advanceTimersByTimeAsync(0)
+				// Watchdog handoff → the parked CS's ticket is revoked.
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+				releaseRow()
+				await drainP
+			} finally {
+				getSpy.mockRestore()
+			}
+			expect(outboxFor()?.pendingTaskId).toBe("T1") // the revoked CS wrote nothing
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe("IncomingTransferService — public-scan health (episodes, backoff, retry)", () => {
+	const MIN = 60_000
+	const T0 = 50_000 * MIN
+	const KEY = `p1|n1|${tokenA.contract}`
+	type Health = { stalled: boolean; since: number | null }
+	type HealthSurface = {
+		pollPublic: (key: string) => Promise<void>
+		hydrateSchedulers: () => Promise<void>
+		getIncomingSyncHealth: (networkId: string) => Promise<Health>
+		retryIncomingScan: (networkId: string) => Promise<void>
+		onIncomingSyncHealthChanged: { add: (h: (e: { profileId: string; networkId: string }) => void) => void }
+		episodes: { settled: () => Promise<void>; has: (key: string) => boolean }
+	}
+	const surface = (service: unknown) => service as HealthSurface
+	const poll = (service: unknown) => surface(service).pollPublic(`n1|${tokenA.contract}`)
+	const storedEpisodes = async (service: unknown) => {
+		await surface(service).episodes.settled()
+		return (
+			(await new FakeBrowserApi().storage.session.get(SCAN_EPISODES_KEY))[SCAN_EPISODES_KEY] as
+				| { episodes: Record<string, { failures: number; failingSince: number; nextAttemptAt: number }> }
+				| undefined
+		)?.episodes
+	}
+	const seedEpisodes = (episodes: Record<string, unknown>, announced: string[] = []) =>
+		new FakeBrowserApi().storage.session.set({ [SCAN_EPISODES_KEY]: { episodes, announced } })
+	const nodeDown = (reader: PublicEventReader) => {
+		reader.getScanTips = async () => {
+			throw new Error("node down")
+		}
+	}
+	const captureHealthEvents = (service: unknown) => {
+		const events: { profileId: string; networkId: string }[] = []
+		surface(service).onIncomingSyncHealthChanged.add((e) => events.push(e))
+		return events
+	}
+	/** Two failed ticks, the second one past the first backoff gate. Leaves the clock at `T0 + 31 s`. */
+	const failTwice = async (service: unknown) => {
+		await poll(service)
+		vi.setSystemTime(T0 + 31_000)
+		await poll(service)
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(T0)
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("node down for an hour, wallet unlocked → stalled after ten minutes, announced once; recovery clears and announces once", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const events = captureHealthEvents(service)
+		const healthyTips = reader.getScanTips
+		nodeDown(reader)
+
+		await failTwice(service)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+
+		for (let minute = 2; minute <= 60; minute++) {
+			vi.setSystemTime(T0 + minute * MIN)
+			await poll(service)
+			if (minute === 10) expect(events).toEqual([])
+		}
+		expect(events).toEqual([{ profileId: "p1", networkId: "n1" }])
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+
+		reader.getScanTips = healthyTips
+		vi.setSystemTime(T0 + 66 * MIN) // past the 5 min backoff cap
+		await poll(service)
+		await poll(service)
+		expect(events).toHaveLength(2)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("a tick inside the backoff window does not touch the node", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+
+		await poll(service) // failure 1 → gate at T0 + 30 s
+		vi.setSystemTime(T0 + 29_000)
+		await poll(service)
+		expect(tips).toHaveBeenCalledTimes(1)
+
+		vi.setSystemTime(T0 + 30_000)
+		await poll(service)
+		expect(tips).toHaveBeenCalledTimes(2)
+	})
+
+	test("unlock after eight hours, then two failures → NOT stalled: a lock ends every episode", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		nodeDown(reader)
+		await failTwice(service)
+
+		profile.getActiveProfile.mockResolvedValue(null)
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(await storedEpisodes(service)).toBeUndefined()
+
+		vi.setSystemTime(T0 + 8 * 60 * MIN)
+		profile.getActiveProfile.mockResolvedValue({ id: "p1" })
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises() // the rebuilt scheduler's immediate poll is failure 1
+		vi.setSystemTime(T0 + 8 * 60 * MIN + 31_000)
+		await poll(service)
+
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 2, failingSince: T0 + 8 * 60 * MIN } })
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+	})
+
+	test("a worker restart mid-episode keeps failingSince, hydrated before the first poll", async () => {
+		const first = makePublicReader()
+		const { service } = await bootPublic(first.reader, first.state)
+		nodeDown(first.reader)
+		await failTwice(service)
+		await surface(service).episodes.settled()
+
+		vi.setSystemTime(T0 + 11 * MIN)
+		const second = makePublicReader()
+		nodeDown(second.reader)
+		const restarted = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: second.reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+
+		expect(await surface(restarted.service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+		expect(await storedEpisodes(restarted.service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("a restart during an active backoff keeps the gate: the boot poll does not touch the node", async () => {
+		const gate = T0 + 100_000
+		await seedEpisodes({ [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } })
+		const { reader } = makePublicReader()
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		const { service } = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+
+		expect(tips).not.toHaveBeenCalled()
+		expect(await storedEpisodes(service)).toEqual({ [KEY]: { failures: 3, failingSince: T0 - 5 * MIN, nextAttemptAt: gate } })
+	})
+
+	test("a same-profile scheduler rebuild keeps the episode; a profile switch ends it", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		nodeDown(reader)
+		await failTwice(service)
+
+		await surface(service).hydrateSchedulers()
+		await flushPromises()
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failingSince: T0 } })
+
+		profile.getActiveProfile.mockResolvedValue({ id: "p2" })
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+	})
+
+	test("an outcome that lands after a lock cannot recreate the episode the lock ended", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const { service } = await bootPublic(reader, state, { profile })
+		let failTips: (error: Error) => void = () => {}
+		reader.getScanTips = () =>
+			new Promise((_resolve, reject) => {
+				failTips = reject
+			})
+
+		const inFlight = poll(service)
+		await flushPromises()
+		profile.getActiveProfile.mockResolvedValue(null)
+		await profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+		failTips(new Error("node down"))
+		await inFlight
+
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test.each([
+		["clearProfile", (service: IncomingTransferService) => service.clearProfile("p1")],
+		["clearChain", (service: IncomingTransferService) => service.clearChain("p1", "n1")],
+	])("%s ends the scope's episodes even though the token set still lists the contract", async (_label, clear) => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		tips.mockClear()
+		await clear(service)
+		await flushPromises()
+
+		// The rebuild's immediate poll ran (the old gate is gone) and opened a FRESH one-failure episode.
+		expect(tips).toHaveBeenCalledTimes(1)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 1, failingSince: T0 + 31_000 } })
+	})
+
+	test("deleting the token ends its episode", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA])
+		const { service } = await bootPublic(reader, state, { token })
+		nodeDown(reader)
+		await failTwice(service)
+
+		token.getTokensRaw.mockResolvedValue([])
+		await token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" } as never)
+		await flushPromises()
+
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("Retry runs the backed-off scan now and keeps the streak", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service) // gate now at T0 + 31 s + 60 s
+
+		await surface(service).retryIncomingScan("n1")
+
+		expect(tips).toHaveBeenCalledTimes(3)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("Retry and the health read ignore a network that is not the active profile's, and a non-string id", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		await surface(service).retryIncomingScan("n2")
+		await surface(service).retryIncomingScan(7 as never)
+
+		expect(tips).toHaveBeenCalledTimes(2)
+		expect(await surface(service).getIncomingSyncHealth(7 as never)).toEqual({ stalled: false, since: null })
+	})
+
+	test("a Retry that lands between a profile switch's epoch bump and its commit scans nothing", async () => {
+		const { reader, state } = makePublicReader()
+		const profile = makeProfileStub()
+		const token = makeTokenStub([tokenA])
+		const { service } = await bootPublic(reader, state, { profile, token })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+		tips.mockClear()
+
+		// The rebuild parks on its descriptors: epoch already bumped, p1's targets still installed.
+		let releaseTokens: () => void = () => {}
+		token.getTokensRaw.mockImplementationOnce(() => new Promise((resolve) => (releaseTokens = () => resolve([]))))
+		profile.getActiveProfile.mockResolvedValueOnce({ id: "p2" })
+		const switching = profile.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		await surface(service).retryIncomingScan("n1") // still reads p1: it captured its profile before the switch
+		expect(tips).not.toHaveBeenCalled()
+
+		releaseTokens()
+		await switching
+		await flushPromises()
+		expect(surface(service).episodes.has(KEY)).toBe(false)
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("a Retry during a parked token teardown cannot scan the token being deleted; nothing of it reappears", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA])
+		const account = publicAccountStub()
+		const { service } = await bootPublic(reader, state, { token, account })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+		tips.mockClear()
+
+		// The teardown parks inside the lock, after its epoch bump, with the doomed target still installed.
+		let releaseTeardown: () => void = () => {}
+		account.getAccounts.mockImplementationOnce(() => new Promise((resolve) => (releaseTeardown = () => resolve([]))))
+		token.getTokensRaw.mockResolvedValue([])
+		const deleting = token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" } as never)
+		await flushPromises()
+
+		await surface(service).retryIncomingScan("n1")
+		expect(tips).not.toHaveBeenCalled()
+
+		releaseTeardown()
+		await deleting
+		await flushPromises()
+		expect(cursorFor()).toBeUndefined()
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("deleting one token rebuilds the schedulers: the tokens that stay keep polling, and Retry reaches them", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA, tokenB])
+		const { service } = await bootPublic(reader, state, { token })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+
+		token.getTokensRaw.mockResolvedValue([tokenA])
+		await token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+		await flushPromises()
+		tips.mockClear()
+		await surface(service).retryIncomingScan("n1")
+
+		expect(tips).toHaveBeenCalledTimes(1)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("a health read is ONE snapshot: clock reads that straddle the threshold cannot split the answer from the baseline", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const events = captureHealthEvents(service)
+		nodeDown(reader)
+		await failTwice(service)
+
+		// First read lands exactly on the threshold (not yet stalled); any later read would be past it.
+		const now = vi
+			.spyOn(Date, "now")
+			.mockReturnValueOnce(T0 + 10 * MIN)
+			.mockReturnValue(T0 + 10 * MIN + 1)
+		const first = await surface(service).getIncomingSyncHealth("n1")
+		now.mockRestore()
+
+		expect(first).toEqual({ stalled: false, since: null })
+		expect(events).toEqual([])
+
+		vi.setSystemTime(T0 + 11 * MIN)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+		expect(events).toHaveLength(1)
+	})
+
+	test("a stall a reader saw while the recovering scan was still running is taken back with an event", async () => {
+		await seedEpisodes({ [KEY]: { failures: 3, failingSince: T0 - 25 * MIN, nextAttemptAt: 0 } })
+		const { reader } = makePublicReader()
+		const healthyTips = reader.getScanTips
+		let releaseTips: () => void = () => {}
+		reader.getScanTips = async (networkId) => {
+			await new Promise<void>((resolve) => {
+				releaseTips = resolve
+			})
+			return healthyTips(networkId)
+		}
+		const { service } = await bootService(
+			{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+			{ keepStorage: true },
+		)
+		await flushPromises()
+		const events = captureHealthEvents(service)
+
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 - 25 * MIN })
+		releaseTips()
+		await flushPromises()
+
+		expect(events).toEqual([{ profileId: "p1", networkId: "n1" }])
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: false, since: null })
+	})
+
+	test("one stall warns once, however many times the worker restarts during it", async () => {
+		const warn = vi.spyOn(IncomingTransferService.prototype as unknown as { logWarn: (message: string) => void }, "logWarn")
+		await seedEpisodes({ [KEY]: { failures: 6, failingSince: T0 - 25 * MIN, nextAttemptAt: T0 + 4 * MIN } })
+
+		for (let wake = 0; wake < 3; wake++) {
+			vi.setSystemTime(T0 + wake * 30_000)
+			const { reader } = makePublicReader()
+			const { service } = await bootService(
+				{ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader },
+				{ keepStorage: true },
+			)
+			await flushPromises()
+			await surface(service).episodes.settled()
+		}
+
+		expect(warn.mock.calls.filter(([message]) => message === "incoming public scan stalled")).toHaveLength(1)
+		warn.mockRestore()
+	})
+
+	test("an ineligible (non-standard) token is never counted", async () => {
+		const { reader, state } = makePublicReader({ classStatus: "non-standard" })
+		const { service } = await bootPublic(reader, state)
+		for (let minute = 0; minute <= 30; minute += 5) {
+			vi.setSystemTime(T0 + minute * MIN)
+			await poll(service)
+		}
+		expect(await storedEpisodes(service)).toBeUndefined()
 	})
 })

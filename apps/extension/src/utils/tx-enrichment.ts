@@ -4,6 +4,7 @@ import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
 import { FEE_METHODS, pickPrimaryIndex, pickPrimaryMethod, userMethodsOf } from "./primary-method"
+import { transferLabel } from "./token-transfer-vocabulary"
 
 export { FEE_METHODS, pickPrimaryMethod }
 
@@ -13,17 +14,8 @@ type TxCall = {
 	args?: unknown[]
 }
 
+/** Labels for the non-transfer names; transfer labels come from the descriptor-derived vocabulary. */
 const METHOD_LABELS: Record<string, string> = {
-	transfer: "Transfer (private)",
-	transfer_in_private: "Transfer (private)",
-	transfer_in_public: "Transfer (public)",
-	transfer_to_private: "Transfer to private",
-	transfer_to_public: "Transfer to public",
-	// Wonderland standard function names
-	transfer_private_to_private: "Transfer (private)",
-	transfer_public_to_public: "Transfer (public)",
-	transfer_private_to_public: "Transfer (private → public)",
-	transfer_public_to_private: "Transfer (public → private)",
 	mint_to_public: "Mint (public)",
 	mint_to_private: "Mint (private)",
 	shield: "Shield",
@@ -41,9 +33,10 @@ const FEE_JUICE_L2_ADDRESS = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).to
  *  trust surface (it would misdescribe what the user is authorizing). */
 const FEE_JUICE_ONLY_LABELS = new Set(["claim", "claim_and_end_setup"])
 
+const curatedLabel = (method: string): string | null => transferLabel(method) ?? METHOD_LABELS[method] ?? null
+
 /**
- * Look up the wallet-curated friendly label for `method` from
- * `METHOD_LABELS`. Returns `null` for anything not in the allowlist —
+ * Look up the wallet-curated friendly label for `method`. Returns `null` for anything not in the allowlist —
  * call sites that need a fallback (e.g. the journal title) use
  * `humanizeMethodName` instead, which title-cases unknowns. The
  * capability popup uses `getMethodLabel` because tautological
@@ -56,19 +49,20 @@ export function getMethodLabel(method: string, contract?: string): string | null
 	if (FEE_JUICE_ONLY_LABELS.has(method) && contract !== undefined && contract.toLowerCase() !== FEE_JUICE_L2_ADDRESS) {
 		return null
 	}
-	return METHOD_LABELS[method] ?? null
+	return curatedLabel(method)
 }
 
 /**
  * Maps a method name/selector to a human-readable label.
- * - Known Aztec methods get friendly labels
+ * - Known Aztec methods get friendly labels; given `contract`, a label that belongs to one protocol
+ *   contract (the fee-juice `claim`) applies only there
  * - Hex selectors get truncated
  * - Generic snake_case gets title-cased
  */
-export function humanizeMethodName(method: string): string {
+export function humanizeMethodName(method: string, contract?: string): string {
 	if (!method) return "Unknown"
 
-	const label = METHOD_LABELS[method]
+	const label = getMethodLabel(method, contract)
 	if (label) return label
 
 	// Hex selector — truncate

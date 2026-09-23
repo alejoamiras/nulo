@@ -113,10 +113,12 @@ test.skipIf(!hasConfig)(
 
 		await step("hold proof gate", () => holdProofGate(page))
 		// Deliberately not awaited: it cannot finish until the gate is released.
-		const sending = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: other }).catch((err) => {
-			console.log(`[guard-e2e] sendTransfer rejected: ${(err as Error).message}`)
-			throw err
-		})
+		const sending = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: other, expect: "send" }).catch(
+			(err) => {
+				console.log(`[guard-e2e] sendTransfer rejected: ${(err as Error).message}`)
+				throw err
+			},
+		)
 		try {
 			await step("wait for an in-flight send", () => waitForInFlightSend(page))
 

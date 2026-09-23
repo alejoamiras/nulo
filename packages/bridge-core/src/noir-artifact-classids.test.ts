@@ -25,17 +25,11 @@ const CONTRACTS = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
 const PINS = [
 	{
-		name: "TokenMinterProxy",
-		path: join(CONTRACTS, "token_minter_proxy", "target", "token_minter_proxy-TokenMinterProxy.json"),
-		classId: "0x07689a539bf0a60a252f9b88406d5a4b129f192f7da37ab181c7a2be6910524a",
-	},
-	{
-		// The recipient-committed TokenBridge (claim_private takes claim_salt + derives the consumption
-		// secret in-circuit) — a DIFFERENT class id from dev's bearer bridge. Regenerated via compile.sh
-		// on the pinned 5.0.1 toolchain; keystone crypto vectors re-validated on 5.0.1 (unchanged).
-		name: "TokenBridge",
-		path: join(CONTRACTS, "token_bridge", "target", "token_bridge_contract-TokenBridge.json"),
-		classId: "0x2cb5c6341bbae9bb0e78b64cfdd724cb493cc35dca46b122280fdf223b3d8713",
+		// The any-ERC-20 hub. Source parity with this artifact is checked by
+		// `contracts/bridge/aztec/scripts/compile.sh --check` (a rebuild must derive this id).
+		name: "TokenBridgeHub",
+		path: join(CONTRACTS, "token_bridge_hub", "target", "token_bridge_hub_contract-TokenBridgeHub.json"),
+		classId: "0x08e8238e48de3370cb952f7689d8697c56d6978e793b7ffc6587ecc768610617",
 	},
 ] as const
 
@@ -48,7 +42,7 @@ describe("committed bridge Noir artifacts — class-id + digest tripwire (5.0.1)
 		})
 	}
 
-	it("both artifacts self-report aztec_version 5.0.1", () => {
+	it("every artifact self-reports aztec_version 5.0.1", () => {
 		for (const pin of PINS) {
 			const raw = JSON.parse(readFileSync(pin.path, "utf8")) as { aztecVersion?: string; aztec_version?: string }
 			expect(raw.aztecVersion ?? raw.aztec_version).toBe("5.0.1")
@@ -62,7 +56,7 @@ describe("committed bridge Noir artifacts — class-id + digest tripwire (5.0.1)
  * integrity, and `descriptors-real-artifact.test.ts` only checks ABI shape (a
  * bytecode-tampered artifact retaining its ABI passes). Pinning the DERIVED class ids
  * of the runtime-loaded Token + Dripper artifacts binds their on-chain IDENTITY — the
- * wallet, faucet, and bridge all register instances from these exact bytes.
+ * wallet, tools, and bridge all register instances from these exact bytes.
  */
 describe("installed aztec-standards Token/Dripper — class-id tripwire (5.0.1)", () => {
 	const STANDARDS = [

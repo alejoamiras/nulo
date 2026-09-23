@@ -14,7 +14,7 @@ describe("undefined-var guard (design self-scan)", () => {
 	test("classifies owned vs local namespaces", () => {
 		expect(isOwnedToken("--nulo-accent")).toBe(true)
 		expect(isOwnedToken("--txt-primary")).toBe(true)
-		expect(isOwnedToken("--nulo-bg")).toBe(true) // a known faucet ghost — owned namespace, undeclared
+		expect(isOwnedToken("--nulo-bg")).toBe(true) // a known tools ghost — owned namespace, undeclared
 		expect(isOwnedToken("--red")).toBe(true)
 		expect(isOwnedToken("--local-spacing")).toBe(false)
 		expect(isOwnedToken("--my-component-x")).toBe(false)

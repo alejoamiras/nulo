@@ -1,11 +1,11 @@
 # @nulo/wallet-sdk-schema-patch
 
 Single source of truth for the Nulo-custom extension of `@aztec/wallet-sdk`'s
-`WalletSchema`. Adds three methods that upstream doesn't ship — `registerToken`,
-`isTokenRegistered`, `grantPublicAuthwit` — so the dApp-side `ExtensionWallet`
+`WalletSchema`. Adds four methods that upstream doesn't ship — `registerToken`,
+`isTokenRegistered`, `grantPublicAuthwit`, `getWalletFeatures` — so the dApp-side `ExtensionWallet`
 proxy can route them.
 
-Private, extension-internal. Consumed by the extension, faucet, and playground.
+Private, extension-internal. Consumed by the extension, tools, and playground.
 It deliberately is **not** an export of `@nulo/wallet-bridge`: wallet-bridge is
 extension-internal, and exposing it to the dApp-facing apps would leak its
 dispatcher/protocol surface to third-party dApps. A dedicated private package

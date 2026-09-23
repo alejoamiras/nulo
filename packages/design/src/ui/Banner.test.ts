@@ -48,6 +48,17 @@ describe("Banner", () => {
 		expect(fired).toBe(1)
 	})
 
+	test("action.testId lands on the button as data-testid, in both directions", () => {
+		const action = { name: "Go", callback: () => {}, testId: "banner-go" }
+		expect(mountBanner({ action }).find('button[data-testid="banner-go"]').exists()).toBe(true)
+		expect(mountBanner({ action, direction: "vertical" }).find('button[data-testid="banner-go"]').exists()).toBe(true)
+		expect(
+			mountBanner({ action: { name: "Go", callback: () => {} } })
+				.find("button")
+				.attributes("data-testid"),
+		).toBeUndefined()
+	})
+
 	test("no action prop → no button rendered", () => {
 		expect(mountBanner().find("button").exists()).toBe(false)
 	})

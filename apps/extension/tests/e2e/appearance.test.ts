@@ -29,19 +29,23 @@ test("animations toggle persists across navigation", async ({ registeredExtensio
 	await navigateToSettings(page, "appearance")
 	await page.waitForSelector('[data-testid="animations-toggle"]', { visible: true, timeout: 5_000 })
 
-	// Read initial state by class
-	const before = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="animations-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
+	// `data-toggle-active` reflects the Toggle's modelValue directly — a stable
+	// literal, unlike the CSS-module-mangled `active` class. The flip is gated
+	// (click → ConfigService RPC → SW broadcast → model ref → re-render is a
+	// multi-hop chain a fixed sleep cannot honestly bound).
+	const toggleState = () =>
+		page.evaluate(() => document.querySelector('[data-testid="animations-toggle"]')?.getAttribute("data-toggle-active"))
+	const before = await toggleState()
+	expect(before === "true" || before === "false").toBe(true)
 
-	// Toggle
 	await clickByTestId(page, "animations-toggle")
-	await new Promise((r) => setTimeout(r, 150))
-	const after = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="animations-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
+	const want = before === "true" ? "false" : "true"
+	await page.waitForFunction(
+		(w: string) => document.querySelector('[data-testid="animations-toggle"]')?.getAttribute("data-toggle-active") === w,
+		{ timeout: 5_000, polling: 50 },
+		want,
+	)
+	const after = await toggleState()
 	expect(after).not.toBe(before)
 
 	// Navigate away and back. Use `/about` — a real sibling settings page.
@@ -50,13 +54,18 @@ test("animations toggle persists across navigation", async ({ registeredExtensio
 	// timed out at 5s. about.vue exists, has no auto-redirect, and is
 	// already exercised by `navigation.test.ts`.)
 	await navigateByHash(page, "#/popup/settings/about")
+	// The hash wait proves nothing about RENDERING — until the appearance
+	// component actually unmounts, the later waitForSelector could satisfy
+	// itself on the same mounted toggle and the "persisted" read would prove
+	// nothing. Gate on the toggle leaving the DOM first.
+	await page.waitForFunction(() => !document.querySelector('[data-testid="animations-toggle"]'), { timeout: 5_000, polling: 100 })
 	await navigateByHash(page, "#/popup/settings/appearance")
 	await page.waitForSelector('[data-testid="animations-toggle"]', { visible: true, timeout: 5_000 })
 
-	const persisted = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="animations-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
+	// The remount's `getProps` RPC resolves BEFORE the toggle renders (the
+	// block is v-if'd on !isLoading), so a rendered toggle carries the settled
+	// persisted value — no extra wait belongs here.
+	const persisted = await toggleState()
 	expect(persisted).toBe(after)
 
 	expect(registeredExtension.consoleErrors).toEqual([])

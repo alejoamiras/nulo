@@ -41,6 +41,7 @@ import { usePrices } from "@/composables/usePrices"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyReceivedValue } from "./received-copy"
 import { trimAddress } from "@/utils/string"
 import { receivedLabel, resolveFromDisplay, resolveReceivedType } from "@/utils/received-display"
 import { getTransactionExplorerUrl, BLOCK_EXPLORERS } from "@/wallet/constants/explorers"
@@ -137,12 +138,7 @@ const formattedFeeUsd = computed(() => (feeJuiceRaw.value ? feeToUsd(BigInt(feeJ
 
 /** Handlers */
 const copy = async (value, label) => {
-	try {
-		await navigator.clipboard.writeText(value)
-		openToast({ label: `${label} copied`, icon: "copy" }, 2_000)
-	} catch {
-		openToast({ label: "Copy failed", icon: "alert" }, 2_000)
-	}
+	await copyReceivedValue(value, label, openToast)
 }
 
 /** Lifecycle */
@@ -356,14 +352,11 @@ onBeforeUnmount(() => {
 }
 
 .hero_meta {
-	flex-wrap: wrap;
-	row-gap: 4px;
+	composes: hero_meta from "../detail-page.module.css";
 }
 
 .tx_time {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
+	composes: tx_time from "../detail-page.module.css";
 }
 
 .meta_sep {
@@ -401,20 +394,15 @@ onBeforeUnmount(() => {
 }
 
 .amount_value {
-	font-family: var(--font-mono);
-	font-size: 24px;
-	font-weight: 500;
-	color: var(--txt-primary);
+	composes: amount_value from "../detail-page.module.css";
 }
 
 .amount_symbol {
-	color: var(--nulo-secondary);
+	composes: amount_symbol from "../detail-page.module.css";
 }
 
 .amount_fiat {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
+	composes: amount_fiat from "../detail-page.module.css";
 }
 
 .transfer_type_chip {
@@ -466,18 +454,11 @@ onBeforeUnmount(() => {
 }
 
 .details_box {
-	padding: 12px;
-	border: 1px solid var(--nulo-border);
-	background: transparent;
+	composes: details_box from "../detail-page.module.css";
 }
 
 .detail_key {
-	font-family: var(--font-headline);
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: detail_key from "../detail-page.module.css";
 }
 
 .detail_key_note {
@@ -487,10 +468,7 @@ onBeforeUnmount(() => {
 }
 
 .detail_value_mono {
-	font-family: var(--font-mono);
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--txt-primary);
+	composes: detail_value_mono from "../detail-page.module.css";
 }
 
 .detail_value_aux {
@@ -540,19 +518,10 @@ onBeforeUnmount(() => {
 }
 
 .empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-	margin-top: 48px;
+	composes: empty_headline from "../detail-page.module.css";
 }
 
 .empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-	text-align: center;
+	composes: empty_sub from "../detail-page.module.css";
 }
 </style>

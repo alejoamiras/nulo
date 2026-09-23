@@ -8,11 +8,11 @@
  *   (b) derive a passkey-wallet master secret from WebAuthn PRF +
  *       credentialId (`PasskeyCredential`),
  *   (c) derive the per-account signing key from the account seed
- *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v1 in
+ *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v2 in
  *       `@nulo/wallet-crypto`, the signing-key-root model adopted at
- *       Aztec 5.0.0; upstream's `deriveSigningKey` was removed and its
- *       construction vendored verbatim, reference-vectored in
- *       `implementations-plan/aztec-5.0.0-stable/reference/`).
+ *       Aztec 5.0.0; upstream's removed `deriveSigningKey` construction
+ *       under the dedicated Nulo separator, reference-vectored in
+ *       `implementations-plan/key-model-v2/reference/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
  * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
@@ -22,7 +22,7 @@
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
  * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
- * IVSK_M domain separator). When you bump `@aztec/foundation`,
+ * NULO_SIGNING_ROOT_SEP domain separator). When you bump `@aztec/foundation`,
  * `@aztec/stdlib`, or `@aztec/accounts`:
  *
  *   1. Run `bun run test`.
@@ -73,7 +73,7 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, derivePxeStoreKey } from "@nulo/wallet-crypto"
+import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, asImportedKeysDek, asMasterSecretBytes, derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { AccountType } from "@/wallet/services/account/spec"
 
 /** Reusable hex helper — keeps fixture constants readable. */
@@ -138,19 +138,25 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// ── V3: passkey master-secret derivation ─────────────────────────
 	//
 	// Locks: HKDF-SHA256, salt = SHA-256(PASSKEY_KDF_LABEL || credentialId),
-	// info = PASSKEY_MASTER_LABEL, 256 output bits reduced through
-	// Fr.fromBufferReduce (big-endian, mod BN254 Fr modulus).
+	// info = PASSKEY_MASTER_LABEL, 512 output bits (the low-skew reduce form)
+	// reduced through Fr.fromBufferReduce (big-endian, mod BN254 Fr modulus).
 	// AZTEC-SENSITIVE: depends on Fr.fromBufferReduce semantics.
 	// Break it: change PASSKEY_KDF_LABEL — fails.
 	// Input PRF is 32 clean bytes base64-encoded; credentialId is a
 	// short base64 identifier mimicking a real WebAuthn credential.
+	// The expected value is REFERENCE-GENERATED, not captured from this
+	// implementation: implementations-plan/key-model-v2-hardening/reference/
+	// passkey-master-vector.ts recomputes it via node:crypto's HKDF (a
+	// different implementation than the wallet's WebCrypto), so a
+	// consistently mis-wired wallet HKDF cannot self-consistently pass.
+	// Never re-pin from deriveMasterSecret's own output.
 	const V3_PRF_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 	const V3_CREDENTIAL_ID_B64 = "dGVzdC1jcmVkZW50aWFsLWlk"
 
-	test("V3 — PasskeyCredential master secret matches fixture", async () => {
+	test("V3 — PasskeyCredential master secret matches the reference vector", async () => {
 		const credential = await PasskeyCredential.create({ id: V3_CREDENTIAL_ID_B64, prf: V3_PRF_B64 })
 		const master = await credential.deriveMasterSecret()
-		expect(toHex(master)).toBe("2db78e1a82bbf002bd36281f079f797fe194ee2b04249df6e44efb30e879919a")
+		expect(toHex(master)).toBe("23c252cf7215344c6fb3b35da3cf7be9ee99f92cae16ee1c235e26f5c4843e79")
 	})
 
 	// ── V6: getHashHex (backup checksum) ─────────────────────────────
@@ -164,23 +170,22 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 		expect(hex).toBe("f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7")
 	})
 
-	// ── V7a: deriveSigningKeyFromSeed(seed) — NULO-ACCOUNT-KDF v1 ────
+	// ── V7a: deriveSigningKeyFromSeed(seed) — NULO-ACCOUNT-KDF v2 ────
 	//
 	// The signing key is the account's OWNERSHIP ROOT under the 5.0.0
 	// signing-key-root model (the privacy secret derives one-way from
 	// it). The construction is upstream's removed `deriveSigningKey`
-	// verbatim — `sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])`
-	// — vendored into `@nulo/wallet-crypto` and REFERENCE-VECTORED in
-	// `implementations-plan/aztec-5.0.0-stable/reference/` (the fixture
-	// value below is regime A/B agreed; it equals the pre-5.0.0 V7a
-	// value because the construction carried over byte-identically).
-	// If this fails, the signing key of every wallet on disk just
-	// changed: stop, never re-pin from this implementation.
-	// AZTEC-SENSITIVE.
+	// under the dedicated Nulo separator —
+	// `sha512ToGrumpkinScalar([seed, NULO_SIGNING_ROOT_SEP])` — and is
+	// REFERENCE-VECTORED in `implementations-plan/key-model-v2/reference/`
+	// (published-5.0.1-tarball provenance; the v1 predecessor vectors
+	// stay archived under `aztec-5.0.0-stable/reference/`). If this
+	// fails, the signing key of every wallet on disk just changed:
+	// stop, never re-pin from this implementation. AZTEC-SENSITIVE.
 	test("V7a — deriveSigningKeyFromSeed(fixedSeed) matches fixture", () => {
 		const seed = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000042")
 		const signingKey = deriveSigningKeyFromSeed(seed)
-		expect(signingKey.toString()).toBe("0x14a31cb4d33a144675e70634830292153f78e8318e51f26a2f212783eb0a3cbc")
+		expect(signingKey.toString()).toBe("0x2aabed87d5340c673eae6dc5faaa57382b8d773fa38247a80bdafbd5277729e3")
 	})
 
 	// ── V8: PASSKEY_PRF_LABEL spec constant ──────────────────────────
@@ -205,25 +210,35 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 		expect(AccountType.Nulo_v1).toBe(0)
 	})
 
-	// ── V11: derivePxeStoreKey(master, profileId) — NULO-PXE-STORE-KDF v1 ──
+	// ── V11: derivePxeStoreKey(master, dek, profileId) — NULO-PXE-STORE-KDF v2 ──
 	//
 	// The per-profile ChaCha20 key for the encrypted SQLite-OPFS PXE stores
-	// (HKDF-SHA256, label "nulo:pxe-store:v1", salt bound to the profileId).
-	// A Nulo-novel construction, so this is a DRIFT PIN (like V8): it locks
-	// what we ship — changing the label, salt shape, or HKDF params orphans
-	// every encrypted PXE store on disk (state resets, not data loss: the
-	// PXE re-syncs — but never change it casually).
-	test("V11 — derivePxeStoreKey(fixedMaster, fixture profileId) matches fixture + is not the master", async () => {
-		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v1")
-		const master = new Uint8Array(32)
+	// (HKDF-SHA256 over master ‖ dek, label "nulo:pxe-store:v2", salt bound to
+	// the profileId). A Nulo-novel construction, so this is a DRIFT PIN (like
+	// V8): it locks what we ship — changing the label, the IKM shape, the salt
+	// shape, or the HKDF params orphans every encrypted PXE store on disk
+	// (state resets, not data loss: the PXE re-syncs — but never change it
+	// casually). v2 mixed the DEK in so a same-phrase sibling (same master)
+	// cannot derive a victim profile's store key.
+	test("V11 — derivePxeStoreKey(fixedMaster, fixedDek, fixture profileId) matches fixture + is bound to both secrets", async () => {
+		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v2")
+		const master = asMasterSecretBytes(new Uint8Array(32) as Uint8Array<ArrayBuffer>)
 		master[31] = 0x42
-		const key = await derivePxeStoreKey(master, "profile-fixture-1")
+		const dek = asImportedKeysDek(new Uint8Array(32).fill(0x5a) as Uint8Array<ArrayBuffer>)
+		const key = await derivePxeStoreKey(master, dek, "profile-fixture-1")
 		expect(key).toHaveLength(32)
-		expect(toHex(key)).toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
+		expect(toHex(key)).toBe("d8061cc5a312e5c1a623385dab782405f2e1f1edaeef884cbd380944edca9ff7")
+		// The retired master-only v1 value for the same master + profile must not come back.
+		expect(toHex(key)).not.toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
 		expect(toHex(key)).not.toBe(toHex(master))
-		// Distinct profiles derive distinct keys from the same master.
-		const other = await derivePxeStoreKey(master, "profile-fixture-2")
+		// Distinct profiles AND distinct DEKs derive distinct keys from the same master.
+		const other = await derivePxeStoreKey(master, dek, "profile-fixture-2")
 		expect(toHex(other)).not.toBe(toHex(key))
+		const otherDek = asImportedKeysDek(new Uint8Array(32).fill(0x5b) as Uint8Array<ArrayBuffer>)
+		expect(toHex(await derivePxeStoreKey(master, otherDek, "profile-fixture-1"))).not.toBe(toHex(key))
+		// A short DEK is refused before any derivation (the 32+32 IKM split is the contract).
+		const shortDek = asImportedKeysDek(new Uint8Array(31).fill(0x5a) as Uint8Array<ArrayBuffer>)
+		await expect(derivePxeStoreKey(master, shortDek, "profile-fixture-1")).rejects.toThrow(/32-byte/)
 	})
 
 	// ── P1: HKDF-SHA256 RFC 5869 Appendix A.1 ────────────────────────

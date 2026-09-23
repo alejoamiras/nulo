@@ -9,16 +9,21 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
-import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useNetworkActivation } from "@/composables/useNetworkActivation"
 const { openToast } = useToast()
+const { activate: activateNetwork } = useNetworkActivation({
+	persist: (id) => managers.network.setActiveNetwork(id),
+	read: () => managers.network.getActiveNetwork(),
+})
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -48,13 +53,6 @@ const handleEditNetworkName = () => {
 const handleSetActive = async () => {
 	if (!network.value) return
 	if (isActive.value) return
-	// The network is part of the scope a send builds against, and switching it
-	// reloads accounts and reselects one — so it moves the signing scope just
-	// like an account switch. Same guard, same escape hatch.
-	if (appStore.hasInFlightSend) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
-		return
-	}
 	// Snapshot before the await: `network` is computed from `route.params.id`,
 	// and if the caller (or another reactive consumer) navigates while the
 	// RPC is in flight, `network.value` becomes `undefined` after the await.
@@ -62,29 +60,10 @@ const handleSetActive = async () => {
 	// `undefined`, leaving the popup with no active network until the next
 	// reactive trigger. See implementations-plan/e2e-full-network-recovery/findings.md.
 	const target = network.value
-	// Guard first, persist second: the guard admits (and moves the in-memory
-	// scope) before the service write, so a refusal leaves nothing moved — the
-	// reverse order let the durable pointer escape a refused switch.
-	const result = await activateNetworkGuarded(
-		appStore,
-		(id) => managers.network.setActiveNetwork(id),
-		() => managers.network.getActiveNetwork(),
-		target,
-	)
-	if (result === "blocked") {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
-		return
-	}
-	if (result === "unconfirmed") {
-		openToast(
-			{ label: "Couldn't confirm the network switch — reopen the popup to verify", icon: "warning", color: "red" },
-			TOAST_DURATION.LONG,
-		)
-		return
-	}
-	// "stale" — the profile changed while this activation waited; the view that
-	// asked for it is gone, so there is nobody to toast at.
-	if (result === "stale") return
+	// Refusals and the unconfirmed outcome toast inside the composable; "stale"
+	// means the profile changed while this waited and nobody is left to toast at.
+	const result = await activateNetwork(target)
+	if (result !== "activated") return
 	openToast({ label: "Active network updated", icon: "check-circle" })
 }
 
@@ -127,7 +106,7 @@ const handleDeleteEndpoint = (endpoint) => {
 			await refreshNetworks()
 			openToast({ label: "Endpoint deleted" })
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err)
+			const msg = errorMessageFromUnknown(err)
 			if (msg.includes("PRIMARY_ENDPOINT")) {
 				openToast({ label: "Make another endpoint primary first.", icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (msg.includes("LAST_ENDPOINT")) {
@@ -154,7 +133,7 @@ const handleDeleteNetwork = () => {
 			openToast({ label: "Chain deleted" })
 			router.replace("/popup/settings/networks")
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err)
+			const msg = errorMessageFromUnknown(err)
 			if (msg.startsWith("ACTIVE_NETWORK")) {
 				openToast({ label: "Switch to another chain before deleting this one.", icon: "warning" }, TOAST_DURATION.LONG)
 			} else {
@@ -172,139 +151,124 @@ watch(network, (n) => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper" v-if="network">
-		<SubPageHeader :title="network.name" :backTo="'/popup/settings/networks'" />
-
-		<Flex direction="column" gap="24" :class="$style.content">
-			<!-- Network info -->
-			<Flex direction="column" gap="12">
-				<SectionLabel label="Chain" />
-				<ItemsContainer>
-					<SettingItem
-						size="small"
-						:title="isActive ? 'Active network' : 'Set as active network'"
-						:description="isActive ? 'Currently in use' : 'Switch the wallet to this chain'"
-						:icon="isActive ? 'check-circle' : 'circle'"
-						:iconFillColor="isActive ? 'primary' : 'tertiary'"
-						iconBgColor="transparent"
-						:disabled="isActive"
-						@click="handleSetActive"
-						data-testid="network-set-active"
-					/>
-					<SettingItem
-						size="small"
-						title="Name"
-						:description="network.name"
-						icon="edit"
-						iconFillColor="tertiary"
-						iconBgColor="transparent"
-						@click="handleEditNetworkName"
-						data-testid="network-detail-rename"
-					/>
-					<SettingItem
-						size="small"
-						title="Chain ID"
-						:description="String(network.chainId)"
-						icon="info"
-						iconFillColor="tertiary"
-						iconBgColor="transparent"
-						raw
-					/>
-				</ItemsContainer>
-			</Flex>
-
-			<!-- Endpoints -->
-			<Flex direction="column" gap="12">
-				<SectionLabel label="Endpoints" :count="network.endpoints.length" />
-				<ItemsContainer>
-					<SettingItem
-						v-for="endpoint in network.endpoints"
-						:key="endpoint.id"
-						:title="endpoint.label || endpoint.rpcUrl"
-						:description="endpoint.label ? endpoint.rpcUrl : undefined"
-						:icon="network.primaryEndpointId === endpoint.id ? 'check-circle' : 'circle'"
-						:iconFillColor="network.primaryEndpointId === endpoint.id ? 'primary' : 'tertiary'"
-						iconBgColor="transparent"
-						@click="handleSetPrimary(endpoint)"
-						data-testid="endpoint-row"
-						:data-endpoint-id="endpoint.id"
-					>
-						<template #right>
-							<Flex align="center" gap="8">
-								<Tooltip position="end" delay="350">
-									<Icon
-										@click.stop="handleEditEndpoint(endpoint)"
-										name="edit"
-										size="14"
-										color="tertiary"
-										:class="$style.icon_btn"
-										data-testid="endpoint-edit-btn"
-									/>
-									<template #content>Edit endpoint</template>
-								</Tooltip>
-								<Tooltip
-									position="end"
-									delay="350"
-									v-if="network.primaryEndpointId !== endpoint.id && network.endpoints.length > 1"
-								>
-									<Icon
-										@click.stop="handleDeleteEndpoint(endpoint)"
-										name="close-circle"
-										size="14"
-										color="tertiary"
-										:class="$style.icon_btn"
-										data-testid="endpoint-delete-btn"
-									/>
-									<template #content>Delete endpoint</template>
-								</Tooltip>
-							</Flex>
-						</template>
-					</SettingItem>
-				</ItemsContainer>
-
-				<Button
-					@click="handleAddEndpoint"
-					wide
-					variant="primary_outline"
-					size="medium"
-					data-testid="endpoint-add-btn"
-				>
-					Add endpoint
-				</Button>
-			</Flex>
-
-			<!-- Danger zone -->
-			<Flex direction="column" gap="12" v-if="canDelete">
-				<SectionLabel label="Danger zone" />
-				<Button
-					@click="handleDeleteNetwork"
-					wide
-					variant="primary_outline"
-					size="medium"
-					data-testid="network-delete-chain-btn"
-				>
-					Delete chain
-				</Button>
-				<Text size="11" weight="500" color="tertiary" height="140">
-					Deleting wipes all accounts, balances, tokens and PXE state for this chain.
-				</Text>
-			</Flex>
+	<SettingsPageShell :title="network.name" :backTo="'/popup/settings/networks'" gap="24" v-if="network">
+		<!-- Network info -->
+		<Flex direction="column" gap="12">
+			<SectionLabel label="Chain" />
+			<ItemsContainer>
+				<SettingItem
+					size="small"
+					:title="isActive ? 'Active network' : 'Set as active network'"
+					:description="isActive ? 'Currently in use' : 'Switch the wallet to this chain'"
+					:icon="isActive ? 'check-circle' : 'circle'"
+					:iconFillColor="isActive ? 'primary' : 'tertiary'"
+					iconBgColor="transparent"
+					:disabled="isActive"
+					@click="handleSetActive"
+					data-testid="network-set-active"
+				/>
+				<SettingItem
+					size="small"
+					title="Name"
+					:description="network.name"
+					icon="edit"
+					iconFillColor="tertiary"
+					iconBgColor="transparent"
+					@click="handleEditNetworkName"
+					data-testid="network-detail-rename"
+				/>
+				<SettingItem
+					size="small"
+					title="Chain ID"
+					:description="String(network.chainId)"
+					icon="info"
+					iconFillColor="tertiary"
+					iconBgColor="transparent"
+					raw
+				/>
+			</ItemsContainer>
 		</Flex>
-	</Flex>
+
+		<!-- Endpoints -->
+		<Flex direction="column" gap="12">
+			<SectionLabel label="Endpoints" :count="network.endpoints.length" />
+			<ItemsContainer>
+				<SettingItem
+					v-for="endpoint in network.endpoints"
+					:key="endpoint.id"
+					:title="endpoint.label || endpoint.rpcUrl"
+					:description="endpoint.label ? endpoint.rpcUrl : undefined"
+					:icon="network.primaryEndpointId === endpoint.id ? 'check-circle' : 'circle'"
+					:iconFillColor="network.primaryEndpointId === endpoint.id ? 'primary' : 'tertiary'"
+					iconBgColor="transparent"
+					@click="handleSetPrimary(endpoint)"
+					data-testid="endpoint-row"
+					:data-endpoint-id="endpoint.id"
+				>
+					<template #right>
+						<Flex align="center" gap="8">
+							<Tooltip position="end" delay="350">
+								<Icon
+									@click.stop="handleEditEndpoint(endpoint)"
+									name="edit"
+									size="14"
+									color="tertiary"
+									:class="$style.icon_btn"
+									data-testid="endpoint-edit-btn"
+								/>
+								<template #content>Edit endpoint</template>
+							</Tooltip>
+							<Tooltip
+								position="end"
+								delay="350"
+								v-if="network.primaryEndpointId !== endpoint.id && network.endpoints.length > 1"
+							>
+								<Icon
+									@click.stop="handleDeleteEndpoint(endpoint)"
+									name="close-circle"
+									size="14"
+									color="tertiary"
+									:class="$style.icon_btn"
+									data-testid="endpoint-delete-btn"
+								/>
+								<template #content>Delete endpoint</template>
+							</Tooltip>
+						</Flex>
+					</template>
+				</SettingItem>
+			</ItemsContainer>
+
+			<Button
+				@click="handleAddEndpoint"
+				wide
+				variant="primary_outline"
+				size="medium"
+				data-testid="endpoint-add-btn"
+			>
+				Add endpoint
+			</Button>
+		</Flex>
+
+		<!-- Danger zone -->
+		<Flex direction="column" gap="12" v-if="canDelete">
+			<SectionLabel label="Danger zone" />
+			<Button
+				@click="handleDeleteNetwork"
+				wide
+				variant="primary_outline"
+				size="medium"
+				data-testid="network-delete-chain-btn"
+			>
+				Delete chain
+			</Button>
+			<Text size="11" weight="500" color="tertiary" height="140">
+				Deleting wipes all accounts, balances, tokens and PXE state for this chain.
+			</Text>
+		</Flex>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .icon_btn {
 	transition: all 0.2s var(--bezier);
 

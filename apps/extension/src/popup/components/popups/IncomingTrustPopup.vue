@@ -32,6 +32,7 @@ import { usePopupStore } from "@/stores/popup.store"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyToClipboard } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
@@ -74,43 +75,53 @@ function toggleExpanded() {
 async function handleCopy() {
 	const value = contractFull.value
 	if (!value) return
-	try {
-		await navigator.clipboard.writeText(value)
-		openToast({ label: "Contract address copied", icon: "copy" }, 1500)
-	} catch {
-		openToast({ label: "Couldn't copy address", icon: "warning" })
-	}
+	await copyToClipboard(value, openToast, {
+		success: { label: "Contract address copied", duration: 1_500 },
+		failure: { label: "Couldn't copy address", icon: "warning" },
+	})
 }
 
-async function handleAllow() {
-	try {
-		// setTrustAllow returns true when the trust flip was applied, false
-		// when the service refused (stale-popup race — token deleted between
-		// Pending emit and click), undefined if the closure wasn't bound.
-		// Show the success toast ONLY on explicit true so an IPC boundary
-		// that drops the return value (defensive — codex final-audit High)
-		// doesn't mislead the user.
-		const ok = await cacheStore.incomingTrust.allow?.()
-		if (ok === true) {
-			openToast({ label: `Now showing receives for ${tokenSymbol.value}`, icon: "check" })
-		}
-	} catch {
-		openToast({ label: "Couldn't update trust state", icon: "warning" })
-	}
-	emit("onClose")
+// B-26: a shared submit latch. Without it, double-clicking Allow/Block fires two
+// decisions: the first closes this prompt (PopupManager then dequeues the NEXT
+// one), and the second's `emit("onClose")` then closes THAT next prompt the user
+// never decided on. The latch drops re-entry while a decision is in flight; the
+// key guard below is the second line of defense. `submitGeneration` is an owner
+// token: a decision only clears the latch it still owns, so a slow prior-prompt
+// handler settling AFTER this component was reused for the next prompt can't
+// unlock the new one (the re-open bumps the generation).
+const isSubmitting = ref(false)
+let submitGeneration = 0
+
+// The identifying triple of the CURRENTLY-displayed prompt. Captured at handler
+// entry and re-checked before `emit("onClose")` so a decision that completes
+// after the active identity switched (PopupManager reassigns
+// `cacheStore.incomingTrust`) can't close whatever prompt is showing now.
+function payloadKey() {
+	const t = cacheStore.incomingTrust
+	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract ?? ""}`
 }
 
-async function handleReject() {
+/** The label and the key are captured before the await: the active prompt can change mid-RPC. */
+async function decide(action, successLabel, successIcon) {
+	if (isSubmitting.value) return
+	isSubmitting.value = true
+	const myGen = ++submitGeneration
+	const key = payloadKey()
 	try {
-		const ok = await cacheStore.incomingTrust.reject?.()
-		if (ok === true) {
-			openToast({ label: `Hiding receives from ${tokenSymbol.value}`, icon: "info" })
-		}
+		// true: the trust flip was applied; false: the service refused (stale-popup race — token deleted
+		// between the Pending emit and the click); undefined: the closure wasn't bound. Only explicit true
+		// earns the success toast, so a boundary that drops the return value can't mislead the user.
+		const ok = await action?.()
+		if (ok === true) openToast({ label: successLabel, icon: successIcon })
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
+	} finally {
+		if (submitGeneration === myGen) isSubmitting.value = false
 	}
-	emit("onClose")
+	if (payloadKey() === key) emit("onClose")
 }
+const handleAllow = () => decide(cacheStore.incomingTrust.allow, `Now showing receives for ${tokenSymbol.value}`, "check")
+const handleReject = () => decide(cacheStore.incomingTrust.reject, `Hiding receives from ${tokenSymbol.value}`, "info")
 
 // Initial focus on the expand toggle so a keyboard-only user lands on
 // the verification surface first — they should be reading the contract
@@ -124,6 +135,11 @@ watch(
 			expanded.value = false
 			return
 		}
+		// Fresh prompt (the component instance is reused across the queue) — bump
+		// the owner token so a still-pending previous submit's `finally` can't clear
+		// THIS prompt's latch, then clear it for the new prompt.
+		submitGeneration++
+		isSubmitting.value = false
 		await nextTick()
 		expandToggleRef.value?.focus()
 	},
@@ -190,6 +206,7 @@ watch(
 				<Flex gap="12">
 					<Button
 						@click="handleReject"
+						:disabled="isSubmitting"
 						wide
 						variant="primary_outline"
 						size="medium"
@@ -199,6 +216,7 @@ watch(
 					</Button>
 					<Button
 						@click="handleAllow"
+						:disabled="isSubmitting"
 						wide
 						size="medium"
 						data-testid="incoming-trust-allow"
@@ -216,15 +234,10 @@ watch(
 	padding: 0 20px 24px 20px;
 }
 .header {
-	padding-top: 4px;
+	composes: header from "./popup-shared.module.css";
 }
 .pre_title {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: pre_title from "./popup-shared.module.css";
 }
 .title {
 	font-family: var(--font-headline);

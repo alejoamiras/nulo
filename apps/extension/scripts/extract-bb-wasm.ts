@@ -27,27 +27,14 @@
  */
 
 import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 
 const DATA_URI_RE = /"data:application\/gzip;base64,([A-Za-z0-9+/=]+)"/
 
-/** Walks up from `__dirname` looking for `node_modules/<pkg>/<file>`.
- *  Mirrors `resolvePackageFile` in `vite.config.ts`. */
+/** Locate a file inside `@aztec/bb.js` (a declared dependency of this
+ *  workspace), layout-agnostically — see @nulo/resolve-asset. */
 export function resolveBbFile(file: string): string {
-	const here = fileURLToPath(new URL(".", import.meta.url))
-	let dir = here
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", "@aztec/bb.js", file)
-		try {
-			readFileSync(candidate)
-			return candidate
-		} catch {
-			// keep walking
-		}
-		dir = dirname(dir)
-	}
-	throw new Error(`@aztec/bb.js/${file} not found in any node_modules ancestor of ${here}`)
+	return resolvePackageAsset("@aztec/bb.js", file, { from: import.meta.url })
 }
 
 /** Read the threads variant from npm's `dest/node/...` tree. Already a

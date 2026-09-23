@@ -36,10 +36,19 @@ import z from "zod"
 import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
-import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
+import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
+import { toDiscoveredAuthwit } from "./discovered-authwit"
+
+/** What one discovery simulation found: the wire actions to splice into the
+ *  build, and the decoded authorization behind each (same order). */
+export type DiscoveredPrivateAuthwits = {
+	actions: AddPrivateAuthwitAction[]
+	discovered: DiscoveredAuthwit[]
+}
 
 /** Minimal build-context the discoverer needs from `buildTxRequest`.
  *  Callers produce this by calling either the facade's legacy
@@ -52,7 +61,7 @@ export type DiscoverContext = {
 	/** Stored chain identity for the user-selected network. Used to rebind
 	 *  the live node's `getNodeInfo()` before deriving the authwit
 	 *  `chainInfo` (F-012 / A-01 V-01). */
-	network: { chainId: number }
+	network: SelectedNetworkChainInfo
 }
 
 /** Callback provided by the caller so the discoverer can run its
@@ -73,7 +82,7 @@ export class AuthwitDiscoverer {
 	public async discoverPrivateAuthwits(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
 		buildTxRequest: BuildTxRequestFn,
-	): Promise<AddPrivateAuthwitAction[]> {
+	): Promise<DiscoveredPrivateAuthwits> {
 		const { txRequest, node, pxe, account, network } = await buildTxRequest(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 
 		// Kernelless simulation: stub the caller's account contract so its
@@ -100,7 +109,7 @@ export class AuthwitDiscoverer {
 
 		const effects = collectOffchainEffects(simulationResult.privateExecutionResult)
 		if (!effects.length) {
-			return []
+			return { actions: [], discovered: [] }
 		}
 
 		const nodeInfo = await node.getNodeInfo()
@@ -109,6 +118,7 @@ export class AuthwitDiscoverer {
 		assertLiveChainIdentity(network, nodeInfo)
 		const chainInfo = { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 		const actions: AddPrivateAuthwitAction[] = []
+		const discovered: DiscoveredAuthwit[] = []
 
 		for (const effect of effects) {
 			try {
@@ -117,16 +127,18 @@ export class AuthwitDiscoverer {
 					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
 					chainInfo,
 				)
+				const record = toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash)
 				actions.push({
 					kind: "add_private_authwit",
 					content: { kind: "message_hash", messageHash: messageHash.toString() },
 				})
+				discovered.push(record)
 			} catch {
 				// Effect is not a CallAuthorizationRequest — skip.
 			}
 		}
 
-		return actions
+		return { actions, discovered }
 	}
 
 	/** Compute the authwit message hash for a `call`-kind content.
@@ -139,14 +151,7 @@ export class AuthwitDiscoverer {
 		instances: Map<string, ContractInstanceWithAddress>,
 		artifacts: Map<string, ContractArtifact>,
 	): Promise<Fr> {
-		const instance = instances.get(content.contract)
-		if (!instance) {
-			throw new Error("Contract not found")
-		}
-		const artifact = artifacts.get(instance.currentContractClassId.toString())
-		if (!artifact) {
-			throw new Error("Contract artifact not found")
-		}
+		const artifact = requireArtifact(instances, artifacts, content.contract)
 		const fn = findFunctionByName(artifact, content.method)
 		if (!fn) {
 			throw new Error("Method not found")
@@ -188,14 +193,7 @@ export class AuthwitDiscoverer {
 		// let a dApp supply name/type/isStatic/returnTypes to skip the lookup and
 		// obtain an authwit over a selector that did not match the claimed name. The
 		// fields set below are ABI truth; any dApp-supplied values are overwritten.
-		const instance = instances.get(content.to)
-		if (!instance) {
-			throw new Error("Contract not found")
-		}
-		const artifact = artifacts.get(instance.currentContractClassId.toString())
-		if (!artifact) {
-			throw new Error("Contract artifact not found")
-		}
+		const artifact = requireArtifact(instances, artifacts, content.to)
 		const fn = await findFunctionBySelector(artifact, content.selector)
 		if (!fn) {
 			throw new Error("Method not found")

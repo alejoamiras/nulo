@@ -17,8 +17,15 @@ export type AccountIntegrityVerifiedStamp = z.infer<typeof VerifiedStampSchema>
  * address derivation + the derived address itself. Pure string work (jsdom-safe, no crypto/bb);
  * it is an identity key, not a security digest.
  */
-export function accountSetDigest(rows: ReadonlyArray<{ chainId: number; index: number; type: number; address: string }>): string {
-	return JSON.stringify(rows.map((r) => `${r.chainId}:${r.index}:${r.type}:${r.address}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
+export function accountSetDigest(
+	rows: ReadonlyArray<{ chainId: number; l1ChainId: number; index: number; type: number; address: string }>,
+): string {
+	// `l1ChainId` is a derivation input (poseidon2 seed), distinct from the composite `chainId`, so
+	// it belongs in the identity: an in-place `l1ChainId` tamper that holds `address` constant must
+	// invalidate the green stamp and force boot re-derivation, not silently skip it.
+	return JSON.stringify(
+		rows.map((r) => `${r.chainId}:${r.l1ChainId}:${r.index}:${r.type}:${r.address}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+	)
 }
 
 /**

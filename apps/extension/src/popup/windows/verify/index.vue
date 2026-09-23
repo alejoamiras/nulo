@@ -6,9 +6,6 @@ import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
 import { onMounted, onUnmounted } from "vue"
 import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
 
-/** Utils */
-import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
-
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
@@ -17,6 +14,7 @@ import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 
 type UIDappMetadata = DappMetadata & {
@@ -41,7 +39,7 @@ const signerDisplay = computed(() => {
 	const first = session.value?.accounts?.[0]
 	if (!first) return "No account"
 	const addr = first.split(":")[2] ?? ""
-	return addr.length > 10 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr
+	return trimAddress(addr, 6, 4, "...")
 })
 const signerNetwork = computed(() => {
 	if (signerAccounts.value.length === 1) {
@@ -68,8 +66,6 @@ const hostnameHasNonAscii = computed(() => {
 	}
 	return h.split(".").some((label) => label.startsWith("xn--"))
 })
-
-const sanitizedDappName = computed(() => (dapp.value?.name ? sanitizeWireString(dapp.value.name, 64) : ""))
 
 const dappSessionService = new DappSessionServiceClient()
 
@@ -137,6 +133,11 @@ onMounted(async () => {
 	}
 
 	const sessionId = router.currentRoute.value.query.sessionId as string
+	// Per-session snapshot the SW passes when opening this window (B-06). A concurrent
+	// session for the same (origin,chain) can overwrite the shared DappSession row's
+	// hash, so the trust-decision emojis MUST derive from THIS session's own hash, not
+	// the row's. The row hash is only a legacy fallback for opens without the param.
+	const snapshotHash = router.currentRoute.value.query.verificationHash as string | undefined
 	isReconnect.value = router.currentRoute.value.query.isReconnect === "true"
 
 	if (!sessionId) {
@@ -151,8 +152,9 @@ onMounted(async () => {
 			return
 		}
 
-		if (session.value.verificationHash) {
-			emojis.value = hashToEmoji(session.value.verificationHash)
+		const displayHash = snapshotHash || session.value.verificationHash
+		if (displayHash) {
+			emojis.value = hashToEmoji(displayHash)
 		}
 
 		// Hydrate dApp logo
@@ -176,47 +178,20 @@ onUnmounted(() => {
 <template>
 	<Flex v-if="session" direction="column" :class="$style.wrapper">
 		<!-- Identity strip: anti-phishing trust anchor. Status is always ready on verify. -->
-		<Flex align="center" justify="between" gap="12" :class="$style.identity_strip">
-			<Flex align="center" gap="8">
-				<span :class="[$style.status_dot, $style.status_ready]" />
-				<span :class="$style.identity_account">{{ signerDisplay }}</span>
-				<span v-if="signerNetwork" :class="$style.identity_sep">·</span>
-				<span
-					v-if="signerNetwork"
-					:class="[$style.identity_network, signerAccounts.length > 1 && $style.identity_warn]"
-				>
-					{{ signerNetwork }}
-				</span>
-			</Flex>
-			<span :class="$style.identity_brand">NULO</span>
-		</Flex>
+		<IdentityStrip
+			:accountLabel="signerDisplay"
+			:networkLabel="signerNetwork || undefined"
+			:warn="signerAccounts.length > 1"
+		/>
 
 		<Flex direction="column" :class="$style.scroll_area">
 			<!-- dApp identity block -->
-			<Flex align="center" gap="12" :class="$style.dapp_block">
-			<div :class="$style.dapp_logo_wrapper">
-				<Icon v-if="dapp?.loadingLogo" :loading="true" name="dapp" size="24" color="tertiary" />
-				<img v-else-if="dapp?.logoBlobUrl" :src="dapp?.logoBlobUrl" :class="$style.dapp_logo" alt="" />
-				<Icon v-else name="dapp" size="24" color="tertiary" />
-			</div>
-
-			<Flex direction="column" gap="4" wide :class="$style.dapp_info">
-				<Flex align="center" gap="6">
-					<span :class="$style.dapp_hostname">{{ dappHostname }}</span>
-					<Tooltip v-if="hostnameHasNonAscii" position="start">
-						<Icon name="warning" size="12" color="orange" />
-						<template #content>
-							<Text size="12" color="secondary" :style="{ lineHeight: '1.3' }">
-								This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.
-							</Text>
-						</template>
-					</Tooltip>
-				</Flex>
-				<span v-if="sanitizedDappName" :class="$style.dapp_name">{{ sanitizedDappName }}</span>
-				<span :class="$style.dapp_action">{{ isReconnect ? "Reconnected" : "Connection established" }}</span>
-			</Flex>
-		</Flex>
-
+			<DappIdentityBlock
+				:dapp="dapp"
+				:hostname="dappHostname"
+				:hostnameSuspicious="hostnameHasNonAscii"
+				:actionLabel="isReconnect ? 'Reconnected' : 'Connection established'"
+			/>
 			<!-- Verification section -->
 			<Flex v-if="emojis" direction="column" gap="12" :class="$style.verification">
 				<SectionLabel label="Connection verification" />
@@ -249,144 +224,11 @@ onUnmounted(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: hidden;
-
-	display: flex;
-	flex-direction: column;
-
-	background: var(--app-bg);
-	border-top: 2px solid var(--nulo-accent);
+	composes: approval_wrapper from "../window-shell.module.css";
 }
 
 .scroll_area {
-	flex: 1;
-	min-height: 0;
-	overflow: auto;
-	scrollbar-gutter: stable;
-}
-
-/* ── Identity strip ────────────────────────────────────────────── */
-
-.identity_strip {
-	flex-shrink: 0;
-
-	padding: 10px 16px;
-	background: var(--nulo-surface);
-	border-bottom: 1px solid var(--nulo-border);
-}
-
-.status_dot {
-	display: inline-block;
-	width: 6px;
-	height: 6px;
-	flex-shrink: 0;
-}
-
-.status_ready { background: var(--green); }
-
-.identity_account {
-	font-family: var(--font-headline);
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	max-width: 140px;
-}
-
-.identity_sep {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-outline);
-}
-
-.identity_network {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-secondary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	max-width: 80px;
-}
-
-.identity_warn {
-	color: var(--orange);
-	font-weight: 700;
-}
-
-.identity_brand {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.2em;
-	color: var(--nulo-outline);
-}
-
-/* ── dApp identity block ───────────────────────────────────────── */
-
-.dapp_block {
-	flex-shrink: 0;
-
-	padding: 16px;
-	border-bottom: 1px solid var(--nulo-border);
-}
-
-.dapp_logo_wrapper {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex-shrink: 0;
-
-	width: 40px;
-	height: 40px;
-
-	background: var(--nulo-surface);
-	border: 1px solid var(--nulo-border);
-}
-
-.dapp_logo {
-	width: 40px;
-	height: 40px;
-	object-fit: cover;
-}
-
-.dapp_info {
-	min-width: 0;
-}
-
-.dapp_hostname {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.01em;
-	color: var(--txt-primary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.dapp_name {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.dapp_action {
-	font-family: var(--font-body);
-	font-size: 12px;
-	color: var(--nulo-secondary);
+	composes: scroll_area from "../window-shell.module.css";
 }
 
 /* ── Verification section ──────────────────────────────────────── */

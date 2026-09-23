@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nulo Dedup Audit</title>
+<style>
+:root{
+  --bg:#0a0908; --panel:#131110; --panel2:#181512; --ink:#f8f1e7; --muted:#999187;
+  --line:#231f1c; --outline:#4a463f;
+  --arch:#e05252; --struct:#d9a13d; --local:#999187;
+  --good:#69a869; --good-dim:rgba(105,168,105,.12);
+  --arch-dim:rgba(224,82,82,.10); --struct-dim:rgba(217,161,61,.10); --local-dim:rgba(153,145,135,.10);
+  --mono:ui-monospace,"JetBrains Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f5f1ea; --panel:#fdfbf7; --panel2:#efe9df; --ink:#171410; --muted:#6e675e;
+    --line:#ddd6ca; --outline:#b0a795;
+    --arch:#b03030; --struct:#96660f; --local:#6e675e; --good:#3f7d3f; --good-dim:rgba(63,125,63,.10);
+    --arch-dim:rgba(176,48,48,.08); --struct-dim:rgba(150,102,15,.08); --local-dim:rgba(110,103,94,.08);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f5f1ea; --panel:#fdfbf7; --panel2:#efe9df; --ink:#171410; --muted:#6e675e;
+  --line:#ddd6ca; --outline:#b0a795;
+  --arch:#b03030; --struct:#96660f; --local:#6e675e; --good:#3f7d3f; --good-dim:rgba(63,125,63,.10);
+  --arch-dim:rgba(176,48,48,.08); --struct-dim:rgba(150,102,15,.08); --local-dim:rgba(110,103,94,.08);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:820px;margin:0 auto;padding:48px 20px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:14px;margin:0 0 4px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+section{margin-top:44px}
+h2{font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:8px;margin:0 0 20px}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 0}
+.stat{border:1px solid var(--line);background:var(--panel);padding:10px 16px;min-width:96px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.stat span{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stat.a b{color:var(--arch)} .stat.s b{color:var(--struct)} .stat.l b{color:var(--local)} .stat.v b{color:var(--good)}
+.wins{border:1px solid var(--good);background:var(--good-dim);padding:18px 20px;margin-top:26px}
+.wins h3{margin:0 0 8px;font-size:13px;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--good)}
+.wins ul{margin:0;padding-left:18px}
+.wins li{margin:5px 0}
+.finding{border:1px solid var(--line);background:var(--panel);margin-top:22px;padding:22px 24px}
+.fhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.chip{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border:1px solid}
+.chip.a{color:var(--arch);border-color:var(--arch);background:var(--arch-dim)}
+.chip.s{color:var(--struct);border-color:var(--struct);background:var(--struct-dim)}
+.chip.l{color:var(--local);border-color:var(--local);background:var(--local-dim)}
+.chip.ok{color:var(--good);border-color:var(--good);background:var(--good-dim)}
+.fid{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.finding h3{font-size:18px;margin:4px 0 12px;line-height:1.35;text-wrap:balance}
+.finding p{margin:10px 0}
+.finding p b{font-weight:650}
+code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--line);padding:1px 5px;word-break:break-word}
+details{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+summary:focus-visible{outline:2px solid var(--outline);outline-offset:2px}
+details dl{margin:12px 0 0;font-size:14px}
+details dt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:10px}
+details dd{margin:3px 0 0}
+.obs p{margin:12px 0}
+footer{margin-top:56px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted);font-size:13px}
+footer a{color:var(--ink)}
+a{color:inherit}
+@media (prefers-reduced-motion: no-preference){ summary{transition:color .15s} summary:hover{color:var(--ink)} }
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Harden Quality · 2026-08-14 · medium effort · duplication focus</p>
+<h1>Nulo Dedup Audit</h1>
+<p class="sub">apps/extension + all packages/* (~105k LOC) · 8 clusters · 16 scanners (Claude Sonnet + Codex per cluster) · Sonnet coordinator · top-5 independently verified</p>
+
+<div class="stats">
+  <div class="stat"><b>15</b><span>findings</span></div>
+  <div class="stat a"><b>3</b><span>architectural</span></div>
+  <div class="stat s"><b>10</b><span>structural</span></div>
+  <div class="stat l"><b>2</b><span>local</span></div>
+  <div class="stat v"><b>5/5</b><span>verified · high conf.</span></div>
+</div>
+
+<div class="wins">
+  <h3>Cheapest wins first</h3>
+  <ul>
+    <li><b>Q-11 · delete the dead popup CSS</b> — ~280 copy-pasted dead lines across 13 files vanish. 2–3 hours.</li>
+    <li><b>Q-14 + Q-15 · two one-file fixes in shared packages</b> — error-class ctor ritual pulled into the base class; tooltip geometry switch extracted once. ~3 hours combined.</li>
+    <li><b>Q-13 · dispatcher authorization reuse</b> — two inline copies of a security check replaced with the existing, stricter helper. 1–2 hours, security payoff.</li>
+  </ul>
+</div>
+
+<section>
+<h2>The one-sentence diagnosis</h2>
+<p>The codebase's conventions are healthy — what recurs instead is a single failure shape: <b>a shared primitive exists, but only its raw mechanics are exposed, so every call site hand-rolls the convenient wrapper and the copies drift.</b> The lock guard (68 hand-rolled sites), the promise-memoize idiom (6 copies, newest added four days before the audit), the client exhaustiveness guard (16 files), and the clipboard helper (~19 sites, one already-fixed bug reintroduced seven times) are all the same story at different layers.</p>
+</section>
+
+<section>
+<h2>Verified findings — architectural</h2>
+
+<div class="finding">
+  <div class="fhead"><span class="chip a">architectural</span><span class="chip ok">verified · high</span><span class="fid">Q-01</span></div>
+  <h3><code>Lock</code> has no <code>withLock()</code> — the acquire/release protocol is hand-rolled at 68 call sites</h3>
+  <p><b>What it is.</b> The wallet's services all guard their writes with a shared mutual-exclusion lock. The lock only offers raw "enter" and "leave" operations, so all 14 service files repeat the same three-line ritual around every write — 68 times. Three files have already invented their own local variations of it.</p>
+  <p><b>What gets harder.</b> The safety rule ("always release, even on error") lives in developer discipline, not in the code. One new write method that forgets the release step silently freezes that service for every later caller — the exact failure the lock's emergency timer exists to paper over.</p>
+  <p><b>The fix.</b> Give the lock a single <code>withLock(fn)</code> method that does the ritual once, correctly, and convert the 68 sites to it. Mostly mechanical; a handful of sites with extra error-handling around the critical section need individual care.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Shotgun Surgery · found by both models</dd>
+    <dt>Instances</dt><dd>68 <code>try { enter() } finally { leave() }</code> pairs in 14 files: <code>services/{network(14), dapp-session(12), operation-journal(8), fpc(7), auth-registry(6), contact(5), token(5), transaction(4), dapp-interaction(1), profile(1), incoming-transfer(1)}/service.ts</code>, <code>activity-protocol/coordinator.ts</code>(2), <code>wallet-sdk/queued-journal.ts</code>(1); primitive at <code>packages/wallet-core/src/utils/lock.ts</code></dd>
+    <dt>Verified divergence</dt><dd><code>token/service.ts</code> uses a <code>holdsLock</code> boolean; <code>profile</code> + <code>incoming-transfer</code> grew local ad-hoc wrappers. Verifier corrected the "71" headline to 68 measured pairs.</dd>
+    <dt>Refactoring</dt><dd>Extract Method — <code>Lock.withLock&lt;T&gt;(fn)</code>; the three divergences disappear. 1–2 days.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip a">architectural</span><span class="chip ok">verified · high</span><span class="fid">Q-02</span></div>
+  <h3>The L1+L2 client-bootstrap block is copy-pasted across 10 bridge deploy/smoke scripts</h3>
+  <p><b>What it is.</b> Ten operational scripts (deploys, smokes, canaries for the bridge) each open with the same ~big block that connects to Ethereum and Aztec and loads config. It was pasted, not shared — and one copy has already silently diverged: the sandbox deploy runs with proving off while every sibling runs it on, with nothing saying whether that's intentional.</p>
+  <p><b>What gets harder.</b> Any fleet-wide operational change — a retry policy after an RPC incident, rotating a default URL — means hand-editing ten files, and each missed file keeps the old behavior while looking fixed.</p>
+  <p><b>The fix.</b> One shared bootstrap helper next to the scripts (the repo already does this for deploy manifests and keys); each script keeps only its genuine per-network differences, which makes the sandbox's proving-off choice explicit instead of accidental.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Shotgun Surgery · found by both models</dd>
+    <dt>Instances</dt><dd>10 files under <code>packages/bridge-core/scripts/</code> (verifier trimmed Codex's 2 extras — L1-only scripts without the block): deposit-testnet, fuel-testnet, deploy-bridge-testnet, smoke-swap-existing-testnet, fpc-dust-canary-mainnet, deploy-bridge-mainnet, smoke-existing-testnet, deploy-sandbox, smoke-existing-mainnet, fee-juice-canary-testnet · ~3,568 combined lines</dd>
+    <dt>Verified drift</dt><dd><code>deploy-sandbox.ts:148</code> is the sole <code>proverEnabled: false</code> among 14 occurrences, unmarked.</dd>
+    <dt>Refactoring</dt><dd>Extract Function — <code>scripts/script-bootstrap.ts</code>: <code>createBridgeScriptClients()</code>, <code>loadManifestFromConfigArg()</code>, <code>stopwatch()</code>. 1 day.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip a">architectural</span><span class="chip ok">verified · high</span><span class="fid">Q-03</span></div>
+  <h3><code>useFeeEstimation</code> and <code>useFeeEstimationMap</code> are two hand-maintained copies of one state machine</h3>
+  <p><b>What it is.</b> Fee estimation (the "how much will this cost" logic behind Send and dApp approvals) has a delicate lifecycle: debounce, cancel stale requests, hand off cleanly on submit. That lifecycle is implemented twice — once for a single estimate, once for a keyed map of them — and the two files even cross-reference each other in comments.</p>
+  <p><b>What gets harder.</b> This is concurrency code. Git history already shows the cost: the last two lifecycle features each had to be hand-written into both files in the same commits. Every future change carries the same double-maintenance burden and the risk the copies drift.</p>
+  <p><b>The fix.</b> The map version is the general case — rebuild the single-estimate composable as a thin wrapper over it with a fixed key, deleting ~90 duplicated lines. Verified feasible without changing what components see; two genuine behavioral seams need preserving deliberately.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Shotgun Surgery (observed in history: commits <code>5f115286</code>, <code>204f2bf4</code> — both same-day per the verifier, correcting "six days apart") · found by both models</dd>
+    <dt>Instances</dt><dd><code>apps/extension/src/composables/useFeeEstimation.ts:70-148</code> ↔ <code>useFeeEstimationMap.ts:73-169</code></dd>
+    <dt>Wrapper seams</dt><dd>the keyed-only <code>flowKey</code> 3rd argument; <code>handoff()</code> vs <code>handoffAll()</code> differ genuinely on in-flight inclusion — preserve, don't unify.</dd>
+    <dt>Refactoring</dt><dd>sentinel-key wrapper over the Map engine. 0.5–1 day.</dd>
+  </dl></details>
+</div>
+</section>
+
+<section>
+<h2>Verified findings — structural</h2>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="chip ok">verified · high</span><span class="fid">Q-04</span></div>
+  <h3>The async memoize-with-retry idiom is hand-rolled 6 times in the PXE layer — and still spreading</h3>
+  <p><b>What it is.</b> Six places in the Aztec runtime each implement "cache this expensive async result, but forget it on failure so a retry can work." Only one of the six guards a subtle race (an old failure wiping out a newer attempt's cache); the other five don't. The newest copy was added four days before this audit ran.</p>
+  <p><b>What gets harder.</b> A correctness fix to the retry/race semantics has no single home — it must be found and applied six times, against copies that already behave subtly differently.</p>
+  <p><b>The fix.</b> One tiny <code>memoizeAsync</code> helper (plus a keyed variant) encoding the contract once, race guard included. All six call sites migrate mechanically.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · found by both (6th instance by Claude only)</dd>
+    <dt>Instances</dt><dd><code>packages/aztec-runtime/src/pxe/</code>: artifact-catalog.ts:88,93-106 · note-schemas.ts:61,63-89 · public-events.ts:169-182 · public-events.ts:184-194 · artifact-registry.ts:52,99-112 · service.ts:508-524 (added 2026-08-10, <code>9ca9308e</code> — the newest, not oldest as first claimed)</dd>
+    <dt>Verified divergence</dt><dd>only artifact-catalog.ts has the still-current identity check before clearing.</dd>
+    <dt>Refactoring</dt><dd>Extract Function — <code>pxe/async-memo.ts</code>. 0.5 day.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="chip ok">verified · high</span><span class="fid">Q-05</span></div>
+  <h3>The client exhaustiveness-guard skeleton is copy-pasted in 16 of 23 service clients</h3>
+  <p><b>What it is.</b> Sixteen service-client files repeat an identical five-part boilerplate whose only purpose is a compile-time proof that no RPC method was forgotten. The shared factory documents that callers should add this guard — but its signature can't enforce it, so everyone pastes it.</p>
+  <p><b>What gets harder.</b> A new client (or a lazy edit) that skips the pasted guard silently loses the proof. Nothing fails; the safety just evaporates.</p>
+  <p><b>The fix.</b> A curried generic whose type constraint <em>is</em> the guard — verified by actually compiling it under the repo's strict TypeScript: both failure modes (missing method, typo) still error at compile time. Each client shrinks to a method list and one call.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · found by both models</dd>
+    <dt>Instances</dt><dd>16 of 23 <code>apps/extension/src/wallet/services/*/client.ts</code> (account, account-state, auth-registry, contact, dapp-interaction, dapp-session, execution, fpc, incoming-transfer, log-viewer, note, passkey, task, token, token-balance, transaction); 7 legitimately deviate.</dd>
+    <dt>Refactoring</dt><dd><code>definePassthroughsExhaustive&lt;M&gt;()</code> in extension-messaging, constraint <code>Exclude&lt;keyof M, Tuple[number]&gt; extends never</code>. 0.5–1 day.</dd>
+  </dl></details>
+</div>
+</section>
+
+<section>
+<h2>Consolidated findings — structural (unverified, cross-model convergent)</h2>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-06 · cross-cutting</span></div>
+  <h3>Clipboard-copy hand-rolled at ~19 sites — including the key/seed export scrub logic</h3>
+  <p><b>What it is.</b> Copying to the clipboard then showing a "copied" toast is reimplemented ~19 times. One helper does it correctly (it was written to fix a real bug: Chrome can reject the copy when the popup loses focus, producing a false "copied"). Most sites don't use it — seven-plus reintroduced the exact bug it fixed. The private-key and seed-phrase export pages also duplicate their entire 60-second clipboard-scrub timer word-for-word.</p>
+  <p><b>What gets harder.</b> Fixes stop propagating: the false-toast bug was fixed once and came back by copy-paste. And on the secret-export pages, the two scrub-timer copies drifting apart is a security event, not a cosmetic one.</p>
+  <p><b>The fix.</b> Generalize the existing correct helper for the ~17 ordinary sites; extract one <code>useSecretClipboardCopy</code> composable for the two export pages.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Shotgun Surgery · found by both scanners in both UI clusters + the prior surface survey (4-way convergence, strongest in the run)</dd>
+    <dt>Instances</dt><dd>correct: <code>components/header-copy-address.ts:11-21</code>; ~17 hand-rolled sites + scrub twins <code>settings/security/export/key.vue:76-96,109-120</code> ↔ <code>seed.vue:66-86,99-109</code> — full list in findings/consolidated.md</dd>
+    <dt>Refactoring</dt><dd>Extract Function + Extract Composable. 1 day + 0.5 day (security-sensitive part).</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-07</span></div>
+  <h3>The two messaging transports duplicate the same error-shaping method quintet</h3>
+  <p><b>What it is.</b> The popup↔service-worker and service-worker↔offscreen transports each carry five near-identical error-construction methods — the leftover of an otherwise-completed base-class extraction. The files maintain parity by hand, by comment.</p>
+  <p><b>What gets harder.</b> Any change to the wire error contract must be made twice with no compiler link between the copies — in the two files every RPC in the product flows through.</p>
+  <p><b>The fix.</b> Pull the two byte-identical methods up into the existing base class; template the two message-string variants.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · both models</dd>
+    <dt>Instances</dt><dd><code>packages/extension-messaging/src/background/client.ts:86-98,134-155</code> ↔ <code>offscreen/client.ts:68-85,113-134</code>; base at <code>core/base-client.ts:259-269</code></dd>
+    <dt>Refactoring</dt><dd>Pull Up Method + Template Method. 0.5 day.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-08</span></div>
+  <h3>The dApp identity strip — a trust anchor — exists as 3 independent implementations</h3>
+  <p><b>What it is.</b> The little strip showing "which account, which network, NULO" before a user approves a dApp action is implemented three times: a shared component, a deliberate fork for the execute window, and a third inline copy in the verify window — with class-for-class identical CSS.</p>
+  <p><b>What gets harder.</b> This strip is what users read to confirm what they're signing. A fix to one copy (spacing, status semantics, accessibility) silently leaves the others inconsistent — drift in exactly the surface that must never feel off.</p>
+  <p><b>The fix.</b> One presentation-only <code>IdentityStrip</code> frame; all three become thin callers.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Divergent Change · both models (3rd instance found by Codex)</dd>
+    <dt>Instances</dt><dd><code>components/composite/DappStatusStrip.vue</code> · <code>popup/windows/execute/SignerIdentityStrip.vue</code> · <code>popup/windows/verify/index.vue:179-192,271-330</code></dd>
+    <dt>Refactoring</dt><dd>Extract Component. 0.5–1 day.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-09</span></div>
+  <h3><code>trimAddress()</code> exists — and is bypassed by 9 hand-rolled copies with 4 different separators</h3>
+  <p><b>What it is.</b> Address truncation ("0x1234…abcd") has a canonical helper, yet nine screens re-slice addresses by hand — and they've drifted into four different separator styles, so the UI already disagrees with itself about what a shortened address looks like.</p>
+  <p><b>What gets harder.</b> Changing the truncation look (or making it screen-reader-friendly) becomes a whole-tree hunt instead of a one-line edit.</p>
+  <p><b>The fix.</b> Replace each inline slice with the helper call; add a separator option if the variety is actually wanted.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Shotgun Surgery · both models + prior survey</dd>
+    <dt>Instances</dt><dd>canonical <code>utils/string.ts:6-9</code>; 9 sites incl. <code>Header.vue:250</code>, <code>AccountsPopup.vue:76</code>, <code>verify/index.vue:44</code> — full list in report.md</dd>
+    <dt>Refactoring</dt><dd>Replace Inline Code with Function Call. 2–3 hours.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-10</span></div>
+  <h3>The mainnet/testnet private-FPC deploy conductors are near-twins around a protocol-critical assertion</h3>
+  <p><b>What it is.</b> Two deploy scripts share ~92 lines of identical structure around the assertion that the deployed fee-payment contract lands at its canonically pinned address — the thing the faucet and wallet hardcode. Only their fee/account setup genuinely differs, and their edit histories have already gone out of sync once.</p>
+  <p><b>What gets harder.</b> A fix to the idempotency check or the pin assertion applied to one network's script and not the other ships a silent asymmetry in the most correctness-critical part of deployment.</p>
+  <p><b>The fix.</b> Extract the shared conductor; each network file keeps only its setup.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · both models</dd>
+    <dt>Instances</dt><dd><code>bridge-core/scripts/deploy-private-fpc-mainnet.ts:26-34,58-70</code> ↔ <code>deploy-private-fpc-testnet.ts:25-33,61-73</code></dd>
+    <dt>Refactoring</dt><dd>Extract Function — <code>deployCanonicalPrivateFpc()</code>. 0.5 day.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-11</span></div>
+  <h3>~280 lines of dead, copy-pasted CSS across 13 popup files</h3>
+  <p><b>What it is.</b> Five popups carry an identical stylesheet block that styles nothing — zero references anywhere — and eight more files carry smaller dead selectors. A previous quality pass touched these exact files and still missed it.</p>
+  <p><b>What gets harder.</b> Every editor must re-discover that the block is dead before touching styling; every new popup cloned from these five propagates it again — which is exactly how it spread.</p>
+  <p><b>The fix.</b> Delete it. This is also where most of the repo's border-radius violations hide, so the deletion doubles as a design-system cleanup.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Dead Code + Duplicate Code · both models + prior survey</dd>
+    <dt>Instances</dt><dd>identical block: New/EditAccountPopup, New/EditNetworkPopup, NewSenderPopup (partial); scattered dead selectors in 8 more — lines in findings/consolidated.md</dd>
+    <dt>Refactoring</dt><dd>Remove Dead Code. 2–3 hours.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-12</span></div>
+  <h3>The three CTA button variants each restate the same 7-property typography contract</h3>
+  <p><b>What it is.</b> The design package's call-to-action button has base, outline, and destructive variants — and each independently declares the identical width/font/weight/size/tracking/uppercase/padding block. Only their colors genuinely differ.</p>
+  <p><b>What gets harder.</b> A CTA-wide typography change needs three synchronized edits, and a fourth variant will copy the whole block again.</p>
+  <p><b>The fix.</b> One shared rule for the common declarations; variants keep their color deltas.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · both models (the broader 12-file "uppercase label" claim was rejected cross-model; see report.md cross-cutting)</dd>
+    <dt>Instances</dt><dd><code>packages/design/src/ui/Button.vue:302-312,326-336,347-357</code></dd>
+    <dt>Refactoring</dt><dd>shared rule / comma-joined selector. 1–2 hours.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip s">structural</span><span class="fid">Q-13 · security-relevant</span></div>
+  <h3>Two dispatcher handlers reimplement the session-account authorization check — with weaker errors</h3>
+  <p><b>What it is.</b> The code that decides which account a dApp is allowed to act as has one correct shared implementation, used by send and authwit creation. Two newer handlers hand-rolled the same check inline — and their copies already handle the edge cases less precisely.</p>
+  <p><b>What gets harder.</b> A security-relevant decision now lives in three places (one correct, two weaker) with nothing keeping them aligned; the next dApp-facing method will likely copy one of the weak ones.</p>
+  <p><b>The fix.</b> Replace both inline blocks with the existing helper call. An hour or two.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code → Divergent Change · single-model (Claude; uncontested — kept for security relevance + mechanical evidence) · confidence moderate</dd>
+    <dt>Instances</dt><dd><code>packages/wallet-bridge/src/dispatcher.ts:774-786, 821-829</code>; helper at <code>:1350-1378</code></dd>
+    <dt>Refactoring</dt><dd>reuse <code>resolveNetworkAndAccount</code>. 1–2 hours.</dd>
+  </dl></details>
+</div>
+</section>
+
+<section>
+<h2>Consolidated findings — local</h2>
+
+<div class="finding">
+  <div class="fhead"><span class="chip l">local</span><span class="fid">Q-14</span></div>
+  <h3>Eleven <code>WalletError</code> subclasses repeat the identical constructor tail</h3>
+  <p><b>What it is.</b> Every error subclass ends its constructor with the same two identity-setup lines; the base class's own comment admits the ritual. A twelfth subclass that forgets one line silently breaks error identification across the RPC boundary.</p>
+  <p><b>What gets harder.</b> Exactly that twelfth subclass — the failure is invisible until an error is mis-identified in production.</p>
+  <p><b>The fix.</b> Do it once in the base constructor (<code>new.target</code> makes it generic); all 11 subclasses drop both lines.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code · both models</dd>
+    <dt>Instances</dt><dd><code>packages/extension-messaging/src/errors.ts</code> — 11 constructors</dd>
+    <dt>Refactoring</dt><dd>Pull Up Constructor Behavior. 1–2 hours.</dd>
+  </dl></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip l">local</span><span class="fid">Q-15</span></div>
+  <h3><code>Tooltip.vue</code> duplicates its cross-axis geometry switch across all four sides</h3>
+  <p><b>What it is.</b> The tooltip's positioning logic contains the same 3-case alignment switch four times — top and bottom share one byte-identical copy, left and right the other.</p>
+  <p><b>What gets harder.</b> A rounding or viewport-clamp fix applied to one axis and forgotten on the other ships a tooltip that's right on two sides and subtly wrong on the others — easy to miss because the axes are rarely compared.</p>
+  <p><b>The fix.</b> One extracted <code>crossAxisOffset()</code> function, called twice.</p>
+  <details><summary>Technical trace</summary><dl>
+    <dt>Smell</dt><dd>Duplicate Code (parallel switches) · both models</dd>
+    <dt>Instances</dt><dd><code>packages/design/src/ui/Tooltip.vue:70-82↔88-100, 106-118↔124-136</code></dd>
+    <dt>Refactoring</dt><dd>Extract Function. 1 hour.</dd>
+  </dl></details>
+</div>
+</section>
+
+<section class="obs">
+<h2>Cross-cutting</h2>
+<p><b>House rule worth adopting:</b> when a shared helper is used at three-plus sites through the same ritual, the ritual belongs in the helper. Five of the fifteen findings (Q-01, Q-04, Q-05, Q-06, Q-09) are this one rule violated at different layers.</p>
+<p><b>Security surfaces attract duplication risk disproportionately:</b> the secret-export scrub (Q-06), the identity strip (Q-08), and the dispatcher authorization (Q-13) are all trust-sensitive paths where copy drift is a security event.</p>
+<p><b>Held honestly:</b> 8 cross-model disagreements were all resolved in favor of the rejecting scanner (each cited a checkable distinction); 2 convergent-but-tiny findings were trimmed for density; the design package's letter-spacing spread survives only as a lower-confidence lead for a future design-system pass. Full lists in the markdown report.</p>
+</section>
+
+<footer>
+  <p>Run <code>2026-08-14-dedup-mid</code> · full report: <a href="report.md">report.md</a> · reduce: <a href="findings/consolidated.md">findings/consolidated.md</a> · verifications: <a href="findings/verified.md">findings/verified.md</a> · raw scanner output: <a href="raw/">raw/</a></p>
+</footer>
+</main>
+</body>
+</html>

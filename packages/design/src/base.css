@@ -56,6 +56,7 @@
 	word-wrap: normal;
 	direction: ltr;
 	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 	font-variation-settings:
 		"FILL" 0,
 		"wght" 300,
@@ -245,6 +246,13 @@
 	margin: 0;
 }
 
+/* The popup scrolls without scrollbars. `::-webkit-scrollbar` is Chromium's and WebKit's only —
+ * Firefox ignores it and showed every one. `scrollbar-width` is the standard property; a scroller
+ * that wants a thin bar back sets it on itself. */
+* {
+	scrollbar-width: none;
+}
+
 *::-webkit-scrollbar {
 	display: none;
 }
@@ -367,7 +375,10 @@ body {
 }
 
 .copyable {
-	cursor: copy;
+	/* Pointer, NOT `cursor: copy` — the copy cursor is the drag-and-drop "a copy will be made here"
+	 * state (the OS draws a "+" badge), which misreads on click-to-copy targets. The affordance comes
+	 * from the copy icon + toast, per GitHub/Etherscan/MetaMask convention. */
+	cursor: pointer;
 }
 
 .capitalize {

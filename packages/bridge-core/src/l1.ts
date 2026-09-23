@@ -155,6 +155,13 @@ export function hashBridgeWitness(w: BridgeWitness): Hex {
 	)
 }
 
+/** Permit signature validity, in seconds. Bounds the window in which a signed fuel-leg intent can be
+ *  executed after the quote it was derived from: the slippage floor bounds LOSS per execution, but the
+ *  deadline bounds how long an unexecuted signature stays executable against a moved market. 10 minutes
+ *  covers congestion without handing MEV a half-hour window; re-signing is free (a fresh quote comes
+ *  with it). Pinned by l1.test.ts — a convenience bump back toward `Date.now() + huge` trips CI. */
+export const PERMIT_DEADLINE_SECONDS = 600n
+
 /** Stages of the one-time Permit2 approval, surfaced to UIs/smokes via `onStatus`. */
 export type Permit2ApprovalStatus = "sufficient" | "approving" | "waiting" | "approved"
 

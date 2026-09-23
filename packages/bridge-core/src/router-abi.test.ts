@@ -57,4 +57,25 @@ describe.skipIf(!existsSync(ARTIFACT))("router-abi pin (forge artifact)", () => 
 		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "Bridge")
 		expect(ours.map(shape)).toEqual(real.map(shape))
 	})
+
+	it("every readback + error entry matches the artifact's whole entry", () => {
+		type Entry = { type: string; name?: string; stateMutability?: string; inputs?: AbiParam[]; outputs?: AbiParam[] }
+		const whole = (e: Entry) => ({
+			type: e.type,
+			name: e.name,
+			stateMutability: e.stateMutability,
+			inputs: (e.inputs ?? []).map(shape),
+			outputs: (e.outputs ?? []).map(shape),
+		})
+		const real = loadArtifact().abi as unknown as Entry[]
+		const rest = (SWAP_BRIDGE_ROUTER_ABI as unknown as Entry[]).filter(
+			(e) => !["bridgeWithFuel", "BridgeWithFuel", "bridge", "Bridge"].includes(e.name ?? ""),
+		)
+		expect(rest.length).toBeGreaterThan(0)
+		for (const entry of rest) {
+			const match = real.find((r) => r.type === entry.type && r.name === entry.name)
+			expect(match, `${entry.type} ${entry.name} missing from the artifact`).toBeDefined()
+			expect(whole(entry)).toEqual(whole(match as Entry))
+		}
+	})
 })

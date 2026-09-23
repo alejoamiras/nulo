@@ -59,68 +59,37 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Contracts" :backTo="'/popup/settings/advanced/account-state'" />
+	<SettingsPageShell title="Contracts" :backTo="'/popup/settings/advanced/account-state'" gap="16" v-if="appStore.isLogined">
+		<AsyncListStatus v-if="isFetchingContracts || isErrorOccurred" :loading="isFetchingContracts" :error="error" label="FETCHING CONTRACTS" @retry="fetchContracts(true)" />
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<LoadingState v-if="isFetchingContracts" label="FETCHING CONTRACTS" />
+		<Flex v-else-if="contracts.length" direction="column" gap="8">
+			<Input
+				v-model="searchTerm"
+				icon="search"
+				placeholder="Search through contracts"
+				clearable
+				@clear="searchTerm = ''"
+			/>
 
-			<Tooltip v-else-if="isErrorOccurred" wide>
-				<Banner :action="{ name: 'Try again', callback: () => fetchContracts(true) }" variant="error" wide>
-					Something went wrong
-				</Banner>
+			<ListStatusMessage v-if="searchTerm && filteredContracts.length === 0" variant="no-results" />
 
-				<template #content>
-					{{ error }}
-				</template>
-			</Tooltip>
+			<Flex v-else v-for="contract in filteredContracts" justify="between" :class="$style.card">
+				<Flex gap="10">
+					<Icon name="zap" size="16" color="tertiary" />
 
-			<Flex v-else-if="contracts.length" direction="column" gap="8">
-				<Input
-					v-model="searchTerm"
-					icon="search"
-					placeholder="Search through contracts"
-					clearable
-					@clear="searchTerm = ''"
-				/>
-
-				<div v-if="searchTerm && filteredContracts.length === 0" :class="$style.no_results">
-					NO MATCHES · TRY A DIFFERENT TERM
-				</div>
-
-				<Flex v-else v-for="contract in filteredContracts" justify="between" :class="$style.card">
-					<Flex gap="10">
-						<Icon name="zap" size="16" color="tertiary" />
-
-						<Flex direction="column" gap="8">
-							<Text size="14" weight="600" color="primary"> Contract </Text>
-							<AddressDisplay size="13" weight="600" color="tertiary" :address="contract" :formatter="(addr) => trimAddress(addr, 6, 4)" />
-						</Flex>
+					<Flex direction="column" gap="8">
+						<Text size="14" weight="600" color="primary"> Contract </Text>
+						<AddressDisplay size="13" weight="600" color="tertiary" :address="contract" :formatter="(addr) => trimAddress(addr, 6, 4)" />
 					</Flex>
 				</Flex>
 			</Flex>
-
-			<div v-else :class="$style.empty">
-				<span :class="$style.empty_headline">NO CONTRACTS YET</span>
-				<span :class="$style.empty_sub">Contracts registered to your account will appear here.</span>
-			</div>
 		</Flex>
 
-	</Flex>
+		<ListStatusMessage v-else headline="NO CONTRACTS YET" sub="Contracts registered to your account will appear here." />
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .card {
 	border-radius: 0;
 	cursor: pointer;
@@ -144,45 +113,4 @@ onBeforeUnmount(() => {
 	}
 }
 
-.empty {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
-
-	text-align: center;
-}
-
-.empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.empty_sub {
-	width: 100%;
-
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
-	overflow-wrap: break-word;
-}
-
-.no_results {
-	padding: 24px 16px;
-	text-align: center;
-
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	color: var(--nulo-outline);
-}
 </style>

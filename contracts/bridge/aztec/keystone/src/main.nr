@@ -75,3 +75,51 @@ fn claim_secret_hash_vectors_match_ts() {
         compute_secret_hash([derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef))]);
     assert(h2 == 0x2a636f84225eec69e412ed5dffd735f1ac8ff6d28b24dac5d796f0c2a648ac1c);
 }
+
+// ─── Fuzz properties (nargo runs parameterized tests with random inputs) ───
+// The recipient-commitment property needs derive_claim_secret to be injective ENOUGH that a
+// different (salt, recipient) never collides onto the committed secret; these random-input
+// assertions pin the two one-bit-flip neighbors across the whole field domain.
+
+#[test]
+fn fuzz_derive_changes_with_salt(salt: Field, recipient_field: Field) {
+    let r = AztecAddress::from_field(recipient_field);
+    assert(
+        derive_claim_secret(salt, r) != derive_claim_secret(salt + 1, r),
+        "salt neighbor collision in derive_claim_secret",
+    );
+}
+
+#[test]
+fn fuzz_derive_changes_with_recipient(salt: Field, recipient_field: Field) {
+    let r0 = AztecAddress::from_field(recipient_field);
+    let r1 = AztecAddress::from_field(recipient_field + 1);
+    assert(
+        derive_claim_secret(salt, r0) != derive_claim_secret(salt, r1),
+        "recipient neighbor collision in derive_claim_secret",
+    );
+}
+
+// ─── Any-ERC-20 generation: the factory's `register` message ────────────────
+// Fourth content-hash vector (PortalFactory.sol ↔ register_hash_lib ↔ bridge-core register-hash.ts)
+// plus the public registration secret hash the factory hard-codes. Vectors: bridge-core
+// scripts/gen-keystone-vectors.ts.
+
+#[test]
+fn register_matches_l1_and_ts() {
+    let token = EthAddress::from_field(0xe2c20);
+    let portal = EthAddress::from_field(0x9017a1);
+    let name_word = 0x004e756c6f205465737420546f6b656e00000000000000000000000000000000;
+    let symbol_word = 0x004e545400000000000000000000000000000000000000000000000000000000;
+    let h = register_hash_lib::get_register_content_hash(token, portal, name_word, symbol_word, 18);
+    assert(h == 0x000d08f46744da94f56ca7a8fcc0b131ca3b48456b03083d107728d8530397a7);
+}
+
+#[test]
+fn register_secret_hash_is_pinned() {
+    assert(register_hash_lib::REGISTER_SECRET == 0);
+    assert(
+        register_hash_lib::register_secret_hash()
+            == 0x1f8eff65d91ed781c2e7a28a2ff99b7f7506b7293121b5ffcf3cd339c84d2250,
+    );
+}

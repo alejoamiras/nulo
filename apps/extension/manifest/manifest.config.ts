@@ -17,7 +17,10 @@ export default {
 	version: `${major}.${minor}.${patch}.${label}`,
 	version_name: version,
 	manifest_version: 3,
-	host_permissions: ["https://nulo.sh/", "http://127.0.0.1/*"],
+	// Presto: HTTPS is the proving transport; plain HTTP carries only the witness-free health
+	// diagnostic and the headless CI server. Holding both keeps extension pages out of Chrome's
+	// local-network-access prompt.
+	host_permissions: ["https://passkey.nulo.sh/", "https://127.0.0.1/*", "http://127.0.0.1/*"],
 	action: {
 		default_popup: "src/popup/index.html#/popup/general",
 	},
@@ -33,6 +36,9 @@ export default {
 			all_frames: true,
 			js: ["src/content-script/content.ts"],
 			matches: ["*://*/*"],
+			// The passkey Relying Party host and its descendants must carry no script at all,
+			// the wallet's own included: any script there could run the PRF ceremony.
+			exclude_matches: ["*://passkey.nulo.sh/*", "*://*.passkey.nulo.sh/*"],
 			run_at: "document_start",
 		},
 	],
@@ -46,16 +52,12 @@ export default {
 	cross_origin_opener_policy: {
 		value: "same-origin",
 	},
+	// Generated from src/assets/logo.png by scripts/store-icons.ts; `--check` fails on drift.
 	icons: {
-		16: "src/assets/logo.png",
-		24: "src/assets/logo.png",
-		32: "src/assets/logo.png",
-		128: "src/assets/logo.png",
+		16: "src/assets/icons/16.png",
+		32: "src/assets/icons/32.png",
+		48: "src/assets/icons/48.png",
+		96: "src/assets/icons/96.png",
+		128: "src/assets/icons/128.png",
 	},
-	web_accessible_resources: [
-		{
-			matches: ["*://*/*"],
-			resources: ["src/assets/logo.png"],
-		},
-	],
 } as ManifestV3Export

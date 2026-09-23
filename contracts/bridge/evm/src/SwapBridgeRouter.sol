@@ -8,6 +8,7 @@ import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 import {IFeeJuicePortal} from "./interfaces/IFeeJuicePortal.sol";
 import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 import {ISignatureTransfer} from "./interfaces/ISignatureTransfer.sol";
+import {IPortalFactory} from "./interfaces/IPortalFactory.sol";
 
 // ─── Minimal UniswapFuelSwap Interface ───────────────────────────────
 
@@ -32,12 +33,17 @@ interface IUniswapFuelSwap {
 /**
  * @title SwapBridgeRouter
  * @notice Permit2-enabled periphery that atomically:
- *   1. Pulls tokens from the user via Permit2 SignatureTransfer (witness-bound)
- *   2. Swaps a portion for FeeJuice via UniswapFuelSwap
- *   3. Deposits FeeJuice to L2 via the canonical FeeJuicePortal
- *   4. Deposits the remaining tokens to L2 via the TokenPortal (public OR private)
+ *   1. Resolves the token's portal from the factory (creating it on first use)
+ *   2. Pulls tokens from the user via Permit2 SignatureTransfer (witness-bound)
+ *   3. Swaps a portion for FeeJuice via UniswapFuelSwap (or passes FeeJuice through as-is)
+ *   4. Deposits FeeJuice to L2 via the canonical FeeJuicePortal
+ *   5. Deposits the remaining tokens to L2 via the token's portal clone (public OR private)
  *
  * All in one L1 transaction (one signature + one tx).
+ *
+ * The legal `tokenPortal` is DERIVED from `bridgeToken`, never trusted from calldata: a signed
+ * intent can only ever route a token into the portal the factory binds to it. The one exception
+ * is the canonical FeeJuicePortal, accepted for a public `bridge()` of the fee asset (direct gas).
  *
  * @dev Stripped of the reference bridge's identity-attestation layer. The
  *      `isPrivate` flag is retained and witness-bound: when true the token side
@@ -58,7 +64,21 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     // ─── State ───────────────────────────────────────────────────────
     ISignatureTransfer public immutable permit2;
     IFeeJuicePortal public immutable feeJuicePortal;
+    IPortalFactory public immutable FACTORY;
+    /// @dev The FeeJuice ERC-20 — the only token whose fuel leg may skip the swap.
+    address public immutable FEE_ASSET;
     IUniswapFuelSwap public swapTarget;
+
+    // ─── Errors ──────────────────────────────────────────────────────
+    /// @dev `tokenPortal` is not the portal the factory binds to `bridgeToken`.
+    error ForeignPortal();
+    /// @dev A fuel-only intent (`fuelAmount == totalAmount`) carried token-leg fields.
+    error FuelOnlyLeg();
+    /// @dev An empty route is only the identity swap of the fee asset.
+    error RouteRequired();
+    error AmountExceedsL2Max();
+    /// @dev The Permit2 pull delivered less than the signed amount (fee-on-transfer token).
+    error InexactPull();
 
     // ─── Events ──────────────────────────────────────────────────────
     event BridgeWithFuel(
@@ -127,20 +147,27 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
 
     // ─── Constructor ─────────────────────────────────────────────────
 
-    constructor(address _permit2, address _feeJuicePortal, address _swapTarget) Ownable(msg.sender) {
+    constructor(address _permit2, address _feeJuicePortal, address _swapTarget, address _factory)
+        Ownable(msg.sender)
+    {
         require(_permit2 != address(0), "SwapBridgeRouter: zero permit2");
         require(_feeJuicePortal != address(0), "SwapBridgeRouter: zero feeJuicePortal");
         require(_swapTarget != address(0), "SwapBridgeRouter: zero swapTarget");
+        require(_factory != address(0), "SwapBridgeRouter: zero factory");
 
         permit2 = ISignatureTransfer(_permit2);
         feeJuicePortal = IFeeJuicePortal(_feeJuicePortal);
         swapTarget = IUniswapFuelSwap(_swapTarget);
+        FACTORY = IPortalFactory(_factory);
+        FEE_ASSET = address(IFeeJuicePortal(_feeJuicePortal).UNDERLYING());
     }
 
     // ─── Governance ──────────────────────────────────────────────────
 
-    /// @notice Update the swap target (e.g. after a pool migration).
-    function setSwapTarget(address _newSwapTarget) external onlyOwner {
+    /// @notice Update the swap target (e.g. after a pool migration). `nonReentrant`: the witness
+    /// binds the target the user signed for, so a rotation must never land between the Permit2
+    /// pull (a hostile token's hook) and the swap.
+    function setSwapTarget(address _newSwapTarget) external onlyOwner nonReentrant {
         require(_newSwapTarget != address(0), "SwapBridgeRouter: zero swapTarget");
         address old = address(swapTarget);
         swapTarget = IUniswapFuelSwap(_newSwapTarget);
@@ -150,16 +177,25 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     // ─── Core Logic ──────────────────────────────────────────────────
 
     /// @notice Bridge tokens to Aztec L2, swapping a portion for Fee Juice gas, in one tx.
+    /// `fuelAmount == totalAmount` is a fuel-only intent (no token leg); an empty `path` is the
+    /// identity swap, legal only when `bridgeToken` is the fee asset itself.
     function bridgeWithFuel(BridgeParams calldata p, PermitParams calldata permit) external nonReentrant {
         require(p.totalAmount > 0, "SwapBridgeRouter: zero amount");
-        require(p.fuelAmount > 0 && p.fuelAmount < p.totalAmount, "SwapBridgeRouter: invalid fuelAmount");
-        require(p.path.length > 0, "SwapBridgeRouter: empty path");
+        if (p.totalAmount > type(uint128).max) revert AmountExceedsL2Max();
+        require(p.fuelAmount > 0 && p.fuelAmount <= p.totalAmount, "SwapBridgeRouter: invalid fuelAmount");
         require(p.path.length == p.zeroForOnes.length, "SwapBridgeRouter: path/direction mismatch");
-        require(p.tokenPortal != address(0), "SwapBridgeRouter: zero tokenPortal");
+        bool identity = p.path.length == 0;
+        if (identity && p.bridgeToken != FEE_ASSET) revert RouteRequired();
 
-        uint256 bridgeAmount = p.totalAmount - p.fuelAmount;
+        bool fuelOnly = p.fuelAmount == p.totalAmount;
+        if (fuelOnly) {
+            if (p.tokenPortal != address(0) || p.aztecRecipient != bytes32(0) || p.tokenSecretHash != bytes32(0)) {
+                revert FuelOnlyLeg();
+            }
+        } else {
+            _requireFactoryPortal(p.tokenPortal, p.bridgeToken);
+        }
 
-        // 1. Pull tokens via Permit2 SignatureTransfer with a witness-bound bridge intent.
         _pullTokensWithWitness(
             msg.sender,
             p.bridgeToken,
@@ -183,48 +219,19 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
             )
         );
 
-        // 2. Swap the fuel portion for FeeJuice.
-        IERC20 token = IERC20(p.bridgeToken);
-        IERC20 feeJuiceToken = feeJuicePortal.UNDERLYING();
-        uint256 fjBalBefore = feeJuiceToken.balanceOf(address(this));
-        uint256 tokenBalBefore = token.balanceOf(address(this));
-
-        token.forceApprove(address(swapTarget), p.fuelAmount);
-        uint256 fuelReceived = swapTarget.swap(p.bridgeToken, p.fuelAmount, p.minFuelOutput, p.path, p.zeroForOnes);
-        token.forceApprove(address(swapTarget), 0);
-
+        uint256 fuelReceived = identity ? p.fuelAmount : _swapFuel(IERC20(p.bridgeToken), p);
         // The user's SIGNED slippage floor is enforced by the router itself - the swap target is
         // owner-replaceable, so its own minOutput check cannot be the binding one.
         require(fuelReceived >= p.minFuelOutput, "SwapBridgeRouter: insufficient fuel");
-        // Defense-in-depth against swap bugs: verify the actual balance change.
-        uint256 fjBalAfter = feeJuiceToken.balanceOf(address(this));
-        require(fjBalAfter - fjBalBefore >= fuelReceived, "SwapBridgeRouter: balance mismatch");
-        // The slice must actually have been CONSUMED by the swap. Without this, a hostile target
-        // can satisfy the floor from prefunded FeeJuice without pulling the input token, stranding
-        // the user's slice in the router as owner-sweepable residue (theft, not slippage). The
-        // approval caps the pull at fuelAmount, so strict equality is sound.
-        require(tokenBalBefore - token.balanceOf(address(this)) == p.fuelAmount, "SwapBridgeRouter: fuel not consumed");
 
-        // 3. Deposit FeeJuice to L2 via the canonical FeeJuicePortal (always public deposit).
-        bytes32 fuelKey;
-        uint256 fuelIndex;
-        {
-            feeJuiceToken.forceApprove(address(feeJuicePortal), fuelReceived);
-            (fuelKey, fuelIndex) = feeJuicePortal.depositToAztecPublic(p.fuelRecipient, fuelReceived, p.fuelSecretHash);
-            feeJuiceToken.forceApprove(address(feeJuicePortal), 0);
-        }
+        (bytes32 fuelKey, uint256 fuelIndex) = _depositFuel(p.fuelRecipient, fuelReceived, p.fuelSecretHash);
 
-        // 4. Deposit the remaining tokens to L2 (public or private).
-        bytes32 tokenKey;
-        uint256 tokenIndex;
-        token.forceApprove(p.tokenPortal, bridgeAmount);
-        if (p.isPrivate) {
-            (tokenKey, tokenIndex) = ITokenPortal(p.tokenPortal).depositToAztecPrivate(bridgeAmount, p.tokenSecretHash);
-        } else {
-            (tokenKey, tokenIndex) =
-                ITokenPortal(p.tokenPortal).depositToAztecPublic(p.aztecRecipient, bridgeAmount, p.tokenSecretHash);
-        }
-        token.forceApprove(p.tokenPortal, 0);
+        uint256 bridgeAmount = p.totalAmount - p.fuelAmount;
+        (bytes32 tokenKey, uint256 tokenIndex) = fuelOnly
+            ? (bytes32(0), uint256(0))
+            : _depositTokens(
+                p.tokenPortal, IERC20(p.bridgeToken), bridgeAmount, p.aztecRecipient, p.tokenSecretHash, p.isPrivate
+            );
 
         emit BridgeWithFuel(
             p.aztecRecipient,
@@ -243,7 +250,11 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     /// @notice Bridge tokens to Aztec L2 without a fuel swap (public or private).
     function bridge(SimpleBridgeParams calldata p, PermitParams calldata permit) external nonReentrant {
         require(p.amount > 0, "SwapBridgeRouter: zero amount");
-        require(p.tokenPortal != address(0), "SwapBridgeRouter: zero tokenPortal");
+        if (p.amount > type(uint128).max) revert AmountExceedsL2Max();
+        // Direct gas: the fee asset may go straight into the canonical FeeJuicePortal, which only
+        // has a public deposit.
+        bool directGas = p.bridgeToken == FEE_ASSET && p.tokenPortal == address(feeJuicePortal) && !p.isPrivate;
+        if (!directGas) _requireFactoryPortal(p.tokenPortal, p.bridgeToken);
 
         _pullTokensWithWitness(
             msg.sender,
@@ -268,17 +279,8 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
             )
         );
 
-        IERC20(p.bridgeToken).forceApprove(p.tokenPortal, p.amount);
-
-        bytes32 key;
-        uint256 index;
-        if (p.isPrivate) {
-            (key, index) = ITokenPortal(p.tokenPortal).depositToAztecPrivate(p.amount, p.secretHash);
-        } else {
-            (key, index) = ITokenPortal(p.tokenPortal).depositToAztecPublic(p.aztecRecipient, p.amount, p.secretHash);
-        }
-
-        IERC20(p.bridgeToken).forceApprove(p.tokenPortal, 0);
+        (bytes32 key, uint256 index) =
+            _depositTokens(p.tokenPortal, IERC20(p.bridgeToken), p.amount, p.aztecRecipient, p.secretHash, p.isPrivate);
 
         emit Bridge(p.aztecRecipient, key, index, p.amount, p.secretHash, p.isPrivate);
     }
@@ -304,6 +306,58 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
 
     // ─── Internal ────────────────────────────────────────────────────
 
+    /// @dev The only legal token portal is the one the factory binds to `bridgeToken`, created here
+    /// on first use. Runs before the Permit2 pull, so a rejected intent moves nothing.
+    function _requireFactoryPortal(address tokenPortal, address bridgeToken) internal virtual {
+        if (tokenPortal != FACTORY.predictPortal(bridgeToken)) revert ForeignPortal();
+        FACTORY.createPortal(bridgeToken);
+    }
+
+    function _swapFuel(IERC20 token, BridgeParams calldata p) internal returns (uint256 fuelReceived) {
+        IERC20 feeJuiceToken = IERC20(FEE_ASSET);
+        uint256 fjBalBefore = feeJuiceToken.balanceOf(address(this));
+        uint256 tokenBalBefore = token.balanceOf(address(this));
+
+        token.forceApprove(address(swapTarget), p.fuelAmount);
+        fuelReceived = swapTarget.swap(p.bridgeToken, p.fuelAmount, p.minFuelOutput, p.path, p.zeroForOnes);
+        token.forceApprove(address(swapTarget), 0);
+
+        // Defense-in-depth against swap bugs: verify the actual balance change.
+        require(
+            feeJuiceToken.balanceOf(address(this)) - fjBalBefore >= fuelReceived, "SwapBridgeRouter: balance mismatch"
+        );
+        // The slice must actually have been CONSUMED by the swap. Without this, a hostile target
+        // can satisfy the floor from prefunded FeeJuice without pulling the input token, stranding
+        // the user's slice in the router as owner-sweepable residue (theft, not slippage). The
+        // approval caps the pull at fuelAmount, so strict equality is sound.
+        require(tokenBalBefore - token.balanceOf(address(this)) == p.fuelAmount, "SwapBridgeRouter: fuel not consumed");
+    }
+
+    function _depositFuel(bytes32 recipient, uint256 amount, bytes32 secretHash) internal returns (bytes32, uint256) {
+        IERC20 feeJuiceToken = IERC20(FEE_ASSET);
+        feeJuiceToken.forceApprove(address(feeJuicePortal), amount);
+        (bytes32 key, uint256 index) = feeJuicePortal.depositToAztecPublic(recipient, amount, secretHash);
+        feeJuiceToken.forceApprove(address(feeJuicePortal), 0);
+        return (key, index);
+    }
+
+    function _depositTokens(
+        address portal,
+        IERC20 token,
+        uint256 amount,
+        bytes32 recipient,
+        bytes32 secretHash,
+        bool isPrivate
+    ) internal returns (bytes32 key, uint256 index) {
+        token.forceApprove(portal, amount);
+        if (isPrivate) {
+            (key, index) = ITokenPortal(portal).depositToAztecPrivate(amount, secretHash);
+        } else {
+            (key, index) = ITokenPortal(portal).depositToAztecPublic(recipient, amount, secretHash);
+        }
+        token.forceApprove(portal, 0);
+    }
+
     function _pullTokensWithWitness(
         address owner,
         address token,
@@ -311,6 +365,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         PermitParams calldata permit,
         bytes32 witness
     ) internal {
+        uint256 before = IERC20(token).balanceOf(address(this));
         permit2.permitWitnessTransferFrom(
             ISignatureTransfer.PermitTransferFrom({
                 permitted: ISignatureTransfer.TokenPermissions({token: token, amount: amount}),
@@ -323,6 +378,9 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
             BRIDGE_WITNESS_TYPE_STRING,
             permit.signature
         );
+        // A short pull would be topped up from router residue downstream — a donor's loss, and a
+        // message minting more than the reserve holds. Refused here, before any leg runs.
+        if (IERC20(token).balanceOf(address(this)) - before != amount) revert InexactPull();
     }
 
     function _hashBridgeWitness(BridgeWitness memory witness) internal pure returns (bytes32) {

@@ -25,9 +25,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, openPopup, replaceInputValue, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
-import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
+import { setupPasskeyVirtualAuth, stallNextPasskeyCeremony } from "./fixtures/passkey"
 
 /** Reset the wallet via the in-app reset flow (settings → security → reset).
  *  Cascades through every service (NetworkService.onProfileDeleted, etc.) so
@@ -99,9 +99,11 @@ async function readActiveAccount(page: Page): Promise<string> {
 	})
 }
 
-/** Read the registered profile's stored record (id + name + type + credentialId).
+/** Read the registered profile's stored record (id + credentialId + the SEALED dek blob —
+ *  the backup's `imported-keys-dek-sealed` field is the row blob verbatim: the restore ceremony
+ *  re-derives the same PRF wrap key, so the register-time seal is exactly what restore opens).
  *  EntityStorage rows live under `nulo:core:profiles@<id>`. */
-async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; credentialId: string }> {
+async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; credentialId: string; dekSealed: string }> {
 	return await page.evaluate(async () => {
 		const all = await chrome.storage.local.get(null)
 		for (const key of Object.keys(all)) {
@@ -109,7 +111,7 @@ async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; c
 			const raw = (all as Record<string, unknown>)[key]
 			const profile = typeof raw === "string" ? JSON.parse(raw) : raw
 			if (profile && profile.type === "passkey") {
-				return { id: profile.id as string, credentialId: profile.credentialId as string }
+				return { id: profile.id as string, credentialId: profile.credentialId as string, dekSealed: profile.dekSealed as string }
 			}
 		}
 		throw new Error("No passkey profile found in storage")
@@ -120,7 +122,7 @@ async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; c
  *  (address AND chainId/index/type): the integrity coordinator re-derives every account from the
  *  credential's master before activating the import, so a row whose chainId doesn't match the one
  *  its address was derived under is withheld as a foreign backup. */
-type RegisteredAccountRow = { address: string; chainId: number; index: number; type: number }
+type RegisteredAccountRow = { address: string; chainId: number; l1ChainId: number; index: number; type: number }
 
 /** Build a passkey-typed synthetic backup payload that the import flow
  *  will accept. Mirrors `import-paths.test.ts:buildSyntheticBackup` but
@@ -128,37 +130,26 @@ type RegisteredAccountRow = { address: string; chainId: number; index: number; t
  *  `master-key`. The account row mirrors the register-time row exactly
  *  (see `RegisteredAccountRow`); this also keeps the `Duplicate address`
  *  check semantics of the pre-integrity version. */
-function buildSyntheticPasskeyBackup(credentialId: string, accountRow: RegisteredAccountRow): string {
+function buildSyntheticPasskeyBackup(credentialId: string, dekSealed: string, accountRow: RegisteredAccountRow): string {
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 3,
+		"compat-epoch": 4,
 		"backup-schema-version": 1,
+		// Passkey blobs carry the credentialId as master-key and NEVER an entropy field
+		// (the master re-derives from the passkey PRF at restore).
 		"master-key": credentialId,
+		// Epoch-4 passkey blobs REQUIRE the SEALED dek carrier (the register-time row blob
+		// verbatim — the restore ceremony re-derives the same PRF wrap key to open it).
+		"imported-keys-dek-sealed": dekSealed,
 		data: {
 			profile: { id: "syn-profile-id", name: "Imported PK", type: "passkey" },
-			network: [
-				{
-					id: "syn-network-id",
-					profileId: "syn-profile-id",
-					name: "Local Network",
-					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-					chainId: accountRow.chainId,
-					kind: "local",
-					endpoints: [
-						{
-							id: "syn-endpoint-id",
-							rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-						},
-					],
-					primaryEndpointId: "syn-endpoint-id",
-				},
-			],
 			account: [
 				{
 					address: accountRow.address,
 					profileId: "syn-profile-id",
 					chainId: accountRow.chainId,
+					l1ChainId: accountRow.l1ChainId,
 					name: "Account",
 					index: accountRow.index,
 					type: accountRow.type,
@@ -191,8 +182,7 @@ async function importPasskeyFullBackup(page: Page, filePath: string): Promise<vo
 	await clickByTestId(page, "import-option-full-backup")
 
 	await page.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-	const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-full-backup-pick-file")])
-	await chooser.accept([filePath])
+	await pickFileByTestId(page, "import-full-backup-pick-file", filePath)
 
 	// Submit button gates on isAllowedToImportBackup — for passkey backups
 	// that means just `profileType && backup`. Wait for it + click.
@@ -367,7 +357,7 @@ test("passkey full-backup export: Escape during modal resets agreement gate", as
 		// Tear down the virtual authenticator BEFORE clicking agree so
 		// navigator.credentials.get hangs, giving the Escape handler a
 		// real chance to abort first.
-		await auth.cleanup()
+		await stallNextPasskeyCeremony(page, auth)
 		auth = undefined
 
 		await clickByTestId(page, "agree-continue-btn")
@@ -422,7 +412,7 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		await registerPasskeyProfile(page)
 		const addressBefore = await readActiveAccount(page)
 		expect(addressBefore.startsWith("0x")).toBe(true)
-		const { credentialId } = await readRegisteredPasskeyProfile(page)
+		const { credentialId, dekSealed } = await readRegisteredPasskeyProfile(page)
 		expect(credentialId.length).toBeGreaterThan(0)
 
 		// Capture the FULL account row (chainId/index/type, not just the address): the imported
@@ -432,14 +422,15 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 			const all = await chrome.storage.local.get()
 			for (const [k, v] of Object.entries(all)) {
 				if (!k.startsWith("nulo:core:accounts@")) continue
-				const row = JSON.parse(v as string) as { address: string; chainId: number; index: number; type: number }
-				if (row.address === addr) return { address: row.address, chainId: row.chainId, index: row.index, type: row.type }
+				const row = JSON.parse(v as string) as { address: string; chainId: number; l1ChainId: number; index: number; type: number }
+				if (row.address === addr)
+					return { address: row.address, chainId: row.chainId, l1ChainId: row.l1ChainId, index: row.index, type: row.type }
 			}
 			throw new Error(`no account row found for ${addr}`)
 		}, addressBefore)
 
 		// 2. Build the synthetic backup file with that exact credentialId.
-		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, accountRow))
+		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, dekSealed, accountRow))
 
 		// 3. Reset the wallet via the in-app reset flow — the same pattern
 		//    `passkey-paths.test.ts:140-172` uses.
@@ -457,14 +448,13 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		const addressAfter = await readActiveAccount(page)
 		expect(addressAfter).toBe(addressBefore)
 
-		// Storage sentinels populated post-import (same as the password
+		// Durable UI pointers populated post-import (same as the password
 		// round-trip test in import-paths.test.ts).
 		const storage = await page.evaluate(async () => {
-			const r = await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:sentinel", "nulo:ui:activeAccount"])
+			const r = await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:activeAccount"])
 			return r
 		})
 		expect(storage["nulo:ui:lastActiveProfile"]).toBeTruthy()
-		expect(storage["nulo:ui:sentinel"]).toBeTruthy()
 		expect(storage["nulo:ui:activeAccount"]).toBeTruthy()
 
 		// Lock-cascade benign errors are the same shape as other Path A tests.

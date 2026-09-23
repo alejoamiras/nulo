@@ -60,80 +60,50 @@ watch(
 			const triggerRect = trigger.value.getBoundingClientRect()
 			const tooltipRect = tip.value.getBoundingClientRect()
 
+			// Cross-axis alignment shared by both side pairs: the same
+			// center/start/end geometry computes x for top/bottom (width axis)
+			// and y for left/right (height axis). One implementation, so a
+			// rounding/clamp fix can never land on one axis and miss the other.
+			const crossAxisOffset = (start: number, end: number, triggerSize: number, tooltipSize: number): number => {
+				switch (props.position) {
+					case "center":
+						return start - (tooltipSize / 2 - triggerSize / 2)
+					case "start":
+						return start
+					case "end":
+						return end - tooltipSize
+					default:
+						// Invalid position (the runtime validator only WARNS, it doesn't
+						// block): the old inner switches fell through leaving the
+						// coordinate at its initialized 0 — preserved exactly.
+						return 0
+				}
+			}
+			const xCross = () => crossAxisOffset(triggerRect.left, triggerRect.right, triggerRect.width, tooltipRect.width)
+			const yCross = () => crossAxisOffset(triggerRect.top, triggerRect.bottom, triggerRect.height, tooltipRect.height)
+
 			let xPos = 0
 			let yPos = 0
 
 			switch (props.side) {
 				case "top":
 					yPos = triggerRect.top - tooltipRect.height - 8
-
-					switch (props.position) {
-						case "center":
-							xPos = triggerRect.left - (tooltipRect.width / 2 - triggerRect.width / 2)
-							break
-
-						case "start":
-							xPos = triggerRect.left
-							break
-
-						case "end":
-							xPos = triggerRect.right - tooltipRect.width
-							break
-					}
+					xPos = xCross()
 					break
 
 				case "bottom":
 					yPos = triggerRect.bottom + 8
-
-					switch (props.position) {
-						case "center":
-							xPos = triggerRect.left - (tooltipRect.width / 2 - triggerRect.width / 2)
-							break
-
-						case "start":
-							xPos = triggerRect.left
-							break
-
-						case "end":
-							xPos = triggerRect.right - tooltipRect.width
-							break
-					}
+					xPos = xCross()
 					break
 
 				case "left":
 					xPos = triggerRect.left - tooltipRect.width - 8
-
-					switch (props.position) {
-						case "center":
-							yPos = triggerRect.top - (tooltipRect.height / 2 - triggerRect.height / 2)
-							break
-
-						case "start":
-							yPos = triggerRect.top
-							break
-
-						case "end":
-							yPos = triggerRect.bottom - tooltipRect.height
-							break
-					}
+					yPos = yCross()
 					break
 
 				case "right":
 					xPos = triggerRect.right + 8
-
-					switch (props.position) {
-						case "center":
-							yPos = triggerRect.top - (tooltipRect.height / 2 - triggerRect.height / 2)
-							break
-
-						case "start":
-							yPos = triggerRect.top
-							break
-
-						case "end":
-							yPos = triggerRect.bottom - tooltipRect.height
-							break
-					}
+					yPos = yCross()
 					break
 
 				default:
@@ -167,6 +137,13 @@ const handleMouseLeave = () => {
 		clearTimeout(delayedHover.value)
 	}
 }
+
+// Keyboard parity: focusin/focusout bubble from any focusable child of the trigger, so a
+// tab-focused trigger shows the tooltip. Focus is deliberate — no hover delay applies.
+const handleFocusIn = () => {
+	if (props.disabled) return
+	isHovered.value = true
+}
 </script>
 
 <template>
@@ -175,6 +152,8 @@ const handleMouseLeave = () => {
 		@mouseleave="handleMouseLeave"
 		@touchstart="handleMouseEnter"
 		@touchend="handleMouseLeave"
+		@focusin="handleFocusIn"
+		@focusout="handleMouseLeave"
 		:class="$style.wrapper"
 		:style="{ width: wide ? '100%' : undefined }"
 	>

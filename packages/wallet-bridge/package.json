@@ -2,19 +2,20 @@
 	"name": "@nulo/wallet-bridge",
 	"private": true,
 	"version": "0.2.0",
+	"license": "Apache-2.0",
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.1",
-		"@aztec/foundation": "5.0.1",
-		"@aztec/stdlib": "5.0.1",
-		"@aztec/wallet-sdk": "5.0.1",
+		"@aztec/aztec.js": "5.2.0",
+		"@aztec/foundation": "5.2.0",
+		"@aztec/stdlib": "5.2.0",
+		"@aztec/wallet-sdk": "5.2.0",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*"
 	},

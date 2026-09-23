@@ -1,0 +1,83 @@
+<title>Export Integrity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground:#FAF9F6; --surface:#FFFFFF; --ink:#1C1E21; --muted:#5B6068;
+  --line:#DDD9D0; --accent:#0E7C66; --accent-ink:#0A5A4B; --card:#F1EFEA; --warn:#A86412;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+    --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+  --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+}
+* { box-sizing:border-box }
+body { margin:0; background:var(--ground); color:var(--ink); font-family:"Source Serif 4",Georgia,serif; font-size:17px; line-height:1.65 }
+.wrap { max-width:720px; margin:0 auto; padding:48px 24px 96px }
+h1,h2,h3 { font-family:"Archivo",sans-serif; text-wrap:balance }
+h1 { font-size:34px; font-weight:800; letter-spacing:-0.015em; margin:8px 0 12px }
+h2 { font-size:20px; font-weight:700; margin:44px 0 12px }
+h3 { font-size:15.5px; font-weight:700; margin:0 0 6px }
+p { margin:0 0 13px }
+.eyebrow { font-family:"Archivo",sans-serif; font-size:12px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent) }
+.phase { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent); padding:16px 18px 10px; margin:0 0 12px }
+.phase p { font-size:15.5px }
+.gate { font-size:13.5px; color:var(--muted); border-top:1px dashed var(--line); margin-top:6px; padding-top:8px }
+.note { background:var(--card); padding:14px 18px; margin:14px 0; font-size:15px }
+pre { background:var(--card); padding:14px 16px; overflow-x:auto; font-family:"JetBrains Mono",monospace; font-size:12.5px; line-height:1.5; white-space:pre-wrap }
+.warnline { color:var(--warn); font-family:"Archivo",sans-serif; font-size:13.5px; font-weight:600 }
+ul { margin:0 0 13px; padding-left:22px } li { margin-bottom:7px } li::marker { color:var(--accent) }
+.muted { color:var(--muted); font-size:14px }
+a { color:var(--accent-ink) }
+</style>
+<div class="wrap">
+<div class="eyebrow">Nulo · remediation batch 1 of 9</div>
+<h1>Export Integrity</h1>
+<p>Your wallet's "Create Backup" screen has a dangerous flaw: if you press Enter twice, or click while it's still working, it can quietly produce a backup file that will <em>refuse to restore</em> — you'd only find out on the day you need it. It can also freeze forever on a spinner if anything goes wrong mid-way. Separately, picking the wrong file in the import screens (a huge file, or a compressed file that expands enormously) can crash the wallet popup. This plan fixes both.</p>
+
+<h2>What changes, in plain words</h2>
+<ul>
+<li><strong>The backup screen becomes single-shot.</strong> Once you start creating a backup, extra clicks and key presses do nothing until it finishes or fails. The moment you start, the screen shows "Creating your backup" — including during the short pause that used to look like nothing was happening.</li>
+<li><strong>The backup file is sealed in one motion.</strong> The file's integrity stamp is now computed from one frozen snapshot, so a backup that downloads is a backup that will restore.</li>
+<li><strong>Failures say so.</strong> If anything breaks mid-backup, you get a clear message and can simply try again — no eternal spinner, and no blank screen for passkey profiles.</li>
+<li><strong>Leaving the screen cleans up.</strong> Navigating away stops the work and wipes the sensitive material from the page's memory.</li>
+<li><strong>File imports get a bouncer.</strong> Backup, account, and contact imports now refuse absurdly large files — including compressed files that would balloon after unpacking — with a clear "file is too large" message instead of a crash.</li>
+</ul>
+
+<h2>Why this level of ceremony (tier: mid)</h2>
+<p>One risk dimension is genuinely high — this touches the wallet's safety net (backups) and secret material. Everything else is contained: two findings, one page plus a few utility files, no new dependencies. That combination is exactly the "mid" tier: one plan, one competing alternative, two independent reviewers, and a final fresh-eyes review.</p>
+
+<h2>Phases</h2>
+<div class="phase"><h3>Phase 1 — Make backup creation single-shot and honest</h3>
+<p>Rebuild the backup screen's engine: a guard that blocks double-starts, the work moved into one clean assembly step that produces the file and its integrity stamp together, clear failure messages, and cleanup on leaving.</p>
+<p class="gate">Proves itself by: automated checks that a second click does nothing, a mid-work failure recovers cleanly, leaving the page wipes secrets — plus the code style and type checks.</p></div>
+<div class="phase"><h3>Phase 2 — Add the file-size bouncer</h3>
+<p>Teach the file-picking machinery a size limit, enforced <em>before</em> anything expensive happens — including inside the unpacking step, where a small compressed file could otherwise balloon into memory.</p>
+<p class="gate">Proves itself by: automated checks that oversized and booby-trapped compressed files are rejected with the right message, and normal files still work.</p></div>
+<div class="phase"><h3>Phase 3 — Prove it end to end</h3>
+<p>The existing full rehearsal — create a real backup in a real browser, download it, restore it in a fresh wallet — now also hammers Enter during creation to prove the old bug is dead.</p>
+<p class="gate">Proves itself by: the project's full check battery plus the browser rehearsal suite, all green.</p></div>
+
+<h2>Human context</h2>
+<p>This is the first of nine fix batches from the August audit review. Two independent reviewers (one from a different AI family) attacked the plan before any code: the first round found real gaps — including a blank-screen dead-end for passkey users and a memory-math error in the size limits — and the plan absorbed all of it. The final design was re-reviewed from scratch by fresh eyes.</p>
+
+<h2>Open questions</h2>
+<ul>
+<li>None blocking. One deliberately deferred idea for a future decision: cryptographically <em>authenticating</em> backup files (today's integrity stamp only detects accidents, by design — changing that means changing the file format, which is a bigger, separate call).</li>
+</ul>
+
+<div class="note"><strong>Approval:</strong> per your standing instruction, approval for this batch was delegated to the reviewer consensus — the plan ships once the final fresh-eyes review returns "approve" and every check is green. This page exists so you can audit the decisions afterwards; the full technical plan lives at <span class="muted">implementations-plan/export-integrity/plan.md</span>.</div>
+
+<h2>Implementation seeds</h2>
+<p class="muted">Not needed for the active autonomous run (its own goal governs). For a standalone re-run of just this plan:</p>
+<p class="warnline">Use exactly one per session — they replace each other.</p>
+<h3>Recommended: /goal</h3>
+<pre>/goal All 3 phases marked ✓ in implementations-plan/export-integrity/plan.md, each ✓ backed by its validation gate reported passing in the transcript; /code-review max --fix applied+committed; codex post-impl loop converged (quoted); PR to dev green (gh pr checks output in transcript); bun run audit:vue and bun run test:e2e both exit 0 in the transcript.</pre>
+<h3>Alternative: /loop</h3>
+<pre>/loop 15m Drive implementations-plan/export-integrity forward per plan.md. Reality-check plan.md + lessons/ + git status first; pick the next pending phase step; validate with the phase's gate commands after each meaningful edit; mark ✓ only when the written gate passes; decisions via /codex xhigh (never idle waiting for the user); log consults in lessons/; after all phases ✓ run the plan's Post-implementation section verbatim.</pre>
+</div>

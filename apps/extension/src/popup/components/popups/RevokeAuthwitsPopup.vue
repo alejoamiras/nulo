@@ -8,6 +8,8 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -28,38 +30,18 @@ const props = defineProps({
 })
 
 const authwitsService = new AuthRegistryServiceClient()
-authwitsService.onRegistryEnabled.add(onRegistryEnabled)
-authwitsService.onRegistryDisabled.add(onRegistryDisabled)
-function onRegistryEnabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = true
-	}
-}
-function onRegistryDisabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = false
-	}
-}
+const registry = useAuthRegistryStatus(authwitsService, () =>
+	appStore.profile && appStore.network && appStore.account
+		? { profileId: appStore.profile.id, chainId: appStore.network.chainId, account: appStore.account.address }
+		: undefined,
+)
+const { isRegistryEnabled, isLoading, error } = registry
+onBeforeUnmount(() => registry.dispose())
 
 const authwits = ref([])
 const chunkedAuthwits = ref([])
 const chunksCount = computed(() => chunkedAuthwits.value.length)
-const isRegistryEnabled = ref(undefined)
-const isLoading = ref(false)
-const error = ref()
 const isErrorOccurred = computed(() => !!error.value)
-
-async function fetchRegistryStatus() {
-	isLoading.value = true
-
-	try {
-		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.account.address)
-	} catch (err) {
-		error.value = err
-	} finally {
-		isLoading.value = false
-	}
-}
 
 function chunkAuthwits() {
 	chunkedAuthwits.value = authwits.value
@@ -85,6 +67,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
+	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
+	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	if (isLoading.value) return
 	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
 	// Pre-fix this guard was a no-op (refs are always truthy as objects);
 	// Enter could fire the handler before feeSettings was set on all chunks.
@@ -92,27 +77,12 @@ async function handleRevokeAuthwits() {
 	if (!isAllowedToExecute.value) return
 
 	isLoading.value = true
-
-	for (const ch of chunkedAuthwits.value) {
-		try {
-			ch.status = "progress"
-			await authwitsService.revokeAuthwits(appStore.network.id, appStore.account.address, ch.ids, ch.feeSettings)
-			ch.status = "success"
-		} catch (err) {
-			if (classifyCancellableRejection(err) === "silent") {
-				// User cancelled this chunk's tx mid-prove. Mark cancelled so
-				// the summary branch below doesn't read it as a success or a
-				// failure. The terminal card in RecentActivityView shows the
-				// per-chunk cancellation already.
-				ch.status = "cancelled"
-			} else {
-				ch.status = "error"
-				ch.error = err
-			}
-		}
+	try {
+		await revokeChunks()
+	} finally {
+		isLoading.value = false
 	}
 
-	isLoading.value = false
 	const errors = chunkedAuthwits.value.filter((ch) => ch.status === "error").map((ch) => ch.error)
 	const cancelled = chunkedAuthwits.value.some((ch) => ch.status === "cancelled")
 	if (cancelled) {
@@ -131,41 +101,56 @@ async function handleRevokeAuthwits() {
 	}
 }
 
+async function revokeChunks() {
+	for (const ch of chunkedAuthwits.value) {
+		try {
+			ch.status = "progress"
+			await authwitsService.revokeAuthwits(appStore.network.id, appStore.account.address, ch.ids, ch.feeSettings)
+			ch.status = "success"
+		} catch (err) {
+			if (classifyCancellableRejection(err) === "silent") {
+				// User cancelled this chunk's tx mid-prove. Mark cancelled so
+				// the summary branch below doesn't read it as a success or a
+				// failure. The terminal card in RecentActivityView shows the
+				// per-chunk cancellation already.
+				ch.status = "cancelled"
+			} else {
+				ch.status = "error"
+				ch.error = err
+			}
+		}
+	}
+}
+
 function showChunkContent(chunk) {
 	cacheStore.viewerData = chunk.content
 	popupStore.open("data_viewer")
 }
 
-watch(
+// No input to focus here: a global Enter confirms. The handler owns the latch and the fee check; the
+// error gate mirrors the button's :disabled, which the handler does not check itself.
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (props.show) {
-			await fetchRegistryStatus()
+	{
+		submit: () => {
+			if (!isErrorOccurred.value) handleRevokeAuthwits()
+		},
+		onShow: async () => {
+			await registry.fetch()
 
 			authwits.value = cacheStore.preselectedAuthwits
 			chunkAuthwits()
-
-			document.addEventListener("keydown", onKeydown)
-		} else {
+		},
+		onHide: () => {
 			authwits.value = []
 			chunkedAuthwits.value = []
-			isRegistryEnabled.value = undefined
-			isLoading.value = false
-			error.value = null
+			registry.reset()
 
 			authwitsService.disconnect()
-
-			document.removeEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
 )
-
-const onKeydown = (e) => {
-	// Mirror the full button :disabled gate (template uses
-	// `!isAllowedToExecute || isErrorOccurred`) AND add isLoading so
-	// rapid Enter doesn't re-enter the handler while a request is in flight.
-	if (e.key === "Enter" && isAllowedToExecute.value && !isErrorOccurred.value && !isLoading.value) handleRevokeAuthwits()
-}
 </script>
 
 <template>
@@ -273,7 +258,7 @@ const onKeydown = (e) => {
 						size="medium"
 						wide
 						:loading="isLoading"
-						:disabled="!isAllowedToExecute || isErrorOccurred"
+						:disabled="!isAllowedToExecute || isErrorOccurred || isLoading"
 					>
 						Revoke
 					</Button>
@@ -310,11 +295,6 @@ const onKeydown = (e) => {
 		padding: 12px;
 	}
 
-	.row {
-		padding: 0 0 8px 8px;
-
-	}
-	
 	.fullscreen_icon {
 		cursor: pointer;
 		&:hover {

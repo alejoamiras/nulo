@@ -30,7 +30,6 @@ export type Task = {
 export enum ContentKind {
 	Step,
 	BalanceUpdate,
-	TokenMint,
 	ExecuteOperation,
 	Transfer,
 	RevokeAuthwits,
@@ -60,19 +59,6 @@ export class BalanceUpdateContent implements ITaskContent {
 	) {}
 }
 
-export class TokenMintContent implements ITaskContent {
-	public readonly kind = ContentKind.TokenMint
-	public readonly label = "Mint token"
-	constructor(
-		public readonly name: string,
-		public readonly symbol: string,
-		public readonly decimals: number,
-		public readonly amount: string,
-		public readonly account: string,
-		public readonly estimatedTime?: number,
-	) {}
-}
-
 export class ExecuteOperationContent implements ITaskContent {
 	public readonly kind = ContentKind.ExecuteOperation
 	public readonly label = "Execute operation"
@@ -91,6 +77,12 @@ export class TransferContent implements ITaskContent {
 		public readonly senderAddress: string,
 		public readonly recipientAddress: string,
 		public readonly amount: bigint,
+		/** Scoping identity for same-address cross-network views: two profiles
+		 *  restored from one phrase share an address, and TaskService clears on
+		 *  PROFILE change only — without the network id, an address-only match
+		 *  renders another network's in-flight transfer card. Optional so
+		 *  in-flight tasks minted before this field keep address-only semantics. */
+		public readonly networkId?: string,
 	) {}
 }
 

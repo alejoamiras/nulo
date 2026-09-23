@@ -11,6 +11,8 @@
  * window so the user sees the reason, then auto-dismisses.
  */
 
+import { trimAddress } from "@/utils/string"
+
 const props = defineProps({
 	op: {
 		type: Object,
@@ -24,7 +26,7 @@ const isFailed = computed(() => props.op?.progress?.stage === "failed")
 const shortAddress = computed(() => {
 	const a = props.op?.contractAddress
 	if (typeof a !== "string" || a.length < 12) return a ?? ""
-	return `${a.slice(0, 6)}…${a.slice(-4)}`
+	return trimAddress(a, 6, 4, "…")
 })
 
 const title = computed(() => {

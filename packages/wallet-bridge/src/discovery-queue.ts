@@ -1,8 +1,29 @@
+import { describeExternalId } from "./external-id"
 import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 
-const STALE_MS = 5 * 60 * 1000 // 5 minutes
+// B-16: bound discovery staleness to the SDK's discovery window, not an
+// arbitrary 5 minutes. The extension provider's DEFAULT_DISCOVERY_TIMEOUT_MS is
+// 60s — the dApp removes its DISCOVERY_RESPONSE listener at t=60s. Approving a
+// discovery past that window strands a half-open handshake the dApp can no
+// longer complete. 55s leaves a ~5s margin for the DISCOVERY_RESPONSE to be
+// scheduled and delivered before t=60s (the subsequent 2s ECDH exchange runs
+// over the already-transferred port, so it is not what the 60s bounds). This is
+// a policy value: a dApp may pass a shorter custom timeout, which the SDK does
+// not surface per-discovery, so it cannot be honored exactly — we align to the
+// documented default.
+export const DISCOVERY_STALE_MS = 55 * 1000 // 55 seconds — just inside the SDK's 60s discovery timeout
+
+/**
+ * True when `discovery` has aged past the SDK's discovery window and must be
+ * rejected rather than approved. MUST be re-checked immediately before EVERY
+ * approval (and before any durable session write), not only at drain-gate
+ * entry: an interactive approval popup can resolve after t=60s.
+ */
+export function isDiscoveryExpired(discovery: PendingDiscovery, now: number = Date.now()): boolean {
+	return now - discovery.timestamp > DISCOVERY_STALE_MS
+}
 
 // F-04: bound the locked-wallet discovery queue so a flooding dApp cannot grow
 // it without limit. A legitimate dApp needs at most a handful of concurrent
@@ -24,7 +45,15 @@ export class DiscoveryQueue {
 	constructor(
 		private handler: BackgroundConnectionHandler,
 		private logger: ILogger,
-	) {}
+	) {
+		// F-B16: reconcile the badge at construction (= every SW boot). The badge
+		// is Chrome-level state that SURVIVES a service-worker kill, while this
+		// queue is in-memory and boots empty — without this, a worker killed with
+		// a non-empty queue leaves a permanent ghost count (the empty-queue drain
+		// below early-returns without touching the badge, so even unlocking never
+		// clears it). The queue is authoritative: paint what it actually holds.
+		this.updateBadge()
+	}
 
 	get size(): number {
 		return this.queue.length
@@ -38,20 +67,20 @@ export class DiscoveryQueue {
 	 */
 	enqueue(requestId: string, origin: string, chainId: string): boolean {
 		if (this.queue.some((d) => d.origin === origin && d.chainId === chainId)) {
-			this.logger.log("wallet-sdk", LogLevel.Info, `Discovery coalesced (already queued): ${origin} chain=${chainId}`)
+			this.logger.log("wallet-sdk", LogLevel.Info, `Discovery coalesced (already queued) on chain=${chainId}`)
 			return false
 		}
 		if (this.queue.filter((d) => d.origin === origin).length >= PER_ORIGIN_CAP) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped (per-origin cap ${PER_ORIGIN_CAP}): ${origin}`)
+			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped: one origin exceeded the per-origin cap of ${PER_ORIGIN_CAP}`)
 			return false
 		}
 		if (this.queue.length >= GLOBAL_CAP) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped (global cap ${GLOBAL_CAP}): ${origin}`)
+			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped: the queue is at its global cap of ${GLOBAL_CAP}`)
 			return false
 		}
 		this.queue.push({ requestId, origin, chainId })
 		this.updateBadge()
-		this.logger.log("wallet-sdk", LogLevel.Info, `Discovery queued (wallet locked): ${origin} [queue: ${this.queue.length}]`)
+		this.logger.log("wallet-sdk", LogLevel.Info, `Discovery queued (wallet locked) [queue: ${this.queue.length}]`)
 		return true
 	}
 
@@ -68,7 +97,6 @@ export class DiscoveryQueue {
 		this.queue.length = 0
 		this.updateBadge()
 
-		const now = Date.now()
 		for (let i = 0; i < snapshot.length; i++) {
 			const entry = snapshot[i]
 			const discovery = this.handler.getPendingDiscovery(entry.requestId)
@@ -77,14 +105,16 @@ export class DiscoveryQueue {
 				this.logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${entry.requestId}`,
+					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${describeExternalId(entry.requestId)}`,
 				)
 				continue
 			}
 
-			if (now - discovery.timestamp > STALE_MS) {
+			// Re-read the clock per entry: processing an earlier discovery (which
+			// can await a popup) may itself push a later one past the window.
+			if (isDiscoveryExpired(discovery)) {
 				this.handler.rejectDiscovery(discovery.requestId)
-				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): ${discovery.origin}`)
+				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): request ${describeExternalId(entry.requestId)}`)
 				continue
 			}
 

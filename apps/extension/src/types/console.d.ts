@@ -8,12 +8,13 @@ export declare global {
 		_error: typeof console.error
 	}
 
+	/** The console sniffer's sinks: a namespace of its own so `console.error` never lands on `window.onerror`. */
 	interface Window {
-		ontrace?: typeof console.trace
-		ondebug?: typeof console.debug
-		onlog?: typeof console.log
-		oninfo?: typeof console.info
-		onwarn?: typeof console.warn
-		onerror?: typeof console.error
+		nuloOntrace?: typeof console.trace
+		nuloOndebug?: typeof console.debug
+		nuloOnlog?: typeof console.log
+		nuloOninfo?: typeof console.info
+		nuloOnwarn?: typeof console.warn
+		nuloOnerror?: typeof console.error
 	}
 }

@@ -3,22 +3,23 @@ import { deriveKeys } from "@aztec/stdlib/keys"
 import { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test } from "vitest"
-import referenceVectors from "../../../../implementations-plan/aztec-5.0.0-stable/reference/regime-b/vectors.json"
+import referenceVectors from "../../../../implementations-plan/key-model-v2/reference/vectors.json"
 import { NuloAccount } from "./nulo-account"
 
 /**
- * Full-chain known-answer test for the signing-key-root inversion (NULO-ACCOUNT-KDF v1).
+ * Full-chain known-answer test for the signing-key-root inversion (NULO-ACCOUNT-KDF v2).
  *
  * The expected values are REFERENCE-GENERATED from the published 5.0.1 packages by a committed
- * script that never touches this repo's helpers (`reference/regime-b/derive-vectors.ts`; the
- * address comes from upstream's own `getSchnorrAccountContractAddress` oracle). Equality is the
- * gate — a mismatch means OUR derivation diverged from upstream's model; stop and investigate,
- * never re-pin from the implementation under test.
+ * script that never touches this repo's helpers (`implementations-plan/key-model-v2/reference/
+ * derive-vectors.ts`; the address comes from upstream's own `getSchnorrAccountContractAddress`
+ * oracle; the v1 predecessor vectors remain archived under `aztec-5.0.0-stable/reference/`).
+ * Equality is the gate — a mismatch means OUR derivation diverged; stop and investigate, never
+ * re-pin from the implementation under test.
  */
 const nullLogger: ILogger = { log: () => {} }
 
-describe("NULO-ACCOUNT-KDF v1 — full chain vs the regime-B reference vectors", () => {
-	for (const vector of referenceVectors.vectors) {
+describe("NULO-ACCOUNT-KDF v2 — full chain vs the reference vectors", () => {
+	for (const vector of referenceVectors.signingChain) {
 		const seed = Fr.fromHexString(vector.seed)
 
 		test(`seed ${vector.seed.slice(0, 10)}… derives the reference signing/secret keys`, async () => {

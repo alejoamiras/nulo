@@ -1,18 +1,23 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
+import { copyWithToast } from "@/utils/clipboard"
 import { isValidHex } from "@/utils/string"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -74,6 +79,9 @@ const hasChanges = computed(() => nameChanged.value || addressChanged.value)
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist" && nameChanged.value)
 const isAddressValid = computed(() => isValidHex(addressTerm.value))
 const isAvailableToUpdateFpc = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isFpcUpdateInProgress.value) return false
 	if (!hasChanges.value) return false
 	// Name is locked on protocol rows; if it differs, that's an invalid edit.
 	if (isProtocol.value && nameChanged.value) return false
@@ -115,7 +123,7 @@ const handleUpdateFpc = async () => {
 		emit("onClose")
 		openToast({ label: "FPC is updated" })
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		processingError.value = {
 			show: true,
 			title: msg,
@@ -144,23 +152,14 @@ const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
 const handleCopyAddress = () => {
-	window.navigator.clipboard.writeText(fpcToEdit.value.address)
-	openToast({ label: "FPC's address is copied", icon: "copy" })
+	void copyWithToast(fpcToEdit.value.address, openToast, "FPC's address is copied")
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			fpcService.disconnect()
-			fpcService = null
-			fpcToEdit.value = null
-			fpcs.value = []
-			form.reset()
-			processingError.value = { show: false, title: "", tooltip: "" }
-		} else {
+	{
+		submit: handleUpdateFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
@@ -173,10 +172,20 @@ watch(
 			nameTerm.value = fpcToEdit.value.name ?? ""
 			addressTerm.value = fpcToEdit.value.address ?? ""
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcToEdit.value = null
+			fpcs.value = []
+			form.reset()
+			processingError.value = { show: false, title: "", tooltip: "" }
+		},
 	},
+	// The edit target and the collision list arrive with the awaits above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after them.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -185,13 +194,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateFpc()
-}
 </script>
 
 <template>
@@ -245,10 +247,7 @@ const onKeydown = (e) => {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
+					<FieldWarning v-if="isAlreadyExist"> Already exist </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -263,35 +262,13 @@ const onKeydown = (e) => {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="!isAddressValid && addressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Invalid address </Text>
-					</Flex>
+					<FieldWarning v-if="!isAddressValid && addressTerm"> Invalid address </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
 
 		<template #aboveSubmit>
-			<Transition name="fade">
-				<Tooltip
-					v-if="processingError.show"
-					side="top"
-					position="start"
-					wide
-					:disabled="!processingError.tooltip"
-					:style="{ marginTop: '-12px' }"
-				>
-					<Flex align="center" wide>
-						<Icon name="info" size="14" color="red" />
-						<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
-							{{ processingError.title }}
-						</Text>
-					</Flex>
-					<template #content>
-						<Text size="12" color="secondary">{{ processingError.tooltip }}</Text>
-					</template>
-				</Tooltip>
-			</Transition>
+			<ProcessingErrorNote :show="processingError.show" :title="processingError.title" :tooltip="processingError.tooltip" color="red" />
 		</template>
 
 		<template #belowSubmit>

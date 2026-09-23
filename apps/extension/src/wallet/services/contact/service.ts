@@ -2,17 +2,18 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { nextRandomId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { type RestoreGate, NOOP_RESTORE_GATE } from "@/e2e/restore-gate"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type Contact, CONTACT_SERVICE_NAME, CONTACT_STORAGE_ROOT, ContactSchema, type Events, type Methods } from "./spec"
 
 export * from "./spec"
@@ -47,7 +48,11 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	 *        directly (legacy behavior). Passed explicitly by the composition
 	 *        root and by tests via FakeBrowserApi.
 	 */
-	public constructor(logger: ILogger, browserApi?: BrowserApi) {
+	public constructor(
+		logger: ILogger,
+		browserApi?: BrowserApi,
+		private readonly restoreGate: RestoreGate = NOOP_RESTORE_GATE,
+	) {
 		super(CONTACT_SERVICE_NAME, logger)
 		this.storage = browserApi
 			? new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, browserApi.storage.local, (raw) => ContactSchema.parse(raw))
@@ -90,38 +95,43 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async addContact(name: string, address: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the lock wait and id allocation below can span the
+		// profile's deletion — without a fence the row lands stamped with the
+		// deleted profile, surviving the cascade's earlier snapshot as an orphan.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const id = await nextRandomId(this.storage)
 
 			const contact: Contact = {
 				id,
-				profileId: profile.id,
+				profileId: fence.profileId,
 				name,
 				address,
 				abbr: this._getAbbreviation(name),
 			}
 
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.storage.set(contact.id, contact)
+			// The set awaits — compensate the just-written row if the deletion
+			// landed during it, before the row becomes observable via the emit.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(contact.id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 
 			this.emit("onContactAdded", contact)
 
 			return contact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateContact(contactId: string, name?: string, address?: string): Promise<Contact> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
 			const newContact = {
@@ -136,29 +146,23 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			this.emit("onContactUpdated", newContact)
 
 			return newContact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteContact(contactId: string): Promise<Contact> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
-			this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
+			this.logDebug(`Remove contact #${contact.id}`)
 			await this.storage.delete(contactId)
 
 			this.emit("onContactDeleted", contact)
 
 			return contact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async exportContacts(): Promise<string> {
@@ -202,23 +206,25 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 					const existingByAddress = contactsByAddress.get(_c.address)
 					const existingByName = contactsByName.get(_c.name)
 
+					// A contact's name and address are user PII — the row id identifies which contact
+					// was touched without writing down who it is.
 					if (existingByAddress) {
 						contact = await this.updateContact(existingByAddress.id, _c.name, _c.address)
 
-						this.logDebug(`Updated existing contact by address: ${_c.address}`)
+						this.logDebug(`Updated existing contact #${existingByAddress.id} (matched by address)`)
 					} else if (existingByName) {
 						contact = await this.updateContact(existingByName.id, _c.name, _c.address)
 
-						this.logDebug(`Updated existing contact by name: ${_c.name}`)
+						this.logDebug(`Updated existing contact #${existingByName.id} (matched by name)`)
 					} else {
 						contact = await this.addContact(_c.name, _c.address)
 
-						this.logDebug(`Added new contact: ${_c.name} - ${_c.address}`)
+						this.logDebug(`Added new contact #${contact?.id}`)
 					}
 
 					results.push(contact!)
 				} catch (error) {
-					this.logError(`Failed to import contact ${_c.name} - ${_c.address}`, getErrorMessage(error))
+					this.logError("Failed to import a contact", error)
 				}
 			}
 		}
@@ -242,20 +248,24 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related contacts`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profileId)
 			await purgeRows(
 				contacts,
 				(contact) => {
-					this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
+					this.logDebug(`Remove contact #${contact.id}`)
 					return this.storage.delete(contact.id)
 				},
 				(contact) => this.emit("onContactDeleted", contact),
 			)
-		} finally {
-			this.lock.leave()
-		}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed contact row ${id}`),
+			)
+		})
 	}
 
 	private _getAbbreviation(name: string): string {
@@ -268,23 +278,33 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry — before the e2e hold gate, the lock,
+		// and the collision reads — so a deleteProfile completing during ANY later
+		// park (including an injected gate) rejects every subsequent row write
+		// instead of landing orphans post-purge.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			contacts.map((c) => (c as { profileId?: unknown } | null)?.profileId),
+		)
+		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
+		// (this service restores inside the per-service loop, before
+		// finalizeRestore), so a crash test can kill the worker at a known
+		// pre-finalize phase. Production resolves immediately.
+		await this.restoreGate.waitAt("service-restore")
 
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
-				let id = contact.id
-				while (await this.storage.contains(id)) {
-					id = getRandomHex(8)
-				}
-				const written = { ...contact, id }
+				const id = await preferOrReallocId(this.storage, contact.id)
+				// Same sanitizer the plaintext import applies: a backup name is untrusted display text.
+				const written = { ...contact, id, name: sanitizeString(contact.name, 20) }
 				// Parse the persisted shape so a malformed backup contact is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				ContactSchema.parse(written)
+				assertRestoreEpoch(deletion, epochs, written.profileId)
 				await this.storage.set(id, written)
 				return written
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

@@ -7,7 +7,7 @@ import { applyNuloSchemaPatch } from "./apply"
 const entry = (schema: Record<string, unknown>, key: string) => (schema as any)[key]
 
 describe("applyNuloSchemaPatch", () => {
-	test("adds the three Nulo-custom methods with the expected input arity + output type", () => {
+	test("adds the four Nulo-custom methods with the expected input arity + output type", () => {
 		const schema: Record<string, unknown> = {}
 		applyNuloSchemaPatch(schema)
 
@@ -22,6 +22,18 @@ describe("applyNuloSchemaPatch", () => {
 		const grantPublicAuthwit = entry(schema, "grantPublicAuthwit")
 		expect(grantPublicAuthwit?.def?.input?.def?.items?.length).toBe(2)
 		expect(grantPublicAuthwit?.def?.output?.def?.type).toBe("string")
+
+		const getWalletFeatures = entry(schema, "getWalletFeatures")
+		expect(getWalletFeatures?.def?.input?.def?.items?.length).toBe(0)
+		expect(getWalletFeatures?.def?.output?.def?.type).toBe("array")
+		expect(getWalletFeatures?.def?.output?.def?.element?.def?.type).toBe("string")
+	})
+
+	test("throws when upstream already defines getWalletFeatures with a different signature", () => {
+		const schema: Record<string, unknown> = {
+			getWalletFeatures: z.function({ input: z.tuple([z.string()]), output: z.array(z.string()) }),
+		}
+		expect(() => applyNuloSchemaPatch(schema)).toThrow(/getWalletFeatures/)
 	})
 
 	test("throws when upstream already defines registerToken with a different signature", () => {

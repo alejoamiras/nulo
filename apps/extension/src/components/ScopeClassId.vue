@@ -11,17 +11,17 @@
  * a hostile dApp can't pick a class ID that collides with a user's
  * named contact to imply a relationship that doesn't exist.
  */
+import { copyWithToast } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
-import { sanitizeWireString, stripWireControl } from "@/wallet/services/dapp-session/capability-meta"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 const props = defineProps<{ id: string }>()
 
 const { openToast } = useToast()
 
 function handleClick() {
-	// Same stripping-without-truncation rule as ScopeAddress (codex post-impl §3).
-	window.navigator.clipboard.writeText(stripWireControl(props.id))
-	openToast({ label: "Class id is copied", icon: "copy" })
+	// Same stripping-without-truncation rule as ScopeAddress.
+	void copyWithToast(props.id, openToast, "Class id is copied", { sanitize: true })
 }
 </script>
 

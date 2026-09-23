@@ -10,3 +10,4 @@
 export { MockClock } from "./mock-clock"
 export { FakeBrowserApi } from "./fake-browser-api"
 export { FakeBackgroundTicker } from "./fake-background-ticker"
+export { createListenerBag, type ListenerBag } from "./listener-bag"

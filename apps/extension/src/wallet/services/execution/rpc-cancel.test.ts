@@ -1,6 +1,16 @@
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import {
+	ContractNotRegisteredError,
+	DuplicateInitializationError,
+	JobCancelledError,
+	PxeStaleAnchorError,
+	SessionEndedError,
+	TermsAcceptanceRequiredError,
+	TooManyPendingError,
+	walletErrorFromPayload,
+} from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { toWalletResponseError } from "@/wallet/services/wallet-sdk/error-envelope"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 
 describe("maybeRethrowAsRpcCancel", () => {
@@ -50,8 +60,60 @@ describe("classifyOperationCatch", () => {
 		const task = { cancel: vi.fn(), fail: vi.fn() }
 		const err = new Error("network unreachable")
 		const result = classifyOperationCatch(err, task, errorMessage)
-		expect(result).toEqual({ status: "failed", error: "network unreachable" })
+		expect(result).toEqual({ status: "failed", error: "network unreachable", code: undefined })
 		expect(task.fail).toHaveBeenCalledWith(err)
 		expect(task.cancel).not.toHaveBeenCalled()
+	})
+
+	test("(N-15) DuplicateInitializationError rides the code channel", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new DuplicateInitializationError(), task, errorMessage)
+		expect(result.status).toBe("failed")
+		expect((result as { code?: string }).code).toBe("DUPLICATE_INITIALIZATION")
+	})
+
+	test("PxeStaleAnchorError and ContractNotRegisteredError ride the code channel (message-only reconstructible)", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const stale = classifyOperationCatch(
+			new PxeStaleAnchorError("proveTx: stale chain anchor persisted after a resync"),
+			task,
+			errorMessage,
+		)
+		expect(stale).toMatchObject({ status: "failed", code: "PXE_STALE_ANCHOR" })
+		const unregistered = classifyOperationCatch(new ContractNotRegisteredError("Contract not found"), task, errorMessage)
+		expect(unregistered).toMatchObject({ status: "failed", code: "CONTRACT_NOT_REGISTERED", error: "Contract not found" })
+		expect(task.fail).toHaveBeenCalledTimes(2)
+	})
+
+	test("SessionEndedError rides the code channel and rebuilds losslessly from its code and message", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new SessionEndedError(), task, errorMessage)
+		expect(result).toMatchObject({ status: "failed", code: "SESSION_ENDED", error: SessionEndedError.MESSAGE })
+		const failed = result as { code: string; error: string }
+		expect(walletErrorFromPayload({ code: failed.code, message: failed.error })).toBeInstanceOf(SessionEndedError)
+	})
+
+	test("a Terms refusal at the broadcast line keeps its code all the way to the dApp envelope", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new TermsAcceptanceRequiredError(), task, errorMessage) as { code: string; error: string }
+		expect(result).toMatchObject({ status: "failed", code: TermsAcceptanceRequiredError.CODE })
+		// What the wallet-sdk dispatcher does with a coded failure, then what the ingress sends back.
+		const rebuilt = walletErrorFromPayload({ code: result.code, message: result.error })
+		expect(rebuilt).toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(toWalletResponseError(rebuilt)).toEqual({
+			code: 4100,
+			message: TermsAcceptanceRequiredError.MESSAGE,
+			data: { walletErrorCode: TermsAcceptanceRequiredError.CODE },
+		})
+	})
+
+	test("(N-15) OTHER WalletError subclasses do NOT ride the code channel (unsound reconstruction guard)", () => {
+		// TooManyPendingError deliberately reconstructs as base WalletError and
+		// detail-dependent classes lose details through the message-only
+		// channel — a blanket pass-through would silently corrupt them.
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new TooManyPendingError(), task, errorMessage)
+		expect(result.status).toBe("failed")
+		expect((result as { code?: string }).code).toBeUndefined()
 	})
 })
