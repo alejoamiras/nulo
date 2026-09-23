@@ -534,10 +534,8 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			discoveredAt: 0,
 		})
 		// Config port hiccup for the visibility key → the READ path must not expose records.
-		config.getValue.mockImplementation(async (key: string) => {
-			if (key === "incomingTransfersVisible") throw new Error("config down")
-			return undefined
-		})
+		config.getValue.mockResolvedValue(undefined)
+		vi.when(config.getValue).calledWith("incomingTransfersVisible").thenReject(new Error("config down"))
 		const out = await service.getIncomingTransfers("p1", "n1", "0xa")
 		expect(out).toEqual([])
 		// Still persisted — reappears once visibility can be read again.
@@ -1016,10 +1014,8 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 			updatedAt: 0,
 		})
 		// Config port hiccup ONLY for the visibility key (boot stays clean).
-		config.getValue.mockImplementation(async (key: string) => {
-			if (key === "incomingTransfersVisible") throw new Error("config port down")
-			return undefined
-		})
+		config.getValue.mockResolvedValue(undefined)
+		vi.when(config.getValue).calledWith("incomingTransfersVisible").thenReject(new Error("config port down"))
 		const added = vi.fn()
 		service.onIncomingTransferAdded.add(added)
 

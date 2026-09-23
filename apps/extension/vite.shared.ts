@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from "node:url"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
+import { configDefaults } from "vitest/config"
 import packageJson from "./package.json"
 
 /**
@@ -63,18 +64,17 @@ export const noirAliases: Record<string, string> = {
 }
 
 /**
- * Reporter set for every e2e config. Explicit `reporters` SUPPRESSES vitest's
- * auto-added `github-actions` annotation reporter (it is only appended when the
- * resolved list is empty), so it must be re-added by hand on CI or PR
- * annotations silently disappear. RetryErrorReporter surfaces the retained
- * first-attempt errors of retried passes. `NULO_E2E_RESULTS_FILE` adds the `json`
- * report a canary lane is asserted on (`scripts/ci-cd/assert-canary-results.ts`).
+ * Reporter set for every e2e config. An explicit `reporters` list replaces
+ * vitest's defaults wholesale — including the `github-actions` annotation
+ * reporter it adds under GITHUB_ACTIONS — so the defaults are spread back in
+ * rather than re-derived from the environment. `NULO_E2E_RESULTS_FILE` adds the
+ * `json` report a canary lane is asserted on (`scripts/ci-cd/assert-canary-results.ts`).
+ * RetryErrorReporter surfaces the retained first-attempt errors of retried passes.
  */
-export function e2eReporters(): ("default" | "github-actions" | ["json", { outputFile: string }] | RetryErrorReporter)[] {
+export function e2eReporters(): (string | ["json", { outputFile: string }] | RetryErrorReporter)[] {
 	const resultsFile = process.env.NULO_E2E_RESULTS_FILE
 	return [
-		"default",
-		...(process.env.GITHUB_ACTIONS ? (["github-actions"] as const) : []),
+		...configDefaults.reporters,
 		...(resultsFile ? [["json", { outputFile: resultsFile }] as ["json", { outputFile: string }]] : []),
 		new RetryErrorReporter(),
 	]

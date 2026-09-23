@@ -3,10 +3,12 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { LEGAL_MANIFEST, type LegalStatus, RISK_POINTS } from "@nulo/legal"
 
 const TERMS = LEGAL_MANIFEST.terms.at(-1)?.version as string
-const { route, push, legal } = vi.hoisted(() => {
-	// vi.hoisted runs before the ESM imports resolve, so these two are required in place.
-	const { reactive: makeReactive } = require("vue") as typeof import("vue")
-	const { EventHandler: Handler } = require("@nulo/wallet-core/utils") as typeof import("@nulo/wallet-core/utils")
+const { route, push, legal } = await vi.hoisted(async () => {
+	// vi.hoisted runs before the static imports resolve, so these two are imported in place — through
+	// Vite, not require(): a require() reaches the raw workspace TS via Node's own loader, whose
+	// extensionless re-exports do not resolve there.
+	const { reactive: makeReactive } = await import("vue")
+	const { EventHandler: Handler } = await import("@nulo/wallet-core/utils")
 	return {
 		route: makeReactive({ name: "popup-general", path: "/popup/general", meta: { isAuthRequired: true } }),
 		push: vi.fn(async (_to: string) => {}),

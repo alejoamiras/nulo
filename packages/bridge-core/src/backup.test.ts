@@ -80,7 +80,7 @@ describe("bridge backup files", () => {
 
 	it("wrong wallet key refuses with the attribution-honest copy", async () => {
 		const file = await sealBridgeBackup(key, publicDeposit(), SEALER)
-		expect(openBridgeBackup(otherKey, file)).rejects.toThrow(
+		await expect(openBridgeBackup(otherKey, file)).rejects.toThrow(
 			/wasn't sealed by the connected Ethereum account, or the file is corrupted/,
 		)
 	})
@@ -88,19 +88,19 @@ describe("bridge backup files", () => {
 	it("a tampered blob refuses (GCM auth)", async () => {
 		const file = await sealBridgeBackup(key, publicDeposit(), SEALER)
 		const tampered: BridgeBackupFile = { ...file, blob: `${file.blob.slice(0, -4)}AAAA` }
-		expect(openBridgeBackup(key, tampered)).rejects.toThrow(/corrupted|tampered/)
+		await expect(openBridgeBackup(key, tampered)).rejects.toThrow(/corrupted|tampered/)
 	})
 
 	it("a swapped header (unauthenticated) is caught against the sealed copies", async () => {
 		const file = await sealBridgeBackup(key, publicDeposit(), SEALER)
-		expect(openBridgeBackup(key, { ...file, id: "0xother" })).rejects.toThrow(/label doesn't match its sealed contents/)
-		expect(openBridgeBackup(key, { ...file, chainId: 1 })).rejects.toThrow(/label doesn't match/)
-		expect(openBridgeBackup(key, { ...file, direction: "withdraw" })).rejects.toThrow(/label doesn't match/)
+		await expect(openBridgeBackup(key, { ...file, id: "0xother" })).rejects.toThrow(/label doesn't match its sealed contents/)
+		await expect(openBridgeBackup(key, { ...file, chainId: 1 })).rejects.toThrow(/label doesn't match/)
+		await expect(openBridgeBackup(key, { ...file, direction: "withdraw" })).rejects.toThrow(/label doesn't match/)
 	})
 
 	it("a private deposit without its sealed envelope refuses to export (no false recovery promise)", async () => {
 		const unsealed = publicDeposit({ id: "0xunsealed", secretHashHex: "0xunsealed", isPrivate: true, secret: undefined })
-		expect(sealBridgeBackup(key, unsealed, SEALER)).rejects.toThrow(/hasn't sealed its recovery secret/)
+		await expect(sealBridgeBackup(key, unsealed, SEALER)).rejects.toThrow(/hasn't sealed its recovery secret/)
 	})
 
 	it("a swapped sealerL1 header on a private deposit is caught against the sealed copy", async () => {
@@ -110,7 +110,7 @@ describe("bridge backup files", () => {
 
 	it("provisional withdraws refuse at seal AND at parse", async () => {
 		const prov = withdraw({ id: "wd-pending-abc12345", exitTxHash: undefined })
-		expect(sealBridgeBackup(key, prov, SEALER)).rejects.toThrow(/nothing restorable/)
+		await expect(sealBridgeBackup(key, prov, SEALER)).rejects.toThrow(/nothing restorable/)
 		const forged = { ...(await sealBridgeBackup(key, withdraw(), SEALER)), id: "wd-pending-abc12345" }
 		expect(() => parseBackupFile(forged)).toThrow(/half-started withdraw/)
 	})
@@ -204,7 +204,7 @@ describe("bridge backup files", () => {
 		const enc = new TextEncoder().encode(raw)
 		const blob = Buffer.from(await key.encrypt(enc)).toString("base64")
 		const file = await sealBridgeBackup(key, publicDeposit(), SEALER)
-		expect(openBridgeBackup(key, { ...file, blob })).rejects.toThrow(/not a valid bridge record/)
+		await expect(openBridgeBackup(key, { ...file, blob })).rejects.toThrow(/not a valid bridge record/)
 	})
 })
 

@@ -1,5 +1,4 @@
 import { defineConfig } from "vitest/config"
-import { sharedTest } from "../../vitest.base"
 
 /*
  * The bridge integration suite: one anvil + `aztec start --local-network` booted by the global
@@ -9,7 +8,6 @@ import { sharedTest } from "../../vitest.base"
  */
 export default defineConfig({
 	test: {
-		...sharedTest,
 		globals: true,
 		environment: "node",
 		include: ["test/integration/**/*.integration.test.ts"],

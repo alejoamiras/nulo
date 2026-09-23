@@ -1,7 +1,6 @@
 import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig } from "vitest/config"
-import { sharedTest } from "../../vitest.base"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
 
 /*
@@ -20,7 +19,6 @@ export default defineConfig({
 		alias: [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }],
 	},
 	test: {
-		...sharedTest,
 		globals: true,
 		environment: "jsdom",
 		setupFiles: ["./src/test/setup.ts"],
