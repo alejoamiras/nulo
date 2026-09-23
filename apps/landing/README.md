@@ -9,7 +9,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `index.html` | The whole page: head/meta, the camera-feed hero, the two-screens section, three promises, the illustrative public record, the preview notice, CTA, footer. All copy lives here, before any script runs. |
 | `src/main.ts` | Vite entry: imports the stylesheets in order and mounts the page. |
 | `src/feed.ts` | Pure renderer for the character "camera feed": seeded value noise, an optional bright subject, Bayer 4×4 dithering into a five-glyph ramp. DOM-free; unit-tested in `feed.test.ts`. |
-| `src/feed-dom.ts` | Wiring: measures the mono cell after fonts load, sizes each `pre[data-feed]` to its host, runs one ~30 fps loop (skips off-screen and hidden-tab, honours Pause and reduced motion), and drives the clock, tracking box and record stream. |
+| `src/feed-dom.ts` | Wiring: measures the mono cell after fonts load, sizes each `pre[data-feed]` to its host, runs one ~30 fps loop (skips off-screen and hidden-tab, scales the grid up past its cell cap so any screen is covered, honours reduced motion), and drives the clock, tracking box and record stream. |
 | `src/release.ts`, `src/release-resolver.ts` | Typed access to the build-time release info (`src/generated/release.json`). |
 | `src/styles/overrides.css` | The few corrections a web page needs on top of `@nulo/design/base.css` (link colour, focus ring, selectable text, visible scrollbars). |
 | `src/styles/page.css` | Page presentation: plates, bar, hero overlay, sections, breakpoints. |
