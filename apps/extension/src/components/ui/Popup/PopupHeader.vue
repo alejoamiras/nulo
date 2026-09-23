@@ -1,11 +1,12 @@
-<script setup>
-const emit = defineEmits(["onClose"])
-const props = defineProps({
+<script setup lang="ts">
+const emit = defineEmits<{ onClose: [] }>()
+defineProps({
 	closable: {
 		type: Boolean,
 		default: false,
 	},
 })
+defineSlots<{ title?(): unknown; right?(): unknown; description?(): unknown }>()
 </script>
 
 <template>

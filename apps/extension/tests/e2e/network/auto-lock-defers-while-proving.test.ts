@@ -45,7 +45,13 @@ test.skipIf(!hasConfig)(
 
 		await holdProofGate(page)
 		// Resolves on the "submitted" toast, which only a released proof can produce.
-		const sending = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: config.minterAddress })
+		const sending = sendTransfer(page, {
+			fromType: "public",
+			toType: "public",
+			amount: "1",
+			destination: config.minterAddress,
+			expect: "send",
+		})
 		sending.catch(() => {})
 		let send: SendRecordView
 		try {

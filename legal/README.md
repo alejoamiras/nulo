@@ -27,15 +27,15 @@ that cannot be read out of this repository.
 | ~~`legal name`~~ | Filled: Alejo Amiras. |
 | ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
-| `effective date` | The date the 1.0 listing goes live. |
+| `effective date` | Privacy 1.0: filled, 23 September 2026 (the submission day). Terms 1.0: the date the 1.0 listing goes live. |
 | `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
-| `published security-reporting URL` | `SECURITY.md` is a repo path; a rendered legal page needs a URL that resolves for a reader who is not in the repo. |
-| `provider legal name and privacy-policy link` | The email provider behind `hello@nulo.sh`. There is no form provider any more — the wallet's contact items are `mailto:` links. |
-| `applicable Cloudflare contracting entity and privacy-policy link` | Hosting for `nulo.sh` and `passkey.nulo.sh`. |
-| `verified categories and access` ×2 | What the dRPC provider account and the Cloudflare dashboard actually expose to the Developer. **Check the dashboards; do not guess.** |
-| `actual period or criteria` ×3 | Retention for website/security records, correspondence, and provider schedules. |
-| `actual native-application legal links` | Presto's own licence and privacy information. |
-| EU/UK Article 27 representative | Only if required. **Delete the line rather than leaving it blank.** |
+| ~~`published security-reporting URL`~~ | Filled: `https://github.com/alejoamiras/nulo/security` (GitHub private vulnerability reporting, enabled 2026-09-22). |
+| ~~`provider legal name and privacy-policy link`~~ | Filled: Google LLC (Google Workspace, from the MX record and Google's contracting-entity table). |
+| ~~`applicable Cloudflare contracting entity and privacy-policy link`~~ | Filled: Cloudflare, Inc. (Self-Serve Subscription Agreement; `nulo.sh` is on the Free plan). |
+| ~~`verified categories and access`~~ ×2 | Filled from both dashboards on 2026-09-22. Re-check them if a plan, Worker logging or browser analytics setting changes. |
+| ~~`actual period or criteria`~~ ×3 | Filled: the hosting dashboard's own window (I keep no copies), correspondence for up to two years after resolution, and the providers' DPAs. |
+| ~~`actual native-application legal links`~~ | Filled: Presto's `LICENSE` (AGPL-3.0-only) and `PRIVACY.md` on GitHub. |
+| ~~EU/UK Article 27 representative~~ | Deleted: the owner's call that none is required. |
 
 ## Release blockers beyond the text
 
@@ -66,15 +66,20 @@ These came out of the two-round review and are **not** fixed by editing the docu
    noir wasm are attributed to the projects that publish them, under their licences; what they
    compile in is not itemised, because upstream publishes no inventory (the notices file says so,
    and `implementations-plan/third-party-notices/follow-ups.md` records what would reopen it).
-5. **Chrome trader disclosure.** A natural person acting professionally can still be a trader, and
-   "solo / free / open source" does not settle it. If the trader path applies, Chrome requires a
-   verified address and phone number displayed publicly — which a clause in these Terms cannot waive.
-   This is the one blocker a clause genuinely cannot route around; see § Identity below.
+5. **Chrome trader disclosure — declared non-trader (2026-09-21).** The developer account answered
+   Chrome's trader question as a non-trader (no revenue, no entity, no professional activity), so the
+   listing shows no address or phone number. A natural person acting professionally can still be a
+   trader, and "solo / free / open source" does not settle it: revisit the declaration before any
+   funding, revenue or entity, because if the trader path applies Chrome requires a verified address
+   and phone number displayed publicly — which a clause in these Terms cannot waive. See § Identity
+   below.
 
 Owned elsewhere, tracked here so nothing falls between worktrees:
 
-- **Firefox** `data_collection_permissions` (required for new AMO submissions) and the Firefox 150+
-  minimum version the passkey RP-ID flow needs — handled in a separate worktree.
+- **Firefox** `data_collection_permissions` is settled: `["financialAndPaymentInfo"]` (transactions
+  and balance queries leave for the configured node; the reasoning and the one contestable reading,
+  the passkey label, are in `apps/extension/store/listing.md` § Data collection declaration). The
+  minimum version is Firefox 153. Both are pinned by `apps/extension/src/manifest.test.ts`.
 - **The README banner** said "Aztec testnet only. Do not use with real funds" while mainnet is the
   seeded default; corrected in the same commit as this file. The rest of that banner still reads
   "DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET", which will also need rewriting at the 1.0 cut.
@@ -105,9 +110,10 @@ it:
   several regimes, Argentina included.
 - **Chrome's trader disclosure is the one exposure a clause cannot route around.** If the listing is
   classed as a trader listing, Chrome requires a verified name, address and phone number displayed
-  publicly. Check the developer account's trader declaration before submitting 1.0: if it forces
-  disclosure, the address becomes public without any of the liability separation an entity would have
-  provided, which is the worst of both outcomes and the trigger to revisit this.
+  publicly. The account is declared non-trader (2026-09-21, blocker 5 above); re-check that
+  declaration before any funding, revenue or entity, because if it flips the address becomes public
+  without any of the liability separation an entity would have provided, which is the worst of both
+  outcomes and the trigger to revisit this.
 
 **Language.** Ley 24.240 Art. 10 expects consumer contracts to be in Spanish. These documents are
 English-only. For an Argentine consumer that is a real weakness; a Spanish version of at least the

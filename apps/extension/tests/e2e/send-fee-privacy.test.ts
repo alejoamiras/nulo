@@ -1,7 +1,8 @@
 /**
  * Fail-closed under a dead node: with NOTHING readable, the Send page pays with nothing, never shows
- * the account's own public Fee Juice as the payer, and never claims "you have no gas" about balances
- * nobody read.
+ * the account's own public Fee Juice as the payer, never claims "you have no gas" about balances
+ * nobody read — and, with no token to send, says nothing about what a send would publish: no strip,
+ * no fee-source tag, no "Review send".
  *
  * What this does NOT prove is the selection rule itself — with both balances unread, Fee Juice is
  * ineligible under any walk order, so a rule that wrongly defaulted to it on an unread PRIVATE balance
@@ -47,14 +48,19 @@ describe("send fee privacy (dead RPC)", () => {
 
 			const state = await page.evaluate(() => ({
 				method: document.querySelector('[data-testid="send-fee-method-trigger"]')?.getAttribute("data-fee-method") ?? null,
-				notice: Boolean(document.querySelector('[data-testid="send-fee-privacy-notice"]')),
+				tag: Boolean(document.querySelector('[data-testid="send-fee-privacy-notice"]')),
+				strip: Boolean(document.querySelector('[data-testid="send-publish-strip"]')),
+				action: document.querySelector('[data-testid="send-submit"]')?.getAttribute("data-action") ?? null,
 				explained: Boolean(document.querySelector('[data-testid="fee-init-degraded"]')),
 				takeover: Boolean(document.querySelector('[data-testid="send-get-fee-juice"]')),
 			}))
 			console.log(`[send-fee-privacy] settled: ${JSON.stringify(state)}`)
 
 			expect(state.method).not.toBe("public")
-			expect(state.notice).toBe(false)
+			expect(state.tag).toBe(false)
+			// No token, nothing to send: the page makes no claim about what a send would publish.
+			expect(state.strip).toBe(false)
+			expect(state.action).not.toBe("review")
 			// Nothing was read, so nothing is known to be empty: no "you have no gas" takeover either.
 			expect(state.takeover).toBe(false)
 			// Either a payer that does not name the account, or no payer plus the reason why.

@@ -10,8 +10,10 @@
 /** Components */
 import AmountCard from "@/components/composite/send/AmountCard.vue"
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
+import PublishStrip from "@/components/composite/send/PublishStrip.vue"
 import RecipientField from "@/popup/components/modules/send/RecipientField.vue"
 import SelectTokenCard from "@/popup/components/modules/send/SelectTokenCard.vue"
+import SendReviewSheet from "@/popup/components/modules/send/SendReviewSheet.vue"
 import SendTypesCard from "@/components/composite/send/SendTypesCard.vue"
 
 /** Services */
@@ -31,22 +33,25 @@ import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helper
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
-import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
-import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
+import { submitTransfer } from "@/popup/pages/send-submit"
+import { NO_FACTS, payerKindOf, publishFacts } from "@/components/composite/send/publish-facts"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
 import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 import { usePrices } from "@/composables/usePrices"
+import { useSendReview } from "@/composables/useSendReview"
 import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
+const popupStore = usePopupStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +68,8 @@ function leaveSend() {
 }
 
 const feeSettings = ref()
+/** The fee card's reading of the method in effect — `{ type, fpcId, isProtocol }` or null. */
+const payer = ref(null)
 /** Set by FeeSettingsCard when the selected fee-juice method has zero balance.
  *  When true, the primary CTA becomes "Get fee juice" (C) and the fee card
  *  shows the explainer banner (A). */
@@ -253,6 +260,30 @@ const isAllowedToSend = computed(() => {
 	return amountValidation.value.valid
 })
 
+const payerKind = computed(() => payerKindOf(feeSettings.value, payer.value))
+// No sendable token → no facts: no strip, no tag, no review, whatever the fee card resolved.
+const facts = computed(() =>
+	isBlockedTransfer.value ? NO_FACTS : publishFacts(selectedSendType.value, selectedReceiverType.value, payerKind.value),
+)
+
+/** The review sheet lives on the popup stack under this key, so it stacks and closes like any other popup. */
+const REVIEW_KEY = "send_review"
+const reviewOpen = computed(() => popupStore.isOpened(REVIEW_KEY))
+const reviewOrder = computed(() => popupStore.popups[REVIEW_KEY]?.order ?? 0)
+const reviewDepth = computed(() => popupStore.len - reviewOrder.value)
+const { ready: reviewReady, authorises } = useSendReview({
+	isGated: () => facts.value.requiresReview,
+	isOpen: () => reviewOpen.value,
+	isTop: () => reviewOrder.value === popupStore.len - 1,
+})
+const openReview = () => {
+	if (!reviewOpen.value) popupStore.open(REVIEW_KEY)
+}
+const closeReview = () => popupStore.close(REVIEW_KEY)
+
+const amountText = computed(() => (amountTerm.value ? String(amountTerm.value) : undefined))
+const feeText = computed(() => (feeEstimate.value ? `~${feeEstimate.value.maxFeeFormatted} FJ` : undefined))
+
 const transferType = computed(() => {
 	if (selectedSendType.value === "private" && selectedReceiverType.value === "private") return TransferType.Private
 	if (selectedSendType.value === "private" && selectedReceiverType.value === "public") return TransferType.PrivateToPublic
@@ -312,9 +343,9 @@ const isSending = ref(false)
  *  "Confirming..." window — prevents a second router.back() from firing. */
 let cancelled = false
 
-const handleSend = async () => {
-	if (!isAllowedToSend.value || isSending.value) return
-	if (!amountValidation.value.valid) return
+const canSubmitNow = () => {
+	if (!isAllowedToSend.value || isSending.value) return false
+	if (!amountValidation.value.valid) return false
 	// The reactive gate runs on a 30s ticker — re-evaluate at TRUE wall-clock
 	// on the actual click so a snapshot cannot slip through expiry/drift by up
 	// to one tick.
@@ -324,16 +355,32 @@ const handleSend = async () => {
 		liveUsd: liveQuote.value?.usd ?? null,
 		now: Date.now(),
 	})
-	if (!submitGate.ok) return
+	return submitGate.ok
+}
+
+/**
+ * The one path to a transfer. `source` says which control was activated; the sheet's counts only
+ * while the sheet is open, the footer's only while it is not. A send that names the account as fee
+ * payer goes out only from the sheet, and only once it is ready — the footer opens the sheet instead.
+ */
+const submit = (source) => {
+	if (!canSubmitNow()) return
+	if ((source === "review") !== reviewOpen.value) return
+	if (facts.value.requiresReview && !authorises(source)) return openReview()
 
 	isSending.value = true
+	closeReview()
+	submitInFlight = true
+	submitTransfer(submitDeps, snapshotTransfer())
 
-	const amountToSend = amountValidation.value.integerized
+	// Leave at once: the durable operation journal shows progress on the general page and survives
+	// popup close and SW restart; a fast rejection reaches the user as a toast.
+	if (cancelled) return
+	leaveSend()
+}
 
-	// Snapshot reactive values — the component may unmount before the promise
-	// settles, at which point the reactive refs no longer carry meaningful state.
-	const destination = searchTerm.value
-	const contract = activeToken.value.contract
+/** Reactive values read once: the page unmounts before the transfer settles. */
+function snapshotTransfer() {
 	// Pass the cached estimate id when available so the SW can skip the
 	// redundant `buildAndEstimateTxRequest` round-trip and reuse the
 	// pre-built TxRequest. The SW validates a snapshot (base fee, primary
@@ -346,64 +393,33 @@ const handleSend = async () => {
 	// cancel) for the full TTL.
 	const precomputedEstimateId = feeEstimate.value?.estimateId
 	if (precomputedEstimateId) handoffFeeEstimate()
-	const transferArgs = [
-		appStore.network.id,
-		appStore.account.address,
-		activeToken.value.id,
-		transferType.value,
-		destination,
-		amountToSend,
-		feeSettings.value,
+	return {
+		networkId: appStore.network.id,
+		accountAddress: appStore.account.address,
+		tokenId: activeToken.value.id,
+		transferType: transferType.value,
+		destination: searchTerm.value,
+		amount: amountValidation.value.integerized,
+		feeSettings: feeSettings.value,
 		precomputedEstimateId,
-	]
+		contract: activeToken.value.contract,
+	}
+}
 
-	// Unique id captured with the placeholder's full scope so the rejection path
-	// removes exactly THIS placeholder — not a by-destination/contract search that
-	// could remove a same-recipient sibling or another account's row after a switch.
-	const awaitingId = crypto.randomUUID()
-	appStore.addAwaitingTransaction({
-		id: awaitingId,
-		account: appStore.account.address,
-		destination,
-		contract,
-	})
-
-	submitInFlight = true
-	executionService
-		.executeTransfer(...transferArgs)
-		.then(() => {
-			openToast({ label: "Transaction submitted", icon: "check-circle" })
-		})
-		.catch((err) => {
-			appStore.removeAwaitingTransaction(awaitingId)
-
-			// User-initiated cancel: the terminal card in RecentActivityView
-			// already says "Cancelled" — a failure toast would be a wrong
-			// signal. See `popup/utils/cancellable-rejection.ts` for the
-			// shared classifier used by every cancellable popup.
-			if (classifyCancellableRejection(err) === "silent") return
-
-			openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
-			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
-			else console.error("[send] executeTransfer failed:", err)
-		})
-		.finally(() => {
-			submitInFlight = false
-			disconnectExecution()
-		})
-
-	// Navigate away immediately. Progress is visible on the general page
-	// via the durable operation journal, which survives popup close/reopen
-	// and SW restart. The previous 700ms sleep tried to "hold the button
-	// so the click felt received" and to catch fast-reject errors — both
-	// jobs are now done by the journal + toast.
-	if (cancelled) return
-	leaveSend()
+const submitDeps = {
+	executeTransfer: (...args) => executionService.executeTransfer(...args),
+	awaiting: { add: appStore.addAwaitingTransaction, remove: appStore.removeAwaitingTransaction },
+	openToast,
+	onSettled: () => {
+		submitInFlight = false
+		disconnectExecution()
+	},
 }
 
 watch(
 	() => cacheStore.activeTokenIdx,
 	() => {
+		closeReview()
 		initSendType()
 		initReceiverType()
 
@@ -495,7 +511,10 @@ async function refetchIdentityScopedState() {
 
 watch(
 	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
-	() => refetchIdentityScopedState(),
+	() => {
+		closeReview()
+		refetchIdentityScopedState()
+	},
 	{ immediate: false },
 )
 
@@ -530,6 +549,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	console.debug(`[send:${sendInstanceId}] unmounting`)
 	cancelled = true
+	closeReview()
 
 	contactService.disconnect()
 	tokenBalanceService.disconnect()
@@ -626,13 +646,16 @@ onBeforeUnmount(() => {
 						:isEstimating="isEstimating"
 						:originPrivacy="selectedSendType"
 						:destinationPrivacy="selectedReceiverType"
+						:payerNoticeShape="facts.noticeShape"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
+						v-model:payer="payer"
 					/>
 				</div>
 			</Flex>
 
-			<Flex direction="column" :class="$style.bottom">
+			<Flex direction="column" gap="10" :class="$style.bottom">
+				<PublishStrip v-if="!isBlockedTransfer" :facts="facts" @open="openReview" />
 				<Button
 					v-if="needsFeeJuice"
 					@click="openFeeJuiceBridge"
@@ -644,17 +667,37 @@ onBeforeUnmount(() => {
 				</Button>
 				<Button
 					v-else
-					@click="handleSend"
+					@click="submit('primary')"
 					data-testid="send-submit"
+					:data-action="facts.requiresReview ? 'review' : 'send'"
 					variant="cta"
 					wide
 					:disabled="!isAllowedToSend || isSending"
 					:loading="isSending"
 				>
-					{{ isSending ? "CONFIRMING" : "Confirm Transaction" }}
+					{{ isSending ? "CONFIRMING" : facts.requiresReview ? "Review send" : "Confirm Transaction" }}
 				</Button>
 			</Flex>
 		</Flex>
+
+		<SendReviewSheet
+			:show="reviewOpen"
+			:order="reviewOrder"
+			:depth="reviewDepth"
+			:facts="facts"
+			:amount="amountText"
+			:symbol="activeToken?.symbol"
+			:recipientName="selectedContact?.name"
+			:recipientAddress="searchTerm"
+			:feeText="feeText"
+			:payerKind="payerKind"
+			:payerType="payer?.type"
+			:canSend="isAllowedToSend"
+			:sending="isSending"
+			:ready="reviewReady"
+			@close="closeReview"
+			@send="submit('review')"
+		/>
 	</Flex>
 </template>
 

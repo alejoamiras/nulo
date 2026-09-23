@@ -90,23 +90,30 @@ CLAUDE.md "Account-address freeze").
 3. `packages/bridge-core/src/noir-artifact-classids.test.ts` + `hub-token.test.ts` — the committed hub class id and the standards Token class id the hub derives from. Either moving ⇒ the live hub cannot be re-pinned (immutable `token_class_id`; the factory binds the hub) ⇒ a NEW GENERATION.
 4. **The sandbox smoke on the JS line** — `bun run --cwd packages/bridge-core deploy:sandbox --smoke` boots `aztec start --local-network` from `~/.aztec/versions/<@aztec/aztec.js pin>` (the version `package.json` declares — the same JS line the live networks run, NOT the 5.0.1 Noir toolchain) and drives real `register_*` publications. That is the only pre-live check that the 5.0.1-compiled hub's `publish_contract_instance_for_public_execution` still resolves on the protocol's `ContractInstanceRegistry` at the new line (the TXE cannot run that path). A red first-time flow here = the split line broke; hold the bump.
 
-**The frozen-account execution canary (MANDATORY, every `@aztec/*` bump PR)**: run
-`bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` **prover-ON** before merge.
-LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
+**The two execution canaries (MANDATORY, every `@aztec/*` bump PR)**: run
+`bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`
+**prover-ON** before merge, **on Chrome and again under `NULO_E2E_BROWSER=firefox`** (geckodriver on
+PATH; `apps/extension/tests/e2e/FIREFOX.md`). LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
 actually run it prover-ON locally: start `PRESTO_ALLOW_ALL=1 presto-server` on `127.0.0.1:59833` (the
 SHA-pinned binary from `_extension-network-e2e.yml`; the variable is scoped to that one process and
 auto-approves the wallet's origin), build the wallet with `VITE_NULO_PRESTO_REQUIRED=1`, and confirm at
 least one `Proving succeeded` in the presto log during the run (`Received /prove request` is logged
 before authorization, so a denied request prints it too). In CI this is
-automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-extension-network-e2e.yml`),
-so the required `extension-network-e2e-status` check enforces it — that is the authoritative gate; the local
-run is a pre-flight. It proves the frozen 5.0.1 account bytecode still simulates, proves natively,
+automatic: both canaries are named files in the prover-ON `network-e2e-canary` job of **both** network
+lanes — `pr-extension-network-e2e.yml`, enforced by the required `extension-network-e2e-status` check, and
+`pr-extension-network-e2e-firefox.yml`, advisory as a check — and each lane's `Assert canary results` step
+reads the run's json report back against `scripts/ci-cd/canary-expectations.json`, so a canary that
+skipped, vanished or never ran reds the job. That is the authoritative gate; the local run is a
+pre-flight. The frozen canary proves the frozen 5.0.1 account bytecode still simulates, proves natively,
 and is accepted by the bumped node/toolchain across the full arc (frozen-ctor multicall deploy →
-init-nullifier flip → authwit consume → SW-restart re-derive + tx). The address KAT cannot see
-execution breakage — this canary is the only gate that does. **A red canary BLOCKS the bump**:
-default response is HOLD the `@aztec` line; shipping a new extension major (address-regime rotation)
-is the deliberate alternative — never a casual fix.
+init-nullifier flip → authwit consume → background-restart re-derive + tx); the passkey canary proves
+the same for a PRF-derived account (in-page ceremony → frozen ctor → authwit consume →
+background-restart ceremony re-unlock + tx). The address KAT cannot see execution breakage — these
+canaries are the only gate that does. **A red canary on either browser BLOCKS the bump** (read the
+Firefox lane's canary job on the bump PR by hand — advisory means it cannot block a merge, not that it
+may be ignored): default response is HOLD the `@aztec` line; shipping a new extension major
+(address-regime rotation) is the deliberate alternative — never a casual fix.
 
 ## Branch A — bump-only (no reset, detectors green)
 

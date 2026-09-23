@@ -253,8 +253,11 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
 	initWalletSdkHandler(services, logger, { windows: browserApi.windows, clock })
 
 	writeInitialLiveness(browserApi, clock, logger)
-	// Heartbeat — keeps MV3 service worker alive long enough for cross-SW
-	// calls. Routed through browserApi.storage + clock for testability.
+	// Heartbeat — keeps the MV3 service worker alive long enough for cross-SW
+	// calls. On Firefox it is also what keeps the PXE alive: the PXE page is a
+	// frame of the background page, and an event page with no extension
+	// activity is suspended after 30 s. Routed through browserApi.storage +
+	// clock for testability.
 	state.heartbeatHandle = clock.setInterval(() => {
 		browserApi.storage.session
 			.set({ "nulo:liveness": clock.now() })

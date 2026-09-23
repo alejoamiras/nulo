@@ -6,8 +6,9 @@ import * as puppeteer from "puppeteer"
 import type { Browser, ElementHandle, Page, Target } from "puppeteer"
 import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
+import { LOCATE_BACKGROUND_PAGE, evaluateViaFrameScript } from "./firefox-frame-script"
 import { observeAndRefuse } from "./firefox-rpc-intercept"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser, VirtualAuthenticator } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, PxeHostState, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
 	type LaunchOwnership,
@@ -229,6 +230,18 @@ const PRICE_HOST_BLACKHOLE = `data:text/javascript,${encodeURIComponent(
 	'function FindProxyForURL(url, host) { return host === "api.coingecko.com" ? "PROXY 127.0.0.1:1" : "DIRECT" }',
 )}`
 
+/**
+ * Every pref the suite launches Firefox with. Exported so a unit test can hold the list to what the
+ * wallet's users run with: a pref that masks timer throttling would hide the slowdown the PXE host
+ * is placed in the background page to avoid.
+ */
+export const FIREFOX_LAUNCH_PREFS = {
+	// Without both of these the virtual authenticator is never consulted and
+	// `credentials.create` never settles — it does not fail, it hangs.
+	"security.webauth.webauthn_enable_softtoken": true,
+	"security.webauth.webauthn_enable_usbtoken": false,
+}
+
 function capabilities({ profileDir, headless }: { profileDir: string; headless: boolean }): Record<string, unknown> {
 	return {
 		...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? { proxy: { proxyType: "pac", proxyAutoconfigUrl: PRICE_HOST_BLACKHOLE } } : {}),
@@ -238,18 +251,7 @@ function capabilities({ profileDir, headless }: { profileDir: string; headless: 
 		"moz:firefoxOptions": {
 			binary: resolveFirefoxBinary(),
 			args: ["-profile", profileDir, ...(headless ? ["-headless"] : [])],
-			prefs: {
-				// Without both of these the virtual authenticator is never consulted and
-				// `credentials.create` never settles — it does not fail, it hangs.
-				"security.webauth.webauthn_enable_softtoken": true,
-				"security.webauth.webauthn_enable_usbtoken": false,
-				// The PXE lives in a minimized window, and Firefox clamps a background window's
-				// timers to one a second and then budgets them further. The Chrome driver turns
-				// the same behaviour off with its backgrounding flags.
-				"dom.min_background_timeout_value": 4,
-				"dom.min_background_timeout_value_without_budget_throttling": 4,
-				"dom.timeout.enable_budget_timer_throttling": false,
-			},
+			prefs: FIREFOX_LAUNCH_PREFS,
 		},
 	}
 }
@@ -322,10 +324,10 @@ async function reloadExtensionPage(page: Page): Promise<void> {
 }
 
 /**
- * A new *tab* goes into the most recently focused window, and once the wallet has started its PXE
- * that is the minimized window hosting it. A page in there is never visible: no animation frames,
- * so every Vue transition freezes half-way, and it is not the active tab, which WebAuthn requires.
- * A window of its own is visible whatever the wallet has opened.
+ * A new *tab* goes into the most recently focused window, which can be one the wallet opened — an
+ * approval window — rather than the suite's own. A page there is not the active tab, which WebAuthn
+ * requires, and may never be visible: no animation frames, so every Vue transition freezes
+ * half-way. A window of its own is visible whatever the wallet has opened.
  */
 const newPage = (browser: Browser): Promise<Page> => browser.newPage({ type: "window" })
 
@@ -345,11 +347,149 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
 }
 
 /**
- * Headless Firefox hands focus to every window the wallet opens, its minimized PXE window
- * included, and refuses WebAuthn from any window but the focused one. A person's click would have
- * focused the page; a scripted one has to be given that.
+ * Headless Firefox hands focus to every window the wallet opens and refuses WebAuthn from any
+ * window but the focused one. A person's click would have focused the page; a scripted one has to
+ * be given that.
  */
 const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
+
+const BACKGROUND_NOT_RUNNING = "the background page is not running"
+
+/** Evaluates `body` (a function body; `content` is the background window) in the background page. */
+export function evaluateInBackgroundPage<T>(browser: Browser, body: string): Promise<T> {
+	const { session, addonId } = contextFor(browser)
+	return evaluateViaFrameScript<T>(session, { addonId, locate: LOCATE_BACKGROUND_PAGE, missing: BACKGROUND_NOT_RUNNING }, body)
+}
+
+/** The PXE host is a frame of the background page: how many, and each frame's own visibility. */
+const PXE_HOST_STATE = `
+	const frames = [...content.document.querySelectorAll("iframe")];
+	return { count: frames.length, visibility: frames.map((frame) => frame.contentDocument?.visibilityState ?? "unloaded") };`
+
+export interface BackgroundIdentity {
+	/** The background page's own `performance.timeOrigin`: a new value is a new page. */
+	timeOrigin: number
+	/** The `src` of every PXE host frame; the generation in its query names the frame. */
+	hosts: string[]
+}
+
+const BACKGROUND_IDENTITY = `
+	return { timeOrigin: content.performance.timeOrigin, hosts: [...content.document.querySelectorAll("iframe")].map((frame) => frame.src) };`
+
+/** Rejects while the background page is not running. */
+export const backgroundIdentity = (browser: Browser): Promise<BackgroundIdentity> => evaluateInBackgroundPage(browser, BACKGROUND_IDENTITY)
+
+/** The running background page's `timeOrigin`, or undefined while none runs. Any other failure is thrown. */
+async function backgroundTimeOrigin(browser: Browser): Promise<number | undefined> {
+	try {
+		return (await backgroundIdentity(browser)).timeOrigin
+	} catch (err) {
+		if (err instanceof Error && err.message === BACKGROUND_NOT_RUNNING) return undefined
+		throw err
+	}
+}
+
+export interface BackgroundStopper {
+	/** The running background's identity, or undefined while none runs. */
+	identity(): Promise<number | undefined>
+	/** Asks Firefox to end it, and resolves with Firefox's outcome word. */
+	terminate(): Promise<string>
+	/** The whole call, first read included. */
+	budgetMs: number
+	retryEveryMs: number
+	pollEveryMs: number
+}
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+interface StopProgress {
+	expired: boolean
+	lastError?: unknown
+}
+
+/** `unknown` is a probe that failed: the page unloads asynchronously after the termination resolves,
+ *  so a failure proves nothing either way. */
+type Sighting = "same" | "gone" | "unknown"
+
+async function sight(stopper: BackgroundStopper, before: number, progress: StopProgress): Promise<Sighting> {
+	try {
+		return (await stopper.identity()) === before ? "same" : "gone"
+	} catch (err) {
+		progress.lastError = err
+		return "unknown"
+	}
+}
+
+async function askToEnd(stopper: BackgroundStopper): Promise<void> {
+	const outcome = await stopper.terminate()
+	if (outcome !== "terminated") throw new Error(`stopBackground: Firefox did not terminate the background page (${outcome})`)
+}
+
+/**
+ * Every ask directly follows a sighting of the SAME page: an ask made on a stale or failed read could
+ * land on a successor an add-on event woke in between, and the test would see two deaths for one.
+ */
+async function endObserved(stopper: BackgroundStopper, progress: StopProgress): Promise<void> {
+	const before = await stopper.identity()
+	if (before === undefined) throw new Error("stopBackground: the add-on runs no background page")
+	let askAt = 0
+	let sighting: Sighting = "same"
+	while (!progress.expired && sighting !== "gone") {
+		if (sighting === "same" && Date.now() >= askAt) {
+			await askToEnd(stopper)
+			askAt = Date.now() + stopper.retryEveryMs
+		}
+		await pause(stopper.pollEveryMs)
+		// The caller already has its rejection by now; a probe begun here would race its teardown.
+		if (!progress.expired) sighting = await sight(stopper, before, progress)
+	}
+	if (sighting !== "gone") throw new Error("stopBackground: the budget ran out before the background page was seen gone")
+}
+
+/**
+ * The termination is a polite suspension: Firefox returns early — reporting success — while a
+ * listener's promise is pending or an extension page keeps the background busy. So it is asked again
+ * for as long as the same page is observed, and only an observation ends the wait: the page absent,
+ * or a different one running. The budget is enforced from outside because a frame-script probe can
+ * outlast it; a step already in flight cannot be recalled, but none starts after expiry.
+ */
+export async function stopBackgroundWith(stopper: BackgroundStopper): Promise<void> {
+	const progress: StopProgress = { expired: false }
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const budget = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			progress.expired = true
+			const { lastError } = progress
+			const probe =
+				lastError === undefined ? "" : ` (last probe: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+			reject(
+				new Error(
+					`stopBackground: the background page was still alive ${stopper.budgetMs / 1000}s after termination — close every extension page first${probe}`,
+				),
+			)
+		}, stopper.budgetMs)
+	})
+	try {
+		await Promise.race([endObserved(stopper, progress), budget])
+	} finally {
+		progress.expired = true
+		if (timer) clearTimeout(timer)
+	}
+}
+
+/**
+ * Ends the event page alone: every other extension page, the content scripts and `storage.session`
+ * stay. Firefox starts a new one only on the add-on's next event, so this resolves on "the old page
+ * is gone" and never waits for a successor — the caller's next step is what wakes one.
+ */
+const stopBackground = (browser: Browser): Promise<void> =>
+	stopBackgroundWith({
+		identity: () => backgroundTimeOrigin(browser),
+		terminate: () => terminateBackground(browser),
+		budgetMs: 15_000,
+		retryEveryMs: 2_000,
+		pollEveryMs: 100,
+	})
 
 const PENDING_FILE_INPUT = 'body > input[type="file"]:not([data-e2e-stale])'
 
@@ -485,6 +625,7 @@ export function silentlyClosed(watch: SilentCloseWatch, open: readonly string[],
 export const firefoxDriver: BrowserDriver = {
 	kind: "firefox",
 	scheme: SCHEME,
+	credentialOutlivesPage: true,
 	launch,
 	extensionUrl: (extensionId, path) => `${SCHEME}${extensionId}${path}`,
 	discoverExtensionId,
@@ -499,6 +640,27 @@ export const firefoxDriver: BrowserDriver = {
 	pickFile,
 	virtualAuthenticator,
 	holdNextCredentialGet,
+	pxeHostState: (page) => evaluateInBackgroundPage<PxeHostState>(page.browser(), PXE_HOST_STATE),
+	stopBackground,
+	backgroundAlive: async (browser) => (await backgroundTimeOrigin(browser)) !== undefined,
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
+}
+
+/** Resolves with the outcome in one word — `terminated`, `no-extension` — or `error: …`. */
+async function terminateBackground(browser: Browser): Promise<string> {
+	const { session, addonId } = contextFor(browser)
+	return session.chromeScript<string>(
+		`const [id, done] = arguments;
+		(async () => {
+			try {
+				const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
+				const extension = ExtensionParent.GlobalManager.getExtension(id);
+				if (!extension) return done("no-extension");
+				await extension.terminateBackground({ ignoreDevToolsAttached: true });
+				done("terminated");
+			} catch (err) { done("error: " + err); }
+		})();`,
+		[addonId],
+	)
 }

@@ -20,7 +20,7 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
 import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
-import { applyFpcEdits, feePayerNotice, previewForPick, recordOf, resolveSendSelection } from "./fee-privacy"
+import { applyFpcEdits, previewForPick, recordOf, resolveSendSelection } from "./fee-privacy"
 import { loadSendSelections, mutateSendSelections, readSendSlots, withSendSlot } from "./fee-send-selection"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
@@ -53,8 +53,11 @@ const props = defineProps({
 	/** "private" | "public" — the side the transfer spends from. Non-null only on the Send page, where
 	 *  the fee source follows it; null keeps the one-pick-per-account behaviour of the dApp windows. */
 	originPrivacy: { type: String, default: null },
-	/** "private" | "public" — the side the transfer lands on; only words the fee-payer notice. */
+	/** "private" | "public" — the side the transfer lands on. */
 	destinationPrivacy: { type: String, default: null },
+	/** The page's reading of what this send's fee publishes — the selector's tag is drawn from it,
+	 *  never from this card's own selection, so the tag can only ever agree with the footer. */
+	payerNoticeShape: { type: String, default: null },
 })
 
 const FEE_METHOD_LS_KEY = UI_STORAGE_KEYS.FEE_PAYMENT_METHODS
@@ -66,6 +69,11 @@ const settings = defineModel()
  *  so the account must bridge before it can pay. Drives the Send page's
  *  "get fee juice" CTA takeover. */
 const needsFeeJuiceOut = defineModel("needsFeeJuice", { type: Boolean, default: false })
+
+/** One-way child→parent: the method that pays, as `{ type, fpcId, isProtocol }`, or null while none
+ *  does (pending, held, none). The parent reads the payer off the submitted settings; this only says
+ *  whether the contract those settings name is one the wallet vouches for. */
+const payerOut = defineModel("payer", { default: null })
 
 const methodId = getRandomHex(6)
 
@@ -178,9 +186,6 @@ const effectiveMethod = computed(() => {
 	if (props.originPrivacy === null) return selectedMethod.value
 	return sendSelection.value.kind === "selected" ? sendSelection.value.method : undefined
 })
-/** Set exactly when this send would name the account as its fee payer while its origin is private —
- *  derived from the method that actually pays, so a defaulted and a hand-picked Fee Juice read alike. */
-const payerNotice = computed(() => feePayerNotice(props.originPrivacy, props.destinationPrivacy, effectiveMethod.value))
 const nudgeCopy = computed(() =>
 	props.originPrivacy === "private"
 		? {
@@ -250,6 +255,13 @@ watch(
 watch(derivedSettings, (val) => {
 	settings.value = val
 })
+watch(
+	effectiveMethod,
+	(m) => {
+		payerOut.value = m ? { type: m.type, fpcId: m.fpc?.id, isProtocol: m.fpc?.isProtocol === true } : null
+	},
+	{ immediate: true },
+)
 
 /**
  * Persist the user's explicit selection. Idempotent: re-saving the same
@@ -732,6 +744,7 @@ onBeforeUnmount(() => {
 				:modelValue="displayMethod"
 				@update:modelValue="handleMethodPicked"
 				:methods="methods"
+				:payerNoticeShape="payerNoticeShape"
 				@open="isMethodsDropdownOpen = true"
 				@close="isMethodsDropdownOpen = false"
 			/>
@@ -765,29 +778,6 @@ onBeforeUnmount(() => {
 				:feeJuiceBalanceFormatted="feeJuiceBalanceFormatted"
 				:privateFeeJuiceFormatted="privateFeeJuiceFormatted"
 			/>
-
-			<!-- The fee payer is public: on a private-origin send, the account's own Fee Juice names the sender. -->
-			<Flex
-				v-if="payerNotice"
-				align="start"
-				gap="8"
-				:class="$style.detail_row"
-				data-testid="send-fee-privacy-notice"
-				:data-notice-shape="payerNotice.shape"
-			>
-				<Icon name="warning" size="14" :class="$style.payer_notice_icon" />
-				<Flex direction="column" gap="4" :style="{ flex: 1, minWidth: 0 }">
-					<Text size="12" weight="700" color="primary">{{ payerNotice.title }}</Text>
-					<Text size="11" weight="500" color="tertiary" height="140">{{ payerNotice.body }}</Text>
-					<a
-						:href="FEE_JUICE_BRIDGE_URL"
-						target="_blank"
-						rel="noopener noreferrer"
-						:class="[$style.get_fee_juice, $style.payer_notice_remedy]"
-						data-testid="send-fee-privacy-remedy"
-					>Get private gas</a>
-				</Flex>
-			</Flex>
 
 			<!-- Get-fee-juice nudge: the selected method has no fee juice to pay with. -->
 			<Flex v-if="feeJuiceMissing" align="center" gap="8" :class="$style.detail_row" data-testid="send-fee-nudge">
@@ -867,18 +857,4 @@ onBeforeUnmount(() => {
 		text-decoration: underline;
 	}
 }
-
-.payer_notice_icon {
-	flex: none;
-	color: var(--orange);
-}
-
-.payer_notice_remedy {
-	align-self: flex-start;
-	margin-top: 2px;
-	color: var(--orange);
-	text-decoration: underline;
-	text-underline-offset: 4px;
-}
-
 </style>

@@ -328,7 +328,7 @@ test.skipIf(!hasConfig)(
 				timeoutMs: 60_000,
 			})
 		}
-		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA })
+		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA, expect: "send" })
 		await waitForTxConfirmation(page, { amount: SETTLED_AMOUNT, fromType: "public", toType: "public" })
 		console.log(`✓ A has a settled extension tx (amount ${SETTLED_AMOUNT})`)
 

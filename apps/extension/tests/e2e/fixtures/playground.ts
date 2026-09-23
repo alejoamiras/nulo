@@ -40,6 +40,18 @@ export async function clickPgButton(page: Page, name: string): Promise<void> {
 	await clickByTestId(page, `pg-btn-${name}`)
 }
 
+export type PgBundle = "accounts" | "transaction" | "transaction-contracts"
+
+/** Pick the capability bundle the next `requestCapabilities` click sends. */
+export async function selectPgBundle(page: Page, bundle: PgBundle): Promise<void> {
+	await page.evaluate((b) => {
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+		if (!select) throw new Error("pg-bundle-select not present on playground page")
+		select.value = b
+		select.dispatchEvent(new Event("change", { bubbles: true }))
+	}, bundle)
+}
+
 /** Set a playground input value via the v-model-aware `replaceInputValue`. */
 export async function setPgInput(page: Page, name: string, value: string): Promise<void> {
 	await replaceInputValue(page, `[data-testid="pg-input-${name}"]`, value)

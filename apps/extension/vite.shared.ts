@@ -67,9 +67,15 @@ export const noirAliases: Record<string, string> = {
  * Reporter set for every e2e config. An explicit `reporters` list replaces
  * vitest's defaults wholesale — including the `github-actions` annotation
  * reporter it adds under GITHUB_ACTIONS — so the defaults are spread back in
- * rather than re-derived from the environment. RetryErrorReporter surfaces the
- * retained first-attempt errors of retried passes.
+ * rather than re-derived from the environment. `NULO_E2E_RESULTS_FILE` adds the
+ * `json` report a canary lane is asserted on (`scripts/ci-cd/assert-canary-results.ts`).
+ * RetryErrorReporter surfaces the retained first-attempt errors of retried passes.
  */
-export function e2eReporters(): (string | RetryErrorReporter)[] {
-	return [...configDefaults.reporters, new RetryErrorReporter()]
+export function e2eReporters(): (string | ["json", { outputFile: string }] | RetryErrorReporter)[] {
+	const resultsFile = process.env.NULO_E2E_RESULTS_FILE
+	return [
+		...configDefaults.reporters,
+		...(resultsFile ? [["json", { outputFile: resultsFile }] as ["json", { outputFile: string }]] : []),
+		new RetryErrorReporter(),
+	]
 }

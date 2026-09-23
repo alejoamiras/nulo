@@ -11,7 +11,7 @@
  * that step this guard would never run on a PR and the whole mechanism would be hollow.
  */
 import { describe, expect, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..")
@@ -233,37 +233,8 @@ describe("CI behavior-gating guard", () => {
     }
   })
 
-  // The network-e2e suite is split across a PROVERLESS shard pool and several PROVER-ON dedicated
-  // jobs. The shard pool's `exclude_files` must be EXACTLY the union of every dedicated job's
-  // `test_files`, or a file silently runs in both pools (wasted) or in NEITHER (never run). The
-  // latter is the real danger for the mandatory `frozen-account-canary` bump gate: a bad edit could
-  // drop it out of both pools and it would silently stop running. This pins the partition
-  // mechanically (the workflow's own "keep in sync" comment can't).
-  test("network-e2e proverless-exclusions == the union of the dedicated jobs' test_files", () => {
-    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
-    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-extension-network-e2e.yml"), "utf8")) as any
-    const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
-
-    let excluded: string[] = []
-    const dedicated: string[] = []
-    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
-    for (const job of Object.values(wf.jobs) as any[]) {
-      if (job.with?.exclude_files) excluded = words(job.with.exclude_files)
-      if (job.with?.test_files) dedicated.push(...words(job.with.test_files))
-    }
-
-    expect(excluded.length, "the proverless pool must exclude the dedicated files").toBeGreaterThan(0)
-    expect(dedicated.length, "there must be dedicated test_files jobs").toBeGreaterThan(0)
-    // The two sets are EQUAL: every dedicated file is excluded from the shard pool, and nothing
-    // extra is excluded (no file runs in both pools; none is left in neither).
-    expect([...excluded].sort(), "proverless exclude_files must equal the union of dedicated test_files").toEqual(
-      [...new Set(dedicated)].sort(),
-    )
-    // The canary specifically must live in a dedicated (prover-ON) job — never only proverless.
-    expect(dedicated, "frozen-account-canary must run in a dedicated prover-ON job").toContain(
-      "tests/e2e/network/frozen-account-canary.test.ts",
-    )
-  })
+  // The shard pool / dedicated-job partition of the network suite is pinned per lane under
+  // "canary lanes" below.
 
   // The self-pay phase gate — the wallet simulating and sending as the account a dApp names,
   // with the node's setup allow-list enforced — must keep running on every PR: the matrix in a
@@ -300,7 +271,6 @@ describe("Firefox lanes", () => {
   // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
   const workflow = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8"))
   const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
-  const CHROME_ONLY_CANARY = "tests/e2e/network/frozen-account-canary.test.ts"
   type SuiteJob = { uses?: string; with?: Record<string, unknown>; strategy?: unknown; needs?: unknown; if?: unknown; secrets?: unknown }
   const TWINS = [
     { chrome: "pr-extension-smoke-e2e.yml", firefox: "pr-extension-smoke-e2e-firefox.yml", filter: "smoke-surface" },
@@ -316,7 +286,7 @@ describe("Firefox lanes", () => {
     }
   })
 
-  test("every Firefox PR suite job runs the Chrome job's files on firefox, minus the Chrome-only canary", () => {
+  test("every Firefox PR suite job runs exactly the Chrome job's files on firefox", () => {
     for (const { chrome, firefox } of TWINS) {
       const [chromeJobs, firefoxJobs] = [workflow(chrome).jobs, workflow(firefox).jobs]
       expect(Object.keys(firefoxJobs), firefox).toEqual(Object.keys(chromeJobs))
@@ -328,9 +298,7 @@ describe("Firefox lanes", () => {
         const { test_files: chromeFiles, ...chromeWith } = job.with ?? {}
         const { test_files: firefoxFiles, ...firefoxWith } = twin.with ?? {}
         expect(firefoxWith, `${firefox} → ${name} with`).toEqual({ ...chromeWith, browser: "firefox" })
-        expect(words(firefoxFiles), `${firefox} → ${name} test_files`).toEqual(
-          words(chromeFiles).filter((file) => file !== CHROME_ONLY_CANARY),
-        )
+        expect(words(firefoxFiles), `${firefox} → ${name} test_files`).toEqual(words(chromeFiles))
         for (const key of ["uses", "strategy", "needs", "if", "secrets"] as const) {
           expect(twin[key], `${firefox} → ${name} ${key}`).toEqual(job[key])
         }
@@ -390,7 +358,7 @@ describe("Firefox lanes", () => {
       expect(firefox, `nightly.yml → ${name}-firefox`).toBeDefined()
       expect(firefox.with.browser).toBe("firefox")
       expect(words(firefox.with.exclude_files)).toEqual(words(chrome.with.exclude_files))
-      expect(words(firefox.with.test_files)).toEqual(words(chrome.with.test_files).filter((file) => file !== CHROME_ONLY_CANARY))
+      expect(words(firefox.with.test_files)).toEqual(words(chrome.with.test_files))
       expect(firefox.strategy).toEqual(chrome.strategy)
     }
   })
@@ -410,5 +378,151 @@ describe("Firefox lanes", () => {
     expect(chromePrefix.length).toBeGreaterThan(0)
     expect(String(firefox.with.key).startsWith(chromePrefix), "a Firefox key Chrome's restore prefix would match").toBe(false)
     expect(firefox.with["restore-keys"]).toBeUndefined()
+  })
+})
+
+/**
+ * The canary lanes — the prover-ON jobs every @aztec bump is gated on — run both execution
+ * canaries on both browsers. What could rot silently: a canary dropped from one lane's list, left
+ * in a proverless pool, or moved into a proverless job; a lane whose aggregator waits on a job but
+ * never reads its result; the reusable workflow's results assertion silenced, or its label match
+ * narrowed so that a lane escapes it.
+ */
+describe("canary lanes", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+  const workflow = (file: string): any => Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8"))
+  const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
+  const SUITE = "_extension-network-e2e.yml"
+  const LANES = [
+    { file: "pr-extension-network-e2e.yml", browser: "chrome" },
+    { file: "pr-extension-network-e2e-firefox.yml", browser: "firefox" },
+    { file: "nightly.yml", browser: "chrome" },
+    { file: "nightly.yml", browser: "firefox" },
+  ] as const
+  type SuiteJob = { uses?: string; with?: Record<string, unknown> }
+  /** A lane is one browser's network suite in one caller: the shard pool plus its dedicated jobs. */
+  const laneJobs = (file: string, browser: string): [string, SuiteJob][] =>
+    (Object.entries(workflow(file).jobs) as [string, SuiteJob][]).filter(
+      ([, job]) => String(job.uses).endsWith(SUITE) && (job.with?.browser ?? "chrome") === browser,
+    )
+  const canaryFiles = readdirSync(join(ROOT, "apps/extension/tests/e2e/network"))
+    .filter((name) => name.endsWith("-canary.test.ts"))
+    .sort()
+    .map((name) => `tests/e2e/network/${name}`)
+
+  test("the two execution canaries are on disk", () => {
+    expect(canaryFiles).toEqual([
+      "tests/e2e/network/frozen-account-canary.test.ts",
+      "tests/e2e/network/passkey-execution-canary.test.ts",
+    ])
+  })
+
+  // "Prover-ON" is the `proverless` input, not the job being dedicated: a heavy job is dedicated too.
+  test("every canary runs prover-ON under a canary label in every lane, and is out of that lane's pool", () => {
+    for (const { file, browser } of LANES) {
+      const jobs = laneJobs(file, browser)
+      const pools = jobs.filter(([, job]) => job.with?.exclude_files)
+      expect(pools.map(([name]) => name), `${file} ${browser}: one shard pool`).toHaveLength(1)
+      const excluded = words(pools[0][1].with?.exclude_files)
+      for (const canary of canaryFiles) {
+        const carriers = jobs.filter(([, job]) => words(job.with?.test_files).includes(canary))
+        expect(carriers.map(([name]) => name), `${file} ${browser}: ${canary} runs in one dedicated job`).toHaveLength(1)
+        const [, job] = carriers[0]
+        expect(job.with?.proverless, `${file} ${browser}: ${canary} runs prover-ON`).not.toBe(true)
+        expect(String(job.with?.shard_label), `${file} ${browser}: ${canary}'s job is a canary lane`).toStartWith("canary")
+        expect(excluded, `${file} ${browser}: ${canary} is out of the shard pool`).toContain(canary)
+      }
+    }
+  })
+
+  // A file in a dedicated job's list but not the pool's runs twice; one in neither never runs.
+  test("each lane's shard pool excludes exactly the union of its dedicated jobs' files", () => {
+    for (const { file, browser } of LANES) {
+      const jobs = laneJobs(file, browser)
+      const excluded = jobs.flatMap(([, job]) => words(job.with?.exclude_files))
+      const dedicated = jobs.flatMap(([, job]) => words(job.with?.test_files))
+      expect(dedicated.length, `${file} ${browser}: dedicated jobs exist`).toBeGreaterThan(0)
+      expect([...excluded].sort(), `${file} ${browser}: exclude_files == union of test_files`).toEqual(
+        [...new Set(dedicated)].sort(),
+      )
+    }
+  })
+
+  // The reusable workflow folds newlines before `read -ra`; a block-scalar list is refused here as well,
+  // since the whitespace-splitting pins above would accept one that the steps then mis-parse.
+  test("every file list is one line", () => {
+    for (const { file, browser } of LANES) {
+      for (const [name, job] of laneJobs(file, browser)) {
+        for (const key of ["test_files", "exclude_files"] as const) {
+          const value = job.with?.[key]
+          if (value !== undefined) expect(String(value), `${file} → ${name} ${key}`).not.toContain("\n")
+        }
+      }
+    }
+  })
+
+  /** A script's lines that run — comments cannot test a result. */
+  const commandLines = (run: unknown): string[] =>
+    String(run ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"))
+
+  /** The jobs an aggregator's script actually tests: the operands of its `for r in …; do` lists and of
+   *  its direct `[ "${{ needs.x.result }}" …` checks — an echo or a comment naming a result does not count. */
+  function resultsTested(run: unknown): string[] {
+    const commands = commandLines(run).join("\n")
+    const inLoops = [...commands.matchAll(/for r in([\s\S]*?);\s*do/g)].flatMap((loop) =>
+      [...loop[1].matchAll(/needs\.([\w-]+)\.result/g)].map((token) => token[1]),
+    )
+    const direct = [...commands.matchAll(/\[ "\$\{\{ needs\.([\w-]+)\.result \}\}" /g)].map((token) => token[1])
+    return [...new Set([...inLoops, ...direct])].sort()
+  }
+
+  // A job in `needs` that the loop never tests can be red under a green aggregator.
+  test("every job an aggregator waits on is tested in its result loop, and nothing else is", () => {
+    for (const [file, aggregator] of [
+      ["pr-extension-network-e2e.yml", "status"],
+      ["pr-extension-network-e2e-firefox.yml", "status"],
+      ["nightly.yml", "status"],
+    ] as const) {
+      const job = workflow(file).jobs[aggregator]
+      const script = (job.steps as { run?: string }[]).map((step) => step.run ?? "").join("\n")
+      expect(resultsTested(script), `${file} → ${aggregator} tests exactly its needs`).toEqual([...[job.needs ?? []].flat()].sort())
+    }
+    // The publish gate enumerates success: `!= 'failure'` would let a skipped or cancelled gate publish.
+    const publish = workflow("nightly.yml").jobs["publish-nightly"]
+    for (const need of [publish.needs ?? []].flat()) {
+      expect(String(publish.if), `nightly.yml → publish-nightly requires needs.${need}.result == 'success'`).toContain(
+        `needs.${need}.result == 'success'`,
+      )
+    }
+  })
+
+  // Pinned whole, not by fragment: a narrower condition, a `continue-on-error` or a commented-out call
+  // would each keep the fragment while disarming the step.
+  test("the reusable workflow asserts canary results on every canary* label, like its zero-proofs check", () => {
+    type Step = { name?: string; if?: string; run?: string; env?: Record<string, string>; "continue-on-error"?: unknown }
+    const job = workflow(SUITE).jobs["network-e2e"]
+    expect(job["continue-on-error"], "the suite job fails when a step does").toBeUndefined()
+    const steps = job.steps as Step[]
+    const results = steps.find((step) => step.name === "Assert canary results")
+    expect(results, "the results step exists").toBeDefined()
+    expect(results?.if).toBe("${{ always() && !cancelled() && startsWith(inputs.shard_label, 'canary') }}")
+    expect(results?.["continue-on-error"], "a red assertion is a red job").toBeUndefined()
+    expect(commandLines(results?.run)).toContain(
+      'bun scripts/ci-cd/assert-canary-results.ts "${RUNNER_TEMP}/canary-results.json" "${TEST_FILE_LIST[@]}"',
+    )
+    const run = steps.find((step) => step.name === "Run network e2e via agent")
+    expect(run?.env?.NULO_E2E_RESULTS_FILE, "a canary* run writes the report").toBe(
+      "${{ startsWith(inputs.shard_label, 'canary') && format('{0}/canary-results.json', runner.temp) || '' }}",
+    )
+    expect(run?.["continue-on-error"]).toBeUndefined()
+    const presto = steps.find((step) => String(step.name).startsWith("Assert presto activity"))
+    expect(presto?.["continue-on-error"]).toBeUndefined()
+    expect(commandLines(presto?.run), "the zero-proofs check matches canary* too").toContain(
+      'if [ "$PROVE_SUCCESS" -eq 0 ] && [[ "$SHARD_LABEL" == canary* ]]; then',
+    )
+    expect(existsSync(join(ROOT, "scripts/ci-cd/assert-canary-results.ts"))).toBe(true)
   })
 })

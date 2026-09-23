@@ -116,10 +116,12 @@ describe("firefox manifest", () => {
 		expect(id).toBe("wallet@nulo.sh")
 	})
 
-	// Declaring collection the wallet does not do is a false public statement on the AMO listing;
-	// "none" is only true while nothing is sent anywhere that identifies the user.
-	test("declares no data collection", () => {
-		expect(buildGecko().data_collection_permissions).toEqual({ required: ["none"] })
+	// The declaration is a public statement on the AMO listing and in every install prompt:
+	// transactions and balance queries leave for the configured node, so "none" would be false,
+	// and any wider claim would declare collection the wallet does not do. Firefox shows exactly
+	// what is listed here; the publish runner pins the same value.
+	test("declares financial and payment information, and nothing else", () => {
+		expect(buildGecko().data_collection_permissions).toEqual({ required: ["financialAndPaymentInfo"] })
 	})
 
 	// Extension-page WebAuthn — how a passkey profile is created — landed in Firefox 150; 153 is

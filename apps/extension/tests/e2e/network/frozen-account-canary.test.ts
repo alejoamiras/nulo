@@ -11,30 +11,23 @@
  *   3. The first tx executes the frozen constructor via the multicall deploy path — simulate,
  *      REAL proof, node acceptance — proven by the init nullifier flipping to PRESENT.
  *   4. A subsequent authwit-CONSUMING tx (grant as A → consume as the named caller B) succeeds.
- *   5. A service-worker restart later, the re-derived account still signs, proves, and lands a tx
+ *   5. A background restart later, the re-derived account still signs, proves, and lands a tx
  *      (the background's re-derivation path throws "account address inconsistency" on drift, so
  *      an ok result pins re-derivation AND execution).
  *
  * Every stage asserts an exact outcome — no ok-or-error tolerances in this file. Run it
- * prover-ON per bump: `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts`
- * (see the aztec-update skill; a red canary BLOCKS the bump — hold the line, or ship a new
- * extension major as a deliberate rotation).
+ * prover-ON per bump, on Chrome and on Firefox: `bun run e2e:agent
+ * tests/e2e/network/frozen-account-canary.test.ts` (see the aztec-update skill; a red canary on
+ * either browser BLOCKS the bump — hold the line, or ship a new extension major as a deliberate
+ * rotation).
  */
 import { Buffer } from "node:buffer"
 import { describe, expect, inject } from "vitest"
-import { CHROME_ONLY, isFirefox } from "../fixtures/browser"
+import { backgroundAlive, stopBackground } from "../fixtures/browser"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import {
-	ensureUnlocked,
-	findServiceWorkerTarget,
-	getAccountAddress,
-	readLivenessBaseline,
-	revealSeedPhrase,
-	stopServiceWorker,
-	waitForWorkerLiveness,
-} from "../fixtures/helpers"
+import { ensureUnlocked, getAccountAddress, readLivenessBaseline, revealSeedPhrase, waitForWorkerLiveness } from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -42,22 +35,22 @@ import { TEST_PASSWORD } from "../fixtures/constants"
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
+describe("frozen-account canary — the execution gate every @aztec bump runs, on both browsers", () => {
 	test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 		if (process.env.E2E_REQUIRE_SETUP === "1") {
 			expect(hasConfig).toBe(true)
 		}
 	})
 
-	/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
-	 *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
-	 *  kill, whose failures propagate. */
-	async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
-		if (!findServiceWorkerTarget(ctx)) {
-			console.warn("[frozen-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
+	/** A prover-ON stage can outlast the browser's idle reaper, and nothing here wakes a background:
+	 *  an absent one IS the restart this stage exercises, so recovery proceeds; a present one gets the
+	 *  real kill, whose failures propagate. */
+	async function restartBackground(ctx: ExtensionContext): Promise<void> {
+		if (!(await backgroundAlive(ctx))) {
+			console.warn("[frozen-canary] no live background — the browser already stopped it; proceeding to recovery")
 			return
 		}
-		await stopServiceWorker(ctx)
+		await stopBackground(ctx)
 	}
 
 	/** `grantPublicAuthwit` resolves to a bare tx-hash string; `sendTx` (NO_WAIT) resolves to
@@ -203,11 +196,11 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 			expect(await node.getNullifierMembershipWitness("latest", derivedB.initNullifier)).toBeDefined()
 			step("authwit consumed; B's init nullifier PRESENT")
 
-			// ── Stage 5: SW restart → recovery re-derives and still operates ──
-			step("terminating the service worker")
-			await restartServiceWorker(ctx)
+			// ── Stage 5: background restart → recovery re-derives and still operates ──
+			step("terminating the background")
+			await restartBackground(ctx)
 
-			// Session storage retains the dead worker's heartbeat, so the gate needs a
+			// Session storage retains the dead background's heartbeat, so the gate needs a
 			// STRICTLY NEWER value; the baseline is read after the stop, from an
 			// extension page (chrome.storage is undefined on the playground page).
 			const recoveryPopup = await openPopup(ctx)
@@ -270,8 +263,8 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKill, () => {
 			})
 			step("post-restart sendTx as A (re-derived account, non-init path)")
 			const seqFinal = await snapshotResultSeq(page)
-			// 180s: the first post-restart RPC that touches the chain runtime pays the full offscreen
-			// re-boot (bb init + encrypted-store unlock) BEFORE the execute popup can open.
+			// 180s: the first post-restart RPC that touches the chain runtime pays the PXE host's full
+			// cold start (bb init + encrypted-store unlock) BEFORE the execute popup can open.
 			const finalPopupP = waitForPopup(ctx, "execute", { timeout: 180_000 })
 			await clickByTestId(page, "pg-btn-sendTx-default")
 			// If the dApp-side handler fails before the wallet opens the popup, surface ITS error

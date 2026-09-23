@@ -259,7 +259,9 @@ implementation, statements, selection or configuration.
 
 **7.6 Optional local proving software.** Nulo can use a separate, locally installed proving
 application to generate proofs faster. That is separate software, installed by you at your choice.
-Its licence and privacy information are available at «FILL: actual native-application legal links».
+Its licence and privacy information are available at
+[its licence](https://github.com/alejoamiras/presto/blob/main/LICENSE) (AGPL-3.0-only) and
+[its privacy notice](https://github.com/alejoamiras/presto/blob/main/PRIVACY.md).
 Nulo works without it.
 
 **7.7 Browser and store platforms.** Your use of Nulo is also subject to the terms of your browser
@@ -558,7 +560,9 @@ would much rather fix it.
 
 **Alejo Amiras** — hello@nulo.sh
 
-Security vulnerabilities: please follow the disclosure process at «FILL: published security-reporting URL» rather than the public feedback forms.
+Security vulnerabilities: please follow the disclosure process at
+https://github.com/alejoamiras/nulo/security (GitHub's private vulnerability reporting) rather than the
+public feedback forms.
 
 ---
 

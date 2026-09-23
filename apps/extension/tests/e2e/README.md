@@ -60,6 +60,18 @@ The **default-token seeding** spec (`network/default-token-seeding.test.ts`) nee
 
 The **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`, `lock-cancels-dapp-send`, `auto-lock-defers-while-proving`, `profile-switch-sweeps-transfer`) hold the tx at `proving` via a `ProofGate` barrier (`holdProofGate`/`releaseProofGate` in `fixtures/proof-gate.ts`, backed by `chrome.storage.session` key `nulo:e2e:proof-gate`) so the sub-second proverless prove still gives a deterministic window. Real BB proving is guarded by the prover-ON `network-e2e-canary` CI job (`transfers` + `tx-sendTx-default`); see [CI.md § Proverless network e2e](../../../../CI.md). Full design: [`implementations-plan/e2e-proverless-stub/`](../../../../implementations-plan/e2e-proverless-stub/plan.md).
 
+### Store captures (opt-in)
+
+`tests/e2e/store-captures.test.ts` is collected by the smoke config and skipped unless
+`STORE_CAPTURES=1`. It writes the three 360×600 popup captures `scripts/store-art.ts` frames for the
+store listings, against a production build in artifact mode:
+
+```bash
+cd apps/extension && bun run build:chrome
+STORE_CAPTURES=1 NULO_E2E_ARTIFACT_RUN=1 EXTENSION_PATH="$PWD/dist/chrome" bun run test:e2e -- tests/e2e/store-captures.test.ts
+bun scripts/store-art.ts
+```
+
 ## Running multiple agents in parallel
 
 Open one terminal per worktree and run `bun run e2e:agent` in each. Each agent allocates fresh ports and owns its own anvil + aztec + playground:
@@ -160,8 +172,10 @@ A Puppeteer/Chrome interaction layer regressed somewhere between sandbox ABI ver
 | `clickByTestId(page, id)` / `clickSelector(page, sel)` | `(await page.waitForSelector(...))!.click()` and `handle.click()` | The CDP element-handle click hangs with `Runtime.callFunctionOn timed out`. Synthetic in-page click via `page.evaluate(() => el.click())` bypasses the broken protocol path. |
 | `typeIntoInput` / `replaceInputValue` | `handle.type(text)` | Same CDP path, same hang. The helper sets `value` via the prototype setter and dispatches `input` events. |
 | `patchPagePolling(page)` (auto-applied by `launchExtension`, `openPopup`, `openPlayground`, `waitForPopup`) | manually configuring polling on every `page.waitForFunction` call | Default `'raf'` polling is throttled in offscreen / unfocused tabs. Patch defaults to `polling: 200`. `waitForSelector` (CSS-only) is rerouted through the patched `waitForFunction` for the same reason; prefixed selectors (`text/`, `xpath/`, `aria/`, `pierce/`) are left alone. |
-| `pointerClick(page, testid)` (`helpers/legal-drivers.ts`) | `clickByTestId` when the assertion is "nothing covers this control" | An in-page click reaches a covered element. This one hit-tests the control's centre, fails naming whatever sits on top, then clicks through `page.mouse` (`Input.dispatchMouseEvent`, not the hanging element-handle path). |
+| `pointerClick(page, testid, { last? })` (`helpers/legal-drivers.ts`) | `clickByTestId` when the assertion is "nothing covers this control" | An in-page click reaches a covered element. This one hit-tests the control's centre, fails naming whatever sits on top, then clicks through `page.mouse` (`Input.dispatchMouseEvent`, not the hanging element-handle path). `last` picks the last match — the control of the popup on top of a stack. |
+| `coveredAt` / `activeTestId` / `waitForFocus` / `tabAround(page, n)` (`helpers/pointer-probes.ts`) | reasoning about z-index or `offsetParent`; reading focus right after a close | What the pointer would hit at a control's centre, where focus is, where it lands (a released trap hands focus back on a timer — wait, never read), and where `n` Tabs take it — the browser facts behind "this popup covers that one" and "the trap holds". |
 | `closeStuckPopup(page)` | waiting for the popup to unmount after a confirm/submit | Vue `<Transition>` sticks mid-enter / mid-leave under headless Chrome rAF throttling — `slide-enter-from + slide-enter-active` never advances. Helper force-removes the `#popup` teleport children + dim backdrop AFTER asserting the actual post-mutation signal (row appeared, contact deleted, etc.). |
+| `settleClosedPopup(page, innerTestId)` (`fixtures/popup-leave.ts`) | `closeStuckPopup` when another popup must stay open beneath | The scoped form: waits for the closed popup's DOM to leave or for its leave to have begun, then finishes only that one by hand. Returns whether it had to. |
 | `withTimeoutMessage(wait, message)` | `.catch(() => { throw new Error("...") })` around a wait | A bare catch relabels frame detaches, CDP disconnects and page crashes as "the state never settled", burying a real fault under a plausible-looking flake. This converts `TimeoutError` only, rethrows everything else untouched, and keeps the original as `cause`. Pass a function when the message has to read live page state — prefer that form, so the failure says what WAS observed. |
 
 Feature helpers in `fixtures/helpers.ts` (all `data-testid`-driven; reuse them rather than re-deriving the click sequence):
@@ -180,6 +194,8 @@ Feature helpers in `fixtures/helpers.ts` (all `data-testid`-driven; reuse them r
 | `createAndActivateProfile(page, name, password)` | Creates a profile from the lock screen's picker, which activates it; returns its id. |
 | `readSessionRow` / `waitForSessionRow` / `peekSession` / `setSessionTtlMs(page, ms)` | Session state without navigating (a navigation refreshes the session): the persisted row's `profile`/`since`/`lockedAt`, the profile service's own expiry check, and a millisecond auto-lock TTL through the config service. |
 | `readSendRecords` / `waitForSendRecord(page, match)` (`fixtures/journal.ts`) | Every profile's `transfer` and `dapp_execute` journal records with their stage and `enteredProveAt` — the anchor for proof-gate timing. |
+| `sendTransfer(page, { …, expect })` + `fillSendForm(page, { amount, destination })` | Drives a whole send. `expect` (`"send"` \| `"review"`) is the caller's claim about the footer: a send the fee card gates (the account's own Fee Juice under a private origin) goes through the review sheet, anything else at once — the other offer throws. Every call site states it. |
+| `openSend` / `readSendView` / `waitForFee` / `waitForTag` / `submitSend` / `openReviewFromStrip` / `readReview` / `waitForReviewReady` / `shotSend` (`fixtures/send-page.ts`) | The Send page's publish surface: the strip's cells, the fee-source tag and the footer's action read together — `assertPublishInvariant` refuses a page where they disagree — plus the review sheet's rows, the hit-tested clicks on "Review send" / "Send now" / the strip, and both-theme screenshots under `NULO_E2E_SHOT_DIR`. |
 
 Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 

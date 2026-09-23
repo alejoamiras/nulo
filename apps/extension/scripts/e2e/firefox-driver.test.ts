@@ -1,11 +1,22 @@
 import { describe, expect, test, vi } from "vitest"
 import {
+	type BackgroundStopper,
+	FIREFOX_LAUNCH_PREFS,
 	type SilentCloseWatch,
 	abandonSession,
 	firefoxDirFor,
 	silentlyClosed,
+	stopBackgroundWith,
 	uuidFromPrefs,
 } from "../../tests/e2e/fixtures/browser/firefox"
+
+/** The PXE host is placed where Firefox's timer throttling cannot reach it; the suite must run under
+ *  that throttling, as its users do, so a regression shows as a slow send rather than staying hidden. */
+describe("launch prefs", () => {
+	test("no pref masks timer throttling", () => {
+		expect(Object.keys(FIREFOX_LAUNCH_PREFS).filter((key) => /timeout|throttl/i.test(key))).toEqual([])
+	})
+})
 
 /**
  * Puppeteer's own `executablePath({ browser: "firefox" })` composes the Firefox path from the
@@ -113,5 +124,142 @@ describe("silent window closes", () => {
 		silentlyClosed(watch, ["a"], new Set())
 		expect(silentlyClosed(watch, ["a"], new Set(["a"]))).toEqual([])
 		expect(silentlyClosed(watch, ["a"], new Set())).toEqual([])
+	})
+})
+
+/**
+ * Firefox's termination is a polite suspension that returns early, reporting success, while the
+ * background is busy — and the page unloads asynchronously when it does go. Only an observation of
+ * the page gone may end the wait; a kill that silently did nothing would let every spec built on it
+ * pass against a background that never died.
+ */
+describe("stopping the background", () => {
+	const OLD = 1_000
+	const stopper = (over: Partial<BackgroundStopper>): BackgroundStopper => ({
+		identity: async () => OLD,
+		terminate: async () => "terminated",
+		budgetMs: 400,
+		retryEveryMs: 40,
+		pollEveryMs: 5,
+		...over,
+	})
+
+	test("a declined termination is asked again until the page is seen gone", async () => {
+		let asked = 0
+		const terminate = vi.fn(async () => {
+			asked++
+			return "terminated"
+		})
+		await stopBackgroundWith(stopper({ terminate, identity: async () => (asked < 2 ? OLD : undefined) }))
+		expect(terminate).toHaveBeenCalledTimes(2)
+	})
+
+	test("a successor already running counts as gone", async () => {
+		let asked = false
+		const terminate = async () => {
+			asked = true
+			return "terminated"
+		}
+		await expect(stopBackgroundWith(stopper({ terminate, identity: async () => (asked ? OLD + 1 : OLD) }))).resolves.toBeUndefined()
+	})
+
+	test("a probe that fails during teardown is asked again, never read as gone", async () => {
+		const answers: Array<() => number | undefined> = [
+			() => OLD,
+			() => {
+				throw new Error("the frame script never answered")
+			},
+			() => undefined,
+		]
+		const identity = vi.fn(async () => (answers.shift() ?? (() => undefined))())
+		await stopBackgroundWith(stopper({ identity }))
+		expect(identity).toHaveBeenCalledTimes(3)
+	})
+
+	// An add-on event can wake a successor at any moment. An ask made on a stale sighting would end
+	// that successor too, and the spec would exercise two background deaths while asserting one.
+	test("a successor that appears between two sightings is never asked to end", async () => {
+		vi.useFakeTimers()
+		try {
+			let current = OLD
+			const endedWhile: number[] = []
+			const terminate = async () => {
+				endedWhile.push(current)
+				return "terminated"
+			}
+			const stopping = stopBackgroundWith(stopper({ terminate, identity: async () => current, retryEveryMs: 40, pollEveryMs: 30 }))
+			await vi.advanceTimersByTimeAsync(30) // Sighted at 30 ms: the old page, too early to ask again.
+			await vi.advanceTimersByTimeAsync(20)
+			current = OLD + 1 // The successor wakes mid-sleep, at 50 ms.
+			await vi.advanceTimersByTimeAsync(10) // At 60 ms the retry is due — and the sighting comes first.
+			await stopping
+			expect(endedWhile).toEqual([OLD])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("nothing is started once the budget has run out, even by a step that was in flight", async () => {
+		vi.useFakeTimers()
+		try {
+			let release: (outcome: string) => void = () => {}
+			const terminate = () =>
+				new Promise<string>((resolve) => {
+					release = resolve
+				})
+			const identity = vi.fn(async () => OLD)
+			const rejected = expect(stopBackgroundWith(stopper({ terminate, identity, budgetMs: 50 }))).rejects.toThrow(/still alive/)
+			await vi.advanceTimersByTimeAsync(50) // The budget runs out while the ask is still in flight.
+			await rejected
+			release("terminated")
+			await vi.advanceTimersByTimeAsync(100)
+			expect(identity).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a failed probe licenses no further ask, however long it keeps failing", async () => {
+		let probes = 0
+		const identity = async () => {
+			probes++
+			if (probes === 1) return OLD
+			if (probes < 15) throw new Error("the frame script never answered")
+			return undefined
+		}
+		const terminate = vi.fn(async () => "terminated")
+		await stopBackgroundWith(stopper({ terminate, identity }))
+		expect(terminate).toHaveBeenCalledTimes(1)
+	})
+
+	test("a probe that keeps failing rejects with its error, at the budget", async () => {
+		let first = true
+		const identity = async () => {
+			if (first) {
+				first = false
+				return OLD
+			}
+			throw new Error("can't access dead object")
+		}
+		await expect(stopBackgroundWith(stopper({ identity }))).rejects.toThrow(/still alive 0\.4s.*last probe: can't access dead object/)
+	})
+
+	test("a probe that never settles cannot outlast the budget", async () => {
+		let first = true
+		const identity = () => {
+			if (!first) return new Promise<number | undefined>(() => {})
+			first = false
+			return Promise.resolve(OLD)
+		}
+		const started = Date.now()
+		await expect(stopBackgroundWith(stopper({ identity }))).rejects.toThrow(/still alive/)
+		expect(Date.now() - started).toBeLessThan(1_500)
+	})
+
+	test("no background, or an outcome other than terminated, rejects by name without waiting", async () => {
+		const terminate = vi.fn(async () => "no-extension")
+		await expect(stopBackgroundWith(stopper({ terminate, identity: async () => undefined }))).rejects.toThrow(/runs no background page/)
+		expect(terminate).not.toHaveBeenCalled()
+		await expect(stopBackgroundWith(stopper({ terminate }))).rejects.toThrow(/did not terminate the background page \(no-extension\)/)
 	})
 })

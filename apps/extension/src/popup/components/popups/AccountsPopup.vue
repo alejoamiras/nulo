@@ -112,6 +112,7 @@ const handleManageAccounts = () => {
 					/>
 					<SettingItem
 						@click="popupStore.open('new_account')"
+						data-testid="accounts-popup-new"
 						title="New account"
 						size="small"
 						icon="plus-circle"
