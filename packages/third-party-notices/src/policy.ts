@@ -49,6 +49,11 @@ export interface Policy {
 	allowed: ReadonlySet<string>
 	overrides: readonly Override[]
 	vendored: readonly Vendored[]
+	/**
+	 * Third-party source adapted into first-party files, which no module walk can attribute. Every
+	 * build ships first-party code, so each record always renders.
+	 */
+	derived: readonly VendoredComponent[]
 	/** Licences a font may ship under. Font licences are not code licences and never join `allowed`. */
 	fontAllowed: ReadonlySet<string>
 	/** Emitted assets that carry code or a font; each must be claimed by a `vendored` asset trigger. */
@@ -308,10 +313,21 @@ export const VENDORED: readonly Vendored[] = [
 	},
 ]
 
+export const DERIVED: readonly VendoredComponent[] = [
+	{
+		name: "Azguard Wallet",
+		license: "Apache-2.0",
+		source: "https://github.com/AzguardWallet/azguard-wallet/blob/845abb7ec1dff689b9330f6648c28105fa8a1ee3/LICENSE.md",
+		texts: ["azguard-wallet.Apache-2.0.txt"],
+		note: 'Nulo began as a fork of Azguard Wallet; each source file derived from it carries a "Modified from Azguard Wallet" notice. The upstream repository ships no NOTICE file.',
+	},
+]
+
 export const POLICY: Policy = {
 	allowed: ALLOWED,
 	overrides: OVERRIDES,
 	vendored: VENDORED,
+	derived: DERIVED,
 	fontAllowed: FONT_ALLOWED,
 	codeAsset: new RegExp(`\\.(wasm(\\.gz)?|[cm]?js)$|${FONT_ASSET.source}`, "i"),
 }

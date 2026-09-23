@@ -31,6 +31,7 @@ const policy = (extra: Partial<Policy> = {}): Policy => ({
 	allowed: ALLOWED,
 	overrides: [],
 	vendored: [],
+	derived: [],
 	fontAllowed: FONT_ALLOWED,
 	codeAsset: /\.(wasm|js|woff2)$/,
 	...extra,
@@ -322,6 +323,26 @@ describe("generateNotices", () => {
 			])
 			expect(violations(() => run([], { overrides: [override] }))).toEqual([
 				"silent: OVERRIDES entry matches nothing bundled; remove it",
+			])
+		})
+	})
+
+	describe("DERIVED", () => {
+		test("renders without any bundled package and meets the same source, text and licence rules", () => {
+			const derived = {
+				name: "Upstream Wallet",
+				license: "Apache-2.0",
+				source: "https://example.org/upstream",
+				texts: ["verified.txt"],
+				note: "Forked.",
+			}
+			const notices = run([], { derived: [derived] })
+			expect([...noticeNames(notices)]).toEqual(["Upstream Wallet"])
+			expect(notices).toContain("Upstream Wallet\nLicence: Apache-2.0\nSource: https://example.org/upstream")
+			expect(violations(() => run([], { derived: [{ ...derived, source: "", texts: [], license: "SSPL-1.0" }] }))).toEqual([
+				"Upstream Wallet: DERIVED entry needs an https source URL",
+				"Upstream Wallet: DERIVED entry supplies no licence text",
+				'Upstream Wallet: licence "SSPL-1.0" is not allowed',
 			])
 		})
 	})

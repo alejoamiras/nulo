@@ -179,10 +179,16 @@ function mergeInstallations(entries: readonly Entry[], violations: string[]): En
 	return [...merged.values()]
 }
 
-function componentEntry(component: VendoredComponent, allowed: ReadonlySet<string>, options: GenerateOptions, violations: string[]): Entry {
+function componentEntry(
+	component: VendoredComponent,
+	record: "VENDORED" | "DERIVED",
+	allowed: ReadonlySet<string>,
+	options: GenerateOptions,
+	violations: string[],
+): Entry {
 	const title = component.version ? `${component.name}@${component.version}` : component.name
-	if (!/^https:\/\//.test(component.source)) violations.push(`${title}: VENDORED entry needs an https source URL`)
-	if (component.texts.length === 0) violations.push(`${title}: VENDORED entry supplies no licence text`)
+	if (!/^https:\/\//.test(component.source)) violations.push(`${title}: ${record} entry needs an https source URL`)
+	if (component.texts.length === 0) violations.push(`${title}: ${record} entry supplies no licence text`)
 	const problem = licenceProblem(title, component.license, allowed)
 	if (problem) violations.push(problem)
 	const { license, source, note } = component
@@ -235,7 +241,7 @@ function vendoredEntries(
 		}
 		violations.push(...accountingProblems(vendored, names).map((problem) => `${label} ${problem}`))
 		const allowed = vendored.font ? options.policy.fontAllowed : options.policy.allowed
-		for (const component of vendored.components) entries.push(componentEntry(component, allowed, options, violations))
+		for (const component of vendored.components) entries.push(componentEntry(component, "VENDORED", allowed, options, violations))
 	}
 	return entries
 }
@@ -281,6 +287,8 @@ export function generateNotices(contents: BundleContents, options: GenerateOptio
 	const installed = packages.flatMap((pkg) => packageEntry(pkg, options, violations) ?? [])
 	const entries = mergeInstallations(installed, violations)
 	entries.push(...vendoredEntries(contents, packages, options, violations))
+	for (const component of options.policy.derived)
+		entries.push(componentEntry(component, "DERIVED", options.policy.allowed, options, violations))
 	violations.push(...unclaimedAssets(contents, options.policy), ...unusedOverrides(names, options.policy))
 	for (const style of contents.unfollowedStyles ?? [])
 		violations.push(`${style}: stylesheet import could not be followed, so what it inlines cannot be attributed`)

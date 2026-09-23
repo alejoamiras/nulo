@@ -49,3 +49,6 @@ Inter
 Space Grotesk
 JetBrains Mono
 Material Symbols Outlined
+
+# source adapted into first-party files
+Azguard Wallet
