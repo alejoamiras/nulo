@@ -306,16 +306,25 @@ function git(...args: string[]): { ok: boolean; stdout: string; stderr: string }
 	return { ok: res.status === 0, stdout: res.stdout ?? "", stderr: res.stderr ?? "" }
 }
 
+const MANIFEST_PATH = "scripts/complexity-baseline/manifest.json"
+
 /** Reads the base's manifest, fetching the commit shallowly when the checkout lacks it (CI
- *  checkouts are depth-1; GitHub serves any reachable commit by SHA). */
-function readBaseManifest(base: { sha?: string; branch?: string }): { manifest: BaselineManifest | LegacyManifest } | { skipped: string } {
+ *  checkouts are depth-1; GitHub serves any reachable commit by SHA). `predates` means the base
+ *  commit was read and has no manifest at all; `skipped` means the base could not be read. */
+function readBaseManifest(base: {
+	sha?: string
+	branch?: string
+}): { manifest: BaselineManifest | LegacyManifest } | { predates: string } | { skipped: string } {
 	const ref = base.sha ?? `refs/remotes/origin/${base.branch}`
 	if (!git("rev-parse", "--verify", "-q", `${ref}^{commit}`).ok) {
 		const fetched = git("fetch", "--no-tags", "--depth=1", "origin", base.sha ?? `${base.branch}:${ref}`)
 		if (!fetched.ok) return { skipped: `${ref} unavailable: ${fetched.stderr.trim() || "fetch failed"}` }
 	}
-	const shown = git("show", `${ref}:scripts/complexity-baseline/manifest.json`)
-	if (!shown.ok) return { skipped: `${ref} has no manifest: ${shown.stderr.trim()}` }
+	const listed = git("ls-tree", "--name-only", ref, "--", MANIFEST_PATH)
+	if (!listed.ok) return { skipped: `${ref} unreadable: ${listed.stderr.trim()}` }
+	if (listed.stdout.trim() === "") return { predates: `${ref} predates the complexity baseline` }
+	const shown = git("show", `${ref}:${MANIFEST_PATH}`)
+	if (!shown.ok) return { skipped: `${ref} has no readable manifest: ${shown.stderr.trim()}` }
 	return { manifest: JSON.parse(shown.stdout) }
 }
 
@@ -326,6 +335,12 @@ describe("shrink-only ratchet against the base branch", () => {
 			const base = ratchetBase()
 			if (base === null) return
 			const read = readBaseManifest(base)
+			if ("predates" in read) {
+				// Nothing to shrink from: every change reaching this base passed the ratchet on its PR into
+				// dev, and the tree-equals-manifest test above still binds this head.
+				console.warn(`ratchet skipped — ${read.predates}`)
+				return
+			}
 			if ("skipped" in read) {
 				// Fail closed on a PR run: CI must always have its base to ratchet against.
 				expect(process.env.GITHUB_ACTIONS === "true", read.skipped).toBe(false)
