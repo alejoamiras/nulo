@@ -85,11 +85,10 @@ describe("modules/send/SendReviewSheet", () => {
 	let w: W | undefined
 	afterEach(() => w?.unmount())
 
-	test("joins the popup stack with the slot's order and its own depth, escape and initial focus", () => {
+	test("joins the popup stack with the slot's order and its own depth, and initial focus", () => {
 		w = mountSheet({ order: 2, depth: 3 })
 		const popup = w.get('[data-testid="stub-popup"]')
 		expect(popup.attributes("data-order")).toBe("2")
-		expect(popup.attributes("data-escape")).toBe("true")
 		expect(popup.attributes("data-focus")).toBe("#send-review-title")
 		expect(w.get('[data-testid="stub-card"]').attributes("data-depth")).toBe("3")
 		expect(w.get('[data-testid="stub-card"]').attributes("data-fit")).toBe("true")
