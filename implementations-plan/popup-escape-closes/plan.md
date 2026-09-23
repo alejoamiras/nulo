@@ -76,7 +76,7 @@ Pressing Escape inside any registry popup closes that popup, and only that one, 
 - Pass: all exit 0; `Popup.test.ts` shows the three Escape/return cases green.
 - Layers: lint/typecheck · unit/component.
 
-### Phase 2 — prove it in real browsers: the stack, and a menu inside a popup
+### Phase 2 ✓ — prove it in real browsers: the stack, and a menu inside a popup (local gate green 2026-09-23; the Firefox leg is the PR job, checked at Delivery — `lessons/phase-2.md`)
 
 - `popup-stack.test.ts`: a second test on the accounts → new_account stack. Steps: open, `pointerClick` `account-avatar-btn`, `pointerClick` `accounts-popup-new`, assert `account-item` covered; press Tab once and assert focus is inside the new popup (`tabAround(1)` lands on a new_account control); `keyboard.press("Escape")`; `settleClosedPopup(page, "account-name-input")`; `account-item` reachable again; `waitForFocus(page, "accounts-popup-new")`; `accounts-popup` still visible; `keyboard.press("Escape")`; `settleClosedPopup(page, "accounts-popup")`; `accounts-popup` gone; `waitForFocus(page, "account-avatar-btn")`; console and page errors empty.
 - `tests/e2e/network/popup-escape-layered.test.ts` (new, `localNetworkExtension`): `navigateToSettings(page, "advanced", "account-state", "authwits")`, `clickByTestId` `authwits-actions-btn`, `clickByTestId` `authwits-toggle-registry`, wait for `registry-toggle-submit` visible, wait for `send-fee-method-trigger` to show a method (fee discovery against the sandbox), `pointerClick` the trigger, wait for a `send-fee-method-*` item visible; Escape → no item visible, and the popup is still *open*, proven by containment rather than visibility (a closed popup can linger in its leave transition — `fixtures/popup-leave.ts`): `tabAround(page, 10)` includes `registry-toggle-submit` and never includes `authwits-actions-btn`; Escape → `settleClosedPopup(page, "registry-toggle-submit")`, then `registry-toggle-submit` gone; console and page errors empty. No transaction is sent.
@@ -92,7 +92,7 @@ Pressing Escape inside any registry popup closes that popup, and only that one, 
 - Pass: exit 0 on each; two tests in the stack file, one in the layered file; no console/page errors.
 - Layers: e2e (smoke) · e2e (live local network). The rest of the network suite is not re-run locally: `fee-methods.test.ts`'s Escape path is unchanged in meaning and CI runs it on the PR (the diff trips the `extension-network` filter through `src/components/**`).
 
-### Phase 3 — docs and plan records
+### Phase 3 ✓ — docs and plan records (gate green 2026-09-23, `lessons/phase-3.md`)
 
 - `CLAUDE.md` § Keyboard & focus order: the Escape bullet.
 - `.claude/skills/e2e-testing/SKILL.md`: the Escape line, next to the `settleClosedPopup` guidance.
