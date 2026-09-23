@@ -815,11 +815,9 @@ export async function addContact(page: Page, name: string, address: string): Pro
 	await closeStuckPopup(page)
 }
 
-/** Force-close a popup that's stuck in Vue <Transition>'s enter-from class.
- *  Pinia state is correct (popupStore says nothing is open), but the DOM
- *  hasn't unmounted because the transitionend never fires. We dispatch
- *  Escape — every popup in the wallet listens for it via FormPopup or
- *  PopupHeader — and clear the popupStore for safety. */
+/** Last-resort recovery for popup DOM that outlived its close: presses Escape, then removes every
+ *  popup container and dimmer without touching the store — so never while a lower popup must stay
+ *  (`settleClosedPopup` is the scoped form). */
 export async function closeStuckPopup(page: Page): Promise<void> {
 	await page.keyboard.press("Escape").catch(() => undefined)
 	await page.evaluate(() => {

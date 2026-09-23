@@ -54,3 +54,5 @@ Plus the focus-ring follow-up above. Sheet screenshots regenerated from the walk
 ## Merged
 
 Owner: *"babysit this PR until green and merge it. You've got my authorization to merge."* First attempt: `CONFLICTING` — `dev` had taken #659 and #661 (Firefox pxe page + the background-kill seam) after this branch's dev merge, and both touched `tests/e2e/fixtures/helpers.ts`; the conflict was the import line only (`type ExtensionContext` dropped upstream, this branch's `send-page` import added). Resolved by hand in a signed merge commit (`b3b1b734`), static scans 89/89, lint + typecheck green, CI 46 pass / 0 fail, then `gh pr merge 660 --squash --delete-branch` → `83b914be` on `dev`, 2026-09-21 22:05 UTC. `gh` printed `'dev' is already used by worktree` afterwards — its attempt to check out `dev` locally, harmless. Worktree removed and manifest row dropped with `agent-worktree done`.
+
+**2026-09-22, owner:** the focus-ring follow-up is dropped (the ring stays; it is correct keyboard feedback), and the popup-Escape follow-up is taken as `popup-escape-closes`.

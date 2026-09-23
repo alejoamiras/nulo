@@ -41,6 +41,17 @@ export async function waitForFocus(page: Page, testid: string, timeout = 5_000):
 		})
 }
 
+/** Whether focus is inside the popup that holds the named control (its wrapper under `#popup`). A Tab
+ *  walk checked with this proves the keyboard never left; one that merely misses an outside control
+ *  can pass after focus has escaped. */
+export async function focusInPopupOf(page: Page, testid: string): Promise<boolean> {
+	return page.evaluate((s) => {
+		const el = document.querySelector(s)
+		const wrapper = el && [...document.querySelectorAll("#popup > *")].find((w) => w.contains(el))
+		return Boolean(wrapper && document.activeElement && wrapper.contains(document.activeElement))
+	}, sel(testid))
+}
+
 /** Presses Tab `times` times and reports where focus landed after each press. */
 export async function tabAround(page: Page, times: number): Promise<string[]> {
 	const visited: string[] = []

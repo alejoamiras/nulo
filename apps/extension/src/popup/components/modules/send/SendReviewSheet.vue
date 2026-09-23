@@ -74,7 +74,7 @@ const handleSend = () => {
 
 <template>
 	<div data-testid="send-review-sheet" :data-open="show" hidden />
-	<Popup :show="show" :displaceIdx="order" close-on-escape initial-focus="#send-review-title" @onClose="emit('close')">
+	<Popup :show="show" :displaceIdx="order" initial-focus="#send-review-title" @onClose="emit('close')">
 		<PopupCard :displaceIdx="depth" fit>
 			<div role="dialog" aria-modal="true" aria-labelledby="send-review-title">
 				<PopupHeader closable @onClose="emit('close')">

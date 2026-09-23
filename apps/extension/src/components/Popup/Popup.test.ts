@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { nextTick, ref } from "vue"
 
 type Options = Record<string, unknown>
-type FakeTrap = { active: boolean; activate: () => void; deactivate: (options?: Options) => void; options: Options }
+type FakeTrap = {
+	active: boolean
+	activate: () => void
+	deactivate: (options?: Options) => void
+	options: Options
+	/** What was focused when the trap was created — what a real trap would record as the return target. */
+	focusedAtCreate: Element | null
+}
 
 const traps: FakeTrap[] = []
 vi.mock("focus-trap", () => ({
@@ -11,6 +18,7 @@ vi.mock("focus-trap", () => ({
 		const trap: FakeTrap = {
 			active: false,
 			options,
+			focusedAtCreate: document.activeElement,
 			activate: vi.fn(() => {
 				trap.active = true
 			}),
@@ -111,21 +119,36 @@ describe("Popup", () => {
 		w.unmount()
 	})
 
-	test("closeOnEscape off: focus-trap keeps its own Escape handling and nothing is emitted", async () => {
+	test("by default Escape is swallowed, onClose emitted, and the trap is left to the close", async () => {
 		const w = await openPopup()
-		expect("escapeDeactivates" in (traps[0]?.options ?? {})).toBe(false)
-		expect(w.emitted("onClose")).toBeUndefined()
-		w.unmount()
-	})
-
-	test("closeOnEscape on: Escape is swallowed, onClose emitted, and the trap is left to the close", async () => {
-		const w = await openPopup({ closeOnEscape: true })
 		const onEscape = traps[0]?.options.escapeDeactivates as (event: KeyboardEvent) => boolean
 		const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
 		expect(onEscape(event)).toBe(false)
 		expect(event.defaultPrevented).toBe(true)
 		expect(w.emitted("onClose")).toEqual([[]])
 		expect(traps[0]?.active).toBe(true)
+		w.unmount()
+	})
+
+	test("closeOnEscape false: the trap ignores Escape rather than releasing, and nothing is emitted", async () => {
+		const w = await openPopup({ closeOnEscape: false })
+		expect(traps[0]?.options.escapeDeactivates).toBe(false)
+		expect(w.emitted("onClose")).toBeUndefined()
+		w.unmount()
+	})
+
+	test("focus returns to what was focused when the popup was shown, even if a child focuses its own input first", async () => {
+		document.body.insertAdjacentHTML("beforeend", '<button id="opener">open</button>')
+		const opener = document.querySelector<HTMLElement>("#opener")
+		opener?.focus()
+		const w = mountPopup()
+		const shown = w.setProps({ show: true })
+		// Queued before the popup's own tick, like a form focusing its first field from onShow.
+		void nextTick(() => document.querySelector<HTMLElement>('[data-testid="inside"]')?.focus())
+		await shown
+		await settle()
+		expect(traps[0]?.focusedAtCreate).toBe(document.querySelector('[data-testid="inside"]'))
+		expect(traps[0]?.options.setReturnFocus).toBe(opener)
 		w.unmount()
 	})
 

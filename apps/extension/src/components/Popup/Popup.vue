@@ -13,10 +13,10 @@ const props = defineProps({
 	displaceIdx: {
 		type: Number,
 	},
-	/** Escape emits `onClose` and is swallowed. Off, Escape only releases the trap (focus-trap's default). */
+	/** Escape closes the popup the way tapping outside does. Off, Escape does nothing and the trap holds. */
 	closeOnEscape: {
 		type: Boolean,
-		default: false,
+		default: true,
 	},
 	/** What the trap focuses on activation: a selector, or false to leave focus where it was. */
 	initialFocus: {
@@ -46,15 +46,22 @@ const releaseTrap = (options) => {
 const activate = async () => {
 	const _ = managers.profile?.refreshSession()
 	const token = ++activation
+	// Read before the tick: a child may focus its own input from a continuation queued in this same
+	// flush, and the trap would then record that input as where focus returns on close.
+	const opener = document.activeElement ?? undefined
 
 	await nextTick()
 	const container = popupEl.value?.wrapper
 	if (token !== activation || !mounted || !props.show || !container) return
 
 	releaseTrap({ returnFocus: false })
-	const options = { initialFocus: props.initialFocus, allowOutsideClick: true, fallbackFocus: container }
-	if (props.closeOnEscape) options.escapeDeactivates = onEscape
-	trap = focusTrap.createFocusTrap(container, options)
+	trap = focusTrap.createFocusTrap(container, {
+		initialFocus: props.initialFocus,
+		allowOutsideClick: true,
+		fallbackFocus: container,
+		setReturnFocus: opener,
+		escapeDeactivates: props.closeOnEscape ? onEscape : false,
+	})
 	trap.activate()
 }
 
