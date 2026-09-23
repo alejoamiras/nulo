@@ -2,7 +2,7 @@
 plan: popup-escape-followups
 tier: light, without a plan audit (the owner scoped the run as "a single PR + codex iteration loop")
 driver: claude-code
-status: in progress 2026-09-23 — all three fixes applied and validated locally; the codex post-impl loop is next; the PR into dev is NOT merged (the owner decides)
+status: in review 2026-09-23 — all three fixes applied and validated locally; codex post-impl loop converged (conditional approve → approve → approve, 3 rounds); PR into dev opened, NOT merged (the owner decides)
 eli5_mode: none (owner-scoped run)
 code_review: off
 budget: codex high, at most 3 rounds
@@ -43,8 +43,8 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 
 | File | Change |
 |---|---|
-| `apps/extension/scripts/e2e/webdriver-ownership.test.ts` | `spawnMarked` returns only once the child shows its marker; its eight call sites await it |
-| `apps/extension/tests/e2e/fixtures/browser/ownership.ts` | `waitForExit` reports a launch gone only after two empty scans a poll apart, since one empty scan can be a child in execve |
+| `apps/extension/scripts/e2e/webdriver-ownership.test.ts` | `spawnMarked` returns only once the child shows its marker, and its eight call sites await it. A new case swallows the signals of a launch that outlives SIGKILL and pins the retry of a failed send, one send per phase, the escalation, and the kept profile and record |
+| `apps/extension/tests/e2e/fixtures/browser/ownership.ts` | `releaseLaunch` deletes the profile and the record only once the stop loop has seen the launch gone. `stopOwned` sends each marker-carrying process its signal once per phase and rescans on every poll, so one that was inside execve is signalled when it shows. It calls the launch gone after two empty scans a poll apart, as a best effort: nothing bounds how long an exec reads empty |
 | `.github/workflows/pr-quick.yml` | the `firefox-touching` filter, its two outputs and its compute branch are removed; `build-firefox` runs on `build-chrome`'s condition |
 | `scripts/ci-cd/behavior-gating.test.ts` | pins `build-firefox`'s condition to `build-chrome`'s; the notices test's `firefox-touching` expectation goes with the filter |
 | `scripts/ci-cd/preview-comment.ts`, `CI.md` | the wording that called a skipped Firefox build normal goes |
@@ -56,7 +56,11 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 
 ## Security & Adversarial Considerations
 
-- **Ownership teardown.** Nothing widens what is signalled or deleted: a process is signalled only if it carries the launch's marker, re-read just before the signal (unchanged). The second empty scan only delays a profile delete by one 100 ms poll, and it closes a window in which a mid-exec child could have its profile deleted under it.
+- **Ownership teardown.**
+  - Nothing widens what is signalled or deleted: a process is signalled only if it carries the launch's marker, re-read just before the signal (unchanged).
+  - Deletion now waits for the stop loop's verdict, two empty scans a poll apart; before, a single final scan could authorise it.
+  - A launch that outlives SIGKILL keeps its profile and record for the next run's sweep.
+  - Still best effort: a descendant no scan ever sees, inside execve across both scans, is not signalled and cannot be shown gone. Proving its absence would take cgroups or pidfds.
 - **CI.** One more build job per extension PR, with the same permissions and artifact path as the Chrome build: no new secret, no new token scope, no store upload. The cost is runner minutes.
 - **Escape.** The key is a user keydown in the extension's own document; a dApp page cannot synthesise it. `preventDefault()` suppresses only the browser's default action (closing the toolbar popup); a cancel still resolves to `UserRejectedError`, which every host treats as a silent return, and nothing is approved by Escape. Once the ceremony has settled, the handler leaves Escape to the browser: the page must not swallow an Escape nothing acts on.
 
@@ -65,16 +69,31 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 | Gate | Result |
 |---|---|
 | Ownership file, 10 runs pinned to one CPU with three busy loops, before the fix | 2 of 10 runs failed |
-| The same, after the fix | 0 of 20 runs failed |
+| The same, after the first fix / on the final code | 0 of 20 / 0 of 20 |
+| Ownership file | 14/14; the SIGKILL-survival case fails if a thrown `kill` counts as sent, or if a sent signal is repeated |
 | `bun run lint:actions` | clean |
 | `bun run test:ci-gating` | 148 pass, 2 skip, 0 fail |
 | `PasskeyCeremonyDialog.test.ts` | 11/11; with the `preventDefault()` removed, the Escape case fails (`expected false to be true`) |
+| `bun run audit:vue` | exit 0 on the final code (7 059 tests, build) |
+| smoke `passkey-backup.test.ts` + `popup-stack.test.ts`, Chrome | 5/5 |
+| network `popup-escape-layered.test.ts` with the moved `pressEscape`, retry 0 | 1/1 |
 
 `lessons/phase-1.md` has the probes and the commands.
 
 ## Post-implementation
 
 `code_review: off`. A fresh `/codex high` session reviews the net diff from `5b447f45`, then is resumed until a round brings no new material finding (at most three rounds). Each round is logged in `lessons/phase-1.md`.
+
+**Converged in three rounds.**
+
+1. Conditional approve. The deletion gate and the signal retry were adopted; the pid/start-time veto and the dialog's keyboard modality were declined (see *Follow-ups*).
+2. Approve, with two Low findings, both adopted.
+3. Approve, with no new material findings.
+
+## Follow-ups (not taken)
+
+- **The passkey dialog does not trap focus.** A keyboard user can Tab to a control behind the overlay mid-ceremony and open a `Popup` there. One Escape then closes that popup and also cancels the ceremony, because the popup's trap listens on the document and the dialog on the window. No host builds that composition. Making the dialog modal for the keyboard changes how it behaves, so it waits for the owner's call.
+- **Teardown's residual.** A descendant that no scan ever sees, inside execve across two scans a poll apart, is neither signalled nor shown gone. A real bound needs cgroups or pidfds, declined for a test harness.
 
 ## Delivery
 

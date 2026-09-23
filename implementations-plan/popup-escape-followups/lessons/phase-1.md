@@ -40,3 +40,37 @@ Gates: `bun run lint:actions` clean; `bun run test:ci-gating` 148 pass, 2 skip, 
 - **Test.** The unit case dispatches a cancelable Escape and asserts `defaultPrevented`.
 - **Mutation check.** A script deleted the `preventDefault()` line, ran the file and restored it. The Escape case failed (`expected false to be true`) and the other ten passed. The file came back byte-identical.
 - **Helper move.** `pressEscape` moved to `helpers/pointer-probes.ts` for the smoke `passkey-backup.test.ts`. Its reader is now registered per press, just before the press, rather than once per page. A window listener registered at an earlier press would run *before* one the page mounted since (the dialog's own handler is a window listener mounted mid-test) and read `defaultPrevented` too early.
+
+## Post-implementation codex loop (2026-09-23)
+
+`code_review: off`. One codex session (`gpt-6-astra`, high), resumed twice, reviewed the net diff from `5b447f45`. Before the loop:
+
+- `bun run audit:vue` exit 0 (7 058 tests, build);
+- the smoke `passkey-backup.test.ts` and `popup-stack.test.ts`, 5/5;
+- the network `popup-escape-layered.test.ts` with the moved helper, 1/1.
+
+### Round 1 — conditional approve
+
+| Finding (severity) | Verified | Disposition |
+|---|---|---|
+| `releaseLaunch` threw away the post-SIGKILL wait's result, so one transiently empty final scan could still authorise deleting the profile and the record (Medium, pre-existing) | yes: the trailing `ownsProcess` check was a single scan after both waits | adopted: the stop result gates deletion, and the trailing scan is gone |
+| Two scans are a heuristic. Nothing bounds an exec's empty read, and `signalOwned` misses a mid-exec child, which costs the whole grace or leaves an orphan (Medium) | yes, by construction | signalling half adopted: `signalOwned` and `waitForExit` merge into `stopOwned`. It signals each marker-carrying pid once per phase, on whichever poll first finds it, and re-reads the marker before each signal. The docstring says best effort. The pid/start-time veto for already-observed members was declined: it covers only a process a scan already saw that then re-execs, it needs zombie handling (a SIGKILLed child keeps its start time until reaped), and it leaves the never-observed descendant as unprovable as before without cgroups or pidfds |
+| A `Popup` under the ceremony dialog closes with it on one Escape (Low, pre-existing) | yes: the popup's trap listens on the document and the dialog on the window, and `preventDefault()` stops neither | declined here. No host builds that composition, since every ceremony starts from a page control. It is reachable only by tabbing behind the overlay, because the dialog does not trap focus. Making it modal is a behaviour change for the owner, recorded as a follow-up |
+| Comments: "it shows again a moment later" promised a timing, and the backup test's comment narrated (Low) | yes | adopted |
+
+The new case, "a launch that outlives SIGKILL keeps its profile and its record", passes on the pre-fix code too, because the live process stays visible to the old final scan. It pins the contract of the branch where a launch outlives SIGKILL. A deterministic reproduction of the transient empty scan would need stubbing the module's own reads.
+
+### Round 2 — approve, two Low findings
+
+| Finding | Verified | Disposition |
+|---|---|---|
+| A `kill` that threw still counted as sent, so that pid was never retried within the phase | yes | adopted: `signalIfOwned` returns `true` only after `kill` succeeds |
+| The new case covered retention, not the retry or the once-per-phase send | yes | adopted: the case fails its first send and asserts `["SIGTERM", "SIGTERM", "SIGKILL"]`. Mutation-checked: counting a thrown `kill` as sent fails it (`["SIGTERM", "SIGKILL"]`), and dropping the dedup fails it (28 signals). The file came back byte-identical |
+
+Both declines held as scope decisions. Codex noted that the claim "never-observed descendants dominate" is unmeasured.
+
+**A contaminated contention run.** The 20-run contention pass on the round-1 code was still running when the mutation check swapped the module in place. Its one failure, run 18 with 28 signals, was the dedup mutant, timestamped inside the mutation window. That pass was discarded and rerun on the final code: 0 of 20 runs failed. `bun run audit:vue` on the final code: exit 0 (7 059 tests, build). Lesson: never mutate a file that a background run is executing.
+
+### Round 3 — approve, no new material findings
+
+Converged.
