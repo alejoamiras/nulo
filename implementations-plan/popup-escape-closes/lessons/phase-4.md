@@ -52,8 +52,32 @@ Four of the five aggregators went green on the first run: `quality-status`, both
 
 Every miss has one shape: the centre was read while the trigger sat at 292–308 (y = 300); by the press it had settled at 283–299, so the press landed 1 px below it, on `fee-settings-card`.
 
-**Fix.** `pointerClick` now reads the centre only once three reads 50 ms apart give the same box (`waitUntilStill` in `helpers/legal-drivers.ts`), polled from the test rather than on animation frames. The fix sits in the helper, not the test, because every caller that presses a control in a popup still entering has the same race: `popup-stack.test.ts` presses `accounts-popup-new` right after the accounts popup appears. The layered test keeps its wait for the submit to go live before it opens the menu; its comment no longer claims the node read moves the trigger. A first draft sampled inside the page and scored 16 on Biome's cognitive-complexity cap of 15; the loop moved to the test side instead of taking a suppression.
+**Fix.** `pointerClick` now reads the centre only once three reads 50 ms apart give the same box (`waitUntilStill` in `helpers/legal-drivers.ts`), polled from the test rather than on animation frames. The fix sits in the helper, not the test, because every caller that presses a control in a popup still entering has the same race: `popup-stack.test.ts` presses `accounts-popup-new` right after the accounts popup appears. The layered test now also waits for the submit to go live before it opens the menu, where it used to wait only for the submit to be visible; that wait, which the Tab walk already used inline, moved into `waitForSubmitLive`, and its comment no longer claims the node read moves the trigger. A first draft sampled inside the page and scored 16 on Biome's cognitive-complexity cap of 15; the loop moved to the test side instead of taking a suppression.
 
 Same run: `popup-escape-layered.test.ts` ✓ (12.7 s) and `legal-acceptance-wall.test.ts` ✓ (24.9 s, a network caller of the helper). The throwaway file was deleted afterwards (`git status` shows only the two intended files); the sandbox stopped and its ports left the registry.
 
 **Final shape and its runs.** The diagnostic ran a draft that scrolled before the wait and measured without scrolling. The committed helper keeps the original measure-and-press step, scroll included, and only adds the wait in front of it. The trigger never scrolled in the diagnostic (its box at every press was the settled 283–299), so both shapes press the same point here. On the committed shape: `legal-acceptance.test.ts` 13/13 and `popup-stack.test.ts` 2/2 on the smoke build, static e2e scans 91/91. The network callers ran on the draft (above) and run again in CI.
+
+## Round 3 — same session, resumed with the fix commit `a27634b7`
+
+Verdict, verbatim: `conditional approve (conditions: exclude a pending popup enter transition from the stillness check)`.
+
+| Finding (severity) | Verified | Disposition |
+|---|---|---|
+| Three identical boxes can accept an enter transition that has not started: Vue adds `*-enter-from` on insert and drops it two animation frames later, so a frame stall of over 100 ms holds the popup still at its start offset, and a frame resuming between the read and the press recreates the miss (Medium) | yes — Vue's enter hook drops the class in a double `requestAnimationFrame`; this harness polls `waitForSelector` on an interval because frames are throttled here, and the suite records a popup stuck in `slide-enter-from slide-enter-active` (`fixtures/helpers.ts`, above `closeStuckPopup`) | adopted: `waitUntilStill` also waits while the control or an ancestor carries `*-enter-from`; after 5 s a still control is pressed where it stands instead of failing, since the suite has seen enters that never start. Diagnostic below |
+| The record says the network callers ran only on the draft, while the prompt said the committed shape (Low) | the prompt was wrong, not the record: the network runs were on the draft | rejected as stated, and corrected in the round-4 prompt; the network callers were re-run on the final shape (below) |
+| The layered test's change is understated: it adds a wait for the submit to go live before the menu opens, where it had waited only for visibility (Low) | yes | adopted: the Fix paragraph above now says so |
+
+### Diagnostic for the pending enter
+
+A throwaway smoke file (`tests/e2e/zz-diag-pending-enter.test.ts`, never committed, deleted after the run) replaced `requestAnimationFrame` before opening the accounts popup — delaying every frame callback by 700 ms, or dropping them — and pressed `accounts-popup-new`, recording at the press whether an ancestor still carried `*-enter-from` and whether the press landed on the control:
+
+| Variant | Time to press | Pending enter at the press | On the control |
+|---|---|---|---|
+| committed helper, frames delayed 700 ms | 1 574 ms | no | yes |
+| stillness-only draft, frames delayed 700 ms | 123 ms | yes | yes |
+| committed helper, frames dropped | 5 025 ms | yes | yes |
+
+The draft pressed a popup whose slide had not started; the press still landed only because no frame resumed in between, which is the window codex describes. The committed helper waits delayed frames out, and presses a popup whose enter never starts where it stands, as the old helper did. Same run, final shape: `legal-acceptance.test.ts` 13/13, `popup-stack.test.ts` 2/2.
+
+Network on the final shape, one `e2e:agent` run (proverless, retry 0): `popup-escape-layered.test.ts` ✓ (13.4 s), `legal-acceptance-wall.test.ts` ✓ (27.2 s); the sandbox stopped and released its ports.

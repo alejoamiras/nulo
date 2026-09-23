@@ -93,27 +93,37 @@ export async function pointerClick(page: Page, testid: string, opts: { last?: bo
 	await page.mouse.click(point.x, point.y)
 }
 
-/** Returns once three reads 50 ms apart give the element the same box. Polled from the test, not on
- *  animation frames, which the suite has seen throttled in headless Chrome. */
+/** Returns once three reads 50 ms apart give the element the same box and no enter transition above it
+ *  still waits to start: Vue drops `*-enter-from` two animation frames after insert, and headless Chrome
+ *  has been seen throttling frames long enough to hold a popup still at its start offset (reads are
+ *  polled from the test for the same reason). After 5 s a still element is pressed where it stands; one
+ *  still moving throws. */
 async function waitUntilStill(page: Page, selector: string, last: boolean): Promise<void> {
-	const boxOf = () =>
+	const read = () =>
 		page.evaluate(
 			(s, lastMatch) => {
 				const all = document.querySelectorAll(s)
-				const r = (lastMatch ? all[all.length - 1] : all[0])?.getBoundingClientRect()
-				return r ? `${r.left},${r.top} ${r.width}x${r.height}` : "gone"
+				const el = lastMatch ? all[all.length - 1] : all[0]
+				const r = el?.getBoundingClientRect()
+				return {
+					box: r ? `${r.left},${r.top} ${r.width}x${r.height}` : "gone",
+					pending: Boolean(el?.closest('[class*="-enter-from"]')),
+				}
 			},
 			selector,
 			last,
 		)
 	const deadline = Date.now() + 5_000
-	let previous = await boxOf()
+	let previous = await read()
 	let unchanged = 0
-	while (unchanged < 2) {
-		if (Date.now() > deadline) throw new Error(`${selector} was still moving after 5s (last box ${previous})`)
+	while (unchanged < 2 || previous.pending) {
+		if (Date.now() > deadline) {
+			if (unchanged >= 2) return
+			throw new Error(`${selector} was still moving after 5s (last box ${previous.box})`)
+		}
 		await new Promise((resolve) => setTimeout(resolve, 50))
-		const box = await boxOf()
-		unchanged = box === previous ? unchanged + 1 : 0
-		previous = box
+		const now = await read()
+		unchanged = now.box === previous.box ? unchanged + 1 : 0
+		previous = now
 	}
 }
