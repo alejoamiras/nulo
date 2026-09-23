@@ -105,18 +105,28 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
 	})
 
-	// No test process can be made to outlive SIGKILL, so here the signals are swallowed instead.
+	// No test process can be made to outlive SIGKILL, so here its signals are swallowed, and the
+	// first one fails. A failed send is retried on the next poll; a sent one is not repeated.
 	test("a launch that outlives SIGKILL keeps its profile and its record", async () => {
 		const marker = launchMarker()
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
-		const record = ownedByThisRun({ marker, pid: await spawnMarked(marker), profileDir, ownsProfile: true, label: "unkillable" })
+		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "unkillable" })
 		recordLaunch(record)
-		const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+		const sent: unknown[] = []
+		const realKill = process.kill.bind(process)
+		const kill = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+			if (target !== pid) return realKill(target, signal)
+			sent.push(signal)
+			if (sent.length === 1) throw new Error("not sent")
+			return true
+		})
 		try {
-			await releaseLaunch(record, 200)
+			await releaseLaunch(record, 1_000)
 		} finally {
 			kill.mockRestore()
 		}
+		expect(sent).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"])
 		expect(existsSync(profileDir)).toBe(true)
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(true)
 	})

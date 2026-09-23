@@ -233,7 +233,7 @@ export async function reapOrphanLaunches(): Promise<string[]> {
 	return reaped
 }
 
-/** False when the pid no longer carries the marker, so nothing was sent. */
+/** Whether the signal was sent. */
 function signalIfOwned(pid: number, marker: string, signal: NodeJS.Signals): boolean {
 	// A whole /proc scan separates finding this pid from signalling it, long enough for it to exit
 	// and be reissued. Asking again leaves one read between the check and the signal, which is as
@@ -241,8 +241,9 @@ function signalIfOwned(pid: number, marker: string, signal: NodeJS.Signals): boo
 	if (!carriesMarker(pid, marker)) return false
 	try {
 		process.kill(pid, signal)
+		return true
 	} catch {
-		// Already gone.
+		// Gone since the re-check, or not ours to signal: the next scan decides.
+		return false
 	}
-	return true
 }
