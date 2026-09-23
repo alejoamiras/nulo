@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { ManifestV3Export } from "@crxjs/vite-plugin"
 import packageJson from "../package.json"
 

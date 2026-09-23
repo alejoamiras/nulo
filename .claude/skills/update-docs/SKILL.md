@@ -3,6 +3,8 @@ name: update-docs
 description: Updates CLAUDE.md based on recent project changes. Use when user says "update docs", "add to CLAUDE.md", "document this", or runs /update-docs command.
 ---
 
+<!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
+
 # Update CLAUDE.md
 
 Maintains project documentation by analyzing git history and syncing CLAUDE.md with code changes.

@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Canonical list of explorer ids — single source for both the `BlockExplorerType`

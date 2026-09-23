@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { ContractArtifact } from "@aztec/stdlib/abi"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import type { Restored } from "@/wallet/base"

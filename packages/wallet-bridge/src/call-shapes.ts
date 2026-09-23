@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /**
  * Q-06: the neutral, kind-less call payloads shared by `action.ts` (which adds a
  * `kind` discriminant to form `CallAction`/`EncodedCallAction`) and
