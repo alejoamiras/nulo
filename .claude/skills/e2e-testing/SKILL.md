@@ -272,7 +272,7 @@ Escape is a real close for every registry popup (only the top one answers; a men
 closes first — prove the popup survived that first press by containment, not by visibility, since
 a closed popup lingers in its leave transition: check `focusInPopupOf` after every Tab, because a
 walk that only misses one outside control can pass after focus has escaped). Read each press for
-`defaultPrevented` too (`pressEscape` in `network/popup-escape-layered.test.ts`): the suite drives the
+`defaultPrevented` too (`pressEscape` in `helpers/pointer-probes.ts`): the suite drives the
 wallet in a tab, where an unhandled Escape does nothing, but Chrome's toolbar popup closes the whole
 wallet on one. When a test asserts where focus returns, open the popup with `pointerClick`:
 `clickByTestId` fires `el.click()`, which never focuses

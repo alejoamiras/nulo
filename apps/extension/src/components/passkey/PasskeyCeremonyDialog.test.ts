@@ -71,7 +71,7 @@ describe("PasskeyCeremonyDialog", () => {
 		expect(w.emitted("reject")?.[0]?.[0]).toBe(generic)
 	})
 
-	test("Escape key aborts the ceremony — emits UserRejectedError", async () => {
+	test("Escape key aborts the ceremony, marked handled — emits UserRejectedError", async () => {
 		// Helper resolves only when its signal aborts.
 		runPasskeyCeremonyMock.mockImplementationOnce((_req, signal) => {
 			return new Promise((_, reject) => {
@@ -82,9 +82,11 @@ describe("PasskeyCeremonyDialog", () => {
 
 		// Wait one microtask so onMounted starts the helper + adds the keydown listener.
 		await flushPromises()
-		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		const keydown = new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
+		window.dispatchEvent(keydown)
 		await flushPromises()
 
+		expect(keydown.defaultPrevented).toBe(true)
 		expect(w.emitted("reject")?.[0]?.[0]).toBeInstanceOf(UserRejectedError)
 	})
 

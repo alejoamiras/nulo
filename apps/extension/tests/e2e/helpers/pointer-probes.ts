@@ -1,5 +1,6 @@
 /**
- * Real-browser facts a page test cannot reach: what the pointer would hit, where the keyboard is.
+ * Real-browser facts a page test cannot reach: what the pointer would hit, where the keyboard is,
+ * whether the page handled a key.
  * Every probe reads the live document; none clicks (that is `pointerClick` in `legal-drivers.ts`).
  */
 import type { Page } from "puppeteer"
@@ -60,4 +61,28 @@ export async function tabAround(page: Page, times: number): Promise<string[]> {
 		visited.push(await activeTestId(page))
 	}
 	return visited
+}
+
+type EscapeRead = { __escapeHandled?: boolean }
+
+/** Presses Escape and returns whether the page marked it handled, which decides whether Chrome's
+ *  toolbar popup closes; this suite's tab never shows it. The reader is a window listener added just
+ *  before the press, so it runs after every listener the page already has. */
+export async function pressEscape(page: Page): Promise<boolean> {
+	await page.evaluate(() => {
+		const w = window as unknown as EscapeRead
+		w.__escapeHandled = undefined
+		const read = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return
+			w.__escapeHandled = e.defaultPrevented
+			window.removeEventListener("keydown", read)
+		}
+		window.addEventListener("keydown", read)
+	})
+	await page.keyboard.press("Escape")
+	await page.waitForFunction(() => (window as unknown as EscapeRead).__escapeHandled !== undefined, {
+		timeout: 5_000,
+		polling: 50,
+	})
+	return page.evaluate(() => (window as unknown as EscapeRead).__escapeHandled === true)
 }

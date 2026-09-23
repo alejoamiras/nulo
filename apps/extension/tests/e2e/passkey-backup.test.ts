@@ -12,9 +12,9 @@
  *   1. Export full backup as a passkey profile — modal appears, virtual
  *      authenticator completes, CTAs become available. Locks in the
  *      `usePasskeyCeremony` wiring on the export page.
- *   2. Export cancel UX — Escape during the modal returns the user to
- *      the agreement gate (`isAgreed = false`), NOT a dead form or a
- *      toast+bounce.
+ *   2. Export cancel UX — Escape during the modal is marked handled and
+ *      returns the user to the agreement gate (`isAgreed = false`), NOT a
+ *      dead form or a toast+bounce.
  *   3. (Commit 2) In-session import round-trip — register, build a
  *      synthetic passkey backup with the real credentialId, reset storage,
  *      drive the import flow, assert the same address comes back.
@@ -28,6 +28,7 @@ import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, replaceInputValue, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth, stallNextPasskeyCeremony } from "./fixtures/passkey"
+import { pressEscape } from "./helpers/pointer-probes"
 
 /** Reset the wallet via the in-app reset flow (settings → security → reset).
  *  Cascades through every service (NetworkService.onProfileDeleted, etc.) so
@@ -371,9 +372,10 @@ test("passkey full-backup export: Escape during modal resets agreement gate", as
 		// for the dialog first makes the Escape land deterministically.
 		await page.waitForSelector('[data-testid="passkey-ceremony-dialog"]', { visible: true, timeout: 15_000 })
 
-		// Press Escape via the dialog's window keydown handler. Wait for the
-		// modal to dismount and the agreement gate to return.
-		await page.keyboard.press("Escape")
+		// The dialog's window keydown handler cancels the ceremony and marks the key handled: Chrome
+		// closes its toolbar popup, the whole wallet, on an Escape the page leaves unhandled. Then the
+		// modal dismounts and the agreement gate returns.
+		expect(await pressEscape(page), "the dialog's Escape went unhandled; the toolbar popup would close").toBe(true)
 
 		await page.waitForFunction(
 			() => {

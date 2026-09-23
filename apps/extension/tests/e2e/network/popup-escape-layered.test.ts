@@ -13,7 +13,7 @@ import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extensi
 import { navigateToSettings } from "../fixtures/helpers"
 import { settleClosedPopup } from "../fixtures/popup-leave"
 import { pointerClick } from "../helpers/legal-drivers"
-import { activeTestId, focusInPopupOf } from "../helpers/pointer-probes"
+import { activeTestId, focusInPopupOf, pressEscape } from "../helpers/pointer-probes"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -32,28 +32,6 @@ async function waitForSubmitLive(page: Page): Promise<void> {
 		{ timeout: 30_000, polling: 250 },
 		sel("registry-toggle-submit"),
 	)
-}
-
-type EscapeRead = { __escapeHandled?: boolean; __escapeReader?: true }
-
-/** Presses Escape and returns whether the page marked it handled. A window listener reads it, after
- *  every document listener has had its turn. */
-async function pressEscape(page: Page): Promise<boolean> {
-	await page.evaluate(() => {
-		const w = window as unknown as EscapeRead
-		w.__escapeHandled = undefined
-		if (w.__escapeReader) return
-		w.__escapeReader = true
-		window.addEventListener("keydown", (e) => {
-			if (e.key === "Escape") w.__escapeHandled = e.defaultPrevented
-		})
-	})
-	await page.keyboard.press("Escape")
-	await page.waitForFunction(() => (window as unknown as EscapeRead).__escapeHandled !== undefined, {
-		timeout: 5_000,
-		polling: 50,
-	})
-	return page.evaluate(() => (window as unknown as EscapeRead).__escapeHandled === true)
 }
 
 test.skipIf(!hasConfig)(
