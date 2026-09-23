@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { afterAll, describe, expect, test } from "vitest"
+import { afterAll, describe, expect, test, vi } from "vitest"
 
 // Set before the module loads: `E2E_DATA_ROOT` is read at import time, and these cases write
 // ownership records that must never land in a real run's state directory.
@@ -103,6 +103,22 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(ownsProcess(record)).toBe(false)
 		expect(existsSync(profileDir)).toBe(false)
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
+	})
+
+	// No test process can be made to outlive SIGKILL, so here the signals are swallowed instead.
+	test("a launch that outlives SIGKILL keeps its profile and its record", async () => {
+		const marker = launchMarker()
+		const profileDir = newProfileDir(marker)
+		const record = ownedByThisRun({ marker, pid: await spawnMarked(marker), profileDir, ownsProfile: true, label: "unkillable" })
+		recordLaunch(record)
+		const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+		try {
+			await releaseLaunch(record, 200)
+		} finally {
+			kill.mockRestore()
+		}
+		expect(existsSync(profileDir)).toBe(true)
+		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(true)
 	})
 
 	// Firefox's children are free to start their own session. A group signal would miss that one

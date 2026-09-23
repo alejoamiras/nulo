@@ -184,27 +184,28 @@ export function listOwnedLaunches(): LaunchOwnership[] {
  * one failed run into host-wide memory pressure.
  */
 export async function releaseLaunch(record: LaunchOwnership, graceMs = 5_000): Promise<void> {
-	signalOwned(record, "SIGTERM")
-	if (!(await waitForExit(record, graceMs))) {
-		signalOwned(record, "SIGKILL")
-		// A killed process stays in /proc until it is reaped, so this has to wait as well.
-		await waitForExit(record, 2_000)
-	}
+	// A killed process stays in /proc until it is reaped, so SIGKILL is waited out as well.
+	const stopped = (await stopOwned(record, "SIGTERM", graceMs)) || (await stopOwned(record, "SIGKILL", 2_000))
 	// A process that outlived SIGKILL is unkillable (uninterruptible sleep); leaving its profile is
 	// the lesser harm, and the record survives for the next run's sweep.
-	if (ownsProcess(record)) return
+	if (!stopped) return
 	const profile = record.ownsProfile ? deletableProfile(record) : undefined
 	if (profile) rmSync(profile, { recursive: true, force: true })
 	rmSync(recordFile(record), { force: true })
 }
 
-/** True once two scans a poll apart find nothing. A process inside execve reads an empty environ,
- *  so one empty scan can miss a process that is very much alive; it shows again a moment later. */
-async function waitForExit(record: LaunchOwnership, timeoutMs: number): Promise<boolean> {
+/** Signals each process carrying the marker once, rescanning until two scans a poll apart find none.
+ *  A process inside execve reads an empty environ until the kernel has set up its new image, so it
+ *  is signalled when a later scan finds it. Best effort: nothing bounds how long an exec reads
+ *  empty, and a process no scan ever found cannot be shown gone. */
+async function stopOwned(record: LaunchOwnership, signal: NodeJS.Signals, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
+	const signalled = new Set<number>()
 	let emptyScans = 0
 	for (;;) {
-		emptyScans = ownsProcess(record) ? 0 : emptyScans + 1
+		const live = ownedProcesses(record.marker)
+		for (const pid of live) if (!signalled.has(pid) && signalIfOwned(pid, record.marker, signal)) signalled.add(pid)
+		emptyScans = live.length === 0 ? emptyScans + 1 : 0
 		if (emptyScans === 2) return true
 		if (Date.now() >= deadline) return false
 		await new Promise((resolve) => setTimeout(resolve, 100))
@@ -232,16 +233,16 @@ export async function reapOrphanLaunches(): Promise<string[]> {
 	return reaped
 }
 
-function signalOwned(record: LaunchOwnership, signal: NodeJS.Signals): void {
-	for (const pid of ownedProcesses(record.marker)) {
-		// A whole /proc scan separates finding this pid from signalling it, long enough for it to
-		// exit and be reissued. Asking again leaves one read between the check and the signal, which
-		// is as narrow as it gets without a pidfd — and the runtime exposes none.
-		if (!carriesMarker(pid, record.marker)) continue
-		try {
-			process.kill(pid, signal)
-		} catch {
-			// Already gone.
-		}
+/** False when the pid no longer carries the marker, so nothing was sent. */
+function signalIfOwned(pid: number, marker: string, signal: NodeJS.Signals): boolean {
+	// A whole /proc scan separates finding this pid from signalling it, long enough for it to exit
+	// and be reissued. Asking again leaves one read between the check and the signal, which is as
+	// narrow as it gets without a pidfd — and the runtime exposes none.
+	if (!carriesMarker(pid, marker)) return false
+	try {
+		process.kill(pid, signal)
+	} catch {
+		// Already gone.
 	}
+	return true
 }
