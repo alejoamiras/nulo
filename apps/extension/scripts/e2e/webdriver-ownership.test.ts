@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { afterAll, describe, expect, test } from "vitest"
+import { afterAll, describe, expect, test, vi } from "vitest"
 
 // Set before the module loads: `E2E_DATA_ROOT` is read at import time, and these cases write
 // ownership records that must never land in a real run's state directory.
@@ -39,11 +39,46 @@ function launchMarker(): string {
 	return marker
 }
 
-/** Real processes to own, so the kill path is exercised rather than mocked. */
-function spawnMarked(marker: string, command = "sleep", args = ["120"]) {
+/** Real processes to own, so the kill path is exercised rather than mocked. Returns once a scan has
+ *  found the child carrying its marker: Bun's spawn returns while the child is still inside execve,
+ *  and until the kernel has set up the new image its `/proc/<pid>/environ` reads empty. A child that
+ *  execs again reads empty again, so one sighting is the proof, not a second read. */
+async function spawnMarked(marker: string, command = "sleep", args = ["120"]): Promise<number> {
 	const child = spawn(command, args, { detached: true, stdio: "ignore", env: { ...process.env, [LAUNCH_ENV]: marker } })
-	if (!child.pid) throw new Error("could not spawn a test process")
-	return child.pid
+	const pid = child.pid
+	if (!pid) throw new Error("could not spawn a test process")
+	let seen = false
+	await until(() => {
+		seen = ownedProcesses(marker).includes(pid)
+		return seen
+	})
+	if (!seen) throw new Error(`process ${pid} never showed its marker`)
+	return pid
+}
+
+/** Runs a release on fake timers, so each poll lands on a fixed tick however slow a scan is, and
+ *  records every signal meant for `pid` instead of sending it; with `failFirst` the first send
+ *  fails. Returns the signals in the order they were sent. */
+async function recordSignals(pid: number, release: () => Promise<void>, failFirst = false): Promise<unknown[]> {
+	const sent: unknown[] = []
+	const realKill = process.kill.bind(process)
+	const kill = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+		if (target !== pid) return realKill(target, signal)
+		sent.push(signal)
+		if (failFirst && sent.length === 1) throw new Error("not sent")
+		return true
+	})
+	try {
+		vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })
+		// Both settle before either rejection is raised, so a failed release is never left unhandled
+		// while fake time advances.
+		const outcomes = await Promise.allSettled([release(), vi.advanceTimersByTimeAsync(10_000)])
+		for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason
+	} finally {
+		vi.useRealTimers()
+		kill.mockRestore()
+	}
+	return sent
 }
 
 /** A record whose owning run is gone, which is what makes the sweep act on it. */
@@ -79,9 +114,9 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(readStartTime(0)).toBeUndefined()
 	})
 
-	test("a process is owned by the marker it inherited, not by its number", () => {
+	test("a process is owned by the marker it inherited, not by its number", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		expect(ownedProcesses(marker)).toEqual([pid])
 		// The same pid under another launch's marker is a stranger: this is the recycled-number case.
 		expect(ownsProcess(ownedByThisRun({ marker: launchMarker(), pid, profileDir: "", ownsProfile: false, label: "t" }))).toBe(false)
@@ -89,7 +124,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("release stops the processes and only then removes the profile", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "release" })
 		recordLaunch(record)
@@ -99,13 +134,50 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(false)
 	})
 
+	// No test process can be made to outlive SIGKILL, so here its signals are recorded, not sent, and
+	// the first one fails. A failed send is retried on the next poll; a sent one is not repeated.
+	test("a launch that outlives SIGKILL keeps its profile and its record", async () => {
+		const marker = launchMarker()
+		const pid = await spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
+		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "unkillable" })
+		recordLaunch(record)
+		expect(await recordSignals(pid, () => releaseLaunch(record, 1_000), true)).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"])
+		expect(existsSync(profileDir)).toBe(true)
+		expect(existsSync(path.join(RECORDS, `${marker}.json`))).toBe(true)
+	})
+
+	// A process inside execve reads an empty environ, so one scan can miss it and a later one find it.
+	test("a process a later scan finds is signalled, and only two empty scans in a row free the profile", async () => {
+		const marker = launchMarker()
+		const pid = await spawnMarked(marker)
+		const profileDir = newProfileDir(marker)
+		const record = ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "late" })
+		recordLaunch(record)
+		const polls = [[], [pid], [], []]
+		const profileAtPoll: boolean[] = []
+		const scan = () => {
+			profileAtPoll.push(existsSync(profileDir))
+			return polls[profileAtPoll.length - 1] ?? []
+		}
+		expect(await recordSignals(pid, () => releaseLaunch(record, 1_000, scan))).toEqual(["SIGTERM"])
+		expect(profileAtPoll).toEqual([true, true, true, true])
+		expect(existsSync(profileDir)).toBe(false)
+	})
+
 	// Firefox's children are free to start their own session. A group signal would miss that one
 	// and the profile would be deleted under it.
 	test("a child that left the process group is still found and stopped", async () => {
 		const marker = launchMarker()
-		const leader = spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
-		await until(() => ownedProcesses(marker).length === 2)
-		expect(ownedProcesses(marker)).toHaveLength(2)
+		const leader = await spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
+		// Both `sh` and the forked child exec again, and a scan that lands inside an exec misses the
+		// process, so the sighting is kept rather than read a second time.
+		let found: number[] = []
+		await until(() => {
+			found = ownedProcesses(marker)
+			return found.length === 2
+		})
+		expect(found).toHaveLength(2)
 
 		const record = ownedByThisRun({ marker, pid: leader, profileDir: newProfileDir(marker), ownsProfile: true, label: "escaped" })
 		await releaseLaunch(record)
@@ -118,7 +190,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 	test("a caller-supplied profile survives release, and the record is still cleared", async () => {
 		const marker = launchMarker()
 		const profileDir = plainDir("caller-owned")
-		const record = ownedByThisRun({ marker, pid: spawnMarked(marker), profileDir, ownsProfile: false, label: "borrowed" })
+		const record = ownedByThisRun({ marker, pid: await spawnMarked(marker), profileDir, ownsProfile: false, label: "borrowed" })
 		recordLaunch(record)
 		await releaseLaunch(record)
 		expect(ownsProcess(record)).toBe(false)
@@ -128,7 +200,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a record whose owner is still alive is NOT an orphan — it belongs to a running agent", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		// Owned by THIS process, which is alive for the duration of the test.
 		recordLaunch(ownedByThisRun({ marker, pid, profileDir, ownsProfile: true, label: "live" }))
@@ -139,7 +211,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a record whose owner is gone is reaped, processes and profile both", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		const profileDir = newProfileDir(marker)
 		recordLaunch(orphaned({ marker, pid, profileDir, ownsProfile: true, label: "orphan" }))
 		expect(await reapOrphanLaunches()).toContain("orphan")
@@ -160,7 +232,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	// The interval an orphan's record sits unattended is exactly when its numbers get reissued.
 	test("an orphan's record never authorises a signal to a process that lacks its marker", async () => {
-		const stranger = spawnMarked(launchMarker())
+		const stranger = await spawnMarked(launchMarker())
 		recordLaunch(orphaned({ marker: launchMarker(), pid: stranger, profileDir: "", ownsProfile: false, label: "reissued" }))
 		expect(await reapOrphanLaunches()).toContain("reissued")
 		expect(readStartTime(stranger)).toBeDefined()
@@ -201,7 +273,7 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 
 	test("a malformed or misfiled record is discarded without acting on it", async () => {
 		const marker = launchMarker()
-		const pid = spawnMarked(marker)
+		const pid = await spawnMarked(marker)
 		mkdirSync(RECORDS, { recursive: true })
 		const misfiled = path.join(RECORDS, `${newLaunchMarker()}.json`)
 		writeFileSync(misfiled, JSON.stringify(orphaned({ marker, pid, profileDir: "", ownsProfile: false, label: "misfiled" })))
