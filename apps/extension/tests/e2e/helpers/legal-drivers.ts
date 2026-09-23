@@ -123,7 +123,7 @@ async function waitUntilStill(page: Page, selector: string, last: boolean): Prom
 		}
 		await new Promise((resolve) => setTimeout(resolve, 50))
 		const now = await read()
-		unchanged = now.box === previous.box ? unchanged + 1 : 0
+		unchanged = now.box === previous.box && now.pending === previous.pending ? unchanged + 1 : 0
 		previous = now
 	}
 }

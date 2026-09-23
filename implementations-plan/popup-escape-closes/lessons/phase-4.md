@@ -81,3 +81,25 @@ A throwaway smoke file (`tests/e2e/zz-diag-pending-enter.test.ts`, never committ
 The draft pressed a popup whose slide had not started; the press still landed only because no frame resumed in between, which is the window codex describes. The committed helper waits delayed frames out, and presses a popup whose enter never starts where it stands, as the old helper did. Same run, final shape: `legal-acceptance.test.ts` 13/13, `popup-stack.test.ts` 2/2.
 
 Network on the final shape, one `e2e:agent` run (proverless, retry 0): `popup-escape-layered.test.ts` ✓ (13.4 s), `legal-acceptance-wall.test.ts` ✓ (27.2 s); the sandbox stopped and released its ports.
+
+## Round 4 — same session, resumed with `425d249e`
+
+Verdict, verbatim: `conditional approve (conditions: reset the stability counter when the pending-enter state changes)`.
+
+| Finding (severity) | Verified | Disposition |
+|---|---|---|
+| Equal boxes read while the enter is pending carry across its start: three pending reads leave the count at 2, and the first read after Vue swaps the class can still see the start box, so the loop exits as the slide begins (Medium) | yes — the count compared boxes only | adopted: a read counts as unchanged only when both its box and its pending state match the previous read, so stillness is observed afresh once the enter starts; a frozen enter still reaches the 5 s fallback |
+| The skill promises no `*-enter-from` class at the read, but the fallback allows one (Low) | yes | adopted: the paragraph now says a still control is pressed after 5 s anyway, best effort, since a frame that never comes and one that comes late look alike |
+
+Codex also confirmed: no class in `apps/extension/src` or `packages/design/src` contains `-enter-from` without being a Vue transition class; `Tooltip.vue`'s custom enter class is missed but fades opacity only, on teleported content; the final hit test is untouched, so no overlay is waited away.
+
+Re-run on the final shape with the same throwaway diagnostic (deleted again afterwards), now also swallowing the press's click so the popup under test stays put, and comparing the control's box at the press with its box 1.5 s later:
+
+| Variant | Time to press | Pending enter at the press | On the control | Pressed at the resting box |
+|---|---|---|---|---|
+| frames delayed 700 ms, run 1 | 3 305 ms | no | yes | yes |
+| frames delayed 700 ms, run 2 | 1 875 ms | no | yes | yes |
+| frames delayed 700 ms, run 3 | 1 848 ms | no | yes | yes |
+| frames dropped | 5 011 ms | yes | yes | yes (where it stands) |
+
+Same run: `legal-acceptance.test.ts` 13/13, `popup-stack.test.ts` 2/2. The network callers last ran locally on `425d249e`; the one-line counter change reaches them through CI.

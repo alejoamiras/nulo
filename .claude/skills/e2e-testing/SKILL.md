@@ -280,13 +280,14 @@ helpers above dispatch the click in-page, which reaches an element even when an 
 they cannot prove that nothing does. A lock-out proof (the Terms sheet must never cover an export
 page) hit-tests the control's centre with `elementFromPoint`, fails naming what covers it, and only
 then clicks through `page.mouse`, which is `Input.dispatchMouseEvent` and not the hanging
-element-handle path. It reads the centre only once the control holds still (the same box on three
-reads 50 ms apart, with no `*-enter-from` class above it — a throttled frame can hold a popup still at
-its start offset): popups enter sliding 40px over 300ms, and a centre read mid-slide was pressed
-after a 16px control had settled past it (ledger #34). Holding still is not being ready — content
-that arrives later can still move a control — so wait for the popup's own done-loading signal first
-when it has one. Use it for the control whose reachability IS the assertion; drive the rest of the
-flow with the ordinary helpers.
+element-handle path. It reads the centre only once the control holds still: the same box on three
+reads 50 ms apart and no `*-enter-from` class above it, since a throttled frame can hold a popup still
+at its start offset. After 5 s a still control is pressed anyway — best effort, as a frame that never
+comes and one that comes late look alike. Popups enter sliding 40px over 300ms, and a centre read
+mid-slide was pressed after a 16px control had settled past it (ledger #34). Holding still is not
+being ready — content that arrives later can still move a control — so wait for the popup's own
+done-loading signal first when it has one. Use it for the control whose reachability IS the
+assertion; drive the rest of the flow with the ordinary helpers.
 
 ### What to assert
 
