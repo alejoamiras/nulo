@@ -2,7 +2,7 @@
 plan: popup-escape-closes
 tier: light
 driver: claude-code
-status: in review 2026-09-23 — all phases ✓, codex post-impl loop converged (conditional approve → approve, 2 rounds); PR into dev opened, NOT merged (the owner decides). Approved 2026-09-23 as rev 3, no conditions
+status: in review 2026-09-23 — all phases ✓, codex post-impl loop converged (conditional approve → approve, 2 rounds); PR into dev opened, NOT merged (the owner decides). First CI run red on one Chrome network shard (`pointerClick` pressed a popup mid-slide): fixed in the helper, codex rounds 3–5 on the fix converged (conditional → conditional → approve). Approved 2026-09-23 as rev 3, no conditions
 eli5_mode: artifact
 code_review: off
 budget: default (recon 1 agent; codex high; code-review off)
@@ -197,7 +197,7 @@ Executed by the implementing session from this file. `code_review: off`, so no `
 
 Single arc, one branch (`worktree-popup-escape-closes`), one PR into `dev`: `gh pr create` with no labels (a label on create cancels the e2e runs; the diff trips the smoke and network filters by itself). Title ≤ 93 chars, conventional: `fix(popup): escape closes the top popup, the way tapping outside does`. Body: the UI-impact table, the owner's sign-off quoted, the two browser cases, the docs edits, the dropped follow-up, and the trailer. Watch `gh pr checks --watch`, and read the Firefox smoke job's result by name. **Do not merge**: report green and stop; the owner decides.
 
-**First CI run (2026-09-23).** Four of the five aggregators went green, the Firefox smoke job included. `extension-network-e2e-status` went red on one Chrome shard: the layered test's `pointerClick` read the fee trigger's centre mid-slide and pressed after the trigger had moved. Fixed in the helper, which now waits for a still target; reproduced and proven under CPU throttling (old helper 4/8 presses missed, new 0/8). `lessons/phase-4.md` § Delivery — CI.
+**First CI run (2026-09-23).** Four of the five aggregators went green, the Firefox smoke job included. `extension-network-e2e-status` went red on one Chrome shard: the layered test's `pointerClick` read the fee trigger's centre mid-slide and pressed after the trigger had moved. Fixed in the helper, which now waits for a still target; reproduced and proven under CPU throttling (old helper 4/8 presses missed, new 0/8). Codex then made the helper also wait out an enter transition that has not started (rounds 3–5, approve). `lessons/phase-4.md` § Delivery — CI and Rounds 3–5.
 
 ## Seeds (final — approved 2026-09-23, unchanged from the draft)
 

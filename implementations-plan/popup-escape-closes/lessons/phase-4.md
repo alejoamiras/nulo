@@ -103,3 +103,7 @@ Re-run on the final shape with the same throwaway diagnostic (deleted again afte
 | frames dropped | 5 011 ms | yes | yes | yes (where it stands) |
 
 Same run: `legal-acceptance.test.ts` 13/13, `popup-stack.test.ts` 2/2. The network callers last ran locally on `425d249e`; the one-line counter change reaches them through CI.
+
+## Round 5 — same session, resumed with `b1090dda`
+
+Verdict, verbatim: `approve` — "no new material findings. The counter now resets when pending-enter state changes, satisfying the round-4 condition." The loop on the CI fix converged in three rounds (conditional → conditional → approve); nothing was rejected except the round-3 records finding, which rested on an error in my prompt.
