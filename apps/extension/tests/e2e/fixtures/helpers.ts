@@ -815,10 +815,9 @@ export async function addContact(page: Page, name: string, address: string): Pro
 	await closeStuckPopup(page)
 }
 
-/** Force-close a popup whose DOM outlived its close: the store says nothing is open, but Vue's
- *  <Transition> never got its transitionend. Escape goes first — a popup that is in fact still open
- *  closes through its focus trap — then every leftover popup container and dimmer is removed.
- *  The store is not touched. */
+/** Last-resort recovery for popup DOM that outlived its close: presses Escape, then removes every
+ *  popup container and dimmer without touching the store — so never while a lower popup must stay
+ *  (`settleClosedPopup` is the scoped form). */
 export async function closeStuckPopup(page: Page): Promise<void> {
 	await page.keyboard.press("Escape").catch(() => undefined)
 	await page.evaluate(() => {

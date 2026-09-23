@@ -1,8 +1,9 @@
 /**
  * A menu open inside a popup keeps the normal layering under Escape: the first press closes the
  * menu while the popup still holds the keyboard, the second closes the popup. The fee-method menu
- * inside the authwits registry popup is the one menu a registry popup hosts, and it has entries
- * only once fee discovery has run against a node — hence the network suite. No transaction is sent.
+ * is the only menu a registry popup hosts (the two authwits popups); the registry popup keeps its
+ * submit disabled until it has read the account's registry state from a node — hence the network
+ * suite. No transaction is sent.
  */
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -10,13 +11,12 @@ import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extensi
 import { navigateToSettings } from "../fixtures/helpers"
 import { settleClosedPopup } from "../fixtures/popup-leave"
 import { pointerClick } from "../helpers/legal-drivers"
-import { tabAround } from "../helpers/pointer-probes"
+import { activeTestId, focusInPopupOf } from "../helpers/pointer-probes"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 const sel = (testid: string) => `[data-testid="${testid}"]`
-/** The menu's entries, never its trigger (which shares the prefix). */
 const menuItem = '[data-testid^="send-fee-method-"]:not([data-testid="send-fee-method-trigger"])'
 
 test.skipIf(!hasConfig)(
@@ -31,24 +31,31 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "authwits-toggle-registry")
 		await page.waitForSelector(sel("registry-toggle-submit"), { visible: true, timeout: 15_000 })
 
-		// The trigger names a method only after fee discovery; before that the menu has nothing to hold.
-		await page.waitForFunction(
-			(s: string) => Boolean(document.querySelector(s)?.getAttribute("data-fee-method")),
-			{ timeout: 30_000, polling: 500 },
-			sel("send-fee-method-trigger"),
-		)
 		await pointerClick(page, "send-fee-method-trigger")
 		await page.waitForSelector(menuItem, { visible: true, timeout: 5_000 })
 
-		// First Escape: the menu goes. The popup is still open — proven by containment, not visibility,
-		// since a store-closed popup can linger through its leave transition.
 		await page.keyboard.press("Escape")
 		await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 5_000, polling: 100 }, menuItem)
-		const held = await tabAround(page, 10)
-		expect(held).toContain("registry-toggle-submit")
-		expect(held).not.toContain("authwits-actions-btn")
 
-		// Second Escape: the popup goes.
+		// The popup is still open — proven by containment, not visibility, since a store-closed popup can
+		// linger through its leave transition. A disabled submit is no Tab stop, so wait for it to go live.
+		await page.waitForFunction(
+			(s: string) => {
+				const el = document.querySelector<HTMLButtonElement>(s)
+				return Boolean(el && !el.disabled)
+			},
+			{ timeout: 30_000, polling: 250 },
+			sel("registry-toggle-submit"),
+		)
+		const landings: string[] = []
+		for (let i = 0; i < 10; i++) {
+			await page.keyboard.press("Tab")
+			const where = await activeTestId(page)
+			expect(await focusInPopupOf(page, "registry-toggle-submit"), `Tab ${i + 1} left the popup for ${where}`).toBe(true)
+			landings.push(where)
+		}
+		expect(landings).toContain("registry-toggle-submit")
+
 		await page.keyboard.press("Escape")
 		const forced = await settleClosedPopup(page, "registry-toggle-submit")
 		if (forced) console.log("[popup-escape-layered] the popup's leave transition stuck; finished by hand")

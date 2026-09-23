@@ -81,7 +81,6 @@ test("Escape closes only the top popup, and each close hands focus back to the c
 	expect(inside).not.toContain("account-item")
 	expect(inside).not.toContain("accounts-popup-new")
 
-	// First Escape: the top popup goes, the lower one stays and gets the keyboard back at its opener.
 	await page.keyboard.press("Escape")
 	const forcedTop = await settleClosedPopup(page, "account-name-input")
 	if (forcedTop) console.log("[popup-stack] the top popup's leave transition stuck; finished by hand")
@@ -93,7 +92,6 @@ test("Escape closes only the top popup, and each close hands focus back to the c
 	expect(below).not.toContain("account-name-input")
 	expect(below).not.toContain("new-account-submit")
 
-	// Second Escape: the lower popup goes and focus lands on the button that opened it.
 	await page.keyboard.press("Escape")
 	const forcedLower = await settleClosedPopup(page, "accounts-popup")
 	if (forcedLower) console.log("[popup-stack] the lower popup's leave transition stuck; finished by hand")
