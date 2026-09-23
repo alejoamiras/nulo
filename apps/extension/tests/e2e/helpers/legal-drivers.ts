@@ -62,10 +62,13 @@ export async function isSheetPresent(page: Page): Promise<boolean> {
 /**
  * A REAL pointer click at the element's centre, after proving nothing sits on top of it there. A
  * DOM-dispatched click reaches an element under an overlay; this is the proof that no overlay is.
- * `last` picks the last match of the testid — the control of the popup on top of a stack.
+ * `last` picks the last match of the testid — the control of the popup on top of a stack. The centre
+ * is read only once the element holds still: a popup enters sliding 40px over 300ms, and a centre read
+ * mid-slide is clicked a round trip later, after the element has moved off it.
  */
 export async function pointerClick(page: Page, testid: string, opts: { last?: boolean } = {}): Promise<void> {
 	await page.waitForSelector(sel(testid), { visible: true, timeout: 15_000 })
+	await waitUntilStill(page, sel(testid), opts.last === true)
 	const point = await page.evaluate(
 		(s, last) => {
 			const all = document.querySelectorAll(s)
@@ -88,4 +91,29 @@ export async function pointerClick(page: Page, testid: string, opts: { last?: bo
 	)
 	if (!point.reachable) throw new Error(`${testid} is covered at its centre by ${point.covering}`)
 	await page.mouse.click(point.x, point.y)
+}
+
+/** Returns once three reads 50 ms apart give the element the same box. Polled from the test, not on
+ *  animation frames, which the suite has seen throttled in headless Chrome. */
+async function waitUntilStill(page: Page, selector: string, last: boolean): Promise<void> {
+	const boxOf = () =>
+		page.evaluate(
+			(s, lastMatch) => {
+				const all = document.querySelectorAll(s)
+				const r = (lastMatch ? all[all.length - 1] : all[0])?.getBoundingClientRect()
+				return r ? `${r.left},${r.top} ${r.width}x${r.height}` : "gone"
+			},
+			selector,
+			last,
+		)
+	const deadline = Date.now() + 5_000
+	let previous = await boxOf()
+	let unchanged = 0
+	while (unchanged < 2) {
+		if (Date.now() > deadline) throw new Error(`${selector} was still moving after 5s (last box ${previous})`)
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		const box = await boxOf()
+		unchanged = box === previous ? unchanged + 1 : 0
+		previous = box
+	}
 }

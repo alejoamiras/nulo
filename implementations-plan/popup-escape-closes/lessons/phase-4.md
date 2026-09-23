@@ -34,3 +34,26 @@ Put together: on mutant A's lingering state, the old walk's ten Tabs would have 
 Verdict, verbatim: `approve` — "no new material findings". The loop converged in two rounds; nothing was rejected at any point.
 
 After the fixes: `build:chrome` then `bun run test:e2e tests/e2e/popup-stack.test.ts` → 2/2 (the network runner had rebuilt `dist/chrome` with its own flavour, so the smoke build was redone first).
+
+## Delivery — CI (PR #675, first run)
+
+Four of the five aggregators went green on the first run: `quality-status`, both smoke lanes (the Firefox smoke job ran `popup-stack.test.ts`, 2/2) and the Firefox network lane, which ran the layered test and passed it. `extension-network-e2e-status` went red on one Chrome shard: `popup-escape-layered.test.ts:35`, `TimeoutError: Waiting failed: 5000ms exceeded` waiting for the fee menu's items after `pointerClick(page, "send-fee-method-trigger")`.
+
+**First hypothesis, refuted.** The registry popup adds a banner above the fee card once the node read returns, so a trigger that moved when the banner landed looked likely. A throwaway sampler of the trigger's top while the popup opened (`tests/e2e/network/zz-diag-trigger-shift.test.ts`, never committed) refuted it: 323 → 283 over the first ~270 ms, then still through the node read and at the moment the submit went live (283 → 283). The 40 px it did move is the enter transition: `.slide-enter-from { transform: translateY(40px) }` over `0.3s` (`packages/design/src/base.css`).
+
+**Mechanism.** `pointerClick` read the trigger's centre as soon as the trigger was visible, which is mid-slide, and pressed a CDP round trip later. The trigger is 16 px tall, so any move over 8 px between the read and the press lands off it. The hit test passes at read time, so nothing fails until the menu never opens.
+
+**Reproduced, then fixed.** The same throwaway file, rewritten: open the popup and press the trigger at once, sixteen times alternating the old helper and the new one, under `page.emulateCPUThrottling(6)`, with capture-phase listeners recording each press against the trigger's box at that instant. One `e2e:agent` run (proverless, retry 0):
+
+| Helper | Menu opened | Missed |
+|---|---|---|
+| old: read the centre, then press | 4 / 8 | 4 / 8 |
+| new: wait until still, then read and press | 8 / 8 | 0 / 8 |
+
+Every miss has one shape: the centre was read while the trigger sat at 292–308 (y = 300); by the press it had settled at 283–299, so the press landed 1 px below it, on `fee-settings-card`.
+
+**Fix.** `pointerClick` now reads the centre only once three reads 50 ms apart give the same box (`waitUntilStill` in `helpers/legal-drivers.ts`), polled from the test rather than on animation frames. The fix sits in the helper, not the test, because every caller that presses a control in a popup still entering has the same race: `popup-stack.test.ts` presses `accounts-popup-new` right after the accounts popup appears. The layered test keeps its wait for the submit to go live before it opens the menu; its comment no longer claims the node read moves the trigger. A first draft sampled inside the page and scored 16 on Biome's cognitive-complexity cap of 15; the loop moved to the test side instead of taking a suppression.
+
+Same run: `popup-escape-layered.test.ts` ✓ (12.7 s) and `legal-acceptance-wall.test.ts` ✓ (24.9 s, a network caller of the helper). The throwaway file was deleted afterwards (`git status` shows only the two intended files); the sandbox stopped and its ports left the registry.
+
+**Final shape and its runs.** The diagnostic ran a draft that scrolled before the wait and measured without scrolling. The committed helper keeps the original measure-and-press step, scroll included, and only adds the wait in front of it. The trigger never scrolled in the diagnostic (its box at every press was the settled 283–299), so both shapes press the same point here. On the committed shape: `legal-acceptance.test.ts` 13/13 and `popup-stack.test.ts` 2/2 on the smoke build, static e2e scans 91/91. The network callers ran on the draft (above) and run again in CI.

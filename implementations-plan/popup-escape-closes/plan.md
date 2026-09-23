@@ -197,6 +197,8 @@ Executed by the implementing session from this file. `code_review: off`, so no `
 
 Single arc, one branch (`worktree-popup-escape-closes`), one PR into `dev`: `gh pr create` with no labels (a label on create cancels the e2e runs; the diff trips the smoke and network filters by itself). Title ≤ 93 chars, conventional: `fix(popup): escape closes the top popup, the way tapping outside does`. Body: the UI-impact table, the owner's sign-off quoted, the two browser cases, the docs edits, the dropped follow-up, and the trailer. Watch `gh pr checks --watch`, and read the Firefox smoke job's result by name. **Do not merge**: report green and stop; the owner decides.
 
+**First CI run (2026-09-23).** Four of the five aggregators went green, the Firefox smoke job included. `extension-network-e2e-status` went red on one Chrome shard: the layered test's `pointerClick` read the fee trigger's centre mid-slide and pressed after the trigger had moved. Fixed in the helper, which now waits for a still target; reproduced and proven under CPU throttling (old helper 4/8 presses missed, new 0/8). `lessons/phase-4.md` § Delivery — CI.
+
 ## Seeds (final — approved 2026-09-23, unchanged from the draft)
 
 Both run inside this worktree (`agent-worktree resume popup-escape-closes`). Use exactly one per session.

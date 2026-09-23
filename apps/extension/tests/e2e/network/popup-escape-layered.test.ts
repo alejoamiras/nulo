@@ -5,6 +5,7 @@
  * submit disabled until it has read the account's registry state from a node — hence the network
  * suite. No transaction is sent.
  */
+import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
@@ -19,6 +20,19 @@ const hasConfig = aztecConfig !== undefined
 const sel = (testid: string) => `[data-testid="${testid}"]`
 const menuItem = '[data-testid^="send-fee-method-"]:not([data-testid="send-fee-method-trigger"])'
 
+/** Waits for the submit to go live. It is disabled until the fee settings are in and while the registry
+ *  read is in flight, so the menu then opens in a popup done loading; a disabled submit is no Tab stop. */
+async function waitForSubmitLive(page: Page): Promise<void> {
+	await page.waitForFunction(
+		(s: string) => {
+			const el = document.querySelector<HTMLButtonElement>(s)
+			return Boolean(el && !el.disabled)
+		},
+		{ timeout: 30_000, polling: 250 },
+		sel("registry-toggle-submit"),
+	)
+}
+
 test.skipIf(!hasConfig)(
 	"escape closes a menu inside a popup first and the popup second",
 	{ timeout: 120_000 },
@@ -29,7 +43,7 @@ test.skipIf(!hasConfig)(
 		await navigateToSettings(page, "advanced", "account-state", "authwits")
 		await clickByTestId(page, "authwits-actions-btn")
 		await clickByTestId(page, "authwits-toggle-registry")
-		await page.waitForSelector(sel("registry-toggle-submit"), { visible: true, timeout: 15_000 })
+		await waitForSubmitLive(page)
 
 		await pointerClick(page, "send-fee-method-trigger")
 		await page.waitForSelector(menuItem, { visible: true, timeout: 5_000 })
@@ -38,15 +52,8 @@ test.skipIf(!hasConfig)(
 		await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 5_000, polling: 100 }, menuItem)
 
 		// The popup is still open — proven by containment, not visibility, since a store-closed popup can
-		// linger through its leave transition. A disabled submit is no Tab stop, so wait for it to go live.
-		await page.waitForFunction(
-			(s: string) => {
-				const el = document.querySelector<HTMLButtonElement>(s)
-				return Boolean(el && !el.disabled)
-			},
-			{ timeout: 30_000, polling: 250 },
-			sel("registry-toggle-submit"),
-		)
+		// linger through its leave transition.
+		await waitForSubmitLive(page)
 		const landings: string[] = []
 		for (let i = 0; i < 10; i++) {
 			await page.keyboard.press("Tab")
