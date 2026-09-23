@@ -2,11 +2,11 @@
 plan: popup-escape-followups
 tier: light, without a plan audit (the owner scoped the run as "a single PR + codex iteration loop")
 driver: claude-code
-status: in review 2026-09-23 — all three fixes applied and validated locally; codex post-impl loop converged (conditional approve → approve → approve, 3 rounds); PR into dev opened, NOT merged (the owner decides)
+status: in review 2026-09-23 — PR #678; codex post-impl loop converged (conditional approve → approve → approve, 3 rounds); a fresh codex review of the PR (xhigh) converged in 2 rounds (conditional approve → approve); the owner authorised the merge once CI is green
 eli5_mode: none (owner-scoped run)
 code_review: off
 budget: codex high, at most 3 rounds
-merge: the owner's call — the authorisation that merged #675 does not carry over
+merge: authorised by the owner 2026-09-23 after a codex review: "Codex review it, and merge it when green."
 follow-up of: popup-escape-closes (#675)
 ---
 
@@ -43,8 +43,8 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 
 | File | Change |
 |---|---|
-| `apps/extension/scripts/e2e/webdriver-ownership.test.ts` | `spawnMarked` returns only once the child shows its marker, and its eight call sites await it. A new case swallows the signals of a launch that outlives SIGKILL and pins the retry of a failed send, one send per phase, the escalation, and the kept profile and record |
-| `apps/extension/tests/e2e/fixtures/browser/ownership.ts` | `releaseLaunch` deletes the profile and the record only once the stop loop has seen the launch gone. `stopOwned` sends each marker-carrying process its signal once per phase and rescans on every poll, so one that was inside execve is signalled when it shows. It calls the launch gone after two empty scans a poll apart, as a best effort: nothing bounds how long an exec reads empty |
+| `apps/extension/scripts/e2e/webdriver-ownership.test.ts` | `spawnMarked` returns once a scan has found the child carrying its marker; one sighting is the proof, because a child that execs again reads empty again. Its eight call sites await it, and the setsid case keeps its sighting the same way. Two cases run the release on fake timers, with the signals recorded, not sent. In one, the launch outlives SIGKILL: the case pins the retry of a failed send, one send per phase, the escalation, and the kept profile and record. In the other, a scripted scan finds the process only on the second poll: it is signalled, and the profile goes only after two empty scans in a row |
+| `apps/extension/tests/e2e/fixtures/browser/ownership.ts` | `releaseLaunch` deletes the profile and the record only once the stop loop has seen the launch gone. `stopOwned` sends each marker-carrying process its signal once per phase and rescans on every poll, so one that was inside execve is signalled when it shows. It calls the launch gone after two empty scans a poll apart, as a best effort: nothing bounds how long an exec reads empty. `releaseLaunch` takes the scan as a parameter, so that what each poll finds can be scripted |
 | `.github/workflows/pr-quick.yml` | the `firefox-touching` filter, its two outputs and its compute branch are removed; `build-firefox` runs on `build-chrome`'s condition |
 | `scripts/ci-cd/behavior-gating.test.ts` | pins `build-firefox`'s condition to `build-chrome`'s; the notices test's `firefox-touching` expectation goes with the filter |
 | `scripts/ci-cd/preview-comment.ts`, `CI.md` | the wording that called a skipped Firefox build normal goes |
@@ -70,7 +70,8 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 |---|---|
 | Ownership file, 10 runs pinned to one CPU with three busy loops, before the fix | 2 of 10 runs failed |
 | The same, after the first fix / on the final code | 0 of 20 / 0 of 20 |
-| Ownership file | 14/14; the SIGKILL-survival case fails if a thrown `kill` counts as sent, or if a sent signal is repeated |
+| The same, on the code as merged, and 30 unpinned runs | 0 of 20 · 0 of 30 |
+| Ownership file | 15/15; five stop-loop mutants each fail a named case (`lessons/phase-1.md` § PR review) |
 | `bun run lint:actions` | clean |
 | `bun run test:ci-gating` | 148 pass, 2 skip, 0 fail |
 | `PasskeyCeremonyDialog.test.ts` | 11/11; with the `preventDefault()` removed, the Escape case fails (`expected false to be true`) |
@@ -98,3 +99,10 @@ Nothing is drawn differently; the dialog keeps its copy ("press Escape to cancel
 ## Delivery
 
 One branch (`worktree-popup-escape-followups`), one PR into `dev`, opened after the codex loop converges: `gh pr create` with no labels, title of 93 characters or fewer. The body carries the UI-impact table and the owner's go-ahead. Watch `gh pr checks --watch`. **Do not merge**: report green and stop; the owner decides.
+
+**PR #678 (2026-09-23).**
+
+1. The first CI run was all green: 51 pass, 3 skipped. The preview comment linked both builds.
+2. The owner then wrote "Codex review it, and merge it when green." A fresh codex session reviewed the PR: conditional approve (two Medium test-quality findings, one Low record), then approve with no material findings.
+3. Validating its fixes surfaced two double reads in the test file, and both were fixed. See `lessons/phase-1.md` § PR review.
+4. The merge is a squash onto `dev` once CI is green again.

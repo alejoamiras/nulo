@@ -30,7 +30,7 @@ The whole `firefox-touching` path is removed:
 - from `pr-quick.yml`: the filter, the `firefox-touching` and `needs-firefox-build` outputs, the compute branch and its three env lines (the other `BASE_REF`, in a later step, stays);
 - from `behavior-gating.test.ts`: the notices test's expectation.
 
-`build-firefox` now has `build-chrome`'s `if`, pinned by a new behaviour-gating case. `preview-comment.ts`'s header and `CI.md` lose the "a skipped Firefox build is normal" wording; the comment still renders a skipped target as "not built for this change" for a PR that builds neither.
+`build-firefox` now has `build-chrome`'s `if`, pinned by a new behaviour-gating case. `preview-comment.ts`'s header and `CI.md` lose the "a skipped Firefox build is normal" wording; the renderer still words a skipped target as "not built for this change", but the job can no longer hand it one: it runs only when the extension builds, and both targets now build together.
 
 Gates: `bun run lint:actions` clean; `bun run test:ci-gating` 148 pass, 2 skip, 0 fail.
 
@@ -74,3 +74,42 @@ Both declines held as scope decisions. Codex noted that the claim "never-observe
 ### Round 3 — approve, no new material findings
 
 Converged.
+
+## PR review (2026-09-23): a fresh codex session on #678, xhigh
+
+The owner asked for a codex review before the merge: "Codex review it, and merge it when green." A fresh session (`gpt-6-astra`, xhigh) reviewed the PR's net diff at `dd6b0468`.
+
+### Round 1: conditional approve
+
+| Finding (severity) | Verified | Disposition |
+|---|---|---|
+| The exact signal sequence in the SIGKILL-survival case depends on the first `/proc` scan finishing inside its one-second grace (Medium) | yes: codex replayed the loop with a 1 001 ms first scan and got `["SIGTERM", "SIGKILL"]` | adopted: the case runs on fake timers (`setTimeout` and `Date`), so each poll lands on a fixed tick however slow a real scan is |
+| The deletion-safety fix has no test that fails without it (Medium) | yes | adopted: `releaseLaunch` takes the scan as a parameter, and a new case scripts `[] → [pid] → [] → []` for a real marked process, recording whether the profile existed at each poll |
+| The lessons claimed the comment job still words a skipped target for a PR that builds neither, but the job does not run for such a PR (Low) | yes | adopted |
+
+**Two double reads, found while validating, missed by both reviews.**
+
+- **`spawnMarked` re-read the marker after `until` had seen it.**
+  - The setsid case's `sh -c "… exec sleep 120"` re-execs under the same pid, so that second read can land inside the exec and throw on a healthy child. It failed exactly so once, in 7 ms.
+  - A probe first ruled out the fake timers: after `useRealTimers`, `Date` and `setTimeout` are real again on Bun 1.4.2 with vitest 4.1.10.
+  - Fix: one sighting is the proof.
+- **The setsid case itself read twice.** It ran `until(length === 2)` and then a fresh `expect(ownedProcesses(marker)).toHaveLength(2)`.
+  - Once `spawnMarked` returned on its first sighting, the test reached that pair sooner, while `sh` and the forked child could still be exec'ing. The pair failed 1 run in 5.
+  - The pattern predates this PR. Fix: keep the sighting.
+
+**Mutation check** (serial; module restored byte-identical):
+
+| Mutant | Fails |
+|---|---|
+| `emptyScans === 1` | the late case |
+| no reset on a non-empty scan | the late and setsid cases |
+| signalling only before any empty scan (the old up-front signal) | the late case |
+| a thrown `kill` counted as sent | the SIGKILL-survival case |
+| no once-per-phase dedup | the SIGKILL-survival case |
+
+### Round 2: approve, no material findings
+
+- **Low, adopted.** The helper left the release promise unobserved while fake time advanced, so a failing release could surface as an unhandled rejection. Both promises now go through `Promise.allSettled` before either rejection is raised.
+- **Hardening, adopted.** The fake timers are installed inside the `try`, so the spy is restored even if installation throws.
+
+**Results on the code as merged.** The file passed 15/15 in ten runs in a row. The one-CPU contention pass: 0 of 20 runs failed. 30 unpinned runs: 0 failed.
