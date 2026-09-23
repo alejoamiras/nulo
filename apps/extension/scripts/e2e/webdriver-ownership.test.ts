@@ -68,11 +68,12 @@ async function recordSignals(pid: number, release: () => Promise<void>, failFirs
 		if (failFirst && sent.length === 1) throw new Error("not sent")
 		return true
 	})
-	vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })
 	try {
-		const released = release()
-		await vi.advanceTimersByTimeAsync(10_000)
-		await released
+		vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })
+		// Both settle before either rejection is raised, so a failed release is never left unhandled
+		// while fake time advances.
+		const outcomes = await Promise.allSettled([release(), vi.advanceTimersByTimeAsync(10_000)])
+		for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason
 	} finally {
 		vi.useRealTimers()
 		kill.mockRestore()
@@ -169,8 +170,14 @@ describe.skipIf(process.platform !== "linux")("webdriver launch ownership", { ti
 	test("a child that left the process group is still found and stopped", async () => {
 		const marker = launchMarker()
 		const leader = await spawnMarked(marker, "sh", ["-c", "setsid sleep 120 & exec sleep 120"])
-		await until(() => ownedProcesses(marker).length === 2)
-		expect(ownedProcesses(marker)).toHaveLength(2)
+		// Both `sh` and the forked child exec again, and a scan that lands inside an exec misses the
+		// process, so the sighting is kept rather than read a second time.
+		let found: number[] = []
+		await until(() => {
+			found = ownedProcesses(marker)
+			return found.length === 2
+		})
+		expect(found).toHaveLength(2)
 
 		const record = ownedByThisRun({ marker, pid: leader, profileDir: newProfileDir(marker), ownsProfile: true, label: "escaped" })
 		await releaseLaunch(record)
