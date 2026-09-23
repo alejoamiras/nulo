@@ -107,3 +107,36 @@ Same run: `legal-acceptance.test.ts` 13/13, `popup-stack.test.ts` 2/2. The netwo
 ## Round 5 — same session, resumed with `b1090dda`
 
 Verdict, verbatim: `approve` — "no new material findings. The counter now resets when pending-enter state changes, satisfying the round-4 condition." The loop on the CI fix converged in three rounds (conditional → conditional → approve); nothing was rejected except the round-3 records finding, which rested on an error in my prompt.
+
+## Owner's manual smoke — 2026-09-23
+
+The owner ran the PR's hand checks in the real Chrome toolbar popup. The account switcher, the two stacked popups, the delete prompt and the contact form behaved as designed. The menu case did not: with the Fee Source menu open inside the authwits registry popup, Escape closed the whole wallet.
+
+**Reproduced in the harness.** A throwaway test (deleted afterwards) read `defaultPrevented` on every Escape from a window listener, which runs after every document listener. Chrome closes its toolbar popup on an Escape the page leaves unhandled; a tab shows nothing.
+
+| Press | Handled |
+|---|---|
+| account switcher open | yes |
+| registry popup with the menu open, 1st press (menu opened while loading, and again once live) | **no** |
+| same, 2nd press | yes |
+| nothing open | no (the browser's own close) |
+
+**Mechanism.** `DropdownRoot` registers its document keydown listener before its focus trap. The listener's `close()` flips `isOpen`; for a real key event the browser runs a microtask checkpoint after each listener, so Vue's flush runs `closeDropdown` right there and deactivates the menu trap. That removes the trap's `checkEscapeKey`, the one that would call `preventDefault`, before its turn, and the popup trap's re-installed listener is not part of this dispatch. Nothing marks the key handled. A unit test cannot see it: a script-dispatched event runs no checkpoint between listeners, so there the trap's handler still runs. The dropdown and focus-trap are untouched by this PR, so dev behaves the same for every menu on the shared dropdown. The plan's *A menu inside a popup* paragraph had described the synchronous order; it is corrected.
+
+**Consult — codex, fresh session `01a0ce68-b592-7dc2-bc52-5716745d6ccc`, `gpt-6-astra` high.** Verdict, verbatim: `Conditional — (1) fixes the reported bug; (2) introduces a concrete regression unless the disabled Input handler is corrected (high confidence).` (1) was the menu's `preventDefault`, (2) a popup guard skipping an Escape already `defaultPrevented`.
+
+| Finding (severity) | Verified | Disposition |
+|---|---|---|
+| The guard would keep a popup open over a focused disabled `Input`, which prevents every key but Tab (`packages/design/src/ui/Input.vue:189`; `EditFpcPopup` renders them) (High) | yes | guard dropped rather than patching `Input`: it protects no current path. While a menu is open the popup's trap is paused, so its handler is not in that dispatch; if the menu's trap fails to activate, the popup's handler runs first and the guard cannot help. Its only effect today would be this regression |
+| One press closes one thing only while the menu's trap activates; in the `installFocusTrap` catch path the popup's listener precedes the menu's and one press closes both (Medium) | yes, by listener order | recorded as a limit, not new: the catch path is a backstop that `fallbackFocus` already prevents |
+| `PasskeyCeremonyDialog` and the design `Popover` act on Escape without marking it handled (Medium) | yes | out of scope and not new. The `Popover` lives only in the logger window, which Escape does not close; the passkey dialog is a follow-up |
+| Assert each press, and add an unhandled press once everything is closed, so the reads are shown able to see `false` (Medium) | — | adopted: `pressEscape` reads each press; the third press expects `false` |
+| Firefox closes its toolbar panel even on a handled Escape (Low) | yes: Mozilla bug 1443758, "Impossible to intercept Escape key in browser action pop-up", RESOLVED WONTFIX | recorded: in Firefox the feature shows only where the wallet runs in a tab or window |
+
+Codex also confirmed the mechanism (HTML "clean up after running script"; the DOM's listener snapshot and removed flag), and that `preventDefault` in the menu's own listener is the minimal fix: a trap-owned Escape loses dismissal when no trap exists, reordering the listeners keeps the timing dependence, and `stopImmediatePropagation` does not prevent the browser's default.
+
+**Fix.** `DropdownRoot`'s Escape branch calls `preventDefault()` before `close()`. The unit pin fails without it (`expected false to be true`, checked by stripping the line and restoring it byte-exact); the layered e2e now expects handled, handled, then unhandled.
+
+**Gates on the fix.** Network e2e, local sandbox, retry 0: `popup-escape-layered` 1/1 and `pin-to-home` 1/1, the only other test that presses Escape on a real dropdown (`readPinState`). `bun run audit:vue` exit 0 (555 files, 7 058 tests, build).
+
+**Round 2 — same session, resumed with the applied diff (committed unchanged as `6313eca8`).** Verdict, verbatim: `Approve — high confidence.` "No new material findings in the three-file diff." On the dropped guard: "My earlier recommendation was broader than necessary." The consult converged in two rounds (conditional → approve).

@@ -14,6 +14,13 @@ chrome-extension://<ID>/src/popup/index.html
 
 Get extension ID from `chrome://extensions`.
 
+Full-page mode is not the toolbar popup. Chrome closes the toolbar popup on an Escape the page leaves
+unhandled (not `defaultPrevented`) and a tab does nothing, so read a key's fate from a `window` keydown
+listener, which runs after every `document` listener. A unit test cannot stand in: for a real key
+event the browser runs microtasks between listeners, so a Vue flush started by one listener can
+remove a later one before its turn (why `DropdownRoot` marks its own Escape handled); a
+script-dispatched event runs none.
+
 ## Logger
 
 **URL:** `chrome-extension://<ID>/src/popup/index.html#/windows/logger`
@@ -74,3 +81,5 @@ What differs from Chrome when probing by hand:
   kept their defaults on Firefox.
 - The Firefox manifest needs a well-formed `browser_specific_settings.gecko.id`; a placeholder
   makes the whole add-on "invalid" at install time, before any code runs.
+- The toolbar panel closes on every Escape, even one the page handles: Mozilla declined to change it
+  (bug 1443758, WONTFIX). Escape closing a popup shows only where the wallet runs in a tab or window.

@@ -271,8 +271,11 @@ an in-page sampler showed the opener focused 26 ms later. `waitForFocus(page, te
 Escape is a real close for every registry popup (only the top one answers; a menu open inside a popup
 closes first — prove the popup survived that first press by containment, not by visibility, since
 a closed popup lingers in its leave transition: check `focusInPopupOf` after every Tab, because a
-walk that only misses one outside control can pass after focus has escaped). When a test asserts where focus
-returns, open the popup with `pointerClick`: `clickByTestId` fires `el.click()`, which never focuses
+walk that only misses one outside control can pass after focus has escaped). Read each press for
+`defaultPrevented` too (`pressEscape` in `network/popup-escape-layered.test.ts`): the suite drives the
+wallet in a tab, where an unhandled Escape does nothing, but Chrome's toolbar popup closes the whole
+wallet on one. When a test asserts where focus returns, open the popup with `pointerClick`:
+`clickByTestId` fires `el.click()`, which never focuses
 the opener, so there is nothing to return to and the landing assertion proves nothing.
 
 **The one sanctioned real click: `pointerClick(page, testid)`** (`helpers/legal-drivers.ts`). The
