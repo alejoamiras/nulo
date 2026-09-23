@@ -7,7 +7,7 @@ import { expect } from "vitest"
 import { clickByTestId, openPopup, test, waitForHash } from "./fixtures/extension"
 import { settleClosedPopup } from "./fixtures/popup-leave"
 import { pointerClick } from "./helpers/legal-drivers"
-import { coveredAt, tabAround } from "./helpers/pointer-probes"
+import { coveredAt, tabAround, waitForFocus } from "./helpers/pointer-probes"
 
 const sel = (testid: string) => `[data-testid="${testid}"]`
 
@@ -59,6 +59,46 @@ test("a popup over a popup: the lower one is covered, Tab stays in the top one, 
 	expect(below).toContain("popup-close-btn")
 	expect(below).not.toContain("account-name-input")
 	expect(below).not.toContain("new-account-submit")
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("Escape closes only the top popup, and each close hands focus back to the control that opened it", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+
+	// Real pointer input: each opener holds focus when its popup opens, which is where focus must return.
+	await pointerClick(page, "account-avatar-btn")
+	await page.waitForSelector(sel("accounts-popup"), { visible: true, timeout: 5_000 })
+	await pointerClick(page, "accounts-popup-new")
+	await page.waitForSelector(sel("account-name-input"), { visible: true, timeout: 5_000 })
+	expect(await coveredAt(page, "account-item")).not.toBeNull()
+
+	// The keyboard is inside the top popup before Escape is pressed, not parked on the opener.
+	const inside = await tabAround(page, 2)
+	expect(inside.some((t) => ["account-name-input", "new-account-submit", "popup-close-btn"].includes(t))).toBe(true)
+	expect(inside).not.toContain("account-item")
+	expect(inside).not.toContain("accounts-popup-new")
+
+	// First Escape: the top popup goes, the lower one stays and gets the keyboard back at its opener.
+	await page.keyboard.press("Escape")
+	const forcedTop = await settleClosedPopup(page, "account-name-input")
+	if (forcedTop) console.log("[popup-stack] the top popup's leave transition stuck; finished by hand")
+	await waitUntilReachable(page, "account-item")
+	await waitForFocus(page, "accounts-popup-new")
+	await page.waitForSelector(sel("accounts-popup"), { visible: true, timeout: 5_000 })
+	const below = await tabAround(page, 4)
+	expect(below).toContain("popup-close-btn")
+	expect(below).not.toContain("account-name-input")
+	expect(below).not.toContain("new-account-submit")
+
+	// Second Escape: the lower popup goes and focus lands on the button that opened it.
+	await page.keyboard.press("Escape")
+	const forcedLower = await settleClosedPopup(page, "accounts-popup")
+	if (forcedLower) console.log("[popup-stack] the lower popup's leave transition stuck; finished by hand")
+	await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 10_000, polling: 100 }, sel("accounts-popup"))
+	await waitForFocus(page, "account-avatar-btn")
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])
