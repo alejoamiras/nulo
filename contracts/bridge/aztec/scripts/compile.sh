@@ -58,7 +58,7 @@ for c in "${crates[@]}"; do
 	# `aztec compile` embeds absolute source paths (this machine's repo root + the ~/.aztec and
 	# ~/nargo dependency caches) in the artifact's debug file_map. They are not load-bearing, but
 	# the artifact is committed (CI has no nargo), so leaving them leaks the contributor's home-dir
-	# layout and trips scripts/check-no-brand.sh. Rewrite to repo-relative so the committed artifact
+	# layout and trips scripts/check-no-local-paths.sh. Rewrite to repo-relative so the committed artifact
 	# is identical regardless of which machine built it.
 	perl -i -pe "s{\Q$repo_root\E/}{}g; s{\Q$HOME\E/}{}g" "$here/$c"/target/*.json
 	if [ "$check" = 1 ]; then

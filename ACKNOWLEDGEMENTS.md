@@ -1,22 +1,23 @@
 # Acknowledgements
 
-Nulo began as a fork of an early Aztec wallet exploration. The current codebase
-has been substantially rewritten since that starting point, but several
-foundational pieces of the project were first established upstream and deserve
-to be credited plainly.
+Nulo began as a fork of [Azguard Wallet](https://github.com/AzguardWallet/azguard-wallet),
+the Aztec wallet built by BB Strategy Pte. Ltd. and licensed under the Apache
+License 2.0. Much of Nulo has been rewritten since, but a meaningful share of it
+still derives from Azguard's code, and the project would not exist in its
+present form without that work.
 
-We want to acknowledge xdeq, Maksim Strebkov, ztepler, GusevPM, Igor Friz, and
-Wizard1209 for the initial scaffolding that helped this wallet take shape. That
-early work included the first Manifest V3 service-worker topology, the network
-manager skeleton, the account manager shell, and the dApp messaging surface
-that later iterations could build on.
+What Nulo inherited includes the Manifest V3 service-worker, popup and
+offscreen topology; the typed background service/client messaging layer; the
+entity storage layer; password encryption and mnemonic handling; the task,
+config, profile, token, network, contact, FPC and authwit services; the dApp
+action and permission schema; many popup screens and UI primitives; and the
+original colour palette and type scale.
 
-The public Git history for Nulo starts at the open-source initial-import commit,
-so those upstream contributions are not visible in this repository's `git log`.
-This file exists to keep that authorship visible anyway, in a form that
-survives the public-history reset.
+Thank you to Azguard's contributors: xdeq, Maksim Strebkov, 257Byte, GusevPM,
+ztepler, Wizard1209 and Igor Friz.
 
-Nulo's architecture, package layout, product behavior, and implementation
-details have evolved far beyond that original fork. Even so, the project would
-not exist in its present form without the upstream work that established its
-first working shape, and those contributors deserve explicit credit here.
+The copyright and licence notice for that code is in [`NOTICE`](./NOTICE), and
+each file derived from it carries a "Modified from Azguard Wallet" header.
+Nulo's public Git history starts at its open-source import commit, so the
+lineage is not visible in `git log`; Azguard's own history is public in its
+repository.

@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /**
  * Minimal storage surface EntityStorage actually uses. Designed as a
  * subset of the chrome/webext StorageArea APIs so that

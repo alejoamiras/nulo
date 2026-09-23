@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /**
  * `DappSendExecutor` — the dApp-initiated send flows (standard,
  * aztec.js, NO_FROM/DefaultEntrypoint) plus dApp fee estimation, moved

@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"

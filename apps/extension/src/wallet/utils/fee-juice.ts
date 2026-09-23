@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"

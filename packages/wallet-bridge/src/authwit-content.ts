@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 // Q-06: import the neutral call payloads (not `CallAction`/`EncodedCallAction`
 // from `action.ts`) so this module no longer forms a cycle with `action.ts`.
 import type { CallPayload, EncodedCallPayload } from "./call-shapes"

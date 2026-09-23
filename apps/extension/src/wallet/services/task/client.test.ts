@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { expect, test, vi } from "vitest"
 import { type EventMessage, MessageType } from "@nulo/extension-messaging/messages"
 import { OriginType, type TxOrigin } from "@/wallet/services/transaction/client"

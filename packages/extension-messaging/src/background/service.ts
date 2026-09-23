@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"

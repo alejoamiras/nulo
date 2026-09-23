@@ -1,3 +1,4 @@
+// Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { EventSelector } from "@aztec/stdlib/abi"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import type { ZodFor } from "@aztec/foundation/schemas"
