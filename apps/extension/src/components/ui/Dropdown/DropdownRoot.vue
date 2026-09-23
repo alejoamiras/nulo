@@ -220,7 +220,12 @@ onBeforeUnmount(() => {
 })
 
 const onKeydown = (event) => {
-	if (event.key === "Escape") close()
+	if (event.key === "Escape") {
+		// Closing the menu removes its trap's Escape handler before it runs (a real key event flushes Vue
+		// between listeners), and Chrome's toolbar popup closes on an Escape the page leaves unhandled.
+		event.preventDefault()
+		close()
+	}
 	if (event.key === "Enter") {
 		if (document.activeElement?.getAttribute("aria-disabled") !== "true") document.activeElement?.click()
 	}

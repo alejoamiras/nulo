@@ -1,9 +1,10 @@
 /**
  * A menu open inside a popup keeps the normal layering under Escape: the first press closes the
- * menu while the popup still holds the keyboard, the second closes the popup. The fee-method menu
- * is the only menu a registry popup hosts (the two authwits popups); the registry popup keeps its
- * submit disabled until it has read the account's registry state from a node — hence the network
- * suite. No transaction is sent.
+ * menu while the popup still holds the keyboard, the second closes the popup. Each press must also
+ * come back handled: Chrome closes its toolbar popup, the whole wallet, on an Escape the page leaves
+ * unhandled, and this suite's tab would not show it. The fee-method menu is the only menu a registry
+ * popup hosts (the two authwits popups); the registry popup keeps its submit disabled until it has
+ * read the account's registry state from a node — hence the network suite. No transaction is sent.
  */
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
@@ -33,6 +34,28 @@ async function waitForSubmitLive(page: Page): Promise<void> {
 	)
 }
 
+type EscapeRead = { __escapeHandled?: boolean; __escapeReader?: true }
+
+/** Presses Escape and returns whether the page marked it handled. A window listener reads it, after
+ *  every document listener has had its turn. */
+async function pressEscape(page: Page): Promise<boolean> {
+	await page.evaluate(() => {
+		const w = window as unknown as EscapeRead
+		w.__escapeHandled = undefined
+		if (w.__escapeReader) return
+		w.__escapeReader = true
+		window.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") w.__escapeHandled = e.defaultPrevented
+		})
+	})
+	await page.keyboard.press("Escape")
+	await page.waitForFunction(() => (window as unknown as EscapeRead).__escapeHandled !== undefined, {
+		timeout: 5_000,
+		polling: 50,
+	})
+	return page.evaluate(() => (window as unknown as EscapeRead).__escapeHandled === true)
+}
+
 test.skipIf(!hasConfig)(
 	"escape closes a menu inside a popup first and the popup second",
 	{ timeout: 120_000 },
@@ -48,7 +71,7 @@ test.skipIf(!hasConfig)(
 		await pointerClick(page, "send-fee-method-trigger")
 		await page.waitForSelector(menuItem, { visible: true, timeout: 5_000 })
 
-		await page.keyboard.press("Escape")
+		expect(await pressEscape(page), "the menu's Escape went unhandled; the toolbar popup would close").toBe(true)
 		await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 5_000, polling: 100 }, menuItem)
 
 		// The popup is still open — proven by containment, not visibility, since a store-closed popup can
@@ -63,7 +86,7 @@ test.skipIf(!hasConfig)(
 		}
 		expect(landings).toContain("registry-toggle-submit")
 
-		await page.keyboard.press("Escape")
+		expect(await pressEscape(page), "the popup's Escape went unhandled; the toolbar popup would close").toBe(true)
 		const forced = await settleClosedPopup(page, "registry-toggle-submit")
 		if (forced) console.log("[popup-escape-layered] the popup's leave transition stuck; finished by hand")
 		await page.waitForFunction(
@@ -71,6 +94,9 @@ test.skipIf(!hasConfig)(
 			{ timeout: 10_000, polling: 100 },
 			sel("registry-toggle-submit"),
 		)
+		// Nothing is left to close, so this press stays unhandled (in the toolbar popup, the browser's own
+		// close), which also proves the reads above can see an unhandled press.
+		expect(await pressEscape(page)).toBe(false)
 
 		expect(localNetworkExtension.consoleErrors).toEqual([])
 		expect(localNetworkExtension.pageErrors).toEqual([])

@@ -265,6 +265,25 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
+	// Chrome closes its toolbar popup on an unhandled Escape, and in a real key event closing the menu
+	// removes its trap's Escape handler before it runs, so the menu's own listener must mark the key.
+	test("Escape closes the menu and marks the key handled", async () => {
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const keydown = new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
+		document.dispatchEvent(keydown)
+		await flushPromises()
+		expect(keydown.defaultPrevented).toBe(true)
+		expect(w.find("[data-dropdown-open]").attributes("data-dropdown-open")).toBe("false")
+		w.unmount()
+	})
+
 	// (frontend-ux-fixes P5a) regression pin: arrow-nav must keep finding items after the
 	// `[tabindex="1"]` → `[data-dropdown-item]` selector change (else changing DropdownItem's tabindex
 	// silently breaks keyboard nav — the codex HIGH). The Flex stub here exposes `wrapper` (the real
