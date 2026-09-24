@@ -184,7 +184,7 @@ async function openVerifyWindow(
 	deps: SessionEstablishedDeps,
 ): Promise<void> {
 	const anchor = await deps.windows.getLastFocused()
-	// Claim the slot for exactly one creation: a reservation released or already spent while this
+	// Claim the slot for exactly one window: a reservation released or already spent while this
 	// handler awaited must not open a second window against the same slot.
 	if (!reservation.markInFlight()) throw new Error("verify window slot was not claimable")
 	let windowId: number | undefined
