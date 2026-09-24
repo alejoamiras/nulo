@@ -9,6 +9,7 @@ Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 - [key-model-v2](key-model-v2/plan.md) — implemented + reviewed (P1–P6 green; code-review max + codex loop converged; stack #420 = PRs #417/#418/#419 draft) — recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2 (pre-launch baseline redefinition)
 - [key-model-v2-hardening](key-model-v2-hardening/plan.md) — drafted, dual-audited (2× conditional-approve adopted), awaiting final codex pass + owner approval — imported-key DEK isolation, duplicate-phrase guard, passkey 512-bit reduce, missing account e2e (arcs 4–5 on stack #420)
 
+- [faucet-bridge](faucet-bridge/plan.md) — completed (mega-deep) — L1↔L2 Portal bridge shipped into the faucet (public PR #76, private PR #78); swap/fuel remains a future arc
 - [token-identity](token-identity/plan.md) — implemented + deployed (mid), awaiting manual testnet validation — NULO/OLUN/AZLO live, isTokenRegistered + contracts field-diff re-consent
 - [incoming-trust-state-machine-refactor](incoming-trust-state-machine-refactor/plan.md) — completed (mega-deep, PR #75) — global service Lock serializing the incoming-transfer trust FSM; race class closed
 - [authwit-lifecycle-and-execution-followups](authwit-lifecycle-and-execution-followups/plan.md) — completed (mid; 3 plan audits + 4-way post-impl fan-out), PR #85 awaiting QA+merge — grantPublicAuthwit RPC + lifecycle e2e (CI-gated) + exec follow-ups; audit caught+fixed a dead scope gate
