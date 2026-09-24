@@ -13,10 +13,8 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | `pr-extension-network-e2e.yml` | `extension-network-e2e-status` | dev (cut over 2026-09-09) + main (cut over 2026-09-23) | PR to `main`, OR `e2e:extension-network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
 | `pr-extension-smoke-e2e-firefox.yml` | `extension-smoke-e2e-firefox-status` (not required yet) | — | same gate as the Chrome twin (its own file + `setup-geckodriver` in the filter); skips drafts | firefox build + the smoke suite over geckodriver + Puppeteer BiDi |
 | `pr-extension-network-e2e-firefox.yml` | `extension-network-e2e-firefox-status` (not required yet) | — | same gate as the Chrome twin; skips drafts | the network suite on Firefox: 5 proverless shards + 2 heavy jobs + the real-proving canary, the same four files as on Chrome |
-| `bridge-contracts.yml` | `bridge-contracts-status` (not required yet) | — | when `contracts/bridge/**`, `packages/bridge-core/**` or the workflow change | forge hermetic + halmos + keystone nargo + hub artifact parity + sole-consumer guard + the sandbox integration suite (`integration`) + the hub's TXE tests (`txe`) |
-| `pr-tools-e2e.yml` | `tools-e2e-status` (not required yet) | — | when the tools graph, the bridge contracts or `packages/bridge-core/**` change, OR the `e2e:tools` label | the tools browser suite (Playwright, embedded wallet-sdk test wallet, injected L1 wallet) in 6 shards, one sandbox each |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
-| `release.yml` | `status` (not required) | — | push to `main` + manual `workflow_dispatch` | release-please + gates + build + smoke against artifact + assets + deploys; `publish_chrome` / `publish_firefox` inputs run the store uploads in their protected environments |
+| `release.yml` | `status` (not required) | — | push to `main` + manual `workflow_dispatch` | release-please + gates + build + smoke against artifact + assets + the landing deploy; `publish_chrome` / `publish_firefox` inputs run the store uploads in their protected environments |
 | `store-check.yml` | — | — | manual `workflow_dispatch` (`store`: chrome / firefox / both) | proves a store credential read-only (Chrome: one `fetchStatus`; Firefox: the author-scoped add-on list; no upload) |
 | `source-rebuild.yml` | — | — | weekly (Mon 05:17 UTC) + manual `workflow_dispatch` (`tag`) | rebuilds `git archive` of a release (or of the commit) on x86_64 + Ubuntu ARM64 with the reviewer script and fails on any byte differing from the shipped Firefox zip |
 | `nightly.yml` | `status` (not required) | — | schedule (03:23 UTC daily) + manual dispatch | full quality bar incl. network suite → prerelease GitHub Release from dev (`v<ver>-nightly.<YYDDD>`) |
@@ -33,7 +31,7 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 | `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
 | `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
 | `_extension-smoke-e2e.yml` | `pr-extension-smoke-e2e`, `pr-extension-smoke-e2e-firefox`, `release`, `nightly` |
-| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `pr-extension-network-e2e-firefox`, `extension-network-e2e-soak`, `release` (stable channel only), `nightly` |
+| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `pr-extension-network-e2e-firefox`, `extension-network-e2e-soak`, `release` (opt-in: `workflow_dispatch` with `run_network_e2e=true`), `nightly` |
 
 Both take a `browser` input (`chrome` default, `firefox`); log-artifact and browser-cache names carry the browser so a Firefox lane can neither overwrite nor restore a Chrome lane's.
 

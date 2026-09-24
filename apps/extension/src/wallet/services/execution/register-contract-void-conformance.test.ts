@@ -4,8 +4,8 @@
  * proxy validates the response with `z.void()`, so the wallet MUST resolve
  * `undefined`. Returning the registered instance (the pre-5.0.1 shape) makes
  * every wallet-sdk dApp call reject with a ZodError AFTER a successful
- * wallet-side registration — caught live on the tools app connect flow, where
- * `registerAllContracts` failed the whole capability handshake.
+ * wallet-side registration, which fails the whole capability handshake of a
+ * dApp that registers its contracts there.
  *
  * The unit layer is bb-free, so the stdlib schema/class-id computations (which
  * hit real Poseidon via bb.js) are mocked at the module boundary; the full

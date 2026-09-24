@@ -257,12 +257,11 @@ attacker-controllable.
 for the three Nulo-custom methods (`registerToken`, `isTokenRegistered`,
 `grantPublicAuthwit`). The patch is a **single private package**,
 [`@nulo/wallet-sdk-schema-patch`](../wallet-sdk-schema-patch/README.md), consumed
-by all three apps:
+by both apps:
 
 | Side | Import | In |
 |---|---|---|
 | Extension | `import "@nulo/wallet-sdk-schema-patch/register"` | `wallet-sdk/background.ts` (first import) |
-| Tools | `import "@nulo/wallet-sdk-schema-patch/register"` | `composables/createAztecWalletSession.ts` (first import) |
 | Playground | `import "@nulo/wallet-sdk-schema-patch/register"` | `lib/wallet.ts` (first import) |
 
 `./register` is **side-effect only** — importing it first mutates `WalletSchema`
@@ -278,7 +277,7 @@ new Nulo-custom RPC, edit the ONE source and add a paired reachability assertion
 Keeping the patch in a **dedicated private package** — not an export of
 `wallet-bridge` itself — is deliberate: `wallet-bridge` depends on `wallet-core`
 + `extension-messaging` and must stay extension-internal, so exposing it to the
-tools/playground dApp surfaces would leak its dispatcher/protocol internals to
+playground dApp surface would leak its dispatcher/protocol internals to
 third-party dApps.
 
 ### Dropped surface

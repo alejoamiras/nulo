@@ -4,7 +4,7 @@ The checklist for bumping the Aztec / Noir dependency line. **`@aztec/*` is exac
 
 > **Convention:** any code that types against an `@aztec` shape (a PXE method signature, a wire type, an artifact field) MUST add an entry to **§ Types coupled to `@aztec` shape** below, with `file:line`, so the next bump has a checklist. Round-2 phase R4 (P18b PXE descriptor) is the first to append here.
 
-Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below). The Noir contract source (Nargo tags, `contracts/bridge/aztec/scripts/compile.sh`, committed `target/*.json`), `@aztec-foundation/aztec-standards` and `@alejoamiras/private-fee-juice` are HELD at 5.0.1 — a deliberate split line, see `implementations-plan/aztec-5.2.0-js-line/`.
+Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below). `@aztec-foundation/aztec-standards` and `@alejoamiras/private-fee-juice` are HELD at 5.0.1 — a deliberate split line, see `implementations-plan/aztec-5.2.0-js-line/`.
 
 ## Before you bump
 1. Read the upstream `@aztec/aztec.js` + `@aztec/pxe` changelog for the target version — note any renamed/removed exports, PXE method signature changes, or artifact-format changes.
@@ -31,20 +31,18 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 - `NoteDaoSchema` / `PackedPrivateEventSchema` / `NotesFilterSchema` — `packages/aztec-runtime/src/pxe/schemas.ts:11-42` — hand-built from `Note.schema`, `AztecAddress.schema`, `Fr.schema`, `TxHash.schema`, `BlockNumberSchema`, `inTxSchema()`, `EventSelector.schema`, `NoteStatus`; `NotesFilterSchema`/`PackedPrivateEventSchema` carry `satisfies ZodFor<...>` pins that break the build if the upstream type reshapes. `NoteDaoSchema` has NO satisfies pin (upstream `NoteDao` is a class) — re-verify its field list against upstream `NoteDao` manually.
 - `PROVE_TX_TIMEOUT_MS` (30 min bb-proving ceiling) — `packages/aztec-runtime/src/pxe/client.ts:60-70` — not a type, but proving-duration coupled; re-validate if the proving backend changes.
 
-**5.0.0-arc couplings (signing-key-root, OPFS store, canonical FPC, deploy intent):**
+**5.0.0-arc couplings (signing-key-root, OPFS store, canonical FPC):**
 
 - `deriveNuloAccountKeys` / `deriveSigningKeyFromSeed` (NULO-ACCOUNT-KDF v1) — `packages/wallet-crypto/src/account-derivation.ts` — the FROZEN seed→signingKey→secretKey chain (`sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])` → `deriveSecretKeyFromSigningKey`). Types against `@aztec/stdlib` key derivation; ANY upstream change to those functions shifts every account address. The two-regime reference vectors (`implementations-plan/aztec-5.0.0-stable/reference/`) + the full-chain KAT (`packages/aztec-runtime/src/account/derivation-vectors.test.ts`) are the tripwire — regenerating them from the implementation under test is FORBIDDEN.
 - `registerAccount(AccountPrivacyKeys, partialAddress)` — `packages/aztec-runtime/src/pxe/spec.ts` + `service.ts` — 5.0.0 replaced secret-key registration with the 4-secret + 2-public-key `AccountPrivacyKeys` shape; `nulo-account.ts` stores ONLY `secretKey` and re-derives at the seam. A reshape breaks registration for every profile.
 - `createPXE options.store` (SQLite-OPFS injection) — `packages/aztec-runtime/src/pxe/opfs-store.ts` (`openChainStore`, 30s bounded open) + `chain-runtime.ts` (fail-closed `PXE_STORE_KEY_MISSING`) — upstream's default store IGNORES `dataDirectory` in the browser, shares one DB, and wipes it on rollup switch, so per-(profile, chain) store injection is MANDATORY. Also coupled: the `sqlite3mc-wasm-emit` vite plugin (`apps/extension/vite.config.ts`) that emits `assets/sqlite3.wasm` + the opfs async proxy UNHASHED (emscripten locateFile requests bare paths; a 404 = silent worker hang), and `PXE_DATA_SCHEMA_VERSION_PIN` (drift-tested mirror of upstream's store version stamp). **`@aztec/sqlite3mc-wasm` is ALSO an explicit direct dependency of `apps/extension` (pinned to the same version `@aztec/kv-store` consumes)** — an Aztec bump that moves `kv-store` MUST move this pin in lockstep; the guard is `apps/extension/scripts/layout-identity.test.ts` (lockstep realpath assertion), which reds on any skew.
-- Canonical PrivateFPC descriptor — `packages/bridge-core/src/private-fuel.ts` (`PRIVATE_FPC_ADDRESS`, `PRIVATE_FPC_SALT = 0x…01` from 5.0.0 on) + `private-fpc-canonical.json` (artifactSha256) + `scripts/check-fpc-version.ts` (exact-version + digest + live-class gate). On bump, the rebuilt-address tripwires fire on ANY artifact/salt drift — every rebuild site must use `PRIVATE_FPC_SALT` (a salt-0 stray in `fuel-testnet.ts` was live-caught by its own tripwire this arc).
-- Fee-juice claim phase semantics — `FeeJuice.claim_and_end_setup` is ONLY valid as the fee payload (setup phase, where `FeeJuicePaymentMethodWithClaim` places it); an app-phase claim under a sponsored fee MUST use plain `claim` (`apps/tools/src/composables/fuelClaim.ts`, `deposit-flow.ts`). Live-caught by the direct-FJ canary on 5.0.0.
-- Deploy-intent tooling — `packages/bridge-core/scripts/live-intent.ts` (plan-pinned signer, caps, candidate digest, privileged readbacks, tree gate) + `manifest-v2.ts` (strict zod manifest, re-derived on parse) + the testnet canaries (`fee-juice-canary-testnet.ts`, `drip-canary-testnet.ts`). A NETWORK RESET re-runs the whole arc under these; see the `aztec-update` skill.
+- Canonical PrivateFPC derivation — `apps/extension/src/wallet/services/fpc/protocol-fpcs.ts` `PRIVATE_FPC_PARAMS` (salt `0x…01` from 5.0.0 on, deployer zero; the artifact is `@alejoamiras/private-fee-juice`'s, via the `@private-fpc-artifact` alias in `apps/extension/vite.shared.ts`), pinned to the deployed canonical address by `protocol-fpcs.test.ts`. Any artifact, salt or upstream-derivation drift reds it on bump: fix it against the deployed contract, never by re-pinning the literals alone — Fee Juice deposited to any other address is unrecoverable.
+- Fee-juice claim phase semantics — `FeeJuice.claim_and_end_setup` is ONLY valid as the setup-phase fee payload: the wallet's `fjwc` strategy (`apps/extension/src/wallet/services/execution/fee/fee-juice-with-claim-strategy.ts`) prepends it (`apps/extension/src/wallet/utils/fee-juice.ts` `getFeeJuiceClaimPayload`) and builds with `AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM`. An app-phase claim under a sponsored fee MUST use plain `claim`. Live-caught on 5.0.0.
 
-**5.0.1-arc couplings (standards swap, descriptor matching, compat map, incarnation fence):**
+**5.0.1-arc couplings (standards swap, descriptor matching, incarnation fence):**
 
 - Token-fn descriptor matching vs the standards artifact — `apps/extension/src/wallet/services/token/functions/descriptors.ts` (`matchesStructPath`: crate-prefix-tolerant struct-path compare) — noir namespaces ABI struct paths by the artifact's import chain (`authorization_contract::aztec::…::AztecAddress` in `@aztec-foundation/aztec-standards@5.0.1`), and 5.x `loadContractArtifact` splits public fns into `artifact.nonDispatchPublicFunctions`. On ANY standards bump run `descriptors-real-artifact.test.ts` — it pins all nine kinds against the REAL installed artifact and is the first thing that must go red on an ABI reshape. Probe through the package's own `Token.js` export, never the raw target JSON (the loaded shape differs). The approval card's transfer vocabulary (`apps/extension/src/utils/token-transfer-vocabulary.ts`) is derived from the same descriptors' `defaultNames` × `variants`, and `token-transfer-vocabulary.test.ts` pins the nine names with their arities and parameter names by hand — a renamed default or a re-shaped variant reds it on purpose.
-- Token `constructor_with_minter` arity — 5.0.1 added a 5th `auth_contract` param. Coupled sites: `apps/extension/tests/e2e/fixtures/aztec.ts` (deployTestToken), `apps/tools/scripts/deploy.ts` (+ record `constructorArgs.authContract`), `apps/tools/src/contracts/deployments.ts` (`rebuildTokenInstanceFrom` REQUIRES `authContract`; pre-5.0.1 records fail targeted). An upstream arity change breaks derivation everywhere at once — the tools app `verify-deployments` gate is the detector.
-- FPC node-compat map — `packages/bridge-core/src/private-fpc-canonical.json` `compatibleNodeVersions` (digest-keyed, HUMAN-curated) + `network` identity pins; consumed by `scripts/check-fpc-version.ts` (`--mode predeploy|require-deployed`). A new artifact digest REQUIRES a fresh compat entry (fails closed); the live v5 testnet returns `"result": null` for an absent `node_getContract` (the `!("result" in body)` branch in `rpcOptional` is dead; correctness rests on `body.result ?? undefined`).
+- Token `constructor_with_minter` arity — 5.0.1 added a 5th `auth_contract` param. Coupled sites: `apps/extension/tests/e2e/fixtures/aztec.ts` (`deployTestToken`) and `fixtures/selfpay-phase.ts` (`deployMinterToken`), both passing `AztecAddress.ZERO`. An upstream arity change breaks every test-token deploy at once — the network e2e is the detector.
 - Stale-anchor diagnostics matched by substring — `packages/aztec-runtime/src/pxe/stale-anchor.ts` (`isStaleAnchorMessage`) — three upstream strings: `possibly a reorg has occurred` (the shared tail of BOTH node wordings — `Block hash … not found when resolving query` in `@aztec/aztec-node` `node_world_state_queries` and `Reference block … not found when querying contract` in its contract lookups; the node package is NOT installed client-side — grep the pinned toolchain under `~/.aztec/versions/<pin>/node_modules/@aztec/aztec-node/dest` on every bump), `not-yet-synchronized PXE` (`@aztec/pxe` `anchor_block_store`), `RewindableRegister write originates behind` (aztec-nr, compiled into the `HandshakeRegistry` artifact). `stale-anchor.sources.test.ts` pins the two installed ones and `stale-anchor.real.test.ts` exercises the node wording against a reorged sandbox; a reworded diagnostic silently disables the resync-and-retry.
 - `pxeGeneration` incarnation fence — `apps/extension/src/wallet/services/profile/spec.ts` (`Profile.pxeGeneration`, minted at EVERY row creation) ↔ `packages/aztec-runtime/src/pxe/{service,client,chain-runtime}.ts` (lifecycle map, `StoreKeyProvision`, `NetworkInfo.pxeGeneration`). Wire-coupled across SW↔offscreen (same build, no skew), but any new Profile-row construction site MUST mint a generation — grep `: Profile = {` on change.
 
@@ -76,43 +74,11 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
   the SponsoredFPC address is generation-dependent (both generations are deployed and funded on
   testnet — verify with a read-only balance probe before assuming).
 
-## Any-ERC-20 bridge couplings (one generation per network: factory + router + hub)
+## Bridge couplings — moved to `alejoamiras/unleashed`
 
-- **Hub ↔ factory — a circular binding, deployed as one unit.** The L2 hub's address is salted with
-  the L1 factory's address (`salt = Fr(factory)`, `packages/bridge-core/src/manifest-v2.ts`
-  `deriveManifestHub`) and the factory's constructor takes the hub; the router binds the factory and
-  the `FeeJuicePortal` as immutables. `scripts/generation.ts` predicts the factory from the deployer's
-  pending nonce and refuses to broadcast if it moved. A network reset (moved `FeeJuicePortal`) or ANY
-  class-id shift below ⇒ a whole new generation via `deploy-generation.ts`; nothing is re-pinned.
-- **`tokenClassId` ↔ the standards `Token` artifact.** The hub's `token_class_id` is a constructor
-  immutable computed from the installed `@aztec-foundation/aztec-standards` JS artifact; every L2
-  token derives from it (`src/hub-token.ts`, class id pinned by `noir-artifact-classids.test.ts`,
-  address vector by `hub-token.test.ts`); the hub's Noir `token` dep (`Nargo.toml` tag) fixes the
-  selectors it calls on that class. A standards bump that moves the class id cannot be absorbed by a
-  deployed hub; moving the JS pin alone makes every derived L2 token address disagree with the live hub.
-- **Hub → protocol `ContractInstanceRegistry`.** `register_*` calls aztec-nr's
-  `publish_contract_instance_for_public_execution` (the 5.0.1 tag) to publish the derived token — a
-  call into the protocol registry the RUNNING network (the 5.2.0 JS line) must still route. The TXE
-  cannot exercise it; the sandbox smoke's first-time flows are the only pre-live canary
-  (`aztec-update` skill, drift detector 4).
-- **The sandbox runs the JS line, the contracts compile on the Noir line.**
-  `scripts/sandbox/local-network.ts` boots `aztec start --local-network` from
-  `~/.aztec/versions/<@aztec/aztec.js pin>` (read from `packages/bridge-core/package.json`, refuses a
-  partial toolchain); `contracts/bridge/aztec/scripts/compile.sh` pins `AZTEC_HOME` to 5.0.1. Bumping
-  the JS line means installing that version's toolchain for the sandbox WITHOUT touching the Noir pin.
-- **Token-list origin ↔ CSP.** `packages/bridge-core/src/token-list.ts` `TOKEN_LIST_ORIGIN` must be the
-  one list host in every target's `cspConnectSrc` (`apps/tools/src/lib/network-targets.ts`); the
-  `_headers` file is generated from it at build time. Moving the origin without the CSP silently
-  degrades the catalog to manifest-only. `TOKEN_LIST_LIVE=1` on `token-list.test.ts` is the real-origin
-  canary (the list is multi-chain now — entries are validated per chain, never as a whole).
-- **`txe-server` lockfile.** `contracts/bridge/aztec/txe-server/` is the committed mini-project whose
-  frozen lockfile pins the TXE server's dependency set (`run-txe-tests.sh` never `bun add`s). It moves
-  with the Noir line, not the JS line.
-- **Per-token wallet grants (`apps/tools/src/lib/capabilities.ts`).** `buildSendManifest` carries the
-  hub + the WHOLE set of granted tokens (exact L2 addresses; `burn_public`/`burn_private` for the exit
-  authwit) — a new token re-prompts and the approval REPLACES the stored grant, so a request never
-  carries just the newcomer. `useTokenGrant` verifies the returned scope against the request before
-  anything is signed; a wallet-sdk capability reshape reds there, not at send time.
+The any-ERC-20 bridge's `@aztec` couplings moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed): hub ↔ factory, `tokenClassId` ↔ the standards `Token` artifact, hub → `ContractInstanceRegistry`, the split JS/Noir toolchain, token-list origin ↔ CSP, the `txe-server` lockfile and per-token wallet grants, plus the PrivateFPC deploy descriptor, its node-compat map and the deploy-intent tooling. Until unleashed is populated, read them in [`UPDATE.md` at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/UPDATE.md).
+
+Nothing here mirrors unleashed's `tokens[].l2Token`: the wallet's bridged-USDC seeds (`default-tokens.ts`, `price-map.ts`) are the retired single-token bridge's L2 tokens. A future mirror belongs in the `aztec-update` skill's reset step; changing the seeds is an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off).
 
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
