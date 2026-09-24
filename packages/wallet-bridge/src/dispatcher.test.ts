@@ -1928,8 +1928,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 // ── grantPublicAuthwit (Nulo-custom) — schema-patch reachability + routing ──
 //
-// Same contract as registerToken: three identical schema-patch copies
-// (extension / tools / playground) pinned by importing the extension's,
+// Same contract as registerToken: the `@nulo/wallet-sdk-schema-patch` entry,
 // routing through DappInteractionService.execute (popup gate), and the
 // dApp-supplied account validated against the session's authorized set.
 
