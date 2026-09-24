@@ -12,6 +12,7 @@ type Step = ApiResponse | Error | ((req: ApiRequest) => ApiResponse)
 function harness(steps: Step[], manifest: unknown = CHROME_MANIFEST) {
 	const calls: ApiRequest[] = []
 	const lines: string[] = []
+	const summary: string[] = []
 	let clock = 0
 	const io: RunIO = {
 		async fetch(req) {
@@ -23,13 +24,30 @@ function harness(steps: Step[], manifest: unknown = CHROME_MANIFEST) {
 		},
 		zip: { manifest: () => manifest, bytes: () => new Uint8Array([0x50, 0x4b]) },
 		log: (l) => lines.push(l),
+		summary: (l) => summary.push(l),
 		now: () => clock,
 		sleep: async (ms) => {
 			clock += ms
 		},
 	}
-	return { io, calls, lines, output: () => lines.join("\n") }
+	return { io, calls, lines, summary, output: () => lines.join("\n") }
 }
+
+const BROAD_HOST = { reason: "BROAD_HOST_USAGE", description: "Your item is requesting broad host permissions which may require an in-depth review." }
+const refused = (warnings: unknown[]): ApiResponse => ({
+	status: 400,
+	json: {
+		error: {
+			code: 400,
+			message: "Validation warnings were encountered that require confirmation.",
+			status: "FAILED_PRECONDITION",
+			details: [
+				{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "MANUAL_CONFIRMATION_REQUIRED", domain: "chromewebstore.googleapis.com", metadata: { itemId: ITEM, publisherId: "pub" } },
+				{ "@type": "type.googleapis.com/google.chrome.webstore.v2.WarningsInfo", warnings },
+			],
+		},
+	},
+})
 
 const ok = (json: unknown, status = 200): ApiResponse => ({ status, json })
 const status = (over: Record<string, unknown> = {}) => ok({ itemId: ITEM, ...over })
@@ -205,6 +223,65 @@ describe("publish flow", () => {
 		const blocked = harness([status(), succeeded, ok({ error: { code: 400, message: "warnings block publish", details: [{ reason: "LARGE_ICON" }] } }, 400)])
 		expect((await runPublishChromeStore(env(), blocked.io)).exit).toBe(1)
 		expect(blocked.output()).toContain("LARGE_ICON")
+	})
+
+	test("a refusal on accepted warnings alone is retried once with blockOnWarnings: false, and recorded", async () => {
+		const h = harness([status(), succeeded, refused([BROAD_HOST]), ok({ state: "PENDING_REVIEW", warningInfo: { warnings: [BROAD_HOST] } })])
+		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(0)
+		expect(h.calls.map(kind)).toEqual(["fetchStatus", "upload", "publish", "publish"])
+		expect(h.calls.slice(2).map((c) => JSON.parse(c.body as string).blockOnWarnings)).toEqual([true, false])
+		expect(h.output()).toContain("::warning::publish-chrome-store: the store warns BROAD_HOST_USAGE")
+		expect(h.output()).toContain("in review; warnings: BROAD_HOST_USAGE")
+		expect(h.summary).toHaveLength(2)
+		expect(h.summary[0]).toContain("BROAD_HOST_USAGE")
+		expect(h.summary[0]).toContain("in-depth review")
+		expect(h.summary[1]).toContain("in review")
+	})
+
+	test("a refusal carrying any other warning makes no second publish call", async () => {
+		const h = harness([status(), succeeded, refused([BROAD_HOST, { reason: "LARGE_ICON", description: "icon" }])])
+		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
+		expect(h.calls.map(kind)).toEqual(["fetchStatus", "upload", "publish"])
+		expect(h.output()).toContain("LARGE_ICON")
+		expect(h.summary).toEqual([])
+	})
+
+	test("a refused retry stops, and the decision it followed stays on record", async () => {
+		const h = harness([status(), succeeded, refused([BROAD_HOST]), refused([BROAD_HOST])])
+		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
+		expect(h.calls.map(kind)).toEqual(["fetchStatus", "upload", "publish", "publish"])
+		expect(h.output()).toContain("publish refused (HTTP 400)")
+		expect(h.summary).toHaveLength(2)
+		expect(h.summary[0]).toContain("blockOnWarnings: false")
+		expect(h.summary[1]).toContain("failed")
+	})
+
+	test("a retry the store took with a warning outside the list exits 1 and points at the dashboard", async () => {
+		const taken = ok({ state: "PENDING_REVIEW", warningInfo: { warnings: [BROAD_HOST, { reason: "LARGE_ICON", description: "icon" }] } })
+		const h = harness([status(), succeeded, refused([BROAD_HOST]), taken])
+		expect((await runPublishChromeStore(env(), h.io)).exit).toBe(1)
+		expect(h.output()).toContain("LARGE_ICON")
+		expect(h.output()).toContain("dashboard")
+		expect(h.summary[1]).toContain("LARGE_ICON")
+	})
+
+	test("store text cannot forge a workflow command, on any line it reaches", async () => {
+		const hostile = { reason: "BROAD_HOST_USAGE", description: "fine\n::error::forged%0A\r##[error]legacy more" }
+		const taken = ok({ state: "PENDING_REVIEW", warningInfo: { warnings: [hostile] } })
+		for (const steps of [
+			[status(), succeeded, refused([hostile]), taken],
+			[status(), succeeded, taken],
+			[status({ publishedItemRevisionStatus: { state: "PUBLISHED", distributionChannels: [{ crxVersion: "0.26.0.0\n::error::forged" }] } })],
+		]) {
+			const h = harness(steps)
+			await runPublishChromeStore(env(), h.io)
+			// Physical lines, as the runner reads them: a command counts only at a line's start, `##[` anywhere.
+			const physical = [...h.lines, ...h.summary].flatMap((l) => l.split(/\r?\n|\r/))
+			const commands = physical.filter((l) => l.trimStart().startsWith("::"))
+			expect(commands.filter((l) => !/^::(add-mask::|(error|warning)::publish-chrome-store: )/.test(l))).toEqual([])
+			expect(physical.filter((l) => l.includes("##["))).toEqual([])
+			expect(h.summary.filter((l) => /[\r\n]/.test(l))).toEqual([])
+		}
 	})
 
 	test("a non-JSON 502 is reported by status code only", async () => {
