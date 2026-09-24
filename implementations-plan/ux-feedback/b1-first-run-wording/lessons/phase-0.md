@@ -2,8 +2,8 @@
 
 ## Plan audit (codex, GPT-6 Astra at `high`, session `01a0d3d9-af15-7b92-a759-f080761204f6`)
 
-- Round 1: **conditional approve**, 10 findings (two blockers). Ledger in
-  [`../audit-codex.md`](../audit-codex.md). The two blockers were real and pre-existing in the
+- Round 1: **conditional approve**, 10 findings (two blockers). Ledger in the plan's § Plan
+  audit ledger. The two blockers were real and pre-existing in the
   code this batch rewrites: the full-backup restore never re-reads or validates the name, and a
   name of spaces around a control character sanitizes to spaces, trims to empty, and lets the raw
   embedded string reach `restore`.

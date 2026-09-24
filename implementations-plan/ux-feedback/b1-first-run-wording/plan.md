@@ -5,7 +5,7 @@ driver: claude-code
 code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 eli5_mode: artifact
-eli5: https://claude.ai/artifact/LNTBQxGqZbXYhUAyELdxjY (source: eli5.html)
+eli5: https://claude.ai/artifact/LNTBQxGqZbXYhUAyELdxjY
 program: implementations-plan/ux-feedback/plan.md (batch 1, arc 1 of 6)
 arc_branch: feat/ux-1-first-run-wording
 design: implementations-plan/ux-feedback/design/spec.md (items 1, 3, 5, 7, 8; round-5 U11, U12, U13)
@@ -348,7 +348,43 @@ unchanged (the accessible name contains the visible word).
 - A later profile created from the onboarding shell (profiles exist, onboarding reopened) follows
   the same rule and shows the field prefilled.
 
-### Asks → codex (decided in the plan audit; ledger in [`audit-codex.md`](audit-codex.md))
+### Plan audit ledger (`/codex high`, GPT-6 Astra, session `01a0d3d9-af15-7b92-a759-f080761204f6`)
+
+Round 1: **conditional approve**, confidence high on source findings, moderate on arbitrary
+fee-contract behavior. Ten findings.
+
+| # | Finding | Call | Resolution |
+|---|---|---|---|
+| 1 | Full-backup naming bypasses the submit check (`useFullBackupImport.ts`) | adopt | The restore asks the flow's resolver for the name inside its latch, after validation, stable through the duplicate-confirm retry |
+| 2 | A hidden backup name can reach storage raw (spaces around a control character trim to empty, `:377`, `:431`) | adopt | `sanitizedBackupName` trims and treats empty as no name; the restore name is always resolved; whitespace- and control-only tests, plain and encrypted |
+| 3 | One-time naming state goes stale | adopt, partly | Submit-time resolution from a fresh read; late setup reads fenced. Live re-classification rejected: a field appearing mid-edit is undrawn UI |
+| 4 | A failed create-time read strands the latch (`useProfileCreateFlow.ts:79`) | adopt | The read moves inside the flow's error handling; rejection-then-retry test |
+| 5 | Backup replacement keeps the previous name | adopt | One tracked automatic value for every writer; each selection recomputes; named → nameless → named test |
+| 6 | "Nothing"/"free" unproven for hand-added contracts | hold | Sent back with the `EXTERNAL` payload evidence (rounds 2–3) |
+| 7 | A failed private read says "no balance" (`fee-helpers.ts`) | adopt | Split from a confirmed zero; drawn for the owner as U14 |
+| 8 | L3 → L3 import; composable wiring | adopt | Inline icons with a pure `publishGlyph`; `useProfileNameDefault` receives a getter and owns no lifecycle |
+| 9 | Fixture inventory and gates incomplete (`fixtures/extension.ts:953`) | adopt | `feeJuiceImportedExtension` through `importSeed`; `price-fixture`, `tx-sendTx-selfPay`, `tx-sendTx-sponsoredFpc` gated; wire-shaped execute test; three retry-0 runs for changed network files too |
+| 10 | Derived states need the owner | adopt | U14 and U15 drawn into round 5 with pickers before P3 |
+
+Round 2: **conditional approve**, confidence high.
+
+| # | Finding | Call | Resolution |
+|---|---|---|---|
+| 1 | Finding 3 withdrawn | accept | Kept: an edited name survives; late setup reads cannot overwrite the resolved name |
+| 2 | Reimbursement through a standing public authwit | hold | Argued the exposure exists from the grant, whichever fee method is picked |
+| 3 | U14 misses a whole failed balance read (`FeeSettingsCard.vue:104`) | adopt the case, not the fix | "Not known yet" (loading, or a whole failed read: "— FJ", rows selectable) apart from one unreadable leg (that row disabled). Disabling both would change gating the card withholds (`:121-125`) |
+| 4 | The backup collision sentence was wrong | adopt | Automatic defaults are unique under `normalizeProfileName`; a backup's own name keeps the exact-string suffix |
+
+Round 3: **conditional approve**, confidence high.
+
+| # | Finding | Call | Resolution |
+|---|---|---|---|
+| 1 | Selectable is not payable | adopt | `settingsForMethod()`'s refusal to self-pay with unknown balances and the card's retry are preserved |
+| 2 | A caller-restricted FPC makes the choice itself enable the debit | adopt | "free"/"Nothing" only for `isProtocol` sponsors; a hand-added one shows "—", spoken "Nulo can't tell what this fee contract charges you."; drawn as U16, sign-off pending |
+
+Round 4: **approve**, confidence high: "No new material findings."
+
+### Asks → codex (decided in the plan audit)
 
 1. Submit-time name: **amended** — resolved at submit for every path, full backup included, from
    a fresh read, with late setup reads fenced and deletion handled.
@@ -381,7 +417,7 @@ Passed under the program's standing approval (program plan § Standing approval)
 1. Phase 0 is the program's pre-answers.
 2. Codex, round 4 of session `01a0d3d9-af15-7b92-a759-f080761204f6`: **approve**, confidence
    high: "No new material findings." Rounds 1–3 were conditional; every condition is applied
-   ([`audit-codex.md`](audit-codex.md)).
+   (ledger above).
 3. Light tier: no fable leg.
 4. No open Ask: 1–11 decided with codex; the UI asks are U11–U16, sign-off pending.
 5. UI impact lists spec surfaces and round-5 recommendations (U11–U16) only.
