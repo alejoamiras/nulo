@@ -4,8 +4,9 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import vectors from "../../implementations-plan/key-model-v2/reference/vectors.json"
 import { EncryptionKey as SourceEncryptionKey } from "../../packages/wallet-crypto/src/encryption-key"
+import { applyNuloSchemaPatch as sourceSchemaPatch } from "../../packages/wallet-sdk-schema-patch/src/apply"
 import { PACKAGES, type PublishedPackage } from "./packages"
-import { REPO_ROOT, stagePackage } from "./stage"
+import { packageNameOf, REPO_ROOT, STAGING_MARKER, stagePackage } from "./stage"
 
 const scratch = mkdtempSync(join(tmpdir(), "nulo-publish-"))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -42,14 +43,12 @@ const MAX_BUNDLE_BYTES: Record<string, number> = {
 	"dist/register.js": 1024,
 }
 
-/** The workspace each peer and dependency is installed under: the fixture links that installed copy. */
-const INSTALLED_FROM: Record<string, string> = {
-	"@aztec/accounts": "wallet-crypto",
-	"@aztec/foundation": "wallet-crypto",
-	"@aztec/aztec.js": "wallet-sdk-schema-patch",
-	"@aztec/stdlib": "wallet-sdk-schema-patch",
-	zod: "wallet-sdk-schema-patch",
-}
+/** The methods the schema patch adds, read from the wallet's own source. */
+const PATCH_KEYS = (() => {
+	const fresh = {}
+	sourceSchemaPatch(fresh)
+	return Object.keys(fresh)
+})()
 
 interface Packed {
 	pkg: PublishedPackage
@@ -84,6 +83,24 @@ async function stageAndPack(outRoot: string): Promise<Packed[]> {
 const sha256 = (path: string) => new Bun.CryptoHasher("sha256").update(readFileSync(path)).digest("hex")
 const workspaceManifest = (dir: string) =>
 	JSON.parse(readFileSync(join(REPO_ROOT, "packages", dir, "package.json"), "utf8")) as { dependencies?: Record<string, string> }
+const declaredBy = (manifest: Record<string, unknown>) => ({
+	...((manifest.peerDependencies ?? {}) as Record<string, string>),
+	...((manifest.dependencies ?? {}) as Record<string, string>),
+})
+
+/** What a consumer's install provides: each declared peer and dependency, as the workspace installed it, and nothing else. */
+function declaredInstalls(packed: Packed[]): Map<string, string> {
+	const links = new Map<string, string>()
+	for (const { pkg, manifest } of packed) {
+		for (const name of Object.keys(declaredBy(manifest))) {
+			const target = realpathSync(join(REPO_ROOT, "packages", pkg.dir, "node_modules", name))
+			const seen = links.get(name)
+			if (seen !== undefined && seen !== target) throw new Error(`${name}: two installed copies, ${seen} and ${target}`)
+			links.set(name, target)
+		}
+	}
+	return links
+}
 
 /** A consumer project outside the workspace: the three tarballs unpacked, their peers linked from the installed tree. */
 function buildFixture(packed: Packed[]): string {
@@ -97,10 +114,10 @@ function buildFixture(packed: Packed[]): string {
 		mkdirSync(dirname(target), { recursive: true })
 		renameSync(join(unpack, "package"), target)
 	}
-	for (const [name, dir] of Object.entries(INSTALLED_FROM)) {
+	for (const [name, installed] of declaredInstalls(packed)) {
 		const target = join(fixture, "node_modules", name)
 		mkdirSync(dirname(target), { recursive: true })
-		symlinkSync(realpathSync(join(REPO_ROOT, "packages", dir, "node_modules", name)), target)
+		symlinkSync(installed, target)
 	}
 	writeFileSync(join(fixture, "check.mjs"), CHECK_SCRIPT)
 	writeFileSync(join(fixture, "consumer.ts"), CONSUMER_TS)
@@ -140,13 +157,16 @@ const key = await EncryptionKey.fromPassword("fixture")
 out.roundTrip = new TextDecoder().decode(await key.decrypt(await key.encrypt(new TextEncoder().encode("sealed"))))
 out.resolveAsset = Object.keys(resolveAsset).sort()
 out.zodRoot = resolveAsset.resolvePackageRoot("zod", { from: import.meta.url })
-out.patched = ["registerToken", "isTokenRegistered", "grantPublicAuthwit", "getWalletFeatures"].filter((k) => k in WalletSchema)
+const fresh = {}
+applyNuloSchemaPatch(fresh)
+out.patchKeys = Object.keys(fresh)
+out.patched = out.patchKeys.filter((k) => k in WalletSchema)
 applyNuloSchemaPatch(WalletSchema)
 console.log(JSON.stringify(out))
 process.exit(0)
 `
 
-/** Every export used at its declared type; \`IsAny\` catches a declaration whose import failed to resolve. */
+/** Every export used at its declared type. `IsAny` catches an export typed `any`; the lib-check run catches an unresolved import in a declaration. */
 const CONSUMER_TS = `import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { EncryptionKey, deriveNuloAccountKeys, deriveSigningKeyFromSeed, type Passhash } from "@alejoamiras/nulo-wallet-crypto"
@@ -240,8 +260,6 @@ describe("staged packages", () => {
 		}
 	})
 
-	// A consumer's own lib check (skipLibCheck: false) reports extensionless relative imports in
-	// declarations under NodeNext (TS2834); the fixture cannot run one, since @aztec's declarations fail it.
 	test("declarations import each other by an explicit .js path that the tarball holds", () => {
 		for (const { staged, files } of packed) {
 			for (const file of files.filter((f) => f.endsWith(".d.ts"))) {
@@ -250,6 +268,24 @@ describe("staged packages", () => {
 					expect(files).toContain(join(dirname(file), (spec ?? "").replace(/\.js$/, ".d.ts")))
 				}
 			}
+		}
+	})
+
+	test("each manifest declares exactly the packages its shipped code and declarations import", () => {
+		const transpiler = new Bun.Transpiler({ loader: "js" })
+		for (const { pkg, staged, files, manifest } of packed) {
+			const imported = new Set<string>()
+			for (const file of files.filter((f) => f.startsWith("dist/"))) {
+				const text = readFileSync(join(staged, file), "utf8")
+				const specs = file.endsWith(".js")
+					? transpiler.scanImports(text).map((i) => i.path)
+					: [...text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1] ?? "")
+				for (const spec of specs.filter((s) => !s.startsWith(".") && !s.startsWith("node:"))) imported.add(packageNameOf(spec))
+			}
+			expect({ pkg: pkg.dir, declared: Object.keys(declaredBy(manifest)).sort() }).toEqual({
+				pkg: pkg.dir,
+				declared: [...imported].sort(),
+			})
 		}
 	})
 
@@ -269,6 +305,7 @@ describe("staged packages", () => {
 			}
 		}
 		expect(byDir("wallet-crypto").manifest.peerDependencies).toEqual({ "@aztec/accounts": "5.2.0", "@aztec/foundation": "5.2.0" })
+		expect(byDir("wallet-sdk-schema-patch").manifest.peerDependencies).toEqual({ "@aztec/aztec.js": "5.2.0", "@aztec/stdlib": "5.2.0" })
 		expect(byDir("wallet-sdk-schema-patch").manifest.dependencies).toEqual({
 			zod: workspaceManifest("wallet-sdk-schema-patch").dependencies?.zod,
 		})
@@ -285,10 +322,44 @@ describe("staged packages", () => {
 		}
 	})
 
-	test("staging is reproducible: a second run packs byte-identical tarballs", async () => {
-		const again = await stageAndPack(join(scratch, "b"))
+	test("the schema-patch README documents every method the patch adds", () => {
+		const readme = readFileSync(join(import.meta.dir, "readme/wallet-sdk-schema-patch.md"), "utf8")
+		expect(PATCH_KEYS.length).toBeGreaterThan(0)
+		for (const key of PATCH_KEYS) expect({ key, documented: readme.includes(`| \`${key}\` |`) }).toEqual({ key, documented: true })
+	})
+
+	test("staging is reproducible: a second run under a stricter umask packs byte-identical tarballs", async () => {
+		const umask = process.umask(0o077)
+		let again: Packed[]
+		try {
+			again = await stageAndPack(join(scratch, "b"))
+		} finally {
+			process.umask(umask)
+		}
 		expect(again.map((p) => sha256(p.tarball))).toEqual(packed.map((p) => sha256(p.tarball)))
 	}, 120_000)
+
+	test("staging replaces only a directory it created, and nothing in the repository outside dist-publish/", async () => {
+		const { pkg } = byDir("resolve-asset")
+		const victim = join(scratch, "victim", pkg.dir)
+		mkdirSync(victim, { recursive: true })
+		writeFileSync(join(victim, "sentinel"), "keep")
+		await expect(stagePackage(pkg, "0.1.0", dirname(victim))).rejects.toThrow(/did not create it/)
+		expect(readFileSync(join(victim, "sentinel"), "utf8")).toBe("keep")
+
+		// Marked as a staging directory, so only the in-repository rule can refuse it, even through a symlink.
+		const inRepo = join(REPO_ROOT, ".stage-guard-probe")
+		mkdirSync(join(inRepo, pkg.dir), { recursive: true })
+		writeFileSync(join(inRepo, pkg.dir, STAGING_MARKER), "")
+		writeFileSync(join(inRepo, pkg.dir, "sentinel"), "keep")
+		symlinkSync(inRepo, join(scratch, "link"))
+		try {
+			await expect(stagePackage(pkg, "0.1.0", join(scratch, "link"))).rejects.toThrow(/only dist-publish/)
+			expect(readFileSync(join(inRepo, pkg.dir, "sentinel"), "utf8")).toBe("keep")
+		} finally {
+			rmSync(inRepo, { recursive: true, force: true })
+		}
+	})
 
 	test("staging refuses to run outside the repository root", async () => {
 		const cwd = process.cwd()
@@ -322,7 +393,8 @@ describe("an out-of-workspace consumer of the tarballs", () => {
 			"resolvePackageRoot",
 		])
 		expect(realpathSync(out.zodRoot)).toBe(realpathSync(join(fixture, "node_modules/zod")))
-		expect(out.patched).toEqual(["registerToken", "isTokenRegistered", "grantPublicAuthwit", "getWalletFeatures"])
+		expect(out.patchKeys).toEqual(PATCH_KEYS)
+		expect(out.patched).toEqual(PATCH_KEYS)
 	}
 
 	test("imports every export under Bun and reproduces the key-derivation vectors", () => {
@@ -335,10 +407,29 @@ describe("an out-of-workspace consumer of the tarballs", () => {
 		expectRuntime(run(["node", "check.mjs", JSON.stringify(seeds)], fixture))
 	}, 120_000)
 
+	const tsc = join(REPO_ROOT, "packages/wallet-crypto/node_modules/typescript/bin/tsc")
+
 	test("type-checks against the declarations under NodeNext and Bundler resolution", () => {
-		const tsc = join(REPO_ROOT, "packages/wallet-crypto/node_modules/typescript/bin/tsc")
 		for (const config of ["tsconfig.nodenext.json", "tsconfig.bundler.json"]) {
 			run([process.execPath, tsc, "-p", config], fixture)
+		}
+	}, 120_000)
+
+	// @aztec's own declarations fail a lib check (`Buffer`, an untyped `util`), so the run is red
+	// overall; what must hold is that none of its diagnostics sits in a published declaration.
+	test("with the lib check on, no diagnostic falls inside the published declarations", () => {
+		for (const config of ["tsconfig.nodenext.json", "tsconfig.bundler.json"]) {
+			const result = Bun.spawnSync([process.execPath, tsc, "-p", config, "--skipLibCheck", "false", "--pretty", "false"], {
+				cwd: fixture,
+				stdout: "pipe",
+				stderr: "pipe",
+			})
+			const headers = `${result.stdout}${result.stderr}`.split("\n").filter((l) => l !== "" && !/^\s/.test(l))
+			for (const line of headers) expect(line).toMatch(/^\S.*\(\d+,\d+\): error TS\d+: /)
+			expect({ config, published: headers.filter((l) => l.includes("node_modules/@alejoamiras/")) }).toEqual({
+				config,
+				published: [],
+			})
 		}
 	}, 120_000)
 })

@@ -5,6 +5,8 @@ export interface PublishedEntry {
 	subpath: "." | `./${string}`
 	/** Source file, relative to the workspace package root. */
 	source: `src/${string}.ts`
+	/** Importing the entry is the point (it mutates a shared singleton), so bundlers must never drop it. */
+	sideEffect?: true
 }
 
 export interface PublishedPackage {
@@ -16,8 +18,6 @@ export interface PublishedPackage {
 	/** `browser` entries may not import `node:*`; `resolve-asset` is a Node/Bun build helper by contract. */
 	target: "browser" | "node"
 	entries: readonly PublishedEntry[]
-	/** Emitted paths that must survive tree-shaking because importing them is the point. */
-	sideEffects: readonly `./dist/${string}.js`[]
 }
 
 export const PACKAGES: readonly PublishedPackage[] = [
@@ -27,7 +27,6 @@ export const PACKAGES: readonly PublishedPackage[] = [
 		description: "Nulo wallet account-key derivation and password-based encryption.",
 		target: "browser",
 		entries: [{ subpath: ".", source: "src/public.ts" }],
-		sideEffects: [],
 	},
 	{
 		dir: "resolve-asset",
@@ -35,7 +34,6 @@ export const PACKAGES: readonly PublishedPackage[] = [
 		description: "Resolve files inside installed packages from the caller's location, on any node_modules layout.",
 		target: "node",
 		entries: [{ subpath: ".", source: "src/index.ts" }],
-		sideEffects: [],
 	},
 	{
 		dir: "wallet-sdk-schema-patch",
@@ -44,9 +42,8 @@ export const PACKAGES: readonly PublishedPackage[] = [
 		target: "browser",
 		entries: [
 			{ subpath: "./apply", source: "src/apply.ts" },
-			{ subpath: "./register", source: "src/register.ts" },
+			{ subpath: "./register", source: "src/register.ts", sideEffect: true },
 		],
-		sideEffects: ["./dist/register.js"],
 	},
 ]
 

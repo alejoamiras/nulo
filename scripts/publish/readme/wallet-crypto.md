@@ -1,6 +1,8 @@
 # @alejoamiras/nulo-wallet-crypto
 
-Account-key derivation and password-based encryption from the [Nulo wallet](https://github.com/alejoamiras/nulo), published so other projects derive the same Aztec accounts and read the same ciphertexts as the wallet.
+Account-key derivation and password-based encryption from the [Nulo wallet](https://github.com/alejoamiras/nulo), published so other projects derive the same signing and account secret keys and read the same ciphertexts as the wallet.
+
+Keys are not addresses. A Nulo account's address also depends on the wallet's frozen Schnorr account artifact and its instantiation descriptor, which this package does not ship. The artifact in the `@aztec/accounts` peer has a different contract class id, so an account built from these keys with it gets a different address from the wallet's.
 
 ## Exports
 
@@ -8,7 +10,7 @@ Account-key derivation and password-based encryption from the [Nulo wallet](http
 |---|---|
 | `deriveSigningKeyFromSeed(seed: Fr): GrumpkinScalar` | The account's Schnorr signing key: `sha512ToGrumpkinScalar([seed, NULO_SIGNING_ROOT_SEP])`. |
 | `deriveNuloAccountKeys(seed: Fr): Promise<{ signingKey, secretKey }>` | The signing key plus the account secret key `deriveSecretKeyFromSigningKey` derives from it. |
-| `EncryptionKey` | Password-based AES-256-GCM. The PBKDF2-SHA256 base key (600,000 iterations) comes from `fromPassword(password)` or `fromPasshash(hash)`; each message gets a fresh 12-byte IV and a salt derived from it. `encrypt(bytes, aad?)` / `decrypt(bytes, aad?)`: the frame is `0x00 ‖ iv ‖ ciphertext`, the AAD is not stored, and decrypting under different AAD fails authentication. `getPasshash(password)` and `getHashHex(input)` are SHA-256 helpers. |
+| `EncryptionKey` | Password-based AES-256-GCM. `fromPassword(password)` and `fromPasshash(hash)` only import SHA-256(password) as the PBKDF2 input, which is cheap. Every `encrypt` and `decrypt` then derives a fresh AES key with PBKDF2-SHA256 at 600,000 iterations, with salt = SHA-256(IV) and a fresh 12-byte IV per message, so each call pays the full KDF cost. `encrypt(bytes, aad?)` / `decrypt(bytes, aad?)`: the frame is `0x00 ‖ iv ‖ ciphertext`, the AAD is not stored, and decrypting under different AAD fails authentication. `getPasshash(password)` and `getHashHex(input)` are SHA-256 helpers. |
 | `type Passhash` | The branded SHA-256 of a password that `fromPasshash` accepts. |
 
 Nothing else from the wallet's crypto layer is published.

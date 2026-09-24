@@ -10,16 +10,33 @@
  * the repository root: the bundler names each module by its cwd-relative path, so any other cwd
  * would change the bytes the approved digests bind and could leak a local path into a tarball.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
-import { basename, dirname, join, relative, resolve } from "node:path"
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { BunPlugin } from "bun"
+import { VERSION_RE } from "./check-digests"
 import { PACKAGES, type PublishedPackage, packageByDir } from "./packages"
 
 export const REPO_ROOT = resolve(import.meta.dir, "../..")
+/** Present in every directory this script created; nothing without it is ever deleted. */
+export const STAGING_MARKER = ".nulo-staged"
 const REPOSITORY = "alejoamiras/nulo"
-const VERSION_RE = /^\d+\.\d+\.\d+$/
+const EXACT_PIN_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
+const RANGE_RE = /^\^?\d+\.\d+\.\d+$/
 const AZGUARD_NOTICE = /^\/\/ Modified from Azguard Wallet \(/
-const MODULE_COMMENT = /^\/\/ (\S+\.ts)$/
+/** Metafile input keys are cwd-relative, and the cwd is the repository root. */
+const SOURCE_INPUT = /^packages\/[a-z0-9-]+\/src\//
 const RELATIVE_SPECIFIER = /((?:from|import)\s*\(?\s*)(["'])(\.{1,2}\/[^"']+)\2/g
 const DECLARATION_SPECIFIER = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
 
@@ -39,6 +56,51 @@ function isBundledExternal(name: string): boolean {
 	return name.startsWith("@aztec/") || name === "zod"
 }
 
+const emittedName = (source: string) => `${basename(source, ".ts")}.js`
+
+function isInside(child: string, parent: string): boolean {
+	const rel = relative(parent, child)
+	return rel === "" || !(rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+}
+
+function lexists(path: string): boolean {
+	try {
+		lstatSync(path)
+		return true
+	} catch {
+		return false
+	}
+}
+
+/**
+ * `realpath` of a path whose tail may not exist yet, so a symlinked parent cannot hide where it
+ * lands; a dangling symlink on the way throws rather than resolving to wherever it would point.
+ */
+function realPathAllowingMissing(path: string): string {
+	const missing: string[] = []
+	let at = resolve(path)
+	while (!lexists(at) && dirname(at) !== at) {
+		missing.unshift(basename(at))
+		at = dirname(at)
+	}
+	return join(realpathSync(at), ...missing)
+}
+
+/** Replaces `out` only when it is a staging directory, never anything in the repository but `dist-publish/`. */
+function prepareOut(out: string): void {
+	const real = realPathAllowingMissing(out)
+	const repo = realpathSync(REPO_ROOT)
+	if (isInside(real, repo) && !isInside(real, join(repo, "dist-publish"))) {
+		throw new Error(`refusing to stage into ${relative(repo, real) || "."}: inside the repository only dist-publish/ is replaced`)
+	}
+	if (existsSync(out) && readdirSync(out).length > 0 && !existsSync(join(out, STAGING_MARKER))) {
+		throw new Error(`refusing to replace ${out}: it has no ${STAGING_MARKER}, so this script did not create it`)
+	}
+	rmSync(out, { recursive: true, force: true })
+	mkdirSync(join(out, "dist"), { recursive: true })
+	writeFileSync(join(out, STAGING_MARKER), "")
+}
+
 /** Entries import each other by their emitted file, so a package with two entries ships one copy of the shared code. */
 function siblingEntriesExternal(entryFiles: Map<string, string>): BunPlugin {
 	return {
@@ -46,15 +108,39 @@ function siblingEntriesExternal(entryFiles: Map<string, string>): BunPlugin {
 		setup(build) {
 			build.onResolve({ filter: /^\.\.?\// }, (args) => {
 				const target = resolve(dirname(args.importer), args.path)
-				const emitted = entryFiles.get(target) ?? entryFiles.get(`${target}.ts`)
-				return emitted ? { path: emitted, external: true } : undefined
+				const emitted = entryFiles.get(target) ?? entryFiles.get(`${target}.ts`) ?? entryFiles.get(target.replace(/\.js$/, ".ts"))
+				return emitted ? { path: `./${emitted}`, external: true } : undefined
 			})
 		},
 	}
 }
 
+/**
+ * Only workspace source may be inlined, each file into one bundle: anything else is third-party code
+ * shipped without its licence or dependency entry, a builtin polyfill, or a second copy of a module.
+ * Returns the Azguard notices of the inlined sources, per output.
+ */
+function inlinedNotices(pkg: PublishedPackage, outputs: Record<string, { inputs: Record<string, { bytesInOutput: number }> }>) {
+	const owner = new Map<string, string>()
+	const notices = new Map<string, Set<string>>()
+	for (const [output, meta] of Object.entries(outputs)) {
+		const inlined = Object.entries(meta.inputs)
+			.filter(([, { bytesInOutput }]) => bytesInOutput > 0)
+			.map(([input]) => input)
+		for (const input of inlined) {
+			if (!SOURCE_INPUT.test(input)) throw new Error(`${pkg.dir}: ${output} inlines ${input}; only packages/*/src may be bundled`)
+			const other = owner.get(input)
+			if (other !== undefined) throw new Error(`${pkg.dir}: ${input} is inlined into both ${other} and ${output}`)
+			owner.set(input, output)
+		}
+		const found = inlined.map((input) => azguardNoticeOf(resolve(REPO_ROOT, input)))
+		notices.set(output, new Set(found.filter((n) => n !== undefined)))
+	}
+	return notices
+}
+
 async function bundle(pkg: PublishedPackage, pkgRoot: string, distDir: string): Promise<string[]> {
-	const entryFiles = new Map(pkg.entries.map((e) => [join(pkgRoot, e.source), `./${basename(e.source, ".ts")}.js`]))
+	const entryFiles = new Map(pkg.entries.map((e) => [join(pkgRoot, e.source), emittedName(e.source)]))
 	const result = await Bun.build({
 		entrypoints: [...entryFiles.keys()],
 		outdir: distDir,
@@ -67,31 +153,17 @@ async function bundle(pkg: PublishedPackage, pkgRoot: string, distDir: string): 
 	})
 	if (!result.success) throw new Error(`${pkg.dir}: bundle failed\n${result.logs.join("\n")}`)
 	const outputs = result.metafile?.outputs ?? {}
+	const expected = [...entryFiles.values()].map((f) => `./${f}`).sort()
+	if (JSON.stringify(Object.keys(outputs).sort()) !== JSON.stringify(expected)) {
+		throw new Error(`${pkg.dir}: bundle emitted ${Object.keys(outputs).join(", ")}, expected exactly ${expected.join(", ")}`)
+	}
 	const written: string[] = []
-	for (const [output, meta] of Object.entries(outputs)) {
+	for (const [output, notices] of inlinedNotices(pkg, outputs)) {
 		const file = resolve(distDir, output)
-		const notices = new Set<string>()
-		for (const [input, { bytesInOutput }] of Object.entries(meta.inputs)) {
-			if (bytesInOutput === 0) continue
-			const firstLine = readFileSync(resolve(input), "utf8").split("\n", 1)[0] ?? ""
-			if (AZGUARD_NOTICE.test(firstLine)) notices.add(firstLine)
-		}
-		const code = readFileSync(file, "utf8")
-		assertModuleComments(pkg, code)
-		writeFileSync(file, [...notices, code].join("\n"))
+		writeFileSync(file, [...notices, readFileSync(file, "utf8")].join("\n"))
 		written.push(file)
 	}
 	return written
-}
-
-/** The bundler labels each module with its cwd-relative path; anything but `packages/<pkg>/src/…` means a wrong cwd. */
-function assertModuleComments(pkg: PublishedPackage, code: string): void {
-	for (const line of code.split("\n")) {
-		const path = MODULE_COMMENT.exec(line)?.[1]
-		if (path !== undefined && !/^packages\/[a-z0-9-]+\/src\//.test(path)) {
-			throw new Error(`${pkg.dir}: bundle names a module outside packages/*/src: ${path}`)
-		}
-	}
 }
 
 /** The package a bundle import needs installed, or undefined when it needs none; throws on anything else. */
@@ -111,7 +183,7 @@ function importedPackage(pkg: PublishedPackage, siblings: Set<string>, path: str
 /** Bare package names the bundle imports; throws on anything a consumer could not install. */
 function bundleImports(pkg: PublishedPackage, files: string[]): Set<string> {
 	const transpiler = new Bun.Transpiler({ loader: "js" })
-	const siblings = new Set(pkg.entries.map((e) => `./${basename(e.source, ".ts")}.js`))
+	const siblings = new Set(pkg.entries.map((e) => `./${emittedName(e.source)}`))
 	const names = new Set<string>()
 	for (const file of files) {
 		for (const { path } of transpiler.scanImports(readFileSync(file, "utf8"))) {
@@ -122,14 +194,24 @@ function bundleImports(pkg: PublishedPackage, files: string[]): Set<string> {
 	return names
 }
 
-function emitDeclarations(pkg: PublishedPackage, pkgRoot: string, distDir: string): void {
+/** Declarations only, into their own directory, whatever `tsconfig.publish.json` says. */
+function emitDeclarations(pkg: PublishedPackage, pkgRoot: string, typesDir: string): void {
 	const tsc = join(pkgRoot, "node_modules/typescript/bin/tsc")
-	const run = Bun.spawnSync([process.execPath, tsc, "-p", join(pkgRoot, "tsconfig.publish.json"), "--outDir", distDir], {
+	const flags = ["--outDir", typesDir, "--declaration", "--emitDeclarationOnly", "--declarationMap", "false", "--removeComments"]
+	const run = Bun.spawnSync([process.execPath, tsc, "-p", join(pkgRoot, "tsconfig.publish.json"), ...flags], {
 		cwd: pkgRoot,
 		stdout: "pipe",
 		stderr: "pipe",
 	})
 	if (run.exitCode !== 0) throw new Error(`${pkg.dir}: tsc failed\n${run.stdout.toString()}${run.stderr.toString()}`)
+}
+
+/** Every file under `dir`, as `/`-separated paths relative to it. */
+function filesUnder(dir: string): string[] {
+	return readdirSync(dir, { recursive: true, encoding: "utf8" })
+		.filter((f) => statSync(join(dir, f)).isFile())
+		.map((f) => f.split(sep).join("/"))
+		.sort()
 }
 
 /** The source's Azguard modification notice, when it carries one: declarations are derived from it too. */
@@ -140,10 +222,10 @@ function azguardNoticeOf(sourceFile: string): string | undefined {
 }
 
 /** Node ESM resolves relative imports inside declarations as it does in JS: extensions are required. */
-function withExplicitExtensions(distDir: string, text: string): string {
+function withExplicitExtensions(typesDir: string, file: string, text: string): string {
 	return text.replace(RELATIVE_SPECIFIER, (_, lead, quote, spec: string) => {
 		if (/\.(js|json)$/.test(spec)) return `${lead}${quote}${spec}${quote}`
-		const suffix = existsSync(join(distDir, spec, "index.d.ts")) ? "/index.js" : ".js"
+		const suffix = existsSync(join(typesDir, dirname(file), spec, "index.d.ts")) ? "/index.js" : ".js"
 		return `${lead}${quote}${spec}${suffix}${quote}`
 	})
 }
@@ -158,7 +240,7 @@ function reachableDeclarations(pkg: PublishedPackage, declarations: Map<string, 
 		if (text === undefined) throw new Error(`${pkg.dir}: tsc emitted no ${file}`)
 		reachable.add(file)
 		for (const [, spec] of text.matchAll(DECLARATION_SPECIFIER)) {
-			if (spec?.startsWith(".")) queue.push(join(dirname(file), spec.replace(/\.js$/, ".d.ts")))
+			if (spec?.startsWith(".")) queue.push(join(dirname(file), spec.replace(/\.js$/, ".d.ts")).split(sep).join("/"))
 		}
 	}
 	return reachable
@@ -178,27 +260,26 @@ function declarationPackages(pkg: PublishedPackage, file: string, text: string):
 }
 
 /**
- * Rewrites the emitted declarations for Node ESM, drops the ones no entry reaches, and heads each
- * Azguard-derived one with its source's notice. Returns the bare package names the kept ones reference.
+ * Moves the declarations the entries reach from `typesDir` into `distDir`, rewritten for Node ESM
+ * and headed with their source's Azguard notice; the rest are dropped. Returns them and the bare
+ * package names they reference.
  */
-function finishDeclarations(pkg: PublishedPackage, pkgRoot: string, distDir: string): Set<string> {
-	const declarations = new Map(
-		readdirSync(distDir)
-			.filter((f) => f.endsWith(".d.ts"))
-			.map((f) => [f, withExplicitExtensions(distDir, readFileSync(join(distDir, f), "utf8"))] as const),
-	)
+function finishDeclarations(pkg: PublishedPackage, pkgRoot: string, typesDir: string, distDir: string) {
+	const emitted = filesUnder(typesDir)
+	const stray = emitted.filter((f) => !f.endsWith(".d.ts"))
+	if (stray.length > 0) throw new Error(`${pkg.dir}: tsc emitted ${stray.join(", ")}`)
+	const declarations = new Map(emitted.map((f) => [f, withExplicitExtensions(typesDir, f, readFileSync(join(typesDir, f), "utf8"))]))
 	const reachable = reachableDeclarations(pkg, declarations)
 	const names = new Set<string>()
-	for (const [file, text] of declarations) {
-		if (!reachable.has(file)) {
-			rmSync(join(distDir, file))
-			continue
-		}
+	for (const file of reachable) {
+		const text = declarations.get(file) ?? ""
 		for (const name of declarationPackages(pkg, file, text)) names.add(name)
 		const notice = azguardNoticeOf(join(pkgRoot, "src", file.replace(/\.d\.ts$/, ".ts")))
+		mkdirSync(dirname(join(distDir, file)), { recursive: true })
 		writeFileSync(join(distDir, file), notice === undefined ? text : `${notice}\n${text}`)
 	}
-	return names
+	rmSync(typesDir, { recursive: true, force: true })
+	return { declarations: reachable, names }
 }
 
 function sortedRecord(entries: [string, string][]): Record<string, string> {
@@ -218,13 +299,9 @@ function dependencyFields(pkg: PublishedPackage, pkgRoot: string, names: Set<str
 		const spec = declared[name]
 		if (spec === undefined)
 			throw new Error(`${pkg.dir}: the bundle needs ${name}, which packages/${pkg.dir}/package.json does not declare`)
-		if (name === "zod") {
-			deps.push([name, spec])
-		} else if (VERSION_RE.test(spec)) {
-			peers.push([name, spec])
-		} else {
-			throw new Error(`${pkg.dir}: ${name} is pinned as "${spec}"; @aztec/* peers must be exact`)
-		}
+		const [list, pattern, shape] = name === "zod" ? [deps, RANGE_RE, "a ^X.Y.Z range"] : [peers, EXACT_PIN_RE, "an exact version"]
+		if (!pattern.test(spec)) throw new Error(`${pkg.dir}: ${name} is declared as "${spec}"; it must be ${shape}`)
+		list.push([name, spec])
 	}
 	return {
 		...(deps.length > 0 ? { dependencies: sortedRecord(deps) } : {}),
@@ -239,6 +316,7 @@ function manifestFor(pkg: PublishedPackage, version: string, dependencies: objec
 			return [e.subpath, { types: `./dist/${base}.d.ts`, default: `./dist/${base}.js` }]
 		}),
 	)
+	const sideEffects = pkg.entries.filter((e) => e.sideEffect).map((e) => `./dist/${emittedName(e.source)}`)
 	return {
 		name: pkg.name,
 		version,
@@ -250,16 +328,26 @@ function manifestFor(pkg: PublishedPackage, version: string, dependencies: objec
 		type: "module",
 		exports: exportsMap,
 		files: ["dist", "NOTICE"],
-		sideEffects: pkg.sideEffects.length > 0 ? [...pkg.sideEffects] : false,
+		sideEffects: sideEffects.length > 0 ? sideEffects : false,
 		...dependencies,
-		// A publish without CI's OIDC identity fails instead of shipping unattested bytes.
+		// Only a default (a CLI flag overrides it); the package's 2FA-and-no-tokens setting is the boundary.
 		publishConfig: { access: "public", provenance: true },
 	}
 }
 
-/** Stages `pkg` into `<outRoot>/<pkg.dir>/`, replacing whatever was there. */
+/** npm keeps each file's mode in the tarball, so the caller's umask would otherwise move the digests. */
+function normalizeModes(dir: string): void {
+	chmodSync(dir, 0o755)
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const path = join(dir, entry.name)
+		if (entry.isDirectory()) normalizeModes(path)
+		else chmodSync(path, 0o644)
+	}
+}
+
+/** Stages `pkg` into `<outRoot>/<pkg.dir>/`, replacing the previous staging there. */
 export async function stagePackage(pkg: PublishedPackage, version: string, outRoot: string): Promise<StagedPackage> {
-	if (!VERSION_RE.test(version)) throw new Error(`version must be X.Y.Z, got "${version}"`)
+	if (!VERSION_RE.test(version)) throw new Error(`version must be canonical X.Y.Z, got "${version}"`)
 	if (realpathSync(process.cwd()) !== realpathSync(REPO_ROOT)) {
 		throw new Error(`run from the repository root (${REPO_ROOT}), not ${process.cwd()}`)
 	}
@@ -269,19 +357,24 @@ export async function stagePackage(pkg: PublishedPackage, version: string, outRo
 	const pkgRoot = join(REPO_ROOT, "packages", pkg.dir)
 	const out = resolve(outRoot, pkg.dir)
 	const distDir = join(out, "dist")
-	rmSync(out, { recursive: true, force: true })
-	mkdirSync(distDir, { recursive: true })
+	prepareOut(out)
 
 	const js = await bundle(pkg, pkgRoot, distDir)
 	const names = bundleImports(pkg, js)
-	emitDeclarations(pkg, pkgRoot, distDir)
-	for (const name of finishDeclarations(pkg, pkgRoot, distDir)) names.add(name)
+	emitDeclarations(pkg, pkgRoot, join(out, ".types"))
+	const types = finishDeclarations(pkg, pkgRoot, join(out, ".types"), distDir)
+	for (const name of types.names) names.add(name)
+	const shipped = [...pkg.entries.map((e) => emittedName(e.source)), ...types.declarations].sort()
+	if (JSON.stringify(filesUnder(distDir)) !== JSON.stringify(shipped)) {
+		throw new Error(`${pkg.dir}: dist holds ${filesUnder(distDir).join(", ")}, expected exactly ${shipped.join(", ")}`)
+	}
 
 	const manifest = manifestFor(pkg, version, dependencyFields(pkg, pkgRoot, names))
 	writeFileSync(join(out, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
 	copyFileSync(join(REPO_ROOT, "LICENSE"), join(out, "LICENSE"))
 	copyFileSync(join(REPO_ROOT, "NOTICE"), join(out, "NOTICE"))
 	copyFileSync(join(import.meta.dir, "readme", `${pkg.dir}.md`), join(out, "README.md"))
+	normalizeModes(out)
 	return { path: out, manifest }
 }
 

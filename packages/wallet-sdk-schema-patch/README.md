@@ -5,14 +5,14 @@ Single source of truth for the Nulo-custom extension of `@aztec/wallet-sdk`'s
 `isTokenRegistered`, `grantPublicAuthwit`, `getWalletFeatures` — so the dApp-side `ExtensionWallet`
 proxy can route them.
 
-Private, extension-internal. Consumed by the extension and the playground.
+The workspace is private and consumed by the extension and the playground.
 It deliberately is **not** an export of `@nulo/wallet-bridge`: wallet-bridge is
 extension-internal, and exposing it to the dApp-facing apps would leak its
-dispatcher/protocol surface to third-party dApps. A dedicated private package
-keeps the patch Nulo-internal while giving both apps one source. (It
-replaced three byte-identical inline copies — the drift risk is gone now.)
+dispatcher/protocol surface to third-party dApps. A dedicated package gives both
+apps one source without that leak. (It replaced three byte-identical inline
+copies — the drift risk is gone now.)
 
-The workspace stays private; [`scripts/publish/`](../../scripts/publish/README.md) stages a copy as `@alejoamiras/nulo-wallet-sdk-schema-patch` (`./apply`, `./register`, with `@aztec/aztec.js` and `@aztec/stdlib` as exact peers) for dApps outside this repo.
+The patch itself is public: [`scripts/publish/`](../../scripts/publish/README.md) stages a copy as `@alejoamiras/nulo-wallet-sdk-schema-patch` (`./apply`, `./register`, with `@aztec/aztec.js` and `@aztec/stdlib` as exact peers) for dApps outside this repo. A new method therefore also goes into that package's README (`scripts/publish/readme/wallet-sdk-schema-patch.md`); `scripts/publish/stage.test.ts` fails until it is listed.
 
 ## Exports
 

@@ -5,12 +5,15 @@
  * A version listed in `approved-digests.json` must pack exactly the listed tarballs, byte for byte.
  * The first publication must be listed: it is the one the rehearsal proved against its real
  * consumer. Later versions rely on the staged tests, the environment approval and the provenance
- * attestation, so an unlisted later version passes with a note.
+ * attestation, so an unlisted later version passes with a note. The publish job refuses any other
+ * version until the first one is on npm, so "later" cannot jump the queue.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 export const FIRST_VERSION = "0.1.0"
+/** Canonical `X.Y.Z` only: npm normalizes `00.1.0` to `0.1.0`, which would dodge a string-keyed binding. */
+export const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const APPROVED_FILE = join(import.meta.dir, "approved-digests.json")
 
 export type ApprovedDigests = Record<string, Record<string, string>>
@@ -27,6 +30,7 @@ export interface DigestCheck {
 }
 
 export function checkDigests(version: string, approved: ApprovedDigests, tarballs: Tarball[]): DigestCheck {
+	if (!VERSION_RE.test(version)) return { ok: false, failures: [`version must be canonical X.Y.Z, got "${version}"`], notes: [] }
 	const listed = approved[version]
 	if (listed === undefined) {
 		return version === FIRST_VERSION

@@ -5,11 +5,12 @@
  * This is the single source of truth — the extension and the playground both
  * activate it via the sibling `./register` side-effect entry.
  *
- * ## Why a private package (not a wallet-bridge export)
+ * ## Why a separate package (not a wallet-bridge export)
  *
  * `wallet-bridge` is extension-internal — exposing it to the playground would
  * give a dApp surface a path to its dispatcher/protocol internals. A dedicated
- * PRIVATE package keeps the patch Nulo-internal while giving both apps one source.
+ * package gives both apps one source without that path; this body is also
+ * published on npm.
  *
  * ## zod v4 entry shape (5.0)
  *
