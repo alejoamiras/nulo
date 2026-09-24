@@ -28,7 +28,7 @@ that cannot be read out of this repository.
 | ~~`country/state of residence`~~ | Filled: Argentina; venue is the Ciudad Autónoma de Buenos Aires. |
 | ~~`contact email`~~ | Filled: `hello@nulo.sh`. |
 | `effective date` | Privacy 1.0: filled, 23 September 2026 (the submission day). Terms 1.0: the date the 1.0 listing goes live. |
-| `official Chrome Web Store / Firefox Add-ons listing URL` | Where store-required publisher disclosures live. |
+| ~~`official Chrome Web Store / Firefox Add-ons listing URL`~~ | Filled 2026-09-23, after both first submissions: Chrome item `jlmiaokmjoicmclelpiiocdhncddkdmc` (slug `nulo-v5`) and the AMO add-on `nulo-v5`. Neither resolves publicly until its store publishes it. |
 | ~~`published security-reporting URL`~~ | Filled: `https://github.com/alejoamiras/nulo/security` (GitHub private vulnerability reporting, enabled 2026-09-22). |
 | ~~`provider legal name and privacy-policy link`~~ | Filled: Google LLC (Google Workspace, from the MX record and Google's contracting-entity table). |
 | ~~`applicable Cloudflare contracting entity and privacy-policy link`~~ | Filled: Cloudflare, Inc. (Self-Serve Subscription Agreement; `nulo.sh` is on the Free plan). |
