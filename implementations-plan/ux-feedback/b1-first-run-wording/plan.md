@@ -6,6 +6,7 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 eli5_mode: artifact
 eli5: https://claude.ai/artifact/LNTBQxGqZbXYhUAyELdxjY
+parity: https://claude.ai/artifact/3bsU92KDV4gfrqFGPBoy1m
 program: implementations-plan/ux-feedback/plan.md (batch 1, arc 1 of 6)
 arc_branch: feat/ux-1-first-run-wording
 design: implementations-plan/ux-feedback/design/spec.md (items 1, 3, 5, 7, 8; round-5 U11, U12, U13)
@@ -502,7 +503,7 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
 
 Gate: lint, `typecheck:all`, `test:all`, `bun run --cwd apps/extension build-storybook` exit 0.
 
-### P5 · Arc gate ☐
+### P5 · Arc gate ✓
 
 1. Every row of the program's [Local gates](../plan.md#local-gates): lint, `typecheck:all`,
    `test:all`, `test:ci-gating`, `build`; full smoke on Chrome and on Firefox.
