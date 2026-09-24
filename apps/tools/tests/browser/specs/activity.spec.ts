@@ -1,5 +1,7 @@
 /** Activity (cell 39): a bridge's recovery file round-trips, and a backgrounded send reports back. */
+import { isProvisionalRecordId } from "@nulo/bridge-core"
 import { freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
+import type { Page } from "@playwright/test"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, tid, walletFrame } from "../pages/connect"
@@ -10,6 +12,25 @@ test.use({ family: "activity", cells: 4, l1Index: 5 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
+
+/**
+ * The id the journal files `who`'s deposit under once the send has named it. A public send opens
+ * its row under a provisional id and renames it onto the claim hash before the deposit is signed,
+ * and a stepper follows the rename — so an id read before it is not one to hold a stepper to.
+ */
+async function namedRecordOf(page: Page, who: string): Promise<string> {
+	let id = ""
+	await expect
+		.poll(
+			async () => {
+				id = (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id ?? ""
+				return id !== "" && !isProvisionalRecordId(id)
+			},
+			{ timeout: 60_000, message: `the deposit to ${who} is filed under a named id, not a provisional one` },
+		)
+		.toBe(true)
+	return id
+}
 
 test("cell 39 — the recovery file of a finished bridge restores it into an empty journal, under one Ethereum signature", async ({
 	page,
@@ -132,8 +153,7 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	await confirmReview(page)
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(1)
-	const own = async (who: string) => (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id
-	const first = (await own(actor.address)) ?? "missing"
+	const first = await namedRecordOf(page, actor.address)
 	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", first)
 	// Tab 2 has seen the foreign record — its own journal renders it — and still sits on its prompt.
 	await tab2.locator(tid(TESTIDS.tabActivity)).click()
@@ -144,7 +164,7 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
 	expect(await walletFrame(tab2, run, "selfpay").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
-	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(b.address)) ?? "missing")
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", await namedRecordOf(page, b.address))
 
 	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
 	expect(r1.hero).toContain("USDT")
