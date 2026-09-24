@@ -37,12 +37,12 @@ describe("required-checks", () => {
 	})
 
 	test("add appends missing names under the Actions app id, is idempotent, and refuses a foreign producer", () => {
-		const plan = planAdd(normalize(live), ["bridge-contracts-status", "quality-status"])
-		expect(plan.checks).toContainEqual({ context: "bridge-contracts-status", app_id: GITHUB_ACTIONS_APP_ID })
+		const plan = planAdd(normalize(live), ["extension-smoke-e2e-firefox-status", "quality-status"])
+		expect(plan.checks).toContainEqual({ context: "extension-smoke-e2e-firefox-status", app_id: GITHUB_ACTIONS_APP_ID })
 		expect(plan.checks.filter((c) => c.context === "quality-status")).toHaveLength(1)
-		expect(planAdd(plan, ["bridge-contracts-status"])).toEqual(plan)
-		const foreign = normalize({ strict: true, checks: [{ context: "bridge-contracts-status", app_id: 42 }] })
-		expect(() => planAdd(foreign, ["bridge-contracts-status"])).toThrow(/two producers/)
+		expect(planAdd(plan, ["extension-smoke-e2e-firefox-status"])).toEqual(plan)
+		const foreign = normalize({ strict: true, checks: [{ context: "extension-smoke-e2e-firefox-status", app_id: 42 }] })
+		expect(() => planAdd(foreign, ["extension-smoke-e2e-firefox-status"])).toThrow(/two producers/)
 	})
 
 	test("expectation is order-insensitive and ignores the deprecated contexts mirror", () => {
@@ -55,7 +55,7 @@ describe("required-checks", () => {
 	})
 
 	test("every rename target is the name an aggregator job produces; labels match the gates", () => {
-		expect(Object.values(RENAMES).sort()).toEqual(["bridge-contracts-status", "extension-network-e2e-status", "extension-smoke-e2e-status"])
-		expect(LABELS.map((l) => l.name)).toEqual(["e2e:extension-smoke", "e2e:extension-network", "e2e:tools"])
+		expect(Object.values(RENAMES).sort()).toEqual(["extension-network-e2e-status", "extension-smoke-e2e-status"])
+		expect(LABELS.map((l) => l.name)).toEqual(["e2e:extension-smoke", "e2e:extension-network"])
 	})
 })

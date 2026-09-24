@@ -14,7 +14,6 @@
 			"!**/target",
 			"!**/*.svg",
 			"!**/apps/extension/src/types",
-			"!**/apps/tools/src/types",
 			"!**/packages/aztec-runtime/src/account/artifacts"
 		]
 	},
@@ -332,26 +331,6 @@
 								"patterns": [
 									{ "group": ["@nulo/aztec-runtime/*"], "message": "wallet-bridge cannot import aztec-runtime subpaths" },
 									{ "group": ["@nulo/extension/*"], "message": "wallet-bridge cannot import extension subpaths" }
-								]
-							}
-						}
-					}
-				}
-			}
-		},
-		{
-			"includes": ["apps/tools/src/**", "!apps/tools/src/lib/network.ts"],
-			"linter": {
-				"rules": {
-					"style": {
-						"noRestrictedImports": {
-							"level": "error",
-							"options": {
-								"patterns": [
-									{
-										"group": ["viem/chains"],
-										"message": "Import chain identity from @/lib/network (NETWORK), not viem/chains directly — single-source the chain so a half-switched two-network build can't sign a Permit2 witness against the wrong chain id"
-									}
 								]
 							}
 						}

@@ -9,9 +9,7 @@ inputs:
   version:
     description: >
       Override the detected Aztec version. Leave empty to derive it from apps/extension's
-      @aztec/aztec.js, which is what every caller wants. The bridge contracts are the exception:
-      their Nargo.toml pins aztec-packages to its own tag, and compiling that tag's aztec-nr with
-      a newer nargo fails inside upstream's own macros.
+      @aztec/aztec.js, which is what every caller wants.
     required: false
     default: ""
 

@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest"
  */
 
 const fromExtension = import.meta.url
-const fromBridgeCore = new URL("../../../packages/bridge-core/package.json", import.meta.url).href
 const fromAztecRuntime = new URL("../../../packages/aztec-runtime/package.json", import.meta.url).href
 
 describe("layout identity — extension-anchored", () => {
@@ -70,17 +69,6 @@ describe("layout identity — extension-anchored", () => {
 })
 
 describe("layout identity — cross-workspace anchors (resolution runs from the DECLARING workspace)", () => {
-	it("bridge-core: private-fee-juice artifact + l1-artifacts contract sources", () => {
-		expect(
-			existsSync(
-				resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", {
-					from: fromBridgeCore,
-				}),
-			),
-		).toBe(true)
-		expect(existsSync(resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: fromBridgeCore }))).toBe(true)
-	})
-
 	it("aztec-runtime: @aztec/pxe storage metadata (pxe exports no '.' — no hints needed)", () => {
 		expect(existsSync(resolvePackageAsset("@aztec/pxe", "dest/storage/metadata.js", { from: fromAztecRuntime }))).toBe(true)
 	})

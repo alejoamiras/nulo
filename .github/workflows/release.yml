@@ -453,51 +453,12 @@ jobs:
           fi
           echo "deploy-hook triggered (HTTP $code)"
 
-  # With the tools deploy hook unwired this job logs a notice and succeeds: the app
-  # redeploys through its Cloudflare Git-integration on push:main, so a
-  # workflow_dispatch republish does NOT redeploy it (wire the hook to change that).
-  # `environment: production` so an env-scoped secret is visible here exactly as
-  # it is in refresh-landing.
-  deploy-tools:
-    name: deploy tools (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets]
-    if: |
-      always() && !cancelled() &&
-      needs.resolve.result == 'success' &&
-      needs.attach-assets.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    environment: production
-    steps:
-      - name: Trigger Cloudflare Pages deploy (tools)
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_TOOLS_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            # Not wired: skip, don't fail. The tools app's Cloudflare dashboard Git-integration
-            # deploys it on push, so an unwired hook never blocks a release.
-            echo "::notice::CLOUDFLARE_TOOLS_DEPLOY_HOOK unset — skipping the CI tools deploy (dashboard Git-integration still deploys it)."
-            exit 0
-          fi
-          code=$(curl -sS -o /tmp/cf-tools.out -w "%{http_code}" \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            -X POST "$DEPLOY_HOOK")
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::tools deploy-hook curl returned HTTP $code"
-            cat /tmp/cf-tools.out
-            exit 1
-          fi
-          echo "tools deploy-hook triggered (HTTP $code)"
-
   verify-live:
     name: verify live deploys (advisory)
-    needs: [resolve, attach-assets, refresh-landing, deploy-tools]
+    needs: [resolve, attach-assets, refresh-landing]
     # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
-    # without blocking the release; open nulo.sh / tools.nulo.sh and re-fire the
-    # deploy (refresh-landing.yml break-glass) if it flags a stale site.
+    # without blocking the release; open nulo.sh and re-fire the deploy
+    # (refresh-landing.yml break-glass) if it flags a stale site.
     if: |
       always() &&
       needs.resolve.outputs.is_prerelease == 'false' &&
@@ -511,10 +472,9 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: ./.github/actions/setup-bun
-      - name: Verify the live sites serve this release
+      - name: Verify the live landing serves this release
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
-          SHA: ${{ needs.resolve.outputs.sha }}
         run: bun scripts/release/verify-live-run.ts
 
   sync-main-to-dev:
@@ -711,7 +671,6 @@ jobs:
         smoke-against-artifact,
         attach-assets,
         refresh-landing,
-        deploy-tools,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -732,7 +691,6 @@ jobs:
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
             "${{ needs.refresh-landing.result }}" \
-            "${{ needs.deploy-tools.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

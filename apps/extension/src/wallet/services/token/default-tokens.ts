@@ -54,7 +54,8 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 	},
 	{
 		chainId: CHAIN_IDS.MAINNET,
-		// Nulo's bridged Circle USDC — the L2 side of the tools.nulo.sh bridge (1:1 vs L1 USDC).
+		// Nulo's bridged Circle USDC (1:1 vs L1 USDC): the retired single-token bridge's L2 token,
+		// absent from unleashed's bridge manifests (github.com/alejoamiras/unleashed).
 		contract: "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4",
 		// Live-captured 2026-07-27 from the Alpha node; original == current; same
 		// aztec-standards Token class as cUSD.
@@ -64,8 +65,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 	},
 	{
 		chainId: CHAIN_IDS.TESTNET,
-		// Testnet "Test USDC" — the L2 side of the tools bridge on Testnet (faucet-minted,
-		// permissionless; same address as apps/tools/public/testnet-bridge.json).
+		// Testnet "Test USDC" (faucet-minted, permissionless): the same retired bridge's L2 token.
 		contract: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae",
 		// Live-captured 2026-07-28 from the Testnet node; original == current; same
 		// aztec-standards Token class as the mainnet tokens.

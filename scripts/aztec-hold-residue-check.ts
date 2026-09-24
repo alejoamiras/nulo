@@ -8,8 +8,7 @@
  * consumer reaches the workspace line, directly and through each held package.
  * A held package's exact-pinned `@aztec` PEER only re-binds to the workspace line when
  * the consuming workspace DECLARES that package; otherwise it silently nests the old
- * version (bridge-core hit exactly this with `@aztec/protocol-contracts`), which is why
- * every peer is checked from every consumer rather than a sample.
+ * version, which is why every peer is checked from every consumer rather than a sample.
  *
  * The Presto SDK is deliberately NOT held: a single `@aztec` generation in the
  * prover path is load-bearing, because upstream's `getVKIndex` discriminates with

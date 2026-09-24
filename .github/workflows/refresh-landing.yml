@@ -1,27 +1,15 @@
 name: refresh-landing
-run-name: "refresh-landing → ${{ inputs.target }}"
 
-# Break-glass: manually re-fire the Cloudflare Pages deploy hook(s) to redeploy
-# the landing (nulo.sh) and/or tools (tools.nulo.sh) WITHOUT a full release run.
+# Break-glass: manually re-fire the Cloudflare Pages deploy hook to redeploy
+# the landing (nulo.sh) WITHOUT a full release run.
 #
-# The release pipeline (release.yml) redeploys the landing on every stable publish; the tools
-# app redeploys through its Cloudflare Git-integration on push:main (its hook is unwired, so
-# neither release.yml nor this workflow can redeploy it until that changes).
+# The release pipeline (release.yml) redeploys the landing on every stable publish.
 # This workflow exists for the rare stale-deploy case (a CDN miss, or a landing
 # that didn't refresh) — one command, no Cloudflare token, no account id, no
-# dashboard: `gh workflow run refresh-landing.yml [-f target=landing|tools|both]`.
+# dashboard: `gh workflow run refresh-landing.yml`.
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Which site(s) to redeploy"
-        type: choice
-        default: both
-        options:
-          - both
-          - landing
-          - tools
 
 permissions:
   contents: read
@@ -38,7 +26,6 @@ jobs:
     environment: production
     steps:
       - name: Trigger landing deploy
-        if: inputs.target == 'both' || inputs.target == 'landing'
         env:
           DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
         run: |
@@ -55,31 +42,3 @@ jobs:
             exit 1
           fi
           echo "landing deploy-hook triggered (HTTP $code)"
-
-      - name: Trigger tools deploy
-        if: inputs.target == 'both' || inputs.target == 'tools'
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_TOOLS_DEPLOY_HOOK }}
-          TARGET: ${{ inputs.target }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            if [ "$TARGET" = "tools" ]; then
-              # Explicitly asked to refresh the tools app, but its hook isn't wired —
-              # fail loud rather than a green no-op.
-              echo "::error::CLOUDFLARE_TOOLS_DEPLOY_HOOK is unset but target=tools was requested — nothing to deploy."
-              exit 1
-            fi
-            # target=both: the tools app's CF dashboard Git-integration deploys it on
-            # push:main, so an unwired hook is a tolerated no-op here.
-            echo "::notice::CLOUDFLARE_TOOLS_DEPLOY_HOOK unset — skipping tools (dashboard Git-integration deploys it on push:main)."
-            exit 0
-          fi
-          code=$(curl -sS -o /tmp/cf-tools.out -w "%{http_code}" \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            -X POST "$DEPLOY_HOOK")
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::tools deploy-hook curl returned HTTP $code"
-            cat /tmp/cf-tools.out
-            exit 1
-          fi
-          echo "tools deploy-hook triggered (HTTP $code)"
