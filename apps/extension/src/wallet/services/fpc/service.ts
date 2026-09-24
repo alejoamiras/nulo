@@ -19,28 +19,10 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Fpc } from "./fpc"
 import { getFpcHandler } from "./handlers"
 import { type Events, FPC_SERVICE_NAME, FPC_STORAGE_ROOT, type FpcInfo, FpcType, type Methods, StoredFpcSchema } from "./spec"
-import { getContractInstanceFromInstantiationParams, type ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { loadContractArtifact, type ContractArtifact } from "@aztec/stdlib/abi"
-import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
-// @ts-expect-error — raw JSON import via vite alias, bypasses @aztec/aztec.js (which references document/window)
-import PrivateFPCJson from "@private-fpc-artifact"
-import { Fr } from "@aztec/foundation/curves/bn254"
-
-const PrivateFPCContractArtifact = loadContractArtifact(PrivateFPCJson)
+import { derivePrivateFpc, deriveSponsoredFpc, type ProtocolFpc } from "./protocol-fpcs"
 
 export * from "./fpc"
 export * from "./spec"
-
-/** The instantiation params for each protocol FPC — the SINGLE source both the canonical-address
- * derivation and the PXE-discovery registration read, so the two can never derive different
- * addresses. The PrivateFPC canonical salt is a FIXED project constant from 5.0.0 onward (the
- * fee-payment package's canonical-deployment contract; rc-era used salt 0). It must equal
- * bridge-core's PRIVATE_FPC_SALT / private-fpc-canonical.json — the derivation from
- * (artifact, salt, deployer) is machine-asserted there (layering bars the import here). Depositing
- * to a wrong PrivateFPC address is an UNRECOVERABLE loss, so a salt drift between the two sites was
- * a fund-loss hazard, not just a re-discovery bug. */
-const SPONSORED_FPC_PARAMS = () => ({ constructorArgs: [], salt: Fr.zero() })
-const PRIVATE_FPC_PARAMS = () => ({ constructorArgs: [], salt: new Fr(1n), deployer: AztecAddress.ZERO })
 
 /** Names seeded onto auto-discovered protocol FPCs. */
 const SPONSORED_FPC_DEFAULT_NAME = "Sponsored Fee Juice"
@@ -109,8 +91,8 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const cached = this.protocolAddresses.get(chainId)
 		if (cached) return cached
 
-		const sponsoredInstance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
-		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
+		const { instance: sponsoredInstance } = await deriveSponsoredFpc()
+		const { instance: privateInstance } = await derivePrivateFpc()
 		const addresses: ProtocolAddresses = {
 			sponsored: sponsoredInstance.address.toString(),
 			private: privateInstance.address.toString(),
@@ -195,27 +177,23 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		return result.map((f) => this.decorate(f, protocols))
 	}
 
-	/** Derive the instance for each protocol FPC the profile is missing. Same
-	 *  params as getOrComputeProtocolAddresses — the shared consts are what
-	 *  guarantee the discovered/registered instances equal `protocols.*`; a
+	/** Derive the instance for each protocol FPC the profile is missing, through
+	 *  the same `protocol-fpcs` helpers as getOrComputeProtocolAddresses — that is
+	 *  what guarantees the discovered/registered instances equal `protocols.*`; a
 	 *  divergence would register/store a DIFFERENT FPC than the derived address,
 	 *  so the has-checks never match (endless re-discovery) and the private-fuel
-	 *  path keys off the wrong address (unrecoverable-deposit hazard — see this
-	 *  file's header). */
-	private async collectMissingProtocolInstances(
-		hasSponsoredFpc: boolean,
-		hasPrivateFpc: boolean,
-	): Promise<{ instance: ContractInstanceWithAddress; artifact: ContractArtifact }[]> {
-		const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
+	 *  path keys off the wrong address (an unrecoverable-deposit hazard). */
+	private async collectMissingProtocolInstances(hasSponsoredFpc: boolean, hasPrivateFpc: boolean): Promise<ProtocolFpc[]> {
+		const toDiscover: ProtocolFpc[] = []
 		if (!hasSponsoredFpc) {
-			const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
+			const { instance, artifact } = await deriveSponsoredFpc()
 			this.logDebug(`getFpcs: SponsoredFPC instance address=${instance.address.toString()}`)
-			toDiscover.push({ instance, artifact: SponsoredFPCContractArtifact })
+			toDiscover.push({ instance, artifact })
 		}
 		if (!hasPrivateFpc) {
-			const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
+			const { instance, artifact } = await derivePrivateFpc()
 			this.logDebug(`getFpcs: PrivateFPC instance address=${instance.address.toString()}`)
-			toDiscover.push({ instance, artifact: PrivateFPCContractArtifact })
+			toDiscover.push({ instance, artifact })
 		}
 		return toDiscover
 	}
@@ -228,7 +206,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	 *  compensating delete) is one contiguous span here. Throws propagate to
 	 *  the caller's per-item catch. */
 	private async registerAndStoreProtocolFpc(
-		item: { instance: ContractInstanceWithAddress; artifact: ContractArtifact },
+		item: ProtocolFpc,
 		pxe: ReturnType<PxeServiceClient["getPXE"]>,
 		chainId: number,
 		network: { id: string },
