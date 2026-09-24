@@ -234,7 +234,6 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 	const HAND_ADDED = { id: "s2", type: FpcType.DefaultSponsoredFpc, name: "Dev sponsor", isProtocol: false }
 	/** Hundredths of a Fee Juice, in base units. */
 	const FJ = (hundredths: string) => `${hundredths}${"0".repeat(16)}`
-	/** The menu's right column: the disabled reason wins over what the row can spend. */
 	const column = (m: FeeMethodOption) => (m.disabled && m.disabledReason ? m.disabledReason : m.spend)
 
 	test.each([

@@ -1,4 +1,3 @@
-/** The name a profile gets when it is the first one. */
 export const FIRST_PROFILE_NAME = "Main"
 
 /**

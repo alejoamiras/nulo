@@ -430,7 +430,6 @@ function makeOpts(o: MakeOpts = {}) {
 	const clearError = vi.fn()
 	const pickFile = vi.fn()
 	const completeImport = vi.fn()
-	// The flow's resolver without the name field: the backup's own name, else the first-run default.
 	const resolveProfileName = vi.fn(async (backupName: string | null): Promise<string | null> => backupName ?? "Main")
 	return { password, repeatedPassword, fillError, clearError, pickFile, completeImport, resolveProfileName }
 }

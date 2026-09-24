@@ -12,7 +12,6 @@ const STUBS = {
 const mountStrip = (facts: PublishFacts) => mount(PublishStrip, { props: { facts }, global: { stubs: STUBS } })
 const strip = (w: ReturnType<typeof mountStrip>) => w.get('[data-testid="send-publish-strip"]')
 const cell = (w: ReturnType<typeof mountStrip>, attr: string) => w.get(`[data-cell="${attr}"]`)
-/** The cell's glyph name, or null when it draws none. */
 const glyphOf = (w: ReturnType<typeof mountStrip>, attr: string) => {
 	const glyph = cell(w, attr).find('[data-testid="stub-glyph"]')
 	return glyph.exists() ? glyph.attributes("data-name") : null

@@ -10,7 +10,6 @@ const STUBS = {
 
 const factory = (props: Record<string, unknown> = {}) => mount(FeeCostReadout, { props, global: { stubs: STUBS } })
 
-/** Every text node's trimmed content, joined by single spaces. */
 function textOf(root: Node): string {
 	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
 	const parts: string[] = []
@@ -26,9 +25,7 @@ const without = (w: VueWrapper, selector: string) => {
 	for (const node of clone.querySelectorAll(selector)) node.remove()
 	return textOf(clone)
 }
-/** What a screen reader reaches. */
 const spoken = (w: VueWrapper) => without(w, '[aria-hidden="true"]')
-/** What is drawn. */
 const drawn = (w: VueWrapper) => without(w, '[class*="visually_hidden"]')
 
 const ESTIMATE = { amount: "3.577824", usd: "$0.215" }
