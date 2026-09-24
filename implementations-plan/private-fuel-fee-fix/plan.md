@@ -1,6 +1,6 @@
 # Private-fuel claim fee fix (V5 self-paying budget)
 
-**Status:** AWAITING APPROVAL (codex round-1 reject → round-2 conditional approve, all conditions folded) · **Tier:** light (codex suggests `mid` — user's call at the gate) · **Parent:** [fuel-portal-v5-fix](https://github.com/alejoamiras/nulo/blob/<FREEZE_SHA>/implementations-plan/fuel-portal-v5-fix/plan.md) → [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md)
+**Status:** AWAITING APPROVAL (codex round-1 reject → round-2 conditional approve, all conditions folded) · **Tier:** light (codex suggests `mid` — user's call at the gate) · **Parent:** [fuel-portal-v5-fix](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/implementations-plan/fuel-portal-v5-fix/plan.md) → [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md)
 
 > **Deferred follow-up:** the public `fjwc` claim commits a 1.0× fee cap and carries the same latent inclusion-reject risk; not addressed here (no FPC budget gate, and broadening the general cap risks other dApps). Track separately.
 

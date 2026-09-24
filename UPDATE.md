@@ -76,7 +76,7 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 
 ## Bridge couplings — moved to `alejoamiras/unleashed`
 
-The any-ERC-20 bridge's `@aztec` couplings moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed): hub ↔ factory, `tokenClassId` ↔ the standards `Token` artifact, hub → `ContractInstanceRegistry`, the split JS/Noir toolchain, token-list origin ↔ CSP, the `txe-server` lockfile and per-token wallet grants, plus the PrivateFPC deploy descriptor, its node-compat map and the deploy-intent tooling. Until unleashed is populated, read them in [`UPDATE.md` at the freeze commit](https://github.com/alejoamiras/nulo/blob/<FREEZE_SHA>/UPDATE.md).
+The any-ERC-20 bridge's `@aztec` couplings moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed): hub ↔ factory, `tokenClassId` ↔ the standards `Token` artifact, hub → `ContractInstanceRegistry`, the split JS/Noir toolchain, token-list origin ↔ CSP, the `txe-server` lockfile and per-token wallet grants, plus the PrivateFPC deploy descriptor, its node-compat map and the deploy-intent tooling. Until unleashed is populated, read them in [`UPDATE.md` at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/UPDATE.md).
 
 Nothing here mirrors unleashed's `tokens[].l2Token`: the wallet's bridged-USDC seeds (`default-tokens.ts`, `price-map.ts`) are the retired single-token bridge's L2 tokens. A future mirror belongs in the `aztec-update` skill's reset step; changing the seeds is an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off).
 
