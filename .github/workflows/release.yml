@@ -422,7 +422,7 @@ jobs:
           cat /tmp/release-notes.md
 
   refresh-landing:
-    name: refresh landing (deploy hook)
+    name: refresh landing (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
       always() && !cancelled() &&
@@ -435,41 +435,19 @@ jobs:
     timeout-minutes: 2
     environment: production
     steps:
-      - name: Trigger landing deploy
+      - name: Trigger Cloudflare Pages deploy
         env:
-          LANDING_HOOK: ${{ secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK }}
-          PAGES_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
         run: |
-          # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
-          if [ -n "$LANDING_HOOK" ]; then
-            if ! [[ "$LANDING_HOOK" =~ ^https://api\.cloudflare\.com/client/v4/workers/builds/deploy_hooks/[A-Za-z0-9_-]+$ ]]; then
-              echo "::error::CLOUDFLARE_LANDING_DEPLOY_HOOK is not a Workers Builds deploy hook URL"
-              exit 1
-            fi
-            DEPLOY_HOOK="$LANDING_HOOK"
-          elif [ -n "$PAGES_HOOK" ]; then
-            DEPLOY_HOOK="$PAGES_HOOK"
-          else
-            echo "::error::neither CLOUDFLARE_LANDING_DEPLOY_HOOK nor CLOUDFLARE_PAGES_DEPLOY_HOOK is set"
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
             exit 1
           fi
-          code=$(curl -sS --globoff -o /tmp/cf.out -w "%{http_code}" \
+          code=$(curl -sS -o /tmp/cf.out -w "%{http_code}" \
             --retry 3 --retry-all-errors --retry-delay 2 \
             -X POST "$DEPLOY_HOOK")
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             echo "::error::deploy-hook curl returned HTTP $code"
-            cat /tmp/cf.out
-            exit 1
-          fi
-          # A Workers Builds hook names the Worker and branch it queued, so a hook for another Worker or
-          # branch fails here. A build already queued answers without them: the hook's binding is then
-          # only as good as its setup.
-          if [ -n "$LANDING_HOOK" ] && ! jq -e '.success == true
-              and (.result.build_uuid | type == "string" and length > 0)
-              and (if .result.already_exists == true and .result.worker == null and .result.branch == null
-                then true
-                else .result.worker == "nulo-landing" and .result.branch == "main" end)' /tmp/cf.out > /dev/null; then
-            echo "::error::the landing deploy hook did not queue a build of nulo-landing on main"
             cat /tmp/cf.out
             exit 1
           fi
