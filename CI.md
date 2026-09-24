@@ -19,6 +19,7 @@ Contributor-facing reference for what runs when, how to opt in to slow gates, ho
 | Add the `e2e:extension-smoke` or `e2e:extension-network` label | the corresponding workflow runs (removing the label re-evaluates) | as above |
 | Push to `main` | `release.yml` (release-please opens or updates a Release PR; merging it tags + creates the GitHub Release + attaches built artifacts) | 1–2 min for the PR refresh; 15–25 min for the publish run after merge |
 | Click "Run workflow" on `release.yml` | re-publish artifacts for an existing tag (escape hatch) | 15–25 min |
+| Click "Run workflow" on `publish-packages.yml` | stage, pack and digest-check the three npm packages; publish them only with `dry_run` false and the `npm-publish` environment approved | 3–5 min |
 
 ### `pr-quick.yml`
 
@@ -117,6 +118,10 @@ The repo's only scheduled workflow: every night at 03:23 UTC it builds current `
 - **Stable notes are protected**: `release.yml` passes `--ignore-tags '^v[0-9]+\.[0-9]+\.[0-9]+-nightly'` to git-cliff so nightly tags never act as range boundaries for a stable release's notes (without it, a stable cut the day after any nightly would only document the last ~24h). The nightly's own notes intentionally use the previous nightly as their boundary — a daily delta.
 - **Interrupted-publish recovery**: `gh release create` makes the tag before assets finish uploading; a cancelled run can leave partial assets, and the quiet-day skip will then match that sha. Re-dispatch with `force=true` (publishes under a fresh date-code tag) or heal in place: rebuild the zips locally and `gh release upload <tag> …--clobber`.
 - Schedules fire from the workflow file on the default branch (`dev`) — the trigger is inert on feature branches until merged.
+
+### `publish-packages.yml`
+
+Manual only (`version`, `dry_run` default true; refuses any ref but `dev`/`main`). Publishes `@alejoamiras/nulo-wallet-crypto`, `-resolve-asset` and `-wallet-sdk-schema-patch` at one lockstep version through npm trusted publishing — no npm token exists. `build` is unprivileged: `test:release` → `scripts/publish/stage.ts --all` → `npm pack` → `check-digests.ts` (the first publication, `0.1.0`, must match `scripts/publish/approved-digests.json`) → the tarballs as an artifact, with their sha256 and integrity in the step summary. `publish` is the only job with `id-token: write`, runs in the `npm-publish` environment (owner approval) and runs no repository code: it re-checks the digests on the downloaded bytes, skips a version already published with identical bytes, and runs `npm publish --provenance`. Node is pinned exactly because the digests depend on its npm and zlib. `scripts/ci-cd/publish-packages.test.ts` pins that shape; [`scripts/publish/README.md`](./scripts/publish/README.md) has the one-time trusted-publisher bootstrap.
 
 ## Labels
 

@@ -316,6 +316,10 @@ CoinGecko's keyless public API every ~3 minutes. Privacy posture:
   bounded by a frozen session quote, round-down bigint conversion, a >1%%
   drift re-confirmation, and the always-visible derived token amount.
 
+## Published packages
+
+The repository publishes three npm packages, `@alejoamiras/nulo-*`, staged from workspaces by `scripts/publish/stage.ts`. Publication runs only in `.github/workflows/publish-packages.yml`, and only through npm trusted publishing. No npm token exists in the repository, in Actions or on a workstation after the one-time bootstrap. The job holding `id-token: write` sits behind the owner-approved `npm-publish` environment and runs no repository code. Every version carries a provenance attestation, and the staged manifests set `publishConfig.provenance`, so a publish without CI's identity fails. The first version is bound to the exact bytes a rehearsal proved against its consumer (`scripts/publish/approved-digests.json`). The `@aztec/*` packages are exact peer dependencies, never bundled, so consumers share a single `Fr` and `WalletSchema`. See [`scripts/publish/README.md`](./scripts/publish/README.md).
+
 ## Dependency policy
 
 **Supply-chain age gate.** `bunfig.toml` sets `minimumReleaseAge = 604800`

@@ -12,6 +12,8 @@ dispatcher/protocol surface to third-party dApps. A dedicated private package
 keeps the patch Nulo-internal while giving both apps one source. (It
 replaced three byte-identical inline copies — the drift risk is gone now.)
 
+The workspace stays private; [`scripts/publish/`](../../scripts/publish/README.md) stages a copy as `@alejoamiras/nulo-wallet-sdk-schema-patch` (`./apply`, `./register`, with `@aztec/aztec.js` and `@aztec/stdlib` as exact peers) for dApps outside this repo.
+
 ## Exports
 
 | Subpath | Kind | Use |

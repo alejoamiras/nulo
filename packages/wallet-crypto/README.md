@@ -20,6 +20,8 @@ Depends only on `wallet-core` for the `ILogger` interface and `Web Crypto` (avai
 | `src/constants.ts` | `ENCRYPTION_GUARD` (frozen by the V8 vector), `PASSKEY_PRF_LABEL`. |
 | `src/zeroize.ts` | `zeroize()` helper for explicit secret-buffer wipes. |
 | `src/index.ts` | Public exports. |
+| `src/public.ts` | The npm surface (`@alejoamiras/nulo-wallet-crypto`): `deriveNuloAccountKeys`, `deriveSigningKeyFromSeed`, `EncryptionKey`, `type Passhash`. Staged by [`scripts/publish/`](../../scripts/publish/README.md); widening it widens a published API. |
+| `tsconfig.publish.json` | Declaration-only emit for the published entry (comments stripped). |
 | [`ATTACK-SURFACE.md`](./ATTACK-SURFACE.md) | What an attacker who reads the disk actually gets, and the work factor to invert each artifact. Read this before changing a KDF cost, adding a persisted field, or arguing about whether something needs encrypting. |
 | `vectors/` | Vendored **official** BIP-39 test vectors + provenance — the external oracle for the mnemonic step. |
 
