@@ -331,7 +331,7 @@ keep cancellation safe through the wait.
 Each phase ends with its validation gate; its log is `lessons/phase-N.md`, printed as
 `LESSONS_FILE=implementations-plan/ux-feedback/b2-window-placement/lessons/phase-N.md`.
 
-### P1 · Placement maths and the window manager ☐
+### P1 · Placement maths and the window manager ✓
 
 1. `topRightOf` (+ tests: the corner on a positive and on a negative-coordinate anchor, the height
    capped by a short anchor and left alone by a tall one, no position without a full anchor).
