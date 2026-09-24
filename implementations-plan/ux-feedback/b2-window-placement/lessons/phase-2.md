@@ -37,7 +37,12 @@ Traps:
 - Mutation probes (from a scratch copy, restored by `cp`): rethrowing the browser error, a
   `() => true` predicate, and reading the anchor after the claim each red exactly their named test.
 
-Gate:
+Review:
+
+- [minor] The claim comment above `markInFlight()` said "exactly one creation", contradicting the
+  "across both attempts" comment below it → fixed in 29cb8764 ("one window").
+
+Gate (re-run after the review fix, same results):
 
 - `bun run lint` → exit 0 (30 warnings, 5 infos, none in changed files).
 - `bun run typecheck:all` → exit 0 (16 workspaces).
