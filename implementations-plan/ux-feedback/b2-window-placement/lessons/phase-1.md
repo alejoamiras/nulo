@@ -46,7 +46,14 @@ Traps:
 - Root `bun run typecheck` cannot find `vue-tsc` in this worktree; `typecheck:all` (the gate) runs
   it per workspace.
 
-Gate:
+Review:
+
+- [minor] `stubWindows` doc-comment sat above `type Stub`, documenting the alias → fixed in 931c679d
+  (the alias moved up beside `Win`).
+- [minor] `createPlaced` TSDoc "an unwanted retry" implied a retry that starts → fixed in d0f14602
+  ("a refusal once `stillWanted()` is false").
+
+Gate (after the review fixes):
 
 - `bun run lint` → exit 0 (30 warnings, 5 infos, none in changed files).
 - `bun run typecheck:all` → exit 0 (16 workspaces).
