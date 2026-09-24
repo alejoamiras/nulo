@@ -9,7 +9,17 @@ Both suites dispatched on `dev` at `5ee1d77a5716e58e90a3093abcbedba8b642b6a9`, b
 
 Re-dispatch if the extracted paths, a shared package, `bun.lock`, `patches/` or either suite's harness changes on `dev` before A5a merges.
 
-Owner steps (pause both tools Pages projects, delete the tools deploy hooks and their secrets, note the serving deployment ids): pending.
+Re-dispatched after #688/#689 edited the tools tests: `pr-tools-e2e.yml` run 36041208852 on `dev` `6e6439a1`, success. Both suites also ran green on #690's head `2f84a813`, whose tree equals `dev` `6611f861` after the squash (runs 36041442526, 36041442478) — the freeze SHA's baseline unless `dev` moves before A5a merges.
+
+Owner steps (2026-09-24):
+
+- **Paused** automatic production + preview deployments on both tools Pages projects. The first push after the pause (`chore/remove-tools`) shows "No deployment available" on both.
+- **Production branch is `main` on both** (the plan expected `dev` for testnet). Serving, both from `main` at `chore(main): release 0.28.0 (#676)`:
+  - testnet project: `7c7841b4` — its `pages.dev` subdomain is `nulo-faucet.pages.dev` (the project's original name), which C1/C2 must target alongside `testnet.tools.nulo.sh`;
+  - mainnet project `nulo-tools-mainnet`: `d5438b0a`, domains `tools.nulo.sh` + `nulo-tools-mainnet.pages.dev`.
+  - The last previews, built from `dev` at #690 minutes before the pause: `84337e15` (testnet), `66da3d4f` (mainnet).
+- **Hook secrets: none exist.** Only the landing's `CLOUDFLARE_PAGES_DEPLOY_HOOK` is set at repo level; the `production`, `chrome-web-store` and `firefox-add-ons` environments hold no Cloudflare secret. The tools deploys ran from Cloudflare's own Git integration, never a GitHub hook.
+- **Dashboard deploy hooks** (Pages → Settings → Builds → Deploy hooks, both projects): pending the owner's check — a paused project still builds when a hook URL is called.
 
 ## Recon (ultracode workflow `stage1-recon`)
 
