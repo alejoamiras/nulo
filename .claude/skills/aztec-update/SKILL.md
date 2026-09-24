@@ -38,7 +38,7 @@ Do not start Phase 1 before the answer. Mid-run surprises that change the shape 
 **The pin surface** — miss one and you get a mixed old/new set:
 - `@aztec/*` exact pins across the workspace package.json files (`rg '"@aztec/' apps/*/package.json packages/*/package.json`). `@aztec/viem` is versioned independently — leave it.
 - **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line. Bump it WITH the `@aztec` line: the page-side client sends the workspace `@aztec/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
-- **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — HELD at 5.0.1 on a deliberate split line (`UPDATE.md`, `implementations-plan/aztec-5.2.0-js-line/`), enforced by `scripts/aztec-hold-residue-check.ts`. Moving them is its own decision: the PrivateFPC artifact the wallet derives from ships in `private-fee-juice`.
+- **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — HELD at 5.0.1 on a deliberate split line (`UPDATE.md`, `implementations-plan/aztec-5.2.0-js-line/`), enforced by `scripts/aztec-hold-residue-check.ts`. Moving them is its own decision: the PrivateFPC artifact the wallet derives from ships in `private-fee-juice`, and `aztec-standards` fixes the Token class every default seed and user-added standards token runs (`default-tokens.test.ts` pins the two together).
 - **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tag, the root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus `@alejoamiras/presto` (and the held pair above whenever it moves too). They are needed whenever `bun install` RESOLVES the new line: once `bun.lock` is final, delete them again in the same PR and prove it with `bun install --frozen-lockfile --force` (a frozen install never re-gates). For the following 7 days, any `package.json` edit in a workspace that reaches the new line (`apps/extension`, `packages/aztec-runtime`, …) re-gates it and fails the install — so land the bump's dependency changes in the bump PR, and for a stray later edit re-add the excludes locally without committing them. Keep a dated exclude across PRs only when a later PR of the same bump must re-resolve.
@@ -85,9 +85,16 @@ the wallet's own `derivePrivateFpc()` (`protocol-fpcs.ts`: the `private-fee-juic
 the artifact, the salt or upstream's derivation moved, and the wallet would pay Fee Juice to an
 address no PrivateFPC lives at — an UNRECOVERABLE loss. Default response: HOLD the bump. Re-pinning
 the literals is a CONSCIOUS act, valid only once a PrivateFPC is deployed at the new address on
-every network the wallet ships and a live re-canary is green; never silence the test. The other
-tripwires: the account KAT and freeze tests (above), `scripts/aztec-hold-residue-check.ts` (the
-lockfile ritual) and `descriptors-real-artifact.test.ts` (Gotchas).
+every network the wallet ships and a live re-canary is green; never silence the test. The deploy and
+the live settle canary run in `alejoamiras/unleashed` (until it is populated: bridge-core's
+`deploy-private-fpc-testnet.ts` and `fuel-testnet.ts` with `PRIVATE_RUNS=1`, at the freeze commit). The
+wallet-side precondition for editing the literals: from `apps/extension`,
+`bun run scripts/seed-preflight.ts <new address>` finds the instance on every shipped network, never `NOT FOUND`. The other
+tripwires: the account KAT and freeze tests (above); `apps/extension/src/wallet/services/token/default-tokens.test.ts`
+(the bundled aztec-standards Token class equals every seed's live class — red means a standards move
+would strand every deployed token, so HOLD the pair; the seeds are what the chain serves and are never
+re-pinned to match); `scripts/aztec-hold-residue-check.ts` (the lockfile ritual) and
+`descriptors-real-artifact.test.ts` (Gotchas).
 
 **The two execution canaries (MANDATORY, every `@aztec/*` bump PR)**: run
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`
@@ -189,12 +196,10 @@ Then Branch A's delivery gates.
   runs the upstream installer, whose npm resolve is live. 2026-08-12: `snappy@7.4.0` (broken Node
   entry chain — unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi`
   fallback) killed every fresh CI sandbox boot the day it published, while local runs stayed green
-  on pre-publish `~/.aztec` trees. The action now carries a load-check-gated pin step (replaces
-  snappy with 7.3.3 by direct tarball extraction, no-op when the installed one loads, fail-loud
-  re-check) — **remove that step when bumping to an @aztec line whose install resolves a fixed
-  snappy** (check: fresh-install in a scratch HOME, then `node -e "require('snappy')"` against the
-  version dir). Same class can recur through any un-pinned transitive: diagnose via publish-time
-  correlation + bare local `npm install` repro before rerunning CI.
+  on pre-publish `~/.aztec` trees. The action carried a snappy 7.3.3 pin step until an
+  @aztec line whose install resolved a fixed snappy; it is gone. The class recurs through any un-pinned
+  transitive: diagnose via publish-time correlation + a bare local `npm install` repro (fresh install
+  in a scratch HOME, then `node -e "require('<pkg>')"` against the version dir) before rerunning CI.
 
 - **Standards/token package swaps: noir struct paths are NOT stable across dep graphs.** The same
   `AztecAddress` param can arrive as `aztec::protocol_types::…::AztecAddress` from one compile and

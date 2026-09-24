@@ -1,0 +1,10 @@
+# swap-fuel — phase 4 lessons (manifest scope + scope-list re-consent)
+
+## 2026-06-12
+
+- **The whole `wallet-sdk-capability-field-diff` family is now closed**: the dispatcher's delta filter gained transaction/simulation/data branches beside the token-identity contracts one. The subtle design call: **coverage mirrors ENFORCEMENT's shape, not set-union** — `checkTransactionCalls` requires a SINGLE cap to cover every call of a tx (`caps.some(c => calls.every(...))`), so `transactionRequestCovered` demands one existing grant covering the whole requested scope. Union-coverage would silently approve requests enforcement then refuses (pinned: "split-across-grants does NOT count as covered"). Simulation sub-scopes (transactions/utilities) check independently because their checkers are per-sub `caps.some`; data privateEvents uses per-address union, matching ITS checker.
+- The replace-semantics machinery from token-identity (deltaApprovedTypes + replacementFor) is type-generic, so approved scope re-consents REPLACE the stored grant with zero new code.
+- **The canonical FeeJuice L2 address is `0x…05`** (`AztecAddress.fromNumber(FEE_JUICE_ADDRESS)`) — a test fixture using `0x…05` as a bridge address collided with it and made a "no wildcards" pin chase ghosts. Protocol-address collisions in fixtures are easy to hit with low integers.
+- Faucet manifests: `claim_and_end_setup` on FEE_JUICE_L2 added to transaction scope AND simulation.transactions scope (the engine's claim gate dry-runs the token claim WITH the embedded fjwc payment) in bridge + combined manifests; exact-list pins updated; the entry is one function on one protocol contract — no wildcards.
+- Popup delta-prominence: satisfied by construction (the popup receives ONLY the delta for approval; existing grants ride along as context). Visual confusion, if any, surfaces in P7's manual regrant smoke.
+- Test-mock gotcha recurrence: a popup returning `granted: []` records a REJECTION, and re-requesting a rejected type re-prompts by design — re-consent pins need fresh sessions between cases.

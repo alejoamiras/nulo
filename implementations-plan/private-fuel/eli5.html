@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueprint ELI5 — private-fuel</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+  h1, h2, h3 { font-weight: 600; }
+  h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+  h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+  pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+  .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+  .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+  .recommended { background: #fff8e1; border-left-color: #f0a020; }
+  .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+  .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+  .crit { color: #b00020; }
+  a { color: #0366d6; }
+  .muted { color: #666; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+  <h1>private-fuel — private gas, end to end</h1>
+  <p>Today you can bridge tokens privately, and you can "arrive with gas" — but only on <em>public</em> bridges, because the only way to get gas onto a fresh Aztec account currently writes your Aztec address onto Ethereum (a leak). This arc adds <strong>private Fee Juice</strong>: a private bridge arrives with gas through Wonderland's PrivateFPC, with nothing linking it to you on L2. Gas privacy follows the token — pick PRIVATE and your gas is private too — and we finally ship the private-by-default presets and delete the "fuel withheld on private" block.</p>
+
+  <h2>Why this tier was chosen (deep)</h2>
+  <p>Four HIGH-risk dimensions: <strong>novelty</strong> (first private-FJ integration), <strong>security/privacy</strong> (a wrong fee method leaks the user), <strong>irreversibility</strong> (gas deposited to a wrong FPC address, or with a wrong secret, is gone forever), <strong>external coupling</strong> (Wonderland's FPC, whose address is version-specific). The rubric leans mega-deep, but two reference implementations (Holonym + Wonderland) and pieces already shipped in our own extension de-risk the novelty — so deep. Three independent plans were drafted, merged, contradiction-checked, and double-audited; the double-audit caught a real privacy hole (below) that the rework fixes.</p>
+
+  <h2>The shape (what we learned)</h2>
+  <p>Good news: the arc is smaller than it looked. The Ethereum contract needs no change (it was built anticipating this). The secret math is already proven in our test suite. And the wallet needs no new "mode" — it already runs the dApp's pre-built fee transaction verbatim (two independent reviewers traced the code to confirm this). The real teeth are three irreversible edges: deriving the FPC address from the exact installed version (not a stale clone), turning a random secret into a derived one the recipient can reconstruct, and keeping two different "salts" from being confused.</p>
+
+  <h2>Phases</h2>
+  <div class="phase"><h3>P0 — Safety keystone (riskiest first, moves no funds)</h3>
+  <p>Pin the FPC address from the installed package, prove our secret math matches the contract's, and check the live network runs the matching version. Nothing real happens until this is locked.</p>
+  <p class="muted">Proves itself by: bridge-core unit tests (secret parity + an address tripwire) + a read-only live node-version check.</p></div>
+  <div class="phase"><h3>P1 — bridge-core private-fuel plumbing</h3>
+  <p>Make the fuel secret an injected, derived value (fixing a latent "random secret = lost funds" bug for private), route private fuel to the FPC, and persist the per-deposit salt safely.</p>
+  <p class="muted">Proves itself by: bridge-core typecheck + unit tests (the private secret/witness matches; the public path is byte-identical).</p></div>
+  <div class="phase"><h3>P2 — wallet: scope + prove the private payload (no new mode)</h3>
+  <p>Let the wallet's permission manifest allow the two private fee calls, register the FPC, and prove — through the <em>real</em> extension — that a cold-start private claim goes through. (Requires teaching the test playground to emit the private payload first.)</p>
+  <p class="muted">Proves itself by: <code>audit:vue</code> + a network-e2e that drives a private cold-start claim through the actual extension.</p></div>
+  <div class="phase"><h3>P3 — faucet: private-default UI + the claim matrix</h3>
+  <p>Ship the PUBLIC/PRIVATE preset cards (private default), remove the old guard, and wire the three fee paths: no-fuel (wallet's own FJ; a cold empty account is blocked with guidance — never Sponsored), public fuel (self-pay public), private fuel (self-pay private). Plus a <strong>fail-closed</strong> rule: only offer private fuel when the gas bought provably covers its own claim — and if it ever falls short, recover privately, never via the public/Sponsored path.</p>
+  <p class="muted">Proves itself by: <code>audit:faucet</code> + <code>audit:vue</code> + a network-e2e for the no-fuel cold-start, with pins for the private insufficient-fuel branch + a backup round-trip.</p></div>
+  <div class="phase"><h3>P4 — live private run on testnet (required gate)</h3>
+  <p>A real-proofs headless run that bridges + self-pays a private claim, asserting your public balance does NOT move and no Sponsor touched it (the privacy proof). First slice is a tiny "dust canary" against a wrong address.</p>
+  <p class="muted">Proves itself by: the live <code>fuel-testnet.ts</code> private variant passing both privacies with real proofs.</p></div>
+  <div class="phase"><h3>P5 — /harden security close-out</h3>
+  <p>A focused security pass over the whole bridge+fee surface, with fail-closed guards.</p>
+  <p class="muted">Proves itself by: a <code>/harden security</code> report with no unresolved high/critical + all suites green.</p></div>
+
+  <h2>Human context</h2>
+  <p>"Fee Juice" is Aztec's gas. A brand-new account has none — a chicken-and-egg problem this whole feature solves by bringing gas in with the bridge. The <strong>PrivateFPC</strong> is a shared "gas station" contract: your gas lands there (so no per-user address is exposed on L2), and only you can pull your share, because the deposit secret is cryptographically tied to your address. The catch the audits surfaced: the gas deposit on Ethereum is still a public transaction from your wallet, so it hides your <em>Aztec</em> identity and <em>which</em> user gets the gas, but not the fact that your Ethereum address funded the station — we'll say that plainly in the UI.</p>
+
+  <h2>Open questions (the Asks)</h2>
+  <ul>
+    <li><strong>No-fuel cold-start — RESOLVED (you chose BLOCK):</strong> a brand-new empty account can't pay for a no-fuel claim by itself and the wallet won't auto-sponsor it on the dApp path. Rather than a Sponsored fallback, the faucet now BLOCKS a no-fuel claim from an empty account with guidance ("enable fuel, or fund first") and never sends Sponsored — honoring the "never send Sponsored" rule.</li>
+    <li><strong>FPC version reconciliation (blocking before the live run):</strong> confirm the testnet runs the Aztec version matching the installed Wonderland package, so the derived address is the one the network recognizes. Who owns that version pin?</li>
+    <li>Where does the verified FPC address live — deployment config, or a generated test snapshot only?</li>
+    <li>Dust canary on every release, or only when the Aztec version / Wonderland package changes?</li>
+  </ul>
+
+  <div class="approval">
+    <h2>✅ Approved — P0 underway</h2>
+    <p class="muted">Gate cleared: scope + tier <code>deep</code> + the validation plan confirmed; no-fuel cold-start resolved to BLOCK. Original decision list kept below for the record.</p>
+    <ul>
+      <li>Confirm scope: private FJ (gas-follows-token) + B-presets (private default) + the fee-method matrix; mainnet + plain-bridge fuel out of scope.</li>
+      <li>Confirm tier <code>deep</code>.</li>
+      <li>Confirm the validation plan: per-phase unit/typecheck/audit gates + a network-e2e (real extension) for P2/P3 + the live headless run for P4 + a /harden security close-out (P5).</li>
+      <li>Answer the no-fuel cold-start Ask (the others have recommended defaults).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (DRAFT — finalized after approval)</h2>
+    <p><code>/goal</code> survives <code>claude --resume</code> and fits transcript-observable completion; <code>/loop</code> fires on an interval. Pick one.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases P0-P5 marked ✓ in implementations-plan/private-fuel/plan.md (the per-phase headers), each backed by its validation gate reported passing in the transcript; for each phase `LESSONS_FILE=implementations-plan/private-fuel/lessons/phase-N.md` printed; P0's FPC-address tripwire + secret keystone green; P4's live private run passed (public FJ unchanged, no Sponsor touched the private claim); /code-review max --fix complete + committed separately; codex post-impl audit complete with high/critical addressed; `bun run audit:vue` + `bun run audit:faucet` + `(cd packages/bridge-evm && forge test)` + `bun run --cwd packages/bridge-core test` all exit 0 in the transcript. Constraints: branch feat/private-fuel only; testnet only; never main; commits unsigned via git -c commit.gpgsign=false; NEVER deposit real FJ to an unverified FPC address (dust-canary first); private recovery NEVER falls back to public/Sponsored.</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/private-fuel on feat/private-fuel. Reality-check plan.md + lessons + git first; fix red suites; else next pending phase honoring its validation gate (P0 keystone → P1 plumbing → P2 wallet scope+network-e2e → P3 faucet+matrix → P4 live → P5 harden); validate per the phase gate; commit small conventional unsigned; push. Decisions → /codex xhigh, log in lessons. Hard limits: testnet only; this branch only; never main; NEVER deposit real FJ to an unverified FPC address; private recovery never public/Sponsored; 5 failures on one step ⇒ stop + reassess with codex. All ✓ ⇒ /code-review max --fix → codex post-impl audit → address high/critical → STOP with the manual checklist.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audits</a> · <a href="audit-opus.md">opus audits</a> · <a href="./lessons/">Lessons</a></p>
+</body>
+</html>

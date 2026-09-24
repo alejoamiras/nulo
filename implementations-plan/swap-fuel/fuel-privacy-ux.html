@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge — chosen design: privacy presets, private by default</title>
+<style>
+  :root{
+    --bg:#0b0a09; --panel:#100f0d; --line:#2a2926; --line-soft:#1c1b18;
+    --fg:#e9e4d9; --mut:#7e7b73; --mut2:#56544e;
+    --mint:#8ee0c0; --mint-dim:#1d3a31; --amber:#e0a83a; --strike:#5b3a3a;
+    --mono:ui-monospace,"SF Mono",Menlo,"DejaVu Sans Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font-family:var(--mono);margin:0;padding:32px 20px 80px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:20px;letter-spacing:.04em;margin:0 0 6px}
+  h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:36px 0 14px;font-weight:600}
+  p.lede{color:var(--mut);font-size:13px;max-width:80ch;margin:0 0 4px}
+  .key{color:var(--mint)} b.fg{color:var(--fg)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+  .chip-r{display:inline-block;border:1px solid var(--mint);color:var(--mint);font-size:11px;letter-spacing:.08em;padding:2px 8px;text-transform:uppercase}
+
+  .combos{max-width:560px;border:1px solid var(--line);margin:12px 0 6px}
+  .combos .c{display:flex;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+  .combos .c:last-child{border-bottom:0}
+  .combos .badge{font-size:10px;letter-spacing:.08em;padding:2px 7px;border:1px solid var(--line);color:var(--mut);text-transform:uppercase;flex:none;width:80px;text-align:center}
+  .combos .c.ok .badge{border-color:var(--mint);color:var(--mint)}
+  .combos .c.no{color:var(--mut2)} .combos .c.no .badge{border-color:var(--strike);color:var(--strike)}
+  .combos .c.no .t{text-decoration:line-through;text-decoration-color:var(--strike)}
+  .combos .t b{color:var(--fg)}
+
+  /* the chosen form */
+  .stage{display:flex;justify-content:center;margin:6px 0}
+  .card{border:1px solid var(--mint);background:var(--panel);width:440px;max-width:100%}
+  .card .cap{padding:14px 16px;border-bottom:1px solid var(--line-soft)}
+  .card .cap .tag{font-size:11px;letter-spacing:.1em;color:var(--mint);text-transform:uppercase}
+  .card .cap .name{font-size:16px;font-weight:600;margin:3px 0 0}
+  .form{padding:16px;display:flex;flex-direction:column;gap:13px}
+  .chainline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
+  .chainline b{color:var(--fg);font-weight:600}
+  .amt{display:flex;align-items:center;border:1px solid var(--line);padding:10px 12px}
+  .amt input{all:unset;flex:1;color:var(--fg);font-family:var(--mono);font-size:16px;width:100%}
+  .amt .u{color:var(--mut);font-size:13px}
+  .flabel{font-size:11px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;margin:2px 0 -4px}
+
+  .modes{display:grid;grid-template-columns:1fr;gap:8px}
+  .mode{border:1px solid var(--line);padding:11px 12px;cursor:pointer;background:transparent;position:relative}
+  .mode.sel{border-color:var(--mint);background:var(--mint-dim)}
+  .mode .mt{font-size:12.5px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+  .mode.sel .mt{color:var(--mint)}
+  .mode .md{font-size:11px;color:var(--mut);margin-top:4px;line-height:1.45}
+  .mode.sel .md{color:#b9d8cc}
+  .badge2{font-size:9.5px;letter-spacing:.08em;border:1px solid var(--mint);color:var(--mint);padding:1px 6px;text-transform:uppercase;font-weight:600}
+  .dot{width:9px;height:9px;border:1px solid var(--mut);border-radius:50%;flex:none}
+  .mode.sel .dot{border-color:var(--mint);background:var(--mint);box-shadow:inset 0 0 0 2px var(--mint-dim)}
+
+  .tog{position:relative;width:38px;height:21px;border:1px solid var(--line);background:transparent;cursor:pointer;flex:none;padding:0}
+  .tog .k{position:absolute;top:2px;left:2px;width:15px;height:15px;background:var(--mut);transition:.14s}
+  .tog.on{border-color:var(--mint)} .tog.on .k{transform:translateX(17px);background:var(--mint)}
+  .tog:disabled{opacity:.4;cursor:not-allowed}
+  .row{display:flex;align-items:center;gap:10px}
+  .row .lbl{font-size:12px;font-weight:600;letter-spacing:.06em}
+  .row.dim .lbl{color:var(--mut2)}
+  .sub{font-size:11px;color:var(--mut);margin:-2px 0 0 2px;line-height:1.45}
+  .sub.mint{color:var(--mint)}
+
+  .fuel{border:1px dashed var(--line);padding:10px 11px;display:flex;flex-direction:column;gap:7px}
+  .fuel .fr{display:flex;align-items:center;gap:7px;font-size:12px}
+  .fuel input{all:unset;width:54px;border:1px solid var(--line);padding:5px 7px;color:var(--fg);font-family:var(--mono);font-size:13px}
+  .fuel .q{color:var(--mint);font-weight:600}
+  .hidden{display:none!important}
+  .go{margin-top:3px;text-align:center;padding:12px;border:1px solid var(--mint);background:var(--mint);color:#06120e;font-weight:700;font-size:13px;letter-spacing:.06em}
+  .state{font-size:11px;color:var(--mut2);border-top:1px solid var(--line-soft);padding:8px 16px}
+  .state b{color:var(--mut)}
+
+  .preview{display:flex;align-items:center;gap:10px;justify-content:center;margin:14px 0 2px;font-size:11px;color:var(--mut)}
+  .preview .tog{width:34px;height:19px} .preview .tog .k{width:13px;height:13px}
+  .preview .tog.on .k{transform:translateX(15px)}
+
+  .note{border:1px solid var(--line);background:var(--panel);padding:14px 16px;margin-top:14px;font-size:12.5px;color:var(--mut);max-width:740px}
+  .note b{color:var(--fg)}
+  .considered{font-size:12px;color:var(--mut2);margin-top:20px}
+  .reco{border:1px solid var(--mint);background:var(--mint-dim);padding:16px 18px;margin-top:24px}
+  .reco h3{margin:0 0 8px;font-size:14px;color:var(--mint);letter-spacing:.04em}
+  .reco p{font-size:13px;color:var(--fg);margin:0 0 8px} .reco b{color:var(--fg)}
+  .reco ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--mut)} .reco li{margin:3px 0}
+  .foot{color:var(--mut2);font-size:11px;margin-top:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Bridge — chosen design</h1>
+  <div class="chips"><span class="chip-r">presets · direction B</span><span class="chip-r">private by default</span><span class="chip-r">no private-tokens + public-gas</span></div>
+  <p class="lede">Friends picked the <b class="fg">preset cards</b>, with <b class="fg">fuller explanations</b> and <b class="key">private selected by default</b>. With the rule in place, gas privacy follows the token, so the cards carry the whole privacy decision; fuel is a separate add-on underneath.</p>
+
+  <h2>The legal bridges</h2>
+  <div class="combos">
+    <div class="c ok"><span class="badge">private</span><span class="t"><b>Private</b> (default) — tokens + gas land hidden. Fully private, no leak.</span></div>
+    <div class="c ok"><span class="badge">public</span><span class="t"><b>Public</b> — tokens + gas visible. Cheapest, simplest.</span></div>
+    <div class="c no"><span class="badge">forbidden</span><span class="t"><b>Private tokens + public gas</b> — would write your Aztec address on L1.</span></div>
+  </div>
+
+  <h2>The form</h2>
+  <div class="stage">
+    <div class="card">
+      <div class="cap"><div class="tag">Bridge AZLO</div><div class="name">Ethereum → Aztec</div></div>
+      <div class="form">
+        <div class="chainline"><b>ETHEREUM · SEPOLIA</b> → <b>AZTEC</b> · 1:1</div>
+        <div class="amt"><input value="100"><span class="u">AZLO</span></div>
+
+        <div class="flabel">How it arrives</div>
+        <div class="modes" data-g="mode">
+          <div class="mode sel" data-v="priv">
+            <div class="mt"><span class="dot"></span>PRIVATE <span class="badge2">default</span></div>
+            <div class="md">Your tokens — and the gas, if you add it — land in your <b style="color:inherit">private</b> Aztec balance, hidden from everyone.</div>
+          </div>
+          <div class="mode" data-v="pub">
+            <div class="mt"><span class="dot"></span>PUBLIC</div>
+            <div class="md">Tokens and gas arrive <b style="color:inherit">visible</b> on Aztec — anyone can see the amount and the recipient. Cheapest and simplest.</div>
+          </div>
+        </div>
+
+        <div class="row" id="fuel-row"><button class="tog" id="fuelTog"><span class="k"></span></button><span class="lbl">ARRIVE WITH GAS</span></div>
+        <div class="sub" id="fuel-blocked">Coming for private bridges — until then, switch to Public to arrive with gas.</div>
+        <div class="fuel hidden" id="fuel-cfg">
+          <div class="fr"><input value="0.25"><span class="u">AZLO</span> → <span class="q">≈ 440 FJ</span></div>
+          <div class="sub mint" id="fuel-gp">+ private gas — claimed with your tokens, fully private.</div>
+        </div>
+
+        <div class="go">BRIDGE PRIVATELY TO AZTEC</div>
+      </div>
+      <div class="state" id="state"></div>
+    </div>
+  </div>
+
+  <div class="preview">
+    preview reality: <button class="tog" id="shipTog"><span class="k"></span></button>
+    <span id="ship-lbl">private Fee Juice NOT shipped yet (interim — gas only on Public)</span>
+  </div>
+
+  <div class="note" id="interim-note">
+    <b>Why the gas toggle is greyed under PRIVATE right now:</b> shipping private gas needs the deferred private-FeeJuice path (the PrivateFPC). Until that lands, fueling a private bridge would force the exact address-leak we just banned — so the honest interim is: <b>Private = no gas yet</b>, <b>Public = gas works</b>. Flip the preview toggle above to see the end-state (private fuel shipped) where the default bridge carries private gas.
+  </div>
+
+  <div class="reco">
+    <h3>What this commits us to</h3>
+    <p>Private-by-default is a strong privacy stance — but it collides with the missing private-FeeJuice path. The default bridge <b>wants</b> gas, and today a private bridge <b>can't</b> have it. So the verdict effectively decides the roadmap:</p>
+    <ul>
+      <li><b>Build private fuel next</b> (PrivateFPC / <code>PrivateMintAndPayFeePaymentMethod</code>) — then the private default carries private gas and the form is whole. My recommendation, since the default is now private.</li>
+      <li><b>Ship B interim</b> — private default, gas greyed under PRIVATE, a one-line "switch to Public for gas" nudge. Honest, but the headline feature (arrive-with-gas) is off on the default path until private fuel ships.</li>
+    </ul>
+    <p style="margin-bottom:0">Either way I can build the <b>real form</b> to this design now (cards, private default, gas-greyed-on-private), and we layer private fuel in when it's ready. Say go and I'll implement + wire it to the live deployment.</p>
+  </div>
+
+  <p class="considered">Also considered: A two-destinations · C two-toggles · D segmented dial. B won for guided clarity with only two postures.</p>
+  <p class="foot">Static mockup · approximated palette · no live quotes. Numbers mirror the screenshot (100 AZLO, 0.25 → ≈440 FJ).</p>
+</div>
+
+<script>
+  const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
+  let priv=true, fuel=false, shipped=false; // shipped = private FeeJuice path live
+
+  function fuelAllowed(){ return shipped || !priv; }          // interim: private can't fuel
+  function render(){
+    // privacy cards
+    $$('[data-g="mode"] .mode').forEach(m=>m.classList.toggle('sel', (m.dataset.v==='priv')===priv));
+    // fuel availability
+    const allowed=fuelAllowed();
+    $('#fuelTog').disabled=!allowed;
+    $('#fuel-row').classList.toggle('dim',!allowed);
+    if(!allowed){ fuel=false; $('#fuelTog').classList.remove('on'); }
+    $('#fuel-blocked').classList.toggle('hidden', allowed || !priv ? !( !allowed ) : true);
+    $('#fuel-blocked').classList.toggle('hidden', allowed);   // show only when blocked
+    $('#fuel-cfg').classList.toggle('hidden', !(fuel && allowed));
+    $('#fuel-gp').innerHTML = priv ? '+ private gas — claimed with your tokens, fully private.' : 'gas arrives public, with your public tokens.';
+    // CTA
+    $('.go').textContent = priv ? 'BRIDGE PRIVATELY TO AZTEC' : 'BRIDGE TO AZTEC';
+    // interim note + preview label
+    $('#interim-note').classList.toggle('hidden', shipped);
+    $('#ship-lbl').textContent = shipped ? 'private Fee Juice SHIPPED (end-state — private default carries gas)' : 'private Fee Juice NOT shipped yet (interim — gas only on Public)';
+    // state
+    const fullyP = priv && fuel;
+    $('#state').innerHTML = 'token <b>'+(priv?'private':'public')+'</b>'+(fuel?' · gas <b>'+(priv?'private':'public')+'</b>':' · no gas')+(fullyP?' · <span style="color:var(--mint)">fully private</span>':'');
+  }
+  $$('[data-g="mode"] .mode').forEach(m=>m.onclick=()=>{ priv=m.dataset.v==='priv'; render(); });
+  $('#fuelTog').onclick=()=>{ if($('#fuelTog').disabled)return; fuel=!fuel; $('#fuelTog').classList.toggle('on',fuel); render(); };
+  $('#shipTog').onclick=()=>{ shipped=!shipped; $('#shipTog').classList.toggle('on',shipped); render(); };
+  render();
+</script>
+</body>
+</html>

@@ -1003,9 +1003,9 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 
 describe("dispatcher — simulateTx / profileTx act as the account named in `opts.from`", () => {
 	// A dApp connected to A and B that simulates or profiles `from: B` must have the
-	// operation built as B. The bridge simulates every claim before sending it; a
-	// self-paid payload built as A is classified as externally paid, leaves the
-	// setup phase open, and the node rejects it. Same contract as sendTx above.
+	// operation built as B. A dApp that simulates each claim before sending it relies
+	// on this: a self-paid payload built as A is classified as externally paid, leaves
+	// the setup phase open, and the node rejects it. Same contract as sendTx above.
 	const grants = [
 		{ capability: { type: "accounts", canGet: true, canCreateAuthWit: true }, grantedAt: 1 },
 		{ capability: { type: "transaction", scope: "*" }, grantedAt: 1 },

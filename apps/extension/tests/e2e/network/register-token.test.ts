@@ -20,8 +20,7 @@ const hasConfig = aztecConfig !== undefined
  *     pre-fetched via parseTokenInterface (D7 — anti-phishing surface).
  *   - User Allow → tokenService.addToken with origin "dapp" + dappOrigin set.
  *
- * Drives via the playground rather than the tools app because the playground
- * helpers are mature.
+ * Drives via the playground, the generic dApp every extension e2e targets.
  *
  * Uses `dappConnectedExtensionWithAccountsCap` so the cap-popup round-trip
  * happens during fixture setup (hookTimeout=300s) rather than during this

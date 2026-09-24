@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — bridge-permit2-recipient-commitment</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.25rem 0; padding: 0.8rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .win { background: #eefaf0; border-left: 3px solid #2e9e4f; padding: 0.6rem 1rem; margin: 0.8rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h1>Permit2 everywhere + private claims a relayer can't steal</h1>
+  <p>Three linked upgrades to the Nulo bridge (the thing that moves tokens between Ethereum L1 and Aztec L2), plus a careful one-time swap of the L2 contracts. In plain terms: make every bridge deposit use a <em>signature</em> instead of an on-chain <em>approval transaction</em> (cheaper, one tap), and change how private deposits are "locked" so that someone else can finish the deposit <em>for</em> you on Aztec without being able to reroute the money to themselves.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Deep.</strong> Five of the six risk dials are HIGH: blast radius (touches L1 Solidity, L2 Noir, the shared TS library, and the faucet UI at once), irreversibility (a private-claim change forces a fresh set of L2 contracts that can never be un-deployed and that everyone must migrate to), migration cost (a full testnet redeploy + config cutover), external coupling (Uniswap V4, canonical Permit2, the Aztec sequencer), and security sensitivity (it's a token bridge — the whole point is not losing funds). Only novelty is moderate (the repo already has a working precedent for the crypto trick). Three independent plans were drafted, cross-checked for contradictions, then double-audited by an adversarial reviewer from a different model family and two fresh security auditors.</p>
+
+  <h2>The three changes, plain</h2>
+  <p><strong>(a) Bridge a normal token with a signature.</strong> Today a plain token bridge makes you send an "approve" transaction first, then the deposit. There is already a signature-based path built into the on-chain router — it's just switched off in the app. We turn it on and delete the old approve path.</p>
+  <p><strong>(b) Buy gas with a signature too.</strong> The "Fuel" tab (which tops up your Aztec gas) still uses the old approve flow. Surprising discovery from the research: we need <em>zero new smart-contract code</em> for this — the same router function from (a) already does exactly what the fuel deposit needs, because the two deposit calls are byte-for-byte identical. So (b) is mostly wiring, plus a one-time "approve Permit2" step the first time (the gas token, unlike the test token, doesn't pre-approve it).</p>
+  <p><strong>(c) Lock private deposits to their recipient.</strong> Right now a private deposit is a "bearer" secret: whoever holds the secret can claim the money to <em>any</em> Aztec address. We change the lock so the secret is mathematically tied to the intended recipient. Then you can safely hand the claim details to a helper ("relayer") who submits the Aztec transaction for you — they can finish it, but the math only lets the money land at <em>you</em>. This is the real prize: it needs new (but small) Noir circuit code and, because Aztec's wiring is one-time-only, a brand-new set of L2 contracts.</p>
+
+  <div class="win">
+    <strong>What the review rounds actually caught</strong> (why the ceremony earned its keep): a validation gate that could <em>never</em> pass (it checked new contracts against the old config); a private-deposit path that would have <em>silently stranded funds</em> because one leg still used the old random secret; a rollback recipe that violated the plan's own safety rule; a "green" test gate that passes while the real test is skipped; and a "the relayer can't do anything bad" claim that was too strong (it can't <em>steal</em>, but it can <em>stall</em> your claim). All fixed in the plan before you see it.
+  </div>
+
+  <h2>Phases (each proves itself before the next)</h2>
+  <div class="phase"><h3>1 — L1 tests first (no contract changes)</h3><p>Add the project's first fuzz tests (throw thousands of random inputs at the router) + tests against the <em>real</em> deployed router and the real Permit2/Uniswap, including a hostile-portal test. Also a positive proof that the live router really has the function we're betting on.</p><p class="muted">Proves itself by: <code>forge test</code> green with fuzz + the named fork tests asserted PASSED (not just "didn't error").</p></div>
+  <div class="phase"><h3>2 — L2 recipient lock + cross-language pins</h3><p>Rewrite the private-claim circuit to derive its secret from the recipient; pin the exact math in both Noir and TypeScript so they can never silently drift apart (a drift would strand deposits). A machine check confirms no old "bearer" path survives.</p><p class="muted">Proves itself by: both toolchains compute byte-identical secrets; the sole-consumer check passes; existing content-hash pins unchanged.</p></div>
+  <div class="phase"><h3>3 — Shared TS library + relayer script</h3><p>Point the shared bridge library at the signature path, delete the old direct path, and ship a small relayer script (submits a claim from a <em>different</em> account — the proof the recipient-lock works).</p><p class="muted">Proves itself by: no old deposit path remains; all five claim call-sites pass the new salt; unit tests + type-check green.</p></div>
+  <div class="phase"><h3>4 — Full local dry-run (all three together)</h3><p>On a local sandbox: public deposit, private deposit, private deposit <em>claimed by a second account</em>, and fuel-only — all end to end. First real proof the recipient-lock circuit actually consumes a real message, and that the recipient can <em>find</em> the money after a relayer submits it.</p><p class="muted">Proves itself by: every leg prints PASSED; the relayer leg's sender ≠ recipient and the recipient sees the balance.</p></div>
+  <div class="phase"><h3>5 — Faucet UI</h3><p>One-signature deposits everywhere; the one-time gas-token approve; a runtime guard so new deposit code <em>refuses</em> to run against an old config (turns the safety rule into a technical lock).</p><p class="muted">Proves itself by: <code>bun run audit:faucet</code> green; no old deposit path in the UI.</p></div>
+  <div class="phase"><h3>6 — Deploy the new stack (candidate only)</h3><p>Deploy the fresh L2 contracts + a fresh portal, reusing the existing L1 token and pools. Writes a <em>candidate</em> config file — the live app doesn't change yet.</p><p class="muted">Proves itself by: every on-chain read-back ✓; the live config file untouched.</p></div>
+  <div class="phase"><h3>7 — Prove on live testnet, then flip</h3><p>Run five real-money-dust canaries against the candidate (including a wrong-recipient attempt that MUST fail, and a relayer claim that must succeed). Only then flip the live config and ship code + config as one release. <strong>(Approved WIPE: no drain window / old-state preservation — freeze the old faucet and cut over; no one cares about prior testnet state.)</strong></p><p class="muted">Proves itself by: all canaries settle with balance checks; wrong-recipient fails without consuming.</p></div>
+  <div class="phase"><h3>8 — Durability + docs <span style="font-weight:400">(shrunk by the WIPE)</span></h3><p>A test proving real new-stack deposits are backup-recoverable, plus honest docs. The old legacy-claim + rollback machinery is dropped — there's no prior state to preserve.</p><p class="muted">Proves itself by: the backup-durability test passes.</p></div>
+  <div class="phase"><h3>9 — Focused security re-audit</h3><p>A narrow red-team pass over only the new/changed surface, same shape as the June bridge audit.</p><p class="muted">Proves itself by: every finding fixed or explicitly accepted; full stack green.</p></div>
+
+  <h2>Human context you need to judge this</h2>
+  <ul>
+    <li><strong>"Bearer secret"</strong> = like cash: whoever holds it, spends it. Today's private claim is bearer. Change (c) makes it a locked cheque made out to you.</li>
+    <li><strong>Why a whole new L2 stack?</strong> Aztec's contract wiring is one-time-only (a deliberate security fix). Changing the claim logic means the old bridge contract can't be re-wired, so a fresh token + minter + bridge + portal is unavoidable. The old ones stay live so nothing in flight is lost — it's the same shape as an Aztec network reset.</li>
+    <li><strong>Relayer honesty:</strong> the recipient-lock guarantees a relayer can't <em>steal</em>. It does <em>not</em> stop a relayer from stalling (consuming your message then making you jump through a hoop to find the funds) or from learning that "address X deposited amount Y." Use a relayer you trust, or none. The plan says this plainly rather than overselling it.</li>
+    <li><strong>This is testnet.</strong> The tokens are worthless, so a couple of accepted risks (a blind signature could drain the test token; a fresh L2 token means re-adding it in the wallet) are fine here — but the plan flags each as a hard blocker before this pattern ever touches a real-value token.</li>
+  </ul>
+
+  <h2>Open questions for you (the Asks)</h2>
+  <ul>
+    <li><strong>A-1 — ratify the "zero new Solidity" bet</strong> for fuel-only (reuse the existing router function), accepting the generic-router phishing surface for testnet. The alternative is a dedicated function + a router redeploy for a smaller attack surface on one path. <em>Recommendation: ratify — it's the leaner design and the phishing surface exists on the bridge path either way.</em></li>
+    <li><strong>A-2 — legacy claims:</strong> a pinned recovery script (recommended) or keep an old faucet build at a versioned URL?</li>
+    <li><strong>A-3 — confirm</strong> users must re-add the new L2 token (old balances stay on the old token, exitable via script). Same as a network reset.</li>
+    <li><strong>A-4 — <code>deposit-testnet.ts</code>:</strong> rewire to the new path (default) or retire it?</li>
+    <li><strong>A-5 — drain window:</strong> how long, announced where, and does it <em>freeze</em> old deposits or just announce?</li>
+    <li><strong>A-6 — relayer canary account:</strong> dedicated fresh key, sponsored fees, never logs secrets (recommended).</li>
+    <li><strong>A-7 — confirm</strong> the new circuit parameter name <code>claim_salt</code> (it lands in the committed ABI).</li>
+  </ul>
+
+  <div class="win">
+    <strong>✅ APPROVED 2026-07-06.</strong> Sign-off recorded. A-1: ratify the zero-Solidity reuse (with the on-chain portal-binding hardening tracked as explicit future work for both paths). A-3/A-5: <strong>WIPE</strong> — only testnet infra exists, no prior state matters, so freeze the old faucet and cut over; the legacy-claim / rollback-preservation / drain-window machinery is dropped (Phases 7–8 shrank accordingly). A-2/4/6/7: defaults. Next: seeds finalized below; the user runs the build session (live-deploy phases stay gated on explicit go).
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (FINAL — approved scope)</h2>
+    <p>Two options for the autonomous build session. <code>/goal</code> keeps working until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires on an interval. This plan's completion is fully transcript-observable (phase ✓ marks + gate output), so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose. And start the session in the permission mode you intend, because the live-deploy + promotion phases (6–7) are gated on your explicit go regardless.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases 1-9 marked ✓ in implementations-plan/bridge-permit2-recipient-commitment/plan.md (the per-phase headers, not just the chat), each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/bridge-permit2-recipient-commitment/lessons/phase-N.md; every fork-test gate reported the NAMED fork legs PASSED (not a bare forge exit 0); the five Phase 7 canaries (public, private self-claim, private relayer-claim + wrong-recipient failure submitted directly to the sequencer, bridgeWithFuel-private, fuel-only) reported settled with balance asserts; the Phase 8 backup-durability test green; /code-review max --fix applied and committed separately; codex post-impl audit high/critical addressed; `bun run audit:faucet`, `cd contracts/bridge/evm && forge test`, both `nargo test` suites, and `bun run --cwd packages/bridge-core test` all report exit 0. STOP before any live deploy (Phase 6) or promotion (Phase 7) for explicit go. (WIPE: no legacy/rollback work — Phase 7 = freeze old + flip, Phase 8 = durability + docs.)</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/bridge-permit2-recipient-commitment forward. Never idle. Each firing: reality-check plan.md + lessons/ + git; pick the next pending step; after each edit run the touched packages' fast gates; commit → push. Stuck or facing a decision? /codex xhigh, reach a verdict, act, log it. Hard limits: never merge to main, never run the Phase 6/7 live-deploy or promotion without explicit go, never expand scope. Phase green = ITS gate in plan.md passes; mark ✓, file lessons, print LESSONS_FILE=..., advance. All phases ✓? /code-review max --fix → codex post-impl audit → wrap-up. Keep an ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="brief.md">brief.md</a> · <a href="audit-codex.md">audit-codex.md</a> · <a href="audit-fable.md">audit-fable.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

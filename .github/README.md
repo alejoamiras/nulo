@@ -31,7 +31,7 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 | `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
 | `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
 | `_extension-smoke-e2e.yml` | `pr-extension-smoke-e2e`, `pr-extension-smoke-e2e-firefox`, `release`, `nightly` |
-| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `pr-extension-network-e2e-firefox`, `extension-network-e2e-soak`, `release` (stable channel only), `nightly` |
+| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `pr-extension-network-e2e-firefox`, `extension-network-e2e-soak`, `release` (opt-in: `workflow_dispatch` with `run_network_e2e=true`), `nightly` |
 
 Both take a `browser` input (`chrome` default, `firefox`); log-artifact and browser-cache names carry the browser so a Firefox lane can neither overwrite nor restore a Chrome lane's.
 
