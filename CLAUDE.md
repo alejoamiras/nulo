@@ -546,7 +546,7 @@ A **stable release** turns the current `main` into a published `vX.Y.Z`: a GitHu
 
 **Prerequisites** (one-time, already done):
 - GitHub App `nulo-release-bot` installed on the repo with `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` repo secrets wired.
-- `CLOUDFLARE_PAGES_DEPLOY_HOOK` repo secret set (used by the workflow's `refresh-landing` job). Both landing workflows read `CLOUDFLARE_LANDING_DEPLOY_HOOK` first: setting it to the `nulo-landing` Worker's Workers Builds hook (branch `main`) moves every refresh from Pages to the Worker with no merge — the landing cut-over's last step. The Pages secret and the fallback go once Pages is deleted.
+- `CLOUDFLARE_PAGES_DEPLOY_HOOK` repo secret set (used by the workflow's `refresh-landing` job). Both landing workflows read `CLOUDFLARE_LANDING_DEPLOY_HOOK` first: setting it to the `nulo-landing` Worker's Workers Builds hook (branch `main`) moves every refresh from Pages to the Worker with no merge — the landing cut-over's last step. The Workers path also checks the hook's URL and that its answer names `nulo-landing` on `main`; while Pages still exists, deleting a bad `CLOUDFLARE_LANDING_DEPLOY_HOOK` falls back to Pages. The Pages secret and the fallback go once Pages is deleted.
 
 #### Stable release (from `main`)
 

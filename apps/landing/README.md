@@ -30,7 +30,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run test` | Unit tests (renderer, headers parser, release resolver). |
 | `bun run deploy:dry` | Validate `wrangler.jsonc` against the built `dist/`; needs no credentials. |
-| `bun run deploy`, `bun run deploy:preview` | What Workers Builds runs for production (`main`) and for other branches. By hand only to create the Worker. |
+| `bun run deploy`, `bun run deploy:preview` | The production (`main`) and other-branch commands to configure when connecting Workers Builds. By hand only to create the Worker. |
 
 ## Key notes
 
@@ -39,7 +39,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 - **Two design rules.** Copy, buttons and panels sit on solid plates; section headings sit on the grain with a dark halo. The grain runs behind every section uninterrupted.
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
-- **Independent ship.** Builds and deploys from `main` without the extension: Cloudflare Pages serves `nulo.sh` today, and the `nulo-landing` Worker (Workers Builds) takes it over at the cut-over. Both rebuild on the release's deploy hook, because `prebuild` reads the latest release. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
+- **Independent ship.** Builds and deploys from `main` without the extension: Cloudflare Pages serves `nulo.sh` today, and the `nulo-landing` Worker (Workers Builds) takes it over at the cut-over. A stable release refreshes whichever serves the site through its deploy hook (Pages until `CLOUDFLARE_LANDING_DEPLOY_HOOK` is set, the Worker after), because `prebuild` reads the latest release. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
 
 ## Legal pages
 

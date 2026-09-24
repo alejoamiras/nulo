@@ -437,10 +437,22 @@ jobs:
     steps:
       - name: Trigger landing deploy
         env:
-          # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK || secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+          LANDING_HOOK: ${{ secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK }}
+          PAGES_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
         run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
+          # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
+          if [ -n "$LANDING_HOOK" ]; then
+            case "$LANDING_HOOK" in
+              https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/*) ;;
+              *)
+                echo "::error::CLOUDFLARE_LANDING_DEPLOY_HOOK is not a Workers Builds deploy hook URL"
+                exit 1
+                ;;
+            esac
+            DEPLOY_HOOK="$LANDING_HOOK"
+          elif [ -n "$PAGES_HOOK" ]; then
+            DEPLOY_HOOK="$PAGES_HOOK"
+          else
             echo "::error::neither CLOUDFLARE_LANDING_DEPLOY_HOOK nor CLOUDFLARE_PAGES_DEPLOY_HOOK is set"
             exit 1
           fi
@@ -449,6 +461,15 @@ jobs:
             -X POST "$DEPLOY_HOOK")
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             echo "::error::deploy-hook curl returned HTTP $code"
+            cat /tmp/cf.out
+            exit 1
+          fi
+          # A Workers Builds hook names the Worker and branch it queued (a build already queued answers
+          # without them), so a valid hook for another Worker or branch cannot pass as a landing refresh.
+          if [ -n "$LANDING_HOOK" ] && ! jq -e '.success == true
+              and (.result.worker // "nulo-landing") == "nulo-landing"
+              and (.result.branch // "main") == "main"' /tmp/cf.out > /dev/null; then
+            echo "::error::the landing deploy hook did not queue a build of nulo-landing on main"
             cat /tmp/cf.out
             exit 1
           fi
