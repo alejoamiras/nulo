@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate round 5: the states the earlier rounds never drew, each with the recommended option
-drawn and a picker. Writes src/r5/{i5,i6,i8,tips}.html."""
+drawn and a picker. Writes src/r5/{i3,i5,i6,i8,tips}.html."""
 import pathlib
 
 from gen_i6 import AUTH_DEF, RENAME_DEF, SIM_ROW, TX_ROW, dapp, details, group, row, strip, term
@@ -408,13 +408,93 @@ def item8() -> str:
     )
 
 
+def item3() -> str:
+    def menu(rows: list[tuple[str, str, str]]) -> str:
+        items = "".join(f'<div class="n-menu-item{cls}"><span>{title}</span><span class="meta">{meta}</span></div>' for title, meta, cls in rows)
+        return f'<div class="n-menu">{items}</div>'
+
+    def menus(loading: list[tuple[str, str, str]], failed: list[tuple[str, str, str]]) -> str:
+        return crop(menu(loading)) + cap("Before the balances arrive") + crop(menu(failed)) + cap("When one balance couldn't be read")
+
+    sponsored = ("Sponsored", "free", " sel")
+    failed_honest = [("Public Fee Juice", "1.2 FJ", ""), ("Private Fee Juice", "couldn't check balance", " dis"), sponsored]
+    ua = opt("U14A", "A dash until the balances arrive; say which couldn't be read", menus(
+        [("Public Fee Juice", "— FJ", ""), ("Private Fee Juice", "— FJ", ""), sponsored], failed_honest), [
+        "Until the balances arrive, including while the card retries a read that failed, the column reads \"— FJ\", the dash the card's Available row already uses. The rows stay selectable, as today.",
+        "When a balance comes back unreadable, that row is disabled with \"couldn't check balance\", public and private alike. Today private says \"no balance\" there, which isn't true.",
+    ], rec=True)
+    ub = opt("U14B", "Nothing while loading", menus(
+        [("Public Fee Juice", "", ""), ("Private Fee Juice", "", ""), sponsored], failed_honest), [
+        "The right column stays empty until the balances arrive; an unreadable balance as in A.",
+    ])
+    uc = opt("U14C", "Today's words until the balances arrive", menus(
+        [("Public Fee Juice", "public", ""), ("Private Fee Juice", "private", ""), sponsored],
+        [("Public Fee Juice", "1.2 FJ", ""), ("Private Fee Juice", "no balance", " dis"), sponsored]), [
+        "Keeps \"public\" / \"private\" until the balances arrive, and today's words for an unreadable balance: \"no balance\" on private.",
+    ])
+
+    def spoken(sentence: str) -> str:
+        card = (
+            '<div class="n-fee"><div class="n-fee-card"><div class="n-fee-top"><span class="n-fee-label">Fee</span></div>'
+            '<div class="n-fee-trigger"><span class="n-fee-value">Sponsored</span><span class="ms">expand_more</span></div></div>'
+            '<div class="n-fee-row"><span class="n-fee-label">You pay</span><span class="n-fee-mono"><b style="font-weight:600">Nothing</b> '
+            '<small><s>~0.004 FJ (&lt;$0.001)</s></small></span></div></div>'
+        )
+        return crop(card) + cap("What you see") + f'<div class="srline">{sentence}</div>' + cap("What a screen reader says")
+
+    sa = opt("U15A", "\"less than $0.001\"", spoken("You pay nothing. The sponsor covers less than $0.001."), [
+        "The spoken sentence says the bound in words when the fee is under a tenth of a cent.",
+    ], rec=True)
+    sb = opt("U15B", "The template as written", spoken("You pay nothing. The sponsor covers about &lt;$0.001."), [
+        "The decided sentence with the price dropped in; most screen readers say \"about less than $0.001\".",
+    ])
+
+    def handadded(meta: str, line: str, said: str) -> str:
+        card = (
+            '<div class="n-fee"><div class="n-fee-card"><div class="n-fee-top"><span class="n-fee-label">Fee</span></div>'
+            '<div class="n-fee-trigger"><span class="n-fee-value">Dev sponsor</span><span class="ms">expand_more</span></div></div>'
+            f'<div class="n-fee-row"><span class="n-fee-label">You pay</span><span class="n-fee-mono">{line}</span></div></div>'
+        )
+        rows = [("Public Fee Juice", "1.2 FJ", ""), ("Private Fee Juice", "0.42 FJ", ""), ("Sponsored", "free", ""), ("Dev sponsor", meta, " sel")]
+        return (
+            crop(menu(rows)) + cap("The menu, with a fee contract you added")
+            + crop(card) + cap("The card with it picked")
+            + f'<div class="srline">{said}</div>' + cap("What a screen reader says")
+        )
+
+    ha = opt("U16A", "A dash for a fee contract added by hand", handadded(
+        "—", "—", "Nulo can't tell what this fee contract charges you."), [
+        "\"free\" and \"Nothing\" stay for the sponsor Nulo ships with. A contract you added by hand still pays the network fee, but Nulo can't vouch for what else it does: it could collect tokens the account already allowed it to take.",
+        "The dash says \"Nulo can't tell\", as it does in the send strip.",
+    ], rec=True)
+    hb = opt("U16B", "The same as the built-in sponsor", handadded(
+        "free", '<b style="font-weight:600">Nothing</b> <small><s>~3.577824 FJ ($0.215)</s></small>',
+        "You pay nothing. The sponsor covers about $0.215."), [
+        "Reads like the sponsor Nulo ships with; \"free\" then means only that the network fee is covered.",
+    ])
+
+    return block(
+        "i3-r5",
+        "V4 draws the fee line and the menu with every balance known and Nulo's own sponsor. Three states have no drawing: the menu before the balances arrive or when one couldn't be read, what a screen reader says when the sponsored fee is under a tenth of a cent, and a fee contract you added by hand.",
+        [ua, ub, uc, sa, sb, ha, hb],
+        [
+            pick("i3d", "U14 · menu, balance unknown", "A|B|C|Other"),
+            pick("i3e", "U15 · spoken, under $0.001", "A|B|Other"),
+            pick("i3f", "U16 · fee contract added by hand", "A|B|Other"),
+        ],
+        "My picks: A, A and A",
+        "Each reuses what the card already says elsewhere: the dash is how the Available row shows a balance it doesn't know, and how the send strip says Nulo can't tell; an unreadable private balance gets the public row's words; a screen reader hears the bound, not a symbol. \"free\" stays a promise only where Nulo can keep it.",
+    )
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     (OUT / "i6.html").write_text(item6())
     (OUT / "tips.html").write_text(tips())
     (OUT / "i5.html").write_text(item5())
     (OUT / "i8.html").write_text(item8())
-    print("wrote src/r5/{i5,i6,i8,tips}.html")
+    (OUT / "i3.html").write_text(item3())
+    print("wrote src/r5/{i3,i5,i6,i8,tips}.html")
 
 
 if __name__ == "__main__":

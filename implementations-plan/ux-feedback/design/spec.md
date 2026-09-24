@@ -63,6 +63,9 @@ and this file gets fixed.
   text: "You pay nothing. The sponsor covers about $0.215." (no-price form, derived: "You pay
   nothing. The sponsor covers about 3.577824 FJ.").
 - Amount formatting: the existing fee formatter, unchanged; only the layout and words change.
+- Undrawn: the menu's right column before the balances arrive or when one is unreadable (U14), and
+  the spoken sentence when the fee is under a tenth of a cent (U15), and a sponsor added by hand
+  (U16).
 - Out of scope: tx detail and receipt fee rows ("Estimated fee", "Network fee").
 
 ## Item 4 · Where dApp windows open (A now)
@@ -276,3 +279,6 @@ owns each builds the owner's pick. The recommended option is what gets drawn fir
 | U11 | Onboarding import | First-run import (recovery phrase, backup) still shows the name field | Same as create: no field, profile "Main" |
 | U12 | Send review sheet, fee menu tag | They share the strip's marks | The same padlock and globe, so the vocabulary stays one |
 | U13 | Send strip, review sheet | Nulo can't tell who pays (`unknown`) | No mark; the dash says it; the review sheet keeps the mark's space so the words align |
+| U14 | Fee menu, right column | Balances not known yet (loading, or retrying a failed read), or one that came back unreadable | Not known yet: "— FJ", rows selectable as today; unreadable: that row disabled with "couldn't check balance", public and private alike |
+| U15 | "You pay", spoken text | The sponsored fee is under a tenth of a cent (`<$0.001`) | "You pay nothing. The sponsor covers less than $0.001." |
+| U16 | Fee menu and "You pay" | The sponsor is a fee contract added by hand, which Nulo cannot vouch for | "free" and "Nothing" only for Nulo's own sponsor; a hand-added one shows "—" in both, spoken "Nulo can't tell what this fee contract charges you." |
