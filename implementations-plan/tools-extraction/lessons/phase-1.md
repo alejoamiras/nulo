@@ -20,6 +20,7 @@ Owner steps (2026-09-24):
   - The last previews, built from `dev` at #690 minutes before the pause: `84337e15` (testnet), `66da3d4f` (mainnet).
 - **Hook secrets: none exist.** Only the landing's `CLOUDFLARE_PAGES_DEPLOY_HOOK` is set at repo level; the `production`, `chrome-web-store` and `firefox-add-ons` environments hold no Cloudflare secret. The tools deploys ran from Cloudflare's own Git integration, never a GitHub hook.
 - **Dashboard deploy hooks**: none on either project (owner, 2026-09-24) — every tools build came through the GitHub connection, which the pause stops. **F0 complete.**
+- **Pause verified**: A5a's push (19:26 UTC, before the pause) drew failed `Cloudflare Pages: nulo-tools-{testnet,mainnet}` checks on #691 within ~1 min (the build has no `apps/tools`; stale, not required). A probe push of the A5b branch after the owner set production and preview to disconnected (19:36) drew only the landing's `nulo` check; neither tools project reported within 3.5 min.
 
 ## Recon (ultracode workflow `stage1-recon`)
 
