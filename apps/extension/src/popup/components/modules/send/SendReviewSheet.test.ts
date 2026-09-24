@@ -16,6 +16,7 @@ import SendReviewSheet from "./SendReviewSheet.vue"
 const STUBS = {
 	Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false },
 	MaterialIcon: { template: "<span />" },
+	Icon: { template: '<svg data-testid="stub-glyph" :data-name="name" :data-size="size" />', props: ["name", "size"] },
 	// The popup family is stubbed to what the sheet wires into it: the stack numbers, escape, initial focus, close.
 	Popup: {
 		name: "Popup",
@@ -168,11 +169,24 @@ describe("modules/send/SendReviewSheet", () => {
 		w = mountSheet({ facts, payerKind })
 		expect(["you", "to", "amount"].map((id) => row(w as W, id).attributes("data-visibility"))).toEqual(visibilities)
 		expect(row(w, "you").attributes("data-notice-shape")).toBe(shape)
+		const GLYPH = { hidden: "lock", public: "globe", exposed: "globe", unknown: undefined }
 		for (const [i, id] of ["you", "to", "amount"].entries()) {
-			const filled = visibilities[i] === "public" || visibilities[i] === "exposed"
-			expect(row(w, id).get("i").classes().includes(mark.filled), id).toBe(filled)
+			const glyph = row(w, id).find('[data-testid="stub-glyph"]')
+			expect(glyph.exists() ? glyph.attributes("data-name") : undefined, id).toBe(GLYPH[visibilities[i]])
 			expect(row(w, id).classes()).toContain(mark[visibilities[i] as keyof typeof mark])
 		}
+	})
+
+	test("a row Nulo can't mark keeps the glyph's 10px, so its words line up with the others", () => {
+		w = mountSheet({ facts: publishFacts("private", "public", "unvouched"), payerKind: "unvouched" })
+		const you = row(w, "you")
+		expect(you.find('[data-testid="stub-glyph"]').exists()).toBe(false)
+		const gap = you.element.firstElementChild
+		expect(gap?.tagName).toBe("SPAN")
+		expect(gap?.getAttribute("aria-hidden")).toBe("true")
+		const glyph = row(w, "to").get('[data-testid="stub-glyph"]')
+		expect(glyph.attributes("data-size")).toBe("10")
+		expect(glyph.attributes("aria-hidden")).toBe("true")
 	})
 
 	test("public rows carry their sentence, hidden rows none, and the gated row its remedy link", () => {

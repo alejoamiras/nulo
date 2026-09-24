@@ -9,6 +9,7 @@
  * when, this only draws it.
  */
 import { Dropdown } from "@/components/ui/Dropdown"
+import { publishGlyph } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
 
 defineProps({
@@ -19,6 +20,9 @@ defineProps({
 })
 
 const emit = defineEmits(["update:modelValue", "open", "close"])
+
+/** The tag only ever says the fee names the account publicly. */
+const TAG_GLYPH = publishGlyph("exposed")
 </script>
 
 <template>
@@ -31,7 +35,7 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 				data-testid="send-fee-privacy-notice"
 				:data-notice-shape="payerNoticeShape"
 			>
-				<i :class="[mark.mark, mark.filled]" aria-hidden="true" />
+				<Icon :name="TAG_GLYPH" size="10" aria-hidden="true" />
 				NAMES YOUR ADDRESS
 			</span>
 		</Flex>

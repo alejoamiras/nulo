@@ -128,6 +128,15 @@ describe("Header — avatar/name/address split", () => {
 })
 
 describe("Header — lock", () => {
+	test("is a chip: the padlock and the word Lock, named for what it does", () => {
+		const lock = mountHeader().get('[data-testid="header-lock"]')
+		expect(lock.get('[data-testid="stub-material"]').attributes("data-name")).toBe("lock")
+		expect(lock.text()).toBe("Lock")
+		// The accessible name contains the visible word.
+		expect(lock.attributes("aria-label")).toBe("Lock wallet")
+		expect(lock.attributes("type")).toBe("button")
+	})
+
 	async function clickLock() {
 		const w = mountHeader()
 		await w.find('[data-testid="header-lock"]').trigger("click")

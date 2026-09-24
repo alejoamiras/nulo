@@ -455,7 +455,7 @@ smoke (`registerProfile` reaches every spec) exit 0.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-### P4 · Lock chip and marks (items 7, 8, U12, U13) ☐
+### P4 · Lock chip and marks (items 7, 8, U12, U13) ✓
 
 1. `Header.vue` chip (+ `Header.test.ts`: word, icon, testid, accessible name).
 2. `publishGlyph` (+ test: every visibility, `unknown` → none, `exposed` → never the lock); the

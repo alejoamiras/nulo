@@ -7,6 +7,7 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Text: { template: "<span><slot /></span>" },
 	MaterialIcon: { template: "<i />" },
+	Icon: { template: '<svg data-testid="stub-glyph" :data-name="name" />', props: ["name", "size"] },
 	Dropdown: {
 		template: '<div><slot name="trigger" /><div data-popup><slot name="popup" /></div></div>',
 	},
@@ -106,7 +107,8 @@ describe("FeeMethodSelector", () => {
 		expect(w.find(TAG).attributes("data-notice-shape")).toBe("private-public")
 		expect(w.find(TAG).text()).toBe("NAMES YOUR ADDRESS")
 		expect(w.find(TAG).classes()).toContain(mark.exposed)
-		expect(w.find(`${TAG} i`).classes()).toEqual(expect.arrayContaining([mark.mark, mark.filled]))
+		expect(w.find(`${TAG} [data-testid="stub-glyph"]`).attributes("data-name")).toBe("globe")
+		expect(w.find(`${TAG} [data-testid="stub-glyph"]`).attributes("aria-hidden")).toBe("true")
 		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Public Fee Juice")
 
 		await w.setProps({ payerNoticeShape: null })

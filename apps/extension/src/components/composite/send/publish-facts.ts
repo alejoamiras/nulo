@@ -104,6 +104,20 @@ export function factWord(cell: FactCell, facts: PublishFacts): string {
 	return FACT_WORDS[cell][facts[cell]]
 }
 
+/** The glyph Home and the token rows use for each side: the padlock only for hidden, and none
+ *  while Nulo cannot tell, so a mark never claims more privacy than the send has. */
+export function publishGlyph(visibility: Visibility): "lock" | "globe" | null {
+	switch (visibility) {
+		case "hidden":
+			return "lock"
+		case "public":
+		case "exposed":
+			return "globe"
+		default:
+			return null
+	}
+}
+
 export function noticeBodyFor(shape: NoticeShape): string {
 	return NOTICE_BODY[shape]
 }

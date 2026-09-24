@@ -11,6 +11,7 @@ import {
 	paidBy,
 	payerKindOf,
 	publishFacts,
+	publishGlyph,
 	rowSentence,
 	stripAriaLabel,
 	type TransferSide,
@@ -83,6 +84,15 @@ describe("payerKindOf", () => {
 		for (const settings of [...shapes, { paymentMethod: { kind: "fjwc" } }, { kind: "fj" } as object]) {
 			expect(payerKindOf(settings, PROTOCOL), JSON.stringify(settings)).toBeNull()
 		}
+	})
+})
+
+describe("publishGlyph", () => {
+	test("the padlock only for hidden, the globe for anything public, nothing when Nulo can't tell", () => {
+		expect(publishGlyph("hidden")).toBe("lock")
+		expect(publishGlyph("public")).toBe("globe")
+		expect(publishGlyph("exposed")).toBe("globe")
+		expect(publishGlyph("unknown")).toBeNull()
 	})
 })
 
