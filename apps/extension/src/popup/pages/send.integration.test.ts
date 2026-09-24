@@ -135,6 +135,7 @@ import { useAppStore } from "@/stores/app.store"
 import { INIT_RETRY_BACKOFF_MS } from "@/stores/balances.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 import { installChromeStorage } from "../../../tests/helpers/chrome-storage-mock"
 import Send from "./send.vue"
 
@@ -166,7 +167,7 @@ const STUBS = {
 	},
 	// The card's read-only rows, and the menu chrome around the real selector's items.
 	FeeMethodRow: { template: '<div data-testid="stub-fee-method-row" />' },
-	FeeCostReadout: { template: '<div data-testid="stub-fee-cost" />' },
+	FeeCostReadout: { props: ["estimate"], template: '<div data-testid="stub-fee-cost" :data-usd="estimate?.usd" />' },
 	FeePriorityRow: { template: '<div data-testid="stub-fee-priority" />' },
 	DropdownRoot: { template: '<div data-testid="stub-dropdown"><slot name="trigger" /><slot name="popup" /></div>' },
 	Popup: {
@@ -510,5 +511,29 @@ describe("send page with the real fee card — transitions", () => {
 		expect((w.get('[data-testid="stub-recipient"]').element as HTMLInputElement).value).toBe(DESTINATION)
 		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
 		w.unmount()
+	})
+})
+
+describe("send page with the real fee card — the review sheet's fee", () => {
+	test("repeats the card's dollars, never the page's own quote", async () => {
+		mocks.estimateTransferFee.mockResolvedValue({ maxFee: HELD, maxFeeFormatted: "1", gasDetails: {} })
+		const { w } = await mountSend(FUNDING["public Fee Juice only"])
+		await fillForm(w)
+		// The page debounces its estimate by 800 ms.
+		await new Promise((r) => setTimeout(r, 900))
+		await flushPromises()
+		// Every price client holds a different quote, as after a reconnect that refreshed only one.
+		vi.mocked(PriceServiceClient).mock.results.forEach(({ value }, i) => {
+			value.onQuotesUpdated.invoke({
+				aztec: { coingeckoId: "aztec", usd: 0.01 * (i + 1), fetchedAt: Date.now(), providerUpdatedAt: null },
+			})
+		})
+		await flushPromises()
+		expect(vi.mocked(PriceServiceClient).mock.results.length).toBeGreaterThan(1)
+
+		const shown = w.get('[data-testid="stub-fee-cost"]').attributes("data-usd")
+		expect(shown).toMatch(/^\$0\.0\d0$/)
+		await strip(w).trigger("click")
+		expect(w.get('[data-testid="send-review-fee"] span').text()).toBe(`Fee · ~1 FJ (${shown})`)
 	})
 })

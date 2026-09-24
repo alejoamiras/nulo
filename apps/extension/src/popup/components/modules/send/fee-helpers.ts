@@ -20,7 +20,7 @@ export function feeDisplay(
 	}
 }
 
-/** The fee card's "You pay" value as one string, so the review sheet cannot price it differently. */
+/** The fee card's "You pay" value as one string, in the card's words. */
 export function feeLine(display: FeeDisplay | null): string | undefined {
 	if (!display) return undefined
 	return display.usd ? `~${display.amount} FJ (${display.usd})` : `~${display.amount} FJ`

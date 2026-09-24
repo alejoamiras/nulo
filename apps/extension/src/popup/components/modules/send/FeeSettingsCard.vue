@@ -81,6 +81,10 @@ const needsFeeJuiceOut = defineModel("needsFeeJuice", { type: Boolean, default: 
  *  whether the contract those settings name is one the wallet vouches for. */
 const payerOut = defineModel("payer", { default: null })
 
+/** One-way child→parent: the fee as "You pay" shows it. The review sheet repeats this value rather
+ *  than pricing it again, since the page's own price client can hold a different quote. */
+const feeDisplayOut = defineModel("feeDisplay", { default: null })
+
 const methodId = getRandomHex(6)
 
 /**
@@ -269,6 +273,13 @@ watch(
 	effectiveMethod,
 	(m) => {
 		payerOut.value = m ? { type: m.type, fpcId: m.fpc?.id, isProtocol: m.fpc?.isProtocol === true } : null
+	},
+	{ immediate: true },
+)
+watch(
+	estimatedFeeDisplay,
+	(d) => {
+		feeDisplayOut.value = d
 	},
 	{ immediate: true },
 )
