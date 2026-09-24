@@ -65,15 +65,22 @@ export async function reviewDeposit(page: Page, plan: DepositPlan): Promise<void
 	await card.click()
 	await expect(card).toHaveAttribute("aria-selected", "true")
 	await setVisibility(page, plan.isPrivate)
-	// The route quote lands asynchronously and a landing quote stands a review down: reach the
-	// review only once the step has stopped quoting (a found route prints nothing of its own).
-	await expect(page.locator(tid(TESTIDS.sendStepAmount))).not.toHaveAttribute("data-route-loading", "true", { timeout: 60_000 })
 	await goToReview(page)
 	await expect(page.locator(tid(TESTIDS.sendReviewVisibility))).toHaveAttribute("data-visibility", plan.isPrivate ? "private" : "public")
 }
 
+/**
+ * CONTINUE, once the step has stopped quoting: a route quote landing under a review stands it down,
+ * and a found route prints nothing of its own, so the step's loading flag is the wait — read only
+ * after CONTINUE lights up. It lights up once the token has resolved, and resolving is what asks
+ * for the quote, so "not loading" before that point is not "quoted". Every deposit stand-down asks
+ * for the quote again, so a re-entered review waits the same way; an exit never quotes.
+ */
 async function goToReview(page: Page): Promise<void> {
-	await page.locator(tid(TESTIDS.sendAmountNext)).click()
+	const next = page.locator(tid(TESTIDS.sendAmountNext))
+	await expect(next).toBeEnabled({ timeout: 60_000 })
+	await expect(page.locator(tid(TESTIDS.sendStepAmount))).not.toHaveAttribute("data-route-loading", "true", { timeout: 60_000 })
+	await next.click()
 	await expect(page.locator(tid(TESTIDS.sendStepReview))).toBeVisible()
 }
 
