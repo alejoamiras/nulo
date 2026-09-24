@@ -381,19 +381,16 @@ export async function readProfileNames(page: Page): Promise<string[]> {
 	})
 }
 
-/** Waits for exactly one profile beyond `before` to be stored, and fails unless it is named
- *  `expected`. */
+/** Waits for the stored profile names to become `before` plus `expected`, and fails on any other
+ *  outcome, a profile lost or renamed included. */
 export async function expectNewProfileNamed(page: Page, before: readonly string[], expected: string, timeoutMs = 10_000): Promise<void> {
+	const want = [...before, expected].sort()
 	const deadline = Date.now() + timeoutMs
 	for (;;) {
-		const added = await readProfileNames(page)
-		for (const name of before) {
-			const i = added.indexOf(name)
-			if (i !== -1) added.splice(i, 1)
-		}
-		if (added.length === 1 && added[0] === expected) return
-		if (added.length > 0 || Date.now() > deadline)
-			throw new Error(`expected one new profile named "${expected}", got ${JSON.stringify(added)}`)
+		const stored = (await readProfileNames(page)).sort()
+		if (stored.length === want.length && stored.every((name, i) => name === want[i])) return
+		if (stored.length > before.length || Date.now() > deadline)
+			throw new Error(`expected the profiles ${JSON.stringify(want)}, got ${JSON.stringify(stored)}`)
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
 }

@@ -7,9 +7,10 @@ describe("defaultProfileName", () => {
 		[[], "Main"],
 		[["Main"], "Profile 2"],
 		[["Main", "Work"], "Profile 3"],
-		// Bumped past a variant that only differs by case or NFKC form.
-		[["Main", "profile 2"], "Profile 3"],
-		[["Main", "Ｐｒｏｆｉｌｅ 2", "PROFILE 3"], "Profile 4"],
+		// Bumped past every taken name, including one that differs only by case or NFKC form.
+		[["Main", "profile 3"], "Profile 4"],
+		[["Main", "Ｐｒｏｆｉｌｅ 3"], "Profile 4"],
+		[["Main", "Profile 4", "profile 5"], "Profile 6"],
 	])("%j → %s", (existing, expected) => {
 		expect(defaultProfileName(existing)).toBe(expected)
 	})
