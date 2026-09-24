@@ -99,13 +99,17 @@ const STUBS = {
 					:key="m.fpc?.id ?? m.type"
 					:data-testid="'pick-' + m.type"
 					:data-disabled="m.disabled ? 'true' : 'false'"
+					:data-spend="m.spend"
 					@click="!m.disabled && $emit('update:modelValue', m)"
 				>{{ m.title }}</button>
 			</div>
 		`,
 	},
 	FeeMethodRow: { template: '<div data-testid="fee-method-row" />' },
-	FeeCostReadout: { template: '<div data-testid="fee-cost-readout" />' },
+	FeeCostReadout: {
+		props: ["estimate", "isEstimating", "payer"],
+		template: '<div data-testid="fee-cost-readout" :data-payer="payer" />',
+	},
 	FeePriorityRow: {
 		props: ["modelValue"],
 		emits: ["update:modelValue"],
@@ -340,9 +344,11 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		const w = mount(FeeSettingsCard, { props: baseProps({ lockedMethod: "fj" }), global: { stubs: STUBS } })
 		await flushPromises()
 
-		expect(w.find('[data-testid="send-fee-locked"]').exists()).toBe(true)
+		const locked = w.find('[data-testid="send-fee-locked"]')
+		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Pay fee with", "Public Fee Juice · set by the app"])
 		expect(w.find('[data-testid="fee-method-selector"]').exists()).toBe(false)
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		expect(w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")).toBe("self")
 		// A locked mount reads the balance FRESH: the dApp asked because the balance just moved.
 		expect(mocks.getGasBalances).toHaveBeenCalledWith(expect.anything(), expect.anything(), true)
 		// The lock is the dApp's, not a preference: nothing is persisted for the account.
@@ -359,6 +365,33 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((ev) => ev[0] !== undefined && ev[0] !== null)
 		expect(truthy).toEqual([])
 		expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(true)
+	})
+})
+
+describe("FeeSettingsCard — who the readout says pays", () => {
+	test("it follows the paying method: Nulo's sponsor, one added by hand, then the account", async () => {
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "s1", type: 1, name: "Sponsored", isProtocol: true },
+			{ id: "s2", type: 1, name: "Dev sponsor", isProtocol: false },
+		])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		const payer = () => w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		expect(payer()).toBe("sponsor")
+
+		await w.findAll('[data-testid="pick-fpc"]')[1].trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s2" } })
+		expect(payer()).toBe("unvouched")
+
+		await w.find('[data-testid="pick-fj"]').trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		expect(payer()).toBe("self")
+		w.unmount()
 	})
 })
 
@@ -737,6 +770,26 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
 		// And never the misleading bridge nudge — the balance is UNKNOWN, not zero.
 		expect(w.text()).not.toContain("You have no fee juice yet")
+		w.unmount()
+	})
+
+	test("a whole read failing keeps the self-paid rows selectable, reading — FJ beside the retry notice", async () => {
+		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "s1", type: 1, name: "Sponsored", isProtocol: true },
+			{ id: "p1", type: 2, name: "Private Fee Juice", isProtocol: true },
+		])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+		const row = (type: string) => w.find(`[data-testid="pick-${type}"]`)
+		for (const type of ["fj", "private_fpc"]) {
+			expect(row(type).attributes("data-disabled")).toBe("false")
+			expect(row(type).attributes("data-spend")).toBe("— FJ")
+		}
+		expect(row("fpc").attributes("data-spend")).toBe("free")
 		w.unmount()
 	})
 
@@ -1566,10 +1619,13 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			expect(activeType(w)).toBe("fpc")
 			expect(activeTitle(w)).toBe("Sponsor")
 			expect(everEmittedSettings(w)).toEqual([])
+			// A preview pays nothing, so nothing may say what it costs.
+			expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(false)
 
 			gas.resolve({ publicFeeJuice: HELD, privateFeeJuice: HELD })
 			await flushPromises()
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(true)
 		})
 
 		test("no sponsor preview where sponsors are not offered", async () => {

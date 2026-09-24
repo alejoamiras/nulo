@@ -199,6 +199,14 @@ const nudgeCopy = computed(() =>
 /** What the dropdown trigger shows: the paying method, or the saved pick's row while loading. */
 const displayMethod = computed(() => effectiveMethod.value ?? sendSelection.value?.preview)
 
+/** Who pays the estimate the readout shows. Only Nulo's own sponsor is promised "Nothing"; a
+ *  sponsor added by hand can charge the account through an authorization it granted earlier. */
+const feePayer = computed(() => {
+	const m = effectiveMethod.value
+	if (m?.type !== "fpc") return "self"
+	return m.fpc?.isProtocol === true ? "sponsor" : "unvouched"
+})
+
 /** The dApp-locked method's fresh row from `methods` (balance-aware), never a saved record. */
 const lockedOption = () => methods.value.find((m) => m.type === props.lockedMethod)
 
@@ -737,7 +745,7 @@ onBeforeUnmount(() => {
 			<!-- A method the dApp asked for: shown, never a choice. -->
 			<Flex v-if="lockedMethod" align="center" justify="between" :class="$style.card" data-testid="send-fee-locked">
 				<Text size="13" weight="600" color="primary">Pay fee with</Text>
-				<Text size="13" weight="600" color="primary">Fee Juice · set by the app</Text>
+				<Text size="13" weight="600" color="primary">Public Fee Juice · set by the app</Text>
 			</Flex>
 			<FeeMethodSelector
 				v-else
@@ -799,6 +807,7 @@ onBeforeUnmount(() => {
 				v-if="effectiveMethod && !feeJuiceMissing"
 				:estimate="estimatedFeeDisplay"
 				:isEstimating="isEstimating"
+				:payer="feePayer"
 			/>
 
 			<FeePriorityRow v-if="effectiveMethod && !feeJuiceMissing" v-model="selectedPriority" />

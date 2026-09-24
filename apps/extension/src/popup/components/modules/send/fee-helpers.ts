@@ -1,6 +1,7 @@
 import { FpcType } from "@/wallet/services/fpc/client"
+import { formatGasBalance } from "@/utils/fee-estimation"
 
-export { formatGasBalance } from "@/utils/fee-estimation"
+export { formatGasBalance }
 
 export interface FeeMethodOption {
 	type: "fj" | "private_fpc" | "fpc"
@@ -8,10 +9,13 @@ export interface FeeMethodOption {
 	subtitle: string
 	disabled?: boolean
 	/** When `disabled`, optional short copy rendered in the dropdown row
-	 *  in place of the regular subtitle (e.g. "no balance"). The testid
-	 *  is still derived from `subtitle`, so this is display-only. */
+	 *  in place of `spend` (e.g. "no balance"). The testid is still derived
+	 *  from `subtitle`, so this is display-only. */
 	disabledReason?: string
-	fpc?: { id: string; type: FpcType; name?: string } | null
+	/** What the method can spend, for the menu's right column: a balance, "— FJ" while
+	 *  balances are unknown, "free" for Nulo's own sponsor, "—" for one added by hand. */
+	spend?: string
+	fpc?: { id: string; type: FpcType; name?: string; isProtocol?: boolean } | null
 }
 
 /** Fee Juice balances surfaced from `executionService.getGasBalances` —
@@ -140,8 +144,8 @@ export function resolveSavedSelection(
 /**
  * Build the dropdown's method list. When `gasBalances` is provided,
  * `fj` and `private_fpc` get marked `disabled` with a "no balance" /
- * "not available" hint so the user can't select a method whose
- * simulation would fail. `gasBalances` is optional so callers can keep
+ * "couldn't check balance" / "not available" hint so the user can't
+ * select a method whose simulation would fail. `gasBalances` is optional so callers can keep
  * building the list before balances arrive (everything stays enabled
  * during load; balances flip the disabled state once fetched).
  *
@@ -168,11 +172,21 @@ export function buildFeeMethods(
 		if (fpc.type === FpcType.DefaultSponsoredFpc) {
 			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
 			if (!allowSponsored) continue
-			base.push({ type: "fpc", title: fpc.name || "Sponsored FPC", subtitle: "sponsored", fpc })
+			// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
+			// sponsorship conditional on a call from the account and then spend a token
+			// authorization the account granted it earlier.
+			const spend = fpc.isProtocol === true ? "free" : "—"
+			base.push({ type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc })
 		}
 	}
 
 	return base
+}
+
+/** `undefined` (balances not known yet) and `null` (the leg's read failed) are never printed as a
+ *  zero, which is what `formatGasBalance` makes of them. */
+function spendOf(balance: string | null | undefined): string {
+	return typeof balance === "string" ? `${formatGasBalance(balance)} FJ` : "— FJ"
 }
 
 function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
@@ -180,7 +194,12 @@ function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
 	// Unknown (null) disables too — but with an honest reason, never "no balance".
 	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
 
-	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
+	const fj: FeeMethodOption = {
+		type: "fj",
+		title: "Public Fee Juice",
+		subtitle: "public",
+		spend: spendOf(gasBalances?.publicFeeJuice),
+	}
 	if (publicFeeJuiceZero) {
 		fj.disabled = true
 		fj.disabledReason = "no balance"
@@ -192,12 +211,15 @@ function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
 }
 
 function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalances?: GasBalances): FeeMethodOption {
-	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
+	const privateFeeJuiceZero = gasBalances?.privateFeeJuice === "0"
+	// Unknown (null) disables too — but with an honest reason, never "no balance".
+	const privateFeeJuiceUnknown = gasBalances !== undefined && gasBalances.privateFeeJuice === null
 
 	const privateFj: FeeMethodOption = {
 		type: "private_fpc",
 		title: privateFpc?.name || "Private Fee Juice",
 		subtitle: "private",
+		spend: spendOf(gasBalances?.privateFeeJuice),
 		fpc: privateFpc ?? null,
 	}
 	if (!privateFpc) {
@@ -206,6 +228,9 @@ function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalance
 	} else if (privateFeeJuiceZero) {
 		privateFj.disabled = true
 		privateFj.disabledReason = "no balance"
+	} else if (privateFeeJuiceUnknown) {
+		privateFj.disabled = true
+		privateFj.disabledReason = "couldn't check balance"
 	}
 	return privateFj
 }

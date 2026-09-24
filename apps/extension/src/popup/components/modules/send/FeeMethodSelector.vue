@@ -3,9 +3,10 @@
  * Fee-method dropdown trigger + popup used by `FeeSettingsCard`. The
  * trigger shows the active method's title (or "Select method"); the
  * popup lists every entry from `methods` with the per-entry testid
- * `send-fee-method-{subtitle}`. Disabled entries (token_fpc placeholder)
- * cannot be selected. `payerNoticeShape` hangs the "names your address" tag
- * on the label: the page decides when, this only draws it.
+ * `send-fee-method-{subtitle}` and what it can spend, or why it is
+ * disabled. Disabled entries cannot be selected. `payerNoticeShape`
+ * hangs the "names your address" tag on the label: the page decides
+ * when, this only draws it.
  */
 import { Dropdown } from "@/components/ui/Dropdown"
 import mark from "@/components/composite/send/publish-mark.module.css"
@@ -23,7 +24,7 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 <template>
 	<Flex direction="column" gap="4" :class="$style.card">
 		<Flex align="center" justify="between">
-			<span :class="$style.fee_label">Fee Source</span>
+			<span :class="$style.fee_label">Fee</span>
 			<span
 				v-if="payerNoticeShape"
 				:class="[$style.tag, mark.exposed]"
@@ -62,7 +63,7 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 							{{ method.title }}
 						</Text>
 						<Text size="11" color="tertiary">
-							{{ method.disabled && method.disabledReason ? method.disabledReason : method.subtitle }}
+							{{ method.disabled && method.disabledReason ? method.disabledReason : method.spend }}
 						</Text>
 					</Flex>
 				</DropdownItem>

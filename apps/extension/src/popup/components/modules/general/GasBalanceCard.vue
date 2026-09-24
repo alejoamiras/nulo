@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
 		<span v-if="isRefreshing" :class="$style.refreshing_dot" data-testid="gas-balance-refreshing" aria-hidden="true" />
 		<div :class="$style.grid">
 			<div :class="$style.col">
-				<span :class="$style.label">Public Juice</span>
+				<span :class="$style.label">Public Fee Juice</span>
 				<Skeleton v-if="isLoading" data-testid="gas-skeleton-public" />
 				<span v-else :class="[$style.amount, isStale && $style.amount_stale]" data-testid="gas-balance-public"
 					>{{ publicFormatted }} FJ</span

@@ -22,9 +22,9 @@ const STUBS = {
 }
 
 const baseMethods = [
-	{ type: "fj", title: "Fee Juice", subtitle: "public" },
-	{ type: "private_fpc", title: "Private FJ", subtitle: "private" },
-	{ type: "fpc", title: "Sponsor", subtitle: "sponsored", fpc: { id: "s1" } },
+	{ type: "fj", title: "Public Fee Juice", subtitle: "public", spend: "1.2 FJ" },
+	{ type: "private_fpc", title: "Private Fee Juice", subtitle: "private", spend: "0.42 FJ" },
+	{ type: "fpc", title: "Sponsored", subtitle: "sponsored", spend: "free", fpc: { id: "s1" } },
 ]
 
 const factory = (props: Record<string, unknown> = {}) =>
@@ -42,7 +42,25 @@ describe("FeeMethodSelector", () => {
 
 	test("trigger shows the active method title", () => {
 		const w = factory({ modelValue: baseMethods[0] })
-		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Fee Juice")
+		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Public Fee Juice")
+	})
+
+	test("the label reads Fee", () => {
+		expect(factory().find("span").text()).toBe("Fee")
+	})
+
+	test("each row shows what it can spend, never its subtitle; a disabled row's reason wins", () => {
+		const w = factory({
+			methods: [{ ...baseMethods[0], disabled: true, disabledReason: "couldn't check balance" }, ...baseMethods.slice(1)],
+		})
+		const cells = (key: string) =>
+			w
+				.find(`[data-testid="send-fee-method-${key}"]`)
+				.findAll("span")
+				.map((n) => n.text())
+		expect(cells("public")).toEqual(["Public Fee Juice", "couldn't check balance"])
+		expect(cells("private")).toEqual(["Private Fee Juice", "0.42 FJ"])
+		expect(cells("sponsored")).toEqual(["Sponsored", "free"])
 	})
 
 	test("trigger forwards data-fee-method from the active method's subtitle", () => {
@@ -71,7 +89,7 @@ describe("FeeMethodSelector", () => {
 	test("clicking a disabled item does NOT emit update:modelValue", async () => {
 		const w = mount(FeeMethodSelector, {
 			props: {
-				methods: [{ type: "fj", title: "Fee Juice", subtitle: "public", disabled: true }, ...baseMethods.slice(1)],
+				methods: [{ ...baseMethods[0], disabled: true }, ...baseMethods.slice(1)],
 			},
 			global: { stubs: STUBS },
 		})
@@ -89,7 +107,7 @@ describe("FeeMethodSelector", () => {
 		expect(w.find(TAG).text()).toBe("NAMES YOUR ADDRESS")
 		expect(w.find(TAG).classes()).toContain(mark.exposed)
 		expect(w.find(`${TAG} i`).classes()).toEqual(expect.arrayContaining([mark.mark, mark.filled]))
-		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Fee Juice")
+		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Public Fee Juice")
 
 		await w.setProps({ payerNoticeShape: null })
 		expect(w.find(TAG).exists()).toBe(false)

@@ -436,7 +436,7 @@ Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 Gate: lint, `typecheck:all`, `test:all`, `bun run build`; the smoke build, then the full Chrome
 smoke (`registerProfile` reaches every spec) exit 0.
 
-### P3 · Fee wording (item 3) ☐
+### P3 · Fee wording (item 3) ✓
 
 1. Strings in `FeeMethodSelector`, `fee-helpers`, `fee-privacy`, `fpc/service`, `FeeMethodRow`,
    `GasBalanceCard`, the locked row.
