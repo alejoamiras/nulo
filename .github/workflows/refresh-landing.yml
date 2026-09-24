@@ -32,13 +32,10 @@ jobs:
         run: |
           # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
           if [ -n "$LANDING_HOOK" ]; then
-            case "$LANDING_HOOK" in
-              https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/*) ;;
-              *)
-                echo "::error::CLOUDFLARE_LANDING_DEPLOY_HOOK is not a Workers Builds deploy hook URL"
-                exit 1
-                ;;
-            esac
+            if ! [[ "$LANDING_HOOK" =~ ^https://api\.cloudflare\.com/client/v4/workers/builds/deploy_hooks/[A-Za-z0-9_-]+$ ]]; then
+              echo "::error::CLOUDFLARE_LANDING_DEPLOY_HOOK is not a Workers Builds deploy hook URL"
+              exit 1
+            fi
             DEPLOY_HOOK="$LANDING_HOOK"
           elif [ -n "$PAGES_HOOK" ]; then
             DEPLOY_HOOK="$PAGES_HOOK"
@@ -46,7 +43,7 @@ jobs:
             echo "::error::neither CLOUDFLARE_LANDING_DEPLOY_HOOK nor CLOUDFLARE_PAGES_DEPLOY_HOOK is set"
             exit 1
           fi
-          code=$(curl -sS -o /tmp/cf-landing.out -w "%{http_code}" \
+          code=$(curl -sS --globoff -o /tmp/cf-landing.out -w "%{http_code}" \
             --retry 3 --retry-all-errors --retry-delay 2 \
             -X POST "$DEPLOY_HOOK")
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
@@ -54,11 +51,14 @@ jobs:
             cat /tmp/cf-landing.out
             exit 1
           fi
-          # A Workers Builds hook names the Worker and branch it queued (a build already queued answers
-          # without them), so a valid hook for another Worker or branch cannot pass as a landing refresh.
+          # A Workers Builds hook names the Worker and branch it queued, so a hook for another Worker or
+          # branch fails here. A build already queued answers without them: the hook's binding is then
+          # only as good as its setup.
           if [ -n "$LANDING_HOOK" ] && ! jq -e '.success == true
-              and (.result.worker // "nulo-landing") == "nulo-landing"
-              and (.result.branch // "main") == "main"' /tmp/cf-landing.out > /dev/null; then
+              and (.result.build_uuid | type == "string" and length > 0)
+              and (if .result.already_exists == true and .result.worker == null and .result.branch == null
+                then true
+                else .result.worker == "nulo-landing" and .result.branch == "main" end)' /tmp/cf-landing.out > /dev/null; then
             echo "::error::the landing deploy hook did not queue a build of nulo-landing on main"
             cat /tmp/cf-landing.out
             exit 1
