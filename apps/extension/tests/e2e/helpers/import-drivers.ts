@@ -14,17 +14,19 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { type Page, TimeoutError } from "puppeteer"
 import { expect } from "vitest"
+import { defaultProfileName } from "@/utils/profile-name"
 import {
 	clickByTestId,
 	type ExtensionContext,
+	expectNameFieldPrefill,
 	expectNoNameField,
 	openOnboarding,
 	openPopup,
 	waitForHash,
-	waitForNameField,
 	withTimeoutMessage,
 	pickFileByTestId,
 } from "../fixtures/extension"
+import { expectNewProfileNamed, readProfileNames } from "../fixtures/helpers"
 import { readSwLogTrail } from "../fixtures/journal"
 import {
 	appendImportRecord,
@@ -186,9 +188,10 @@ export async function gotoOnboardingImport(ctx: ExtensionContext): Promise<Page>
 	return page
 }
 
-/** Import a recovery phrase. A first profile has no name field and is named "Main"; a later one
- *  keeps its "Profile N" prefill unless `profileName` is given. A `profileName` on a first
- *  profile fails instead of being skipped. */
+/** Import a recovery phrase and check the name the profile gets, both judged from the profiles
+ *  stored beforehand: a first profile shows no name field and is named "Main"; a later one opens
+ *  prefilled with the default and keeps it unless `profileName` replaces it. A `profileName` on a
+ *  first profile fails instead of being skipped. */
 export async function importSeed(
 	page: Page,
 	seed: string,
@@ -197,13 +200,14 @@ export async function importSeed(
 	{ profileName }: { profileName?: string } = {},
 ): Promise<void> {
 	await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
-	if ((await waitForNameField(page, shell.pageTestId)) === "hidden") {
+	const before = await readProfileNames(page)
+	const fallback = defaultProfileName(before)
+	if (before.length === 0) {
 		if (profileName !== undefined)
 			throw new Error(`importSeed: profileName "${profileName}" given, but a first profile has no name field`)
 		await expectNoNameField(page, shell.pageTestId, shell.nameInputTestId)
-	} else if (profileName === undefined) {
-		const prefill = await page.$eval(`[data-testid="${shell.nameInputTestId}"] input`, (el) => (el as HTMLInputElement).value)
-		if (!/^Profile \d+$/.test(prefill)) throw new Error(`importSeed: expected a "Profile N" prefill, got "${prefill}"`)
+	} else {
+		await expectNameFieldPrefill(page, shell.pageTestId, shell.nameInputTestId, fallback)
 	}
 	await clickByTestId(page, "import-option-seed")
 	await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 10_000 })
@@ -215,6 +219,7 @@ export async function importSeed(
 	})
 	await submitWhenEnabled(page, shell.submitTestId("seed"))
 	await waitForHash(page, shell.successHash, 30_000)
+	await expectNewProfileNamed(page, before, profileName ?? fallback)
 }
 
 /** Drive the popup/onboarding full-backup flow up to (and including) submit,

@@ -1,6 +1,7 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { Page } from "puppeteer"
+import { defaultProfileName } from "@/utils/profile-name"
 import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { clickByTestId, clickSelector, expectNameFieldPrefill, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
@@ -347,23 +348,25 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 
 /** Create a profile from the lock screen's picker and land on its home screen: creating a profile
  *  activates it. Starts unlocked with no approved send running, so the lock button locks without
- *  asking. The name field opens prefilled `Profile N` (N = profiles + 1) before `name` replaces
- *  it. Returns the new profile's id. */
+ *  asking. The name field must open prefilled with the default the stored profiles give before
+ *  `name` replaces it. Returns the new profile's id. */
 export async function createAndActivateProfile(page: Page, name: string, password: string): Promise<string> {
 	const previous = (await readSessionRow(page))?.profile
 	await clickByTestId(page, "header-lock")
 	await page.waitForSelector('[data-testid="auth-profile"]', { visible: true, timeout: 15_000 })
 	await clickByTestId(page, "auth-profile")
 	await page.waitForSelector('[data-testid="select-profile-new-btn"]', { visible: true, timeout: 10_000 })
-	const profiles = (await page.$$('[data-testid="select-profile-row"]')).length
+	// Read from storage: the picker draws its button before its rows arrive.
+	const before = await readProfileNames(page)
 	await clickByTestId(page, "select-profile-new-btn")
 
-	await expectNameFieldPrefill(page, "register-page", "register-name-input", `Profile ${profiles + 1}`)
+	await expectNameFieldPrefill(page, "register-page", "register-name-input", defaultProfileName(before))
 	await replaceInputValue(page, '[data-testid="register-name-input"]', name)
 	await replaceInputValue(page, '[data-testid="register-password-input"]', password)
 	await replaceInputValue(page, '[data-testid="register-password-confirm-input"]', password)
 	await clickByTestId(page, "register-submit-btn")
 	await waitForHash(page, "#/popup/general", 90_000)
+	await expectNewProfileNamed(page, before, name)
 	return (await waitForSessionRow(page, (row) => row.profile !== previous)).profile
 }
 
@@ -376,6 +379,23 @@ export async function readProfileNames(page: Page): Promise<string[]> {
 			.filter(([key, raw]) => key.startsWith("nulo:core:profiles@") && typeof raw === "string")
 			.map(([, raw]) => (JSON.parse(raw as string) as { name: string }).name)
 	})
+}
+
+/** Waits for exactly one profile beyond `before` to be stored, and fails unless it is named
+ *  `expected`. */
+export async function expectNewProfileNamed(page: Page, before: readonly string[], expected: string, timeoutMs = 10_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const added = await readProfileNames(page)
+		for (const name of before) {
+			const i = added.indexOf(name)
+			if (i !== -1) added.splice(i, 1)
+		}
+		if (added.length === 1 && added[0] === expected) return
+		if (added.length > 0 || Date.now() > deadline)
+			throw new Error(`expected one new profile named "${expected}", got ${JSON.stringify(added)}`)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+	}
 }
 
 // ── Session ────────────────────────────────────────────────────────────
