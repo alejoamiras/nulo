@@ -348,13 +348,14 @@ describe("staged packages", () => {
 		expect(readFileSync(join(victim, "sentinel"), "utf8")).toBe("keep")
 
 		// Marked as a staging directory, so only the in-repository rule can refuse it, even through a symlink.
-		const inRepo = join(REPO_ROOT, ".stage-guard-probe")
-		mkdirSync(join(inRepo, pkg.dir), { recursive: true })
-		writeFileSync(join(inRepo, pkg.dir, STAGING_MARKER), "")
-		writeFileSync(join(inRepo, pkg.dir, "sentinel"), "keep")
-		symlinkSync(inRepo, join(scratch, "link"))
+		const inRepo = mkdtempSync(join(REPO_ROOT, ".stage-guard-"))
+		const link = join(mkdtempSync(join(scratch, "link-")), "link")
 		try {
-			await expect(stagePackage(pkg, "0.1.0", join(scratch, "link"))).rejects.toThrow(/only dist-publish/)
+			mkdirSync(join(inRepo, pkg.dir))
+			writeFileSync(join(inRepo, pkg.dir, STAGING_MARKER), "")
+			writeFileSync(join(inRepo, pkg.dir, "sentinel"), "keep")
+			symlinkSync(inRepo, link)
+			await expect(stagePackage(pkg, "0.1.0", link)).rejects.toThrow(/only dist-publish/)
 			expect(readFileSync(join(inRepo, pkg.dir, "sentinel"), "utf8")).toBe("keep")
 		} finally {
 			rmSync(inRepo, { recursive: true, force: true })

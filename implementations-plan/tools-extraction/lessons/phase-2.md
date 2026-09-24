@@ -84,3 +84,12 @@ Codex: changes needed (shared cache in the publish build, `--out packages` delet
 | `zod` inlined | staging fails closed (third-party input) |
 | Marker guard removed | the guard test (sentinel deleted) |
 | In-repository guard removed | the guard test, through a symlink |
+
+### Review round 2 (codex): changes needed, 3 findings, all adopted
+
+- **A parallel job can replace an artifact.** Name uniqueness stops a duplicate upload, not a delete-and-recreate: `upload-artifact` supports `overwrite: true` across jobs, through the job's runtime token, whatever `GITHUB_TOKEN` may do. So `test`, running beside `pack`, could swap `npm-tarballs` after `pack` uploaded it. `publish` and `verify` now download by `pack`'s `artifact-id` output (download-artifact v8.0.1 accepts `artifact-ids`; one ID lands directly in `path`) and check each tarball against a sha256 map `pack` outputs. Job outputs are written only by their own job.
+- **Statement claims are not signer identity.** The repository, workflow and ref inside an SLSA statement are whatever the signer wrote, and `npm audit signatures` checks the signature and subject but not whose certificate signed it. `scripts/publish/verify-provenance.sh` now uses `gh attestation verify --bundle … --digest-alg sha512 --cert-identity-regex '^https://github\.com/<repo>/<workflow>@refs/heads/(dev|main)$' --cert-oidc-issuer https://token.actions.githubusercontent.com --deny-self-hosted-runners`. Probe on `@sigstore/core@3.0.0`: its own workflow is accepted, `other.yml` and a tarball with one gzip header byte changed are refused, each with gh's `verifying` error. gh reads a bundle file only by a `.json`/`.jsonl` name; the first probe run failed on that for all three cases, and the stderr assertion is what exposed it.
+- **The guard test's fixture was shared.** `.stage-guard-probe` was a fixed path that two concurrent runs could clobber; it is now `mkdtempSync` inside the repo root.
+
+Codex accepted post-publication verification as the gate and an older attested commit for identical bytes once the signer is authenticated. It rated findings 2, 4 and 5 of round 1 closed, and 1 and 3 closed by this round.
+

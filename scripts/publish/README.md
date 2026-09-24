@@ -18,6 +18,8 @@ Stages three workspace packages as public npm packages and binds their first pub
 | `check-digests.ts` | `bun scripts/publish/check-digests.ts <version> <tgz-dir>`: the version must be canonical `X.Y.Z`; a version listed in `approved-digests.json` must pack exactly those tarballs; `0.1.0` must be listed. |
 | `approved-digests.json` | `{ "<version>": { "<tarball>": "<sha256>" } }`, recorded by the rehearsal before the first publication. |
 | `stage.test.ts` | The tarball contract (run by `test:release`). Details below. |
+| `verify-provenance.sh` | `scripts/publish/verify-provenance.sh <tarball> [<owner/repo> <workflow path>]`: fetches the registry's SLSA bundle for the tarball's name@version and has `gh attestation verify` check it was signed by that workflow on `dev` or `main` (the Sigstore certificate identity) and names the tarball's sha512. Prints the attested commit. |
+| `verify-provenance.test.ts` | Runs the script against a real attested package (`@sigstore/core@3.0.0`): accepted for its own workflow, refused for another workflow and for altered bytes. Opt-in, since it needs the network and an authenticated `gh`: `NULO_PROVENANCE_PROBE=1 bun test scripts/publish/verify-provenance.test.ts`. |
 
 ## What the tests prove
 
@@ -49,7 +51,9 @@ Ordinary comment-only edits (`//` and `/** */`) to a published source file leave
 1. **Test.** `test:release`. It runs `@aztec/*` code, so it makes no bytes.
 2. **Pack.** A frozen install with no shared cache and no lifecycle scripts, then stage, pack and check the digests. It runs no test code.
 3. **Publish.** The only job with `id-token: write`. It runs in the `npm-publish` environment, which needs the owner's approval, refuses any version but `0.1.0` until `0.1.0` is on npm, and publishes each tarball with `npm publish --provenance` through npm trusted publishing. No npm token exists anywhere.
-4. **Verify.** Reads each version's SLSA provenance back from the registry and requires it to name these tarballs, this repository, this workflow and `dev` or `main`; then runs `npm audit signatures`. A re-run that found a version already published is verified the same way.
+4. **Verify.** Runs `verify-provenance.sh` on each tarball, which requires the registry's provenance to be signed by this workflow on `dev` or `main` and to name these bytes, then runs `npm audit signatures`. A re-run that found a version already published is verified the same way.
+
+`publish` and `verify` download `pack`'s artifact by its ID and check every tarball against the sha256 list `pack` outputs: `test` runs beside `pack` with the same artifact token, and could otherwise replace a named artifact.
 
 `scripts/ci-cd/publish-packages.test.ts` pins that shape.
 

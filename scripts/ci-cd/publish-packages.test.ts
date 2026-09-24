@@ -80,14 +80,31 @@ describe(FILE, () => {
 		)
 	})
 
-	test("publish runs no repository code: a one-file sparse checkout, then only shell over the artifact", () => {
-		const checkout = steps("publish").find((s) => s.uses?.startsWith("actions/checkout@"))
-		expect(checkout.with["sparse-checkout"].trim()).toBe("/scripts/publish/approved-digests.json")
+	test("publish and verify each check out one file and run no JavaScript from the repository", () => {
+		const sparse = (job: string) =>
+			steps(job)
+				.find((s) => s.uses?.startsWith("actions/checkout@"))
+				?.with["sparse-checkout"].trim()
+		expect(sparse("publish")).toBe("/scripts/publish/approved-digests.json")
+		expect(sparse("verify")).toBe("/scripts/publish/verify-provenance.sh")
 		for (const job of ["publish", "verify"]) {
 			expect(steps(job).filter((s) => s.uses?.startsWith("./"))).toEqual([])
 			expect(runs(job)).not.toMatch(/\bbun\b|\bnode\s|npx/)
 		}
-		expect(steps("verify").filter((s) => s.uses?.startsWith("actions/checkout@"))).toEqual([])
+	})
+
+	// `test` runs beside `pack` with the same artifact runtime token, and can replace a named artifact.
+	test("publish and verify take pack's artifact by ID and check every tarball against pack's digests", () => {
+		expect(wf.jobs.pack.outputs["artifact-id"]).toBe("${{ steps.upload.outputs.artifact-id }}")
+		expect(wf.jobs.pack.outputs.digests).toBe("${{ steps.digests.outputs.json }}")
+		for (const job of ["publish", "verify"]) {
+			const download = steps(job).find((s) => s.uses?.startsWith("actions/download-artifact@"))
+			expect(download.with).toEqual({ "artifact-ids": "${{ needs.pack.outputs.artifact-id }}", path: "${{ runner.temp }}/tgz" })
+			const check = steps(job).find((s) => s.env?.DIGESTS)
+			expect(check.env.DIGESTS).toBe("${{ needs.pack.outputs.digests }}")
+			expect(check.run).toContain("sha256sum -c --strict -")
+			expect(steps(job).indexOf(check)).toBe(steps(job).indexOf(download) + 1)
+		}
 	})
 
 	test("every job uses the same exact Node, which fixes the npm and zlib that produce the approved bytes", () => {
@@ -112,12 +129,21 @@ describe(FILE, () => {
 		expect(runs("publish")).toMatch(/npm publish "\$tgz" --provenance --access public --ignore-scripts/)
 	})
 
-	test("verify requires provenance naming the bytes, this repository, this file and dev or main", () => {
-		const verify = runs("verify")
-		expect(verify).toContain(".subject == [{ name: $purl, digest: { sha512: $digest } }]")
-		expect(verify).toContain('workflow.repository == "https://github.com/alejoamiras/nulo"')
-		expect(verify).toContain(`workflow.path == "${FILE}"`)
-		expect(verify).toContain('workflow.ref | IN("refs/heads/dev", "refs/heads/main")')
-		expect(verify).toContain("npm audit signatures")
+	test("verify checks the signer's certificate identity, not the statement's own claims", () => {
+		expect(runs("verify")).toContain('"$GITHUB_WORKSPACE/scripts/publish/verify-provenance.sh" "$tgz"')
+		expect(runs("verify")).toContain("npm audit signatures")
+		const script = readFileSync(join(ROOT, "scripts/publish/verify-provenance.sh"), "utf8")
+		expect(script).toContain("repo=${2:-alejoamiras/nulo}")
+		expect(script).toContain(`workflow=\${3:-${FILE}}`)
+		expect(script).toContain('@refs/heads/(dev|main)\\$"')
+		for (const flag of [
+			"--digest-alg sha512",
+			"--cert-oidc-issuer https://token.actions.githubusercontent.com",
+			'--cert-identity-regex "$identity"',
+			"--predicate-type https://slsa.dev/provenance/v1",
+			"--deny-self-hosted-runners",
+		]) {
+			expect(script).toContain(flag)
+		}
 	})
 })
