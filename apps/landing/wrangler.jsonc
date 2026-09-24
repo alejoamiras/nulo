@@ -1,0 +1,18 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "nulo-landing",
+	"compatibility_date": "2026-09-01",
+	"account_id": "0f1688fc6a4b6acf3fa55cf71e1bed26",
+	"assets": {
+		"directory": "./dist",
+		// Released wallets deep-link to paths with no file here (/forms/uninstall, /forms/feedback):
+		// they get index.html with a 200, as on Pages, never a 404.
+		"not_found_handling": "single-page-application"
+	},
+	// No `routes` while Pages still holds nulo.sh: Cloudflare refuses a Custom Domain over that record,
+	// so a route-bearing config could never finish a production build. The cut-over adds the route.
+	"workers_dev": true,
+	"preview_urls": true,
+	// Privacy Policy § 5.5 lists every request record the Developer can see; Workers Logs is not one.
+	"observability": { "enabled": false }
+}

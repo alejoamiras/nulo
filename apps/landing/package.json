@@ -13,7 +13,10 @@
 		"pretypecheck": "bun run scripts/ensure-release-json.ts",
 		"typecheck": "tsc --noEmit",
 		"pretest": "bun run scripts/ensure-release-json.ts",
-		"test": "bun --bun vitest run"
+		"test": "bun --bun vitest run",
+		"deploy": "wrangler deploy",
+		"deploy:dry": "wrangler deploy --dry-run",
+		"deploy:preview": "wrangler versions upload"
 	},
 	"dependencies": {
 		"@nulo/design": "workspace:*",
@@ -22,6 +25,7 @@
 	"devDependencies": {
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
-		"vitest": "^4.1.9"
+		"vitest": "^4.1.9",
+		"wrangler": "4.129.1"
 	}
 }

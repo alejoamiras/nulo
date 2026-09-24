@@ -16,8 +16,9 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `scripts/headers.ts` | Parses the site-wide block of `public/_headers` so `vite preview` serves the production CSP. |
 | `scripts/release-html-plugin.ts` | Substitutes `{{release_url}}` and friends into `index.html` at build; throws if a known token survives. |
 | `scripts/fetch-latest-release.ts`, `scripts/ensure-release-json.ts` | Prebuild fetch of the latest GitHub release; the no-release stub for typecheck/test. |
-| `public/` | `_headers` (CSP and caching for Cloudflare Pages), favicon, robots, sitemap. |
+| `public/` | `_headers` (CSP and caching, applied by Cloudflare), favicon, robots, sitemap. |
 | `vite.config.ts` | Vite config, including `preview.headers` from `_headers`. |
+| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. No `routes` until `nulo.sh` moves off Pages. |
 
 ## Scripts
 
@@ -28,6 +29,8 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `bun run preview` | Preview the production build with the production response headers. |
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run test` | Unit tests (renderer, headers parser, release resolver). |
+| `bun run deploy:dry` | Validate `wrangler.jsonc` against the built `dist/`; needs no credentials. |
+| `bun run deploy`, `bun run deploy:preview` | The production (`main`) and other-branch commands to configure when connecting Workers Builds in the Cloudflare dashboard. By hand only to create the Worker. |
 
 ## Key notes
 
@@ -36,7 +39,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 - **Two design rules.** Copy, buttons and panels sit on solid plates; section headings sit on the grain with a dark halo. The grain runs behind every section uninterrupted.
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
-- **Independent ship.** Builds and deploys (Cloudflare Pages, from `main`) without the extension. CI lints, typechecks and unit-tests this package on every PR but does not build it; run `bun run --cwd apps/landing build` locally before opening a PR.
+- **Independent ship.** Builds and deploys from `main` without the extension: Cloudflare Pages serves `nulo.sh` today, refreshed after each stable release by its deploy hook because `prebuild` reads the latest release. The `nulo-landing` Worker takes over at the cut-over and builds from Git pushes only (Workers Builds, no hook), so from then on a release reaches the page with the next push to `main`. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
 
 ## Legal pages
 

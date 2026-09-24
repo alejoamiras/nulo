@@ -1,4 +1,4 @@
-/** The site-wide (`/*`) block of a Cloudflare Pages `_headers` file, so `vite preview` mirrors it. */
+/** The site-wide (`/*`) block of a Cloudflare `_headers` file, so `vite preview` mirrors it. */
 export function siteHeaders(text: string): Record<string, string> {
 	const headers: Record<string, string> = {}
 	let inSiteBlock = false
