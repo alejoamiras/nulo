@@ -16,6 +16,7 @@ per `git range-diff`); codex's quotes keep the ids it saw.
 | 3 | changes-requested | five comments restating one-line helpers (`textOf`, `spoken`, `drawn`, `glyphOf`, `FIRST_PROFILE_NAME`) | `7987cee9` (those five, plus three of the same kind codex had not listed) |
 | 4 (confirmation) | **approve**, high | none | — |
 | 5 (after `8c39bc5e`) | **approve**, high | none; one nit on the gate wording | `000a1444` |
+| 6 (after the parity answers, P6) | changes-requested, high | the sheet priced the fee with the page's price client while the card used its own, so the two could show different dollars after a reconnect | the card hands its display to the page; a regression test (phase 6) |
 
 Round 4's verdict, verbatim: *"VERDICT: approve — confidence: high. no new material findings.
 Commit `46a0ed32` closes the remaining finding: all five cited comments are deleted, along with the

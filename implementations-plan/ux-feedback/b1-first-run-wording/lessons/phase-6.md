@@ -11,19 +11,21 @@ The parity page left three differences for the owner. Asked in chat on 2026-09-2
 
 ## Decisions
 
-1. **One formatter for the card and the sheet.** `feeDisplay` (amount and dollars from the
-   estimate and the live Fee Juice quote) moved out of `FeeSettingsCard` into `fee-helpers.ts`;
-   `feeLine` joins it into the sheet's string. The owner asked for the card's formatting, so the
-   sheet cannot compute its own.
+1. **The sheet repeats the card's figure.** `feeDisplay` (amount and dollars from the estimate
+   and the live Fee Juice quote) moved out of `FeeSettingsCard` into `fee-helpers.ts`; `feeLine`
+   joins it into the sheet's string. The first version had the page call `feeDisplay` with its
+   own quote. Codex round 6 showed why that breaks: the page and the card each own a price
+   client, and after a reconnect or a failed refresh they can hold different quotes. The card
+   now hands its display to the page (`v-model:feeDisplay`, the same one-way model as `payer`).
 2. **The sheet's hand-added line reuses U16's sentence**, now `UNVOUCHED_FEE_SENTENCE` in
    `publish-facts.ts`, which `FeeCostReadout` also reads, so the card and the sheet cannot say
    different things. `.visually_hidden` moved to `fee-shared.module.css` for the same reason.
 3. **Row 17 follows U16.** The owner aligned the sheet with U16, which is still sign-off pending;
    a different U16 pick changes both.
-4. **No page-level test for the dollars.** The page's line is one call to the two tested helpers
-   the card uses. Driving it through `send.integration.test.ts` would need a debounced estimate
-   and a fresh quote through the mocked price client; P7's parity capture of row 9 shows the
-   result on the built extension instead.
+4. **The regression test gives every price client a different quote.** It tells the card's and
+   the page's clients apart without knowing their order, and it failed on the first version:
+   "expected 'Fee · ~1 FJ ($0.010)' to be 'Fee · ~1 FJ ($0.020)'" (probed by restoring the page's
+   own pricing from a scratch copy, then copying the fixed file back).
 
 ## Gate
 

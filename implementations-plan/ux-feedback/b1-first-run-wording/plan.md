@@ -537,8 +537,10 @@ Gate: all of the above exit 0 and the parity Artifact URL printed.
    banner gets `data-testid="send-fee-embedded"` (+ `FeeSettingsCard.test.ts` and
    `OperationCard.fee.test.ts` read both labels).
 2. `feeDisplay` and `feeLine` in `fee-helpers.ts` (+ test: priced, below a tenth of a cent,
-   unpriced, a zero quote, no estimate); the card's "You pay" and the page's sheet line both use
-   them, so the sheet cannot price the fee differently.
+   unpriced, a zero quote, no estimate). The card computes the display and hands it to the page
+   (`v-model:feeDisplay`); the sheet's line repeats it rather than pricing it with the page's own
+   price client (+ `send.integration.test.ts`: every price client holds a different quote, and
+   the sheet shows the card's dollars).
 3. `paidBy` returns null for `unvouched`; the sheet draws "—" and speaks `UNVOUCHED_FEE_SENTENCE`,
    which `FeeCostReadout` now shares; `.visually_hidden` moves to `fee-shared.module.css`
    (+ `publish-facts.test.ts`, `SendReviewSheet.test.ts`).
