@@ -1,13 +1,5 @@
-/**
- * The I/O runner around the pure `verifyLive` decision (verify-live.ts). Fetches
- * the live landing (cache-busted, `no-cache`), retries to ride out CDN
- * propagation lag, and fails CLOSED — if the live state can't be confirmed to
- * match the release after the retry budget, it's a failure, never a pass.
- *
- * `fetch` is injectable so the retry / fail-closed branches are unit-testable
- * with zero network.
- */
-
+/** Fetches the live landing cache-busted and retries through CDN propagation lag; still failing
+ *  after the retry budget is a failure. */
 import { verifyLive, type VerifyLiveResult } from "./verify-live"
 
 export interface RunVerifyLiveOpts {
@@ -56,11 +48,9 @@ export async function runVerifyLive(opts: RunVerifyLiveOpts): Promise<VerifyLive
 		if (last.ok) return last
 		if (attempt < retries) await sleep(delay)
 	}
-	return last // fail-closed: the last (failing) result after the retry budget
+	return last
 }
 
-// CLI entry — the `verify-live` release job runs `bun scripts/release/verify-live-run.ts`.
-// Skipped on import (import.meta.main is false in the unit tests).
 if (import.meta.main) {
 	const result = await runVerifyLive({
 		version: process.env.VERSION ?? "",

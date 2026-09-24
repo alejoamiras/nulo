@@ -27,4 +27,12 @@ describe("verifyLive", () => {
 	test("landing unreachable → fail-closed", () => {
 		expect(verifyLive(ok({ landingHtml: null })).ok).toBe(false)
 	})
+
+	test("a longer version sharing the prefix is not a match", () => {
+		expect(verifyLive(ok({ expectedVersion: "0.23.1", landingHtml: landing("0.23.10") })).ok).toBe(false)
+	})
+
+	test("a prerelease of the expected version is not a match", () => {
+		expect(verifyLive(ok({ landingHtml: landing("0.23.0-rc.1") })).ok).toBe(false)
+	})
 })

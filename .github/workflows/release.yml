@@ -468,9 +468,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The workflow's own revision, not the tag: a republished old tag must not run that tag's
+      # verifier, which may probe sites this repo no longer deploys.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
       - uses: ./.github/actions/setup-bun
       - name: Verify the live landing serves this release
         env:

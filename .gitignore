@@ -46,3 +46,9 @@ wallet_data_*/
 .playwright-mcp/
 **/pxe_data_*/
 **/wallet_data_*/
+
+# Moved to alejoamiras/unleashed. A clone that ran the bridge scripts can still hold deployer
+# wallet stores and forge caches here; keep them unstageable.
+/apps/tools/
+/packages/bridge-core/
+/contracts/bridge/

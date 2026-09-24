@@ -1,11 +1,5 @@
-/**
- * The post-deploy "verify-live" decision: does the LIVE landing actually serve the
- * release we just published? Pure over already-fetched strings (the HTTP fetch
- * + bounded retry + cache-bust headers are workflow glue), so every pass/fail
- * branch is unit-testable with zero network.
- *
- * Fail-closed: anything we can't positively confirm is a FAILURE, never a pass.
- */
+/** Does the live landing serve the release just published? Fail-closed: anything not positively
+ *  confirmed is a failure. */
 
 export interface VerifyLiveInput {
 	expectedVersion: string
@@ -18,15 +12,19 @@ export interface VerifyLiveResult {
 	failures: string[]
 }
 
+// The tag must end at the link's closing quote: a bare substring match would accept v0.28.10 or
+// v0.28.1-rc.2 for an expected 0.28.1.
+function linksReleaseTag(html: string, version: string): boolean {
+	const tag = `releases/tag/v${version}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+	return new RegExp(`${tag}["']`).test(html)
+}
+
 export function verifyLive(input: VerifyLiveInput): VerifyLiveResult {
 	const failures: string[] = []
-
-	// --- Landing: served HTML must reference the new release's tag page ---
 	if (input.landingHtml === null) {
 		failures.push("landing: unreachable")
-	} else if (!input.landingHtml.includes(`releases/tag/v${input.expectedVersion}`)) {
+	} else if (!linksReleaseTag(input.landingHtml, input.expectedVersion)) {
 		failures.push(`landing: served HTML does not reference releases/tag/v${input.expectedVersion}`)
 	}
-
 	return { ok: failures.length === 0, failures }
 }
