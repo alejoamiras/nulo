@@ -535,5 +535,6 @@ describe("send page with the real fee card — the review sheet's fee", () => {
 		expect(shown).toMatch(/^\$0\.0\d0$/)
 		await strip(w).trigger("click")
 		expect(w.get('[data-testid="send-review-fee"] span').text()).toBe(`Fee · ~1 FJ (${shown})`)
+		w.unmount()
 	})
 })
