@@ -58,6 +58,7 @@ const TAG_GLYPH = publishGlyph("exposed")
 				<DropdownItem
 					v-for="method in methods"
 					:key="method.fpc?.id ?? method.type"
+					:class="$style.method"
 					:disabled="method.disabled"
 					:data-testid="`send-fee-method-${method.subtitle}`"
 					@click="!method.disabled && emit('update:modelValue', method)"
@@ -93,6 +94,12 @@ const TAG_GLYPH = publishGlyph("exposed")
 
 .fee_placeholder {
 	color: var(--nulo-secondary);
+}
+
+/* A disabled method already reads in tertiary ink, so DropdownItem's own fade would dim it twice.
+   The doubled class outranks `.wrapper.disabled` whichever sheet loads last. */
+.method.method[aria-disabled="true"] {
+	opacity: 1;
 }
 
 .tag {
