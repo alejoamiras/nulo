@@ -19,7 +19,7 @@ Owner steps (2026-09-24):
   - mainnet project `nulo-tools-mainnet`: `d5438b0a`, domains `tools.nulo.sh` + `nulo-tools-mainnet.pages.dev`.
   - The last previews, built from `dev` at #690 minutes before the pause: `84337e15` (testnet), `66da3d4f` (mainnet).
 - **Hook secrets: none exist.** Only the landing's `CLOUDFLARE_PAGES_DEPLOY_HOOK` is set at repo level; the `production`, `chrome-web-store` and `firefox-add-ons` environments hold no Cloudflare secret. The tools deploys ran from Cloudflare's own Git integration, never a GitHub hook.
-- **Dashboard deploy hooks** (Pages → Settings → Builds → Deploy hooks, both projects): pending the owner's check — a paused project still builds when a hook URL is called.
+- **Dashboard deploy hooks**: none on either project (owner, 2026-09-24) — every tools build came through the GitHub connection, which the pause stops. **F0 complete.**
 
 ## Recon (ultracode workflow `stage1-recon`)
 
