@@ -467,9 +467,16 @@ jobs:
         uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
         with:
           config: cliff.toml
-          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'apps/extension/**'
+          # --offline: naming the remote (GITHUB_REPO below) would otherwise make
+          # git-cliff fetch commit metadata from the GitHub API, which the template
+          # never uses.
+          args: --tag ${{ env.TAG }} --unreleased --strip header --offline --include-path 'apps/extension/**'
         env:
           OUTPUT: /tmp/release-notes.md
+          # The template links each commit through remote.github, which git-cliff
+          # reads from the checked-out branch's upstream; a detached checkout has
+          # none, so every link came out empty until the remote was named here.
+          GITHUB_REPO: ${{ github.repository }}
 
       - name: Compose release body
         run: |

@@ -339,24 +339,55 @@ jobs:
             dist/release/SHASUMS256.txt
           retention-days: 14
 
+      # The tag already exists when this job runs (release-please or auto-unstick
+      # creates it before the chain starts; a dispatch names an existing one), so
+      # `--unreleased` finds nothing after it and left every body empty. The range
+      # is chosen here by ancestry instead: a stable covers everything since the
+      # previous stable, an rc everything since the previous rc or stable —
+      # `git describe` takes the nearest such tag reachable from the release
+      # commit's parent, so the nightly tags dev publishes daily (nightly.yml)
+      # and git-cliff's own timestamp ordering never decide the boundary.
+      - name: Pick the release-notes range
+        env:
+          IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
+        run: |
+          # The tag name reaches git-cliff's arguments through a shell, so only the two forms
+          # release-please cuts here are accepted; the range itself is passed as commit ids.
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc(\.[0-9]+)?)?$ ]] \
+            || { echo "::error::release notes: tag ${TAG} is not a stable or rc tag"; exit 1; }
+          exclude=(--exclude 'v*-nightly*' --exclude 'v*-internal*')
+          [ "$IS_PRERELEASE" = "true" ] || exclude+=(--exclude 'v*-rc*')
+          # Without any predecessor (a first release) the range starts after the root commit,
+          # which holds no extension file.
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${exclude[@]}" "${TAG}^" 2>/dev/null) \
+            || prev=$(git rev-list --max-parents=0 "$TAG" | tail -n 1)
+          {
+            echo "CLIFF_RANGE=$(git rev-parse "${prev}^{commit}")..$(git rev-parse "${TAG}^{commit}")"
+            # Only this tag exists for git-cliff, so no tag inside the range can split the notes.
+            echo "CLIFF_TAG_PATTERN=^${TAG//./\\.}\$"
+          } >> "$GITHUB_ENV"
+          echo "release notes cover ${prev}..${TAG}"
+
       - name: Generate release notes (git-cliff)
         uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
         with:
           config: cliff.toml
-          # --ignore-tags: nightly prerelease tags (published daily by
-          # nightly.yml) must not act as range boundaries here — without this,
-          # a stable cut landing the day after any nightly would generate notes
-          # covering only the last ~24h instead of everything since the
-          # previous stable/rc tag (ignore_tags folds ignored tags' commits
-          # into the next section).
+          # --offline: naming the remote (GITHUB_REPO below) would otherwise make
+          # git-cliff fetch commit metadata from the GitHub API, which the template
+          # never uses.
           args: >-
             --tag ${{ env.TAG }}
-            --unreleased
+            --tag-pattern '${{ env.CLIFF_TAG_PATTERN }}'
             --strip header
-            --ignore-tags '^v[0-9]+\.[0-9]+\.[0-9]+-nightly'
+            --offline
             --include-path 'apps/extension/**'
+            ${{ env.CLIFF_RANGE }}
         env:
           OUTPUT: /tmp/release-notes.md
+          # The template links each commit through remote.github, which git-cliff
+          # reads from the checked-out branch's upstream; a detached checkout has
+          # none, so every link came out empty until the remote was named here.
+          GITHUB_REPO: ${{ github.repository }}
 
       - name: Show generated notes
         run: |
