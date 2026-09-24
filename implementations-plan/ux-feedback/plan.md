@@ -311,9 +311,9 @@ on the snackbar looks weird."); i11 A; i12 B. Round-5 picks are appended here as
 
 - 4B, one connect window that turns into the emoji check after Allow: its own blueprint (it
   touches the verify path); round 1's "A + B" drawing is its design.
-- The tools testnet manifest names a hub token "Test USDC" (`USDC`) while the extension's
-  default token list carries "Clean USDC" (`cUSDC`); check whether they are meant to be one token
-  (the `aztec-update` skill owns that mirror).
+- The extension's testnet default "Test USDC" (`default-tokens.ts`) points at `0x1c81…e9ae`,
+  which `apps/tools/public/testnet-bridge.json` no longer lists: its "Test USDC" is another
+  address. A mirror fix for the `aztec-update` skill, noticed while drawing item 6.
 
 ## Seeds
 

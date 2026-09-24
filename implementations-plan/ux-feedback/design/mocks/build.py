@@ -63,7 +63,9 @@ def fold(key: str, label: str, inner: str) -> str:
 
 R1_LABEL = "Round 1 <em>· facts, research, options and my pick</em>"
 ROUND_LABEL = "Round {n} <em>· options and my pick</em>"
-LATER = ("r4", "r3", "r2")
+LATER = ("r5", "r4", "r3", "r2")
+# The tooltip map's part body holds its round-2 content and its round-3 block.
+BODY_LABEL = {"tips": "Rounds 2–3 <em>· options and my picks</em>"}
 
 
 def rounds(part: str, src: pathlib.Path) -> str:
@@ -86,7 +88,7 @@ def rounds(part: str, src: pathlib.Path) -> str:
         inner += fold(f"{sid}-f1", R1_LABEL, body)
     else:
         # Items that were new in round 2 carry their round-2 content in the part body itself.
-        inner += fold(f"{sid}-f2", ROUND_LABEL.format(n=2), body)
+        inner += fold(f"{sid}-f2", BODY_LABEL.get(sid, ROUND_LABEL.format(n=2)), body)
     return head + inner + "\n</section>"
 
 

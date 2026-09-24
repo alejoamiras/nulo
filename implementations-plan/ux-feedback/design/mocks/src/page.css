@@ -321,3 +321,11 @@ code { padding: 1px 5px; background: var(--surface-2); border: 1px solid var(--l
 .clmd pre { margin: 0; padding: 14px; overflow-x: auto; font: 12.5px/1.6 var(--f-mono); color: var(--ink-2); white-space: pre-wrap; }
 .st.r4 { border-color: var(--accent); color: var(--accent); }
 .rail-chip.r4 { border-color: var(--accent); }
+
+.st.r5 { border-color: var(--accent); color: var(--accent); }
+.rail-chip.r5 { border-color: var(--accent); }
+.rowdict-wrap { margin-top: 28px; }
+.rowdict-wrap h3 { margin: 0 0 8px; font: 700 11px/1.2 var(--f-head); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.ledger.rowdict { min-width: 900px; }
+.ledger.rowdict code { font-size: 11.5px; }
+.ledger.rowdict tr.new td { background: color-mix(in srgb, var(--accent) 7%, transparent); }

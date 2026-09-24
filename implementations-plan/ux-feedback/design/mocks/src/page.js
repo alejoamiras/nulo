@@ -6,19 +6,19 @@
 		{ id: "i2", num: "02", title: "Alias tooltip", hit: "Runs off the edge of the window", opts: "A: fix the tooltip · B: helper line", mine: "A + B", status: "decided" },
 		{ id: "i3", num: "03", title: "Fee wording", hit: "\"Sponsored Fee Juice\", \"Fee source\"", opts: "V4: the fee struck through", mine: "V4′", status: "decided", ids: ["i3", "i3b", "i3c"] },
 		{ id: "i4", num: "04", title: "Window placement", hit: "Covers the app's emoji check", opts: "A: top-right · B: one connect window (later)", mine: "A (B later)", status: "decided", later: "B saved as a follow-up" },
-		{ id: "i5", num: "05", title: "Profile name at setup", hit: "\"Was too much\"", opts: "A: no name field", mine: "A", status: "decided" },
-		{ id: "i6", num: "06", title: "Permissions window", hit: "Everything \"high\", claims overstated", opts: "Round 4: the authorizations row · what Off means · unknown permissions", mine: "Off = ask · Off · B", status: "r4", ids: ["i6", "i6b", "i6c", "i6d"], latest: ["i6b", "i6c", "i6d"] },
+		{ id: "i5", num: "05", title: "Profile name at setup", hit: "\"Was too much\"", opts: "Round 5: first-run import", mine: "A", status: "r5", ids: ["i5", "i5b"], latest: ["i5b"] },
+		{ id: "i6", num: "06", title: "Permissions window", hit: "Everything \"high\", claims overstated", opts: "Round 5: seven states no round drew", mine: "Off = ask · Off · B", status: "r5", ids: ["i6", "i6b", "i6c", "i6d", "i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"], latest: ["i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"] },
 		{ id: "i7", num: "07", title: "Lock button", hit: "Same icon as \"private\"", opts: "A1 padlock chip · A2 word only · A3 no border", mine: "A2", status: "decided", ids: ["i7", "i7b"] },
-		{ id: "i8", num: "08", title: "Privacy strip", hit: "Squares read as checkboxes", opts: "B: lock/globe", mine: "A", status: "decided" },
+		{ id: "i8", num: "08", title: "Privacy strip", hit: "Squares read as checkboxes", opts: "Round 5: the review sheet and fee tag", mine: "A", status: "r5", ids: ["i8", "i8b"], latest: ["i8b"] },
 		{ id: "i9", num: "09", title: "Explaining terms", hit: "Jargon with no help nearby", opts: "Dotted terms + glossary · \"Authorizations\"", mine: "Authorizations", status: "decided", ids: ["i9", "i9b", "i9c"] },
-		{ id: "tips", num: "T", title: "Tooltip map", hit: "\"Something huge filled with tooltips\"", opts: "4 new definitions, 2 candidates, rules", mine: "All of it", status: "decided" },
+		{ id: "tips", num: "T", title: "Tooltip map", hit: "\"Something huge filled with tooltips\"", opts: "Round 5: two warnings as text", mine: "All of it", status: "r5", ids: ["tips", "tipsb", "tipsc"], latest: ["tipsb", "tipsc"] },
 		{ id: "i10", num: "10", title: "Toasts", hit: "At the top, gone in 2 seconds", opts: "A′ errors get × · A″ × on all", mine: "A′", status: "decided", ids: ["i10", "i10b"] },
 		{ id: "i11", num: "11", title: "Row hover", hit: "Pointer on some rows only", opts: "A: one interactive row", mine: "A", status: "decided" },
 		{ id: "i12", num: "12", title: "Incoming transfers", hit: "\"Appear from nowhere\"", opts: "A: arrival animation · B: + snackbar · C: + toolbar count", mine: "B", status: "decided" },
 	];
 	const idsOf = (it) => it.ids || [it.id];
 	const PICK_IDS = ITEMS.flatMap(idsOf);
-	const STATUS_LABEL = { decided: "Decided", r4: "Round 4", r3: "Round 3", r2: "Round 2", new: "New" };
+	const STATUS_LABEL = { decided: "Decided", r5: "Round 5", r4: "Round 4", r3: "Round 3", r2: "Round 2", new: "New" };
 	const LS_PICKS = "nulo-feedback-r1-picks";
 	const LS_THEME = "nulo-feedback-r1-wallet-theme";
 
@@ -111,6 +111,15 @@
 	const itemOf = (id) => ITEMS.find((it) => idsOf(it).includes(id));
 	/** An item counts as open until every picker of its latest round has an answer. */
 	const isSettled = (it) => (it.latest || idsOf(it).slice(-1)).every((id) => Boolean(optionOf(id)));
+	/** Every round's pick in order; a round with more than three pickers collapses to a count. */
+	function yoursText(it) {
+		const ids = idsOf(it);
+		if (ids.length === 1) return optionOf(it.id) || "—";
+		const many = it.latest && it.latest.length > 3 ? it.latest : [];
+		const parts = ids.filter((x) => !many.includes(x)).map((x, i) => optionOf(x) || (i ? "open" : "—"));
+		if (many.length) parts.push(`${many.filter(optionOf).length}/${many.length} picked`);
+		return parts.join(" → ");
+	}
 
 	function reflect(id) {
 		const p = picks[id];
@@ -123,10 +132,7 @@
 		const it = itemOf(id);
 		if (!it) return;
 		const yours = $(`[data-yours="${it.id}"]`);
-		if (yours) {
-			const ids = idsOf(it);
-			yours.textContent = ids.length > 1 ? ids.map((x, i) => optionOf(x) || (i ? "open" : "—")).join(" → ") : optionOf(it.id) || "—";
-		}
+		if (yours) yours.textContent = yoursText(it);
 		const chip = $(`[data-chip="${it.id}"]`);
 		if (chip) chip.classList.toggle("picked", isSettled(it));
 		const count = ITEMS.filter(isSettled).length;
@@ -207,8 +213,8 @@
 			ta.rows = 2;
 			ta.placeholder = "Note or tweak (optional)";
 			const owner = itemOf(id);
-			const round = owner ? idsOf(owner).indexOf(id) : 0;
-			ta.setAttribute("aria-label", `Note for ${owner ? owner.title : id}${round > 0 ? `, round ${round + 1}` : ""}${box.dataset.legend ? `, ${box.dataset.legend}` : ""}`);
+			const round = box.dataset.round || (owner && idsOf(owner).indexOf(id) > 0 ? String(idsOf(owner).indexOf(id) + 1) : "");
+			ta.setAttribute("aria-label", `Note for ${owner ? owner.title : id}${round ? `, round ${round}` : ""}${box.dataset.legend ? `, ${box.dataset.legend}` : ""}`);
 			let timer = 0;
 			ta.addEventListener("input", () => {
 				clearTimeout(timer);
@@ -274,7 +280,7 @@
 	/* ---------- copy as text ---------- */
 
 	function picksText() {
-		const lines = ["Nulo feedback: picks, rounds 1 to 4"];
+		const lines = ["Nulo feedback: picks, rounds 1 to 5"];
 		const fmt = (id) => {
 			const p = picks[id];
 			const opt = p && p.option ? p.option : "—";

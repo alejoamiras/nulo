@@ -554,3 +554,62 @@
 .n-dt-fn span { overflow-wrap: anywhere; color: var(--txt-tertiary); }
 .n-dt-foot { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--txt-tertiary); }
 .n-dt-yes.ms { width: auto; height: auto; background: none; font-size: 15px; line-height: 1; color: var(--nulo-secondary); }
+
+/* Round 5 · each block mirrors the component named above it. */
+/* Banner.vue, vertical */
+.n-bnr { display: flex; align-items: flex-start; gap: 8px; padding: 8px 16px 8px 8px; border: 1px solid var(--nulo-border); background: var(--nulo-surface-low); }
+.n-bnr > .ic { width: 16px; height: 16px; margin: 2px; color: var(--nulo-secondary); }
+.n-bnr.done > .ic { color: var(--green); }
+.n-bnr-b { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.n-bnr-t { margin-top: 4px; font-size: 12px; font-weight: 600; line-height: 1.2; color: var(--txt-primary); }
+.n-bnr-d { font-size: 12px; font-weight: 500; line-height: 1.2; color: var(--txt-tertiary); }
+.n-bnr-d:last-child { margin-bottom: 4px; }
+.n-bnr-a { align-self: flex-start; margin-bottom: 4px; font-family: var(--font-headline); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--nulo-accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; cursor: pointer; }
+.n-alias-input.focus { border-color: var(--nulo-accent); }
+/* OperationCard.vue, simple card */
+.n-opcard { display: flex; flex-direction: column; width: 100%; padding: 12px; border: 1px solid var(--nulo-border); }
+.n-opcard-t { font-size: 14px; color: var(--txt-primary); }
+.n-prop, .n-arg { display: flex; justify-content: space-between; gap: 12px; }
+.n-prop { padding-top: 12px; font-size: 12px; }
+.n-arg { font-size: 11px; }
+.n-prop .k, .n-arg .k, .n-opgroup > .k { color: var(--nulo-secondary); }
+.n-prop .v, .n-arg .v { min-width: 0; text-align: right; color: var(--txt-primary); }
+.n-prop .v.b { font-weight: 600; }
+.n-prop .mono, .n-arg .mono { font-family: var(--font-mono); }
+.n-opgroup { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; font-size: 12px; }
+/* GrantedCapabilitiesList.vue */
+.n-grants { display: flex; flex-direction: column; gap: 6px; }
+.n-grant { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--nulo-border); font-size: 13px; color: var(--nulo-secondary); cursor: pointer; }
+.n-grant:hover { background: var(--nulo-surface-high); }
+.n-grant .l { display: flex; align-items: center; gap: 6px; }
+.n-grant .l .ic { width: 11px; height: 11px; color: var(--txt-primary); }
+.n-grant > .ic { width: 12px; height: 12px; color: var(--txt-tertiary); }
+/* DappIdentityBlock.vue: the warning as text */
+.n-warnline { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; font-weight: 500; line-height: 1.3; color: var(--orange); }
+.n-warnline .ic { width: 12px; height: 12px; margin-top: 1px; }
+/* ImportSecretForm.vue: the note under the section label */
+.n-fnote { font-size: 12px; font-weight: 500; line-height: 1.35; color: var(--txt-tertiary); }
+/* import.vue hero line */
+.n-hero-sub { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--nulo-secondary); }
+/* FeeMethodSelector.vue tag glyph */
+.n-names-tag .ic { width: 10px; height: 10px; }
+/* SendReviewSheet.vue */
+.n-rv { display: flex; flex-direction: column; gap: 14px; padding: 0 20px 24px; background: var(--nulo-surface); }
+.n-rv-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 0 4px; }
+.n-rv-head .ms { font-size: 18px; color: var(--nulo-secondary); }
+.n-rv-title { font-family: var(--font-headline); font-size: 12px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; }
+.n-rv-sum { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--nulo-border); }
+.n-rv-amt { font-family: var(--font-headline); font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.n-rv-amt small { margin-left: 4px; font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--nulo-secondary); }
+.n-rv-to { font-family: var(--font-mono); font-size: 11px; color: var(--nulo-secondary); }
+.n-rv-rows { display: flex; flex-direction: column; border: 1px solid var(--nulo-border); }
+.n-rv-rhead { padding: 6px 10px; border-bottom: 1px solid var(--nulo-border); font-family: var(--font-headline); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--nulo-secondary); }
+.n-rv-row { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--nulo-border); }
+.n-rv-row:last-child { border-bottom: none; }
+.n-rv-row > .ic { width: 10px; height: 10px; margin-top: 2px; }
+.n-rv-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.n-rv-top { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; font-weight: 600; color: var(--txt-primary); }
+.n-rv-word { font-family: var(--font-mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; }
+.n-rv-why { font-size: 11px; font-weight: 500; line-height: 1.4; color: var(--txt-tertiary); }
+.n-rv-fee { display: flex; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--nulo-secondary); }
+.n-rv-fee b { font-weight: 500; color: var(--txt-primary); }

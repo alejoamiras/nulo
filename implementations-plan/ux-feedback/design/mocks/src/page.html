@@ -7,7 +7,7 @@
 
 <nav class="rail" aria-label="Items">
 	<div class="wrap rail-in">
-		<span class="rail-name">Rounds 1–4</span>
+		<span class="rail-name">Rounds 1–5</span>
 		<div class="rail-chips" id="rail-chips"></div>
 		<span class="rail-count" id="rail-count">0 / 13 settled</span>
 	</div>
@@ -16,12 +16,12 @@
 <main>
 	<header class="wrap hero">
 		<div>
-			<h1 class="bt"><span class="m">Feedback</span><span class="s">Round four</span></h1>
+			<h1 class="bt"><span class="m">Feedback</span><span class="s">Round five</span></h1>
 			<div class="hero-bar"></div>
 		</div>
 		<div>
-			<p class="lede">Item 3 is V4 and item 9 is "Authorizations", so everything but item 6 is decided. On item 6 the table stays, with check marks instead of squares, and the authorizations row has three new wordings. Its three picks are the last ones. Nothing has changed in the code.</p>
-			<p class="lede">Item 6 opens with its round-4 block; earlier rounds fold underneath, newest first. Picks save to this page, as before.</p>
+			<p class="lede">Every item is decided. Round five draws the states no round drew and the build still needs: seven on item 6, the two warnings the tooltip map moves out of tooltips, first-run import, and the review sheet with the fee tag. Each is drawn the way I'd build it, with a picker. Until you pick, the build uses the drawn option and its PR marks that surface "sign-off pending".</p>
+			<p class="lede">Items 5, 6, 8 and the tooltip map open with their round-5 block; earlier rounds fold underneath, newest first. Picks save to this page, as before.</p>
 			<div class="controls">
 				<span class="ctl-label" id="wt-label">Wallet theme</span>
 				<div class="seg" role="group" aria-labelledby="wt-label">
@@ -35,19 +35,21 @@
 	</header>
 
 	<section class="wrap r2sum" aria-labelledby="r2sum-title">
-		<p class="eyebrow" id="r2sum-title">Round four at a glance</p>
+		<p class="eyebrow" id="r2sum-title">Round five at a glance</p>
 		<div class="r2grid">
-			<div class="r2card"><h3>Decided this round · 2</h3><ul>
-				<li><a href="#i3">3</a> V4 · the fee struck through, with its own spoken text</li>
-				<li><a href="#i9">9</a> "Authorizations"</li>
+			<div class="r2card"><h3>Decided in round four · 3</h3><ul>
+				<li><a href="#i6">6</a> The authorizations row: B</li>
+				<li><a href="#i6">6</a> Off means ask</li>
+				<li><a href="#i6">6</a> Unknown permissions start Off</li>
 			</ul></div>
-			<div class="r2card r3sum-open"><h3>Still open · 3 picks, all item 6</h3><ul>
-				<li><a href="#i6">6</a> The authorizations row: A, B or C</li>
-				<li><a href="#i6">6</a> What Off means, open since round 2</li>
-				<li><a href="#i6">6</a> Unknown permissions: I'd keep them Off</li>
+			<div class="r2card r3sum-open"><h3>Open · 11 picks on drawn states</h3><ul>
+				<li><a href="#i6-r5">6</a> Asking for more, several accounts, network banners, every row, rename, the authorization window, Settings · 7</li>
+				<li><a href="#tips-r5">T</a> The hostname warning and the recovery-phrase note as text · 2</li>
+				<li><a href="#i5-r5">5</a> First-run import · 1</li>
+				<li><a href="#i8-r5">8</a> The review sheet and the fee tag · 1</li>
 			</ul></div>
-			<div class="r2card"><h3>Changed · 1</h3><ul>
-				<li><a href="#i6">6</a> Details marks are checks, not squares; the row is drawn three ways, on and off</li>
+			<div class="r2card"><h3>Unchanged · 1</h3><ul>
+				<li><a href="#i6-r5">6</a> The window's cancelled and error overlays stay as they are</li>
 			</ul></div>
 		</div>
 	</section>
@@ -67,11 +69,11 @@
 <!--@PARTS@-->
 
 	<footer class="wrap foot">
-		<h2>After you pick</h2>
+		<h2>How it gets built</h2>
 		<ol>
-			<li>I read your picks and notes back from this page.</li>
-			<li>One plan (<code>/blueprint mid</code>) with a <em>UI impact</em> line per surface and your picks quoted as the sign-off, as CLAUDE.md requires for anything a user sees.</li>
-			<li>Small PRs by surface: copy first (items 1, 3, 5, 7), then the shared pieces (the fixed tooltip, dotted term and glossary with its CLAUDE.md rule, the snackbar, the interactive row), then the redesigns (6, 8, 12, and 4's placement). Each popup-visible PR carries a screenshot.</li>
+			<li>Six stacked PRs, in this order: first run and wording (1, 3, 5, 7, 8); window placement (4A); tooltips and glossary (2, 9, T); snackbar, rows and arrivals (10, 11, 12); then permissions (6) in two parts, the authorization confirm and the window.</li>
+			<li>I read your round-5 picks back from this page. A pick that differs from the drawn option goes into the PR that owns that surface before it opens.</li>
+			<li>Every PR that changes what you see comes with screenshots of the built extension beside these drawings, in its own artifact, so you can compare them side by side.</li>
 		</ol>
 		<h2 style="margin-top:28px">Follow-ups, outside this arc</h2>
 		<ol>

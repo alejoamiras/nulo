@@ -39,7 +39,7 @@ if (inventory) {
 			folds: Array.from(s.querySelectorAll(".r1")).map((f) => f.id),
 			opts: Array.from(s.querySelectorAll("[data-opt]")).map((o) => {
 				const fold = o.closest(".r1");
-				const round = o.closest("[id$='-r3'],[id$='-r4']");
+				const round = o.closest("[id$='-r3'],[id$='-r4'],[id$='-r5']");
 				return `${fold ? `#${fold.id} ` : round ? `#${round.id} ` : ""}[data-opt="${o.dataset.opt}"]`;
 			}),
 		})),
