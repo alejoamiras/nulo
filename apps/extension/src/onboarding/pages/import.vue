@@ -51,6 +51,7 @@ async function completeImport(profile: unknown) {
 }
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -127,16 +128,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
+	<OnboardingPage :gap="24" data-testid="onboarding-import-page" :data-name-field="nameFieldState" :data-restore-stage="restoreStage">
 		<OnboardingBackLink testid="onboarding-import-back" />
 		<StepIndicator :current="2" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Import" sub="Profile" />
+			<BrutalistTitle main="Import" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
 		<OnboardingProfileNameField
+			v-if="nameFieldState === 'shown'"
 			ref="nameInputRef"
 			v-model="profileName"
 			:error="nameError"

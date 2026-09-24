@@ -1,5 +1,6 @@
 import type { Ref } from "vue"
 import { computed, ref } from "vue"
+import { normalizeProfileName } from "@/utils/profile-name"
 
 /**
  * Options accepted by `useProfileNameField`. All fields are optional;
@@ -22,13 +23,12 @@ export interface ProfileNameFieldOptions {
 /** Options for a single `validate()` call. */
 export interface ValidateOptions {
 	/**
-	 * If provided, validate rejects the name when it case-folded
-	 * NFKC-normalizes to any string in this list. The list is the caller's
-	 * responsibility — typically populated via `managers.profile.getProfiles()`
-	 * right before submit, behind the existing `isCreating` / `isImporting`
-	 * latch so two rapid clicks can't race past the check.
+	 * If provided, validate rejects the name when it collides with any string in this list under
+	 * `normalizeProfileName`. The list is the caller's responsibility — typically populated via
+	 * `managers.profile.getProfiles()` right before submit, behind the existing `isCreating` /
+	 * `isImporting` latch so two rapid clicks can't race past the check.
 	 */
-	existingNames?: string[]
+	existingNames?: readonly string[]
 }
 
 /** Public surface of the `useProfileNameField` composable. */
@@ -126,13 +126,9 @@ export function useProfileNameField(opts: ProfileNameFieldOptions = {}): Profile
 		})
 	}
 
-	function isDuplicate(candidate: string, existingNames: string[]): boolean {
-		// NFKC + locale-aware lowercase catches stylistic variants ("ﬂ" vs "fl",
-		// "K" vs "K", trailing-period vs no-period). It does NOT catch
-		// cross-script homoglyphs (Cyrillic 'А' vs Latin 'A') — flagged as
-		// follow-up in plan-v2.md §7.2; out of scope for this PR.
-		const normalized = candidate.normalize("NFKC").toLocaleLowerCase()
-		return existingNames.some((existing) => existing.normalize("NFKC").toLocaleLowerCase() === normalized)
+	function isDuplicate(candidate: string, existingNames: readonly string[]): boolean {
+		const normalized = normalizeProfileName(candidate)
+		return existingNames.some((existing) => normalizeProfileName(existing) === normalized)
 	}
 
 	function validate(checkOpts: ValidateOptions = {}): boolean {

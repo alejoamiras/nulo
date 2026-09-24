@@ -3,7 +3,7 @@ import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { Page } from "puppeteer"
 import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
+import { clickByTestId, clickSelector, expectNameFieldPrefill, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 import { type SendAction, submitSend } from "./send-page"
 
 /**
@@ -347,22 +347,35 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 
 /** Create a profile from the lock screen's picker and land on its home screen: creating a profile
  *  activates it. Starts unlocked with no approved send running, so the lock button locks without
- *  asking. Returns the new profile's id. */
+ *  asking. The name field opens prefilled `Profile N` (N = profiles + 1) before `name` replaces
+ *  it. Returns the new profile's id. */
 export async function createAndActivateProfile(page: Page, name: string, password: string): Promise<string> {
 	const previous = (await readSessionRow(page))?.profile
 	await clickByTestId(page, "header-lock")
 	await page.waitForSelector('[data-testid="auth-profile"]', { visible: true, timeout: 15_000 })
 	await clickByTestId(page, "auth-profile")
 	await page.waitForSelector('[data-testid="select-profile-new-btn"]', { visible: true, timeout: 10_000 })
+	const profiles = (await page.$$('[data-testid="select-profile-row"]')).length
 	await clickByTestId(page, "select-profile-new-btn")
 
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
+	await expectNameFieldPrefill(page, "register-page", "register-name-input", `Profile ${profiles + 1}`)
 	await replaceInputValue(page, '[data-testid="register-name-input"]', name)
 	await replaceInputValue(page, '[data-testid="register-password-input"]', password)
 	await replaceInputValue(page, '[data-testid="register-password-confirm-input"]', password)
 	await clickByTestId(page, "register-submit-btn")
 	await waitForHash(page, "#/popup/general", 90_000)
 	return (await waitForSessionRow(page, (row) => row.profile !== previous)).profile
+}
+
+/** Every stored profile's name, in storage order. EntityStorage rows live under
+ *  `nulo:core:profiles@<id>`. */
+export async function readProfileNames(page: Page): Promise<string[]> {
+	return page.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		return Object.entries(all)
+			.filter(([key, raw]) => key.startsWith("nulo:core:profiles@") && typeof raw === "string")
+			.map(([, raw]) => (JSON.parse(raw as string) as { name: string }).name)
+	})
 }
 
 // ── Session ────────────────────────────────────────────────────────────

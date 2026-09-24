@@ -326,14 +326,13 @@ export interface UseFullBackupImportOptions {
 	 */
 	showErrorLog?: (errors: Record<string, unknown[]>) => void
 	/**
-	 * Optional reactive name from the parent's Profile-name input. When the
-	 * trimmed value is non-empty, it overrides the backup-embedded name
-	 * during `restoreBackup` via a spread-clone (the parsed backup data is
-	 * NOT mutated in place). When absent or empty after trim, the
-	 * backup-embedded name is used unchanged. The service's existing
-	 * duplicate-name auto-suffix at `service.ts:825-840` still applies.
+	 * The name the restored profile gets, asked inside the restore's latch once the backup is
+	 * validated. `backupName` is the validated backup's own name, sanitized (`null` when it has
+	 * none). Resolves `null` to stop the restore quietly (a typed name failed validation);
+	 * rejects when the profile list cannot be read. The embedded name never reaches `restore`
+	 * unless it comes back from here; the service still suffixes an exact duplicate.
 	 */
-	profileName?: Ref<string>
+	resolveProfileName: (backupName: string | null) => Promise<string | null>
 	/**
 	 * Duplicate-phrase override from the warn-and-confirm dialog. Set by `confirmDuplicate` while
 	 * it re-runs the restore; the service then accepts the duplicate (soft guard by owner policy).
@@ -358,10 +357,10 @@ export interface UseFullBackupImportResult {
 	isAllowedToImportBackup: Ref<boolean>
 	isRestoreHasErrors: Ref<boolean>
 	/**
-	 * Backup-embedded profile name, surfaced after a successful parse so the
-	 * parent page can prefill its Profile-name input. `null` until a file is
-	 * picked + parsed (plain backups) or decrypted (encrypted backups).
-	 * Resets to `null` in `resetBackupState`.
+	 * The current selection's embedded profile name, sanitized, so the parent page can prefill
+	 * its Profile-name input. `null` while the selection has no usable name: before a plain
+	 * file is parsed or an encrypted one decrypted, for a nameless backup, and after
+	 * `resetBackupState`.
 	 */
 	parsedBackupName: Ref<string | null>
 	pickBackupFile: () => Promise<void>
@@ -371,12 +370,13 @@ export interface UseFullBackupImportResult {
 	resetBackupState: () => void
 }
 
-/** The backup-embedded profile name, sanitized for the parent's prefill watcher — a
- *  maliciously crafted backup can embed bidi-override / zero-width / unauthorized chars,
- *  and the watcher's `v-model` assignment bypasses `Input.vue`'s input-event sanitizer. */
+/** The backup-embedded profile name, sanitized — a maliciously crafted backup can embed
+ *  bidi-override / zero-width / unauthorized chars, and neither the prefill's `v-model`
+ *  assignment nor the restore passes through `Input.vue`'s input-event sanitizer. Trimmed,
+ *  so a name of spaces around a stripped character is no name at all. */
 function sanitizedBackupName(raw: unknown): string | null {
 	if (typeof raw !== "string" || raw.length === 0) return null
-	const cleaned = sanitizeString(raw, 32)
+	const cleaned = sanitizeString(raw, 32).trim()
 	return cleaned.length > 0 ? cleaned : null
 }
 
@@ -412,24 +412,24 @@ function buildSliceClients() {
 }
 
 /**
- * Profile restore with the duplicate-confirm wiring. Honors the parent-supplied
- * Profile-name override when non-empty after trim (spread-clone: the parsed `data.profile`
- * is never mutated in place — the structure may be re-read on retry paths; the service-side
- * auto-suffix still resolves collisions). The dup guard throws a TYPED error out of restore
- * (deliberately rethrown past restore's restoreError flattening); `confirmDuplicate`
- * surfaces the shared dialog and re-runs with the override. `undefined` = the user declined
- * → abandon cleanly (no profile was created — the guard runs before the row commit).
+ * Profile restore with the duplicate-confirm wiring, under the resolved `name` (spread-clone:
+ * the parsed `data.profile` is never mutated in place — the structure may be re-read on retry
+ * paths; the service-side auto-suffix still resolves collisions). The dup guard throws a TYPED
+ * error out of restore (deliberately rethrown past restore's restoreError flattening);
+ * `confirmDuplicate` surfaces the shared dialog and re-runs with the same name. `undefined` =
+ * the user declined → abandon cleanly (no profile was created — the guard runs before the row
+ * commit).
  */
 async function restoreProfileStep(
 	profile: { id: string; name: string; type: "password" | "passkey" },
+	name: string,
 	restoreSecret: RestoreSecret,
 	credentialData: PasskeyCredentialData | undefined,
 	deps: { profileService: ProfileServiceClient; opts: UseFullBackupImportOptions },
 	io: RestoreIo,
 ): Promise<{ id: string; restoreError?: unknown } | null> {
 	const { profileService, opts } = deps
-	const override = opts.profileName?.value.trim()
-	const profileForRestore = override ? { ...profile, name: override } : profile
+	const profileForRestore = { ...profile, name }
 	const runRestore = () =>
 		profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData, opts.allowDuplicate?.value)
 	const newProfile = opts.confirmDuplicate ? await opts.confirmDuplicate(runRestore) : await runRestore()
@@ -462,6 +462,12 @@ async function executeRestore(
 	const masterKey = backup["master-key"] as string
 	const profile = data.profile as { id: string; name: string; type: "password" | "passkey" }
 
+	// Before the passkey ceremony, so a name the user must fix never costs a ceremony.
+	const name = await opts.resolveProfileName(sanitizedBackupName(profile.name))
+	if (name === null) {
+		io.setStatus("")
+		return null
+	}
 	const cred = await resolvePasskeyCredential(profile, masterKey, opts.runCeremony)
 	if (cred.kind !== "proceed") {
 		applyOutcome(io, cred)
@@ -472,7 +478,7 @@ async function executeRestore(
 		applyOutcome(io, secretOut)
 		return null
 	}
-	const newProfile = await restoreProfileStep(profile, secretOut.restoreSecret, cred.credentialData, deps, io)
+	const newProfile = await restoreProfileStep(profile, name, secretOut.restoreSecret, cred.credentialData, deps, io)
 	if (!newProfile) return null
 	scratch.createdProfileId = newProfile.id
 
@@ -578,10 +584,13 @@ async function runPickBackupFile(state: ImportRefs, opts: UseFullBackupImportOpt
 		// the user can "import" a file the UI just said failed.
 		if (!file) {
 			state.selectedBackup.value = null
+			state.parsedBackupName.value = null
 			return
 		}
 		const { selection, parseError } = await readBackupFile(file)
 		state.selectedBackup.value = selection
+		// Every selection replaces the previous one's name, a nameless one included.
+		state.parsedBackupName.value = null
 		if (parseError) {
 			opts.fillError("full_backup", parseError.title, parseError.tooltip)
 			return
@@ -599,8 +608,7 @@ async function runPickBackupFile(state: ImportRefs, opts: UseFullBackupImportOpt
 		// JSON; encrypted backups only expose it after `decryptBackup`, handled there.
 		if (selection.type === "plain") {
 			const parsed = selection.backup as { data?: { profile?: { name?: string } } } | null
-			const cleaned = sanitizedBackupName(parsed?.data?.profile?.name)
-			if (cleaned) state.parsedBackupName.value = cleaned
+			state.parsedBackupName.value = sanitizedBackupName(parsed?.data?.profile?.name)
 		}
 		state.restoreStatus.value = null
 		opts.password.value = ""
@@ -638,8 +646,7 @@ async function runDecryptBackup(state: ImportRefs, opts: UseFullBackupImportOpti
 		}
 		// Encrypted backups only expose the embedded name AFTER decrypt succeeds. Surface it
 		// for the parent's prefill watcher (same sanitization rationale as pickBackupFile).
-		const cleaned = sanitizedBackupName(backupObject?.data?.profile?.name)
-		if (cleaned) state.parsedBackupName.value = cleaned
+		state.parsedBackupName.value = sanitizedBackupName(backupObject?.data?.profile?.name)
 		opts.clearError()
 	} catch {
 		if (state.selectedBackup.value !== target) return

@@ -413,7 +413,7 @@ Gate: `build.py` and `shots.mjs` exit 0, the check reports clean, the publish re
 
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
-### P2 · First run (item 5, U11) ☐
+### P2 · First run (item 5, U11) ✓
 
 1. `utils/profile-name.ts` (+ test: "Main", "Profile 2", a collision bump past a case/NFKC
    variant, 32-char bound); `useProfileNameField` uses `normalizeProfileName`.
