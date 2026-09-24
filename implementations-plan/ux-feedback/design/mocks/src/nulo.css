@@ -593,7 +593,9 @@
 .n-hero-sub { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--nulo-secondary); }
 /* FeeMethodSelector.vue tag glyph */
 .n-names-tag .ic { width: 10px; height: 10px; }
-/* SendReviewSheet.vue */
+/* SendReviewSheet.vue; `.v-unknown` mirrors publish-mark.module.css `.unknown`. */
+.v-unknown { color: var(--txt-tertiary); opacity: 0.55; }
+.n-rv-gap { width: 10px; flex: none; }
 .n-rv { display: flex; flex-direction: column; gap: 14px; padding: 0 20px 24px; background: var(--nulo-surface); }
 .n-rv-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 0 4px; }
 .n-rv-head .ms { font-size: 18px; color: var(--nulo-secondary); }

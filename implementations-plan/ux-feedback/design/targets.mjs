@@ -24,6 +24,7 @@ export const TARGETS = [
 	{ name: "07-lock-chip", sel: '#i7-f2 [data-opt="A1"]', unfold: ["i7-f2"] },
 	{ name: "08-privacy-strip", sel: '#i8-f1 [data-opt="B"]', unfold: ["i8-f1"] },
 	{ name: "08-review-U12", sel: '#i8-r5 [data-opt="U12"]' },
+	{ name: "08-unknown-U13", sel: '#i8-r5 [data-opt="U13A"]' },
 	{ name: "09-home-dotted", sel: '#i9-f3 [data-opt="H3"]', unfold: ["i9-f3"] },
 	{ name: "09-glossary", sel: '#i9-f3 [data-opt="G3"]', unfold: ["i9-f3"] },
 	{ name: "09-definitions", sel: "#i9-f3 .facts", unfold: ["i9-f3"] },

@@ -9,7 +9,7 @@
 		{ id: "i5", num: "05", title: "Profile name at setup", hit: "\"Was too much\"", opts: "Round 5: first-run import", mine: "A", status: "r5", ids: ["i5", "i5b"], latest: ["i5b"] },
 		{ id: "i6", num: "06", title: "Permissions window", hit: "Everything \"high\", claims overstated", opts: "Round 5: seven states no round drew", mine: "Off = ask · Off · B", status: "r5", ids: ["i6", "i6b", "i6c", "i6d", "i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"], latest: ["i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"] },
 		{ id: "i7", num: "07", title: "Lock button", hit: "Same icon as \"private\"", opts: "A1 padlock chip · A2 word only · A3 no border", mine: "A2", status: "decided", ids: ["i7", "i7b"] },
-		{ id: "i8", num: "08", title: "Privacy strip", hit: "Squares read as checkboxes", opts: "Round 5: the review sheet and fee tag", mine: "A", status: "r5", ids: ["i8", "i8b"], latest: ["i8b"] },
+		{ id: "i8", num: "08", title: "Privacy strip", hit: "Squares read as checkboxes", opts: "Round 5: the review sheet, fee tag, unknown payer", mine: "A", status: "r5", ids: ["i8", "i8b", "i8c"], latest: ["i8b", "i8c"] },
 		{ id: "i9", num: "09", title: "Explaining terms", hit: "Jargon with no help nearby", opts: "Dotted terms + glossary · \"Authorizations\"", mine: "Authorizations", status: "decided", ids: ["i9", "i9b", "i9c"] },
 		{ id: "tips", num: "T", title: "Tooltip map", hit: "\"Something huge filled with tooltips\"", opts: "Round 5: two warnings as text", mine: "All of it", status: "r5", ids: ["tips", "tipsb", "tipsc"], latest: ["tipsb", "tipsc"] },
 		{ id: "i10", num: "10", title: "Toasts", hit: "At the top, gone in 2 seconds", opts: "A′ errors get × · A″ × on all", mine: "A′", status: "decided", ids: ["i10", "i10b"] },

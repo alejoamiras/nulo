@@ -171,6 +171,8 @@ Behaviour:
   "To", "Amount", "Hidden", "Public", "Sender", "Fee payer"). Shot `08-privacy-strip`.
 - The strip's marks come from `publish-mark.module.css`, which the review sheet's rows and the fee
   menu's "names your address" tag share ("one vocabulary"). Only the strip is drawn: U12.
+- The strip has a fourth state the decision does not cover: `unknown` ("—", payer not known yet
+  or a hand-added fee contract). Undrawn: U13.
 
 ## Item 9 · Dotted terms and the glossary
 
@@ -273,3 +275,4 @@ owns each builds the owner's pick. The recommended option is what gets drawn fir
 | U10 | Permission window | Cancelled / error overlays | Unchanged |
 | U11 | Onboarding import | First-run import (recovery phrase, backup) still shows the name field | Same as create: no field, profile "Main" |
 | U12 | Send review sheet, fee menu tag | They share the strip's marks | The same padlock and globe, so the vocabulary stays one |
+| U13 | Send strip, review sheet | Nulo can't tell who pays (`unknown`) | No mark; the dash says it; the review sheet keeps the mark's space so the words align |

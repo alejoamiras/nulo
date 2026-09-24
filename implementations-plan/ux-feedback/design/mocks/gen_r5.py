@@ -361,13 +361,50 @@ def item8() -> str:
         "The strip, the review sheet and the fee tag share one mark today; the decision drew the strip. This carries the same glyphs to the other two, so private is always the padlock and public the globe.",
         "Words and sentences unchanged.",
     ], rec=True)
+    lock = '<svg class="ic"><use href="#i-lock"/></svg>'
+
+    def cell(cls: str, glyph: str, name: str, word: str) -> str:
+        return f'<span class="n-pub-cell {cls}">{glyph}<b>{name}</b><span class="w">{word}</span></span>'
+
+    def unknown_stage(glyph: str, row_glyph: str) -> str:
+        strip = (
+            '<div class="n-bottom"><div class="n-pub">'
+            + cell("v-unknown", glyph, "You", "—")
+            + cell("v-hidden", lock, "To", "HIDDEN")
+            + cell("v-hidden", lock, "Amount", "HIDDEN")
+            + '<span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Confirm transaction</div></div>'
+        )
+        row = (
+            f'<div class="n-rv-rows" style="margin:16px"><div class="n-rv-rhead">This send publishes</div><div class="n-rv-row v-unknown">{row_glyph}'
+            '<div class="n-rv-body"><div class="n-rv-top"><span>Your address</span><span class="n-rv-word">—</span></div>'
+            '<span class="n-rv-why">This fee contract was added by hand. Nulo cannot tell what it publishes about you.</span></div></div>'
+            + rv("lock", "Recipient", "HIDDEN", None, "v-hidden")
+            + "</div>"
+        )
+        return crop(strip, pad="0") + cap("The strip") + crop(row, pad="0") + cap("Its review sheet")
+
+    help_glyph = '<svg class="ic"><use href="#i-help"/></svg>'
+    square = '<i class="n-mark"></i>'
+    ua = opt("U13A", "When Nulo can't tell who pays: no mark", unknown_stage("", '<span class="n-rv-gap"></span>'), [
+        "The dash already says it. A square would read as a checkbox again, the complaint that started item 8.",
+        "The review sheet keeps the mark's space, so the row's words line up with the others.",
+    ], rec=True)
+    ub = opt("U13B", "A question mark", unknown_stage(help_glyph, help_glyph), [
+        "Says \"unknown\" with a third glyph; one more shape to learn.",
+    ])
+    uc = opt("U13C", "Keep today's faint square", unknown_stage(square, square), [
+        "Unchanged, and the only square left on the screen.",
+    ])
     return block(
         "i8-r5",
-        "Item 8 swapped the strip's squares for the padlock and globe. The review sheet and the fee tag use the same squares.",
-        [o],
-        [pick("i8b", "U12 · review sheet and fee tag", "As drawn|Keep squares there|Other")],
-        "My pick: as drawn",
-        "One vocabulary: the code keeps these marks in one shared stylesheet so they can't disagree, and splitting them would bring the disagreement back.",
+        "Item 8 swapped the strip's squares for the padlock and globe. The review sheet and the fee tag use the same squares, and one state has neither: while Nulo can't tell who pays the fee, or when a fee contract was added by hand.",
+        [o, ua, ub, uc],
+        [
+            pick("i8b", "U12 · review sheet and fee tag", "As drawn|Keep squares there|Other"),
+            pick("i8c", "U13 · who pays, unknown", "A|B|C|Other"),
+        ],
+        "My picks: as drawn, and no mark when unknown",
+        "One vocabulary: the code keeps these marks in one shared stylesheet so they can't disagree, and splitting them would bring the disagreement back. The unknown state gets no shape of its own; its dash and its sentence already say what Nulo knows.",
     )
 
 
