@@ -44,7 +44,7 @@ import {
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
-import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "../helpers/account-io"
+import { confirmImport, exportAccountBody, FIRST_ACCOUNT_NAME, gotoAccounts, previewImport } from "../helpers/account-io"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -69,7 +69,7 @@ test.skipIf(!hasConfig)(
 			await waitForTxConfirmation(page, { amount: "10", fromType: "public", toType: "public" })
 			console.log("✓ Source account deployed via its first self-transfer")
 
-			accountFile = await exportAccountBody(page, "Account", false)
+			accountFile = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 			expect(accountFile.trim().startsWith("{")).toBe(true)
 			await page.close()
 		}
@@ -122,7 +122,7 @@ test.skipIf(!hasConfig)(
 		{
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general", 30_000)
-			accountFile = await exportAccountBody(page, "Account", false)
+			accountFile = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 			expect(accountFile.trim().startsWith("{")).toBe(true)
 			await page.close()
 		}

@@ -65,7 +65,7 @@ vi.mock("@/wallet/services/account/client", () => ({
 		}
 	}),
 	AccountType: { Nulo_v1: "Nulo_v1" },
-	DEFAULT_ACCOUNT_NAME: "Account",
+	DEFAULT_ACCOUNT_NAME: "Account 1",
 }))
 
 import { managers, initTransactionService } from "@/utils/core"

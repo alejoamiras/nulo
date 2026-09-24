@@ -22,7 +22,7 @@ import {
 } from "./fixtures/extension"
 import { ensureUnlocked, lockWallet, navigateByHash, waitForLockScreen } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
-import { exportAccountBody } from "./helpers/account-io"
+import { exportAccountBody, FIRST_ACCOUNT_NAME } from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { CANONICAL_SEED_24, importSeed, ONBOARDING_IMPORT_SHELL, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
 import {
@@ -205,7 +205,7 @@ describe("popup: declining never locks a person out", () => {
 				expect(phrase.split(" ")).toHaveLength(24)
 				expect(await isSheetPresent(page)).toBe(false)
 
-				const body = await exportAccountBody(page, "Account", false)
+				const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 				expect(Object.keys(JSON.parse(body) as object).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)
 

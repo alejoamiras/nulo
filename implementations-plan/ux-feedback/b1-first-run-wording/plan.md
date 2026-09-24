@@ -69,8 +69,8 @@ rows (apart from the unit).
 
 Read from the artifact's `picks` store on 2026-09-24: no round-5 pick yet (`i5b`, `i8b`, `i8c`
 absent). U11, U12 and U13A are built as drawn and listed **sign-off pending**; so are U14, U15
-and U16, drawn before P1 (below). A later pick replaces the drawn option on this arc, even after the PR opens.
-The picks are re-read before P2 and before P5.
+and U16, drawn before P1 (below). A later pick replaces the drawn option on this arc, even after
+the PR opens. The picks are re-read before P2 and before P5.
 
 ## UI impact
 
@@ -94,7 +94,7 @@ Every user-visible change in this batch. "Sign-off" is the owner's pick quoted i
 | 13 | Screen-reader sentence under a tenth of a cent | "…covers less than $0.001." | `03-spoken-U15` | **sign-off pending** (U15) |
 | 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing") | `03-handadded-U16` | **sign-off pending** (U16) |
 
-Three states the shots do not draw go to the owner as round-5 additions before P3 builds them
+Three states the shots do not draw went to the owner as round-5 additions before P1
 (the plan audit's findings 10 and 6), drawn with a picker each; the build uses the recommended
 option and lists it **sign-off pending**, per the program's round-5 rule:
 
@@ -403,7 +403,7 @@ Done: Version 8, 40/40 shots ([`lessons/phase-0.md`](lessons/phase-0.md)).
 
 Gate: `build.py` and `shots.mjs` exit 0, the check reports clean, the publish result printed.
 
-### P1 · Account names ☐
+### P1 · Account names ✓
 
 1. `DEFAULT_ACCOUNT_NAME = "Account 1"`; `nextAccountName` extracted with its test; the popup
    uses it.
