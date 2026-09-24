@@ -3,13 +3,12 @@ import { deferred } from "@nulo/wallet-core/utils"
 import { RealChromeBrowserApi } from "./chrome-browser-api"
 
 type Win = { id: number; type: string; left: number; top: number; width: number; height: number }
+type Stub = (...args: unknown[]) => unknown
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** The suite's `chrome` stub has no `windows`; install one per test. `firefox` adds
  *  `runtime.getBrowserInfo`, the Firefox-only API the adapter keys its focus tracker on. */
-type Stub = (...args: unknown[]) => unknown
-
 function stubWindows(impl: Partial<{ getLastFocused: unknown; update: unknown; get: unknown }>, { firefox = false } = {}) {
 	const getLastFocused = vi.fn<Stub>(impl.getLastFocused as Stub)
 	const update = vi.fn<Stub>(impl.update as Stub)
