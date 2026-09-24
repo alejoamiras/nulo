@@ -177,12 +177,8 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		return result.map((f) => this.decorate(f, protocols))
 	}
 
-	/** Derive the instance for each protocol FPC the profile is missing, through
-	 *  the same `protocol-fpcs` helpers as getOrComputeProtocolAddresses — that is
-	 *  what guarantees the discovered/registered instances equal `protocols.*`; a
-	 *  divergence would register/store a DIFFERENT FPC than the derived address,
-	 *  so the has-checks never match (endless re-discovery) and the private-fuel
-	 *  path keys off the wrong address (an unrecoverable-deposit hazard). */
+	/** Must derive through the same helpers as getOrComputeProtocolAddresses, or the
+	 *  registered FPC never matches `protocols.*` and every read rediscovers it. */
 	private async collectMissingProtocolInstances(hasSponsoredFpc: boolean, hasPrivateFpc: boolean): Promise<ProtocolFpc[]> {
 		const toDiscover: ProtocolFpc[] = []
 		if (!hasSponsoredFpc) {

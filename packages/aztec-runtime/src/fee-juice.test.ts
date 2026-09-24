@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest"
 import { GasFees } from "@aztec/stdlib/gas"
 import { type MinFeeNode, predictedWorstMinFees } from "./fee-juice"
 
-// The fallback to the (possibly stale) current min fee is allowed ONLY when the node does not
-// implement getPredictedMinFees; silently downgrading on a transient error under-prices the cap.
+// An error from getPredictedMinFees falls back to the (possibly stale) current min fee only when
+// the method is missing; silently downgrading on a transient error under-prices the cap.
 describe("predictedWorstMinFees fallback", () => {
 	test("a transient 'block not found' error PROPAGATES (no fee downgrade)", async () => {
 		const box = { currentCalls: 0 }

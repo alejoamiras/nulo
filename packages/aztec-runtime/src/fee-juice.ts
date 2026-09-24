@@ -8,12 +8,12 @@ export type MinFeeNode = {
 
 /**
  * The protocol's worst-case min fee across predicted future slots — the inclusion-safe basis for a
- * committed `maxFeesPerGas`. Mirrors `@aztec/wallets` `base_wallet.getMinFees`: take the highest
- * `feePerL2Gas` from `getPredictedMinFees()`, falling back to `getCurrentMinFees()` on older nodes.
+ * committed `maxFeesPerGas`. Like `@aztec/wallet-sdk` `BaseWallet.getMinFees` (Limit estimate,
+ * method-missing fallback), but takes the DA and L2 maxima independently across slots. Falls back
+ * to `getCurrentMinFees()` when the node lacks the method or predicts no slots.
  *
  * A transaction is simulated and proven seconds-to-minutes before it lands; committing only the
- * CURRENT min fee risks an inclusion-time reject if the base fee rises in that window. The predicted
- * worst case bounds that window.
+ * CURRENT min fee risks an inclusion-time reject if the base fee rises in that window.
  */
 export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> {
 	if (!node.getPredictedMinFees) return node.getCurrentMinFees()
@@ -23,13 +23,9 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 		// an argless call defaults the node to Target, which under-prices the cap under rising congestion.
 		predicted = await node.getPredictedMinFees(ManaUsageEstimate.Limit)
 	} catch (e) {
-		// Only fall back for old nodes that don't IMPLEMENT the method — NOT for
-		// transient RPC errors (a silent fallback to current-min would under-price
-		// the inclusion-safe cap → the tx can be rejected for insufficient fee).
-		// Mirror BaseWallet's method-missing predicate: Aztec's JSON-RPC server
-		// emits `Method not found: <m>` with code -32601 and the client rethrows it
-		// verbatim with `cause = response.error`. A bare "not found" (e.g. "block
-		// not found") is a transient error and MUST propagate.
+		// Only a missing method permits the fallback (BaseWallet's predicate: code -32601 on
+		// `cause`, or "Method not found"); a transient error such as "block not found" must
+		// propagate, or the cap is silently under-priced.
 		const code = (e as { cause?: { code?: number } } | null | undefined)?.cause?.code
 		const msg = e instanceof Error ? e.message : String(e)
 		if (code === -32601 || /method not found/i.test(msg)) return node.getCurrentMinFees()
