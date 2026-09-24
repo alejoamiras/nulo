@@ -81,7 +81,11 @@ CLAUDE.md "Account-address freeze").
 **The drift detector** (GREEN on every bump, reset or not — the address is network-independent):
 `apps/extension/src/wallet/services/fpc/protocol-fpcs.test.ts` re-derives the PrivateFPC through
 the wallet's own `derivePrivateFpc()` (`protocol-fpcs.ts`: the `private-fee-juice` artifact, salt
-`0x…01`, deployer zero) and pins salt, deployer and address to the canonical deployment. Red means
+`0x…01`, deployer zero) and pins salt, deployer and address to the canonical deployment. The same
+file pins the artifact's reviewed digest (function flags such as `isStatic` sit outside the class id,
+yet the wallet copies them into the calls it builds) and that the package's runtime copy
+(`dist/target/`, what fixtures and dApps register) equals the one the wallet derives from — so any
+`private-fee-juice` move reds it: review the new artifact, then re-pin the digest. Red means
 the artifact, the salt or upstream's derivation moved, and the wallet would pay Fee Juice to an
 address no PrivateFPC lives at — an UNRECOVERABLE loss. Default response: HOLD the bump. Re-pinning
 the literals is a CONSCIOUS act, valid only once a PrivateFPC is deployed at the new address on
