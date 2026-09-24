@@ -1,7 +1,30 @@
 import { FpcType } from "@/wallet/services/fpc/client"
-import { formatGasBalance } from "@/utils/fee-estimation"
+import { feeJuicePricingFromUsd, feeToUsd, formatGasBalance } from "@/utils/fee-estimation"
 
 export { formatGasBalance }
+
+export interface FeeDisplay {
+	amount: string
+	/** Null without a live Fee Juice quote. */
+	usd: string | null
+}
+
+export function feeDisplay(
+	estimate: { maxFee: string | bigint; maxFeeFormatted: string } | null | undefined,
+	usdPerFeeJuice: number | undefined,
+): FeeDisplay | null {
+	if (!estimate) return null
+	return {
+		amount: estimate.maxFeeFormatted,
+		usd: feeToUsd(BigInt(estimate.maxFee), feeJuicePricingFromUsd(usdPerFeeJuice)),
+	}
+}
+
+/** The fee card's "You pay" value as one string, so the review sheet cannot price it differently. */
+export function feeLine(display: FeeDisplay | null): string | undefined {
+	if (!display) return undefined
+	return display.usd ? `~${display.amount} FJ (${display.usd})` : `~${display.amount} FJ`
+}
 
 export interface FeeMethodOption {
 	type: "fj" | "private_fpc" | "fpc"

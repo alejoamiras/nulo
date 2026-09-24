@@ -324,6 +324,8 @@ describe("FeeSettingsCard — mounting & init contract", () => {
 		})
 		await flushPromises()
 
+		const banner = w.find('[data-testid="send-fee-embedded"]')
+		expect(banner.findAll("span").map((n) => n.text())).toEqual(["Fee", "Embedded payload"])
 		// runInit early-returns when isCustomMethod && !useOwnMethod, so no SW calls.
 		expect(mocks.getGasBalances).not.toHaveBeenCalled()
 		expect(mocks.getTokenBalances).not.toHaveBeenCalled()
@@ -345,7 +347,7 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		await flushPromises()
 
 		const locked = w.find('[data-testid="send-fee-locked"]')
-		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Pay fee with", "Public Fee Juice · set by the app"])
+		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Fee", "Public Fee Juice · set by the app"])
 		expect(w.find('[data-testid="fee-method-selector"]').exists()).toBe(false)
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
 		expect(w.find('[data-testid="fee-cost-readout"]').attributes("data-payer")).toBe("self")

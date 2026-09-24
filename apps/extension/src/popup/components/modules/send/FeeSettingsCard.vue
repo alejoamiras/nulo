@@ -19,10 +19,16 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	FEE_JUICE_BRIDGE_URL,
+	feeDisplay,
+	formatGasBalance,
+	resolveSavedSelection,
+	settingsForMethod,
+} from "./fee-helpers"
 import { applyFpcEdits, previewForPick, recordOf, resolveSendSelection } from "./fee-privacy"
 import { loadSendSelections, mutateSendSelections, readSendSlots, withSendSlot } from "./fee-send-selection"
-import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
 
 /** Composables */
@@ -141,11 +147,7 @@ const privateFeeJuiceFormatted = computed(() =>
  *  expired entirely, where the figure must disappear). */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
-const estimatedFeeDisplay = computed(() => {
-	if (!props.feeEstimate) return null
-	const usd = feeToUsd(BigInt(props.feeEstimate.maxFee), feeJuicePricingFromUsd(prices.feeJuiceQuote.value?.usd))
-	return { amount: props.feeEstimate.maxFeeFormatted, usd }
-})
+const estimatedFeeDisplay = computed(() => feeDisplay(props.feeEstimate, prices.feeJuiceQuote.value?.usd))
 
 const showMethodSelector = computed(() => {
 	if (!isCustomMethod.value) return true
@@ -725,8 +727,8 @@ onBeforeUnmount(() => {
 	<Flex direction="column" :class="[$style.wrapper, embedded && $style.embedded]" data-testid="fee-settings-card" :data-origin="originPrivacy">
 		<!-- Embedded fee override banner -->
 		<template v-if="isCustomMethod && !useOwnMethod">
-			<Flex align="center" justify="between" :class="$style.card">
-				<Text size="13" weight="600" color="primary">Pay fee with</Text>
+			<Flex align="center" justify="between" :class="$style.card" data-testid="send-fee-embedded">
+				<Text size="13" weight="600" color="primary">Fee</Text>
 				<Text size="13" weight="600" color="primary">Embedded payload</Text>
 			</Flex>
 			<Flex direction="column" gap="8" :class="$style.detail_row">
@@ -744,7 +746,7 @@ onBeforeUnmount(() => {
 		<template v-if="showMethodSelector">
 			<!-- A method the dApp asked for: shown, never a choice. -->
 			<Flex v-if="lockedMethod" align="center" justify="between" :class="$style.card" data-testid="send-fee-locked">
-				<Text size="13" weight="600" color="primary">Pay fee with</Text>
+				<Text size="13" weight="600" color="primary">Fee</Text>
 				<Text size="13" weight="600" color="primary">Public Fee Juice · set by the app</Text>
 			</Flex>
 			<FeeMethodSelector

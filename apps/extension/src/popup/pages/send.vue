@@ -29,7 +29,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 import { managers } from "@/utils/core"
 import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 import { isValidHex } from "@/utils/string"
-import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
+import { FEE_JUICE_BRIDGE_URL, feeDisplay, feeLine } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
@@ -282,7 +282,7 @@ const openReview = () => {
 const closeReview = () => popupStore.close(REVIEW_KEY)
 
 const amountText = computed(() => (amountTerm.value ? String(amountTerm.value) : undefined))
-const feeText = computed(() => (feeEstimate.value ? `~${feeEstimate.value.maxFeeFormatted} FJ` : undefined))
+const feeText = computed(() => feeLine(feeDisplay(feeEstimate.value, prices.feeJuiceQuote.value?.usd)))
 
 const transferType = computed(() => {
 	if (selectedSendType.value === "private" && selectedReceiverType.value === "private") return TransferType.Private

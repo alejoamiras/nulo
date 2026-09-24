@@ -166,7 +166,7 @@ describe("OperationCard — who pays a wire-shaped transaction's fee", () => {
 	test("the app names the account as payer: locked to Public Fee Juice, and the account pays the fee", async () => {
 		const w = await mountCard(sendTx({ feePayer: OWNER }))
 		const locked = w.find('[data-testid="send-fee-locked"]')
-		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Pay fee with", "Public Fee Juice · set by the app"])
+		expect(locked.findAll("span").map((n) => n.text())).toEqual(["Fee", "Public Fee Juice · set by the app"])
 		expect(fee(w).text()).toContain("You pay")
 		expect(fee(w).text()).toContain("~3.577824 FJ")
 		expect(w.find('[data-testid="fee-estimate-usd"]').text()).toBe("($0.215)")

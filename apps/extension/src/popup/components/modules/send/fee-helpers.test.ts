@@ -5,6 +5,8 @@ import {
 	buildSettings,
 	FEE_JUICE_BRIDGE_URL,
 	type FeeMethodOption,
+	feeDisplay,
+	feeLine,
 	formatGasBalance,
 	settingsForMethod,
 } from "./fee-helpers"
@@ -313,5 +315,24 @@ describe("fee-helpers/buildFeeMethods — only the protocol PrivateFPC is offere
 		expect(privateOption?.fpc).toBeNull()
 		expect(privateOption?.disabled).toBe(true)
 		expect(privateOption?.disabledReason).toBe("not available")
+	})
+})
+
+describe("fee-helpers/feeDisplay + feeLine", () => {
+	// 1.05e14 base units = 0.000105 FJ; wire estimates carry maxFee as a decimal string.
+	const estimate = { maxFee: "105000000000000", maxFeeFormatted: "0.000105" }
+
+	test("priced: the card's amount and dollars, and the sheet's line in the same words", () => {
+		const display = feeDisplay(estimate, 0.004)
+		expect(display).toEqual({ amount: "0.000105", usd: "<$0.001" })
+		expect(feeLine(display)).toBe("~0.000105 FJ (<$0.001)")
+		expect(feeLine(feeDisplay({ maxFee: 10n ** 18n, maxFeeFormatted: "1" }, 2.5))).toBe("~1 FJ ($2.500)")
+	})
+
+	test("unpriced or no estimate: no dollars, and nothing at all without an estimate", () => {
+		expect(feeLine(feeDisplay(estimate, undefined))).toBe("~0.000105 FJ")
+		expect(feeLine(feeDisplay(estimate, 0))).toBe("~0.000105 FJ")
+		expect(feeDisplay(null, 0.004)).toBeNull()
+		expect(feeLine(null)).toBeUndefined()
 	})
 })
