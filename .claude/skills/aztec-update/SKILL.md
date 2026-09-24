@@ -92,7 +92,9 @@ lockfile ritual) and `descriptors-real-artifact.test.ts` (Gotchas).
 **The two execution canaries (MANDATORY, every `@aztec/*` bump PR)**: run
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`
 **prover-ON** before merge, **on Chrome and again under `NULO_E2E_BROWSER=firefox`** (geckodriver on
-PATH; `apps/extension/tests/e2e/FIREFOX.md`). LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
+PATH; `apps/extension/tests/e2e/FIREFOX.md`). First `aztec-up install <new @aztec/aztec.js pin>`: the
+sandbox boots only from the complete pinned toolchain under `~/.aztec/versions/<pin>` (CLI,
+`aztec-anvil`, `internal-bin/{forge,anvil}`), and `e2e:agent` fails closed without it. LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
 actually run it prover-ON locally: start `PRESTO_ALLOW_ALL=1 presto-server` on `127.0.0.1:59833` (the
 SHA-pinned binary from `_extension-network-e2e.yml`; the variable is scoped to that one process and
