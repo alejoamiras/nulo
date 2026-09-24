@@ -92,14 +92,12 @@ jobs:
               - 'packages/wallet-bridge/src/**'
               - 'packages/wallet-bridge/package.json'
             extension:
-              # Built target — whole package; design + bridge-core dep libs — src + manifest.
+              # Built target — whole package; its dep libs outside the filters above — src + manifest.
               - 'apps/extension/**'
               - 'packages/legal/src/**'
               - 'packages/legal/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
-              - 'packages/bridge-core/src/**'
-              - 'packages/bridge-core/package.json'
               - 'packages/resolve-asset/src/**'
               - 'packages/resolve-asset/package.json'
               # The licence texts and the expected-minimum list are build inputs too.

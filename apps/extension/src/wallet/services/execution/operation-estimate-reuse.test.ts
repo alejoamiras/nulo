@@ -6,7 +6,7 @@ import { ESTIMATE_REUSE_TTL_MS } from "./transfer-estimate-reuse"
 import { OperationEstimateReuse, type OperationEstimateReuseDeps, type OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 
-vi.mock("@nulo/bridge-core/fee-juice", async (importOriginal) => {
+vi.mock("@nulo/aztec-runtime/fee-juice", async (importOriginal) => {
 	const original = await importOriginal<Record<string, unknown>>()
 	return { ...original, predictedWorstMinFees: vi.fn(async () => new GasFees(2n, 3n)) }
 })

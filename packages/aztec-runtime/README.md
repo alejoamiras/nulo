@@ -23,6 +23,7 @@ Depends on `wallet-core` and `extension-messaging`. Does **not** depend on `wall
 | `src/pxe/known-artifacts.ts`, `note-schemas.ts`, `schemas.ts` | Compiled-in artifacts the wallet trusts by default. |
 | `src/account/nulo-account.ts` | `NuloAccount` — thin adapter over `@aztec/accounts/schnorr`. Owns signing-key derivation, multicall wrapping, recursive payload chunking, deterministic salt. |
 | `src/account/fee-options.ts` | Helpers for fee-payment selection at tx-construction time. |
+| `src/fee-juice.ts` | `predictedWorstMinFees` — the inclusion-safe worst-case min fee across predicted slots; falls back to the current min fee when the node lacks the method or predicts no slots; other RPC errors propagate. |
 | `src/adapters/aztec-node-factory-adapter.ts` | The `AztecNodeFactory` adapter — single entry point for constructing `AztecNode` instances. |
 | `src/ports/node-factory-port.ts` | Port abstraction the adapter implements. |
 | `src/utils/fetch.ts` | Tiny fetch wrapper used by chain-runtime boot. |
@@ -39,6 +40,7 @@ The package exposes targeted entry points instead of a single barrel:
 "./adapters"    → src/adapters/index.ts
 "./utils"       → src/utils/index.ts
 "./offscreen/entry" → src/offscreen/entry.ts
+"./fee-juice"   → src/fee-juice.ts
 ```
 
 ## Scripts

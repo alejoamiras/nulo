@@ -27,7 +27,7 @@
 
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
+import { type MinFeeNode, predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
