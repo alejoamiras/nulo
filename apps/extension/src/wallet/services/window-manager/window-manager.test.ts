@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
-import type { ILogger } from "@/wallet/logger"
-import { centerOn, WindowManager } from "./window-manager"
+import { LogLevel, type ILogger } from "@/wallet/logger"
+import { centerOn, createPlaced, topRightOf, WindowManager } from "./window-manager"
 
 const TIMEOUT_MS = 5_000
 
@@ -39,6 +39,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -57,6 +58,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -76,6 +78,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -94,6 +97,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -112,6 +116,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -128,6 +133,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -144,6 +150,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 		clock.advance(TIMEOUT_MS)
@@ -160,6 +167,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -176,6 +184,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -196,6 +205,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 
 		// No flush first: a macrotask boundary before the handler attaches would
@@ -210,6 +220,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "a",
+			placement: "top-right",
 		})
 		const b = manager.openAndAwait<string>({
 			url: "b.html",
@@ -217,6 +228,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "b",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -234,6 +246,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -250,6 +263,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -272,6 +286,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 
@@ -307,6 +322,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		// Park AFTER creation starts: the timeout must land while create is in flight.
 		await flushCreate()
@@ -341,6 +357,7 @@ describe("WindowManager", () => {
 			height: 600,
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
+			placement: "top-right",
 		})
 		await flushCreate()
 		clock.advance(TIMEOUT_MS)
@@ -359,17 +376,146 @@ describe("WindowManager", () => {
 	})
 
 	describe("positioning on the last-focused window", () => {
-		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test" }
+		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test", placement: "top-right" as const }
 		/** Test-only surface of FakeWindowsAdapter. */
 		const fake = () => browser.windows as unknown as { lastFocused?: unknown; creates: Array<Record<string, unknown>> }
+		const refused = () => new Error("Invalid value for bounds. Bounds must be at least 50% within visible screen space.")
+
+		/** Park every `create` until released, then let it resolve through the fake or reject. */
+		function parkCreates() {
+			const realCreate = browser.windows.create.bind(browser.windows)
+			const gates: Array<(outcome: Error | undefined) => void> = []
+			const createSpy = vi.spyOn(browser.windows, "create").mockImplementation(
+				(options) =>
+					new Promise((resolve, reject) => {
+						gates.push((outcome) => (outcome ? reject(outcome) : resolve(realCreate(options))))
+					}),
+			)
+			return { createSpy, release: (index: number, outcome?: Error) => gates[index]?.(outcome) }
+		}
 
 		it("centers on the anchor, signed — a display left of the primary keeps its negative left", async () => {
 			fake().lastFocused = { left: -1920, top: 0, width: 1920, height: 1080 }
 
-			manager.openAndAwait<string>(OPTS)
+			manager.openAndAwait<string>({ ...OPTS, placement: "center" })
 			await flushCreate()
 
 			expect(fake().creates[0]).toMatchObject({ type: "popup", width: 400, height: 800, left: -1160, top: 140 })
+		})
+
+		it("top-right: flush with the anchor's right edge and top, capped at the anchor's height", async () => {
+			fake().lastFocused = { left: -1920, top: 30, width: 1920, height: 700 }
+
+			manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+
+			expect(fake().creates).toEqual([{ type: "popup", url: "popup.html", width: 400, height: 700, left: -400, top: 30 }])
+		})
+
+		it("center: a refused position is not retried and the handle fails", async () => {
+			fake().lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
+			const createSpy = vi.spyOn(browser.windows, "create").mockRejectedValueOnce(refused())
+
+			const { promise } = manager.openAndAwait<string>({ ...OPTS, placement: "center" })
+
+			await expect(promise).rejects.toBe("Failed to open window.")
+			expect(createSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("top-right: a refused position opens the window with the size only and the handle resolves", async () => {
+			fake().lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
+			const removeSpy = vi.spyOn(browser.windows, "remove")
+			const createSpy = vi.spyOn(browser.windows, "create").mockRejectedValueOnce(refused())
+
+			const { handleId, promise } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+
+			expect(createSpy.mock.calls.map(([options]) => options)).toEqual([
+				{ type: "popup", url: "popup.html", width: 400, height: 800, left: 1520, top: 0 },
+				{ type: "popup", url: "popup.html", width: 400, height: 800 },
+			])
+			manager.settle(handleId, "ok")
+			await expect(promise).resolves.toBe("ok")
+			expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
+		})
+
+		it("a handle cancelled during the first attempt gets no second create", async () => {
+			fake().lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
+			const { createSpy, release } = parkCreates()
+
+			const { handleId, promise } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+			manager.cancel(handleId, "cancelled")
+			await expect(promise).rejects.toBe("cancelled")
+
+			release(0, refused())
+			await flushCreate()
+			expect(createSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("a window arriving after cancellation is closed, and a rejected close is swallowed", async () => {
+			const { release } = parkCreates()
+			// Not a vi.fn: a spy observes the promises it returns, which would handle the rejection.
+			const removed: number[] = []
+			browser.windows.remove = (windowId: number) => {
+				removed.push(windowId)
+				return Promise.reject(new Error(`No window with id: ${windowId}.`))
+			}
+
+			const { handleId, promise } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+			manager.cancel(handleId, "cancelled")
+			await expect(promise).rejects.toBe("cancelled")
+
+			release(0)
+			await flushCreate()
+			await flushCreate()
+			expect(removed).toEqual([FIRST_WINDOW_ID])
+		})
+
+		it("a stale rejection leaves a re-minted handle with the same id untouched", async () => {
+			const { release } = parkCreates()
+
+			const { handleId, promise } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+			clock.advance(TIMEOUT_MS)
+			await expect(promise).rejects.toMatch(/timed out/i)
+
+			const handles = (manager as unknown as { handles: Map<string, unknown> }).handles
+			const impostor = {
+				settled: false,
+				windowId: undefined,
+				unsubOnRemoved: null,
+				timeoutHandle: null,
+				resolve: vi.fn(),
+				reject: vi.fn(),
+			}
+			handles.set(handleId, impostor)
+
+			release(0, refused())
+			await flushCreate()
+			expect(handles.get(handleId)).toBe(impostor)
+			expect(impostor.settled).toBe(false)
+			expect(impostor.reject).not.toHaveBeenCalled()
+			handles.delete(handleId)
+		})
+
+		it("a browser error carrying the window's URL reaches neither a log line nor the settle reason", async () => {
+			const sentinels = ["moz-extension://4f1c", "verificationHash=0xfeedface", "requestId=9d3b7a"]
+			const leak = () =>
+				new Error(`Invalid bounds for ${sentinels[0]}/src/popup/index.html#/windows/verify?${sentinels[1]}&${sentinels[2]}`)
+			const log = vi.fn()
+			manager = new WindowManager(browser.windows, clock, { log } as unknown as ILogger)
+			fake().lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
+			const createSpy = vi.spyOn(browser.windows, "create").mockRejectedValueOnce(leak()).mockRejectedValueOnce(leak())
+
+			const { promise } = manager.openAndAwait<string>(OPTS)
+			const reason = await promise.catch((err: unknown) => err)
+
+			expect(createSpy).toHaveBeenCalledTimes(2)
+			expect(reason).toBe("Failed to open window.")
+			const logged = log.mock.calls.flat().map((arg) => (arg instanceof Error ? `${arg.message} ${arg.stack}` : String(arg)))
+			for (const sentinel of sentinels) expect(logged.join("\n")).not.toContain(sentinel)
 		})
 
 		it("no last-focused window → create carries no left/top (Chrome picks)", async () => {
@@ -407,7 +553,7 @@ describe("WindowManager", () => {
 	})
 
 	describe("focus", () => {
-		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test" }
+		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test", placement: "top-right" as const }
 		const updates = () => (browser.windows as unknown as { updates: unknown[] }).updates
 
 		it("a live handle → update(focused + drawAttention + state normal) and true", async () => {
@@ -445,5 +591,84 @@ describe("centerOn", () => {
 	it("missing anchor or any missing bound → {} so Chrome picks", () => {
 		expect(centerOn(undefined, 400, 800)).toEqual({})
 		expect(centerOn({ left: 0, top: 0, width: 1920 }, 400, 800)).toEqual({})
+	})
+})
+
+describe("topRightOf", () => {
+	it("puts the window's right edge on the anchor's and its top on the anchor's top", () => {
+		expect(topRightOf({ left: 100, top: 50, width: 1200, height: 900 }, 400, 800)).toEqual({ left: 900, top: 50, height: 800 })
+	})
+
+	it("keeps signed coordinates on an anchor left of / above the primary display", () => {
+		expect(topRightOf({ left: -1920, top: -1080, width: 1920, height: 1080 }, 400, 800)).toEqual({
+			left: -400,
+			top: -1080,
+			height: 800,
+		})
+	})
+
+	it("caps the height at a short anchor's and leaves it alone under a tall one", () => {
+		expect(topRightOf({ left: 0, top: 0, width: 1000, height: 600 }, 400, 800).height).toBe(600)
+		expect(topRightOf({ left: 0, top: 0, width: 1000, height: 1400 }, 400, 800).height).toBe(800)
+	})
+
+	it("missing anchor or any missing bound → no position, the requested height", () => {
+		expect(topRightOf(undefined, 400, 800)).toEqual({ height: 800 })
+		expect(topRightOf({ left: 0, top: 0, width: 1920 }, 400, 800)).toEqual({ height: 800 })
+	})
+})
+
+describe("createPlaced", () => {
+	const PLACED = { type: "popup" as const, url: "popup.html", width: 400, height: 700, left: -400, top: 30 }
+	const SIZE_ONLY = { type: "popup" as const, url: "popup.html", width: 400, height: 700 }
+
+	function setup(outcomes: Array<Error | number>) {
+		const create = vi.fn(async (_options: unknown) => {
+			const outcome = outcomes.shift()
+			if (outcome instanceof Error) throw outcome
+			return { id: outcome }
+		})
+		const log = vi.fn()
+		return { create, log, logger: { log } as unknown as ILogger }
+	}
+
+	it("retries a refused position once without left/top, everything else identical", async () => {
+		const { create, logger } = setup([new Error("bounds refused"), 7])
+
+		await expect(createPlaced({ create }, PLACED, () => true, logger, "src")).resolves.toEqual({ id: 7 })
+		expect(create.mock.calls).toEqual([[PLACED], [SIZE_ONLY]])
+	})
+
+	it("logs the recovered refusal as one constant debug line", async () => {
+		const { create, log, logger } = setup([new Error("bounds refused for chrome-extension://abc"), 7])
+
+		await createPlaced({ create }, PLACED, () => true, logger, "src")
+		expect(log.mock.calls).toEqual([["src", LogLevel.Debug, "window position refused; opened with the size only"]])
+	})
+
+	it("never retries a size-only create", async () => {
+		const refusal = new Error("refused")
+		const { create, log, logger } = setup([refusal, 7])
+
+		await expect(createPlaced({ create }, SIZE_ONLY, () => true, logger, "src")).rejects.toBe(refusal)
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(log).not.toHaveBeenCalled()
+	})
+
+	it("no retry once stillWanted() is false", async () => {
+		const refusal = new Error("refused")
+		const { create, logger } = setup([refusal, 7])
+
+		await expect(createPlaced({ create }, PLACED, () => false, logger, "src")).rejects.toBe(refusal)
+		expect(create).toHaveBeenCalledTimes(1)
+	})
+
+	it("a second refusal propagates", async () => {
+		const second = new Error("still refused")
+		const { create, log, logger } = setup([new Error("refused"), second])
+
+		await expect(createPlaced({ create }, PLACED, () => true, logger, "src")).rejects.toBe(second)
+		expect(create).toHaveBeenCalledTimes(2)
+		expect(log).not.toHaveBeenCalled()
 	})
 })

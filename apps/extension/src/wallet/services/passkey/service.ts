@@ -122,6 +122,7 @@ export class PasskeyService extends Service<Methods> implements ServiceSpec<Meth
 			height: 800,
 			timeoutMs: PASSKEY_TIMEOUT_MS,
 			kind: "passkey",
+			placement: "center",
 		})
 
 		this.pending.set(id, { request, handleId: handle.handleId })
