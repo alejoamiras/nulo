@@ -36,12 +36,13 @@ export function statusRequest(publisherId: string, itemId: string, token: string
 	return { url: itemUrl(publisherId, itemId, "fetchStatus"), method: "GET", headers: auth(token) }
 }
 
-export function publishRequest(publisherId: string, itemId: string, token: string, publishType: PublishType): ApiRequest {
+/** `blockOnWarnings: false` is sent only by the one retry `acceptedWarnings` licenses. */
+export function publishRequest(publisherId: string, itemId: string, token: string, publishType: PublishType, blockOnWarnings = true): ApiRequest {
 	return {
 		url: itemUrl(publisherId, itemId, "publish"),
 		method: "POST",
 		headers: { ...auth(token), "Content-Type": "application/json" },
-		body: JSON.stringify({ publishType, blockOnWarnings: true }),
+		body: JSON.stringify({ publishType, blockOnWarnings }),
 	}
 }
 
@@ -184,6 +185,48 @@ export function interpretAsyncUploadState(status: ItemStatus, itemId: string): U
 	}
 }
 
+/**
+ * Store warnings a publish may proceed past, by their `reason`. BROAD_HOST_USAGE comes from the
+ * content script matching every http(s) page, which offering the wallet on every page requires.
+ * `apps/extension/src/manifest.test.ts` pins the explicit host permissions, the content-script
+ * matches and the absence of optional grants, so a wider grant fails the unit tests instead of
+ * hiding behind this entry. Adding a reason here is a reviewed code change, never a CI variable.
+ */
+export const ACCEPTED_WARNINGS: ReadonlySet<string> = new Set(["BROAD_HOST_USAGE"])
+
+export interface StoreWarning {
+	reason: string
+	description: string
+}
+
+const ERROR_INFO = "type.googleapis.com/google.rpc.ErrorInfo"
+const WARNINGS_INFO = "type.googleapis.com/google.chrome.webstore.v2.WarningsInfo"
+/** Detail types known to carry no warning of their own. Any other type fails closed: it might. */
+const INERT_DETAILS = new Set(["type.googleapis.com/google.rpc.LocalizedMessage", "type.googleapis.com/google.rpc.Help"])
+
+type Detail = { kind: "confirmation" } | { kind: "warnings"; warnings: StoreWarning[] } | { kind: "inert" } | { kind: "unreadable" }
+
+const record = (v: unknown): Record<string, unknown> | null =>
+	typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+/** How many warnings or details any one line lists; the rest is counted, never rendered. */
+const MAX_LISTED = 10
+const asList = (v: unknown): unknown[] => {
+	if (v === undefined) return []
+	return Array.isArray(v) ? v : [v]
+}
+
+/** A `warnings` list as `WarningsInfo` carries it: null unless every entry names a reason. */
+export function readWarnings(value: unknown): StoreWarning[] | null {
+	if (!Array.isArray(value)) return null
+	const warnings: StoreWarning[] = []
+	for (const entry of value) {
+		const w = record(entry)
+		if (!w || typeof w.reason !== "string" || w.reason === "") return null
+		warnings.push({ reason: w.reason, description: typeof w.description === "string" ? w.description : "" })
+	}
+	return warnings
+}
+
 export interface PublishResponse {
 	state?: string
 	warningInfo?: { warnings?: unknown[] }
@@ -191,10 +234,23 @@ export interface PublishResponse {
 	[k: string]: unknown
 }
 
-/** Warnings arrive in two envelopes: `warningInfo.warnings` on a 200, `error.details` on the 4xx that `blockOnWarnings` produces. */
+/**
+ * Warnings arrive in two envelopes: `warningInfo.warnings` on a 200, `error.details` on the 4xx
+ * that `blockOnWarnings` produces. A readable warning is rendered as `reason: description` so
+ * every reason survives the truncation; anything else is its JSON, truncated.
+ */
 export function collectWarnings(res: PublishResponse): string[] {
-	const found: unknown[] = [...(res.warningInfo?.warnings ?? []), ...(res.error?.details ?? [])]
-	return found.slice(0, 10).map((w) => truncate(typeof w === "string" ? w : JSON.stringify(w), 200))
+	const found = [...asList(record(res.warningInfo)?.warnings), ...asList(res.error?.details)]
+	return found.slice(0, MAX_LISTED).flatMap(describeEntry).slice(0, MAX_LISTED).map((w) => truncate(w, 200))
+}
+
+/** A `WarningsInfo` detail or a bare `Warning` (the 200 envelope's shape) reads as its reasons; anything else is opaque. */
+function describeEntry(entry: unknown): string[] {
+	const d = record(entry)
+	const list = d?.["@type"] === WARNINGS_INFO ? d.warnings : [entry]
+	const warnings = d && (d["@type"] === WARNINGS_INFO || !("@type" in d)) ? readWarnings(list) : null
+	if (!warnings) return [typeof entry === "string" ? entry : JSON.stringify(entry)]
+	return warnings.map((w) => (w.description ? `${w.reason}: ${w.description}` : w.reason))
 }
 
 export function interpretPublish(res: PublishResponse, httpStatus: number): Verdict {
@@ -202,19 +258,68 @@ export function interpretPublish(res: PublishResponse, httpStatus: number): Verd
 	if (httpStatus >= 400) {
 		return { ok: false, reason: `publish refused (HTTP ${httpStatus}): ${apiError(res)}${warnings.length ? `; warnings: ${warnings.join(" | ")}` : ""}` }
 	}
+	// A success that still lists warnings is a success — the store did what it was asked — but the warnings are shown.
+	const noted = warnings.length ? `; warnings: ${warnings.join(" | ")}` : ""
 	switch (res.state) {
 		case "PENDING_REVIEW":
-			return { ok: true, summary: "submitted: the revision is in review" }
+			return { ok: true, summary: `submitted: the revision is in review${noted}` }
 		case "STAGED":
-			return { ok: true, summary: "approved and staged: publish it from the dashboard within 30 days" }
+			return { ok: true, summary: `approved and staged: publish it from the dashboard within 30 days${noted}` }
 		case "PUBLISHED":
 		case "PUBLISHED_TO_TESTERS":
-			return { ok: true, summary: `live (${res.state})` }
+			return { ok: true, summary: `live (${res.state})${noted}` }
 		case "REJECTED":
 			return { ok: false, reason: `publish rejected${warnings.length ? `: ${warnings.join(" | ")}` : ""}` }
 		default:
-			return { ok: false, reason: `publish returned state ${str(res.state)}${warnings.length ? `; warnings: ${warnings.join(" | ")}` : ""}` }
+			return { ok: false, reason: `publish returned state ${str(res.state)}${noted}` }
 	}
+}
+
+function classifyDetail(detail: unknown, itemId: string): Detail {
+	const d = record(detail)
+	const type = d?.["@type"]
+	if (typeof type !== "string" || !d) return { kind: "unreadable" }
+	if (INERT_DETAILS.has(type)) return { kind: "inert" }
+	if (type === WARNINGS_INFO) {
+		const warnings = readWarnings(d.warnings)
+		return warnings ? { kind: "warnings", warnings } : { kind: "unreadable" }
+	}
+	if (type !== ERROR_INFO) return { kind: "unreadable" }
+	const ours = d.reason === "MANUAL_CONFIRMATION_REQUIRED" && d.domain === "chromewebstore.googleapis.com" && record(d.metadata)?.itemId === itemId
+	return ours ? { kind: "confirmation" } : { kind: "unreadable" }
+}
+
+/**
+ * The warnings a refused publish may proceed past, or null: never retry. Non-null only for the
+ * exact shape `blockOnWarnings: true` produces — HTTP 400 FAILED_PRECONDITION, no success fields,
+ * one ErrorInfo confirming our item, every detail readable, at least one warning and all of them
+ * accepted.
+ */
+export function acceptedWarnings(res: PublishResponse, httpStatus: number, itemId: string): StoreWarning[] | null {
+	if (httpStatus !== 400 || res.error?.status !== "FAILED_PRECONDITION" || !Array.isArray(res.error.details)) return null
+	// A refusal carrying the success envelope's fields is no shape this script knows.
+	if (res.state !== undefined || res.warningInfo !== undefined) return null
+	const details = res.error.details.map((d) => classifyDetail(d, itemId))
+	if (details.some((d) => d.kind === "unreadable") || details.filter((d) => d.kind === "confirmation").length !== 1) return null
+	const warnings = details.flatMap((d) => (d.kind === "warnings" ? d.warnings : []))
+	return warnings.length > 0 && warnings.every((w) => ACCEPTED_WARNINGS.has(w.reason)) ? warnings : null
+}
+
+/**
+ * The verdict on the retry made without `blockOnWarnings`. The store then lists what it ignored
+ * in `warningInfo`; the submission exists at this point, so anything outside the accepted set is
+ * reported as a failure for the owner to review — the script never cancels a submission.
+ */
+export function interpretAcceptedPublish(res: PublishResponse, httpStatus: number): Verdict {
+	const verdict = interpretPublish(res, httpStatus)
+	if (!verdict.ok || res.warningInfo === undefined) return verdict
+	const info = record(res.warningInfo)
+	// proto3 JSON omits an empty repeated field, so a `warningInfo` without `warnings` is "none".
+	const warnings = info ? readWarnings(info.warnings ?? []) : null
+	const strangers = warnings?.filter((w) => !ACCEPTED_WARNINGS.has(w.reason)).map((w) => truncate(w.reason, 80)) ?? null
+	if (strangers?.length === 0) return verdict
+	const what = strangers ? listed(strangers) : "an unreadable warningInfo"
+	return { ok: false, reason: `the store took the submission but reports ${what} outside the accepted warnings; review it in the dashboard and cancel it there if that is wrong` }
 }
 
 /** The API's `reason`/`description`/`message` strings, truncated; never the raw body. */
@@ -229,4 +334,6 @@ export function apiError(body: unknown): string {
 }
 
 export const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+/** The first MAX_LISTED entries, then a count: output stays bounded whatever the store sends. */
+export const listed = (items: string[]) => (items.length > MAX_LISTED ? `${items.slice(0, MAX_LISTED).join(", ")} (+${items.length - MAX_LISTED} more)` : items.join(", "))
 const str = (v: unknown) => (v === undefined ? "<absent>" : JSON.stringify(v))

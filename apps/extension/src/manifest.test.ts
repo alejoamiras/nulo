@@ -7,7 +7,13 @@ import firefoxManifest from "../manifest/manifest.firefox.config"
 import { RP_ID } from "@/wallet/services/passkey/spec"
 
 type ContentScript = { matches: string[]; exclude_matches?: string[] }
-const m = manifest as unknown as { web_accessible_resources?: unknown; host_permissions: string[]; content_scripts: ContentScript[] }
+const m = manifest as unknown as {
+	web_accessible_resources?: unknown
+	host_permissions: string[]
+	optional_host_permissions?: unknown
+	optional_permissions?: unknown
+	content_scripts: ContentScript[]
+}
 
 /** Chrome match-pattern semantics for the subset the manifest uses: `<scheme>://<host>/<path>`,
  *  where host is `*`, `*.domain` (domain and every subdomain) or an exact domain. */
@@ -55,11 +61,12 @@ describe("passkey relying party", () => {
 		expect(RP_ID).toBe("passkey.nulo.sh")
 	})
 
-	test("the host permission names exactly the RP host; the only other https origin is Presto's loopback", () => {
-		expect(m.host_permissions).toContain(`https://${RP_ID}/`)
-		const remote = m.host_permissions.filter((p) => p.startsWith("https://") && !p.startsWith("https://127.0.0.1/"))
-		expect(remote).toEqual([`https://${RP_ID}/`])
-		expect(m.host_permissions).toContain("https://127.0.0.1/*")
+	// Pinned in full, order-free: the CI publish proceeds past the store's BROAD_HOST_USAGE warning
+	// (scripts/release/publish-chrome-store.ts), so no host grant may widen behind it unnoticed.
+	test("the host permissions are exactly the RP host and Presto's loopback, and nothing is optional", () => {
+		expect([...m.host_permissions].sort()).toEqual([`https://${RP_ID}/`, "https://127.0.0.1/*", "http://127.0.0.1/*"].sort())
+		expect(m.optional_host_permissions).toBeUndefined()
+		expect(m.optional_permissions).toBeUndefined()
 	})
 
 	test("no in-repo deployable names the RP host (dashboard-managed hosting is out of this test's sight)", () => {
@@ -85,8 +92,10 @@ describe("passkey relying party", () => {
 		expect(JSON.parse(config.replace(/^\s*\/\/.*$/gm, "")).routes).toEqual([{ pattern: RP_ID, custom_domain: true }])
 	})
 
-	test("the content script never injects into the RP host or its descendants, and still does elsewhere", () => {
+	test("the one content script matches every http(s) page, never the RP host or its descendants", () => {
+		expect(m.content_scripts).toHaveLength(1)
 		const [cs] = m.content_scripts
+		expect(cs.matches).toEqual(["*://*/*"])
 		expect(injectsInto(cs, `https://${RP_ID}/`)).toBe(false)
 		expect(injectsInto(cs, `https://${RP_ID}/index.html`)).toBe(false)
 		expect(injectsInto(cs, `http://${RP_ID}/`)).toBe(false)

@@ -227,9 +227,12 @@ The account side ran on 2026-09-22/23. Every action, with its rollback, is in
   after 30 days). Unlisted → Public is the owner's call, after a `/harden security` pass.
 - **Firefox**: `nulo-v5` 0.28.0.0 is awaiting review. Mozilla's modified-library rule (Ask 9) is the
   open review risk. API publishing starts with the next stable release.
-- **CI Chrome publish vs warnings**: `blockOnWarnings: true` stops at `BROAD_HOST_USAGE`, which the
-  wallet's host permissions will always raise. Decide between an explicit accepted-warnings list
-  (still fail closed on any other warning) and a manual dashboard submit each release.
+- **CI Chrome publish vs warnings** — decided 2026-09-24: an accepted-warnings list in code
+  (`ACCEPTED_WARNINGS` in `scripts/release/publish-chrome-store.ts`, only `BROAD_HOST_USAGE`, pinned
+  by a test). The publish still sends `blockOnWarnings: true`; a refusal whose every warning is on
+  the list is recorded in the job summary and retried once with `blockOnWarnings: false`; anything
+  else fails closed. `apps/extension/src/manifest.test.ts` pins the host permissions, the
+  content-script matches and the absence of optional grants, so nothing widens behind it.
 - **`fetchStatus` and a dashboard submission**: about two hours after the hand submission, check
   mode read `submitted none`. Confirm what the next publish's preflight reports.
 - **Release notes are empty on every release**: `attach-assets` runs `git-cliff --unreleased` after

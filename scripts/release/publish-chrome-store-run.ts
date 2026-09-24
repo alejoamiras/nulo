@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { appendFileSync, existsSync } from "node:fs"
 import {
 	type ApiRequest,
 	type ItemStatus,
@@ -17,16 +17,21 @@ import {
 	type RevisionStatus,
 	type PublishResponse,
 	type PublishType,
+	type StoreWarning,
 	type UploadResponse,
+	acceptedWarnings,
 	apiError,
 	compareStoreVersions,
+	interpretAcceptedPublish,
 	interpretAsyncUploadState,
 	interpretPreflight,
 	interpretPublish,
 	interpretUpload,
+	listed,
 	parseStoreVersion,
 	publishRequest,
 	statusRequest,
+	truncate,
 	uploadRequest,
 } from "./publish-chrome-store"
 
@@ -50,14 +55,25 @@ export interface RunIO {
 	fetch(req: ApiRequest, timeoutMs: number): Promise<ApiResponse>
 	zip: ZipReader
 	log(line: string): void
+	/** One Markdown line for the job summary, where an accepted store warning stays visible after the log scrolls. */
+	summary(line: string): void
 	now(): number
 	sleep(ms: number): Promise<void>
 }
 
 export type RunResult = { exit: 0 | 1 }
 
+/** A workflow command with its data escaped the way the runner unescapes it, so API text cannot forge a second command. */
+const command = (name: string, data: string) => `::${name}::${data.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/##\[/g, "## [")}`
+/**
+ * An ordinary line that may carry API text: no line break (a `::` command counts only at the
+ * start of a physical line) and no `##[`, which the runner's legacy parser accepts anywhere.
+ */
+const plain = (s: string) => s.replace(/[\r\n]+/g, " ").replace(/##\[/g, "## [")
+const say = (io: RunIO, line: string) => io.log(plain(line))
+
 const fail = (io: RunIO, reason: string): RunResult => {
-	io.log(`::error::publish-chrome-store: ${reason}`)
+	io.log(command("error", `publish-chrome-store: ${reason}`))
 	return { exit: 1 }
 }
 
@@ -83,12 +99,12 @@ async function run(env: Record<string, string | undefined>, io: RunIO): Promise<
 async function runCheck(env: Record<string, string | undefined>, io: RunIO, publisherId: string, itemId: string): Promise<RunResult> {
 	const token = env.CWS_ACCESS_TOKEN ?? ""
 	if (!token) return fail(io, "CWS_ACCESS_TOKEN is required in check mode")
-	io.log(`::add-mask::${token}`)
+	io.log(command("add-mask", token))
 	const res = await call(io, statusRequest(publisherId, itemId, token))
 	if (!res.ok) return fail(io, res.reason)
 	const status = res.json as ItemStatus
 	if (status.itemId !== itemId) return fail(io, `fetchStatus answered for item ${JSON.stringify(status.itemId ?? null)}, expected ${itemId}`)
-	io.log(`check ok: item ${itemId} — published ${describe(status.publishedItemRevisionStatus)}; submitted ${describe(status.submittedItemRevisionStatus)}`)
+	say(io, `check ok: item ${itemId} — published ${describe(status.publishedItemRevisionStatus)}; submitted ${describe(status.submittedItemRevisionStatus)}`)
 	return { exit: 0 }
 }
 
@@ -104,37 +120,63 @@ async function runPublish(env: Record<string, string | undefined>, io: RunIO, pu
 	const checked = readManifest(io, zipPath, version)
 	if (!checked.ok) return fail(io, checked.reason)
 	const storeVersion = checked.storeVersion
-	io.log(`zip ok: ${zipPath} — manifest version ${storeVersion} (version_name ${version})`)
+	say(io, `zip ok: ${zipPath} — manifest version ${storeVersion} (version_name ${version})`)
 
 	if (dryRun === "true") {
-		io.log(`dry run: would preflight, upload and publish (${publishType}) item ${itemId} at ${storeVersion}; no request was made`)
+		say(io, `dry run: would preflight, upload and publish (${publishType}) item ${itemId} at ${storeVersion}; no request was made`)
 		return { exit: 0 }
 	}
 
 	const token = env.CWS_ACCESS_TOKEN ?? ""
 	if (!token) return fail(io, "CWS_ACCESS_TOKEN is required")
-	io.log(`::add-mask::${token}`)
+	io.log(command("add-mask", token))
 
 	const pre = await call(io, statusRequest(publisherId, itemId, token))
 	if (!pre.ok) return fail(io, pre.reason)
 	const verdict = interpretPreflight(pre.json as ItemStatus, itemId, storeVersion)
 	if (!verdict.ok) return fail(io, verdict.reason)
-	io.log(verdict.summary)
+	say(io, verdict.summary)
 
 	const up = await call(io, uploadRequest(publisherId, itemId, token, io.zip.bytes(zipPath)))
 	if (!up.ok) return fail(io, up.reason)
 	let outcome = interpretUpload(up.json as UploadResponse, itemId, storeVersion)
 	if (outcome.kind === "poll") outcome = await pollUpload(io, publisherId, itemId, token)
 	if (outcome.kind === "fail") return fail(io, outcome.reason)
-	io.log(`upload ok: ${storeVersion}`)
+	say(io, `upload ok: ${storeVersion}`)
+	return publish(io, publisherId, itemId, token, publishType)
+}
 
-	const pub = await call(io, publishRequest(publisherId, itemId, token, publishType), true)
-	if (!pub.ok) return fail(io, pub.reason)
-	const result = interpretPublish(pub.json as PublishResponse, pub.status)
-	if (!result.ok) return fail(io, result.reason)
-	io.log(`publish (${publishType}) ${result.summary}`)
+/**
+ * Publish with warnings blocking. When the store refuses on warnings that are all accepted, one
+ * retry proceeds past them with `blockOnWarnings: false` — the only request that ever sends it,
+ * never made twice. The decision is recorded in the job summary before the retry, so a retry
+ * that fails or times out still leaves the record of what was authorized.
+ */
+async function publish(io: RunIO, publisherId: string, itemId: string, token: string, publishType: PublishType): Promise<RunResult> {
+	const first = await call(io, publishRequest(publisherId, itemId, token, publishType), true)
+	if (!first.ok) return fail(io, first.reason)
+	const accepted = acceptedWarnings(first.json as PublishResponse, first.status, itemId)
+	if (!accepted) {
+		const result = interpretPublish(first.json as PublishResponse, first.status)
+		if (!result.ok) return fail(io, result.reason)
+		say(io, `publish (${publishType}) ${result.summary}`)
+		return { exit: 0 }
+	}
+	const decision = `the store warns ${describeWarnings(accepted)}; every reason is accepted, so the publish proceeds past it with blockOnWarnings: false`
+	io.log(command("warning", `publish-chrome-store: ${decision}`))
+	io.summary(plain(`Chrome Web Store: ${decision}.`))
+	const retry = await call(io, publishRequest(publisherId, itemId, token, publishType, false), true)
+	const result = retry.ok ? interpretAcceptedPublish(retry.json as PublishResponse, retry.status) : { ok: false as const, reason: retry.reason }
+	if (!result.ok) {
+		io.summary(plain(`Chrome Web Store: the publish past accepted warnings failed — ${result.reason}.`))
+		return fail(io, result.reason)
+	}
+	say(io, `publish (${publishType}) ${result.summary}`)
+	io.summary(plain(`Chrome Web Store: ${result.summary}.`))
 	return { exit: 0 }
 }
+
+const describeWarnings = (warnings: StoreWarning[]) => listed(warnings.map((w) => `${w.reason} ("${truncate(w.description, 120)}")`))
 
 async function pollUpload(io: RunIO, publisherId: string, itemId: string, token: string) {
 	const deadline = io.now() + UPLOAD_DEADLINE_MS
@@ -217,10 +259,12 @@ export async function realFetch(req: ApiRequest, timeoutMs: number): Promise<Api
 }
 
 if (import.meta.main) {
+	const summaryPath = process.env.GITHUB_STEP_SUMMARY
 	const io: RunIO = {
 		fetch: realFetch,
 		zip: unzipReader,
 		log: (line) => console.log(line),
+		summary: (line) => (summaryPath ? appendFileSync(summaryPath, `${line}\n`) : console.log(line)),
 		now: () => Date.now(),
 		sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 	}
