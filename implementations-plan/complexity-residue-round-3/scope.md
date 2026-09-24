@@ -108,7 +108,7 @@ codex session per plan).
   pre-send `claimAttemptAt`; the direct-FJ `latchFuel` can resurrect a cleared `setupInsufficiency`.
   Pinned by `useDeposit.characterization.test.ts` "(BUG PIN) PROPOSED write drops the pre-send
   claimAttemptAt" (snapshot `fjwc-latch-patches`) — see
-  [deposit-decomposition/plan.md](../deposit-decomposition/plan.md) item 8. Fix shape is a codex
+  [deposit-decomposition/plan.md](https://github.com/alejoamiras/nulo/blob/<FREEZE_SHA>/implementations-plan/deposit-decomposition/plan.md) item 8. Fix shape is a codex
   back-and-forth: read-current-then-patch at each site vs deep-merging `fuel` in the journal's
   patcher (which changes every other `fuel` write's semantics) — pick the one that cannot regress
   the clean-latch reading elsewhere. The pin flips to the fixed behavior in the same PR.
@@ -116,7 +116,7 @@ codex session per plan).
   ~889–940): a terminal `reverted` receipt RETAINS `claimTxHash`, so every Retry re-enters the
   receipt path and can never resend, while the card copy says "You can retry from this card".
   Pinned by `useBridgeJournal.stages.test.ts` "(e) (BUG PIN) the reverted-hash trap" — see
-  [journal-engine-decomposition/plan.md](../journal-engine-decomposition/plan.md) item 3. The keep
+  [journal-engine-decomposition/plan.md](https://github.com/alejoamiras/nulo/blob/<FREEZE_SHA>/implementations-plan/journal-engine-decomposition/plan.md) item 3. The keep
   was deliberate for hash-scoped landed provenance (`reportRevertedClaim`), so the fix is adjudicated
   with codex: clear the hash on a TERMINAL revert only (dropped-debounce and proposed/pending paths
   untouched, sent-claim monotonicity preserved) vs keep the hash and allow a fresh send with the new

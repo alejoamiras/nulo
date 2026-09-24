@@ -5,11 +5,11 @@ Single source of truth for the Nulo-custom extension of `@aztec/wallet-sdk`'s
 `isTokenRegistered`, `grantPublicAuthwit`, `getWalletFeatures` — so the dApp-side `ExtensionWallet`
 proxy can route them.
 
-Private, extension-internal. Consumed by the extension, tools, and playground.
+Private, extension-internal. Consumed by the extension and the playground.
 It deliberately is **not** an export of `@nulo/wallet-bridge`: wallet-bridge is
 extension-internal, and exposing it to the dApp-facing apps would leak its
 dispatcher/protocol surface to third-party dApps. A dedicated private package
-keeps the patch Nulo-internal while giving all three apps one source. (It
+keeps the patch Nulo-internal while giving both apps one source. (It
 replaced three byte-identical inline copies — the drift risk is gone now.)
 
 ## Exports
