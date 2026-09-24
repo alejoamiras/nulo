@@ -11,6 +11,8 @@ export interface LaunchOptions {
 	/** Persists profile state across launches, which is what makes a relaunch a real cold boot. */
 	userDataDir?: string
 	headless: boolean
+	/** `false` drops the fixed window size a driver launches with; only Chrome's launch has one. */
+	fixedWindowSize?: boolean
 }
 
 export interface LaunchedBrowser {
