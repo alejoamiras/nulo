@@ -123,7 +123,7 @@ The commands every batch gate and the final pass quote. `<b>` is `chrome` or `fi
 | CI-gating scripts | `bun run test:ci-gating` |
 | Build | `bun run build` |
 | Smoke e2e (does not build) | `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:<b>`, then `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` |
-| Network e2e, Chrome (builds itself) | `NULO_E2E_BROWSER=chrome NULO_E2E_RETRY=0 NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]`, prover on; files marked `@requires-proverless` run again with `NULO_E2E_PROVERLESS=1` |
+| Network e2e, Chrome (builds itself) | `NULO_E2E_BROWSER=chrome NULO_E2E_RETRY=0 NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]`, prover on, excluding files marked `@requires-proverless` (`agent.sh` refuses them), which run separately with `NULO_E2E_PROVERLESS=1` |
 | Network e2e, Firefox (builds itself) | `NULO_E2E_BROWSER=firefox NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]`, proverless, as CI's Firefox shards run |
 | Execution canaries, prover on (batch 5) | Chrome: the Chrome network command with `tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`. Firefox: CI's Firefox canary job (below) |
 | Storybook (when stories change) | `bun run --cwd apps/extension build-storybook` |
