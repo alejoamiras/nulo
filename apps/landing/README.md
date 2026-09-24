@@ -30,7 +30,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run test` | Unit tests (renderer, headers parser, release resolver). |
 | `bun run deploy:dry` | Validate `wrangler.jsonc` against the built `dist/`; needs no credentials. |
-| `bun run deploy`, `bun run deploy:preview` | The production (`main`) and other-branch commands Workers Builds' Git connection is configured with in the Cloudflare dashboard. By hand only to create the Worker. |
+| `bun run deploy`, `bun run deploy:preview` | The production (`main`) and other-branch commands to configure when connecting Workers Builds in the Cloudflare dashboard. By hand only to create the Worker. |
 
 ## Key notes
 
