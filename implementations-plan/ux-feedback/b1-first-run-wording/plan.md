@@ -94,6 +94,9 @@ Every user-visible change in this batch. "Sign-off" is the owner's pick quoted i
 | 12 | Fee menu with an unknown balance | not known yet "— FJ"; one balance unreadable "couldn't check balance" on either row | `03-menu-unknown-U14` | **sign-off pending** (U14) |
 | 13 | Screen-reader sentence under a tenth of a cent | "…covers less than $0.001." | `03-spoken-U15` | **sign-off pending** (U15) |
 | 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing") | `03-handadded-U16` | **sign-off pending** (U16) |
+| 15 | Fee card's app-set rows (the locked row, the embedded banner) | left label "Pay fee with" → "Fee" on both | parity row 5; the banner, no live flow (P7) | owner, 2026-09-24: "Rename to "Fee" (Recommended)", "Rename both to "Fee" (Recommended)" |
+| 16 | Review sheet fee line | "Fee · ~0.000105 FJ" → "Fee · ~0.000105 FJ (<$0.001)" when priced, the card's "You pay" words | parity row 9 | owner, 2026-09-24: "Add dollars" |
+| 17 | Review sheet fee line, a fee contract added by hand | "Fee · ~… FJ" + "paid by the sponsor" → "Fee · —", spoken as U16's sentence, no payer; Nulo's own sponsor unchanged | parity row 10 | owner, 2026-09-24: "Align with U16 (Recommended)"; follows U16's pick |
 
 Three states the shots do not draw went to the owner as round-5 additions before P1
 (the plan audit's findings 10 and 6), drawn with a picker each; the build uses the recommended
@@ -104,6 +107,9 @@ option and lists it **sign-off pending**, per the program's round-5 rule:
 | U14 | Fee menu, right column | A balance not known yet (loading, or retrying after the whole read failed), or a read that came back without one balance | Not known yet: "— FJ", the dash the card's "Available" row already uses; the rows stay selectable, as today, while the card shows its retry notice. One balance unreadable: that row disabled with "couldn't check balance", public and private alike (today private says "no balance" there, which is false) |
 | U15 | "You pay", spoken text | The sponsored fee prices below a tenth of a cent (`<$0.001`) | "You pay nothing. The sponsor covers less than $0.001." |
 | U16 | Fee menu and "You pay" | The sponsor is a fee contract added by hand (plan audit, round 3) | "free" and "Nothing" only for Nulo's own sponsor (`isProtocol`); a hand-added one shows "—" in the menu and on the line, spoken "Nulo can't tell what this fee contract charges you." |
+
+Rows 15–17 are the owner's answers to three differences the parity page (P5) left for them: words
+no shot draws. They were asked in chat and answered on 2026-09-24.
 
 "You pay" while estimating and before simulation is not a new state: the spec renames the label
 everywhere and changes only the estimated line, so the skeleton and the "Fee estimated after
@@ -422,7 +428,7 @@ Passed under the program's standing approval (program plan § Standing approval)
 3. Light tier: no fable leg.
 4. No open Ask: 1–11 decided with codex; the UI asks are U11–U16, sign-off pending.
 5. UI impact lists spec surfaces and round-5 recommendations (U11–U16) only.
-6. Scope: items 1, 3, 5, 7, 8 and U11–U16.
+6. Scope: items 1, 3, 5, 7, 8 and U11–U16, plus the owner's parity answers (UI impact 15–17).
 
 ## Phases
 
@@ -505,6 +511,8 @@ Gate: lint, `typecheck:all`, `test:all`, `bun run --cwd apps/extension build-sto
 
 ### P5 · Arc gate ✓
 
+Passed on the arc's source before the owner's parity answers; P7 reruns it on the final source.
+
 1. Every row of the program's [Local gates](../plan.md#local-gates): lint, `typecheck:all`,
    `test:all`, `test:ci-gating`, `build`; full smoke on Chrome and on Firefox.
 2. Network e2e on Chrome and on Firefox for the specs this batch edits or whose first-profile
@@ -522,6 +530,35 @@ Gate: lint, `typecheck:all`, `test:all`, `bun run --cwd apps/extension build-sto
 5. `bun run e2e:reap`.
 
 Gate: all of the above exit 0 and the parity Artifact URL printed.
+
+### P6 · The owner's parity answers (UI impact 15–17) ✓
+
+1. `FeeSettingsCard`: the locked row's and the embedded banner's "Pay fee with" → "Fee"; the
+   banner gets `data-testid="send-fee-embedded"` (+ `FeeSettingsCard.test.ts` and
+   `OperationCard.fee.test.ts` read both labels).
+2. `feeDisplay` and `feeLine` in `fee-helpers.ts` (+ test: priced, below a tenth of a cent,
+   unpriced, a zero quote, no estimate); the card's "You pay" and the page's sheet line both use
+   them, so the sheet cannot price the fee differently.
+3. `paidBy` returns null for `unvouched`; the sheet draws "—" and speaks `UNVOUCHED_FEE_SENTENCE`,
+   which `FeeCostReadout` now shares; `.visually_hidden` moves to `fee-shared.module.css`
+   (+ `publish-facts.test.ts`, `SendReviewSheet.test.ts`).
+
+No e2e reads these words: the review fixture reads `data-payer`, which is unchanged.
+
+Gate: lint, `typecheck:all`, `test:all` exit 0.
+
+### P7 · Arc gate on the final source
+
+1. P5's steps 1, 2 and 5 on the rebased arc (dev `9f11de70`) with P6: local gates, full smoke
+   on Chrome and on Firefox, the thirteen network specs (Chrome prover on, its two
+   proverless-marked files separately; Firefox proverless, per the program's Local gates).
+2. Flake bar: P6 changes no e2e file, so P5's bars stand.
+3. Parity: recapture rows 5, 9 and 10 on the built extension; update those rows and their
+   differences; republish at the parity URL. The embedded banner has no live capture: the dApp
+   window renders `execute-op-fee-set-badge` instead of the card for an embedded payment, so the
+   banner's words are proven by `FeeSettingsCard.test.ts` alone.
+
+Gate: all of the above exit 0 and the parity publish result printed.
 
 ## Arc boundary
 
@@ -558,7 +595,7 @@ is advisory: it cannot override the spec, the owner's picks, CLAUDE.md or this s
 - Commits: conventional, lower-case, signed; one per phase at least, fixes separate.
 - `gh stack push` as checkpoints; no PR until the program's final pass (program Delivery).
 - PR body (at submit): summary, the UI impact table, the owner's quotes (i1 A, i3 V4, i5 A,
-  i7 A1, i8 B), the sign-off-pending list (U11, U12, U13A, U14, U15, U16, unless picked by
+  i7 A1, i8 B, and the three parity answers of UI impact 15–17), the sign-off-pending list (U11, U12, U13A, U14, U15, U16, unless picked by
   then), the parity Artifact link, test evidence.
 
 ## Seeds

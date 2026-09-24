@@ -7,7 +7,7 @@
   included).
 - Artifact republished at its URL as Version 5 (round 5: U1–U12); `picks` store read back, 22 docs.
 - `geckodriver --version` → `geckodriver 0.37.1 (300705c65d1b 2026-07-17 09:25 +0000)`.
-- Baseline smoke on the untouched base (`ad9f9ffb`, docs only on top of `origin/dev`):
+- Baseline smoke on the untouched base (`ad9f9ffb`, docs only on top of `origin/dev`; `814eeb83` after the stack's rebase):
   - Chrome: 139 passed, 8 skipped (147), exit 0, 902 s.
   - Firefox: 36 files passed, 2 skipped; 135 passed, 12 skipped (147), exit 0, 1063 s.
   - `bun run e2e:reap` afterwards: nothing to reap.

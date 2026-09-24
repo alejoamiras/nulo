@@ -55,7 +55,7 @@ option stay out.
 | ✓ | # | Batch | Items | Tier | Arc branch(es) | Plan |
 |---|---|---|---|---|---|---|
 | ✓ | 0 | Program setup | round 5 drawings, stack init | — | on arc 1 | this file ([lessons](lessons/phase-0.md)) |
-| ✓ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
+| ☐ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
 | ☐ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ☐ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
 | ☐ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
@@ -322,6 +322,11 @@ That's freaking awesome."); i7 A, then A1 ("Let's keep A1 for now."); i8 B ("Tak
 height."); i9 dotted terms plus glossary, "Authorizations" ("9 => Authorizations."); tips "All of
 it" ("Everything else sounds pretty good", without the "sponsor" tooltip); i10 A′ ("The timer bar
 on the snackbar looks weird."); i11 A; i12 B. Round-5 picks are appended here as they arrive.
+
+Batch 1's parity answers (chat, 2026-09-24): the fee card's app-set row and embedded banner say
+"Fee" ("Rename to "Fee" (Recommended)", "Rename both to "Fee" (Recommended)"); the review sheet's
+fee line adds dollars ("Add dollars"); a hand-added fee contract there reads "Fee · —" with no
+payer ("Align with U16 (Recommended)").
 
 ## Follow-ups (not this program)
 

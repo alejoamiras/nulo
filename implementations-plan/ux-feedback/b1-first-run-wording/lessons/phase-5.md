@@ -6,18 +6,21 @@ P3's read. i1 A, i3 V4, i5 A, i7 A1, i8 B; no U11–U16 row, so those stay built
 
 ## Review loop (codex high, GPT-6 Astra, one resumed session)
 
+Commit ids are the arc's after its rebase onto dev `9f11de70` (every commit's content unchanged,
+per `git range-diff`); codex's quotes keep the ids it saw.
+
 | Round | Verdict | Material findings | Fix |
 |---|---|---|---|
-| 1 | changes-requested | `createAndActivateProfile` counted the picker's rows, which arrive after its button, so a slow read expected "Profile 1"; `importSeed` accepted whichever name-field state the page settled on and any "Profile N"; the fee menu's disabled row was dimmed twice (tertiary ink plus `DropdownItem`'s 0.5 fade) against U14A's drawing | `56ded6f9` (both helpers read the stored names and expect `defaultProfileName(before)` exactly, then check the saved name), `acd72861` (the menu cancels the fade on its disabled rows) |
-| 2 | changes-requested | the new postcondition passed when a profile vanished; the case and NFKC collision tests never collided; the readout's and menu's headers narrated their templates and named their parent | `cb4faa65` (sorted exact equality; collisions that land on a taken variant, one bumping twice), `95ce251f` (headers cut to the parent-decides constraint) |
-| 3 | changes-requested | five comments restating one-line helpers (`textOf`, `spoken`, `drawn`, `glyphOf`, `FIRST_PROFILE_NAME`) | `46a0ed32` (those five, plus three of the same kind codex had not listed) |
+| 1 | changes-requested | `createAndActivateProfile` counted the picker's rows, which arrive after its button, so a slow read expected "Profile 1"; `importSeed` accepted whichever name-field state the page settled on and any "Profile N"; the fee menu's disabled row was dimmed twice (tertiary ink plus `DropdownItem`'s 0.5 fade) against U14A's drawing | `a668050a` (both helpers read the stored names and expect `defaultProfileName(before)` exactly, then check the saved name), `845b82d5` (the menu cancels the fade on its disabled rows) |
+| 2 | changes-requested | the new postcondition passed when a profile vanished; the case and NFKC collision tests never collided; the readout's and menu's headers narrated their templates and named their parent | `496362c9` (sorted exact equality; collisions that land on a taken variant, one bumping twice), `bac05e27` (headers cut to the parent-decides constraint) |
+| 3 | changes-requested | five comments restating one-line helpers (`textOf`, `spoken`, `drawn`, `glyphOf`, `FIRST_PROFILE_NAME`) | `7987cee9` (those five, plus three of the same kind codex had not listed) |
 | 4 (confirmation) | **approve**, high | none | — |
-| 5 (after `f0edddcf`) | **approve**, high | none; one nit on the gate wording | `803da36d` |
+| 5 (after `8c39bc5e`) | **approve**, high | none; one nit on the gate wording | `000a1444` |
 
 Round 4's verdict, verbatim: *"VERDICT: approve — confidence: high. no new material findings.
 Commit `46a0ed32` closes the remaining finding: all five cited comments are deleted, along with the
 additional redundant comments. It contains only comment deletions and is the sole change since
-round 3."*
+round 3."* (`46a0ed32` is `7987cee9` after the rebase.)
 
 Round 5's verdict, verbatim: *"VERDICT: approve — confidence: high. no new material findings"*.
 It checked that `protocolTimeout` reaches BiDi's command timer and that Puppeteer starts the wait
@@ -48,7 +51,7 @@ asked for the comment audit over the whole arc, which is where rounds 2 and 3 fo
   and 3 were stopped.
 - **The proven cause.** Firefox's BiDi session ran with Puppeteer's default 180 s protocol
   timeout, while `sendTransfer` waits 300 s for the toast. Chrome's launch already allowed 300 s.
-  Fixed in `f0edddcf`.
+  Fixed in `8c39bc5e`.
 - **The second cause, measured.** After the fix, a prover-on diagnostic run (not a gate) failed
   the same two tests on `sendTransfer`'s own 300 s toast wait: "Waiting failed: 300000ms
   exceeded", with no protocol error. So a WASM-proved transfer took more than 300 s on Firefox on
@@ -62,7 +65,7 @@ asked for the comment audit over the whole arc, which is where rounds 2 and 3 fo
   - Firefox's protocol budget matches Chrome's.
   - Batch 5's Firefox canaries take their evidence from CI's Presto canary job.
 
-  The program plan's Local gates table records the modes (`8524b16a`).
+  The program plan's Local gates table records the modes (`edcea092`).
 - **Rejected from the consult, out of this arc's diff:** the comment rewrite it proposed for
   `vitest.e2e.network.config.ts`, which this arc does not touch.
 
@@ -86,18 +89,24 @@ asked for the comment audit over the whole arc, which is where rounds 2 and 3 fo
 
 <https://claude.ai/artifact/3bsU92KDV4gfrqFGPBoy1m>: fourteen rows, each drawing beside the
 built extension (smoke captures for rows 1–4, 7 and 12, sandbox captures for the fee and mark
-rows), on the final source (`46a0ed32`; later commits touch only e2e and docs). Every visible
-difference is listed on its row. Nothing needed a fix. Three are today's words or lines that no
-drawing covers, left for the owner:
+rows), on the final source before the rebase (`46a0ed32`, now `7987cee9`; later commits touch
+only e2e and docs). Every visible difference is listed on its row. Nothing needed a fix. Three
+are today's words or lines that no drawing covers, left for the owner:
 
 - Row 5: the dApp window's app-set fee row keeps its label "Pay fee with".
 - Row 9: the review sheet's fee line shows FJ only, with no dollar value.
 - Row 10: for a hand-added fee contract, the sheet still reads "paid by the sponsor" next to a
   card that says "—".
 
+The owner answered all three on 2026-09-24, and renamed the embedded banner's "Pay fee with" too
+(plan UI impact 15–17). That reopened the arc: P6 builds the answers, P7 regates.
+
 ## Gate
 
-On `feat/ux-1-first-run-wording`, extension source at `46a0ed32`:
+### Before the rebase (base `df37c0f4`)
+
+These runs name the commits they ran on, which the rebase replaced: `46a0ed32` → `7987cee9`,
+`fee6b4a2` → `b082d88e`, `8524b16a` → `edcea092`, `803da36d` → `000a1444`.
 
 - Local gates (`46a0ed32`): `bun run lint` exit 0 (30 warnings, 5 infos, none in changed files);
   `typecheck:all` exit 0; `test:all` exit 0 (extension 7,123 passed, 4 skipped, 7 todo; tools
@@ -115,3 +124,14 @@ On `feat/ux-1-first-run-wording`, extension source at `46a0ed32`:
 - Diagnostic, Firefox prover on (not a gate): `imported-account-execution` 1 passed, 2 failed on
   the 300 s wait (above).
 - `bun run e2e:reap` after every chain.
+
+### After the rebase (base `9f11de70`, HEAD `8f0d79c2`)
+
+- Local gates: `bun run lint` exit 0 (29 warnings, 3 infos); `typecheck:all` exit 0; `test:all`
+  exit 0 (extension 7,131 passed, 4 skipped, 7 todo; aztec-runtime 249); `test:ci-gating` exit 0
+  (138 passed, 2 skipped; the complexity ratchet red before the rebase, from dev's removal of the
+  tools app, is green); `build` exit 0.
+- Smoke, full, Chrome: exit 0 (139 passed, 8 skipped).
+- The rest of the chain (Firefox smoke, both network runs) was stopped when the owner's parity
+  answers arrived, since they change the arc's source; reaped with `bun run e2e:reap`. P7 runs it
+  on the final source.
