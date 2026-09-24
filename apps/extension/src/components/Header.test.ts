@@ -132,7 +132,6 @@ describe("Header — lock", () => {
 		const lock = mountHeader().get('[data-testid="header-lock"]')
 		expect(lock.get('[data-testid="stub-material"]').attributes("data-name")).toBe("lock")
 		expect(lock.text()).toBe("Lock")
-		// The accessible name contains the visible word.
 		expect(lock.attributes("aria-label")).toBe("Lock wallet")
 		expect(lock.attributes("type")).toBe("button")
 	})

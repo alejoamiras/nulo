@@ -1,17 +1,8 @@
 <script setup>
-/**
- * "You pay" readout used inside `FeeSettingsCard`. Three states:
- * - `isEstimating === true && no estimate` → stacked label + skeleton in the value slot
- * - `estimate` present                     → stacked label + what the account pays
- * - otherwise                              → "Fee estimated after simulation" hint
- *
- * `payer` says who pays an estimate: the account (`self`), Nulo's own sponsor (`sponsor`: "Nothing",
- * the waived fee struck through), or a fee contract added by hand (`unvouched`: a dash, since Nulo
- * cannot tell what such a contract charges).
- */
 const props = defineProps({
 	estimate: { type: Object, default: null },
 	isEstimating: { type: Boolean, default: false },
+	/** Who pays an estimate. The parent decides: only it knows whether a sponsor is Nulo's own. */
 	payer: { type: String, default: "self", validator: (v) => ["self", "sponsor", "unvouched"].includes(v) },
 })
 
@@ -86,7 +77,6 @@ const sponsoredSentence = computed(() => {
 	composes: skeleton from "./fee-shared.module.css";
 }
 
-/* Read by screen readers, never drawn. */
 .visually_hidden {
 	position: absolute;
 	width: 1px;

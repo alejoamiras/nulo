@@ -1,13 +1,4 @@
 <script setup>
-/**
- * Fee-method dropdown trigger + popup used by `FeeSettingsCard`. The
- * trigger shows the active method's title (or "Select method"); the
- * popup lists every entry from `methods` with the per-entry testid
- * `send-fee-method-{subtitle}` and what it can spend, or why it is
- * disabled. Disabled entries cannot be selected. `payerNoticeShape`
- * hangs the "names your address" tag on the label: the page decides
- * when, this only draws it.
- */
 import { Dropdown } from "@/components/ui/Dropdown"
 import { publishGlyph } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
@@ -15,7 +6,8 @@ import mark from "@/components/composite/send/publish-mark.module.css"
 defineProps({
 	modelValue: { type: Object, default: null },
 	methods: { type: Array, required: true },
-	/** "private-private" | "private-public" while this send's fee names the account; null otherwise. */
+	/** "private-private" | "private-public" while this send's fee names the account, else null. The
+	 *  page decides; this only draws the tag. */
 	payerNoticeShape: { type: String, default: null },
 })
 
