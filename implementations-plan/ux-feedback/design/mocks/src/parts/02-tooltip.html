@@ -1,0 +1,124 @@
+<section class="wrap item" id="i2" data-item="i2" aria-labelledby="i2-title">
+	<div class="item-head">
+		<span class="item-num">02</span>
+		<h2 class="item-title" id="i2-title">The alias tooltip runs off the window</h2>
+		<div class="item-surface"><span class="chip">Capabilities window</span><span class="chip">Tooltip primitive (every tooltip)</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>On the "Capabilities pop up" the tooltip for the alias goes outside of the width of the window size.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li><code>packages/design/src/ui/Tooltip.vue</code> places the bubble from its trigger's rectangle and never checks the window edge. With <code>position="start"</code> the bubble starts at the ⓘ (about 100px in) and may grow to 320px wide (<code>calc(var(--base-width) - 40px)</code>), so it ends around 440px inside a 400px window.</li>
+				<li><code>--base-width</code> is 360px even inside the 400px approval windows, and nothing ever flips or shifts the bubble.</li>
+				<li>Two more start-aligned tooltips with long copy carry the same latent bug: the suspicious-hostname warning (<code>DappIdentityBlock.vue:47</code>) and the recovery-phrase hint (<code>ImportSecretForm.vue:35</code>).</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>Standard collision handling is <i>flip</i> (other side when there's no room), then <i>shift</i> (slide along the edge), then <i>size</i> (cap width) — <a href="https://floating-ui.com/docs/middleware">Floating UI</a>. Radix shipped the same bug and fixed it the same way (<a href="https://github.com/radix-ui/primitives/issues/1476">radix-ui#1476</a>).</li>
+				<li>Keep bubbles near 240px in the 360px popup and 260–280px in the 400px windows, under ~130 characters.</li>
+				<li>"Users shouldn't need to find a tooltip in order to complete their task" — <a href="https://www.nngroup.com/articles/tooltip-guidelines/">NN/g</a>. Where there's room, a visible line beats a tooltip.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Bubble anchored at the ⓘ, cut by the window</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop w400" theme="dark">
+					<div class="n-sections">
+						<div class="n-group">
+							<div class="n-seclabel">Select accounts to share<span class="count">1</span></div>
+							<div class="n-items">
+								<div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+									<div class="n-alias">
+										<span class="n-alias-label">Alias <svg class="ic" id="i2-trig-a"><use href="#i-info"/></svg></span>
+										<div class="n-alias-input">Account</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-tip" data-tip-for="i2-trig-a" data-tip-mode="start"><div class="n-tip-text">A private name for this account visible only to this app</div></div>
+					<span class="n-pin bad" style="right:6px;bottom:6px">window edge · 400px</span>
+				</div></div>
+				<div class="cap">Tooltip pinned open · the frame is the window's edge</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Fix the primitive: flip, shift, cap</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop w400" theme="dark">
+					<div class="n-sections">
+						<div class="n-group">
+							<div class="n-seclabel">Select accounts to share<span class="count">1</span></div>
+							<div class="n-items">
+								<div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+									<div class="n-alias">
+										<span class="n-alias-label">Alias <svg class="ic" id="i2-trig-b"><use href="#i-info"/></svg></span>
+										<div class="n-alias-input">Account</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-tip" data-tip-for="i2-trig-b" data-tip-mode="clamp" data-tip-max="272"><div class="n-tip-text">A private name for this account visible only to this app</div></div>
+				</div></div>
+				<div class="cap">Same tooltip, same component, measured against the window</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>After measuring, <code>Tooltip.vue</code> keeps the bubble 8px inside both window edges, flips it above/below when it doesn't fit, and caps its width at <code>min(280px, window − 16px)</code>.</li>
+					<li>About fifteen lines in the one primitive; no new dependency. Fixes all three start-aligned tooltips and anything item 9 adds.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Unchanged: hover or keyboard focus shows it, leaving hides it.</p></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">No tooltip here: say it under the field</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop w400" theme="dark">
+					<div class="n-sections">
+						<div class="n-group">
+							<div class="n-seclabel">Select accounts to share<span class="count">1</span></div>
+							<div class="n-items">
+								<div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+									<div class="n-alias">
+										<span class="n-alias-label">Name for this app</span>
+										<div class="n-alias-input">Account</div>
+										<span class="n-help">This app will show the account under this name. Other apps won't see it.</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="cap">Readable at rest, nothing to hover</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>"Alias" becomes "Name for this app"; the explanation becomes a helper line. The copy is also more accurate: the app does receive this name — it is private from <i>other</i> apps.</li>
+					<li>Complements A; doesn't replace it (other tooltips still need the fix).</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>None.</p></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A + B</h3>
+			<p>A is the bug fix and a precondition for item 9. B is the better answer for this particular field: the alias is a new idea for most people, and research consistently says essential explanations belong on the screen, not behind hover. If you take item 6's option A, this field moves behind a "Rename for this app" link and B's helper line goes with it.</p>
+			<p class="conf">Confidence: high for A, moderate for B.</p>
+		</div>
+		<div class="pick" data-pick="i2" data-options="A + B|A only|B only|Other"></div>
+	</div>
+</section>

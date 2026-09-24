@@ -1,0 +1,90 @@
+<title>Nulo Feedback Round 1</title>
+<style>
+/*@PAGE_CSS@*/
+/*@NULO_CSS@*/
+</style>
+<!--@SPRITE@-->
+
+<nav class="rail" aria-label="Items">
+	<div class="wrap rail-in">
+		<span class="rail-name">Rounds 1–4</span>
+		<div class="rail-chips" id="rail-chips"></div>
+		<span class="rail-count" id="rail-count">0 / 13 settled</span>
+	</div>
+</nav>
+
+<main>
+	<header class="wrap hero">
+		<div>
+			<h1 class="bt"><span class="m">Feedback</span><span class="s">Round four</span></h1>
+			<div class="hero-bar"></div>
+		</div>
+		<div>
+			<p class="lede">Item 3 is V4 and item 9 is "Authorizations", so everything but item 6 is decided. On item 6 the table stays, with check marks instead of squares, and the authorizations row has three new wordings. Its three picks are the last ones. Nothing has changed in the code.</p>
+			<p class="lede">Item 6 opens with its round-4 block; earlier rounds fold underneath, newest first. Picks save to this page, as before.</p>
+			<div class="controls">
+				<span class="ctl-label" id="wt-label">Wallet theme</span>
+				<div class="seg" role="group" aria-labelledby="wt-label">
+					<button type="button" data-wallet-theme="dark" aria-pressed="true">Dark</button>
+					<button type="button" data-wallet-theme="light" aria-pressed="false">Light</button>
+				</div>
+				<button type="button" class="btn ghost" id="copy-picks">Copy picks as text</button>
+				<span class="store-note" id="store-note">Loading saved picks…</span>
+			</div>
+		</div>
+	</header>
+
+	<section class="wrap r2sum" aria-labelledby="r2sum-title">
+		<p class="eyebrow" id="r2sum-title">Round four at a glance</p>
+		<div class="r2grid">
+			<div class="r2card"><h3>Decided this round · 2</h3><ul>
+				<li><a href="#i3">3</a> V4 · the fee struck through, with its own spoken text</li>
+				<li><a href="#i9">9</a> "Authorizations"</li>
+			</ul></div>
+			<div class="r2card r3sum-open"><h3>Still open · 3 picks, all item 6</h3><ul>
+				<li><a href="#i6">6</a> The authorizations row: A, B or C</li>
+				<li><a href="#i6">6</a> What Off means, open since round 2</li>
+				<li><a href="#i6">6</a> Unknown permissions: I'd keep them Off</li>
+			</ul></div>
+			<div class="r2card"><h3>Changed · 1</h3><ul>
+				<li><a href="#i6">6</a> Details marks are checks, not squares; the row is drawn three ways, on and off</li>
+			</ul></div>
+		</div>
+	</section>
+
+	<section class="wrap ledger-sec" aria-labelledby="ledger-title">
+		<p class="eyebrow" id="ledger-title">All thirteen</p>
+		<div class="scroll-x">
+			<table class="ledger">
+				<thead>
+					<tr><th>#</th><th>Item</th><th>Status</th><th>What testers hit</th><th>Options</th><th>My pick</th><th>Your pick</th></tr>
+				</thead>
+				<tbody id="ledger-body"></tbody>
+			</table>
+		</div>
+	</section>
+
+<!--@PARTS@-->
+
+	<footer class="wrap foot">
+		<h2>After you pick</h2>
+		<ol>
+			<li>I read your picks and notes back from this page.</li>
+			<li>One plan (<code>/blueprint mid</code>) with a <em>UI impact</em> line per surface and your picks quoted as the sign-off, as CLAUDE.md requires for anything a user sees.</li>
+			<li>Small PRs by surface: copy first (items 1, 3, 5, 7), then the shared pieces (the fixed tooltip, dotted term and glossary with its CLAUDE.md rule, the snackbar, the interactive row), then the redesigns (6, 8, 12, and 4's placement). Each popup-visible PR carries a screenshot.</li>
+		</ol>
+		<h2 style="margin-top:28px">Follow-ups, outside this arc</h2>
+		<ol>
+			<li><b>One connect window</b> (item 4, option B): Allow and the emoji check in the same window. You want it; it reworks the verify path, so it gets its own plan with round 1's "A + B" drawing as its design.</li>
+			<li><b>Testnet's default "Test USDC"</b> points at <code>0x1c81…e9ae</code>, which the tools bridge no longer lists. A mirror fix for the <code>aztec-update</code> skill, noticed while drawing item 6.</li>
+		</ol>
+		<p class="srcs" id="sources"></p>
+	</footer>
+</main>
+
+<script>
+/*@JS@*/
+</script>
+<style>
+/*@FONTS@*/
+</style>

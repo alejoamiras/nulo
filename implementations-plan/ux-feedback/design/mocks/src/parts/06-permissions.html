@@ -1,0 +1,225 @@
+<section class="wrap item" id="i6" data-item="i6" aria-labelledby="i6-title">
+	<div class="item-head">
+		<span class="item-num">06</span>
+		<h2 class="item-title" id="i6-title">The permissions window reads like an alarm</h2>
+		<div class="item-surface"><span class="chip">Capabilities window</span><span class="chip">capability-meta.ts copy</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>It's saying that everything is high and it's also saying that it can ACT ON YOUR BEHALF (which is not true), SEND TRANSACTIONS (but still require your approval). I don't even know why we have the "Send transactions" if the user has to approve them either way? We want to inform the user, and let him take care of it, but not completely overwhelm. We want to be re-assuring.</blockquote>
+
+	<div class="push">
+		<b>Where I disagree</b>
+		"Act on your behalf" is true. With it, Nulo signs this app's authorization requests <i>without asking</i> whenever the call is on the app's list (<code>packages/wallet-bridge/src/dispatcher.ts</code>, <code>handleCreateAuthWit</code>); off-list calls still prompt. What the card leaves out is the limit: those signatures only take effect inside a transaction you approve. The worse problem is one nobody flagged: "Transaction simulation" says "Nothing is sent to the network", yet it lets the app read your private balances without asking, and it's rated lower than the two permissions that always ask.
+	</div>
+
+	<div class="facts">
+		<div>
+			<h3>What each permission really does</h3>
+			<ul>
+				<li><b>Send transactions</b> (▲ HIGH): every send opens an approval window no matter what (<code>dapp-interaction/service.ts</code>). The permission is the app's list of allowed calls: anything off the list is refused without a popup, and the list also limits the signing above. That's why it exists.</li>
+				<li><b>Transaction simulation</b> (● MED): simulations run on your device, but the results go back to the app, and they include decrypted private values (<code>view-executor.ts</code>). The tools app uses this to read your private token balances (<code>apps/tools/src/lib/capabilities.ts</code>).</li>
+				<li><b>Contract registration</b> (— LOW): public metadata only. <b>Private data</b>, which the tools app doesn't ask for, hands over your whole address book and decrypted events.</li>
+				<li>Ratings are fixed per permission type, so every app gets two ▲ HIGH on its first connect. You can only disconnect the whole app later, not take back one permission.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>Warnings you see every time stop being read: brain scans show habituation from the second exposure (<a href="https://dl.acm.org/doi/10.1145/2702123.2702322">Anderson et al., CHI 2015</a>). In one study, 17% of Android users looked at permission screens and 3% understood them (Felt et al., SOUPS 2012).</li>
+				<li>Popular wallets don't grade connect requests. MetaMask says "See your accounts and suggest transactions"; Rabby rates risk per transaction, when it simulates it. Phantom splits what an app can see from what it can do.</li>
+				<li>ERC-7715 still wants wallets to "warn them against granting dangerous permissions" (<a href="https://eips.ethereum.org/EIPS/eip-7715">EIP</a>). So flags stay, for the dangerous cases only.</li>
+				<li>GitHub groups app consent by what the app can do, and "Act on your behalf" is its own heading there (<a href="https://docs.github.com/en/apps/using-github-apps/authorizing-github-apps">GitHub docs</a>).</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Four cards, two ▲ HIGH, no limits stated</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">tools.nulo.sh</span><span class="n-dapp-name">Nulo Tools</span><span class="n-dapp-action">is requesting permissions on Testnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Select accounts to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+									<div class="n-alias"><span class="n-alias-label">Alias <svg class="ic"><use href="#i-info"/></svg></span><div class="n-alias-input">Account</div></div>
+								</div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">New permissions requested<span class="count">4</span></div>
+								<div class="n-caps">
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Act on your behalf</span><span class="n-cap-right"><span class="n-risk">▲ HIGH</span><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">This app can create auth-witnesses — request your signature to authorize actions on your behalf — for the account(s) you share.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Contract registration</span><span class="n-cap-right"><span class="n-risk">— LOW</span><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">Register contracts, read their metadata, and check whether listed tokens are registered in your wallet.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Transaction simulation</span><span class="n-cap-right"><span class="n-risk">● MED</span><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">Run simulations locally. Nothing is sent to the network.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Send transactions</span><span class="n-cap-right"><span class="n-risk">▲ HIGH</span><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">Request transactions within the scope below. Each transaction still requires your approval.</span></div></div></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Approve</div></div>
+				</div></div>
+				<div class="cap">400×800 window · tools app request, as shipped</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Plain summary: what it can do on its own, what always asks</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">tools.nulo.sh</span><span class="n-dapp-name">Nulo Tools</span><span class="n-dapp-action">wants to connect on Testnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Account to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">TESTNET</span></div><div class="n-arow-line"><span class="n-arow-addr">0x1dd7...d930</span><span class="n-linkbtn">Rename for this app</span></div></div></div>
+								</div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Without asking, it can</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">visibility</span><div><div class="n-perm-t">See Account 1</div><div class="n-perm-s">Its address, and the name it's shared under.</div></div></div>
+									<div class="n-perm-row"><span class="ms">visibility</span><div><div class="n-perm-t">Read your private USDC and ETH balances</div><div class="n-perm-s">Worked out on this device; the app sees the result.</div></div></div>
+									<div class="n-perm-row"><span class="ms">signature</span><div><div class="n-perm-t">Get signatures for its listed calls</div><div class="n-perm-s">No prompt each time. They only count inside a transaction you approve.</div></div></div>
+									<div class="n-perm-row"><span class="ms">add_circle</span><div><div class="n-perm-t">Add its 3 contracts to your wallet</div><div class="n-perm-s">Public information only.</div></div></div>
+								</div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Always asks you first</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">task_alt</span><div><div class="n-perm-t">Sending any transaction</div><div class="n-perm-s">You approve each one. Off-list requests are refused.</div></div></div>
+								</div>
+								<span class="n-help">It can't move funds without you, see accounts you don't share, or read anything off its list.</span>
+							</div>
+							<div>
+								<div class="n-details" role="button" tabindex="0" aria-expanded="false" data-toggle="i6-details"><span>Details <span class="n-tag-quiet">· 4 permissions · 3 contracts</span></span><span class="ms">chevron_right</span></div>
+								<div class="n-detail-panel" id="i6-details" hidden>
+									<div><div class="n-detail-k">Reads, no prompt</div><div class="n-detail-v">USDC · balance_of_private<br>ETH · balance_of_private</div></div>
+									<div><div class="n-detail-k">Transactions, asks every time</div><div class="n-detail-v">Dripper · drip_to_public<br>Dripper · drip_to_private<br>Sponsor · sponsor_unconditionally</div></div>
+									<div class="n-check"><svg class="ic c-primary"><use href="#i-check-circle"/></svg>Signatures without a prompt</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Same request · Details is clickable</div>
+				<div class="fit"><div class="nulo n-crop w400" theme="dark" style="padding:16px">
+					<div class="n-details" aria-expanded="true"><span>Details <span class="n-tag-quiet">· 4 permissions · 3 contracts</span></span><span class="ms">chevron_right</span></div>
+					<div class="n-detail-panel">
+						<div><div class="n-detail-k">Reads, no prompt</div><div class="n-detail-v">USDC · balance_of_private<br>ETH · balance_of_private</div></div>
+						<div><div class="n-detail-k">Dry runs, no prompt</div><div class="n-detail-v">USDC · balance_of_public<br>ETH · balance_of_public<br>Sponsor · sponsor_unconditionally</div></div>
+						<div><div class="n-detail-k">Transactions, asks every time</div><div class="n-detail-v">Dripper · drip_to_public<br>Dripper · drip_to_private<br>Sponsor · sponsor_unconditionally</div></div>
+						<div><div class="n-detail-k">Contracts</div><div class="n-detail-v">Dripper 0x0b1f…77c2<br>USDC 0x2a9e…d10c<br>ETH 0x19c4…5b3e</div></div>
+						<div style="display:flex;flex-direction:column;gap:8px"><div class="n-detail-k">Turn off what you don't want. The app may not fully work.</div>
+							<div class="n-check"><svg class="ic c-primary"><use href="#i-check-circle"/></svg>Signatures without a prompt</div>
+							<div class="n-check"><svg class="ic c-primary"><use href="#i-check-circle"/></svg>Balance reads and dry runs</div>
+							<div class="n-check"><svg class="ic c-primary"><use href="#i-check-circle"/></svg>Adding its contracts</div>
+							<div class="n-check"><svg class="ic c-primary"><use href="#i-check-circle"/></svg>Transaction requests</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="cap">Details open: the exact list, and the switches</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Two groups replace the cards: what the app can do on its own, and what always asks. The first answers the question a new user actually has ("what happens if I click Connect?"); the second is the reassurance.</li>
+					<li>No HIGH/MED/LOW. A normal request shows zero warnings, so a warning means something. The orange tag is kept only for: a permission Nulo doesn't recognize (still off until ticked), one you denied before, an "any contract" scope, and address-book access.</li>
+					<li>Sentences come from facts Nulo can check: a token name only when the contract is a token Nulo knows. Anything else falls back to "Read private data from 2 contracts" plus the list in Details.</li>
+					<li>The per-permission switches move into Details. They still work exactly as today.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Connect grants what's listed. Details expands in place. Rename for this app opens the name field from item 2.</p></div>
+				<p class="cost">Effort: medium. New copy, a scope-to-sentence mapper with tests, new layout. Before shipping, confirm the "only count inside a transaction you approve" line against the account contract. I'm fairly confident it holds for Nulo's accounts: a private signature can only be checked by this wallet, and public ones need a transaction.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">Keep the cards, fix the words, drop the ratings</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">tools.nulo.sh</span><span class="n-dapp-name">Nulo Tools</span><span class="n-dapp-action">wants to connect on Testnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Account to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+									<div class="n-alias"><span class="n-alias-label">Name for this app</span><div class="n-alias-input">Account 1</div></div>
+								</div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">What it's asking for<span class="count">4</span></div>
+								<div class="n-caps">
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Get signatures for its listed calls</span><span class="n-cap-right"><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">No prompt each time. They only count inside a transaction you approve.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Add its contracts to your wallet</span><span class="n-cap-right"><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">Public information about the contracts it uses.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Preview transactions and read results</span><span class="n-cap-right"><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">Runs on this device, without asking. The app sees the results, including the private balances it asks about.</span></div></div></div>
+									<div class="n-cap"><div class="n-cap-head"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-cap-body"><div class="n-cap-line"><span class="n-cap-label">Ask you to send transactions</span><span class="n-cap-right"><svg class="ic n-chev"><use href="#i-chevron"/></svg></span></div><span class="n-cap-desc">You approve each one. Requests outside its list are refused.</span></div></div></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Same layout, rewritten copy</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Only the strings in <code>capability-meta.ts</code>, the section labels and the button. The risk tag leaves the card; the orange tags stay for the exceptions listed under A.</li>
+					<li>Still four equal-looking cards to read, and nothing says which ones happen without asking.</li>
+				</ul></div>
+				<p class="cost">Effort: small. A good first PR even if you pick A.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">Connect with an account only; ask for the rest when it's first used</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">tools.nulo.sh</span><span class="n-dapp-name">Nulo Tools</span><span class="n-dapp-action">wants to connect on Testnet</span></div></div>
+					<div class="n-sections">
+						<div class="n-group">
+							<div class="n-seclabel">Account to share<span class="count">1</span></div>
+							<div class="n-items"><div class="n-arow">
+								<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">TESTNET</span></div><span class="n-arow-addr">0x1dd7...d930</span></div></div>
+							</div></div>
+							<span class="n-help">It will see this account's address. Anything more, it has to ask for.</span>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Step 1 · when you click Connect in the app</div>
+				<div class="fit"><div class="nulo n-win" theme="dark">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-mini">
+						<div class="n-mini-q">Nulo Tools wants to read your private USDC and ETH balances</div>
+						<div class="n-mini-s">Nulo works them out on this device and gives the app the result. You can disconnect the app anytime in Settings → Connected apps.</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Not now</div><div class="n-btn medium primary">Allow</div></div>
+				</div></div>
+				<div class="cap">Step 2 · the first time the app reads a balance</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Nulo grants only the account at connect, then pauses the app's first call that needs more and asks, one thing at a time.</li>
+					<li>Apps written against the SDK expect an answer to what they asked for. The tools app retries after a refusal; others may just break.</li>
+				</ul></div>
+				<p class="cost">Effort: large. A new kind of prompt, partial grants, and a compatibility risk with every dApp. The most reassuring first screen, and the most windows overall.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A, with B's copy shipped first</h3>
+			<p>A is the only option that answers "what happens if I click Connect?" at a glance and is still honest about the one thing that happens without asking: private reads. It drops the ratings that taught your tester to ignore the screen, and it keeps the switches for people who want them. B's strings are the cheap first PR and carry over into A's Details. C shows the calmest first screen, but it puts more windows in front of people and breaks the request–answer contract dApps rely on.</p>
+			<p class="conf">Confidence: high that the ratings should go and the simulation line must change; moderate on A's exact layout.</p>
+		</div>
+		<div class="pick" data-pick="i6" data-options="A|B|C|A, B first|Other"></div>
+	</div>
+</section>

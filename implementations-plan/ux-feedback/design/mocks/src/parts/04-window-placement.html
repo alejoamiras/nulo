@@ -1,0 +1,141 @@
+<section class="wrap item" id="i4" data-item="i4" aria-labelledby="i4-title">
+	<div class="item-head">
+		<span class="item-num">04</span>
+		<h2 class="item-title" id="i4-title">Nulo's windows land on top of the app's emoji check</h2>
+		<div class="item-surface"><span class="chip">Window placement</span><span class="chip">Connect flow</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>The request capabilities pop-up opened in the center of the window for my friend, and it was blocking the "encryption check" from the app. Maybe we can pop it up somewhere on the right?</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>Connecting takes up to three Nulo windows in a row: <b>Allow</b> (discover), the <b>emoji check</b> (verify), then <b>permissions</b> (capabilities).</li>
+				<li>Allow, permissions and every transaction approval open centered on the browser window (<code>centerOn</code> in <code>window-manager.ts</code>). That's where dApps put their own modals, including the tools app's "Verify the grid".</li>
+				<li>The emoji window sets no position at all (<code>session-established.ts</code> calls <code>windows.create</code> with only a size). Chrome then offsets it from the browser window, so it also lands over the page.</li>
+				<li>Every window is 400×800. On a 1440×900 laptop that's nearly the full height; on a 768px screen it doesn't fit.</li>
+				<li>We can't tell from the report which window covered the check. Any of them could have.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>Nearly every wallet anchors its window to the top-right of the last-focused browser window: MetaMask, Rabby, Phantom, Keplr, Argent X, Talisman, SubWallet, Backpack (<a href="https://github.com/MetaMask/metamask-extension/blob/main/app/scripts/lib/notification-manager.ts">MetaMask</a>, <a href="https://github.com/RabbyHub/Rabby/blob/master/src/background/webapi/window.ts">Rabby</a>, <a href="https://github.com/argentlabs/argent-x">Argent X</a>). None centers. They're 360–400 wide and 600–660 tall, and Rabby shrinks the height to fit short screens. Enkrypt sets no position — the same as Nulo's emoji window today.</li>
+				<li>Aztec: the dApp should "let the user confirm it matches what's shown in their wallet" before connecting. The docs give no placement advice, and the reference wallet shows the emojis inside its approval window (<a href="https://docs.aztec.network/developers/docs/tutorials/js_tutorials/wallet-extension/wallet-protocol">Aztec docs</a>).</li>
+				<li>A side panel can't answer a dApp's request: Chrome and Firefox only open one "in response to a user action" (<a href="https://developer.chrome.com/docs/extensions/reference/api/sidePanel">Chrome</a>, <a href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/sidebarAction/open">MDN</a>), so I dropped that idea.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Centered on the browser, over the app</span></div>
+			<div class="stage">
+				<div class="fit"><div class="screen" role="img" aria-label="A 1440 by 900 screen. A Nulo window, drawn to scale, sits in the middle of the browser and hides the app's emoji check almost entirely.">
+					<div class="menubar"></div>
+					<div class="browser max">
+						<div class="bar"><i></i><i></i><i></i><span class="url"></span><span class="ext"></span></div>
+						<div class="page">
+							<div class="ln" style="width:30%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:42%"></div>
+							<div class="modal"><b>Verify the grid</b><span class="sub">Match this grid with the wallet window.</span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><div class="btns"><i></i><i></i></div></div>
+						</div>
+					</div>
+					<div class="nw real" style="left:188px;top:22px"><span class="t">Nulo · Permissions</span><span class="l" style="width:70%"></span><span class="l"></span><span class="l" style="width:85%"></span><span class="l"></span><span class="l" style="width:60%"></span><span class="b"></span></div>
+					<span class="tag bad" style="left:196px;top:176px">The app's check is under here</span>
+				</div></div>
+				<div class="cap">1440×900 laptop, windows drawn to scale</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Top-right corner, every window</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="screen" role="img" aria-label="The same screen. The Nulo window sits flush against the top-right corner of the browser, showing its emoji grid, while the app's emoji check stays fully visible in the middle.">
+					<div class="menubar"></div>
+					<div class="browser max">
+						<div class="bar"><i></i><i></i><i></i><span class="url"></span><span class="ext"></span></div>
+						<div class="page">
+							<div class="ln" style="width:30%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:42%"></div>
+							<div class="modal"><b>Verify the grid</b><span class="sub">Match this grid with the wallet window.</span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><div class="btns"><i></i><i></i></div></div>
+						</div>
+					</div>
+					<div class="nw real verify" style="left:376px;top:9px"><span class="t">Nulo · Connection verification</span><span class="l" style="width:70%"></span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><span class="l"></span><span class="l" style="width:80%"></span><span class="b"></span></div>
+					<span class="tag good" style="left:190px;top:236px">Both grids in view</span>
+				</div></div>
+				<div class="seq"><span>Allow</span><i>→</i><span>Emoji check</span><i>→</i><span>Permissions</span><i>·</i>each opens in the same corner</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>A second placement next to <code>centerOn</code>: right edge and top of the last-focused browser window. The emoji window goes through the window manager too, so it gets the same spot.</li>
+					<li>Height becomes <code>min(800, browser window height)</code>, so it never runs off a short screen.</li>
+					<li>Nothing inside the windows changes. It appears near the toolbar icon people click to open Nulo, so it reads as the same wallet.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>The app's Connect button → Nulo appears top-right → Allow → the emoji check replaces it in the same spot, with the app's grid still visible → permissions, same spot.</p></div>
+				<p class="cost">Limits: in a browser window narrower than about 1,100px, no corner clears a centered modal. The window can still be dragged. On macOS, a window opened from a full-screen browser can land in another Space; Coinbase opens a tab in that case. If Chrome rejects the position (it refuses windows less than half on-screen), retry with size only.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">A + B</span><span class="opt-name">…and Allow + emoji check share one window</span></div>
+			<div class="stage">
+				<div class="fit"><div class="screen" role="img" aria-label="The same top-right placement. The one Nulo window shows a two-step progress bar on its second step, the emoji check.">
+					<div class="menubar"></div>
+					<div class="browser max">
+						<div class="bar"><i></i><i></i><i></i><span class="url"></span><span class="ext"></span></div>
+						<div class="page">
+							<div class="ln" style="width:30%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:42%"></div>
+							<div class="modal"><b>Verify the grid</b><span class="sub">Match this grid with the wallet window.</span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><div class="btns"><i></i><i></i></div></div>
+						</div>
+					</div>
+					<div class="nw real verify" style="left:376px;top:9px"><span class="t">Nulo · Connect 2 / 2</span><div class="steps"><span class="on"></span><span class="on"></span></div><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><span class="l"></span><span class="l" style="width:80%"></span><span class="b"></span></div>
+					<span class="tag good" style="left:190px;top:236px">One window, two steps</span>
+				</div></div>
+				<div class="seq"><span class="merged">Allow → Emoji check</span><i>→</i><span>Permissions</span><i>·</i>two windows instead of three</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>After Allow, the window stays open and switches to the emoji check once the secure channel is up (usually under a second), instead of closing so a second window can open.</li>
+					<li>Permissions stay a separate window: the app asks for them on its own schedule, and possibly never.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Allow → the same window shows the emojis → OK closes it.</p></div>
+				<p class="cost">Effort: moderate, and it touches the security-critical verify path (slot reservation, fail-closed termination). Worth doing only after A.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">A + C</span><span class="opt-name">…and Nulo remembers where you drag it</span></div>
+			<div class="stage">
+				<div class="fit"><div class="screen" role="img" aria-label="The dashed outline marks the default top-right spot. The window opens bottom-left, where the user last dragged it.">
+					<div class="menubar"></div>
+					<div class="browser max">
+						<div class="bar"><i></i><i></i><i></i><span class="url"></span><span class="ext"></span></div>
+						<div class="page">
+							<div class="ln" style="width:30%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:42%"></div>
+							<div class="modal"><b>Verify the grid</b><span class="sub">Match this grid with the wallet window.</span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><div class="btns"><i></i><i></i></div></div>
+						</div>
+					</div>
+					<div class="ghost" style="left:376px;top:9px"></div>
+					<div class="nw real verify" style="left:8px;top:30px"><span class="t">Nulo · Connection verification</span><span class="l" style="width:70%"></span><div class="emo"><span>🦊</span><span>🍋</span><span>🚀</span><span>🌵</span><span>🎲</span><span>🐙</span><span>🍉</span><span>⚓</span><span>🔔</span></div><span class="l"></span><span class="l" style="width:80%"></span><span class="b"></span></div>
+					<span class="tag" style="left:360px;top:150px">Default spot</span>
+				</div></div>
+				<div class="seq"><span>Drag once</span><i>→</i><span>Every Nulo window opens there</span></div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Nulo saves the last position you drag its window to and reuses it next time, falling back to A.</li>
+					<li>A saved position is checked against the current screen before it's used, so unplugging a monitor can't strand the window off-screen.</li>
+					<li>Firefox has no "window moved" event; it would save on close instead.</li>
+				</ul></div>
+				<p class="cost">Effort: small on top of A. It only helps from the second time.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A now, B later</h3>
+			<p>A is what almost every wallet does, clears the app's center on common screen sizes, and gives all four windows one predictable home. The height cap fixes a separate bug on short screens. B is the better experience, but it reworks the verify path; I'd ship A, watch the next round of testers, then decide.</p>
+			<p class="conf">Confidence: high for A; moderate that B is worth its risk.</p>
+		</div>
+		<div class="pick" data-pick="i4" data-options="A|A + B|A + C|Other"></div>
+	</div>
+</section>

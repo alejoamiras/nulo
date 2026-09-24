@@ -1,0 +1,95 @@
+<section class="wrap item" id="i10" data-item="i10" aria-labelledby="i10-title">
+	<div class="item-head">
+		<span class="item-num">10</span>
+		<h2 class="item-title" id="i10-title">Toasts appear where nobody is looking, and vanish</h2>
+		<div class="item-surface"><span class="chip">Toast primitive</span><span class="chip">History list</span><span class="chip">Bottom nav</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>Most of the time I was not able to read the toasts or noticed them. They were on the upper end of the wallet and I was (for example) looking at a transaction on the transaction list when it said transaction submitted.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>One toast at a time, 12px from the top, centered over the header (<code>ToastManagerBase.vue</code>). Default 2 s; errors 4 s (<code>composables/toast.ts</code>). No <code>aria-live</code>, so screen readers never hear it.</li>
+				<li>"Transaction submitted" fires when the send finishes proving and reaches the network (<code>send-submit.ts</code>), often 30 s or more after you clicked, by which time you're watching the row in History.</li>
+				<li>Every toast looks the same: copy confirmations, "Contact added", failures.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>Most systems put transient messages at the bottom: Material's snackbar, Shopify Polaris, Atlassian's flags. NN/g reports a user missing a bottom message that faded after 5 s (<a href="https://www.nngroup.com/articles/indicators-validations-notifications/">NN/g</a>).</li>
+				<li>"Design assuming toasts will be missed" (<a href="https://adrianroselli.com/2020/01/defining-toast-messages.html">Roselli</a>): anything important also has to live somewhere persistent. For a wallet, that's the activity row.</li>
+				<li>WCAG: people must be able to extend timed content (2.2.1), and status messages must be announced (4.1.3). Errors should not disappear on their own.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Top, 2 seconds, for everything</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" style="position:relative;overflow:hidden"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-scroll" style="padding-bottom:64px"><div class="n-hist-hero"><h1>History</h1><span></span></div><div class="n-txlist" style="gap:10px"><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Proving in browser…</span></div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">water_drop</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Drip</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Yesterday</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+100.00</span><span class="n-tx-sym">ETH</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Sep 20</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div></div><div class="n-toast-wrap" style="top:12px"><div class="n-toast"><svg class="ic c-green"><use href="#i-check-circle"/></svg><span class="n-toast-label">Transaction submitted</span></div></div><span class="n-pin bad" style="left:228px;top:52px">2 s, then gone</span><span class="n-pin bad" style="left:190px;top:196px">eyes here</span><div class="n-nav"><div class="n-navtab"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab active"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">History while a send finishes</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Bottom snackbar that points at the row</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" style="position:relative;overflow:hidden"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-scroll" style="padding-bottom:64px"><div class="n-hist-hero"><h1>History</h1><span></span></div><div class="n-txlist" style="gap:10px"><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Proving in browser…</span></div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">water_drop</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Drip</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Yesterday</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+100.00</span><span class="n-tx-sym">ETH</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Sep 20</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div></div><div class="n-toast-wrap" style="bottom:76px"><div class="n-snack" role="status" style="position:relative"><svg class="ic c-green"><use href="#i-check-circle"/></svg><div class="n-snack-text"><span class="n-snack-title">Transaction submitted</span><span class="n-snack-sub">250 USDC to 0x8c02…41fa</span></div><span class="n-snack-act">View</span><span class="n-snack-timer" style="width:62%"></span></div></div><div class="n-nav"><div class="n-navtab"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab active"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">Above the nav, where the list is</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Messages rise from just above the nav. Successes stay 6 s and pause while hovered or focused; the thin bar shows the time left. Errors stay until dismissed.</li>
+					<li>Transaction messages say what happened and to whom, and carry <b>View</b>, which opens that transaction.</li>
+					<li>Announced to screen readers: successes politely, errors assertively.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>View → the transaction's detail. Clicking elsewhere leaves it running out.</p></div>
+				<p class="cost">Effort: small. One primitive in <code>@nulo/design</code> and its call sites' durations.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">The row is the message</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" style="position:relative;overflow:hidden"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-scroll" style="padding-bottom:64px"><div class="n-hist-hero"><h1>History</h1><span></span></div><div class="n-txlist" style="gap:10px"><div class="n-tx flash"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Submitted · waiting for a block</span></div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">water_drop</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Drip</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Yesterday</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+100.00</span><span class="n-tx-sym">ETH</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Sep 20</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div></div><div class="n-nav"><div class="n-navtab"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab active"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">The row updates and flashes in place</div>
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="position:relative;height:64px"><div class="n-nav"><div class="n-navtab active"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab"><span class="ms">history</span><span class="n-navtab-label">History</span><span class="n-navbadge">1</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">Anywhere else: a badge on History until you look</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>A send's progress is shown on its row, step by step, and the row briefly flashes when it's submitted, fails or confirms. No toast for it.</li>
+					<li>If you're on another tab, History gets a badge that clears when you open it.</li>
+					<li>Toasts stay for small, local confirmations such as "Copied".</li>
+				</ul></div>
+				<p class="cost">Effort: medium. The row already shows stages; the flash, the badge and its "seen" state are new.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">Same spot, longer and announced</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" style="position:relative;overflow:hidden"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-scroll" style="padding-bottom:64px"><div class="n-hist-hero"><h1>History</h1><span></span></div><div class="n-txlist" style="gap:10px"><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span><span class="n-tx-badge"><span class="n-spin"></span></span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub"><span class="n-tx-stage">Proving in browser…</span></div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">water_drop</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Drip</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Yesterday</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+100.00</span><span class="n-tx-sym">ETH</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Sep 20</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−40.00</span><span class="n-tx-sym">USDC</span></div></div></div></div><div class="n-toast-wrap" style="top:12px"><div class="n-toast" style="position:relative;padding:12px 16px"><svg class="ic c-green"><use href="#i-check-circle"/></svg><span class="n-toast-label">Transaction submitted</span><span class="n-snack-timer" style="width:55%"></span></div></div><span class="n-pin" style="left:252px;top:56px">6 s</span><div class="n-nav"><div class="n-navtab"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab active"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">Top, 6 s, with a timer</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Durations go to 6 s (errors until dismissed), hover pauses, and it's announced. Position unchanged.</li>
+					<li>Fixes "vanished before I read it"; doesn't fix "I never looked up".</li>
+				</ul></div>
+				<p class="cost">Effort: trivial.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A + B</h3>
+			<p>B makes the list the source of truth, which is where your tester was already looking, so nothing important depends on catching a toast. A moves what remains to where the eyes are and gives it time. C alone treats the timing and not the placement.</p>
+			<p class="conf">Confidence: high on B; moderate on 6 s (Carbon uses 5 s, Polaris 10 s or more).</p>
+		</div>
+		<div class="pick" data-pick="i10" data-options="A + B|A only|B only|C|Other"></div>
+	</div>
+</section>
