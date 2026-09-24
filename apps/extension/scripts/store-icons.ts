@@ -19,6 +19,11 @@ export const ICONS_DIR = "src/assets/icons"
 export const iconPath = (size: IconSize) => `${ICONS_DIR}/${size}.png`
 
 export async function renderIcons(master: Uint8Array): Promise<Map<IconSize, Uint8Array>> {
+	// The "system" backend (the default on macOS and Windows) resizes through the OS, so its
+	// pixels differ from Linux's; the portable backend renders byte-identical PNGs everywhere.
+	// The selector is process-global and stays set: nothing else in this process renders, and
+	// a save/restore would race if two renders ever overlapped.
+	Bun.Image.backend = "bun"
 	const rendered = new Map<IconSize, Uint8Array>()
 	for (const size of ICON_SIZES) {
 		rendered.set(size, await new Bun.Image(master).resize(size, size).png().bytes())
