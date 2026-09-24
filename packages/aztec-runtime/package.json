@@ -12,7 +12,8 @@
 		"./ports": "./src/ports/index.ts",
 		"./adapters": "./src/adapters/index.ts",
 		"./utils": "./src/utils/index.ts",
-		"./offscreen/entry": "./src/offscreen/entry.ts"
+		"./offscreen/entry": "./src/offscreen/entry.ts",
+		"./fee-juice": "./src/fee-juice.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
