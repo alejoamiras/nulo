@@ -318,11 +318,19 @@ jobs:
           name: extension-firefox
           path: dist/release/firefox
 
+      # Every entry is stamped with the commit's own time and written in a fixed order, so a
+      # rebuild of the same commit with the same zip gives the same bytes and a republish leaves
+      # SHASUMS256.txt as it was (the runner image is not pinned: a zip update could still move
+      # them once). The script is taken from the workflow's own revision, not the checkout: a tag
+      # older than the script has none at its commit, and a republish must still package it.
       - name: Zip artifacts + SHASUMS
         run: |
           mkdir -p dist/release
-          (cd dist/release/chrome && zip -r "../nulo-chrome-${VERSION}.zip" .)
-          (cd dist/release/firefox && zip -r "../nulo-firefox-${VERSION}.zip" .)
+          git show "${GITHUB_SHA}:scripts/release/zip-reproducible.ts" > "${RUNNER_TEMP}/zip-reproducible.ts"
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          bun "${RUNNER_TEMP}/zip-reproducible.ts" dist/release/chrome "dist/release/nulo-chrome-${VERSION}.zip"
+          bun "${RUNNER_TEMP}/zip-reproducible.ts" dist/release/firefox "dist/release/nulo-firefox-${VERSION}.zip"
           cd dist/release
           sha256sum \
             "nulo-chrome-${VERSION}.zip" \
