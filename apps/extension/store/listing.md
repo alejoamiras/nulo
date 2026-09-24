@@ -124,7 +124,7 @@ unrelated to the wallet: no. Used for creditworthiness or lending: no.
 | Category | Tools |
 | Language | English |
 | Privacy policy URL | https://nulo.sh/privacy |
-| Support | hello@nulo.sh |
+| Support URL | Empty: the field takes URLs only and rejects `mailto:`. The publisher's verified contact email, `hello@nulo.sh`, is shown instead |
 | Homepage | https://nulo.sh |
 | Visibility (first upload) | Unlisted |
 
@@ -157,10 +157,11 @@ match them.
 |---|---|
 | Name | Nulo V5 |
 | Summary | Self-custody wallet for the Aztec network. Keys stay on your device; private transactions are proven in your browser. |
-| Categories | Privacy & Security; Other |
+| Categories | Privacy & Security (AMO's "Other" is "My add-on doesn't fit into any of the categories", exclusive of the rest) |
 | License | Apache-2.0 |
 | Support email | hello@nulo.sh |
-| Homepage | https://nulo.sh |
+| Support website | Empty |
+| Homepage | https://nulo.sh — not on the submission form; set afterwards under Edit Product Page → Additional Details |
 | Privacy policy | The text of `legal/privacy.md` at its current version, as published at https://nulo.sh/privacy |
 | Channel | Listed |
 
@@ -212,9 +213,14 @@ Modifications to third-party code, stated exactly:
   (`vite.config.ts:92`, `scripts/strip-artifact-debug-info.ts`); this removes source snippets from
   error traces and changes no bytecode.
 
-Linter warnings and their origin: `DANGEROUS_EVAL` and `UNSAFE_VAR_ASSIGNMENT` come from bundled
-`@aztec` packages and their WASM glue; `UNSUPPORTED_API` is `chrome.offscreen`, feature-gated and
-never called on Firefox.
+Linter warnings and their origin: `innerHTML` is assigned by Vue's
+runtime (`insertStaticContent`) and by the `@alejoamiras/presto` banner element, which renders its
+own template (its link is normalized to an http(s) URL; variant and state come from fixed lists).
+`Function` and `eval` appear in zod's eval-capability probe and msgpackr's record decoder, both inside
+try/catch with a non-evaluating fallback, and in get-intrinsic's intrinsics table, which references
+`eval` without calling it; the extension CSP (`script-src 'self' 'wasm-unsafe-eval'`) forbids
+evaluating strings, so none of them evaluates one. `UNSUPPORTED_API` is `chrome.offscreen` and
+`chrome.sidePanel`, both feature-gated and never called on Firefox.
 
 Remote code: the package loads no code from the network. Applications send contract artifacts
 (ACIR and Brillig bytecode with an ABI) as data over the wallet-sdk channel; a bundled WASM virtual

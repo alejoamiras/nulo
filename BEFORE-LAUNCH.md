@@ -28,8 +28,8 @@ and Presto links. What each fill says, and its source, is in `legal/README.md` �
 
 | Fill | Where |
 |---|---|
-| Chrome Web Store listing URL | `legal/terms.md` § 1 |
-| Firefox Add-ons listing URL | `legal/terms.md` § 1 |
+| ~~Chrome Web Store listing URL~~ | `legal/terms.md` § 1 — done 2026-09-23 |
+| ~~Firefox Add-ons listing URL~~ | `legal/terms.md` § 1 — done 2026-09-23 |
 
 Also at this point, not a placeholder but the same deadline: the **Chrome trader disclosure**
 ([`legal/README.md`](./legal/README.md), blocker 5) is declared non-trader as of 2026-09-21; it
@@ -46,9 +46,9 @@ any placeholder survives, and the date is one. Set it in the three places tests 
 - [x] `legal/privacy.md` — the version line at the top, and the 1.0 row of the history table
 - [x] `packages/legal/src/manifest.ts` — `effective` for `privacy` 1.0 (23 September 2026)
 
-The Terms keep their placeholders until § 3: their effective date is the 1.0 ship day and their
-two listing URLs exist only after both submissions, so `/terms` stays draft a little longer, which
-the stores do not mind — they require a reachable privacy policy, not terms.
+The Terms' listing URLs were filled once both first submissions existed (2026-09-23). Their
+effective date waits for § 3, the 1.0 ship day, so `/terms` stays draft a little longer, which the
+stores do not mind — they require a reachable privacy policy, not terms.
 
 Also before submission, one wording item in the privacy policy that is not a placeholder: § 2
 attributes "loads no remote code" to the content security policy, which only forbids remote
@@ -69,6 +69,8 @@ together:
 Then:
 
 - [ ] `git grep -n "«FILL" -- legal/` prints nothing
+- [ ] Both listing URLs in `legal/terms.md` § 1 open the live listings (a store serves an item's
+      public page only once it has published it)
 - [ ] `bun run --cwd packages/legal test` and `bun run --cwd apps/landing test` are green
 - [ ] After the deploy, `nulo.sh/terms/v1.0/` shows **no DRAFT banner** and no `noindex` meta
 - [ ] The README's "DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET" banner is rewritten
@@ -84,8 +86,6 @@ re-accept. `git diff <last release tag> -- legal/` answers whether any of this a
 
 ## Not legal text, same deadline
 
-- `main`'s required-check cut-over, pending before the next promote:
-  [`CLAUDE.md` § Release runbook](./CLAUDE.md#release-runbook), step 1.
 - Firefox `data_collection_permissions` (`financialAndPaymentInfo`) and the Firefox 153 minimum
   are settled and pinned by `apps/extension/src/manifest.test.ts`; the reasoning is in
   `apps/extension/store/listing.md` § Data collection declaration.
