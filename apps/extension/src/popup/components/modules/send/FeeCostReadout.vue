@@ -1,4 +1,6 @@
 <script setup>
+import { UNVOUCHED_FEE_SENTENCE } from "@/components/composite/send/publish-facts"
+
 const props = defineProps({
 	estimate: { type: Object, default: null },
 	isEstimating: { type: Boolean, default: false },
@@ -34,7 +36,7 @@ const sponsoredSentence = computed(() => {
 		</span>
 		<span v-else-if="payer === 'unvouched'" :class="$style.fee_value">
 			<span aria-hidden="true">—</span>
-			<span :class="$style.visually_hidden">Nulo can't tell what this fee contract charges you.</span>
+			<span :class="$style.visually_hidden">{{ UNVOUCHED_FEE_SENTENCE }}</span>
 		</span>
 		<span v-else :class="$style.fee_value">
 			~{{ estimate.amount }} FJ<template v-if="estimate.usd">
@@ -78,15 +80,7 @@ const sponsoredSentence = computed(() => {
 }
 
 .visually_hidden {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	margin: -1px;
-	padding: 0;
-	overflow: hidden;
-	clip-path: inset(50%);
-	white-space: nowrap;
-	border: 0;
+	composes: visually_hidden from "./fee-shared.module.css";
 }
 
 </style>

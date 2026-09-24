@@ -13,6 +13,7 @@ import {
 	publishFacts,
 	publishGlyph,
 	rowSentence,
+	UNVOUCHED_FEE_SENTENCE,
 	stripAriaLabel,
 	type TransferSide,
 } from "./publish-facts"
@@ -114,6 +115,7 @@ describe("copy", () => {
 			contract: "paid by the fee contract",
 			sponsor: "paid by the sponsor",
 		})
+		expect(UNVOUCHED_FEE_SENTENCE).toBe("Nulo can't tell what this fee contract charges you.")
 	})
 
 	test("each cell's word is the one for its visibility", () => {
@@ -150,12 +152,12 @@ describe("copy", () => {
 		expect(rowSentence("you", unknown, null)).toBeNull()
 	})
 
-	test("the fee line names the payer from the settings' reading, and says nothing while there is none", () => {
+	test("the fee line names the payer from the settings' reading, and none while pending or hand-added", () => {
 		expect(paidBy("account", "fj")).toBe(PAID_BY.account)
 		expect(paidBy("account", "fpc")).toBe(PAID_BY.account)
 		expect(paidBy("contract", "private_fpc")).toBe(PAID_BY.contract)
 		expect(paidBy("contract", "fpc")).toBe(PAID_BY.sponsor)
-		expect(paidBy("unvouched", "fpc")).toBe(PAID_BY.sponsor)
+		expect(paidBy("unvouched", "fpc")).toBeNull()
 		expect(paidBy(null, "fj")).toBeNull()
 	})
 

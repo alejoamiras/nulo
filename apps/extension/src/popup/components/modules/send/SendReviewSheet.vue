@@ -14,6 +14,7 @@ import {
 	type PublishFacts,
 	publishGlyph,
 	rowSentence,
+	UNVOUCHED_FEE_SENTENCE,
 } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
 import { FEE_JUICE_BRIDGE_URL } from "./fee-helpers"
@@ -123,7 +124,8 @@ const handleSend = () => {
 					</div>
 
 					<div :class="$style.fee" data-testid="send-review-fee" :data-payer="payerKind ?? 'none'">
-						<span>Fee · {{ feeText || "—" }}</span>
+						<span v-if="payerKind === 'unvouched'">Fee · <span aria-hidden="true">—</span><span :class="$style.visually_hidden">{{ UNVOUCHED_FEE_SENTENCE }}</span></span>
+						<span v-else>Fee · {{ feeText || "—" }}</span>
 						<b v-if="paid">{{ paid }}</b>
 					</div>
 
@@ -294,6 +296,10 @@ const handleSend = () => {
 	font-family: var(--font-mono);
 	font-size: 11px;
 	color: var(--nulo-secondary);
+}
+
+.visually_hidden {
+	composes: visually_hidden from "./fee-shared.module.css";
 }
 
 .fee b {

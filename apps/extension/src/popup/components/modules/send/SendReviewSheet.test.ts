@@ -8,6 +8,7 @@ import {
 	type PayerKind,
 	type PublishFacts,
 	publishFacts,
+	UNVOUCHED_FEE_SENTENCE,
 } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
 import { FEE_JUICE_BRIDGE_URL } from "./fee-helpers"
@@ -223,12 +224,20 @@ describe("modules/send/SendReviewSheet", () => {
 		["account", "fj", PAID_BY.account],
 		["contract", "private_fpc", PAID_BY.contract],
 		["contract", "fpc", PAID_BY.sponsor],
-		["unvouched", "fpc", PAID_BY.sponsor],
 	] as const)("the fee line for payer %s / %s", (payerKind, payerType, paidBy) => {
 		w = mountSheet({ payerKind, payerType })
 		const fee = w.get('[data-testid="send-review-fee"]')
 		expect(fee.text()).toBe(`Fee · ~0.0028 FJ${paidBy}`)
 		expect(fee.attributes("data-payer")).toBe(payerKind)
+	})
+
+	test("a hand-added contract's fee is drawn as — and spoken as the card's sentence, with no payer", () => {
+		w = mountSheet({ payerKind: "unvouched", payerType: "fpc", feeText: "~0.0028 FJ ($0.004)" })
+		const fee = w.get('[data-testid="send-review-fee"]')
+		expect(fee.get('[aria-hidden="true"]').text()).toBe("—")
+		expect(fee.text()).toBe(`Fee · —${UNVOUCHED_FEE_SENTENCE}`)
+		expect(fee.find("b").exists()).toBe(false)
+		expect(fee.attributes("data-payer")).toBe("unvouched")
 	})
 
 	test("send now: enabled and emitting only when shown, sendable, ready and idle", async () => {

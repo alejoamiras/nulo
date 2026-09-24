@@ -66,6 +66,9 @@ export const PAID_BY = {
 	sponsor: "paid by the sponsor",
 } as const
 
+/** Spoken in place of a hand-added contract's fee, which is drawn as "—". */
+export const UNVOUCHED_FEE_SENTENCE = "Nulo can't tell what this fee contract charges you."
+
 type SubmittedFee = { paymentMethod?: { kind?: string; fpcId?: string } } | undefined
 
 /**
@@ -131,10 +134,13 @@ export function rowSentence(cell: FactCell, facts: PublishFacts, payer: PayerKin
 	return facts.you === "unknown" && payer === "unvouched" ? FACT_SENTENCES.unvouched : null
 }
 
-/** Null while no payer is resolved. `account` comes from the submitted settings, never from the row's type. */
+/**
+ * Null while no payer is resolved, and for a hand-added contract, whose charge Nulo cannot vouch
+ * for. `account` comes from the submitted settings, never from the row's type.
+ */
 export function paidBy(payer: PayerKind, type: PayerDescriptor["type"] | undefined): string | null {
 	if (payer === "account") return PAID_BY.account
-	if (payer === null) return null
+	if (payer === null || payer === "unvouched") return null
 	return type === "private_fpc" ? PAID_BY.contract : PAID_BY.sponsor
 }
 
