@@ -42,17 +42,13 @@ apps/extension/.e2e-state/
 *.tsbuildinfo
 wallet_data_*/
 
-
-# sandbox deploy output (instance-specific) — deploy-sandbox.ts writes here for manual inspection
-packages/bridge-core/sandbox-deploy/
-
-# bridge e2e runtime artifacts (in-browser/script PXE data + MCP captures)
+# Local runtime artifacts (script PXE/wallet data dirs + MCP captures)
 .playwright-mcp/
-/deposit-public-success.png
 **/pxe_data_*/
 **/wallet_data_*/
 
-# Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
-apps/tools/public/testnet-bridge.candidate.json
-apps/tools/public/testnet-bridge.journal*.jsonl
-apps/tools/.e2e-state/
+# Moved to alejoamiras/unleashed. A clone that ran the bridge scripts can still hold deployer
+# wallet stores and forge caches here; keep them unstageable.
+/apps/tools/
+/packages/bridge-core/
+/contracts/bridge/

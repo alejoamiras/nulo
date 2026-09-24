@@ -70,7 +70,7 @@ describe("passkey relying party", () => {
 	})
 
 	test("no in-repo deployable names the RP host (dashboard-managed hosting is out of this test's sight)", () => {
-		const roots = ["apps/landing", "apps/tools"].map((r) => resolve(__dirname, "../../..", r))
+		const roots = ["apps/landing"].map((r) => resolve(__dirname, "../../..", r))
 		// The generated legal pages are build output like `dist`: the privacy policy has to NAME the
 		// host to disclose it, and prose on nulo.sh routes nothing to the RP host.
 		// Exactly those HTML paths, in the landing only: a config file beside them is still scanned.

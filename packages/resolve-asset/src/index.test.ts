@@ -6,7 +6,6 @@ import { assertPackageIdentity, isUnderNodeModules, resolveExportedAsset, resolv
 // workspace that DECLARES the target — the property that keeps these tests
 // green under both the hoisted and the isolated linker.
 const fromExtension = new URL("../../../apps/extension/package.json", import.meta.url).href
-const fromBridgeCore = new URL("../../bridge-core/package.json", import.meta.url).href
 const fromAztecRuntime = new URL("../../aztec-runtime/package.json", import.meta.url).href
 
 describe("resolvePackageRoot (search-path scan — exports maps deliberately ignored)", () => {
@@ -39,7 +38,7 @@ describe("resolvePackageRoot (search-path scan — exports maps deliberately ign
 describe("resolvePackageAsset", () => {
 	test("returns an unexported file inside the package (@alejoamiras/private-fee-juice artifact)", () => {
 		const artifact = resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", {
-			from: fromBridgeCore,
+			from: fromAztecRuntime,
 		})
 		expect(existsSync(artifact)).toBe(true)
 	})

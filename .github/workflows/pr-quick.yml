@@ -53,11 +53,9 @@ jobs:
       extension: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
       playground: ${{ steps.override.outputs.full || steps.filter.outputs.playground }}
       landing: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
-      tools: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
       workflows: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
       root-config: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
       needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
-      needs-tools-build: ${{ steps.compute.outputs.needs-tools-build }}
       needs-landing-build: ${{ steps.compute.outputs.needs-landing-build }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,24 +115,6 @@ jobs:
               - 'packages/legal/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
-            tools:
-              # Built target — tools (whole package) + its transitive dep libs
-              # (bridge-core → wallet-crypto → wallet-core, + design) + the tools app build
-              # workflow. Closes the prior under-gate (was tools + design only).
-              - 'apps/tools/**'
-              - 'packages/bridge-core/src/**'
-              - 'packages/bridge-core/package.json'
-              - 'packages/resolve-asset/src/**'
-              - 'packages/resolve-asset/package.json'
-              - 'packages/wallet-crypto/src/**'
-              - 'packages/wallet-crypto/package.json'
-              - 'packages/wallet-core/src/**'
-              - 'packages/wallet-core/package.json'
-              - 'packages/wallet-sdk-schema-patch/src/**'
-              - 'packages/wallet-sdk-schema-patch/package.json'
-              - 'packages/design/src/**'
-              - 'packages/design/package.json'
-              - '.github/workflows/_build-tools.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -158,7 +138,6 @@ jobs:
           RUNTIME: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
           BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
           EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
-          TOOLS: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
           LANDING: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
           WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
           ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
@@ -168,13 +147,6 @@ jobs:
             echo "needs-extension-build=true" >> "$GITHUB_OUTPUT"
           else
             echo "needs-extension-build=false" >> "$GITHUB_OUTPUT"
-          fi
-          # Tools build runs on tools-touching PRs + any workflow / root
-          # config change that could affect its bundle.
-          if [ "$TOOLS" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
-            echo "needs-tools-build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs-tools-build=false" >> "$GITHUB_OUTPUT"
           fi
           if [ "$LANDING" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
             echo "needs-landing-build=true" >> "$GITHUB_OUTPUT"
@@ -317,20 +289,6 @@ jobs:
           export PREVIEW_VERSION
           bun scripts/ci-cd/preview-comment.ts
 
-  build-tools:
-    name: Build Tools (${{ matrix.target }})
-    needs: changes
-    if: needs.changes.outputs.needs-tools-build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [testnet, mainnet]
-    uses: ./.github/workflows/_build-tools.yml
-    with:
-      ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      target: ${{ matrix.target }}
-      upload_artifacts: true
-
   # The landing deploys from Cloudflare's own Git integration, so without this job the first
   # build of a change is the production one. No network: the release stub stands in for the
   # GitHub API call `prebuild` makes, and the legal pages are generated from legal/*.md.
@@ -365,7 +323,7 @@ jobs:
   status:
     name: quality-status
     if: always()
-    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-tools, build-landing]
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-landing]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -378,7 +336,6 @@ jobs:
             "${{ needs.unit-tests.result }}" \
             "${{ needs.build-chrome.result }}" \
             "${{ needs.build-firefox.result }}" \
-            "${{ needs.build-tools.result }}" \
             "${{ needs.build-landing.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
