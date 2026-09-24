@@ -365,7 +365,7 @@ Each phase ends with its validation gate; its log is `lessons/phase-N.md`, print
 
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
-### P2 · The emoji check ☐
+### P2 · The emoji check ✓
 
 1. `SessionEstablishedDeps.windows` widened; `openVerifyWindow` reads the anchor before claiming,
    places through `topRightOf` and `createPlaced`.
