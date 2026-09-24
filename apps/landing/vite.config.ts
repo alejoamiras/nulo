@@ -19,7 +19,7 @@ export default defineConfig({
 		port: 5175,
 	},
 	preview: {
-		// Pages applies public/_headers in production; preview would otherwise run without the CSP.
+		// Cloudflare applies public/_headers in production; preview would otherwise run without the CSP.
 		headers: siteHeaders(readFileSync(resolve(here, "public/_headers"), "utf8")),
 	},
 	build: {

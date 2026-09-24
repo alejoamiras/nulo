@@ -422,7 +422,7 @@ jobs:
           cat /tmp/release-notes.md
 
   refresh-landing:
-    name: refresh landing (Cloudflare Pages deploy hook)
+    name: refresh landing (deploy hook)
     needs: [resolve, attach-assets]
     if: |
       always() && !cancelled() &&
@@ -435,12 +435,13 @@ jobs:
     timeout-minutes: 2
     environment: production
     steps:
-      - name: Trigger Cloudflare Pages deploy
+      - name: Trigger landing deploy
         env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+          # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK || secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
+            echo "::error::neither CLOUDFLARE_LANDING_DEPLOY_HOOK nor CLOUDFLARE_PAGES_DEPLOY_HOOK is set"
             exit 1
           fi
           code=$(curl -sS -o /tmp/cf.out -w "%{http_code}" \

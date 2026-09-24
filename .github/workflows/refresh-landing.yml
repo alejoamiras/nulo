@@ -1,6 +1,6 @@
 name: refresh-landing
 
-# Break-glass: manually re-fire the Cloudflare Pages deploy hook to redeploy
+# Break-glass: manually re-fire the landing deploy hook to redeploy
 # the landing (nulo.sh) WITHOUT a full release run.
 #
 # The release pipeline (release.yml) redeploys the landing on every stable publish.
@@ -20,17 +20,18 @@ concurrency:
 
 jobs:
   refresh:
-    name: refresh Cloudflare Pages
+    name: refresh landing
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
     steps:
       - name: Trigger landing deploy
         env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+          # The Workers hook once it is set; Pages, which still serves nulo.sh, until then.
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_LANDING_DEPLOY_HOOK || secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
+            echo "::error::neither CLOUDFLARE_LANDING_DEPLOY_HOOK nor CLOUDFLARE_PAGES_DEPLOY_HOOK is set"
             exit 1
           fi
           code=$(curl -sS -o /tmp/cf-landing.out -w "%{http_code}" \
