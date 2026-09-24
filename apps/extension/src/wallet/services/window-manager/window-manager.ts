@@ -50,9 +50,9 @@ export function topRightOf(
 }
 
 /** `create`, retried once with `left` and `top` removed when the browser refuses a position and
- *  `stillWanted()` still holds. A size-only create, an unwanted retry and a second refusal all
- *  reject with the browser's error, which callers must not log or surface: it can carry the
- *  window's URL. */
+ *  `stillWanted()` still holds. A size-only create, a refusal once `stillWanted()` is false, and a
+ *  second refusal all reject with the browser's error, which callers must not log or surface: it
+ *  can carry the window's URL. */
 export async function createPlaced(
 	windows: Pick<WindowPort, "create">,
 	options: CreateWindowOptions,
