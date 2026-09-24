@@ -123,11 +123,27 @@ The commands every batch gate and the final pass quote. `<b>` is `chrome` or `fi
 | CI-gating scripts | `bun run test:ci-gating` |
 | Build | `bun run build` |
 | Smoke e2e (does not build) | `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:<b>`, then `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` |
-| Network e2e (builds itself) | `NULO_E2E_BROWSER=<b> NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]` |
-| Execution canaries, prover on (batch 5) | the network command with `tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts` |
+| Network e2e, Chrome (builds itself) | `NULO_E2E_BROWSER=chrome NULO_E2E_RETRY=0 NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]`, prover on; files marked `@requires-proverless` run again with `NULO_E2E_PROVERLESS=1` |
+| Network e2e, Firefox (builds itself) | `NULO_E2E_BROWSER=firefox NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent [files]`, proverless, as CI's Firefox shards run |
+| Execution canaries, prover on (batch 5) | Chrome: the Chrome network command with `tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`. Firefox: CI's Firefox canary job (below) |
 | Storybook (when stories change) | `bun run --cwd apps/extension build-storybook` |
 
 After the last Firefox run of a session, `bun run e2e:reap`.
+
+**Proving modes (amended 2026-09-24, decided with `/codex high`, session `01a0d4da-73b1-…`).**
+
+- **Why the Firefox network gate runs proverless.** Batch 1's first Firefox network run was prover on. Without Presto, the wallet proves in WASM. Both execution tests of `imported-account-execution` failed in `waitForToast`, with `script.callFunction timed out`.
+- **The proven cause.** Firefox's BiDi session had Puppeteer's default 180 s protocol timeout, while `sendTransfer` waits 300 s for the toast. Batch 1 sets Firefox's budget to 300 s, as Chrome's already is.
+- **An unproven cause.** That WASM proving holds the shared extension process is plausible but not established; a prover-on diagnostic run is recorded in batch 1's lessons.
+- **What CI runs.** CI runs every network spec except the four canaries proverless on both browsers. So proverless is Firefox's gate mode here. Chrome keeps prover on, which is stricter than CI. The flake bar runs in each browser's gate mode.
+- **Where the Firefox canaries run.** They cannot run locally: the local `presto-server` is 1.1.1 (CI pins 1.1.2), and its bb lookup needs a GitHub token this program may not handle.
+- **What counts as Firefox canary evidence.** Batch 5's evidence is CI's `Firefox / Run / canary / real-proving` job on its PR, for the exact head revision. It must show:
+  - the substantive canary tests passed;
+  - retry 0;
+  - Presto enforcement on;
+  - native proofs in the server log.
+
+  A skipped or fallback run does not count, and CI success is never reported as a local pass. The row stays open until that evidence exists, and the final pass repeats it on the stack top.
 
 ## How each batch runs
 
