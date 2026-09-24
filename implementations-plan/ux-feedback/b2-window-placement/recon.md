@@ -68,9 +68,10 @@ windows and `useDappApprovalWindow`'s self-close keep their placement.
   the suite is requested 800 tall today, centered on it. After this batch each is requested at the
   anchor's top-right, 600 tall. Fifty-four e2e files drive a dApp window (`waitForPopup(`), so the
   arc gate is the whole network suite on both browsers, not a subset.
-- Correction from the plan audit: the Chrome launch sets no `defaultViewport`, so Puppeteer
-  emulates every page it wraps at 800×600 whatever the native window size; existing clicks do not
-  start exercising a shorter layout. Only a spec that drops the emulation sees the native one.
+- The plan audit's correction here was wrong, as the P3 probe showed: only `browser.newPage()`
+  pages are emulated at 800×600. Approval windows (`target.asPage()`) render at their native size,
+  which the size flag holds at 400×600 whatever the wallet asks, so on Chrome only the positions
+  move. The plan's e2e contract records the spec that sees a shorter window.
 - Firefox launches with no window size (`fixtures/browser/firefox.ts:245-253`) and gives each
   extension control page a normal window of its own (`:332`); whether headless Firefox honours
   `left`/`top` on `windows.create` is checked in P3. Firefox ignores `windowTypes` in

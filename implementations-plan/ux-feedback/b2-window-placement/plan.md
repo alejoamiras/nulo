@@ -153,48 +153,73 @@ The passkey window is not a dApp window and keeps `centerOn` at 500×800.
 
 ### e2e contract
 
-- New network spec `tests/e2e/network/window-placement.test.ts`:
-  1. Focus the dApp's browser window and capture its window id explicitly (Firefox gives each
-     extension control page a normal window of its own, `fixtures/browser/firefox.ts:332`, so
-     "the" normal window is never assumed). Normalise it with `chrome.windows.update` to
-     `state: "normal"`, on-screen bounds wider than 400 (so right alignment differs from left) and
-     shorter than 800 (so the height rule bites); await it, read the bounds back, assert both,
-     and derive every expectation from what the browser reports.
-  2. Walk connect → emoji check → permissions → one `sendTx`, arming each `waitForPopup` before
-     the action that opens it (it ignores targets that already exist, `fixtures/popups.ts:36`).
-  3. On each window: drop Puppeteer's viewport emulation (`page.setViewport(null)`; the Chrome
-     launch sets no `defaultViewport`, so every wrapped page is emulated at 800×600 whatever its
-     native size), poll `chrome.windows.getCurrent()` from the window's own page until its bounds
-     settle, then assert `left + width` is the anchor's right edge, `top` its top, `height`
-     `min(800, anchor height)`. The content check does not equate inner and outer sizes, since
-     outer bounds include the frame: `page.viewport()` is `null`, and `innerWidth`/`innerHeight`
-     are positive and no larger than the measured outer width and height, with no assumed
-     decoration offset.
+- New network spec `tests/e2e/network/window-placement.test.ts`. On Chrome it launches without
+  the suite's `--window-size=400,600`: headless Chrome's size flag overrides the dimensions
+  `windows.create` asks for, so under it every window is 600 tall whatever the wallet requests
+  (P3 probe). The opt-out is one launch option threaded through `launchExtension`,
+  `LaunchOptions` and the Chrome launch; every other launch keeps its exact flags. Firefox sets no
+  window size, so the option changes nothing there.
+  1. The anchor, first: create the dApp's browser window A from an open extension page
+     (`chrome.windows.create`, `type: "normal"`, focused, the playground's test URL), so its
+     window id is explicit (Firefox gives each extension control page a normal window of its own,
+     `fixtures/browser/firefox.ts:332`, so "the" normal window is never assumed). Normalise it
+     with `chrome.windows.update` to `state: "normal"` and on-screen bounds wider than 400 (so
+     right alignment differs from left) with a height below 600, 500 (so the height rule bites
+     under the 800 cap and on headless Chrome's 600-tall screen alike). Read the bounds back and
+     assert the requested geometry, and that it lies on the screen, before anything else; every
+     later expectation is derived from what the browser reports.
+  2. Walk connect → emoji check → permissions → one `sendTx` from A, arming each `waitForPopup`
+     before the action that opens it (it ignores targets that already exist,
+     `fixtures/popups.ts:36`).
+  3. On each window: no viewport reset. A window wrapped the way `waitForPopup` wraps it
+     (`target.asPage()`) already has a `null` viewport and renders at its native size (P3 probe;
+     only `browser.newPage()` pages get Puppeteer's 800×600 default), so assert
+     `page.viewport()` is `null`. Poll `chrome.windows.getCurrent()` from the window's own page
+     until its bounds settle, then assert `left + width` is the anchor's right edge, `top` its
+     top, `height` `min(800, anchor height)`. The content check does not equate inner and outer
+     sizes, since outer bounds include the frame: `innerWidth`/`innerHeight` are positive and no
+     larger than the measured outer width and height, with no assumed decoration offset.
   4. The final approve or reject in each window goes through `pointerClick`
      (`helpers/legal-drivers.ts:69`) after the existing readiness waits. It scrolls the control
      into view, proves with `elementFromPoint` that nothing covers it, and clicks with the real
      pointer. `clickByTestId` checks only that the element has a size, so a clipped button would
      pass it. Other suites keep their helpers.
-  5. The anchor case, three distinct candidate corners:
-     - A `sendTx` from the dApp window A opens execute window W1 at A's corner.
-     - Open a second normal window B with its own distinct bounds, focused. Move W1 to a third
-       spot and focus it again.
-     - While W1 stays focused, fire a second request from A's page with a page-context click
-       (`page.evaluate` on its `data-testid`). `clickByTestId` and `prepareClick` focus their page
-       on Firefox (`extension.ts:1430`, `browser/firefox.ts:354`) and would hide the bug.
-     - The new window opens at B's corner, not A's or W1's.
-     - Every `chrome.windows` call runs by `page.evaluate` in a page that is already open, so no
-       control window takes focus during the sequence.
-     - Which second request the playground can issue while W1 is pending is settled in P3.
-  Selectors by `data-testid` only; the existing dApp fixtures drive the walk.
-- Firefox: the same spec. Firefox 153 supports positioning popups and may clamp coordinates; a
-  headless limitation is separated from an implementation error with evidence before any Firefox
-  assertion is narrowed, and a narrowing is recorded in this plan, `FIREFOX.md` and
-  `lessons/phase-3.md`.
-- The recon's addendum overstated the suite-wide effect: content in Chrome e2e is emulated at
-  800×600 regardless of native size, so existing clicks do not start exercising a shorter layout.
-  The whole network suite stays the arc gate (native bounds change for every dApp window), and the
-  new spec is what exercises the native layout.
+  5. The anchor case, three distinct candidate corners, in two tests. A connected page cannot
+     supply the second request while its `sendTx` waits in W1 (every message of a session waits
+     on the one before it); Connect on a second, unconnected playground page can, because
+     discovery is not a session message (P3 probe).
+     - **Shared, both browsers.** A `sendTx` from A opens execute window W1 at A's corner. Create
+       a second normal window B with its own distinct bounds, focused, holding an unconnected
+       playground page, and wait for that page. Move W1 to a third spot. Confirm the browser's
+       own `getLastFocused({ windowTypes: ["normal"] })` answers B, then fire Connect on B's page
+       with a page-context click (`page.evaluate` on its `data-testid`), `waitForPopup` armed
+       first. The new discover window opens at B's corner, not A's or W1's. On Chrome this proves
+       the most recently created normal window wins over a stale A; it proves neither refocusing
+       nor the rejection of a focused popup as the anchor.
+     - **Firefox only.** The full A → W1 → B → W1 sequence: after B's page is ready, focus B,
+       then move W1 and focus it again. Confirm the browser reports W1 as last focused (a popup:
+       Firefox ignores `windowTypes`) just before Connect on B's page; W1 stays unresolved. The
+       new window uses B, not A or W1, which only the adapter's focus tracker can find. Skipped
+       on Chrome with the reason: headless Chrome ignores `windows.update({ focused: true })` and
+       `bringToFront` (P3 probe), so W1 can never be the last-focused window there.
+     - During both sequences no `newPage`, `bringToFront` or focus-changing click helper runs:
+       `clickByTestId` and `prepareClick` focus their page on Firefox (`extension.ts:1430`,
+       `browser/firefox.ts:354`) and `newPage` opens a focused window there, any of which would
+       hide the bug. Every `chrome.windows` call runs by `page.evaluate` in a page that is
+       already open.
+  Selectors by `data-testid` only; the walk reuses the dApp helpers (`waitForPopup`,
+  `selectPgBundle`, `waitForPgResult`).
+- Firefox: the same spec. Firefox 153 honours position and size on `windows.create` and clamps an
+  off-screen position instead of refusing it (P3 probe); a headless limitation is separated from
+  an implementation error with evidence before any Firefox assertion is narrowed, and a narrowing
+  is recorded in this plan, `FIREFOX.md` and `lessons/phase-3.md`.
+- The recon's addendum and the first draft of this contract said Chrome e2e emulates every
+  wrapped page at 800×600, so existing clicks never met a native layout. The P3 probe disproves
+  it: approval windows have always rendered at their native size in the Chrome suite, which under
+  the size flag is 400×600 whatever the wallet asks. So on Chrome the rest of the suite keeps its
+  window sizes and only the positions move, while on Firefox every dApp window now opens
+  `min(800, anchor height)` tall. The whole network suite stays the arc gate, and the new spec is
+  the one that exercises a window shorter than 600.
 - No existing test changes expectation; a spec that breaks because its window moved or shrank is a
   bug to fix, never an assertion to loosen (program § Tests).
 
@@ -239,7 +264,9 @@ The passkey window is not a dApp window and keeps `centerOn` at 500×800.
    limit line; the rejection's wording is not relied on).
 5. There is no `/windows/sign` route; signing approvals render in the execute window.
 6. Chrome e2e runs with `--window-size=400,600` and no `defaultViewport`
-   (`fixtures/browser/chrome.ts:31-39`), so Puppeteer emulates every page it wraps at 800×600.
+   (`fixtures/browser/chrome.ts:31-39`). Corrected by the P3 probe: only `browser.newPage()` pages
+   are emulated at 800×600; a window wrapped by `target.asPage()` has a `null` viewport and its
+   native size, and the size flag makes every created window 600 tall.
 7. A verify reservation is reclaimable (`releaseIfUnstarted`, expiry) only while unstarted;
    `markInFlight` ends that (`verify-admission.ts:70-124`).
 8. The logger keeps error messages, and `scrubUrls` handles `http(s)`/`ws(s)` only
@@ -273,6 +300,15 @@ The passkey window is not a dApp window and keeps `centerOn` at 500×800.
 5. The e2e design: **amended** (the anchor id, normalisation, arming, viewport emulation,
    polling, the popup-anchor case).
 6. Log level `debug`: **amended**, a constant message instead of the error.
+7. P3, after the step-1 probes: headless Chrome's `--window-size` makes every created window 600
+   tall and ignores focus changes, and a connected page cannot open a second window while its
+   `sendTx` is pending. How does the spec prove the height rule and the popup-anchor fallback?
+   Option 5 was to drop the size flag for this spec's Chrome launch only. Codex (GPT-6 Astra,
+   high), **adopted** as-is; it supersedes the `setViewport(null)` resolution of round 1 #4:
+   - a. Option 5; spec-local Chrome size-flag opt-out, full height assertions on both browsers.
+   - b. Connect from unconnected page B; shared B-selection check plus a separate Firefox-only W1-focus regression.
+   - c. Remove the viewport reset; assert native viewport and retain reachability checks.
+   - d. Gate shared checks on both browsers and the focus regression on Firefox explicitly. — confidence: high
 
 UI asks: none. The spec draws the placement and the height; nothing inside a window changes.
 
@@ -400,23 +436,31 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
      `onFocusChanged`;
    - `chrome.runtime.getBrowserInfo` present on Firefox's `chrome` namespace and absent on Chrome;
    - the second request the playground can issue while an execute window is pending.
-2. `window-placement.test.ts` per the e2e contract.
-3. Parity: capture each of the four windows at its native size (emulation dropped), and draw each
-   window's measured bounds over its anchor's (an SVG drawn from the measured numbers, beside
-   `04-window-placement`); publish one private Artifact; list every difference.
+   ✓, and the decision it forced is Ask 7.
+2. The Chrome launch opt-out (one option through `launchExtension`, `LaunchOptions` and the Chrome
+   launch), then `window-placement.test.ts` per the e2e contract: the shared test on both
+   browsers, the focused-popup case on Firefox only.
+3. Parity: capture each of the four windows at its native size, and record each window's measured
+   bounds, its anchor's bounds and the screen size, plus the Firefox-only case's three corners and
+   result. Draw each window's measured bounds over its anchor's (an SVG drawn from the measured
+   numbers, beside `04-window-placement`); publish one private Artifact; list every difference
+   and each browser's limitations.
 
-Gate: the new spec passes on Chrome and on Firefox; the parity Artifact URL printed.
+Gate: The shared placement, height, and native-layout checks pass on Chrome and Firefox; the focused-popup anchor regression passes on Firefox and is explicitly skipped on Chrome because headless refocusing is unsupported. Parity evidence records each browser's measured bounds and limitations.
 
 ### P4 · Arc gate ☐
 
 1. Every row of the program's [Local gates](../plan.md#local-gates): lint, `typecheck:all`,
    `test:all`, `test:ci-gating`, `build`; full smoke on Chrome and on Firefox.
 2. The whole network suite (`bun run e2e:agent`, no file filter) on Chrome and on Firefox,
-   `NULO_E2E_RETRY=0`: every dApp window in it now opens shorter.
-3. Flake bar: `window-placement.test.ts` three consecutive retry-0 runs on each browser.
+   `NULO_E2E_RETRY=0`: every dApp window in it opens at its anchor's top-right, and on Firefox
+   no taller than the anchor.
+3. Flake bar: `window-placement.test.ts` three consecutive retry-0 runs on each browser. The
+   shared checks pass on both; the focused-popup regression passes on Firefox and, on Chrome, is
+   reported skipped, never failed.
 4. `bun run e2e:reap`.
 
-Gate: all of the above exit 0.
+Gate: all of the above exit 0, with the Firefox-only case skipped on Chrome in every run.
 
 ## Arc boundary
 

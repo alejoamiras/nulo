@@ -90,6 +90,38 @@ because B is created focused and the filter skips W1.
 Firefox matches the plan's assumptions: sizes and positions honoured, focus tracked, the filter
 ignored. It clamps off-screen positions instead of refusing them.
 
-Not done, pending a decision on the Chrome height assertion: `window-placement.test.ts` (step 2),
-its Chrome and Firefox runs, and the parity capture (step 3). Nothing narrowed, nothing
-redesigned.
+## Decision (codex high)
+
+Asked `/codex high` (GPT-6 Astra) how the spec should prove the height rule and the popup-anchor
+fallback given the probes above. Adopted as-is; the plan's e2e contract, P3, P4 and Ask 7 carry
+it.
+
+DECISION:
+a. Option 5; spec-local Chrome size-flag opt-out, full height assertions on both browsers.
+b. Connect from unconnected page B; shared B-selection check plus a separate Firefox-only W1-focus regression.
+c. Remove the viewport reset; assert native viewport and retain reachability checks.
+d. Gate shared checks on both browsers and the focus regression on Firefox explicitly. — confidence: high
+
+## Rebase onto batch 1's final tip
+
+- The implementing worktree was cut from `dev` (`ae4260f3`), not from batch 1. Its branch held no
+  commit of its own and a clean tree, so it was moved to batch 1's final tip `ad470e6c` before
+  anything else.
+- Batch 2's twelve commits (`16667877..2caf3788` on `wip/ux-2-p3`) were cherry-picked onto
+  `ad470e6c` in order: all twelve applied, no conflicts, every commit signed. The only non-plan
+  differences from `2caf3788` are batch 1's own later commits.
+- `bun install` → exit 0.
+
+## Comment fixes codex flagged
+
+All three lines predate batch 2, so none was changed here (`git diff ad470e6c..HEAD` touches none
+of them; `git blame` gives earlier commits):
+
+- `tests/e2e/fixtures/popups.ts:28-30` cites `implementations-plan/network-followups/plan.md`
+  (`6b2075ee`, May). Worth a one-sentence rewrite about mount latency under CPU pressure, outside
+  this batch.
+- `window-manager.ts:140-143`, the four-line "Identity, not membership" comment (`94237eb7`).
+  Codex's sentence: "Handle IDs can be reused; identity prevents adopting a stale create and
+  leaves its window to be closed."
+- `chrome-browser-api.ts:204-205` says "the dApp's window" (`57c4158a`); the query returns the
+  last-focused normal window, which can differ.
