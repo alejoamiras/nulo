@@ -794,7 +794,7 @@ In order. No `/code-review`: `code_review` is `off`.
 
 ## Seeds (DRAFT — finalized after approval)
 
-ELI5 Artifact: https://claude.ai/artifact/56x2U32EAJmHkbF1cvT9dT (`eli5_mode: artifact`; its source stays off-repo, in the session scratchpad).
+ELI5 Artifact: https://claude.ai/artifact/APE6BrLDXTog5iaUSJ42bm (`eli5_mode: artifact`; its source stays off-repo, in the session scratchpad).
 
 **Recommended: `/goal`.** Completion shows in the transcript: gate outputs, `gh stack view`.
 
