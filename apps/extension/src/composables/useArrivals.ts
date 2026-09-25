@@ -131,6 +131,11 @@ class ArrivalCoordinator {
 	private readonly version = ref(0)
 	private run: ScopeRun | undefined
 	private disposed = false
+	// A chip installs only in presentation order and on the route visit that presented it, so an
+	// older lookup that answers last, or one from before Home was left, shows nothing.
+	private presented = 0
+	private chipOrder = 0
+	private routeGen = 0
 	private readonly now: () => number
 	readonly addedRead = coalesce(() => this.startRead(), ADDED_COALESCE)
 
@@ -409,11 +414,12 @@ class ArrivalCoordinator {
 		const shown = records.filter((x) => r.judged.get(x.id)?.arriving && !r.attempted.has(x.id) && inScope(r.scope, x))
 		if (shown.length === 0) return
 		for (const x of shown) r.attempted.add(x.id)
-		void this.claimShown(r, shown, route)
+		void this.claimShown(r, shown, route, ++this.presented)
 	}
 
-	private async claimShown(r: ScopeRun, shown: IncomingTransferRecord[], route: string): Promise<void> {
+	private async claimShown(r: ScopeRun, shown: IncomingTransferRecord[], route: string, order: number): Promise<void> {
 		const { profileId, networkId, account } = r.scope
+		const routeGen = this.routeGen
 		let ids: string[] = []
 		try {
 			ids = await this.svc.claimArrivals(
@@ -430,12 +436,15 @@ class ArrivalCoordinator {
 		const newest = shown.filter((x) => ids.includes(x.id)).sort(newestFirst)[0]
 		if (!newest || route !== HOME) return
 		const token = await this.deps.lookupToken(newest).catch(() => undefined)
-		if (this.live(r) && this.route() === HOME) this.latest.value = { id: newest.id, label: arrivalChipLabel(newest, token) }
+		if (!this.live(r) || this.routeGen !== routeGen || order < this.chipOrder) return
+		this.chipOrder = order
+		this.latest.value = { id: newest.id, label: arrivalChipLabel(newest, token) }
 	}
 
 	/** Leaving a route retires its windows: a row that played there is at rest when the route returns. */
 	readonly onRouteChanged = (): void => {
 		const route = this.route()
+		this.routeGen++
 		if (route !== HOME) this.latest.value = null
 		for (const judged of this.run?.judged.values() ?? []) if (judged.route !== route) judged.arriving = false
 	}
