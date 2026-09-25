@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# R, the local rehearsal: applies B1's changes to an extract.sh output on a throwaway branch, installs
-# the staged 0.1.0 tarballs as file: dependencies, and runs R's validation gate phase by phase.
-# Nothing is published, pushed or deployed.
+# The local rehearsal of the unleashed import: applies the workspace changes (design package,
+# codemod, the three published packages as dependencies) to an extract.sh output on a throwaway
+# branch and runs the validation gate phase by phase. Nothing is published, pushed or deployed.
 #
 #   rehearse.sh <workdir> <tgz-dir> [phase ...]
 #
@@ -11,7 +11,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-PHASES=(prepare preinstall install fast identity tools e2e contracts history)
+PHASES=(prepare preinstall install fast identity tools e2e contracts history audit)
+PUBLISHED=(wallet-crypto resolve-asset wallet-sdk-schema-patch)
 
 die() {
   echo "rehearse: $*" >&2
@@ -27,12 +28,6 @@ repo=$work/unleashed
 report=$work/report
 export PATH="${FOUNDRY_BIN:-$HOME/.cache/unleashed-rehearsal/foundry/bin}:${EXTRACTION_TOOLS:-$HOME/.local/share/extraction-tools/bin}:$PATH"
 
-tarball() {
-  local found=("$tgz"/alejoamiras-nulo-"$1"-0.1.0.tgz)
-  [ -f "${found[0]}" ] || die "missing the $1 tarball in $tgz"
-  echo "${found[0]}"
-}
-
 # The Aztec line a crate's Nargo.toml pins, as _bridge-contracts.yml resolves it.
 aztec_pin() {
   sed -n 's/.*aztec-packages\/".*tag = "v\([^"]*\)".*/\1/p' "$repo/contracts/bridge/aztec/$1/Nargo.toml" | head -1
@@ -46,10 +41,15 @@ phase_prepare() {
   git -C "$repo" switch -q -c rehearsal
   bun "$here/design.ts" "$work/freeze" "$repo"
   git -C "$repo" add -A
-  bun "$here/codemod.ts" "$repo" \
-    "wallet-crypto=file:$(tarball wallet-crypto)" \
-    "resolve-asset=file:$(tarball resolve-asset)" \
-    "wallet-sdk-schema-patch=file:$(tarball wallet-sdk-schema-patch)"
+  # Relative specs keep the absolute scratch path out of manifests and the lockfile; every
+  # dependent sits two levels down (apps/tools, packages/bridge-core), and install fails otherwise.
+  mkdir -p "$work/tgz"
+  local specs=() name
+  for name in "${PUBLISHED[@]}"; do
+    cp "$tgz/alejoamiras-nulo-$name-0.1.0.tgz" "$work/tgz/"
+    specs+=("$name=file:../../../tgz/alejoamiras-nulo-$name-0.1.0.tgz")
+  done
+  bun "$here/codemod.ts" "$repo" "${specs[@]}"
   # Seeding nulo's lockfile keeps every shared dependency at the version nulo's gates ran against.
   cp "$work/freeze/bun.lock" "$repo/bun.lock"
   git -C "$repo" add -A
@@ -71,7 +71,8 @@ phase_preinstall() {
 }
 
 phase_install() {
-  # The longer specifiers push some lines past the formatter's width; B1 reformats after the codemod.
+  # The longer specifiers push some lines past the formatter's width, so the codemod is always
+  # followed by a format.
   (cd "$repo" && bun install && bun run format)
   git -C "$repo" add -A
   git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "rehearsal: lockfile, reformat"
@@ -95,13 +96,19 @@ phase_identity() {
       const r = assertPackageIdentity(pkg, { from, expectVersion: "5.2.0", lockstepVia: via })
       console.log(`identity: ${pkg}@${r.version} is one copy through ${via}`)
     }
+    const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+    const methods = ["registerToken", "isTokenRegistered", "grantPublicAuthwit"]
+    if (methods.some((m) => m in WalletSchema)) throw new Error("WalletSchema carries a patched method before register ran")
+    await import("@alejoamiras/nulo-wallet-sdk-schema-patch/register")
+    const missing = methods.filter((m) => !(m in WalletSchema))
+    if (missing.length) throw new Error(`register left the WalletSchema apps/tools resolves without ${missing.join(", ")}`)
+    console.log("identity: register adds all three methods to the WalletSchema apps/tools resolves")
   ')
   (cd "$repo" && bun run --cwd apps/tools build:testnet)
-  local method
-  for method in registerToken isTokenRegistered grantPublicAuthwit; do
-    grep -rqF -- "$method" "$repo/apps/tools/dist/assets" || die "the production bundle lost the schema patch's $method"
-  done
-  echo "identity: the production bundle carries all three patched methods"
+  # The patch body is referenced only by register, so it survives tree-shaking only if the call does.
+  grep -rqF -- "Nulo schema-patch: upstream WalletSchema." "$repo/apps/tools/dist/assets" ||
+    die "the production bundle does not carry the schema patch"
+  echo "identity: the production bundle carries the schema patch"
 }
 
 phase_tools() {
@@ -169,20 +176,34 @@ phase_contracts() {
 }
 
 phase_history() {
-  # The e2e specs may change in their specifiers and in the formatter's reflow of them, nothing else.
+  [ -z "$(git -C "$repo" status --porcelain -- apps/tools/tests)" ] || die "apps/tools/tests has uncommitted changes"
+  # The e2e specs may differ from main only in specifiers: undoing the renames and formatting both
+  # sides must give identical text, so a changed literal or statement cannot hide in a reflow.
   (cd "$repo" && bun -e '
-    const git = (...args) => Bun.spawnSync(["git", ...args]).stdout.toString()
-    const norm = (text) =>
-      text.replaceAll("@unleashed/", "@nulo/").replaceAll("@alejoamiras/nulo-", "@nulo/").replace(/,(\s*[}\])])/g, "$1").replace(/\s+/g, "")
-    const changed = git("diff", "--name-only", "main", "--", "apps/tools/tests").split("\n").filter(Boolean)
-    const bad = changed.filter((f) => norm(git("show", `main:${f}`)) !== norm(git("show", `HEAD:${f}`)))
+    const run = (cmd, input) => {
+      const r = Bun.spawnSync(cmd, { stdin: input === undefined ? "ignore" : new Blob([input]) })
+      if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")} exited ${r.exitCode}`)
+      return r.stdout.toString()
+    }
+    // Biome formats only these; any other file must match exactly once the renames are undone.
+    const formats = /\.(?:[cm]?[jt]sx?|jsonc?|css)$/
+    const format = (file, text) =>
+      formats.test(file) ? run(["node_modules/.bin/biome", "format", `--stdin-file-path=${file}`], text) : text
+    const unrename = (text) => text.replaceAll("@unleashed/", "@nulo/").replaceAll("@alejoamiras/nulo-", "@nulo/")
+    const changed = run(["git", "diff", "--name-only", "main", "HEAD", "--", "apps/tools/tests"]).split("\n").filter(Boolean)
+    const bad = changed.filter((f) => format(f, run(["git", "show", `main:${f}`])) !== format(f, unrename(run(["git", "show", `HEAD:${f}`]))))
     if (bad.length) { console.error("changed beyond specifiers:", bad); process.exit(1) }
-    console.log(`history: ${changed.length} spec file(s) differ only in specifiers and their reflow`)
+    console.log(`history: ${changed.length} spec file(s) differ from main only in specifiers`)
   ')
-  git -C "$repo" log --follow --format=%H -- apps/tools/src/main.ts | tail -1 >"$report/main-ts-root.txt"
   git -C "$repo" log --follow --name-status --format= -- apps/tools/src/main.ts | grep -q "packages/faucet/src/main.ts" ||
     die "apps/tools/src/main.ts does not follow back to packages/faucet"
-  echo "history: specifier-only test diff; main.ts reaches the packages/faucet era"
+  echo "history: apps/tools/src/main.ts follows back to packages/faucet"
+}
+
+# The workspace commits are new content too: the same audit, over main and the rehearsal branch.
+phase_audit() {
+  mkdir -p "$report/workspace"
+  python3 "$here/audit.py" "$repo" "$report/workspace" "$here/audit-allowlist.txt" "$here/audit-allowlist-workspace.txt"
 }
 
 for phase in "$@"; do
