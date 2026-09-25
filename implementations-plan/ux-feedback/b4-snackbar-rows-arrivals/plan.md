@@ -419,7 +419,9 @@ Arrivals:
 - `popup/app.vue` and `onboarding/app.vue`: `<div id="toast" />` moves to the end of the template,
   so the snack's buttons come after the page in Tab and reading order. `defer` on the teleport
   resolves the later target.
-- `popup/app.vue` (S-16): `enterLockedState` (`:174-186`) calls `closeToast()`; a `flush: "sync"`
+- `popup/app.vue` (S-16): the lock's seal (`popup/locked-state.ts`) calls `closeToast()` and
+  clears `isLogined` before the lock event awaits its profile lookup, and a `flush: "sync"` watcher
+  on `isLogined` does the same the moment the header marks the popup locked; a `flush: "sync"`
   watcher on the active profile, network and account ids closes the snack when it carries an
   action (only transaction and receipt snacks do, S-7). Both bump a new `appStore.scopeEpoch`
   counter, the one fence Send and the arrival coordinator compare after an await, so a round

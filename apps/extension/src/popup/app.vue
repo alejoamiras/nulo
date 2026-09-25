@@ -17,6 +17,7 @@ import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
 import { runFencedBootstrap } from "@/popup/profile-bootstrap"
 import { createScopeEpochHandlers } from "@/popup/scope-epoch"
+import { createLockedState, watchLockStart } from "@/popup/locked-state"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -169,6 +170,24 @@ watch(
 
 // `flush: "sync"`: a send settling in the next microtask must already see the new epoch.
 watch([() => appStore.profile?.id, () => appStore.network?.id, () => appStore.account?.address], onScopeChanged, { flush: "sync" })
+watchLockStart(() => appStore.isLogined, onLocked)
+
+/** The popup's locked state, entered from the lock event and from a boot-time session check
+ *  that finds no session under an authenticated page (a worker restart). */
+const lockedState = createLockedState({
+	closePopups: () => popupStore.closeAll(),
+	onLocked,
+	markLocked: () => {
+		appStore.isLogined = false
+	},
+	clearActivity: () => appStore.clearActivity(),
+	resetInFlight: () => appStore.resetInFlight(),
+	cachedProfiles: () => appStore.profiles,
+	setProfiles: (profiles) => {
+		appStore.profiles = profiles
+	},
+	route: (path) => router.push(path),
+})
 
 /** Sequence token for profile events. Handlers await service round-trips, and under load a
  *  stale LOCK event can resume after its own unlock has already re-activated the profile — its
@@ -199,34 +218,10 @@ const onActiveProfileChanged = async (profile) => {
 		})
 		return
 	}
-	// Lock cleanup must survive a failed lookup: a transport rejection here (SW churn at the
-	// exact moment of a lock) must not leave the popup rendered as authenticated over a closed
-	// session. The list only picks auth vs register — the cached one is good enough for that.
-	let profiles = appStore.profiles
-	try {
-		profiles = await managers.profile.getProfiles()
-	} catch {
-		// Cached list stands in; the cleanup below runs regardless.
-	}
-	if (seq !== profileEventSeq) return
-	enterLockedState(profiles)
-}
-
-/** The popup's locked state, entered from the lock event and from a boot-time session check
- *  that finds no session under an authenticated page (a worker restart). */
-const enterLockedState = (profiles) => {
-	popupStore.closeAll()
-	onLocked()
-	appStore.isLogined = false
-	// Every cached scope goes with the lock, so no profile's activity outlives
-	// it in memory. Switching profiles runs through lock/unlock, which means a
-	// switch deliberately starts cold rather than repainting from cache.
-	appStore.clearActivity()
-	// The lock cancels the running sends, but the cancel events do not reach
-	// this popup; left in place, the rows would refuse every pick on the lock screen.
-	appStore.resetInFlight()
-	appStore.profiles = profiles
-	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
+	await lockedState.onLockEvent(
+		() => managers.profile.getProfiles(),
+		() => seq === profileEventSeq,
+	)
 }
 
 /** The profile unlocked in RECOVERY MODE: its imported-keys DEK (or the envelope MAC over it)
@@ -287,7 +282,7 @@ const lockLandingActions = {
 	},
 	lock: (result) => {
 		appStore.isSessionChecked = true
-		enterLockedState(result.profiles)
+		lockedState.enter(result.profiles)
 	},
 	settle: () => {
 		appStore.isSessionChecked = true
