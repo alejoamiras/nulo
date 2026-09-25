@@ -1,4 +1,4 @@
-# Phase 6 · The owner's parity answers
+# Phase 6 · The owner's parity answers ✓
 
 The owner answered the parity page's thirteen calls on 2026-09-25. Code paths are relative to
 `apps/extension/src/` unless they start with `packages/` or `tests/`.
@@ -495,3 +495,85 @@ bounded focus retries; it did not rerun the browser e2e.
 > no unapproved UI state.
 
 > VERDICT: approve — confidence: moderate
+
+## Gate
+
+The first run, on `2d8ab638`, was green but for both smokes, which ran at the config's two
+retries; the network files ran at retry 0.
+
+| Step | `2d8ab638` |
+|---|---|
+| `bun run lint`, `typecheck:all`, `test:all`, `test:ci-gating`, `build` | exit 0 each |
+| `snack-placement` and `window-placement`, Chrome prover on | 4 passed, 1 skipped |
+| `window-placement` twice more, Chrome | 1 passed, 1 skipped, each time |
+| `snack-placement` and `window-placement`, Firefox proverless | 5 passed |
+| `window-placement` twice more, Firefox | 2 passed, each time |
+| smoke, Chrome | 156 passed, 7 skipped; snackbar's still pointer failed on all three attempts |
+| smoke, Firefox | 152 passed, 11 skipped; rows' Logs row failed on all three attempts |
+
+Each red case was rerun alone at retry 0 until its cause was known, and each fix was proven alone
+before the next.
+
+1. **Snackbar's still pointer (Chrome).** The rest check waited for no animation under the sheet's
+   layer, which also holds in the frames before the slide begins: the Receive sheet keeps its 40px
+   start offset for two or three frames after it mounts, and on the third its slide exists but has
+   not started. The case read the address there and pressed 28 to 40px below where it comes to
+   rest, on a wrapper, so no copy ran and no snack opened. The check now needs the target's own
+   box unchanged on three animation frames in a row with nothing finite animating, and the case
+   waits on the address it presses (`b29ecfd6`). Before, 2 of 5 runs failed; after, the file
+   passed 10 of 10 on Chrome and 3 of 3 on Firefox, the success living 6152 to 6165ms.
+2. **A 1.2px snack move**, found in those reruns: the lengthened Receive case failed about one
+   full-file run in four. The popup's frame was `overflow: hidden`, a scroll container that focus
+   and `scrollIntoView` move, and content a fraction of a pixel past its bottom edge gave it 1px to
+   scroll. Scrolling Close into view raised the whole frame by that pixel; the inset leaves such a
+   scroll out, as no user can make it, so the next measure moved the snack. The inset changed for
+   real (the test was not measuring mid-scroll), so the product changed and the 0.5px bound
+   stayed: the frame is `overflow: clip` (`23ed6c55`), which clips the same and cannot scroll. The
+   case now hangs a 2px strip below the popup first; with `hidden` the snack moves 2px on both
+   browsers, with `clip` it stays. A clip box is no scroll container, so as a flex item its minimum
+   size follows its content: with the frame's width set to auto, a 1604-char line widened it to
+   10800px on Chrome and 14298px on Firefox. Zero minimum sizes keep it at the window's width
+   (`cb26b925`). On both browsers the document's scrollWidth then equals its clientWidth on Receive
+   (its address, and an 802-char line beside it), on Send (an 802-char destination), in the logger
+   window (an 802-char line) and in a json window (a 1602-char line). No sticky box had the frame
+   as its nearest scroller; each sticks inside its page's own. No drawn state changes.
+3. **Rows' Logs row (Firefox)**: three causes, and a fourth that had not failed yet.
+   - A retry could not pass: the case clicked the developer-mode toggle without reading it, and
+     `registeredExtension` lives for the whole file, so each attempt flipped developer mode and the
+     second found no row. The case now sets it on.
+   - Space fired no click on the gate's first and third attempts, and in 3 of 17 runs at retry 0
+     after it. The case pressed it as soon as the log window's target appeared, and a key sent to
+     a page whose window lost focus reaches its focused element with no default action. Firefox
+     raises a window it opens once more as it starts loading its page (its delayed startup calls
+     `window.focus()` right after starting the load), which undid a `bringToFront` made between the
+     two raises. The case now waits for the target to show the log page, and the driver's new
+     `prepareKeys` brings the popup forward until it reports focus, again if it loses it; Chrome's
+     is empty (`a98dbdf9`). In 8 instrumented runs no blur came between that focus and the key.
+   - Space landed while `windows.create` was still pending and opened a second window in 4 of 17
+     runs: the product race in P6.6, fixed in `f75064b1`.
+   - The Tab after Space raced the handler's own `windows.update` raise, which took focus from the
+     popup 3 to 7ms after the click in all 8 instrumented runs. The one-Tab-stop check moved before Enter, and Shift+Tab
+     brings focus back.
+
+   After both fixes the file passed 8 of 8 runs on Firefox and 4 of 4 on Chrome at retry 0.
+
+The rerun on the fix tip ran every e2e file at retry 0, each run followed by `bun run e2e:reap`.
+`037b6c6c` adds only this log's round 2 and 3 records to `d62e34fa`, and `a98dbdf9` differs from
+`d62e34fa` only in comments and a network file:
+
+| Step | Commit | Result |
+|---|---|---|
+| `bun run lint` | `d62e34fa` | exit 0, the first run's 29 warnings and 3 infos |
+| `bun run typecheck:all` | `d62e34fa` | exit 0 |
+| `bun run test:all` | `d62e34fa` | exit 0; the extension's 7499 passed, 4 skipped and 7 todo, one more than the first run (the Logs handler's) |
+| `bun run test:ci-gating` | `d62e34fa` | 138 passed |
+| `bun run build` | `037b6c6c` | exit 0 |
+| `snack-placement` and `window-placement`, Chrome prover on | `037b6c6c` | 4 passed, 1 skipped |
+| `window-placement` twice more, Chrome | `037b6c6c` | 1 passed, 1 skipped, each time |
+| `snack-placement` and `window-placement`, Firefox proverless | `037b6c6c` | 5 passed |
+| `window-placement` twice more, Firefox | `037b6c6c` | 2 passed, each time |
+| smoke, Chrome | `a98dbdf9` | 157 passed, 7 skipped |
+| smoke, Firefox | `d62e34fa` | 153 passed, 11 skipped |
+
+The parity captures of the new states were then taken from `037b6c6c` on both browsers, outside
+the repo.
