@@ -40,7 +40,7 @@ const sanitizedName = computed(() => (props.dapp?.name ? sanitizeWireString(prop
 			<Flex v-if="hostnameSuspicious" align="start" gap="6" data-testid="dapp-hostname-warning">
 				<Icon name="warning" size="12" color="orange" aria-hidden="true" :class="$style.warning_icon" />
 				<span :class="$style.warning_text">
-					This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.
+					This hostname contains non-ASCII or punycoded characters. Verify carefully. Some characters can imitate Latin letters.
 				</span>
 			</Flex>
 			<span v-if="sanitizedName" :data-testid="nameTestId" :class="$style.dapp_name">{{ sanitizedName }}</span>
