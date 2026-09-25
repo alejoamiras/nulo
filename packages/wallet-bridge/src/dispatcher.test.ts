@@ -10,7 +10,7 @@ import {
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
-import type { CapabilityResult } from "./dapp-interaction-protocol"
+import type { CapabilityParams, CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type {
@@ -1775,8 +1775,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 			ctx,
 		)
 		expect(widen.state.prompted).toBe(true)
-		// Fresh session for the subset case - the widen dispatch above recorded a rejection,
-		// and re-requesting a rejected type re-prompts by design.
+		// A fresh session, so the rejection the widen dispatch recorded plays no part.
 		const subset = promptTracking([])
 		const fresh = makeSessionWriter(makeSession({ capabilityGrants: [dataGrant] }))
 		const dispatcher2 = makeDispatcher(fresh.writer, subset.popup)
@@ -1892,6 +1891,36 @@ describe("dispatcher — the data answer comes from the stored grant", () => {
 	})
 })
 
+/** A requestCapabilities round trip against the real merge fake: the popup approves exactly what
+ *  the window was given unless `answer` says otherwise. */
+function capabilityHarness(session: IDappSessionRef, answer?: (params: CapabilityParams) => CapabilityResult | Promise<CapabilityResult>) {
+	const { writer } = makeSessionWriter(session)
+	const seen: { params?: CapabilityParams; windows: number } = { windows: 0 }
+	let decisions = 0
+	const counted: IDappSessionWriter = {
+		...writer,
+		applyCapabilityDecision: async (id, decision) => {
+			decisions += 1
+			return writer.applyCapabilityDecision(id, decision)
+		},
+	}
+	const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+	const interaction: IDappInteractionRunner = {
+		execute: async () => ({}) as never,
+		requestCapabilities: async (params: CapabilityParams) => {
+			seen.windows += 1
+			seen.params = params
+			return answer ? answer(params) : { granted: params.delta }
+		},
+	}
+	const dispatcher = new WalletSdkDispatcher(network, stubAccount, stubExecution, interaction, counted, noopLogger)
+	const request = (capabilities: unknown[]) =>
+		dispatcher.dispatch("requestCapabilities", [{ capabilities }], ctx) as Promise<{ granted: unknown[] }>
+	const row = () => writer.getDappSession("test-session-id")
+	const stored = async () => (await row()).capabilityGrants?.map((g) => g.capability) ?? []
+	return { request, row, stored, seen, decisions: () => decisions }
+}
+
 describe("dispatcher — the grant boundary", () => {
 	const A = `0x${"0a".repeat(32)}`
 	const B = `0x${"0b".repeat(32)}`
@@ -1901,35 +1930,8 @@ describe("dispatcher — the grant boundary", () => {
 	const AT_MODULUS = hex64(Fr.MODULUS)
 	const ALL_F = `0x${"f".repeat(64)}`
 
-	type Seen = { params?: { delta: unknown[]; manifest: { capabilities: unknown[] } } }
-	/** A popup that approves exactly what the window was given, or what `answer` returns. */
-	function harness(session: IDappSessionRef, answer?: (params: { delta: unknown[] }) => CapabilityResult) {
-		const { writer } = makeSessionWriter(session)
-		const seen: Seen = {}
-		let decisions = 0
-		const counted: IDappSessionWriter = {
-			...writer,
-			applyCapabilityDecision: async (id, decision) => {
-				decisions += 1
-				return writer.applyCapabilityDecision(id, decision)
-			},
-		}
-		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
-		const interaction: IDappInteractionRunner = {
-			execute: async () => ({}) as never,
-			requestCapabilities: (async (params: Seen["params"] & { delta: unknown[] }) => {
-				seen.params = params
-				return answer ? answer(params) : { granted: params.delta }
-			}) as never,
-		}
-		const dispatcher = new WalletSdkDispatcher(network, stubAccount, stubExecution, interaction, counted, noopLogger)
-		const request = (capabilities: unknown[]) => dispatcher.dispatch("requestCapabilities", [{ capabilities }], ctx)
-		const stored = async () => (await writer.getDappSession("test-session-id")).capabilityGrants?.map((g) => g.capability) ?? []
-		return { request, stored, seen, decisions: () => decisions }
-	}
-
 	test("a field the manifest invents is neither shown nor stored", async () => {
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		await h.request([
 			{ type: "accounts", canGet: true, canCreateAuthWit: false, invented: 1 },
 			{ type: "transaction", scope: [{ contract: A, function: "transfer", invented: 2 }], invented: 3 },
@@ -1945,7 +1947,7 @@ describe("dispatcher — the grant boundary", () => {
 	})
 
 	test("a field the popup's echo invents is never stored", async () => {
-		const h = harness(makeSession(), () => ({
+		const h = capabilityHarness(makeSession(), () => ({
 			granted: [
 				{ type: "contracts", contracts: [A], canRegister: true, invented: 1 },
 				{ type: "simulation", transactions: { scope: "*", invented: 2 } },
@@ -1962,14 +1964,14 @@ describe("dispatcher — the grant boundary", () => {
 	})
 
 	test("the accounts grant the safety net adds is the projected request", async () => {
-		const h = harness(makeSession(), () => ({ granted: [], selectedAccounts: [`aztec:0:${A}`] }))
+		const h = capabilityHarness(makeSession(), () => ({ granted: [], selectedAccounts: [`aztec:0:${A}`] }))
 		await h.request([{ type: "accounts", canGet: true, canCreateAuthWit: true, invented: 1 }])
 		expect(await h.stored()).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true }])
 	})
 
 	test("an explicit accounts list survives", async () => {
 		const accounts = [{ alias: "Main", item: A }, { item: B }]
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		await h.request([{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts }])
 		expect(await h.stored()).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts }])
 	})
@@ -1987,29 +1989,29 @@ describe("dispatcher — the grant boundary", () => {
 			{ type: "contractClasses", classes: "*", canGetMetadata: true },
 			{ type: "data", addressBook: false, privateEvents: { contracts: "*" } },
 		]
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		await h.request(requested)
 		expect(h.seen.params?.delta).toEqual(requested)
 		expect(await h.stored()).toEqual(requested)
 	})
 
 	test("reordered fields store the same grant", async () => {
-		const first = harness(makeSession())
+		const first = capabilityHarness(makeSession())
 		await first.request([{ type: "contracts", contracts: [A], canRegister: true, canGetMetadata: true }])
-		const second = harness(makeSession())
+		const second = capabilityHarness(makeSession())
 		await second.request([{ canGetMetadata: true, contracts: [A], canRegister: true, type: "contracts" }])
 		expect(JSON.stringify(await second.stored())).toBe(JSON.stringify(await first.stored()))
 	})
 
 	test("an unknown type passes untouched", async () => {
 		const unknown = { type: "x-vendor", anything: { nested: [1, "two"] } }
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		await h.request([unknown])
 		expect(h.seen.params?.delta).toEqual([unknown])
 	})
 
 	test("a known type named twice is refused before any window", async () => {
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		const refusal = h.request([
 			{ type: "transaction", scope: [{ contract: A, function: "transfer" }] },
 			{ type: "transaction", scope: "*" },
@@ -2045,7 +2047,7 @@ describe("dispatcher — the grant boundary", () => {
 		["a listed address at the modulus", { type: "contracts", contracts: [AT_MODULUS] }],
 		["a listed address of all f", { type: "data", privateEvents: { contracts: [ALL_F] } }],
 	])("%s is refused before any window", async (_name, cap) => {
-		const h = harness(makeSession())
+		const h = capabilityHarness(makeSession())
 		const type = (cap as { type: string }).type
 		const refusal = h.request([cap])
 		await expect(refusal).rejects.toBeInstanceOf(ValidationError)
@@ -2065,7 +2067,7 @@ describe("dispatcher — the grant boundary", () => {
 			{ type: "data", addressBook: SENTINEL, privateEvents: { contracts: [SENTINEL] } },
 		]
 		for (const cap of manifests) {
-			const error = await harness(makeSession())
+			const error = await capabilityHarness(makeSession())
 				.request([cap])
 				.catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(ValidationError)
@@ -2086,7 +2088,7 @@ describe("dispatcher — the grant boundary", () => {
 			["private events row Off", [], { type: "data", addressBook: true, privateEvents: { contracts: [A] } }],
 			["private events row On", [request("*")], { type: "data", addressBook: true, privateEvents: { contracts: "*" } }],
 		])("held both, widened to any contract: %s", async (_name, granted, expected) => {
-			const h = harness(held({ type: "data", addressBook: true, privateEvents: { contracts: [A] } }), () => ({ granted }))
+			const h = capabilityHarness(held({ type: "data", addressBook: true, privateEvents: { contracts: [A] } }), () => ({ granted }))
 			const answer = (await h.request([request("*")])) as { granted: unknown[] }
 			expect(await h.stored()).toEqual([expected])
 			expect(answer.granted).toEqual([expected])
@@ -2099,10 +2101,81 @@ describe("dispatcher — the grant boundary", () => {
 			["both On", { type: "data", addressBook: true, privateEvents: { contracts: [A, B] } }],
 		])("held private events only, both rows new: %s", async (_name, result) => {
 			const heldCap: Capability = { type: "data", privateEvents: { contracts: [A] } }
-			const h = harness(held(heldCap), () => ({ granted: result === undefined ? [] : [result] }))
+			const h = capabilityHarness(held(heldCap), () => ({ granted: result === undefined ? [] : [result] }))
 			await h.request([request([A, B])])
 			expect(await h.stored()).toEqual([result ?? heldCap])
 		})
+	})
+})
+
+describe("dispatcher — a declined type asked again", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
+	const declined = (capability: Capability) =>
+		makeSession({
+			capabilityGrants: [{ capability, grantedAt: 1 }],
+			capabilityRejections: [{ capabilityType: capability.type, rejectedAt: 2 }],
+		})
+	const rejectedTypes = async (h: ReturnType<typeof capabilityHarness>) =>
+		(await h.row()).capabilityRejections?.map((r) => r.capabilityType)
+	const heldData: Capability = { type: "data", addressBook: true, privateEvents: { contracts: [A] } }
+
+	test("the identical data widening opens the window with data re-requested", async () => {
+		const h = capabilityHarness(declined(heldData), () => ({ granted: [] }))
+		await h.request([{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }])
+		expect(h.seen.params?.reRequested).toEqual(["data"])
+		expect(h.seen.params?.delta.map((c) => (c as Capability).type)).toEqual(["data"])
+	})
+
+	test("a data request for exactly the held record opens no window, is answered from it and keeps the rejection", async () => {
+		const h = capabilityHarness(declined(heldData))
+		const answer = await h.request([heldData])
+		expect(h.seen.windows).toBe(0)
+		expect(answer.granted).toEqual([heldData])
+		expect(await rejectedTypes(h)).toEqual(["data"])
+	})
+
+	test("a contracts subset of a held grant whose widening was declined opens no window and keeps the rejection", async () => {
+		const held: Capability = { type: "contracts", contracts: [A, B], canRegister: true }
+		const h = capabilityHarness(declined(held))
+		const answer = await h.request([{ type: "contracts", contracts: [A], canRegister: true }])
+		expect(h.seen.windows).toBe(0)
+		expect(answer.granted).toEqual([{ type: "contracts", contracts: [A], canRegister: true }])
+		expect(await h.stored()).toEqual([held])
+		expect(await rejectedTypes(h)).toEqual(["contracts"])
+	})
+
+	test("a covered declined type beside a new one is not re-requested", async () => {
+		const h = capabilityHarness(declined(heldData), () => ({ granted: [] }))
+		await h.request([heldData, { type: "transaction", scope: [{ contract: A, function: "transfer" }] }])
+		expect(h.seen.params?.delta.map((c) => (c as Capability).type)).toEqual(["transaction"])
+		expect(h.seen.params?.reRequested).toEqual([])
+	})
+
+	test("a contract class declined beside a granted one still opens the window when asked for", async () => {
+		// Two windows on one row, opened together: class A approved in the first, class B declined in
+		// the second, so the row holds A's grant and a contractClasses rejection.
+		const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]
+		const h = capabilityHarness(makeSession(), async (params) => {
+			const window = h.seen.windows
+			if (window === 1) await gates[0].promise
+			if (window === 2) await gates[1].promise
+			if (window === 2) return { granted: [] }
+			return window === 1 ? { granted: params.delta } : Promise.reject(new UserRejectedError("declined"))
+		})
+		const first = h.request([{ type: "contractClasses", classes: [A] }])
+		const second = h.request([{ type: "contractClasses", classes: [B] }])
+		await new Promise((r) => setTimeout(r, 0))
+		gates[0].resolve()
+		await first
+		gates[1].resolve()
+		await second
+		expect(await h.stored()).toEqual([{ type: "contractClasses", classes: [A] }])
+		expect(await rejectedTypes(h)).toEqual(["contractClasses"])
+
+		await h.request([{ type: "contractClasses", classes: [B] }]).catch(() => {})
+		expect(h.seen.windows).toBe(3)
+		expect(h.seen.params?.reRequested).toEqual(["contractClasses"])
 	})
 })
 

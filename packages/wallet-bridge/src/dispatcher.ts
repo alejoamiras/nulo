@@ -448,10 +448,9 @@ type CapabilityPlan = {
 	existingGrants: GrantedCapabilityRecord[]
 	grantedTypes: Set<string>
 	rejectedTypes: Set<string>
-	/** Capabilities not yet granted OR previously rejected (re-request). */
+	/** Capabilities the stored grants do not cover, plus rejected types whose coverage cannot be
+	 *  read from their fields. */
 	delta: Record<string, unknown>[]
-	/** Delta items that are re-requests (previously rejected). */
-	reRequested: string[]
 	/** Existing grants shown to the popup — re-requested types are not "existing". */
 	existingCaps: Capability[]
 	/** The session's stored accounts, CAIP-10 and raw hex alike (`sessionAccountsOf`). */
@@ -460,7 +459,7 @@ type CapabilityPlan = {
 	availableAccounts?: Array<{ address: string; chainId: number }>
 	/** Set when the popup's picker opens for a session that already holds an accounts grant: the
 	 *  held rows are locked, and the decision only ever ADDS membership — with equal flags the
-	 *  stored grant is never replaced (the popup's echo could otherwise drop the authwit rider). */
+	 *  stored grant is never replaced (the popup's echo could otherwise drop `canCreateAuthWit`). */
 	accountsWidening?: { granted: string[]; membershipOnly: boolean }
 }
 
@@ -471,9 +470,8 @@ export function ungrantedAccounts(profileAddresses: readonly string[], sessionAd
 }
 
 /** Widening classification for a session that already holds an accounts grant. Membership-only
- *  (flags equal) with something to add joins the delta; a re-prompt after a declined widening
- *  with nothing left to add would be a dead end (every row locked, nothing approvable) and is
- *  answered from the stored grant instead; a field-diff keeps the replacement path. */
+ *  (flags equal) is covered, so it joins the delta only with an account left to add; a field-diff
+ *  is already in the delta and keeps the replacement path. */
 function planAccountsWidening(
 	plan: CapabilityPlan,
 	requested: AccountsCapability,
@@ -485,11 +483,13 @@ function planAccountsWidening(
 	const membershipOnly = accountsCapsEqual(stored, requested)
 	const inDelta = plan.delta.some((cap) => cap.type === "accounts")
 	if (membershipOnly && ungranted.length > 0 && !inDelta) plan.delta.push(requested as unknown as Record<string, unknown>)
-	if (membershipOnly && ungranted.length === 0 && inDelta) {
-		plan.delta = plan.delta.filter((cap) => cap.type !== "accounts")
-		plan.reRequested = plan.reRequested.filter((type) => type !== "accounts")
-	}
 	if (plan.delta.some((cap) => cap.type === "accounts")) plan.accountsWidening = { granted: [...held], membershipOnly }
+}
+
+/** Delta types with a stored rejection, read once the accounts widening is planned, so a type that
+ *  left the delta carries no badge. */
+function reRequestedTypes(plan: CapabilityPlan): string[] {
+	return plan.delta.map((cap) => cap.type as string).filter((type) => plan.rejectedTypes.has(type))
 }
 
 function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[], dappSession: IDappSessionRef): CapabilityPlan {
@@ -498,32 +498,23 @@ function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[]
 	const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
 	const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
 
-	// For `accounts` specifically, compare full shape — `canGet` /
-	// `canCreateAuthWit` — not just type. Without this, a dApp granted
-	// `{canGet:true, canCreateAuthWit:false}` could later request
-	// `{canCreateAuthWit:true}` and the type-only filter would return empty,
-	// silently authorising the upgrade. The breadth fix for other cap types
-	// is filed as `wallet-sdk-capability-field-diff`.
+	// Unknown wire types keep the type-only rule: they flow through to the popup and render
+	// default-off, so they are never dropped or coerced. Known types are projected by now and
+	// checked field-aware, so a flag upgrade on a held type still opens the window.
 	const delta = requestedCapabilities.filter((cap) => {
 		const type = cap.type as string
-		if (rejectedTypes.has(type)) return true
-		// Unknown wire types keep the type-only default: they flow through to the
-		// popup and render default-off — do NOT drop or coerce them. Known types are
-		// trusted as their `Capability` variant (the same trust the removed per-branch
-		// `as unknown as XCapability` casts encoded) and checked field-aware via
-		// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
-		// grant, transaction REPLACES; scope checkers union across grants downstream.)
-		if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
+		if (!isKnownCapabilityType(type)) return rejectedTypes.has(type) || !grantedTypes.has(type)
+		// A declined widening left the held grant in force, so a request inside it needs no window;
+		// not for `contractClasses`, whose coverage is type-only.
+		if (type === "contractClasses" && rejectedTypes.has(type)) return true
 		return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
 	})
-	const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
 	const existingCaps = existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)).map((g) => g.capability)
 	return {
 		existingGrants,
 		grantedTypes,
 		rejectedTypes,
 		delta,
-		reRequested,
 		existingCaps,
 		sessionAccounts: sessionAccountsOf(dappSession),
 	}
@@ -1275,7 +1266,7 @@ export class WalletSdkDispatcher {
 	/**
 	 * Handle requestCapabilities with 3-phase approach:
 	 * 1. Check stored grants → compute delta (new/changed types)
-	 *    - Previously rejected types are included in delta (re-request)
+	 *    - A previously rejected type rejoins the delta unless the held grant covers it
 	 * 2. Early return if delta is empty (all already granted)
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
@@ -1332,7 +1323,7 @@ export class WalletSdkDispatcher {
 				manifest: { ...manifest, capabilities: requestedCapabilities },
 				delta: plan.delta,
 				existingGrants: plan.existingCaps,
-				reRequested: plan.reRequested,
+				reRequested: reRequestedTypes(plan),
 				availableAccounts,
 				grantedAccounts: plan.accountsWidening?.granted,
 				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
