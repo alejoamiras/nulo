@@ -1,1 +1,7 @@
-{}
+{
+	"0.1.0": {
+		"alejoamiras-nulo-resolve-asset-0.1.0.tgz": "d04abc6d9b44ec8fd64684df0ee437bf8e062c035302e9888b7f8d7a89c48401",
+		"alejoamiras-nulo-wallet-crypto-0.1.0.tgz": "843dc093eec20a80667db6ae85cae2fb46950801bef0a2265a1c655c00bd6def",
+		"alejoamiras-nulo-wallet-sdk-schema-patch-0.1.0.tgz": "935e3b040afd2be7baa719ca3f2ec4440034c5b341790031228267f2c9dedae5"
+	}
+}
