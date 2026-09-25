@@ -695,7 +695,7 @@ Recorded under the program's standing approval (implementations-plan/ux-feedback
 Each phase ends with its validation gate; its log is `lessons/phase-N.md`, printed as
 `LESSONS_FILE=implementations-plan/ux-feedback/b3-tooltips-glossary/lessons/phase-N.md`.
 
-### P1 · The tooltip primitive and the glossary module ☐
+### P1 · The tooltip primitive and the glossary module ✓
 
 1. `tooltip-placement.ts` + `tooltip-placement.test.ts` (table tests):
    - flip at the bottom edge and at the top;
