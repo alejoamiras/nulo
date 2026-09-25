@@ -17,7 +17,7 @@
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
-import { nextTick } from "vue"
+import { nextTick, ref } from "vue"
 import { createMemoryHistory, createRouter } from "vue-router"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -162,6 +162,7 @@ vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.store.current }))
 
 // ── Fixtures + helpers ────────────────────────────────────────────────────────
 
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import RecentActivityView from "./RecentActivityView.vue"
 
 const makeRouter = () =>
@@ -703,5 +704,68 @@ describe("RecentActivityView — stalled incoming scan line", () => {
 
 		expect(H.getIncomingSyncHealth).toHaveBeenCalledWith("net-1")
 		expect(line(w).exists()).toBe(true)
+	})
+})
+
+describe("RecentActivityView — arrivals", () => {
+	const fakeArrivals = (arriving: string[]) => ({
+		isArriving: vi.fn((r: { id: string }) => arriving.includes(r.id)),
+		present: vi.fn(),
+		latest: ref(null),
+		load: vi.fn(async () => {}),
+	})
+	const mountWith = (arrivals: ReturnType<typeof fakeArrivals>, props: Record<string, unknown> = {}) =>
+		mount(RecentActivityView, {
+			shallow: true,
+			props,
+			global: { plugins: [makeRouter()], provide: { [ARRIVALS_KEY as symbol]: arrivals } },
+		})
+	const cards = (w: ReturnType<typeof mountWith>) => w.findAllComponents({ name: "TransactionIncomingCard" })
+	const read = async () => {
+		await flushPromises()
+		H.incomingConnected.emit()
+		await flushPromises()
+	}
+
+	test("the account feed paints its rows only under a loaded arrival state, judges each one and presents them", async () => {
+		const first = incomingRecord({ siloedNullifier: "a", discoveredAt: 2000 })
+		const second = incomingRecord({ siloedNullifier: "b", discoveredAt: 1000 })
+		H.getIncomingTransfers.mockResolvedValue([first, second])
+		const arrivals = fakeArrivals([first.id])
+		let finishLoad = () => {}
+		arrivals.load.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishLoad = resolve
+				}),
+		)
+		const w = mountWith(arrivals)
+		await read()
+		expect(arrivals.load).toHaveBeenCalledWith({ profileId: "p1", networkId: "net-1", account: ACCT_A })
+		expect(cards(w)).toHaveLength(0)
+		finishLoad()
+		await flushPromises()
+		expect(cards(w).map((c) => c.props("arriving"))).toEqual([true, false])
+		expect(arrivals.present).toHaveBeenLastCalledWith([first, second])
+	})
+
+	test("a receipt the row budget leaves out is not presented", async () => {
+		const records = [1, 2, 3, 4, 5, 6].map((n) => incomingRecord({ siloedNullifier: `r${n}`, discoveredAt: 1000 * (7 - n) }))
+		H.getIncomingTransfers.mockResolvedValue(records)
+		const arrivals = fakeArrivals(records.map((r) => r.id))
+		mountWith(arrivals)
+		await read()
+		expect(arrivals.present).toHaveBeenLastCalledWith(records.slice(0, 5))
+	})
+
+	test("the token page's feed waits for no arrival state, marks nothing arriving and presents nothing", async () => {
+		const r = incomingRecord({ siloedNullifier: "t", tokenId: 7 })
+		H.getIncomingTransfers.mockResolvedValue([r])
+		const arrivals = fakeArrivals([r.id])
+		const w = mountWith(arrivals, { token: { id: 7, contract: "0xtok", symbol: "TOK" } })
+		await read()
+		expect(cards(w).map((c) => c.props("arriving"))).toEqual([false])
+		expect(arrivals.load).not.toHaveBeenCalled()
+		expect(arrivals.present).not.toHaveBeenCalled()
 	})
 })

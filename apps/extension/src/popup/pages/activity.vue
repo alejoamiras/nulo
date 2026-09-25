@@ -24,6 +24,7 @@ import { PriceServiceClient } from "@/wallet/services/price/client"
 import { buildActivityRows } from "@/utils/activity-rows"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
 
 /** Store */
@@ -50,12 +51,11 @@ const tokensById = computed(() => {
 /** Incoming-receive surface — third source for the activity row merge.
  *  Filtered by trust state at the service layer; only visible (trusted)
  *  records arrive via getIncomingTransfers. */
-// Parent owns the client lifecycle (connect/disconnect below); the composable
-// wires the listeners + optimistic merges + the `incomingTransfersVisible`
-// toggle reload. Shared verbatim with the home Recent-Activity widget.
+// Parent owns the client lifecycle (connect/disconnect below).
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
+const arrivals = inject(ARRIVALS_KEY, undefined)
 const {
 	incomingTransfers,
 	refresh: loadIncomingTransfers,
@@ -68,9 +68,10 @@ const {
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
+	afterRead: arrivals?.load,
 })
 
-/** Journal terminal records (Phase 2 follow-up).
+/** Journal terminal records.
  *  Loaded on mount + refreshed on every journal event so the list reacts to
  *  late-arriving cancellations / failures while the user is on this page. */
 const terminalJournalOps = ref([])
@@ -136,6 +137,8 @@ async function loadTokens() {
 // pattern as RecentActivityView.
 tokenService.onTokenAdded.add(loadTokens)
 
+watch(activityRows, (rows) => arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc)), { flush: "post" })
+
 /** Lifecycle hooks */
 onMounted(async () => {
 	if (heroRef.value) {
@@ -193,7 +196,7 @@ onBeforeUnmount(() => {
 
 		<Flex direction="column" gap="24" :class="$style.content">
 			<!-- Mixed activity list (chain tx + journal terminal records) -->
-			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokensById="tokensById" />
+			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokensById="tokensById" :isArriving="arrivals?.isArriving" />
 
 			<!-- Empty state -->
 			<Flex

@@ -18,9 +18,13 @@ import { createNetworkSwitchHandler } from "@/popup/network-switch"
 import { runFencedBootstrap } from "@/popup/profile-bootstrap"
 import { createScopeEpochHandlers } from "@/popup/scope-epoch"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Composables */
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { ARRIVALS_KEY, useArrivals } from "@/composables/useArrivals"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -60,6 +64,34 @@ watch(
 
 const configService = new ConfigServiceClient()
 configService.onUpdate.add(applySetting)
+
+const arrivalsIncoming = new IncomingTransferServiceClient()
+const arrivalsTokens = new TokenServiceClient()
+const arrivalsPrices = new PriceServiceClient()
+// Opened before the coordinator listens, so only a reconnect reads through `onConnected`.
+void arrivalsIncoming.connect()
+void arrivalsPrices.connect()
+const arrivals = useArrivals({
+	incomingTransferService: arrivalsIncoming,
+	configService,
+	priceService: arrivalsPrices,
+	scope: () =>
+		appStore.isLogined && appStore.profile?.id && appStore.network?.id && appStore.account?.address
+			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
+			: undefined,
+	epoch: () => appStore.scopeEpoch,
+	routeName: () => route.name,
+	lookupToken: async (record) => {
+		if (record.tokenId === undefined) return undefined
+		const { symbol, decimals } = await arrivalsTokens.getToken(record.tokenId)
+		return { symbol, decimals }
+	},
+	accountName: () => appStore.account?.name ?? "",
+	openToast,
+	openReceipt: (id) => router.push(`/popup/received/${id}`),
+})
+const { seeded: arrivalsSeeded } = arrivals
+provide(ARRIVALS_KEY, arrivals)
 
 const intervalId = ref(null)
 
@@ -410,11 +442,21 @@ watch(
 onBeforeUnmount(() => {
 	clearInterval(intervalId.value)
 	configService.disconnect()
+	arrivalsIncoming.disconnect()
+	arrivalsTokens.disconnect()
+	arrivalsPrices.disconnect()
+	arrivals.dispose()
 })
 </script>
 
 <template>
-	<Flex wide direction="column" :class="$style.wrapper" :data-boot-outcome="bootOutcome || undefined">
+	<Flex
+		wide
+		direction="column"
+		:class="$style.wrapper"
+		:data-boot-outcome="bootOutcome || undefined"
+		:data-arrivals-seeded="arrivalsSeeded ? 'true' : undefined"
+	>
 		<!-- Popup Teleport -->
 		<div id="popup" />
 		<div id="tooltip" />
