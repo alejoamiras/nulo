@@ -175,6 +175,69 @@ async function snackInsetIs(page: Page, inset: number): Promise<void> {
 	)
 }
 
+/** Adds a `px` tall block at the top of the scrolling card that holds `testid`, so the card scrolls and
+ *  the control sits below its fold. */
+async function lengthenCard(page: Page, testid: string, px: number): Promise<void> {
+	await page.evaluate(
+		(id: string, height: number) => {
+			let card = document.querySelector(`[data-testid="${id}"]`)?.parentElement ?? null
+			while (card && getComputedStyle(card).overflowY !== "auto") card = card.parentElement
+			const content = card?.children[1]
+			if (!card || !content) throw new Error(`no scrolling card around ${id}`)
+			const block = document.createElement("div")
+			block.style.height = `${height}px`
+			block.style.flexShrink = "0"
+			content.prepend(block)
+			card.scrollTop = 0
+		},
+		testid,
+		px,
+	)
+}
+
+type AboveEnd = { viewport: number; controlTop: number; snackBottom: number }
+
+/** Waits until the snack sits 12px above where `testid` stops once its card is scrolled to its end,
+ *  and reads both. */
+async function snackAboveEnd(page: Page, testid: string): Promise<AboveEnd> {
+	const handle = await page.waitForFunction(
+		(s: string, id: string) => {
+			const card = document.querySelector(s)?.getBoundingClientRect()
+			const control = document.querySelector(`[data-testid="${id}"]`)
+			let scroller = control?.parentElement ?? null
+			while (scroller && getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement
+			if (!card || !control || !scroller) return null
+			const controlTop = control.getBoundingClientRect().top
+			const end = controlTop - (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop)
+			if (Math.abs(end - 12 - card.bottom) >= 0.5) return null
+			return { viewport: document.documentElement.clientHeight, controlTop, snackBottom: card.bottom }
+		},
+		{ timeout: 5_000, polling: 50 },
+		SNACK,
+		testid,
+	)
+	return (await handle.jsonValue()) as AboveEnd
+}
+
+/** Scrolls `testid` into view and hit-tests its centre in the same task, as a pointer click does. */
+async function hitAfterScroll(page: Page, testid: string): Promise<{ hit: string; covered: boolean }> {
+	return page.evaluate(
+		(s: string, id: string) => {
+			const el = document.querySelector(`[data-testid="${id}"]`)
+			if (!el) throw new Error(`${id} not found`)
+			el.scrollIntoView({ block: "center" })
+			const box = el.getBoundingClientRect()
+			const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+			return {
+				hit: hit?.closest("[data-testid]")?.getAttribute("data-testid") ?? "none",
+				covered: document.querySelector(s)?.contains(hit) === true,
+			}
+		},
+		SNACK,
+		testid,
+	)
+}
+
 /** Counts the pointer and hover events that reach a card, to show what the browser sent it. */
 async function countCardEvents(page: Page): Promise<void> {
 	await page.evaluate((s: string) => {
@@ -400,6 +463,31 @@ test("in the Receive sheet a copy's snack sits 12px above the sheet's Close butt
 	const rect = await settledSnack(page)
 	const closeTop = await page.$eval(sel("receive-close"), (el) => el.getBoundingClientRect().top)
 	expect(closeTop - rect.bottom).toBeCloseTo(12, 0)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("in a Receive sheet taller than the popup, an error already clears where Close stops, so a scroll and a click in one task land on Close", async ({
+	registeredExtension,
+}) => {
+	const page = await openHome(registeredExtension)
+	await stubClipboard(page, "reject")
+	await clickByTestId(page, "actions-receive")
+	await sheetAtRest(page, "receive-close")
+	await lengthenCard(page, "receive-close", 400)
+
+	await clickByTestId(page, "receive-address")
+	await waitForToast(page, "Couldn't copy", 5_000, { kind: "error" })
+	await settledSnack(page)
+	const before = await snackAboveEnd(page, "receive-close")
+	console.log(`[snackbar] the lengthened Receive sheet before the scroll: ${JSON.stringify(before)}`)
+	expect(before.controlTop).toBeGreaterThanOrEqual(before.viewport)
+
+	expect(await hitAfterScroll(page, "receive-close")).toEqual({ hit: "receive-close", covered: false })
+	const after = await snackAboveEnd(page, "receive-close")
+	expect(after.controlTop - after.snackBottom).toBeCloseTo(12, 0)
+	expect(after.snackBottom).toBeCloseTo(before.snackBottom, 0)
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])
