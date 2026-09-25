@@ -21,6 +21,8 @@ import { coveredAt, pressEscape, tabAround, waitForFocus } from "./helpers/point
 
 const sel = (testid: string) => `[data-testid="${testid}"]`
 const TX_HASH = `0x${"5e".repeat(32)}`
+/** Puppeteer's BiDi keyboard (Firefox) knows the space bar only by its key value, not as "Space". */
+const SPACE = " "
 
 type Probe = {
 	__pushes?: number
@@ -29,6 +31,7 @@ type Probe = {
 	__spacePrevented?: boolean | null
 	__clicks?: string[]
 	__rowClicks?: number
+	__linkClick?: { modified: boolean; href: string | null; prevented: boolean } | null
 }
 
 /** A finalized 1.5 USDC transfer for the active scope, under the tx root. Every field the row codec
@@ -121,6 +124,26 @@ async function armNavigationProbe(page: Page): Promise<void> {
 				if (e.key !== " ") return
 				setTimeout(() => {
 					w.__spacePrevented = e.defaultPrevented
+				}, 0)
+			},
+			{ capture: true, once: true },
+		)
+	})
+}
+
+/** Reads the next click once every handler has run: its modifier, the link it landed on, and
+ *  whether the page left the default to the browser, which for a modified click opens the link in a
+ *  new tab. */
+async function armLinkClickProbe(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as Probe
+		w.__linkClick = null
+		window.addEventListener(
+			"click",
+			(e) => {
+				const href = (e.target as Element | null)?.closest("a")?.getAttribute("href") ?? null
+				setTimeout(() => {
+					w.__linkClick = { modified: e.ctrlKey || e.metaKey, href, prevented: e.defaultPrevented }
 				}, 0)
 			},
 			{ capture: true, once: true },
@@ -252,7 +275,7 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 	await goBackTo(page, "#/popup/general")
 	await tabTo(page, "tx-card")
 	await armNavigationProbe(page)
-	await page.keyboard.press("Space")
+	await page.keyboard.press(SPACE)
 	await waitForHashPrefix(page, "#/popup/tx/")
 	await page.waitForFunction(() => (window as unknown as Probe).__spacePrevented !== null, { timeout: 5_000, polling: 50 })
 	expect(await probe(page)).toEqual({ pushes: 1, scrolls: 0, spacePrevented: true })
@@ -296,26 +319,26 @@ test("a contact row: its edit action is a 24px box whose real press stays on Con
 
 	const before = new Set(registeredExtension.browser.targets())
 	const point = await centreOf(page, row)
+	await armLinkClickProbe(page)
 	await page.keyboard.down("Control")
 	await page.mouse.click(point.x, point.y)
 	await page.keyboard.up("Control")
 	const target = await waitForTarget(registeredExtension.browser, (t) => t.type() === "page" && !before.has(t), 10_000)
 	const tab = await target.asPage()
 	try {
+		// The new tab's own URL is no witness to where it opened: the wallet's cold boot routes it on at
+		// once (today it bounces a deep link to Home), and Firefox's navigation entry names no URL.
+		// What opened it is the browser's default for a modified click the page left alone, on the
+		// row's link.
+		await page.waitForFunction(() => (window as unknown as Probe).__linkClick != null, { timeout: 5_000, polling: 50 })
+		expect(await page.evaluate(() => (window as unknown as Probe).__linkClick)).toEqual({ modified: true, href, prevented: false })
+		expect(await hash(page)).toBe("#/popup/settings/contacts")
 		await waitForMainFrame(tab, 10_000)
 		// A tab opened in the background gets no animation frames; the polls must not depend on them.
 		patchPagePolling(tab)
-		// The tab opens at the row's link: its navigation entry keeps that URL after the wallet's cold
-		// boot has routed the tab on (a deep link is bounced to Home today — see the phase lessons).
-		await tab.waitForFunction(() => performance.getEntriesByType("navigation").length > 0, { timeout: 20_000, polling: 100 })
-		const opened = await tab.evaluate(() => performance.getEntriesByType("navigation")[0]?.name ?? "")
-		expect(opened).toContain(href.slice(href.indexOf("#")))
-		expect(await hash(page)).toBe("#/popup/settings/contacts")
 		// Where the boot leaves the tab once its shell is up, for the record.
 		await tab.waitForSelector(sel("bottom-nav"), { timeout: 30_000 }).catch(() => undefined)
-		console.log(
-			`[rows] the Ctrl-click's tab opened at ${opened.slice(opened.indexOf("#"))}; after boot it shows ${(await tabState(tab)).hash}`,
-		)
+		console.log(`[rows] the Ctrl-click's tab, after boot, shows ${(await tabState(tab)).hash}`)
 	} finally {
 		await tab.close().catch(() => undefined)
 	}
@@ -334,7 +357,7 @@ test("a click-mode Settings row opens on Enter and on Space; an action inside a 
 	await page.bringToFront()
 
 	await tabTo(page, "network-detail-rename", 12)
-	for (const key of ["Enter", "Space"] as const) {
+	for (const key of ["Enter", SPACE] as const) {
 		await page.keyboard.press(key)
 		await page.waitForSelector(sel("network-name-input"), { visible: true, timeout: 5_000 })
 		await closeTopPopup(page, "network-name-input")
@@ -345,7 +368,7 @@ test("a click-mode Settings row opens on Enter and on Space; an action inside a 
 	// stop: the next two are the endpoint row's target and its first action.
 	await recordClicks(page)
 	expect(await tabAround(page, 2)).toEqual(["endpoint-row", "endpoint-edit-btn"])
-	for (const [i, key] of (["Enter", "Space"] as const).entries()) {
+	for (const [i, key] of (["Enter", SPACE] as const).entries()) {
 		await page.keyboard.press(key)
 		await page.waitForSelector(sel("endpoint-rpc-input"), { visible: true, timeout: 5_000 })
 		// The action's click stops at the action: none reaches the row root, where the row's handler is.
