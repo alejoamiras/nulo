@@ -756,7 +756,7 @@ type CapabilityManifest = {
 /**
  * Structural arg-shape guard for authorization-sensitive dApp methods, run before
  * capability/scope enforcement so the scope checkers + handlers dereference validated
- * shapes rather than raw `unknown` (F-08). Deliberately dependency-free — wallet-bridge is
+ * shapes rather than raw `unknown`. Deliberately dependency-free — wallet-bridge is
  * transport-shaped and does NOT import `WalletSchema`; it validates only the
  * authorization-relevant fields the scope/handler layer uses. Full Aztec-object parsing
  * stays downstream (execution-layer Zod). Residual: this is not a complete WalletSchema parse;
@@ -782,8 +782,7 @@ function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
 	switch (methodName) {
 		case "sendTx":
 		case "profileTx":
-			// simulateTx is intentionally NOT guarded here: post-merge with dev's
-			// arg-guard refactor, its exec validation is owned by
+			// simulateTx is intentionally NOT guarded here: its exec validation is owned by
 			// `checkSimulationTransactions` (optional-chains `exec?.calls`, requires
 			// an array, coerces `to`/tolerates missing `name`) plus the downstream
 			// execution-layer Zod — so a dispatcher-level shape guard is redundant and
@@ -888,16 +887,15 @@ export class WalletSdkDispatcher {
 			throw new Error(`Invalid arguments for wallet method: ${methodName}`)
 		}
 
-		// F-08: structural arg-shape guard for authorization-sensitive methods, before any
-		// capability/scope logic dereferences the args.
+		// Must run before any capability or scope logic dereferences the args.
 		assertAuthRelevantArgShape(methodName, args)
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
 		const grants = this.enforceCapability(methodName, ctx, dappSession)
 		if (grants.length) {
-			// F-005: enforceScopeWithSession includes account-scope-array
-			// validation. Build the approved-accounts set from the session.
+			// enforceScopeWithSession includes account-scope-array validation. Build the
+			// approved-accounts set from the session.
 			// If the session is missing (shouldn't happen when grants.length>0
 			// since enforceCapability would have returned []), fall back to
 			// the plain enforceScope to avoid throwing on the wrong thing.
@@ -1522,11 +1520,9 @@ export class WalletSdkDispatcher {
 					| AccountsCapability
 					| undefined
 
-				// F-003: honor canGet on the GRANT-RESPONSE path. Previously the
-				// accounts list was echoed unconditionally — a dApp could request
-				// `canGet:false` and still receive the full account list in the
-				// grant response (and later via getAccounts because that method
-				// was exempt). Both paths now require `canGet === true`.
+				// Honor canGet on the GRANT-RESPONSE path: the account list is returned only
+				// when the stored accounts grant has `canGet === true`, as getAccounts requires
+				// too, so a dApp that asked for `canGet: false` never receives it.
 				const canGet = storedAccounts?.canGet === true
 				const grantedAccounts = canGet
 					? this.projectSessionAccounts(allAccounts, sessionAddresses, ctx.chainId, dappSession.accountAliases)
@@ -1551,7 +1547,7 @@ export class WalletSdkDispatcher {
 	 * Enforce capability grants before dispatching a method call.
 	 *
 	 * - Exempt methods (getChainInfo, requestCapabilities, batch) skip enforcement.
-	 *   NOTE: getAccounts is NOT exempt — F-003 made it require accounts.canGet=true.
+	 *   NOTE: getAccounts is NOT exempt: it requires accounts.canGet=true.
 	 * - The method's required capability type must be in the session's grants.
 	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
 	 *   so non-exempt methods are blocked until requestCapabilities() is called.
@@ -1567,12 +1563,11 @@ export class WalletSdkDispatcher {
 		if (!requiredType) return [] // Unknown method — let dispatch() handle it
 
 		if (!dappSession) {
-			// F-006: fail-closed when the stored DappSession is missing. Pre-fix,
-			// this returned [] and the dispatcher fell through to the sink with
-			// no grants — network-only methods (getPrivateEvents, getAddressBook,
-			// registerSender, registerContract, getContractMetadata,
-			// getContractClassMetadata) executed unchecked after the user
-			// disconnected the dApp from Settings or after session expiry.
+			// Fail closed when the stored DappSession is missing: returning [] here would
+			// fall through to the sink with no grants, and network-only methods
+			// (getPrivateEvents, getAddressBook, registerSender, registerContract,
+			// getContractMetadata, getContractClassMetadata) would run unchecked after the
+			// user disconnects the dApp in Settings or the session expires.
 			//
 			// Throwing CapabilityNotGrantedError gives the dApp a structured
 			// signal to re-request capabilities (the same path used for
@@ -1592,10 +1587,8 @@ export class WalletSdkDispatcher {
 			// reaching enforceCapability without the required grant type.
 			this.logDebug(`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 			// CapabilityNotGrantedError is the public contract — dApps substring-
-			// match on the error code and message. The plain `Error` form was an
-			// earlier mistake; F-003's removal of `getAccounts` from
-			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
-			// which has an existing CapabilityNotGrantedError-pinned test.
+			// match on the error code and message. getAccounts reaches this path too, since
+			// it is not exempt, and a test pins its CapabilityNotGrantedError.
 			throw new CapabilityNotGrantedError(requiredType)
 		}
 		return grants

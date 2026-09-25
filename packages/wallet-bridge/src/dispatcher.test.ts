@@ -25,8 +25,8 @@ import type {
 	INetworkReader,
 } from "./services-contract"
 
-/** Shared fake of the real DappSessionService.applyCapabilityDecision merge (B-14):
- *  deltas merged against the LATEST row. Returns the new row. */
+/** Shared fake of the real DappSessionService.applyCapabilityDecision merge: deltas merged
+ *  against the LATEST row. Returns the new row. */
 function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision): IDappSessionRef {
 	const held = new Set((session.capabilityGrants ?? []).map((g) => g.capability.type as string))
 	const revoked = (decision.requiresGrant ?? []).find((type) => !held.has(type))
@@ -113,11 +113,8 @@ function makeSessionWriter(initial: IDappSessionRef) {
 		},
 		applyCapabilityDecision: async (_id, decision) => {
 			session = applyDecisionTo(session, decision)
-			// Mirror the merged result onto the legacy call trackers so tests that
-			// assert the final grants/rejections keep working post-B-14. Only record a
-			// grant write when the decision actually changes grants — a pure-reject
-			// (no approvals) leaves grants untouched, matching the old flow that called
-			// setCapabilityRejections only.
+			// Mirror the merged session onto the call trackers the tests assert on. A
+			// decision that changes no grants, such as a pure reject, records no grant write.
 			if (decision.grantRecords.length > 0 || decision.replaceTypes.length > 0) {
 				calls.setGrants.push(session.capabilityGrants ?? [])
 			}
@@ -209,7 +206,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		expect(calls.setGrants).toHaveLength(0)
 	})
 
-	test("(B-14 PIN) concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
+	test("concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
 		const { writer, calls } = makeSessionWriter(makeSession())
 		let resolveA!: () => void
 		const gateA = new Promise<void>((r) => (resolveA = r))
@@ -232,7 +229,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			[{ capabilities: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] }],
 			ctx,
 		)
-		// A resumes and writes — under B-14 it reacquires B's committed row and merges,
+		// A resumes and writes. The merge against the latest row keeps B's committed grant,
 		// rather than clobbering it with a grant list computed from the stale snapshot.
 		resolveA()
 		await pA
@@ -241,7 +238,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		expect(finalGrants.map((g) => g.capability.type).sort()).toEqual(["data", "transaction"])
 	})
 
-	test("(B-14 PIN) approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
+	test("approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
 		// A rejection of an existing type landed concurrently (it's in the latest row).
 		const session = makeSession({
 			capabilityGrants: [
@@ -488,13 +485,11 @@ function makeGetAccountsDispatcher(opts: {
 }
 
 describe("dispatcher.handleGetAccounts contract rows", () => {
-	test("no session → throws CapabilityNotGrantedError (F-006: fail-closed)", async () => {
-		// F-006: pre-fix, this returned [] from enforceCapability
-		// and the dispatcher fell through with no grants, letting network-only
-		// methods execute unchecked after the user revoked the dApp.
-		// Post-fix: enforceCapability throws CapabilityNotGrantedError when
-		// the session is missing, paired with the live-transport teardown
-		// in wallet-sdk/background.ts.
+	test("no session → throws CapabilityNotGrantedError (fail-closed)", async () => {
+		// enforceCapability throws CapabilityNotGrantedError when the session is missing,
+		// rather than returning [] and letting network-only methods run unchecked after the
+		// user revoked the dApp. The live-transport teardown in wallet-sdk/background.ts
+		// is its pair.
 		const sessionWriter: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
 			getDappSession: async () => null as unknown as IDappSessionRef,
@@ -538,9 +533,8 @@ describe("dispatcher.handleGetAccounts contract rows", () => {
 
 	test("session has 1 account + canGet=true grant → returns formatted Aliased<AztecAddress> (fast path)", async () => {
 		// CAIP account for chainId 0 on the address below.
-		// Post F-003: also requires an accounts grant with canGet=true. The
-		// legacy "accounts present without a grant" fast-path is closed; F-003's
-		// scope-enforcement now requires explicit canGet.
+		// The fast path also requires an accounts grant with canGet=true: accounts present
+		// without a grant are not returned.
 		const addr = "0x1111111111111111111111111111111111111111111111111111111111111111"
 		const caip = `aztec:0:${addr}`
 		const session = makeSession({
@@ -1448,7 +1442,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
  * it through every internal call. Pinned by counting how many times the
  * session-lookup is invoked per dispatch() call.
  */
-describe("F-006: network-only methods fail-closed on missing session", () => {
+describe("network-only methods fail-closed on missing session", () => {
 	function dispatcherNoSession(): WalletSdkDispatcher {
 		const writer: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
@@ -1491,7 +1485,7 @@ describe("F-006: network-only methods fail-closed on missing session", () => {
 		// Exempt methods don't require a session — getChainInfo is the canonical
 		// dApp probe path. The base stubExecution returns an empty object; we
 		// only assert that the throw is NOT CapabilityNotGrantedError (the
-		// fail-closed F-006 path), not that the method succeeds end-to-end.
+		// fail-closed missing-session path), not that the method succeeds end-to-end.
 		const dispatcher = dispatcherNoSession()
 		await expect(dispatcher.dispatch("getChainInfo", [], ctx)).rejects.not.toBeInstanceOf(CapabilityNotGrantedError)
 	})
@@ -2784,7 +2778,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	})
 })
 
-describe("F-08 authorization-relevant arg-shape guard", () => {
+describe("authorization-relevant arg-shape guard", () => {
 	const dispatcher = makeDispatcher(makeSessionWriter(makeSession()).writer, async () => ({}) as CapabilityResult)
 
 	test("sendTx with non-array exec.calls is rejected before authz", async () => {
@@ -2797,9 +2791,9 @@ describe("F-08 authorization-relevant arg-shape guard", () => {
 		await expect(dispatcher.dispatch("executeUtility", ["nope"], ctx)).rejects.toThrow(/Malformed executeUtility/)
 	})
 	test("createAuthWit with a missing `from` is rejected before authz", async () => {
-		// Post-merge, dev's registry `argSchema` (argsCreateAuthWit) owns this
-		// rejection and fires FIRST — so the message is the generic arg-guard one,
-		// not F-08's "Malformed". The security property (rejected pre-authz) holds.
+		// The registry's `argSchema` (argsCreateAuthWit) rejects this before the arg-shape
+		// guard runs, so the message is the generic one, not the guard's "Malformed". Either
+		// way the call is refused before authorization.
 		await expect(dispatcher.dispatch("createAuthWit", [], ctx)).rejects.toThrow(/Invalid arguments for wallet method: createAuthWit/)
 	})
 	test("registerToken with a null positional arg is rejected", async () => {
