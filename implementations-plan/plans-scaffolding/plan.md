@@ -475,6 +475,11 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
 
 ### Phase 2: hygiene, untrack, permalinks, policy (Arc A; one atomic change)
 
+0. **Before enforcement is switched on**, close codex A0 round 3's open finding: classify decoded values, not raw spellings.
+   - Decode the discriminating attributes (`http-equiv`, …) before classifying. `http-equiv="ref&#114;esh"` must yield its `url=` target.
+   - Decode `style` values before CSS detection.
+   - Flag any CSS escape the scanner does not decode as `link-opaque`.
+   - Each construct gets a fixture that fails first.
 1. `tools/untrack.ts --record` writes the manifest.
 2. `tools/promote.ts` (A1) runs, then the 3 renames (A2).
 3. Hygiene:

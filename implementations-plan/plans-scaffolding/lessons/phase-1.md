@@ -255,7 +255,7 @@ After both fixes the baseline is unchanged.
 - every block on line 1.
 
 **Codex's corrections to the round-1 residue, both accepted:**
-- **`--exclude-standard` reads more than unstaged edits.** It also reads `.git/info/exclude` and the global excludes file, so a local run can differ from CI with no edit at all. CI has neither file. A local enforce run on a machine with a global exclude matching a plan artifact would under-report `tracked-artifact`, never over-report it. The residue stands, now described correctly.
+- **`--exclude-standard` reads more than unstaged edits.** It also reads `.git/info/exclude` and the global excludes file, so a local run can differ from CI with no edit at all. The difference only adds findings. A pattern there can put an otherwise permitted tracked file into `ls-files -ci`, so `tracked-artifact` reports it. It cannot un-ignore anything, because the repo's `.gitignore` files take precedence over both. So a local run may report more than CI, never less. (Codex round 3 corrected an earlier draft of this entry that had the direction reversed.) The residue stands.
 - **The C1 remap was omitted.** Now implemented.
 
 **Deviations and pushback:**
@@ -274,3 +274,18 @@ After both fixes the baseline is unchanged.
 | `time bun scripts/ci-cd/plans/check.ts --report` | 0 | 787 findings in 4.1 s (3.7–5.9 s over four runs) on a host at load average ≈130; round 1 recorded 3.3 s on a quieter host |
 
 Per-rule counts are unchanged: tracked-artifact 667, hygiene-files 6, nested-ignore 1, link-untracked 112, link-missing 1, and 0 for every other rule, `link-opaque` included.
+
+## Codex round 3: A0 ready to open report-only; one finding carried to A
+
+Closed: 6, 8, 12, 13, 14.
+
+Still open: 10, with a medium finding. The gate classifies raw spellings, not decoded values. None of these three constructs produces a link or a `link-opaque` finding:
+- `<meta http-equiv="ref&#114;esh" content="0;url=…">`;
+- a `style` attribute with an entity inside `url(`;
+- a `<style>` block using a CSS escape (`u\72l(`).
+
+The refresh case can navigate to an unapproved SHA. Codex's call: fix before enforcement, not a blocker for a report-only A0. It is now step 0 of Phase 2 in `plan.md`, so A cannot switch enforcement on without it.
+
+Low: this log's `--exclude-standard` residue entry had the direction reversed. It is corrected above.
+
+Probes reproduced 787 findings with unchanged counts. No defect surfaced in permalink validation or the `dev` ancestry anchor.
