@@ -1,8 +1,4 @@
-/**
- * Tooltips and the glossary in a real browser, where jsdom has no layout: the bubble stays inside the
- * window, the pointer can reach it, it swallows the click it covers, Escape closes it before anything
- * under it, and pressing the control a tooltip labels closes it for the popup that press opens.
- */
+/** In a real browser, because jsdom has no layout. */
 import type { Page } from "puppeteer"
 import { TimeoutError } from "puppeteer"
 import { expect } from "vitest"
