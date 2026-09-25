@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest"
-import { UserRejectedError, ValidationError, WalletError } from "../errors"
+import { JournaledRejection, UserRejectedError, ValidationError, WalletError } from "../errors"
 import { decodeResult } from "./decode"
 import { buildErrorResponseContent } from "./error-response"
 import { awaitInitialized } from "./initialization"
@@ -48,6 +48,24 @@ describe("buildErrorResponseContent", () => {
 	test("base WalletError still carries its code", () => {
 		const out = buildErrorResponseContent(new WalletError("CUSTOM", "msg"))
 		expect(out.errorPayload?.code).toBe("CUSTOM")
+	})
+
+	test("a JournaledRejection sends its error's fields unchanged and its id beside them", () => {
+		const error = new ValidationError("bad", { field: "amount" })
+		expect(buildErrorResponseContent(new JournaledRejection(error, "0123456789abcdef"))).toEqual({
+			...buildErrorResponseContent(error),
+			journalId: "0123456789abcdef",
+		})
+	})
+
+	test("an id the thrown value carries itself is never sent", () => {
+		const ID = "0123456789abcdef"
+		const thrown = [
+			Object.assign(new Error("sdk"), { journalId: ID }),
+			new ValidationError("bad", { journalId: ID }),
+			{ error: "x", journalId: ID },
+		]
+		for (const value of thrown) expect(buildErrorResponseContent(value)).not.toHaveProperty("journalId")
 	})
 })
 
