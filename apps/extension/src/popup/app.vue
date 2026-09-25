@@ -497,7 +497,9 @@ onBeforeUnmount(() => {
 .wrapper {
 	position: relative;
 
-	overflow: hidden;
+	/* Clip, not hidden: focus and scrollIntoView scroll a hidden box, so content a pixel past the
+	   popup's edge would shift the whole frame by it, with no way to scroll it back. */
+	overflow: clip;
 }
 
 .retry {
