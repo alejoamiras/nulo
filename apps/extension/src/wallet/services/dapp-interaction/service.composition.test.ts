@@ -2,7 +2,7 @@
  * Real OperationJournalService FSM + real WindowManager on one FakeBrowserApi;
  * DappInteractionService started through a ServiceCollection so `init()` wires
  * the journal subscription. Stubbed: profile, network, account, dApp session,
- * execution. No PXE, no proving, no browser.
+ * execution, FPCs. No PXE, no proving, no browser.
  */
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
@@ -13,6 +13,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
+import { FpcService } from "@/wallet/services/fpc/service"
 import { AccessLevel, DappSessionService } from "@/wallet/services/dapp-session/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
@@ -74,6 +75,7 @@ async function makeHarness() {
 	collection.add(svc(AccountService.name, {}))
 	collection.add(svc(DappSessionService.name, { tryGetDappSession: async () => SESSION }))
 	collection.add(svc(ExecutionService.name, { executeOperations: vi.fn(async () => []) }))
+	collection.add(svc(FpcService.name, {}))
 	collection.add(journal)
 	collection.add(dapp)
 	await collection.start()

@@ -163,6 +163,9 @@ export type CapabilityParams = {
 	 *  authorizations permission shows as already granted and the decision never replaces the
 	 *  grant. */
 	accountsMembershipOnly?: boolean
+	/** Contracts the wallet names by construction, addresses lower-cased. The wallet sets it when it
+	 *  opens the window, replacing any value that arrived with the request. */
+	knownContracts?: Array<{ address: string; name: string }>
 }
 
 export type CapabilityResult = {

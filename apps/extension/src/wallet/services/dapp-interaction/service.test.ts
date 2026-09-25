@@ -19,18 +19,22 @@ import { LoggerStore, type ILogger } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { AccountService } from "@/wallet/services/account/service"
+import { ContactService } from "@/wallet/services/contact/service"
 import { AccessLevel, DappSessionService } from "@/wallet/services/dapp-session/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
+import { FpcService, FpcType } from "@/wallet/services/fpc/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { TokenService } from "@/wallet/services/token/service"
 import { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, TermsAcceptanceRequiredError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { DappInteractionService } from "./service"
-import type { DappInteraction, ExecutionHooks, OperationRequest } from "./spec"
+import type { CapabilityPayload, DappInteraction, ExecutionHooks, OperationRequest } from "./spec"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -605,6 +609,7 @@ describe("DappInteractionService — a confirmation window never falls back to s
 		collection.add(stub(DappSessionService.name, { tryGetDappSession: async () => SESSION }))
 		collection.add(stub(ExecutionService.name, { executeOperations }))
 		collection.add(stub(OperationJournalService.name, { onOperationUpdated: new EventHandler() }))
+		collection.add(stub(FpcService.name, {}))
 		collection.add(dapp)
 		await collection.start()
 		const creates = vi.spyOn(api.windows, "create")
@@ -673,5 +678,82 @@ describe("DappInteractionService — a confirmation window never falls back to s
 		await expect.poll(() => second.outcome.settled).toBe(true)
 		expect(second.outcome.err).toBeDefined()
 		expect(h.executeOperations).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("DappInteractionService — the capability window's known contracts", () => {
+	const SPONSORED = `0x${"0b".repeat(32)}`
+	const PRIVATE = `0x${"0c".repeat(32)}`
+	const TOKEN = `0x${"0d".repeat(32)}`
+	const SESSION = {
+		id: "s1",
+		profileId: "p1",
+		chainId: String(CHAIN_IDS.TESTNET),
+		dappMetadata: { name: "dapp.example", url: "https://dapp.example" },
+		permissions: [],
+		accounts: [],
+		confirmationLevel: AccessLevel.Transactions,
+		expiry: Number.MAX_SAFE_INTEGER,
+	}
+	const stub = (name: string, methods: Record<string, unknown>) => ({ name, dependencies: [], async start() {}, ...methods }) as never
+
+	test("names only what the wallet vouches for, whatever the stores and the request carry", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const logger = new LoggerStore(new ConfigStore())
+		const dapp = new DappInteractionService(logger, new WindowManager(api.windows, new MockClock(), logger))
+		const collection = new ServiceCollection()
+		collection.add(stub(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }) }))
+		collection.add(stub(NetworkService.name, {}))
+		collection.add(stub(AccountService.name, {}))
+		collection.add(stub(DappSessionService.name, { getDappSession: async () => SESSION, tryGetDappSession: async () => SESSION }))
+		collection.add(stub(ExecutionService.name, {}))
+		collection.add(stub(OperationJournalService.name, { onOperationUpdated: new EventHandler() }))
+		collection.add(
+			stub(FpcService.name, {
+				getOrComputeProtocolAddresses: async () => ({ sponsored: SPONSORED, private: PRIVATE }),
+				getFpcs: async () => [
+					{
+						id: "f1",
+						profileId: "p1",
+						chainId: CHAIN_IDS.TESTNET,
+						type: FpcType.DefaultSponsoredFpc,
+						address: SPONSORED,
+						name: "Auth registry",
+					},
+				],
+			}),
+		)
+		collection.add(
+			stub(TokenService.name, { getTokens: async () => [{ id: 1, chainId: CHAIN_IDS.TESTNET, contract: TOKEN, name: "Fee Juice" }] }),
+		)
+		collection.add(
+			stub(ContactService.name, {
+				getContacts: async () => [{ id: "c1", profileId: "p1", name: "Private fee payer", address: TOKEN }],
+			}),
+		)
+		collection.add(dapp)
+		await collection.start()
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+
+		void dapp
+			.requestCapabilities({
+				sessionId: SESSION.id,
+				manifest: {},
+				delta: [{ type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] }],
+				existingGrants: [],
+				knownContracts: [{ address: TOKEN, name: "Fee Juice" }],
+			})
+			.catch(() => {})
+		await expect.poll(() => storage.size).toBe(1)
+
+		const { params } = [...storage.values()][0].payload as CapabilityPayload
+		expect(params.knownContracts).toEqual([
+			{ address: `0x${"0".repeat(63)}3`, name: "Fee Juice" },
+			{ address: SPONSORED, name: "Sponsored fee payer" },
+			{ address: PRIVATE, name: "Private fee payer" },
+			{ address: "0x1e8e7e73c592a1b1c9199b4b655ddc7a16fa8a8488df595610b71d3dc1cc666c", name: "Auth registry" },
+			{ address: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae", name: "Test USDC" },
+		])
 	})
 })

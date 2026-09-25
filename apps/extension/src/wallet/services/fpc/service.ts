@@ -28,7 +28,7 @@ export * from "./spec"
 const SPONSORED_FPC_DEFAULT_NAME = "Sponsored"
 const PRIVATE_FPC_DEFAULT_NAME = "Private Fee Juice"
 
-type ProtocolAddresses = { sponsored: string; private: string }
+export type ProtocolAddresses = { sponsored: string; private: string }
 
 /** Stored shape strips the in-memory `isProtocol` decoration. */
 type StoredFpc = Omit<FpcInfo, "isProtocol">
@@ -87,7 +87,8 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		})
 	}
 
-	private async getOrComputeProtocolAddresses(chainId: number): Promise<ProtocolAddresses> {
+	/** Derived, never read from a stored row, so a renamed or re-pointed row cannot move them. */
+	public async getOrComputeProtocolAddresses(chainId: number): Promise<ProtocolAddresses> {
 		const cached = this.protocolAddresses.get(chainId)
 		if (cached) return cached
 
