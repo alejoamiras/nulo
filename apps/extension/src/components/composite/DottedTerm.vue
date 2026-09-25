@@ -15,6 +15,8 @@ const props = defineProps({
 	testid: { type: String, default: undefined },
 	/** A dotted button that does something, such as a rename link, instead of a term in a sentence. */
 	action: { type: Boolean, default: false },
+	/** An action that cannot act now: aria-disabled and out of the Tab order. A click still emits. */
+	disabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits<{ click: [event: MouseEvent] }>()
@@ -31,6 +33,8 @@ const definition = computed(() => GLOSSARY[props.term]?.definition ?? "")
 			v-if="action"
 			type="button"
 			:aria-describedby="descriptionId"
+			:aria-disabled="disabled || undefined"
+			:tabindex="disabled ? -1 : undefined"
 			:data-testid="testid"
 			:class="$style.action"
 			@click="(event: MouseEvent) => emit('click', event)"
