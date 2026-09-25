@@ -23,6 +23,7 @@
  */
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -203,7 +204,7 @@ watch(
 					A contract you don't recognize could be a scam token with a familiar-looking symbol. Verify the contract address before allowing.
 				</Text>
 
-				<Flex gap="12">
+				<Flex v-snack-footer gap="12">
 					<Button
 						@click="handleReject"
 						:disabled="isSubmitting"

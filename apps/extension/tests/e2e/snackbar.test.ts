@@ -153,6 +153,28 @@ async function waitForSnackGone(page: Page, timeout: number): Promise<void> {
 	await page.waitForFunction((s: string) => !document.querySelector(s), { timeout, polling: 50 }, SNACK)
 }
 
+/** Waits until a sheet has finished sliding in, so what it holds is where it will stay. */
+async function sheetAtRest(page: Page, testid: string): Promise<void> {
+	await page.waitForSelector(sel(testid), { visible: true, timeout: 5_000 })
+	await page.waitForFunction(() => document.getElementById("popup")?.getAnimations({ subtree: true }).length === 0, {
+		timeout: 5_000,
+		polling: 50,
+	})
+}
+
+/** Waits until the snack's bottom edge sits `inset` px above the viewport's. */
+async function snackInsetIs(page: Page, inset: number): Promise<void> {
+	await page.waitForFunction(
+		(s: string, px: number) => {
+			const card = document.querySelector(s)?.getBoundingClientRect()
+			return card !== undefined && Math.abs(window.innerHeight - px - card.bottom) < 1
+		},
+		{ timeout: 5_000, polling: 50 },
+		SNACK,
+		inset,
+	)
+}
+
 /** Presses Tab until focus lands on `testid`, at most `limit` times, noting every landing that left
  *  the popup holding `inside`. */
 async function tabUntil(page: Page, testid: string, inside: string, limit: number): Promise<{ visited: string[]; escaped: string[] }> {
@@ -282,6 +304,44 @@ test("an error raised inside a popup: Tab reaches its × after the popup's contr
 	await waitForSnackGone(page, 5_000)
 	expect(await page.$(sel("accounts-popup"))).not.toBeNull()
 	expect(await focusInPopupOf(page, "account-item")).toBe(true)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("over the accounts sheet, which covers the nav, an error sits 12px up and goes back above the nav once the sheet closes", async ({
+	registeredExtension,
+}) => {
+	const page = await openHome(registeredExtension)
+	await clickByTestId(page, "account-avatar-btn")
+	await sheetAtRest(page, "accounts-popup")
+	await stubClipboard(page, "reject")
+	await pointerClick(page, "account-item-copy")
+	await waitForToast(page, "Couldn't copy", 5_000, { kind: "error" })
+	const over = await settledSnack(page)
+	expect(over.bottom).toBeCloseTo(over.innerHeight - 12, 0)
+
+	await page.bringToFront()
+	await page.keyboard.press("Escape")
+	await page.waitForFunction((s: string) => !document.querySelector(s), { timeout: 5_000 }, sel("accounts-popup"))
+	await snackInsetIs(page, 76)
+	expect(await cardCount(page)).toBe(1)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("in the Receive sheet a copy's snack sits 12px above the sheet's Close button", async ({ registeredExtension }) => {
+	const page = await openHome(registeredExtension)
+	await stubClipboard(page, "resolve")
+	await clickByTestId(page, "actions-receive")
+	await sheetAtRest(page, "receive-close")
+
+	await clickByTestId(page, "receive-address")
+	await waitForToast(page, "Address is copied", 5_000, { kind: "success" })
+	const rect = await settledSnack(page)
+	const closeTop = await page.$eval(sel("receive-close"), (el) => el.getBoundingClientRect().top)
+	expect(closeTop - rect.bottom).toBeCloseTo(12, 0)
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])

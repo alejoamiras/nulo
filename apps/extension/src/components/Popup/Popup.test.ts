@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { nextTick, ref } from "vue"
+import { defineComponent, h, nextTick, ref } from "vue"
 
 type Options = Record<string, unknown>
 type FakeTrap = {
@@ -34,6 +34,7 @@ vi.mock("focus-trap", () => ({
 }))
 vi.mock("@/utils/core", () => ({ managers: { profile: { refreshSession: vi.fn() } } }))
 
+import { useSnackInset } from "@/composables/snackInset"
 import Popup from "./Popup.vue"
 
 /** `Popup` reads the trap container off `Flex`'s exposed `wrapper`; the stub exposes its root the same way. */
@@ -193,5 +194,28 @@ describe("Popup", () => {
 		const b = await openPopup({ initialFocus: "#title" })
 		expect(traps[1]?.options.initialFocus).toBe("#title")
 		b.unmount()
+	})
+
+	test("an open popup covers the nav: the snack drops from the nav's 76px to 12px and goes back when it closes", async () => {
+		let inset = { value: -1 }
+		const host = mount(
+			defineComponent({
+				setup() {
+					inset = useSnackInset(() => 76)
+					return () => h("div")
+				},
+			}),
+		)
+		const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+		const w = await openPopup()
+		await frame()
+		expect(inset.value).toBe(12)
+
+		await w.setProps({ show: false })
+		await settle()
+		await frame()
+		expect(inset.value).toBe(76)
+		w.unmount()
+		host.unmount()
 	})
 })

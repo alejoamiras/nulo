@@ -84,3 +84,46 @@ Tests:
   address fails the estimate and its error sits 12px (±0.5) above `send-footer`; in the execute
   window, a public transfer the account cannot fund does the same above `dapp-approval-footer`.
   Both then grow the footer by a 40px line and check the snack follows it.
+
+## P6.5 · Over a sheet (12a)
+
+How the host knows a sheet covers the nav: every popup-app sheet renders through
+`components/Popup/Popup.vue`, whose wrapper is `position: absolute; inset: 0` over the whole app
+at z-index `(displaceIdx + 1) × 500`, above the nav's. So an open `Popup` always covers the nav,
+and its wrapper carries `v-snack-sheet`. While one is registered the host drops the base to 12 and
+counts only the footers inside the top sheet (the last registered, which is the last opened);
+page footers under it are ignored. The directive's `unmounted` hook runs when the close starts,
+not when the slide-out ends, so the snack goes back to 76px as the sheet leaves.
+
+The sheets' own rows (`v-snack-footer`):
+
+| Sheet | Row |
+|---|---|
+| The 11 forms on `FormPopup` (new and edit account, contact, endpoint, fee contract, network; new token) | the submit block: the error note above, the submit button, the reset button or note below |
+| Confirm | Cancel and Confirm |
+| Edit profile | Update and Reset changes |
+| A new sender's first receipt (incoming trust) | Block and Allow |
+| Import contacts | Cancel and Import selected |
+| Data viewer | Close |
+| The authorization registry | Send and its error line |
+| Revoke authorizations | Revoke and its error line |
+| New sender | its error line and Add sender |
+| Receive | Close (new testid `receive-close`) |
+| Select a fee contract | New FPC |
+| Select a profile | New profile, Import profile |
+| Token details | Close |
+| Send's review | Send now |
+
+No row: the accounts sheet, forgot password, select networks and select token.
+
+Sign-off pending: a sheet over a no-nav page ignores that page's footer, since the sheet covers
+it. Send's review over Send puts the snack above Send now, not above Confirm Transaction.
+
+Tests:
+
+- `components/Popup/Popup.test.ts`: an open popup drops the inset from 76 to 12, and closing it
+  restores 76. `composables/snackInset.test.ts` already covers the top sheet's own row and a
+  stacked pair.
+- `tests/e2e/snackbar.test.ts`, two new smoke cases: over the accounts sheet an error sits 12px
+  from the bottom, and back at 76px once Escape closes the sheet; in the Receive sheet a copy's
+  success sits 12px above Close.

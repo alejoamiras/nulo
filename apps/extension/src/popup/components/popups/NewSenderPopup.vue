@@ -7,6 +7,7 @@ import { isValidHex } from "@/utils/string"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -119,7 +120,7 @@ usePopupEntity(() => props.show, {
 					</template>
 				</Input>
 
-				<Flex direction="column" gap="10">
+				<Flex v-snack-footer direction="column" gap="10">
 					<Transition name="fade">
 						<Tooltip
 							v-if="error.type === 'error'"

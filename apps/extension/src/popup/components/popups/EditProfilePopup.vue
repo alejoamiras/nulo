@@ -5,6 +5,7 @@ import { FieldWarning } from "@nulo/design"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -157,7 +158,7 @@ usePopupEntity(() => props.show, {
 					</template>
 				</Input>
 
-				<Flex direction="column" gap="12">
+				<Flex v-snack-footer direction="column" gap="12">
 					<Button
 						@click="handleUpdateProfile"
 						wide

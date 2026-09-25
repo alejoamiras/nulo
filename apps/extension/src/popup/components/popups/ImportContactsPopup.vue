@@ -5,6 +5,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { isValidHex, trimAddress } from "@/utils/string"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -227,7 +228,7 @@ watch(
 						</Flex>
 					</Flex>
 
-					<Flex align="center" justify="between" gap="12" wide>
+					<Flex v-snack-footer align="center" justify="between" gap="12" wide>
 						<Button
 							@click="handleReject"
 							variant="primary_outline"

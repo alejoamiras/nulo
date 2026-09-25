@@ -3,6 +3,9 @@
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Utils */
 import { stringCompare } from "@/utils/string"
 
@@ -167,6 +170,7 @@ watch(
 				</Flex>
 
 				<Button
+					v-snack-footer
 					@click="popupStore.open('new_fpc')"
 					wide
 					variant="primary_outline"
