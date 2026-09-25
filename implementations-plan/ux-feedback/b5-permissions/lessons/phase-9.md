@@ -69,9 +69,11 @@ option (b): the permission window fills its window, and the other windows stay a
   comes back. A flow that needs a first request after a rejection gets its own connect.
 - **Keys are pressed as characters.** Puppeteer's BiDi keyboard has no `"Space"`; `" "` works
   on both browsers.
-- **S1's fit is bounded by S2's**, as P9.3 states: S1 differs only by having no note. The
-  playground has no bundle that names a contract the wallet knows, so no committed flow draws S1.
-  P10.1 measures S1 through the playground's client, in a scratch spec.
+- **S1's fit is bounded by S2's**, as P9.3 states: S1 is S2 without the note, so S2 fitting
+  means S1 fits. The fit case says so in one line. The playground has no bundle that names a
+  contract the wallet knows, so no committed flow draws S1. P10.1 records the S1-like window's
+  scroll area in both browsers at 400×800 (scroll height against client height, 0 overflow
+  expected), beside the story's exact 12 rows.
 
 ## The window width (P9.3's fit)
 
