@@ -8,6 +8,7 @@ import { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/clien
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
 import { usePopupEntity } from "@/composables/usePopupEntity"
@@ -124,7 +125,7 @@ usePopupEntity(
 					v-model="feeSettings"
 				/>
 
-				<Flex align="center" direction="column" gap="12">
+				<Flex v-snack-footer align="center" direction="column" gap="12">
 					<Button
 						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"

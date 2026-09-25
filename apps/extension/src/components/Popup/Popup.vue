@@ -2,6 +2,9 @@
 /** Vendor */
 import * as focusTrap from "focus-trap"
 
+/** Composables */
+import { vSnackSheet } from "@/composables/snackInset"
+
 /** Utils */
 import { managers } from "@/utils/core"
 
@@ -104,6 +107,7 @@ onBeforeUnmount(() => {
 				<!-- tabindex -1: the trap's fallback when a popup has no tabbable control. -->
 				<Flex
 					ref="popupEl"
+					v-snack-sheet
 					direction="column"
 					:class="$style.wrapper"
 					:style="{ zIndex: (displaceIdx + 1) * 100 * 5 }"

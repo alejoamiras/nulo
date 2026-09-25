@@ -4,6 +4,7 @@
  * every action an emit: the page owns the popup slot, the facts and the send.
  */
 import { computed } from "vue"
+import { vSnackFooter } from "@/composables/snackInset"
 import { maskAddress } from "@/components/composite/send/masked-address"
 import {
 	type FactCell,
@@ -130,6 +131,7 @@ const handleSend = () => {
 					</div>
 
 					<Button
+						v-snack-footer
 						variant="cta"
 						wide
 						data-testid="send-review-submit"
