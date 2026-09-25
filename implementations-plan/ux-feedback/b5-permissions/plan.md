@@ -119,31 +119,33 @@ Good enough: Settings → Connected apps keeps today's permission names below th
 
 ## Round-5 picks
 
-Read 2026-09-24 from the artifact's `picks` store. No pick has been made for U1 (`i6e`),
-U2 (`i6f`), U3 (`i6g`), U4 (`i6h`), U5 (`i6i`), U6 (`i6j`) or U7 (`i6k`).
+Read 2026-09-24 from the artifact's `picks` store: no pick had been made for U1 (`i6e`), U2
+(`i6f`), U3 (`i6g`), U4 (`i6h`), U5 (`i6i`), U6 (`i6j`) or U7 (`i6k`).
 
-- Each is built as drawn (the recommended option) and listed **sign-off pending**.
+- **Signed off by the owner in chat, 2026-09-25: "Regarding 6: Recommended."** That is the
+  recommended option of U1–U7 as drawn and of every ask A-1 to A-32, the P0 addendum's
+  included. The picks store is unreadable from this account, so the chat answer is the record
+  (lessons/phase-4.md).
+- Each is built as drawn. What no drawing defines stays **sign-off pending** (§ Delivery).
 - U10 has no picker: it is "Unchanged".
-- Re-read the store before P2 (the interim window's words come from U4), before P3 (U6, U7) and
-  before P6 (U1–U5), and the P0 addendum's pickers before the phase that builds each. A pick
-  that differs from the drawing replaces the matching step before that step starts.
+- A later pick that differs from a drawing replaces the matching step before that step starts.
 
 ## UI impact
 
 | # | Surface | Before → after | Shot | Sign-off |
 |---|---|---|---|---|
-| 1 | Permission window, arc 5a (interim) | Every card has a tick, with a rider card "Act on your behalf" (`capability-meta.ts:41-47`) → today's window and cards, with a tick only on the authorizations, address-book, private-events and unknown cards. The authorizations card and the two data cards take their titles and lines from the U4 row list. Other cards have no tick and are granted as requested. Full list in A-1 | none (interim) | **sign-off pending**: Ask A-1 |
+| 1 | Permission window, arc 5a (interim) | Every card has a tick, with a rider card "Act on your behalf" (`capability-meta.ts:41-47`) → today's window and cards, with a tick only on the authorizations, address-book, private-events and unknown cards. The authorizations card and the two data cards take their titles and lines from the U4 row list. Other cards have no tick and are granted as requested. Full list in A-1 | none (interim) | Ask A-1, signed off 2026-09-25 (§ Round-5 picks) |
 | 2 | Permission window, first connect (S1) | "is requesting permissions on X", "New permissions requested" cards, "Approve" → "wants to connect on X" and four groups: "Account to share", "Without asking, it can", "If you allow, it can", "Always asks you first". Then "Details · N contracts" (the table) and footer "Reject" / "Connect" | `06-window-S1`, `06-auth-row-B` | i6 "6 => B, Off = ask, unknown Off. That's freaking awesome." (owner) |
 | 3 | Permission window, nothing recognized (S2) | → the S1 layout, plus the note "Nulo doesn't recognize any of its contracts." above Details (`gen_i6.py:226`) | `06-window-S2` | i6 (owner) |
 | 4 | Permission window, broad request (S3) | → flagged rows and the "Any contract" chip on the simulation row. The authorizations row is flagged (orange icon, no chip), Off, with "You confirm each authorization first. Off because it listed any contract." (`gen_i6r4.py:88-94`). "Every transaction, on any contract". "Details · any contract" | `06-window-S3`, `06-off-means-ask` | i6 (owner). S3's round-3 authorizations row is rebuilt with B per the spec (§ Item 6, "S2 and S3 predate round 4") |
-| 5 | Permission window, asking for more (U1) | "New permissions requested" / "Already granted" → the new rows only, a folded "Already allowed · N" row, "wants more permissions on X", button "Allow" (`gen_r5.py:100-127`) | `06-more-U1` | round 5 U1A as drawn, **sign-off pending** |
-| 6 | Several accounts (U2) | "Add/Select accounts to share" → "Accounts to share" with a count. The first "Without asking" row reads "See the addresses of the accounts you share" (`gen_r5.py:130-138`) | `06-accounts-U2` | round 5 U2, **sign-off pending**; the label when the app already holds accounts ("Add accounts to share" today) is Ask A-31 |
-| 7 | Network banners (U3) | the description's "Approve as is" → "Connect as is". The button "Switch wallet to X" and the rest are unchanged, in today's place (`gen_r5.py:141-150`) | `06-banners-U3` | round 5 U3, **sign-off pending** |
-| 8 | Private events, contract classes (U4) | one "data" card → an address-book row and a private-events row, each with its own switch. Contract classes → "Look up contract code on X" in "Without asking". The three "any contract" rows the list marks carry the "Any contract" chip (`gen_r5.py:158,160,166`). Full row list at `gen_r5.py:154-170` | `06-rows-U4`, `06-row-list-U4` | round 5 U4, **sign-off pending**; the two new rows' flag state is Ask A-29; a data row left Off keeps what the app already held for it, Ask A-30; a re-request after a declined widening, Ask A-32 |
-| 9 | Account row alias (U5) | "Alias" label, ⓘ tooltip, and the field always shown on a selected row → the dotted button "Rename for this app". Pressing it swaps in today's field, labelled "Name for this app", prefilled and focused (`gen_r5.py:60-72,194-200`) | `06-rename-U5`, `tips-map` | round 5 U5, **sign-off pending**; tips "All of it" (owner) for the dotted terms |
+| 5 | Permission window, asking for more (U1) | "New permissions requested" / "Already granted" → the new rows only, a folded "Already allowed · N" row, "wants more permissions on X", button "Allow" (`gen_r5.py:100-127`) | `06-more-U1` | round 5 U1A as drawn, signed off 2026-09-25 (§ Round-5 picks) |
+| 6 | Several accounts (U2) | "Add/Select accounts to share" → "Accounts to share" with a count. The first "Without asking" row reads "See the addresses of the accounts you share" (`gen_r5.py:130-138`) | `06-accounts-U2` | round 5 U2, signed off 2026-09-25 (§ Round-5 picks); the label when the app already holds accounts ("Add accounts to share" today) is Ask A-31, signed off with it |
+| 7 | Network banners (U3) | the description's "Approve as is" → "Connect as is". The button "Switch wallet to X" and the rest are unchanged, in today's place (`gen_r5.py:141-150`) | `06-banners-U3` | round 5 U3, signed off 2026-09-25 (§ Round-5 picks) |
+| 8 | Private events, contract classes (U4) | one "data" card → an address-book row and a private-events row, each with its own switch. Contract classes → "Look up contract code on X" in "Without asking". The three "any contract" rows the list marks carry the "Any contract" chip (`gen_r5.py:158,160,166`). Full row list at `gen_r5.py:154-170` | `06-rows-U4`, `06-row-list-U4` | round 5 U4, signed off 2026-09-25 (§ Round-5 picks); the two new rows' flag state is Ask A-29; a data row left Off keeps what the app already held for it, Ask A-30; a re-request after a declined widening, Ask A-32; the three signed off with it |
+| 9 | Account row alias (U5) | "Alias" label, ⓘ tooltip, and the field always shown on a selected row → the dotted button "Rename for this app". Pressing it swaps in today's field, labelled "Name for this app", prefilled and focused (`gen_r5.py:60-72,194-200`) | `06-rename-U5`, `tips-map` | round 5 U5, signed off 2026-09-25 (§ Round-5 picks); tips "All of it" (owner) for the dotted terms |
 | 10 | Cancelled and error overlays (U10) | unchanged | none | spec U10 "Unchanged" |
-| 11 | Authorization confirmation window (U6) | card title "Create authwit" → "Authorization". Everything else is as today (`gen_r5.py:203-224`) | `06-auth-window-U6` | round 5 U6, **sign-off pending**; i9c "Authorizations" (owner) for the word |
-| 12 | Settings → Connected apps → app (U7) | new group "If you allow, it can" holding the authorizations row with its switch, directly above "Granted permissions" (`gen_r5.py:227-253`). Only for an app granted authorizations | `06-settings-U7` | round 5 U7A, **sign-off pending** |
+| 11 | Authorization confirmation window (U6) | card title "Create authwit" → "Authorization". Everything else is as today (`gen_r5.py:203-224`) | `06-auth-window-U6` | round 5 U6, signed off 2026-09-25 (§ Round-5 picks); i9c "Authorizations" (owner) for the word |
+| 12 | Settings → Connected apps → app (U7) | new group "If you allow, it can" holding the authorizations row with its switch, directly above "Granted permissions" (`gen_r5.py:227-253`). Only for an app granted authorizations | `06-settings-U7` | round 5 U7A, signed off 2026-09-25 (§ Round-5 picks) |
 | 13 | Settings → Connected apps list | no visible change (a testid on each row's target) | none | none needed |
 
 Keyboard changes:
@@ -175,14 +177,16 @@ Visible consequences of technical choices (stated in the PR body, program § Ope
   answered from the held grant; today it reopens the window for the declined type (Ask A-32).
   Contract classes keep today's behaviour, since their coverage checks only the type.
 
-### UI asks for the owner (built as recommended, sign-off pending)
+### UI asks for the owner (built as recommended, signed off 2026-09-25)
 
 Each ask names what the drawings settle. **Drawn** means the built value is read off a round 3,
 4 or 5 drawing. **Undrawn** means no round drew it: spec § How to use it says such a surface
 stops for the owner, so P0 draws each one into the artifact as a round-5 addendum, with this
-plan's recommendation drawn and a picker, before any phase builds it. With no pick, the drawn
-recommendation is built and listed **sign-off pending** (program § Round 5). Asks with no
-visible form (A-23's Tab behaviour, A-27's spoken names) are drawn as annotated options.
+plan's recommendation drawn and a picker, before any phase builds it. The drawn recommendation
+is built. The owner signed off the recommended option of every ask on 2026-09-25 ("Regarding
+6: Recommended.", § Round-5 picks). A state no drawing defines stays **sign-off pending**
+(§ Delivery). Asks with no visible form (A-23's Tab behaviour, A-27's spoken names) are drawn
+as annotated options.
 
 - **A-1 · The arc 5a interim window** (undrawn). Arc 5a changes behaviour before arc 5b redraws
   the window, and the stack's PRs may land one at a time.
@@ -1805,10 +1809,23 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
 - `gh stack push` as checkpoints. No PR until the program's final pass (program Delivery). Never
   merge: `gh pr merge` and `gh stack merge` are always the owner's call.
 - PR bodies (at submit): summary, the UI impact table, the visible consequences of technical
-  choices, the owner's quotes (i6 both rounds, i9c, tips), the **sign-off pending** list (A-1 to
-  A-32 and U1–U7, each with its round-5 or P0-addendum drawing and pick), the owner's D-2
-  answer quoted (§ Approval; there is no "open" status to report), the parity Artifact
-  link, screenshots of every changed popup surface, test evidence.
+  choices, the owner's quotes (i6 both rounds, i9c, tips, and round 5's "Regarding 6:
+  Recommended." of 2026-09-25, which signs off A-1 to A-32 and U1–U7 as drawn), the
+  **sign-off pending** list below, the owner's D-2 answer quoted (§ Approval; there is no
+  "open" status to report), the parity Artifact link, screenshots of every changed popup
+  surface, test evidence.
+  - **Sign-off pending**, as no drawing defines it (each built as the plan recommends):
+    - two or more unknown types in one request: 5a shows one "Unknown permission" card with one
+      switch, in the singular words of `06-interim-unknown-A1`. The words for several are the
+      owner's to give (codex round 1, finding 5, held in lessons/phase-5.md);
+    - A-2 in 5a: the authorizations card among the new cards, with no switch and the line "You
+      confirm each authorization first." A-2 draws only 5b's row;
+    - A-5 in 5a: on a widening to any contract, the authorizations card among the new cards, Off,
+      with the broad off line. A-5 draws only 5b's rows;
+    - the data cards' detail panels, opened: each shows only its half of the permission. The A-1
+      drawing leaves them closed;
+    - the 5a switches' keyboard focus: the browser's default outline. A-19 draws its ring only on
+      5b's rows and the Settings row.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
