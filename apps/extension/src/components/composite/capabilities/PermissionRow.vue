@@ -18,6 +18,8 @@ const props = defineProps<{
 	chip?: string
 	/** A quiet fact on the title line, such as a permission declined before. */
 	badge?: string
+	/** A permission the app already holds: its title reads in the secondary colour. */
+	granted?: boolean
 	titleTestid?: string
 	modelValue?: boolean
 }>()
@@ -33,7 +35,7 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 </script>
 
 <template>
-	<div :class="[$style.row, flagged && $style.flagged]">
+	<div :class="[$style.row, flagged && $style.flagged, granted && $style.granted]">
 		<MaterialIcon :name="icon" :size="16" :class="$style.icon" aria-hidden="true" />
 
 		<div :class="$style.body">
@@ -102,6 +104,10 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	font-weight: 600;
 	line-height: 1.35;
 	color: var(--txt-primary);
+}
+
+.row.granted .title {
+	color: var(--nulo-secondary);
 }
 
 .sub {

@@ -78,6 +78,13 @@ describe("composite/capabilities/PermissionRow", () => {
 		expect(mountRow().classes()).not.toContain(STYLE.flagged)
 	})
 
+	test("a granted row carries the granted class that turns its title secondary", () => {
+		const w = mountRow({ granted: true })
+		expect(w.classes()).toContain(STYLE.granted)
+		expect(w.find(`.${STYLE.title}`).text()).toBe(AUTH.title)
+		expect(mountRow().classes()).not.toContain(STYLE.granted)
+	})
+
 	test("without a switch name there is no switch and no Tab stop", () => {
 		const w = mountRow({ switchLabel: undefined })
 		expect(toggle(w).exists()).toBe(false)
