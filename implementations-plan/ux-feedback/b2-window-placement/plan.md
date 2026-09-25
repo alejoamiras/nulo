@@ -288,8 +288,10 @@ The passkey window is not a dApp window and keeps `centerOn` at 500×800.
 
 ### Inferences
 
-- A minimized anchor's bounds are refused by the browser and the retry opens the window with the
-  size only; a rule for it is not drawn, so none is built (Ask 4).
+- A minimized anchor gets no special handling: the adapter drops the window's `state`, so its
+  numeric bounds place the window like any other anchor's. The size-only retry runs only when the
+  browser rejects the position (Chrome refuses a mostly off-screen one; Firefox clamps it instead).
+  The spec draws no rule for it, so none is built (Ask 4).
 
 ### Asks → codex (decided in the plan audit)
 
