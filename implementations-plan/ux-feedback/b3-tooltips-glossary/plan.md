@@ -87,7 +87,7 @@ placement.
 
 Read 2026-09-24 17:4x from the artifact's `picks` store (22 documents): `tipsb` (U8) and `tipsc`
 (U9) have no pick, so both are built as drawn (the recommended option) and listed **sign-off
-pending**. Re-read before P3 starts.
+pending**. Re-read before P3 started (2026-09-25): unchanged, 22 documents, no `tipsb` or `tipsc`.
 
 ## UI impact
 
@@ -779,7 +779,7 @@ Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-### P3 · Glossary page, Settings row, rule-6 texts, CLAUDE.md, the smoke spec ☐
+### P3 · Glossary page, Settings row, rule-6 texts, CLAUDE.md, the smoke spec ✓
 
 1. `glossary.vue` + a component test: four sections in order and nine entries with the exact
    strings (strings are asserted here, not in e2e).
