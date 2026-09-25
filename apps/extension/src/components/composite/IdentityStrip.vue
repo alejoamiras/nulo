@@ -76,9 +76,11 @@ withDefaults(
 	max-width: 140px;
 }
 
+/* Chrome's normal line box here; Firefox's is 15px, a pixel over the drawn 35px strip. */
 .identity_sep {
 	font-family: var(--font-mono);
 	font-size: 11px;
+	line-height: 14px;
 	color: var(--nulo-outline);
 }
 
