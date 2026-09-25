@@ -206,6 +206,35 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b"])
 	})
 
+	it.each([
+		["the service read", "read"],
+		["afterRead", "afterRead"],
+	] as const)("a receipt deleted while %s waits is not installed by that read", async (_name, pause) => {
+		let release!: () => void
+		const gate = new Promise<void>((r) => (release = r))
+		const incoming = makeIncomingService()
+		incoming.getIncomingTransfers.mockImplementationOnce(async () => {
+			if (pause === "read") await gate
+			return [rec("a"), rec("b")]
+		})
+		const afterRead = vi.fn(() => (pause === "afterRead" ? gate : Promise.resolve()))
+		const effect = effectScope()
+		const result = effect.run(() =>
+			useIncomingTransfers({ incomingTransferService: incoming, configService: makeConfigService(), scope: READY, afterRead }),
+		)
+		const pending = result?.refresh()
+		await vi.waitFor(() => expect(pause === "read" ? incoming.getIncomingTransfers : afterRead).toHaveBeenCalled())
+
+		incoming.onIncomingTransferDeleted.invoke(rec("a"))
+		release()
+		await pending
+		expect(result?.incomingTransfers.value.map((x) => x.id)).toEqual(["b"])
+
+		incoming.getIncomingTransfers.mockResolvedValueOnce([rec("a"), rec("b")])
+		await result?.refresh()
+		expect(result?.incomingTransfers.value.map((x) => x.id)).toEqual(["a", "b"])
+	})
+
 	it("config update for incomingTransfersVisible triggers a refresh", async () => {
 		const incoming = makeIncomingService([rec("a")])
 		const config = makeConfigService()
