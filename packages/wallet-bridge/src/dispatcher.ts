@@ -404,6 +404,12 @@ const CAPABILITY_PROJECTORS: Record<Capability["type"], (cap: Record<string, unk
 	data: projectData,
 }
 
+/** A contracts permission with neither flag grants nothing the checkers honour, and wallet-sdk
+ *  requires neither, so it is answered as asked and never negotiated or stored. */
+function grantsNothing(cap: Record<string, unknown>): boolean {
+	return cap.type === "contracts" && cap.canRegister !== true && cap.canGetMetadata !== true
+}
+
 /** Validates a known capability and copies only its known fields; unknown types pass untouched.
  *  Every failure, a throw on a hostile value included, becomes one error naming only the type, so
  *  no request value reaches a log line. */
@@ -1331,7 +1337,8 @@ export class WalletSdkDispatcher {
 		}
 
 		// Phase 1: existing grants/rejections → the delta to negotiate.
-		const plan = computeCapabilityDelta(requestedCapabilities, dappSession)
+		const negotiated = requestedCapabilities.filter((cap) => !grantsNothing(cap))
+		const plan = computeCapabilityDelta(negotiated, dappSession)
 		const requestedAccounts = requestedCapabilities.find((cap) => cap.type === "accounts")
 		if (requestedAccounts !== undefined && grantsOfType(plan.existingGrants, "accounts").length > 0) {
 			await this.applyAccountsWidening(plan, requestedAccounts as unknown as AccountsCapability, ctx, dappSession)
@@ -1352,7 +1359,7 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		const result = await this.askCapabilities(plan, { ...manifest, capabilities: requestedCapabilities }, ctx, dappSession)
+		const result = await this.askCapabilities(plan, { ...manifest, capabilities: negotiated }, ctx, dappSession)
 
 		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
@@ -1483,7 +1490,7 @@ export class WalletSdkDispatcher {
 		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
 
 		for (const cap of requestedCaps) {
-			if (!grantedTypes.has(cap.type)) continue
+			if (!grantedTypes.has(cap.type) && !grantsNothing(cap)) continue
 
 			if (cap.type === "accounts") {
 				const network = await this.resolveNetwork(ctx)
