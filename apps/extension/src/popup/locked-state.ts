@@ -13,12 +13,8 @@ export interface LockedStateShell<P> {
 	route: (path: string) => void
 }
 
-/**
- * The popup's locked state, in two parts. The seal drops everything a lock takes away — popups, the
- * snack, the scope epoch, the logged-in mark, every cached scope's activity, the in-flight sends —
- * and runs before anything awaits, so no snack stays up and no late result presents while the lock
- * looks up where to land. The landing picks the lock or register screen from that lookup.
- */
+/** The seal runs before anything awaits, so no snack stays up and no late result presents while
+ *  a lock looks up where to land. */
 export function createLockedState<P>(shell: LockedStateShell<P>) {
 	const seal = () => {
 		shell.closePopups()
@@ -51,9 +47,7 @@ export function createLockedState<P>(shell: LockedStateShell<P>) {
 		let profiles = shell.cachedProfiles()
 		try {
 			profiles = await readProfiles()
-		} catch {
-			// The cached list stands in.
-		}
+		} catch {}
 		if (!isCurrent()) return
 		land(profiles)
 	}
