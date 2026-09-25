@@ -262,6 +262,22 @@ describe("useArrivals — rows", () => {
 		expect(arriving(list(c, ref([r])), r)).toBeUndefined()
 	})
 
+	test.each([
+		[HOME, SETTINGS],
+		[HISTORY, HOME],
+	])("a row played on %s, left for %s and back inside its window, stays at rest", async (on, away) => {
+		const c = await seeded({ route: on })
+		const r = receipt(20)
+		c.store.records.push(r)
+		await c.arrivals.load(SCOPE)
+		expect(arriving(list(c, ref([r])), r)).toBe("true")
+		c.arrivals.present([r])
+		await settle()
+		c.route.value = away
+		c.route.value = on
+		expect(arriving(list(c, ref([r])), r)).toBeUndefined()
+	})
+
 	test("one play per receipt: a remount over the same service state replays nothing", async () => {
 		const c = await seeded({ route: HOME })
 		const r = receipt(20)
