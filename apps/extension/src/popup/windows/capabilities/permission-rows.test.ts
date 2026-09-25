@@ -14,6 +14,7 @@ import {
 	plainText,
 	privateEventsDefault,
 	privateEventsRow,
+	ROW_ORDER,
 	simulationRow,
 	transactionRow,
 	unknownRow,
@@ -44,13 +45,15 @@ const listed = [{ contract: A, function: "transfer" }]
 
 describe("the row list, row by row", () => {
 	test("one account's address", () => {
-		expect(cells(accountAddressRow(["Account 1"]))).toEqual(["Without asking", "See Account 1's address", "—"])
+		expect(cells(accountAddressRow([{ name: "Account 1" }]))).toEqual(["Without asking", "See Account 1's address", "—"])
 	})
 
-	test("several accounts, and none selected, name no account", () => {
+	test("several accounts, none selected, and one the wallet no longer names, name no account", () => {
 		const row = ["Without asking", "See the addresses of the accounts you share", "—"]
-		expect(cells(accountAddressRow(["Account 1", "Account 2"]))).toEqual(row)
+		expect(cells(accountAddressRow([{ name: "Account 1" }, { name: "Account 2" }]))).toEqual(row)
 		expect(cells(accountAddressRow([]))).toEqual(row)
+		expect(cells(accountAddressRow([{}]))).toEqual(row)
+		expect(cells(accountAddressRow([{ name: "Account 1" }, {}]))).toEqual(row)
 	})
 
 	test("simulations on listed contracts", () => {
@@ -177,6 +180,34 @@ describe("the row list, row by row", () => {
 	test("transactions on listed contracts, and on any contract", () => {
 		expect(cells(transactionRow(tx(listed)))).toEqual(["Always asks you first", "Every transaction", "—"])
 		expect(cells(transactionRow(tx("*")))).toEqual(["Always asks you first", "Every transaction, on any contract", "—"])
+	})
+
+	test("each row's icon: the drawn ones, and add_circle, info and mail_lock for the three new rows", () => {
+		const icons = [
+			accountAddressRow([]),
+			simulationRow(sim("*")),
+			contractsRow({ type: "contracts", contracts: "*", canRegister: true })!,
+			contractsRow({ type: "contracts", contracts: [A], canGetMetadata: true })!,
+			contractClassesRow("Testnet"),
+			authorizationsRow({ broad: false, noScope: false }),
+			addressBookRow({ broadRequest: false }),
+			privateEventsRow("*"),
+			unknownRow(1, { broadRequest: false }),
+			transactionRow(tx("*")),
+		].map((row) => [row.key, row.icon])
+		expect(icons).toEqual([
+			["account-address", "visibility"],
+			["simulation", "play_circle"],
+			["contracts", "add_circle"],
+			["contract-details", "info"],
+			["contract-classes", "code_blocks"],
+			["authorizations", "signature"],
+			["address-book", "contacts"],
+			["private-events", "mail_lock"],
+			["unknown", "help"],
+			["transaction", "task_alt"],
+		])
+		expect(icons.map(([key]) => key)).toEqual([...ROW_ORDER])
 	})
 
 	test("the address book and unknown rows are flagged only in a broad request", () => {

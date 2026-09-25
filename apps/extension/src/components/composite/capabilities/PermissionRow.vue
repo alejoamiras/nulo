@@ -16,6 +16,9 @@ const props = defineProps<{
 	switchTestid?: string
 	flagged?: boolean
 	chip?: string
+	/** A quiet fact on the title line, such as a permission declined before. */
+	badge?: string
+	titleTestid?: string
 	modelValue?: boolean
 }>()
 
@@ -34,7 +37,13 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 		<MaterialIcon :name="icon" :size="16" :class="$style.icon" aria-hidden="true" />
 
 		<div :class="$style.body">
-			<div :class="$style.title">{{ title }}</div>
+			<div :data-testid="titleTestid" :class="$style.title">
+				<span v-if="badge" :class="$style.title_line">
+					<span>{{ title }}</span>
+					<span data-testid="cap-rerequested-badge" :class="$style.badge">{{ badge }}</span>
+				</span>
+				<template v-else>{{ title }}</template>
+			</div>
 			<div v-if="hasSub" :id="subId" data-testid="cap-row-sub" :class="$style.sub">
 				<slot name="sub" :on="modelValue === true">{{ line }}</slot>
 			</div>
@@ -103,19 +112,33 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	color: var(--nulo-secondary);
 }
 
-.chip {
+.title_line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 6px;
+}
+
+.chip,
+.badge {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-
-	margin-top: 3px;
 
 	font-family: var(--font-headline);
 	font-size: 10px;
 	font-weight: 700;
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
+}
+
+.chip {
+	margin-top: 3px;
 	color: var(--orange);
+}
+
+.badge {
+	color: var(--txt-secondary);
 }
 
 .switch {
