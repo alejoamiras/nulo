@@ -1677,7 +1677,7 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
 
 Gate: lint, `typecheck:all`, `test:all`, Storybook build exit 0.
 
-#### P8 · Accounts, rename, the Alias ⓘ ☐
+#### P8 · Accounts, rename, the Alias ⓘ ✓
 
 1. `DottedTerm.vue`: the `action` variant. `DottedTerm.test.ts` cases: renders a `button`; emits
    `click`; keeps `aria-describedby`; a hit area of at least 24px (class assertion; the size is a
@@ -1869,7 +1869,10 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
     - the S2 note on a re-request sits after the "Already allowed" fold, before Details. No
       drawing has the note and the fold together;
     - the keyboard focus of the Details and "Already allowed" buttons: batch 4's row ring, 2px
-      `--nulo-accent` inside the edge, with the hover's colours. The drawings give them none.
+      `--nulo-accent` inside the edge, with the hover's colours. The drawings give them none;
+    - a row whose rename was pressed keeps its field open when it is deselected and selected
+      again, and the field still shows the name typed there. A-20 keeps the field open once
+      pressed; no drawing deselects the row after that.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
