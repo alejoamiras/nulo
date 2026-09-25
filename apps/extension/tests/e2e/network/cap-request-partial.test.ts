@@ -30,12 +30,8 @@ test.skipIf(!hasConfig)(
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
 		await assertPgOk(page, result, "cap-request-partial:result")
 		const granted = (result.resultJson as { granted?: Array<{ type: string }> })?.granted ?? []
-		const answered = granted.find((g) => g.type === "data")
-		expect(answered).toMatchObject({ type: "data", addressBook: true })
-		expect(answered).not.toHaveProperty("privateEvents")
-
-		const stored = await readStoredCapability(ctx, new URL(PLAYGROUND_TEST_URL).origin, "data")
-		expect(stored).toMatchObject({ type: "data", addressBook: true })
-		expect(stored).not.toHaveProperty("privateEvents")
+		const addressBookAlone = { type: "data", addressBook: true }
+		expect(granted.find((g) => g.type === "data")).toEqual(addressBookAlone)
+		expect(await readStoredCapability(ctx, new URL(PLAYGROUND_TEST_URL).origin, "data")).toEqual(addressBookAlone)
 	},
 )
