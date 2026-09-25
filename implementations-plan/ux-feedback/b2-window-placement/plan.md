@@ -456,7 +456,7 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
 
 Gate: The shared placement, height, and native-layout checks pass on Chrome and Firefox; the focused-popup anchor regression passes on Firefox and is explicitly skipped on Chrome because headless refocusing is unsupported. Parity evidence records each browser's measured bounds and limitations.
 
-### P4 · Arc gate ☐
+### P4 · Arc gate ✓
 
 1. Every row of the program's [Local gates](../plan.md#local-gates): lint, `typecheck:all`,
    `test:all`, `test:ci-gating`, `build`; full smoke on Chrome and on Firefox.
@@ -469,6 +469,11 @@ Gate: The shared placement, height, and native-layout checks pass on Chrome and 
 4. `bun run e2e:reap`.
 
 Gate: all of the above exit 0, with the Firefox-only case skipped on Chrome in every run.
+
+Passed on `b21317af` ([lessons](lessons/phase-4.md)). One network file,
+`backup-restore-integrity`, went red once on Chrome. The cause is the test's own dependence on
+public networks, outside this arc; the file then passed three isolated retry-0 runs at the same
+commit.
 
 ## Arc boundary
 
