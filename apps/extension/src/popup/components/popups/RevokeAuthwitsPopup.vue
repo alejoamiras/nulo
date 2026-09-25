@@ -202,7 +202,15 @@ usePopupEntity(
 								<Text v-if="ch.count > 1" size="12" color="tertiary"> {{ `(${ch.count})` }} </Text>
 							</Flex>
 							<Tooltip position="end">
-								<Icon @click="showChunkContent(ch)" name="expand" size="16" color="tertiary" :class="$style.fullscreen_icon" />
+								<!-- The sheet revokes on any Enter that reaches the document; here Enter only opens the content. -->
+								<RowAction
+									label="View authwits content"
+									data-testid="revoke-authwits-view-content"
+									@click="showChunkContent(ch)"
+									@keydown.enter.stop
+								>
+									<Icon name="expand" size="16" color="tertiary" />
+								</RowAction>
 
 								<template #content>
 									<Text size="12" color="secondary">View authwits content</Text>
@@ -292,13 +300,6 @@ usePopupEntity(
 
 	.header {
 		padding: 12px;
-	}
-
-	.fullscreen_icon {
-		cursor: pointer;
-		&:hover {
-			fill: var(--txt-primary);
-		}
 	}
 }
 

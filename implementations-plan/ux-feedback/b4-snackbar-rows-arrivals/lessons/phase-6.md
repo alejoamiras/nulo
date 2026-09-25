@@ -247,3 +247,48 @@ Tests:
 - `tests/e2e/snackbar.test.ts`, two new smoke cases: over the accounts sheet an error sits 12px
   from the bottom, and back at 76px once Escape closes the sheet; in the Receive sheet a copy's
   success sits 12px above Close.
+
+## P6.6 · Two more rows (5b)
+
+Built:
+
+- `popup/pages/settings/advanced/index.vue`: the Logs row was a `div role="button" tabindex="0"`
+  that Enter alone opened, with `outline: none`. It is now the row pattern: a positioned root
+  (`settings-logs-row`, new) holding the handler, and a stretched `RowTarget` button
+  (`settings-logs-open`, new) named by the row's "Logs" title. Enter and Space press the button
+  natively and the click reaches the root's handler. The ring is the rows' `2px solid
+  var(--nulo-accent)` at `-2px`, on `:has(> [data-row-target]:focus-visible)`.
+- `popup/components/popups/RevokeAuthwitsPopup.vue`: the expand glyph, a bare `<Icon @click>` no
+  keyboard could reach, is a `RowAction` (24×24, named "View authwits content",
+  `revoke-authwits-view-content`, new) inside the same tooltip; its old hover fill is RowAction's.
+
+Decisions:
+
+1. **The Logs row keeps its list's hover:** the 0.8 fade that Account State beside it also uses,
+   since the Advanced page has no background tint. Focus draws the ring at full opacity; the fade
+   would dim the ring.
+2. **The row's box reaches past the text** by 8px sideways and 6px up and down (`margin: -6px
+   -8px; padding: 6px 8px`, the activity rows' bleed), so the ring clears the text and nothing on
+   the page moves.
+3. **Enter stops at the new button.** The Revoke sheet submits on any Enter that reaches the
+   document (`usePopupEntity` with `submitKey` Enter). Without the stop, Enter on the button would
+   open the content and revoke. Its own press still runs.
+4. **"A sibling of its row's target"**: the button's chunk card is not an openable row, so it has
+   no target to sit beside; the button is the card header's one control.
+
+Sign-off pending: the Logs row's fade, its ring box and the ring without the fade; the chunk
+header grows by the button's 24px box, where the glyph was 16px (R-3's shift).
+
+Found by reading, not changed: in the Revoke sheet and the registry sheet
+(`ChangeAuthwitsRegistryPopup.vue`, the same `submitKey`), Enter on any other focused control,
+the header's × or a fee method, reaches the same listener, so once the fees are set it submits
+the revocation or the registry change. Older than this batch.
+
+Tests:
+
+- `popup/components/popups/RevokeAuthwitsPopup.test.ts`: the content control is a named button;
+  Enter on it, bubbling to the document with a revoke ready, never revokes, and its press opens the
+  data viewer with the chunk's content. Without the stop the revoke fires (mutation-checked).
+- `tests/e2e/rows.test.ts`, smoke: with developer mode on, Tab reaches `settings-logs-open` and the
+  next Tab leaves the row; the row draws `solid 2px -2px`; Enter opens the log window; Space, with
+  it open, runs the same handler (a second click on the row) and opens no second window.

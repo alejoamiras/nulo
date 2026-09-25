@@ -21,6 +21,7 @@ const authwitsServiceMock = {
 }
 
 const openToastMock = vi.fn()
+const popupOpenMock = vi.fn()
 const preselected = { preselectedAuthwits: [] as { id: string; content: string }[] }
 
 vi.mock("@/wallet/services/auth-registry/client", () => ({
@@ -50,7 +51,7 @@ vi.mock("@/stores/popup.store", () => ({
 	usePopupStore: () => ({
 		popups: { revoke_authwits: { order: 1 } },
 		len: 1,
-		open: vi.fn(),
+		open: popupOpenMock,
 	}),
 }))
 
@@ -82,6 +83,7 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 }
 
+import { RowAction } from "@nulo/design"
 import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
 
 // Track every mounted wrapper so afterEach can tear down via show=false,
@@ -90,12 +92,13 @@ import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
 // stale onKeydown closure makes pressEnter() fire the old handler.
 const wrappers: ReturnType<typeof mount>[] = []
 
-async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id: "aw-1", content: "c1" }]) {
+async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id: "aw-1", content: "c1" }], attached = false) {
 	preselected.preselectedAuthwits = authwits
 	authwitsServiceMock.getRegistryEnabled.mockResolvedValueOnce(true)
 	const w = mount(RevokeAuthwitsPopup, {
 		props: { show: false },
-		global: { stubs: STUBS },
+		global: { stubs: STUBS, components: { RowAction } },
+		...(attached ? { attachTo: document.body } : {}),
 	})
 	wrappers.push(w)
 	await w.setProps({ show: true })
@@ -117,6 +120,7 @@ beforeEach(() => {
 	authwitsServiceMock.revokeAuthwits.mockReset().mockResolvedValue(undefined)
 	authwitsServiceMock.disconnect.mockReset()
 	openToastMock.mockReset()
+	popupOpenMock.mockReset()
 	preselected.preselectedAuthwits = []
 })
 
@@ -127,6 +131,23 @@ afterEach(async () => {
 		w.unmount()
 	}
 	wrappers.length = 0
+})
+
+describe("RevokeAuthwitsPopup — the content button", () => {
+	test("is a named button; Enter on it opens the content and never revokes, though a revoke is ready", async () => {
+		const w = await mountAndOpen([{ id: "aw-1", content: "c1" }], true)
+		await setAllFees(w)
+		const view = w.get('[data-testid="revoke-authwits-view-content"]')
+		expect(view.element.tagName).toBe("BUTTON")
+		expect(view.attributes("aria-label")).toBe("View authwits content")
+
+		view.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await view.trigger("click")
+		await flushPromises()
+		expect(authwitsServiceMock.revokeAuthwits).not.toHaveBeenCalled()
+		expect(popupOpenMock).toHaveBeenCalledWith("data_viewer")
+		expect(preselected).toMatchObject({ viewerData: ["c1"] })
+	})
 })
 
 describe("RevokeAuthwitsPopup — Enter-key gate", () => {
