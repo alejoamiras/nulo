@@ -66,18 +66,21 @@ export async function tabAround(page: Page, times: number): Promise<string[]> {
 type EscapeRead = { __escapeHandled?: boolean }
 
 /** Presses Escape and returns whether the page marked it handled, which decides whether Chrome's
- *  toolbar popup closes; this suite's tab never shows it. The reader is a window listener added just
- *  before the press, so it runs after every listener the page already has. */
+ *  toolbar popup closes; this suite's tab never shows it. The reader is a `window` capture listener
+ *  that reads `defaultPrevented` in a `setTimeout(0)` after the dispatch, so a listener that stops
+ *  propagation cannot starve it and it still sees every listener's mark. */
 export async function pressEscape(page: Page): Promise<boolean> {
 	await page.evaluate(() => {
 		const w = window as unknown as EscapeRead
 		w.__escapeHandled = undefined
 		const read = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return
-			w.__escapeHandled = e.defaultPrevented
-			window.removeEventListener("keydown", read)
+			window.removeEventListener("keydown", read, true)
+			setTimeout(() => {
+				w.__escapeHandled = e.defaultPrevented
+			}, 0)
 		}
-		window.addEventListener("keydown", read)
+		window.addEventListener("keydown", read, true)
 	})
 	await page.keyboard.press("Escape")
 	await page.waitForFunction(() => (window as unknown as EscapeRead).__escapeHandled !== undefined, {
