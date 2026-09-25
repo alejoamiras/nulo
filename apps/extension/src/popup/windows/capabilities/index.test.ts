@@ -13,9 +13,8 @@
  * guard (capabilities-only divergence — execute/discover bail; do NOT "fix") ·
  * C12 onActiveProfileChanged guard.
  *
- * Out of scope (window-specific business pins E17–E21: account selection,
- * noAccountsAvailable, grant assembly) — deferred; the network e2e dApp-connect
- * flow covers them end-to-end today.
+ * The describe blocks after the shell's pin the window's own business: the account
+ * picker's widening consent, and the permission cards with the answer they produce.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -475,5 +474,244 @@ describe("capabilities window — account widening consent (real rows)", () => {
 		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
 		expect(resolvedArg().selectedAccounts).toEqual([`aztec:1:${A.address}`])
 		expect(resolvedArg().granted).toEqual([wide])
+	})
+})
+
+describe("capabilities window — permission cards and the answer (real cards)", () => {
+	// Wire-shaped: 0x + 64 hex, each value below the field modulus.
+	const TOKEN = `0x${"1b".repeat(32)}`
+	const ALICE = { address: `0x${"0a".repeat(32)}`, name: "Alice", chainId: 1 }
+	const ALICE_CAIP = `aztec:1:${ALICE.address}`
+	const listed = [{ contract: TOKEN, function: "transfer_public_to_public" }]
+	const authwitAccounts = { type: "accounts", canGet: true, canCreateAuthWit: true }
+	const txAny = { type: "transaction", scope: "*" }
+	const txListed = { type: "transaction", scope: listed }
+	const contractsAny = { type: "contracts", contracts: "*", canRegister: true, canGetMetadata: true }
+	const manifest = (capabilities: unknown[]) => ({
+		version: "1.0",
+		metadata: { name: "nulo-playground", version: "0.1.0", url: "http://localhost:5173" },
+		capabilities,
+	})
+	/** A first request: the dispatcher's delta is the manifest's capabilities. */
+	const firstRequest = (capabilities: unknown[], extra: Record<string, unknown> = {}) => ({
+		params: {
+			sessionId: "s1",
+			manifest: manifest(capabilities),
+			delta: capabilities,
+			existingGrants: [],
+			heldGrants: [],
+			...extra,
+		},
+		session: { chainId: "1" },
+	})
+	const mountWindow = async (payload: unknown) => {
+		payloadToLoad = payload
+		resolveInteractionMock.mockClear()
+		w = mount(Capabilities, {
+			global: {
+				stubs: {
+					...STUBS,
+					CapabilityCard: false,
+					AccountSelectRow: false,
+					CapabilityDetailPanel: {
+						props: ["capability", "granted"],
+						template: '<div data-detail-panel :data-cap="JSON.stringify(capability)" />',
+					},
+				},
+			},
+		})
+		await completeInit()
+	}
+	const shown = (granted: boolean) =>
+		w!
+			.findAll('[data-testid="cap-item"]')
+			.filter((c) => !(c.attributes("style") ?? "").includes("display: none"))
+			.filter((c) => (c.attributes("data-cap-granted") === "true") === granted)
+	const rowKeys = (granted: boolean) => shown(granted).map((c) => c.attributes("data-cap-row"))
+	const card = (row: string, granted = false) => {
+		const found = shown(granted).find((c) => c.attributes("data-cap-row") === row)
+		if (!found) throw new Error(`no ${granted ? "granted" : "new"} card for ${row}`)
+		return found
+	}
+	const toggleOf = (row: string) => card(row).find('[data-testid="cap-toggle"]')
+	const approve = async () => {
+		await (w!.vm as unknown as { approve: () => Promise<void> }).approve()
+		await flushPromises()
+		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
+		return (resolveInteractionMock.mock.calls[0] as unknown as [string, Record<string, unknown>])[1]
+	}
+
+	test("transaction: authorizations start Off with the broad line, and the answer says so", async () => {
+		const simulation = { type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } }
+		await mountWindow(firstRequest([authwitAccounts, txAny, simulation], { availableAccounts: [ALICE] }))
+		expect(rowKeys(false)).toEqual(["authorizations", "transaction", "simulation"])
+		const authorizations = card("authorizations")
+		expect(authorizations.attributes("data-cap-id")).toBe("accounts")
+		expect(authorizations.text()).toContain("Act for you in transactions you approve")
+		expect(authorizations.text()).toContain("You confirm each authorization first. Off because it listed any contract.")
+		expect(toggleOf("authorizations").attributes("aria-checked")).toBe("false")
+		expect(toggleOf("transaction").exists()).toBe(false)
+		expect(await approve()).toEqual({
+			granted: [authwitAccounts, txAny, simulation],
+			selectedAccounts: [ALICE_CAIP],
+			accountAliases: { [ALICE_CAIP]: "Alice" },
+			authorizationsWithoutAsking: false,
+		})
+	})
+
+	test("transaction-listed: authorizations start On with the narrow line", async () => {
+		const simulation = { type: "simulation", transactions: { scope: listed } }
+		const contracts = { type: "contracts", contracts: [TOKEN], canRegister: true, canGetMetadata: true }
+		await mountWindow(firstRequest([authwitAccounts, txListed, simulation, contracts], { availableAccounts: [ALICE] }))
+		expect(card("authorizations").text()).toContain("Nulo signs its authorizations without asking.")
+		expect(toggleOf("authorizations").attributes("aria-checked")).toBe("true")
+		expect(await approve()).toEqual({
+			granted: [authwitAccounts, txListed, simulation, contracts],
+			selectedAccounts: [ALICE_CAIP],
+			accountAliases: { [ALICE_CAIP]: "Alice" },
+			authorizationsWithoutAsking: true,
+		})
+	})
+
+	test("the switch flips the card's line and the answer", async () => {
+		await mountWindow(firstRequest([authwitAccounts, txAny], { availableAccounts: [ALICE] }))
+		await toggleOf("authorizations").trigger("click")
+		expect(card("authorizations").text()).toContain("For any call, on any contract.")
+		expect(toggleOf("authorizations").attributes("aria-checked")).toBe("true")
+		expect((await approve()).authorizationsWithoutAsking).toBe(true)
+	})
+
+	test("data: two cards, each detail panel holding only its half; any contract starts Off", async () => {
+		await mountWindow(firstRequest([{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }, contractsAny]))
+		expect(rowKeys(false)).toEqual(["address-book", "private-events", "contracts"])
+		const book = card("address-book")
+		expect(book.attributes("data-cap-id")).toBe("data")
+		expect(book.text()).toContain("See your address book")
+		expect(book.text()).toContain("Every name and address you saved.")
+		expect(toggleOf("address-book").attributes("aria-label")).toBe("Share address book")
+		const events = card("private-events")
+		expect(events.text()).toContain("See private events from any contract")
+		expect(events.text()).toContain("Not shared. The app may ask again later.")
+		expect(toggleOf("private-events").attributes("aria-checked")).toBe("false")
+		await book.find('[data-testid="cap-detail-toggle"]').trigger("click")
+		expect(JSON.parse(card("address-book").find("[data-detail-panel]").attributes("data-cap") ?? "null")).toEqual({
+			type: "data",
+			addressBook: true,
+		})
+		expect(await approve()).toEqual({ granted: [{ type: "data", addressBook: true }, contractsAny] })
+	})
+
+	test("data: both rows Off never sends a data grant", async () => {
+		await mountWindow(firstRequest([{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }, contractsAny]))
+		await toggleOf("address-book").trigger("click")
+		expect(await approve()).toEqual({ granted: [contractsAny] })
+	})
+
+	test("data on listed contracts: both halves On; private events switched Off keeps the address book", async () => {
+		await mountWindow(firstRequest([{ type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }, contractsAny]))
+		expect(card("private-events").text()).toContain("See private events from its contracts")
+		expect(card("private-events").text()).toContain(
+			"Private messages its contracts sent to your accounts, like a transfer you received.",
+		)
+		expect(toggleOf("private-events").attributes("aria-checked")).toBe("true")
+		await toggleOf("private-events").trigger("click")
+		expect(await approve()).toEqual({ granted: [{ type: "data", addressBook: true }, contractsAny] })
+	})
+
+	test("a membership-only accounts widening: the held authorizations card, no switch, no consent sent", async () => {
+		const BOB = { address: `0x${"0b".repeat(32)}`, name: "Bob", chainId: 1 }
+		const BOB_CAIP = `aztec:1:${BOB.address}`
+		const held = [authwitAccounts, txListed]
+		await mountWindow({
+			params: {
+				sessionId: "s1",
+				manifest: manifest(held),
+				delta: [authwitAccounts],
+				existingGrants: held,
+				heldGrants: held,
+				authorizationsWithoutAsking: { broad: false },
+				availableAccounts: [ALICE, BOB],
+				grantedAccounts: [ALICE.address],
+				accountsMembershipOnly: true,
+			},
+			session: { chainId: "1" },
+		})
+		expect(rowKeys(false)).toEqual([])
+		expect(rowKeys(true)).toEqual(["authorizations", "account-address", "transaction"])
+		expect(card("authorizations", true).text()).toContain("Nulo signs its authorizations without asking.")
+		expect(w!.findAll('[data-testid="cap-toggle"]')).toHaveLength(0)
+		await w!.findAll('[data-testid="cap-account-item"]')[1].trigger("click")
+		const answer = await approve()
+		expect(answer).toEqual({
+			granted: [authwitAccounts, txListed],
+			selectedAccounts: [ALICE_CAIP, BOB_CAIP],
+			accountAliases: { [ALICE_CAIP]: "Alice", [BOB_CAIP]: "Bob" },
+		})
+		expect(answer).not.toHaveProperty("authorizationsWithoutAsking")
+	})
+
+	test("a Settings change after dispatch: the defaults follow the snapshot, not the session", async () => {
+		const held = [{ type: "accounts", canGet: false, canCreateAuthWit: true }, txListed]
+		await mountWindow({
+			params: {
+				sessionId: "s1",
+				manifest: manifest([authwitAccounts, txListed]),
+				delta: [authwitAccounts],
+				existingGrants: held,
+				heldGrants: held,
+				authorizationsWithoutAsking: { broad: false },
+				availableAccounts: [ALICE],
+				grantedAccounts: [ALICE.address],
+			},
+			// Re-read after the snapshot: Settings has since turned the consent off.
+			session: { chainId: "1", authorizationsWithoutAsking: undefined, capabilityGrants: [] },
+		})
+		expect(toggleOf("authorizations").attributes("aria-checked")).toBe("true")
+		expect(await approve()).toEqual({
+			granted: [authwitAccounts, txListed],
+			selectedAccounts: [ALICE_CAIP],
+			accountAliases: { [ALICE_CAIP]: "Alice" },
+			authorizationsWithoutAsking: true,
+		})
+	})
+
+	test("a data re-request after a declined widening: private events new and badged, the address book held", async () => {
+		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
+		const asked = { type: "data", addressBook: true, privateEvents: { contracts: "*" } }
+		await mountWindow({
+			params: {
+				sessionId: "s1",
+				manifest: manifest([asked, contractsAny]),
+				delta: [asked],
+				// The stored rejection drops `data` from the echo list, never from the held grants.
+				existingGrants: [contractsAny],
+				heldGrants: [contractsAny, heldData],
+				reRequested: ["data"],
+			},
+			session: { chainId: "1" },
+		})
+		expect(rowKeys(false)).toEqual(["private-events"])
+		expect(toggleOf("private-events").attributes("aria-checked")).toBe("false")
+		expect(card("private-events").find('[data-testid="cap-rerequested-badge"]').exists()).toBe(true)
+		expect(rowKeys(true)).toEqual(["contracts", "address-book"])
+		expect(card("address-book", true).find('[data-testid="cap-rerequested-badge"]').exists()).toBe(false)
+		expect(await approve()).toEqual({ granted: [contractsAny] })
+	})
+
+	test("a transaction widening with a held data record: one address-book and one private-events card", async () => {
+		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
+		await mountWindow({
+			params: {
+				sessionId: "s1",
+				manifest: manifest([txAny, heldData]),
+				delta: [txAny],
+				existingGrants: [heldData],
+				heldGrants: [heldData],
+			},
+			session: { chainId: "1" },
+		})
+		expect(rowKeys(false)).toEqual(["transaction"])
+		expect(rowKeys(true)).toEqual(["address-book", "private-events"])
+		expect(await approve()).toEqual({ granted: [txAny, heldData] })
 	})
 })
