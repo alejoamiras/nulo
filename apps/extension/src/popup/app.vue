@@ -498,8 +498,12 @@ onBeforeUnmount(() => {
 	position: relative;
 
 	/* Clip, not hidden: focus and scrollIntoView scroll a hidden box, so content a pixel past the
-	   popup's edge would shift the whole frame by it, with no way to scroll it back. */
+	   popup's edge would shift the whole frame by it, with no way to scroll it back. A clip box is
+	   no scroll container, so as a flex item its minimum size would follow its content without the
+	   zero minimums hidden implied, and one unbreakable line could set its width. */
 	overflow: clip;
+	min-width: 0;
+	min-height: 0;
 }
 
 .retry {
