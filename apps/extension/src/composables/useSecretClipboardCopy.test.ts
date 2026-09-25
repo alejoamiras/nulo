@@ -31,13 +31,13 @@ describe("useSecretClipboardCopy", () => {
 		expect(openToast).not.toHaveBeenCalled() // premature success toast would fail here
 		resolveWrite()
 		await flush()
-		expect(openToast).toHaveBeenCalledWith({ label: "Key is copied", icon: "copy" })
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Key is copied" })
 	})
 
 	test("success: toast carries the configured label after the write settles", async () => {
 		make().copySecret("s")
 		await flush()
-		expect(openToast).toHaveBeenCalledWith({ label: "Key is copied", icon: "copy" })
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Key is copied" })
 	})
 
 	test("failure: honest warning toast — never a false 'copied'", async () => {
@@ -45,7 +45,7 @@ describe("useSecretClipboardCopy", () => {
 		make().copySecret("s")
 		await flush()
 		expect(openToast).toHaveBeenCalledTimes(1)
-		expect(openToast).toHaveBeenCalledWith({ label: "Couldn't copy", icon: "warning" }, 3_000)
+		expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Couldn't copy" })
 	})
 
 	test("flash starts regardless of outcome and resets after 2.5s", async () => {

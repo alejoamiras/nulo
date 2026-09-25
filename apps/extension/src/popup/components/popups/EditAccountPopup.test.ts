@@ -18,7 +18,6 @@ const appStoreState = {
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 vi.mock("@/stores/app.store", () => ({
 	useAppStore: () => appStoreState,

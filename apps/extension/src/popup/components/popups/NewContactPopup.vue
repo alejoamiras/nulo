@@ -10,7 +10,7 @@ import ProcessingErrorNote from "@/components/composite/ProcessingErrorNote.vue"
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -111,7 +111,7 @@ const handleAddContact = async () => {
 		await contactService.addContact(nameTerm.value.trim(), contactAddressTerm.value.toLowerCase())
 
 		emit("onClose")
-		openToast({ label: "Contact is added" })
+		openToast({ kind: "success", label: "Contact is added" })
 	} catch (err) {
 		processingError.value = {
 			show: true,
@@ -119,7 +119,7 @@ const handleAddContact = async () => {
 			tooltip: err,
 		}
 
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 	} finally {
 		isLoading.value = false
 	}

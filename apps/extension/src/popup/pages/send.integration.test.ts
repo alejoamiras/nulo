@@ -119,7 +119,6 @@ vi.mock("@/utils/core", () => ({
 }))
 vi.mock("@/composables/toast.js", () => ({
 	useToast: () => ({ openToast: mocks.openToast }),
-	TOAST_DURATION: { DEFAULT: 2000, LONG: 4000 },
 }))
 const route = reactive({ name: "popup-send", path: "/popup/send", query: {} as Record<string, string>, meta: {} })
 vi.mock("vue-router", () => ({
@@ -400,7 +399,7 @@ describe("send page with the real fee card — transitions", () => {
 
 		fpcEvents.onFpcDeleted.invoke(SPONSOR)
 		await nextTick()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: "Selected FPC was deleted" })
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "success", label: "Selected FPC was deleted" })
 		expect(feeTrigger(w)).toBe("public")
 		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
 		await submit(w).trigger("click")

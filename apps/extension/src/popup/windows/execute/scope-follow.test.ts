@@ -75,7 +75,6 @@ vi.mock("@/composables/useFeeEstimationMap", () => ({
 }))
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: vi.fn() }),
-	TOAST_DURATION: { SHORT: 2000, LONG: 5000 },
 }))
 vi.mock("@/utils/core", () => ({
 	requireNetwork: () => ({ setActiveNetwork: setActiveNetworkMock, getActiveNetwork: getActiveNetworkMock }),

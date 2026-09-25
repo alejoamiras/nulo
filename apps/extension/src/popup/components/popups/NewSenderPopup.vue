@@ -68,7 +68,7 @@ const handleAddSender = async () => {
 	try {
 		await accountStateClientService.addSender(appStore.network.id, senderAddress.value)
 		emit("onClose")
-		openToast({ label: "Sender is added" })
+		openToast({ kind: "success", label: "Sender is added" })
 	} catch (err) {
 		fillError("error", "Failed to add sender", err)
 	} finally {

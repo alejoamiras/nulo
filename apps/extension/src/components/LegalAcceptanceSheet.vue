@@ -47,7 +47,7 @@ const handleAccept = async () => {
 	try {
 		await legal.accept("popup")
 	} catch {
-		openToast({ label: "Could not record your acceptance. Try again.", icon: "warning", color: "red" }, 4_000)
+		openToast({ kind: "error", label: "Could not record your acceptance. Try again." })
 	} finally {
 		busy.value = false
 	}

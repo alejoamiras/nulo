@@ -36,7 +36,7 @@ const handleSelectAccount = async (acc) => {
 	// until it settles; cancelling it also clears this.
 	const switched = await appStore.commitScopeChange(() => appStore.selectAccount(acc))
 	if (!switched) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		return
 	}
 

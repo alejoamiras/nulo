@@ -203,7 +203,7 @@ async function loadOp() {
 
 function onOperationDeleted(deleted) {
 	if (deleted.id === idFromRoute.value) {
-		openToast({ label: "Record removed", icon: "info" })
+		openToast({ kind: "success", label: "Record removed" })
 		router.replace("/popup/activity")
 	}
 }

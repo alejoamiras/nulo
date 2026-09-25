@@ -152,7 +152,7 @@ const onActiveProfileChanged = async (profile) => {
 				appStore.bootstrapFailure = record
 			},
 			shouldToast: () => !appStore.isLogined || appStore.profile?.id === profile.id,
-			toast: () => openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG),
+			toast: () => openToast({ kind: "error", label: "Something went wrong" }),
 		})
 		return
 	}
@@ -191,7 +191,7 @@ const enterLockedState = (profiles) => {
  *  service deliberately does NOT block the profile (export must stay reachable); this toast and the
  *  Home banner (`ProfileInfo.recoveryMode`) are the signals. */
 const onImportedKeysDegraded = () => {
-	openToast({ label: "Wallet keys need recovery — export a backup and restore it", icon: "warning" }, TOAST_DURATION.LONG)
+	openToast({ kind: "error", label: "Wallet keys need recovery — export a backup and restore it" })
 }
 
 /** How the boot-time session check ended when it could NOT decide: "unreachable" (the service
@@ -408,7 +408,6 @@ onBeforeUnmount(() => {
 		<div id="tooltip" />
 		<div id="dropdown" />
 		<div id="popover" />
-		<div id="toast" />
 
 		<div>
 			<PopupManager />
@@ -440,6 +439,8 @@ onBeforeUnmount(() => {
 		</RouterView>
 
 		<Navigation v-if="$route.meta.showBottomNav" />
+
+		<div id="toast" />
 	</Flex>
 </template>
 

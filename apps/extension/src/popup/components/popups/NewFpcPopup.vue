@@ -7,7 +7,7 @@ import { isValidHex } from "@/utils/string"
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -74,14 +74,14 @@ const handleAddFpc = async () => {
 	try {
 		await fpcService.addFpc(appStore.network.id, FpcType.DefaultSponsoredFpc, fpcAddressTerm.value, nameTerm.value)
 		emit("onClose")
-		openToast({ label: "FPC is added" })
+		openToast({ kind: "success", label: "FPC is added" })
 	} catch (err) {
 		processingError.value = {
 			show: true,
 			title: "Failed to add FPC.",
 			tooltip: err,
 		}
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 	} finally {
 		isLoading.value = false
 	}

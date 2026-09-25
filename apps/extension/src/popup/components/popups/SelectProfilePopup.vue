@@ -53,7 +53,7 @@ const handleSelectProfile = async (profile) => {
 			appStore.profile = profile
 		})
 		if (!switched) {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 			return
 		}
 		await setLastActiveProfileId(profile.id)

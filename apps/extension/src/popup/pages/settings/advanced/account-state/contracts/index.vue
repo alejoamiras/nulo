@@ -31,7 +31,7 @@ const isFetchingContracts = ref(false)
 const error = ref()
 const isErrorOccurred = computed(() => !!error.value)
 const fetchContracts = async (isRefetching) => {
-	if (isRefetching) openToast({ label: "Fetching contracts again", icon: "zap" })
+	if (isRefetching) openToast({ kind: "success", label: "Fetching contracts again" })
 	isFetchingContracts.value = true
 
 	try {

@@ -26,7 +26,6 @@ const cacheStoreState: {
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 vi.mock("@/utils", () => ({
 	FileTooLargeError: class FileTooLargeError extends Error {},
@@ -117,7 +116,7 @@ describe("importContacts — selection gate", () => {
 		expect(trace).toEqual(["open:import_contacts:controls-ready:2"])
 		cacheStoreState.importPromise?.resolve([...(cacheStoreState.importContacts as never[])])
 		await done
-		expect(openToastMock).toHaveBeenLastCalledWith({ label: "Contacts imported · 2 senders registered", icon: "info" })
+		expect(openToastMock).toHaveBeenLastCalledWith({ kind: "success", label: "Contacts imported · 2 senders registered" })
 	})
 })
 
@@ -145,7 +144,7 @@ describe("importContacts — per-row order and early exits", () => {
 		expect(trace).toEqual(["add:A:rejected", "sender:A", "add:B", "sender:B"])
 		expect(services.accountStateService.addSender).toHaveBeenCalledTimes(2)
 		// Contact errors win the toast and are logged with the ORIGINAL error object.
-		expect(openToastMock).toHaveBeenLastCalledWith({ label: "Import ended with errors", icon: "warning" }, 4000)
+		expect(openToastMock).toHaveBeenLastCalledWith({ kind: "error", label: "Import ended with errors" })
 		expect(console.error).toHaveBeenCalledWith("Failed to create a contact", expect.objectContaining({ message: "row A failed" }))
 	})
 
@@ -203,7 +202,7 @@ describe("importContacts — sender-failure toasts", () => {
 		await untilSelectionGate()
 		cacheStoreState.importPromise?.resolve([...(cacheStoreState.importContacts as never[])])
 		await done
-		expect(openToastMock).toHaveBeenLastCalledWith({ label: "Contacts imported · 1 of 2 senders registered", icon: "warning" }, 4000)
+		expect(openToastMock).toHaveBeenLastCalledWith({ kind: "error", label: "Contacts imported · 1 of 2 senders registered" })
 	})
 
 	test("total sender failure: `sender registration failed` (warning)", async () => {
@@ -214,6 +213,6 @@ describe("importContacts — sender-failure toasts", () => {
 		await untilSelectionGate()
 		cacheStoreState.importPromise?.resolve([...(cacheStoreState.importContacts as never[])])
 		await done
-		expect(openToastMock).toHaveBeenLastCalledWith({ label: "Contacts imported · sender registration failed", icon: "warning" }, 4000)
+		expect(openToastMock).toHaveBeenLastCalledWith({ kind: "error", label: "Contacts imported · sender registration failed" })
 	})
 })

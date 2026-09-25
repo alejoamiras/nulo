@@ -1,5 +1,5 @@
 import type { Ref } from "vue"
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { FileTooLargeError, downloadFile, pickFile, sanitizeString } from "@/utils"
 import { MAX_CONTACT_IMPORT_BYTES, parseContactsExport } from "@/utils/contacts-export-format"
 import type { AccountStateServiceClient } from "@/wallet/services/account-state/client"
@@ -99,10 +99,10 @@ async function exportContacts(deps: ContactIoDeps): Promise<void> {
 
 		try {
 			await downloadFile({ data: JSON.stringify(exportPayload, null, 2), filename })
-			openToast({ label: "Contacts exported successfully", icon: "download" })
+			openToast({ kind: "success", label: "Contacts exported successfully" })
 		} catch (err) {
 			console.error("Export failed:", (err as Error)?.message || err)
-			openToast({ label: "Failed to export contacts", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Failed to export contacts" })
 		}
 	} catch (err) {
 		console.error(err)
@@ -124,7 +124,7 @@ async function importContacts(deps: ContactIoDeps): Promise<void> {
 		// UTF-16 code units, so a heavily multi-byte file could otherwise
 		// exceed the advertised ceiling before the parser sees it.
 		if (file.size > MAX_CONTACT_IMPORT_BYTES) {
-			openToast({ label: "Contacts file is too large", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Contacts file is too large" })
 			return
 		}
 
@@ -133,7 +133,7 @@ async function importContacts(deps: ContactIoDeps): Promise<void> {
 		const importedContacts = normalizeImportRows(rawContacts)
 
 		if (!importedContacts?.length) {
-			openToast({ label: "No contacts found in file", icon: "info" })
+			openToast({ kind: "error", label: "No contacts found in file" })
 			return
 		}
 
@@ -141,12 +141,12 @@ async function importContacts(deps: ContactIoDeps): Promise<void> {
 		try {
 			res = await openImportSelection(cacheStore, popupStore, importedContacts)
 		} catch {
-			openToast({ label: "Contact import canceled", icon: "info" })
+			openToast({ kind: "success", label: "Contact import canceled" })
 			return
 		}
 
 		if (!res.length) {
-			openToast({ label: "No contacts selected for import", icon: "info" })
+			openToast({ kind: "error", label: "No contacts selected for import" })
 			return
 		}
 
@@ -154,11 +154,11 @@ async function importContacts(deps: ContactIoDeps): Promise<void> {
 		toastImportOutcome(openToast, tally)
 	} catch (err) {
 		if (err instanceof FileTooLargeError) {
-			openToast({ label: "Contacts file is too large", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Contacts file is too large" })
 			return
 		}
 		console.error("Error occurred during import", (err as Error)?.message || (err as Error)?.stack || err)
-		openToast({ label: "Error occurred during import", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Error occurred during import" })
 	} finally {
 		cacheStore.importContacts = []
 		cacheStore.importPromise = null
@@ -283,7 +283,7 @@ function toastImportOutcome(openToast: ContactIoDeps["openToast"], tally: Import
 			// diagnosis, and the toast below already tells the user the import had failures.
 			console.error(`Failed to ${e.operation} a contact`, e.error)
 		}
-		openToast({ label: "Import ended with errors", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Import ended with errors" })
 	} else if (senderTotal > 0 && senderOk < senderTotal) {
 		// "Skipped" ≠ "failed": the no-network case was announced as a
 		// skip by the import banner — the toast must say the same thing.
@@ -293,10 +293,10 @@ function toastImportOutcome(openToast: ContactIoDeps["openToast"], tally: Import
 			: senderOk === 0
 				? "sender registration failed"
 				: `${senderOk} of ${senderTotal} senders registered`
-		openToast({ label: `Contacts imported · ${detail}`, icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: `Contacts imported · ${detail}` })
 	} else if (senderTotal > 0) {
-		openToast({ label: `Contacts imported · ${senderOk} ${senderOk === 1 ? "sender" : "senders"} registered`, icon: "info" })
+		openToast({ kind: "success", label: `Contacts imported · ${senderOk} ${senderOk === 1 ? "sender" : "senders"} registered` })
 	} else {
-		openToast({ label: "Import completed successfully", icon: "info" })
+		openToast({ kind: "success", label: "Import completed successfully" })
 	}
 }

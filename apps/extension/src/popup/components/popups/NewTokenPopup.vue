@@ -12,7 +12,7 @@ import { isValidHex } from "@/utils/string"
 import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
 import { usePopupEntity } from "@/composables/usePopupEntity"
-const { openToast, TOAST_DURATION } = useToast()
+const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -208,7 +208,7 @@ const handleAddToken = async () => {
 		// Chain mismatch — no TB for this account will ever be created on this chain.
 		if (newToken.chainId !== submittingChainId) {
 			balanceWait.abort()
-			openToast({ label: "Token added" })
+			openToast({ kind: "success", label: "Token added" })
 			emit("onClose")
 			return
 		}
@@ -219,7 +219,7 @@ const handleAddToken = async () => {
 		const existing = await tokenBalanceService.getTokenBalances(newToken.id, submittingAccount)
 		if (existing.length > 0 && (existing[0].updatedAt ?? 0) > 0) {
 			balanceWait.abort()
-			openToast({ label: "Token added" })
+			openToast({ kind: "success", label: "Token added" })
 			emit("onClose")
 			return
 		}
@@ -236,18 +236,15 @@ const handleAddToken = async () => {
 
 		switch (outcome) {
 			case "success":
-				openToast({ label: "Token added" })
+				openToast({ kind: "success", label: "Token added" })
 				emit("onClose")
 				break
 			case "timeout":
-				openToast({ label: "Token added — balance will appear in a moment" }, TOAST_DURATION.LONG)
+				openToast({ kind: "success", label: "Token added — balance will appear in a moment" })
 				emit("onClose")
 				break
 			case "error":
-				openToast(
-					{ label: "Token added. Couldn't load balance — we'll retry automatically.", icon: "warning" },
-					TOAST_DURATION.LONG,
-				)
+				openToast({ kind: "success", label: "Token added. Couldn't load balance — we'll retry automatically." })
 				emit("onClose")
 				break
 			case "aborted":

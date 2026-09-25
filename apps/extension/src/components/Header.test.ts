@@ -114,7 +114,7 @@ describe("Header — avatar/name/address split", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalledWith(FULL_ADDRESS)
-		expect(H.openToast).toHaveBeenCalledWith({ label: "Address is copied", icon: "copy" }, undefined)
+		expect(H.openToast).toHaveBeenCalledWith({ kind: "success", label: "Address is copied" })
 		expect(H.openPopup).not.toHaveBeenCalled() // copying never opens the switcher
 	})
 

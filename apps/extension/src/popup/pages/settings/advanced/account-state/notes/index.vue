@@ -110,7 +110,7 @@ const filteredDisplayNotes = computed(() => {
 })
 
 const fetchNotes = async (isRefetching) => {
-	if (isRefetching) openToast({ label: "Fetching notes again", icon: "zap" })
+	if (isRefetching) openToast({ kind: "success", label: "Fetching notes again" })
 	isFetchingNotes.value = true
 	error.value = undefined
 

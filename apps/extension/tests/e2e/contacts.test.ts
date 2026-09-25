@@ -110,10 +110,7 @@ test("edit contact name", async ({ registeredExtension }) => {
 	expect(registeredExtension.pageErrors).toEqual([])
 })
 
-// SKIP: pre-existing smoke flake (documented in
-// wallets-architecture-research/nulo/self-analysis.md:427 — popup-internal
-// waitForToast race). Un-skip when the toast-wait helper is hardened.
-test.skip("delete contact", async ({ registeredExtension }) => {
+test("delete contact", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 

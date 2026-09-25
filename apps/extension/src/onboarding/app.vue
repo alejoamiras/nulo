@@ -80,7 +80,6 @@ onMounted(async () => {
 		<div id="tooltip" />
 		<div id="dropdown" />
 		<div id="popover" />
-		<div id="toast" />
 
 		<PopupManager />
 		<ToastManager />
@@ -99,6 +98,8 @@ onMounted(async () => {
 		<RouterView v-slot="{ Component }">
 			<component :is="Component" />
 		</RouterView>
+
+		<div id="toast" />
 	</main>
 </template>
 

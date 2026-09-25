@@ -102,7 +102,7 @@ function onTokenDeleted(token) {
 		return
 	}
 
-	openToast({ label: "The last token has just been deleted" })
+	openToast({ kind: "success", label: "The last token has just been deleted" })
 
 	leaveSend()
 }
@@ -335,7 +335,7 @@ const {
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
-		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Couldn't estimate fee — retry." })
 	},
 })
 const isSending = ref(false)

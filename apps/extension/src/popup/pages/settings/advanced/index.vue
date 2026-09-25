@@ -103,7 +103,7 @@ async function updateSetting(key, value) {
 		await configService.setValue(key, value)
 		applySetting(key, value)
 	} catch (err) {
-		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update setting" })
 	}
 }
 
@@ -119,7 +119,7 @@ async function applySetting(key, value) {
 			break
 
 		case "defaultExplorer":
-			openToast({ label: "Default explorer updated", icon: "info" }, TOAST_DURATION.SHORT)
+			openToast({ kind: "success", label: "Default explorer updated" })
 			break
 
 		default:

@@ -28,7 +28,6 @@ const cacheStoreState: {
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 vi.mock("@/utils", () => ({
 	downloadFile: vi.fn(),
@@ -112,7 +111,7 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		expect(accountStateService.addSender).toHaveBeenCalledTimes(1)
 		expect(accountStateService.addSender).toHaveBeenCalledWith("net-1", ADDR_A)
 		expect(accountStateService.deleteSender).not.toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Contacts imported · 1 sender registered", icon: "info" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Contacts imported · 1 sender registered" })
 	})
 
 	test("merge-by-name address swap NEVER unregisters the old address (adds-only pin)", async () => {
@@ -142,10 +141,10 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		expect(contactService.addContact).toHaveBeenCalledTimes(1)
 		expect(accountStateService.addSender).not.toHaveBeenCalled()
 		// "Skipped", not "failed" — matches the popup banner's promise.
-		expect(openToastMock).toHaveBeenCalledWith(
-			{ label: "Contacts imported · sender registrations skipped (no active network)", icon: "warning" },
-			expect.anything(),
-		)
+		expect(openToastMock).toHaveBeenCalledWith({
+			kind: "error",
+			label: "Contacts imported · sender registrations skipped (no active network)",
+		})
 	})
 
 	test("duplicate addresses in the file are deduped (first row wins) before any service call", async () => {
@@ -241,7 +240,7 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		await runImport(api)
 
 		expect(accountStateService.addSender).toHaveBeenCalledWith("net-1", ADDR_A)
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Import ended with errors", icon: "warning" }, expect.anything())
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "error", label: "Import ended with errors" })
 	})
 
 	test("an oversized file is rejected by byte size before it is read", async () => {
@@ -257,7 +256,7 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		await api.importContacts()
 
 		expect(contactService.addContact).not.toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Contacts file is too large", icon: "warning" }, expect.anything())
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "error", label: "Contacts file is too large" })
 	})
 
 	test("a sender-free import toasts plain success", async () => {
@@ -269,7 +268,7 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 
 		expect(contactService.addContact).toHaveBeenCalledTimes(1)
 		expect(accountStateService.addSender).not.toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Import completed successfully", icon: "info" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Import completed successfully" })
 	})
 })
 

@@ -61,7 +61,7 @@ const handleCreateAccount = async () => {
 	// Creating an account SELECTS it, so it changes the active account exactly
 	// like a switch does — and a send in flight is still reading that.
 	if (appStore.hasInFlightSend) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		return
 	}
 
@@ -81,7 +81,7 @@ const handleCreateAccount = async () => {
 			appStore.account = account
 		})
 		if (!selected) {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 			emit("onClose")
 			return
 		}
