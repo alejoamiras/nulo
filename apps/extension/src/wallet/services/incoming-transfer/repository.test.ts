@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { IncomingPublicEventRecord } from "./spec"
 import { publicRecordId } from "./spec"
@@ -87,6 +87,22 @@ describe("IncomingTransferRepository — arrival floors and rows", () => {
 		api.reset()
 		return { api, repo: new IncomingTransferRepository(api) }
 	}
+
+	test("a fence that turns false while setTrust reads the stored row writes nothing", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const repo = new IncomingTransferRepository(api)
+		const read = repo.getTrust.bind(repo)
+		let owned = true
+		vi.spyOn(repo, "getTrust").mockImplementationOnce(async (...args) => {
+			const out = await read(...args)
+			owned = false
+			return out
+		})
+
+		expect(await repo.setTrust("p1", "n1", "0xtok", "trusted", () => owned)).toBeUndefined()
+		expect(await read("p1", "n1", "0xtok")).toBeUndefined()
+	})
 
 	test("a trust state change keeps the stored arrival floor and its pending mark", async () => {
 		const { repo } = freshRepo()

@@ -112,8 +112,24 @@ export class IncomingTransferRepository {
 	}
 
 	/** A state change keeps the stored arrival floor: a floor that moved with the state could fall. */
-	public async setTrust(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<IncomingTrustRecord> {
+	public async setTrust(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<IncomingTrustRecord>
+	/** With a `fence`: read after the stored row is, and false writes nothing and returns undefined. */
+	public async setTrust(
+		profileId: string,
+		networkId: string,
+		contract: string,
+		state: IncomingTrustState,
+		fence?: () => boolean,
+	): Promise<IncomingTrustRecord | undefined>
+	public async setTrust(
+		profileId: string,
+		networkId: string,
+		contract: string,
+		state: IncomingTrustState,
+		fence?: () => boolean,
+	): Promise<IncomingTrustRecord | undefined> {
 		const stored = await this.getTrust(profileId, networkId, contract)
+		if (fence && !fence()) return undefined
 		const record: IncomingTrustRecord = { profileId, networkId, contract, state, updatedAt: Date.now() }
 		if (stored?.arrivalFloor !== undefined) record.arrivalFloor = stored.arrivalFloor
 		if (stored?.arrivalFloorPending) record.arrivalFloorPending = true

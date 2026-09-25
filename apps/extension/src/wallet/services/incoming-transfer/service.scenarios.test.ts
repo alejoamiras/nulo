@@ -89,8 +89,9 @@ vi.mock("./repository", () => ({
 				listByContract: async (p: string, n: string, c: string) =>
 					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.contract === c),
 				getTrust: async (p: string, n: string, c: string) => trust.get(trustKey(p, n, c)),
-				// Keeps the stored floor fields, as the real repository does.
-				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState) => {
+				// Keeps the stored floor fields and reads the fence after its own read, as the real one does.
+				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState, fence?: () => boolean) => {
+					if (fence && !fence()) return undefined
 					const { arrivalFloor, arrivalFloorPending } = trust.get(trustKey(p, n, c)) ?? {}
 					const rec: IncomingTrustRecord = { profileId: p, networkId: n, contract: c, state, updatedAt: 0 }
 					if (arrivalFloor !== undefined) rec.arrivalFloor = arrivalFloor
@@ -4715,6 +4716,8 @@ type ArrivalInternals = {
 	onAccountAdded: (account: { chainId: number; address: string }) => Promise<void>
 	onAccountDeleted: (account: { profileId: string; chainId: number; address: string }) => Promise<void>
 	repo: {
+		getTrust: (p: string, n: string, c: string) => Promise<IncomingTrustRecord | undefined>
+		setTrust: (...args: unknown[]) => Promise<IncomingTrustRecord | undefined>
 		getArrivalRow: (p: string, n: string, a: string) => Promise<ArrivalRow | undefined>
 		getRecord: (id: string) => Promise<IncomingTransferRecord | undefined>
 		setCursor: (...args: unknown[]) => Promise<void>
@@ -4947,6 +4950,72 @@ describe("IncomingTransferService — arrival floors", () => {
 		expect(isArrivalEligible(onB, stateB)).toBe(false)
 		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 46 }), stateA)).toBe(true)
 		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 46, accountAddress: "0xb" }), stateB)).toBe(true)
+	})
+})
+
+/** Holds the `nth` call of `obj[method]` until `release`: a read computes its answer first, so the
+ *  held caller resumes with what it saw; a write is held before it runs. */
+function holdCall(obj: object, method: string, nth: number, when: "after" | "before") {
+	const target = obj as Record<string, (...args: unknown[]) => Promise<unknown>>
+	const current = target[method]
+	const real = vi.isMockFunction(current)
+		? (current.getMockImplementation() as (...args: unknown[]) => Promise<unknown>)
+		: current.bind(obj)
+	const spy = vi.isMockFunction(current) ? current : vi.spyOn(target, method)
+	let calls = 0
+	let release!: () => void
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	const held = { reached: false }
+	spy.mockImplementation(async (...args: unknown[]) => {
+		if (++calls !== nth) return real(...args)
+		held.reached = true
+		if (when === "before") {
+			await gate
+			return real(...args)
+		}
+		const out = await real(...args)
+		await gate
+		return out
+	})
+	return { release: () => release(), held }
+}
+
+type Booted = Awaited<ReturnType<typeof bootArrivals>>
+
+describe("IncomingTransferService — a token add displaced by the watchdog while its token is deleted", () => {
+	test.each([
+		["the section's trust read", (f: Booted) => holdCall(internals(f.service).repo, "getTrust", 1, "after")],
+		["the registration's network read", (f: Booted) => holdCall(f.network, "getNetwork", 1, "after")],
+		["the registration's token read", (f: Booted) => holdCall(f.token, "getTokensRaw", 1, "after")],
+		["the trust write's own read", (f: Booted) => holdCall(internals(f.service).repo, "setTrust", 1, "before")],
+		["the floor's trust read", (f: Booted) => holdCall(internals(f.service).repo, "getTrust", 2, "after")],
+	])("a pause at %s writes neither trust nor a floor after the delete", async (_name, pause) => {
+		const fixture = await bootArrivals(100)
+		let registered = [tokenA, tokenB]
+		fixture.token.getTokensRaw.mockImplementation(async () => registered)
+		const { release, held } = pause(fixture)
+		vi.useFakeTimers()
+		try {
+			const add = internals(fixture.service).onTokenAdded(tokenAdd(tokenB))
+			await vi.advanceTimersByTimeAsync(0)
+			expect(held.reached).toBe(true)
+
+			registered = [tokenA]
+			void fixture.token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			release()
+			await add
+			await vi.advanceTimersByTimeAsync(0)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		const row = trust.get(trustKey("p1", "n1", tokenB.contract))
+		expect(row?.state).not.toBe("trusted")
+		expect(row?.arrivalFloor).toBeUndefined()
+		expect(row?.arrivalFloorPending).toBeUndefined()
 	})
 })
 
