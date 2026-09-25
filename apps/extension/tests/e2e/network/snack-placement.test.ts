@@ -217,6 +217,8 @@ test.skipIf(!hasConfig)(
 			{ timeout: 10_000, polling: 100 },
 			sel("journal-detail-state"),
 		)
+		// The card leaves over 150ms, and the journal page can load inside that.
+		await page.waitForFunction((s: string) => document.querySelector(s) === null, { timeout: 5_000, polling: 50 }, SNACK)
 		expect(await page.$(SNACK)).toBeNull()
 
 		expect(tokenReadyExtension.pageErrors).toEqual([])
