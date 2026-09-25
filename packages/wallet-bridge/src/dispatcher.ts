@@ -1520,9 +1520,8 @@ export class WalletSdkDispatcher {
 					| AccountsCapability
 					| undefined
 
-				// Honor canGet on the GRANT-RESPONSE path: the account list is returned only
-				// when the stored accounts grant has `canGet === true`, as getAccounts requires
-				// too, so a dApp that asked for `canGet: false` never receives it.
+				// Return account identities only when the stored grant permits `canGet`,
+				// matching `getAccounts`.
 				const canGet = storedAccounts?.canGet === true
 				const grantedAccounts = canGet
 					? this.projectSessionAccounts(allAccounts, sessionAddresses, ctx.chainId, dappSession.accountAliases)
