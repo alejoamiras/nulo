@@ -165,10 +165,11 @@ process.exit(0)
 
 /**
  * The wallet's sources beside the bundle: the methods the schema patch adds, and whether an
- * EncryptionKey ciphertext from either opens with the other and is refused under another AAD or
- * with a flipped byte (null = refused).
+ * EncryptionKey ciphertext from either opens with the other to the exact bytes and is refused
+ * under another AAD or with a flipped byte. Each check prints "ok" or its assertion message.
  */
-const CROSS_SCRIPT = `import { EncryptionKey as Bundled } from "@alejoamiras/nulo-wallet-crypto"
+const CROSS_SCRIPT = `import assert from "node:assert/strict"
+import { EncryptionKey as Bundled } from "@alejoamiras/nulo-wallet-crypto"
 
 const [encryptionKeySource, applySource] = process.argv.slice(2)
 const { EncryptionKey: Source } = await import(encryptionKeySource)
@@ -177,28 +178,32 @@ const fresh = {}
 applyNuloSchemaPatch(fresh)
 
 const text = new TextEncoder()
+const payload = text.encode("recovery secret")
 const aad = text.encode("nulo:recovery:v1")
+const otherAad = text.encode("nulo:other:v1")
 const source = await Source.fromPassword("correct horse battery staple")
 const bundle = await Bundled.fromPassword("correct horse battery staple")
-const opened = async (key, sealed, withAad) => {
-	try {
-		return new TextDecoder().decode(await key.decrypt(sealed, withAad))
-	} catch {
-		return null
-	}
-}
-const bySource = await source.encrypt(text.encode("recovery secret"), aad)
-const byBundle = await bundle.encrypt(text.encode("recovery secret"), aad)
+const bySource = await source.encrypt(payload, aad)
+const byBundle = await bundle.encrypt(payload, aad)
 const tampered = bySource.slice()
 tampered[tampered.length - 1] ^= 1
-const otherAad = text.encode("nulo:other:v1")
-console.log(JSON.stringify({
-	patchKeys: Object.keys(fresh),
-	sourceToBundle: await opened(bundle, bySource, aad),
-	bundleToSource: await opened(source, byBundle, aad),
-	otherAad: [await opened(source, bySource, otherAad), await opened(bundle, bySource, otherAad)],
-	tampered: [await opened(source, tampered, aad), await opened(bundle, tampered, aad)],
-}))
+
+const checks = {}
+const check = async (name, run) => {
+	try {
+		await run()
+		checks[name] = "ok"
+	} catch (error) {
+		checks[name] = String(error?.message ?? error)
+	}
+}
+await check("sourceToBundle", async () => assert.deepEqual(await bundle.decrypt(bySource, aad), payload))
+await check("bundleToSource", async () => assert.deepEqual(await source.decrypt(byBundle, aad), payload))
+for (const [who, key] of [["source", source], ["bundle", bundle]]) {
+	await check(\`\${who} refuses another AAD\`, () => assert.rejects(key.decrypt(bySource, otherAad)))
+	await check(\`\${who} refuses a flipped byte\`, () => assert.rejects(key.decrypt(tampered, aad)))
+}
+console.log(JSON.stringify({ patchKeys: Object.keys(fresh), checks }))
 process.exit(0)
 `
 
@@ -247,10 +252,7 @@ export type Checks = [
 
 interface CrossCheck {
 	patchKeys: string[]
-	sourceToBundle: string | null
-	bundleToSource: string | null
-	otherAad: (string | null)[]
-	tampered: (string | null)[]
+	checks: Record<string, string>
 }
 
 let packed: Packed[] = []
@@ -484,14 +486,20 @@ describe("an out-of-workspace consumer of the tarballs", () => {
 })
 
 describe("EncryptionKey: the bundle and the wallet's source read each other's ciphertexts", () => {
-	test("sealed by either opens with the other", () => {
-		expect({ sourceToBundle: cross.sourceToBundle, bundleToSource: cross.bundleToSource }).toEqual({
-			sourceToBundle: "recovery secret",
-			bundleToSource: "recovery secret",
+	test("sealed by either opens with the other to the exact payload bytes", () => {
+		expect({ sourceToBundle: cross.checks.sourceToBundle, bundleToSource: cross.checks.bundleToSource }).toEqual({
+			sourceToBundle: "ok",
+			bundleToSource: "ok",
 		})
 	})
 
 	test("both refuse a different AAD and a flipped ciphertext byte", () => {
-		expect({ otherAad: cross.otherAad, tampered: cross.tampered }).toEqual({ otherAad: [null, null], tampered: [null, null] })
+		const refusals = Object.fromEntries(Object.entries(cross.checks).filter(([name]) => name.includes(" refuses ")))
+		expect(refusals).toEqual({
+			"source refuses another AAD": "ok",
+			"source refuses a flipped byte": "ok",
+			"bundle refuses another AAD": "ok",
+			"bundle refuses a flipped byte": "ok",
+		})
 	})
 })
