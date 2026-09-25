@@ -73,6 +73,11 @@ absent). U11, U12 and U13A are built as drawn and listed **sign-off pending**; s
 and U16, drawn before P1 (below). A later pick replaces the drawn option on this arc, even after
 the PR opens. The picks are re-read before P2 and before P5.
 
+All six are signed off, each as drawn, so nothing changes. The owner, in chat on 2026-09-25:
+U11 (round five's item 5, "Regarding 5: Sounds good."), U14 to U16 (item 3, "Regarding 2: on
+(3)... Go with recommended."), then U12 and U13 ("for U12: (a) for U13: (a)"). The program
+plan's [sign-off record](../plan.md#the-owners-answers-2026-09-25) quotes both messages.
+
 ## UI impact
 
 Every user-visible change in this batch. "Sign-off" is the owner's pick quoted in the program's
@@ -81,26 +86,27 @@ Every user-visible change in this batch. "Sign-off" is the owner's pick quoted i
 | # | Surface | Before → after | Shot | Sign-off |
 |---|---|---|---|---|
 | 1 | Onboarding create (`onboarding/pages/create.vue`) | hero "Create / Profile" → "Create / Wallet"; "Profile name" field → none on a first profile; "Authentication method" → "How you'll unlock Nulo" (label and tablist name); CTA "Create profile" → "Create wallet" ("Create with passkey" unchanged); focus starts on the password field | `05-onboarding` | i5 A |
-| 2 | Onboarding import (`onboarding/pages/import.vue`) | hero "Import / Profile" → "Import / Wallet"; name field → none on a first profile; the profile is "Main" or the backup's own name | `05-import-U11` | **sign-off pending** (U11) |
+| 2 | Onboarding import (`onboarding/pages/import.vue`) | hero "Import / Profile" → "Import / Wallet"; name field → none on a first profile; the profile is "Main" or the backup's own name | `05-import-U11` | owner, 2026-09-25 (U11) |
 | 3 | Popup new profile and import (`popup/pages/profile/new.vue`, `popup/pages/import.vue`) | a first profile: no name field, "Main"; a later profile: the field shows, prefilled "Profile N" (N = profiles + 1); heroes and CTAs unchanged | spec item 5 rule (no shot) | i5 A |
 | 4 | Account names (every network's first account; New Account popup) | "Account" → "Account 1" (initials "A1"); New Account continues "Account 2" | `01-account-names` | i1 A |
 | 5 | Fee card and menu (popup send, dApp execute window) | "Fee Source" → "Fee"; "Sponsored Fee Juice" → "Sponsored"; "Fee Juice" → "Public Fee Juice"; "Estimated Network Fee" → "You pay" with the V4 line and its spoken text; the menu's right column shows the spend ("1.2 FJ", "free") instead of "public"/"private"/"sponsored"; the locked row "Fee Juice · set by the app" → "Public Fee Juice · set by the app"; "Available … Fee Juice" → "… FJ" | `03-fee-matrix` (V4 column), `03-fee-round1` (card and menu) | i3 V4 |
 | 6 | Home gas card (`GasBalanceCard.vue`) | "Public Juice" → "Public Fee Juice" | `07-lock-chip` (the card under the header) | i3 V4 |
 | 7 | Header lock (`components/Header.vue`) | icon-only padlock → bordered chip: padlock + "Lock", matching the network chip | `07-lock-chip` | i7 A1 |
 | 8 | Send strip (`PublishStrip.vue`) | squares → padlock (hidden) and globe (public, fee payer) | `08-privacy-strip` | i8 B |
-| 9 | Review sheet rows, fee "names your address" tag | squares → the same padlock and globe | `08-review-U12` | **sign-off pending** (U12) |
-| 10 | Strip and review sheet when the payer is unknown | faint square → no mark; the review row keeps the mark's space | `08-unknown-U13` (U13A) | **sign-off pending** (U13) |
+| 9 | Review sheet rows, fee "names your address" tag | squares → the same padlock and globe | `08-review-U12` | owner, 2026-09-25: "for U12: (a)" |
+| 10 | Strip and review sheet when the payer is unknown | faint square → no mark; the review row keeps the mark's space | `08-unknown-U13` (U13A) | owner, 2026-09-25: "for U13: (a)" |
 | 11 | Wherever the seeded sponsor's name shows (fee menu, Settings → fee contracts) | "Sponsored Fee Juice" → "Sponsored" on fresh installs | spec item 3 surfaces | i3 V4 |
-| 12 | Fee menu with an unknown balance | not known yet "— FJ"; one balance unreadable "couldn't check balance" on either row | `03-menu-unknown-U14` | **sign-off pending** (U14) |
-| 13 | Screen-reader sentence under a tenth of a cent | "…covers less than $0.001." | `03-spoken-U15` | **sign-off pending** (U15) |
-| 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing"); the menu lists Nulo's sponsor above hand-added ones, which keep their order, as the shot draws (found by P7's parity pass; the default payer is unchanged) | `03-handadded-U16` | **sign-off pending** (U16) |
+| 12 | Fee menu with an unknown balance | not known yet "— FJ"; one balance unreadable "couldn't check balance" on either row | `03-menu-unknown-U14` | owner, 2026-09-25 (U14) |
+| 13 | Screen-reader sentence under a tenth of a cent | "…covers less than $0.001." | `03-spoken-U15` | owner, 2026-09-25 (U15) |
+| 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing"); the menu lists Nulo's sponsor above hand-added ones, which keep their order, as the shot draws (found by P7's parity pass; the default payer is unchanged) | `03-handadded-U16` | owner, 2026-09-25 (U16) |
 | 15 | Fee card's app-set rows (the locked row, the embedded banner) | left label "Pay fee with" → "Fee" on both | parity row 5; the banner, no live flow (P7) | owner, 2026-09-24: "Rename to "Fee" (Recommended)", "Rename both to "Fee" (Recommended)" |
 | 16 | Review sheet fee line | "Fee · ~0.000105 FJ" → "Fee · ~0.000105 FJ (<$0.001)" when priced, the card's "You pay" words | parity row 9 | owner, 2026-09-24: "Add dollars" |
 | 17 | Review sheet fee line, a fee contract added by hand | "Fee · ~… FJ" + "paid by the sponsor" → "Fee · —", spoken as U16's sentence, no payer; Nulo's own sponsor unchanged | parity row 10 | owner, 2026-09-24: "Align with U16 (Recommended)"; follows U16's pick |
 
 Three states the shots do not draw went to the owner as round-5 additions before P1
 (the plan audit's findings 10 and 6), drawn with a picker each; the build uses the recommended
-option and lists it **sign-off pending**, per the program's round-5 rule:
+option and lists it **sign-off pending**, per the program's round-5 rule (all three since signed
+off, § Round-5 picks):
 
 | # | Surface | State | Recommended |
 |---|---|---|---|
@@ -600,8 +606,8 @@ is advisory: it cannot override the spec, the owner's picks, CLAUDE.md or this s
 - Commits: conventional, lower-case, signed; one per phase at least, fixes separate.
 - `gh stack push` as checkpoints; no PR until the program's final pass (program Delivery).
 - PR body (at submit): summary, the UI impact table, the owner's quotes (i1 A, i3 V4, i5 A,
-  i7 A1, i8 B, and the three parity answers of UI impact 15–17), the sign-off-pending list (U11, U12, U13A, U14, U15, U16, unless picked by
-  then), the parity Artifact link, test evidence.
+  i7 A1, i8 B, the three parity answers of UI impact 15–17, and round five's sign-off of U11 to
+  U16, § Round-5 picks), the parity Artifact link, test evidence. Nothing is left sign-off pending.
 
 ## Seeds
 
