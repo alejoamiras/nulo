@@ -189,3 +189,25 @@ fold and the emoji check's Confirm sits at the bottom edge. Both are reached by 
 where the execute window reads "Local Network".
 
 `bun run e2e:reap` → exit 0, nothing to reap.
+
+A second throwaway capture, Firefox only, anchored A at 0,0 1366×768 and then 0,0 1100×768
+(both accepted as asked) and connected from it: the emoji check opened at 966,0 and 700,0,
+400×768. Capture spec → exit 0; `bun run e2e:reap` → exit 0, nothing to reap.
+
+## Parity
+
+Published at <https://claude.ai/artifact/6DMmkBks8M4EzY4WW1fDog>: the drawing, each window's
+measured bounds drawn to scale on Chrome and Firefox plus the Firefox focus case, the room left
+for the app's own grid at 1366 and 1100, and the differences:
+
+- "Both grids in view" cannot be captured: the playground shows no grid (`connect()` confirms as
+  soon as the channel opens). A centred modal would clear the emoji window only if it were at
+  most 566 px wide in a 1366-px window, or 300 px in an 1100-px one.
+- A short anchor gives a short window, as the rule says: 500 tall under a 500-tall A, 440 under
+  a 440-tall B.
+- From window B, Connect goes straight to the emoji check: B's origin is already connected.
+- Firefox's inner height is 1 px less than the outer; Chrome's are equal.
+- The size-only retry is not exercised headless: Firefox clamps a position instead of refusing
+  it, and on Chrome, which refuses a mostly off-screen one (step 1), every anchor in the spec is
+  on screen. Its proof stays in the unit tests.
+- The emoji check's "NO ACCOUNT" and "chain 0" headers predate this batch; listed as a follow-up.

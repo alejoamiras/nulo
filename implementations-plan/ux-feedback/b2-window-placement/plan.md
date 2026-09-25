@@ -6,6 +6,7 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 eli5_mode: artifact
 eli5: https://claude.ai/artifact/Bw5Fq5mD7HDBaQNsGpMfLY
+parity: https://claude.ai/artifact/6DMmkBks8M4EzY4WW1fDog
 program: implementations-plan/ux-feedback/plan.md (batch 2, arc 2 of 6)
 arc_branch: feat/ux-2-window-placement
 design: implementations-plan/ux-feedback/design/spec.md (item 4, option A)
@@ -432,7 +433,7 @@ Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-### P3 · e2e and parity ☐
+### P3 · e2e and parity ✓
 
 1. Probe headless Chrome and headless Firefox (throwaway, never committed) and record what each
    honours in `lessons/phase-3.md`:
@@ -450,7 +451,8 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
    bounds, its anchor's bounds and the screen size, plus the Firefox-only case's three corners and
    result. Draw each window's measured bounds over its anchor's (an SVG drawn from the measured
    numbers, beside `04-window-placement`); publish one private Artifact; list every difference
-   and each browser's limitations.
+   and each browser's limitations. ✓ (<https://claude.ai/artifact/6DMmkBks8M4EzY4WW1fDog>;
+   `lessons/phase-3.md` § Parity)
 
 Gate: The shared placement, height, and native-layout checks pass on Chrome and Firefox; the focused-popup anchor regression passes on Firefox and is explicitly skipped on Chrome because headless refocusing is unsupported. Parity evidence records each browser's measured bounds and limitations.
 
