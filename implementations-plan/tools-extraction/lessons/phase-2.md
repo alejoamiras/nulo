@@ -151,6 +151,14 @@ Runs used the freeze SHA 6611f861 and the three tarballs staged from `dev` at ee
 - `verify:deployments` finds every committed address equal to its recomputed one.
 - `build:testnet` / `build:mainnet` plus `verify:build-target` pass, and `test:e2e` passes 29/29.
 - The e2e specs differ from `main` only in specifiers and the formatter's reflow of them (25 files).
+- Browser e2e (`e2e:tools`, 69 cells, one sandbox, 1.3 h): 68 passed. Cell 34b failed on `net::ERR_NETWORK_CHANGED`: a host network change aborted the test wallet's dynamic import of `HandshakeRegistry`. A flake: its spec re-run alone passed (1/1).
+- Contracts:
+  - forge: 157 tests in 21 suites, and the gas snapshot within tolerance;
+  - halmos: 12 proofs, by name;
+  - the ABI pins (8), keystone (10), hub keystone (2), `compile.sh --check`, and TXE (65);
+  - bridge-core `test:integration`: 35 tests in 6 files;
+  - the sole-consumer invariant and its self-test.
+- The build regenerates `apps/tools/src/types/components.d.ts` (unplugin-vue-components drops `RouterLink` / `RouterView`), so a check for a clean `src/` fails after any build; the rehearsal checks only the files it edits.
 
 **Recipe fixes found by the run.**
 - **Derived files stay verbatim.** The codemod rewrote two comment lines in `packages/design/src/base.css`, which carries a "Modified from Azguard Wallet" header, and its pinned hash failed. Rewriting Azguard-derived code is under the freeze, so the codemod now skips any file carrying the marker. Its two `@nulo/design` comments remain for the brand-guard allowlist, and the hash pin keeps proving the copy is byte-identical to nulo's.
@@ -197,7 +205,12 @@ Not closed, now fixed:
    - **The canaries found a real gap the byte totals hid.** trufflehog never reads content it sniffs as SVG, under any name: `favicon.svg` and `token-sprite.svg` were never scanned by it. A neutral first line defeats the sniffing; both are now read, and both are clean.
    - Two more false misses: trufflehog drops unverified results that contain a dictionary word ("REad", "dIeN", "PKCS", "X509", "2048"). A vowel-free alphabet cuts the rate to about 1.5 in 10,000, and the retry absorbs the rest.
    - Binaries are fingerprinted, never passed by extension: each needs a `binary:<oid>` key, by content alone because one blob can sit at several paths. All five are woff2 fonts whose SHA-256 the third-party-notices font policy pins.
-6. **The bundle grep proves text, not execution.** The browser proof is e2e cell 36: on the production-mode local build, add-to-wallet reaches the full-profile test wallet only through `registerToken` on the app's wallet proxy. The new `control` phase removes the register import, reruns cells 35 and 36, and requires cell 36 to fail while both cell 35 fail-open cases pass.
+6. **The bundle grep proves text, not execution.** The browser proof is e2e cells 35 and 36 on the production-mode local build. add-to-wallet reaches a test wallet only through `registerToken` on the app's own wallet proxy, which lives on a separate origin from the wallet and has its own `WalletSchema`. The new `control` phase removes the register import and runs the drip spec.
+   - All three add-to-wallet cases must fail with `data-add-status="error"`, the call throwing on a proxy with no such method.
+   - Cell 38, which uses only standard methods, must still pass, or the run proves nothing.
+   - The first draft expected cell 35 to keep passing. It does not: even the wallets that refuse the method need the app to send it first, so cell 35 is patch-dependent too.
+   - Result on run2: without the import, cell 38 passes and cells 35, 35 and 36 fail with `data-add-status="error"`. With it, all four pass in the full e2e run. The phase exits 0 end to end.
+   - A bash trap in the phase's first version referenced a function-local variable. That variable is gone by the time a subshell's EXIT trap fires, so `set -u` failed the phase after every check had passed. The trap now expands its paths when set.
 8. **Ancestry was name-bound below 50% similarity.** Renames are now paired down to 10%. That surfaced one real ancestor, `.github/workflows/contracts.yml`: the `contracts/bridge/**` PR gate, rewritten into `bridge-contracts.yml` at 43% similarity in #575. It is now in `paths.txt`. The three reviewed basename pairs now pair with their true, listed sources, so `lineage-reviewed.txt` is empty. The stated limit: a move that keeps under 10% of the content under a new basename looks like a new file.
 
 New:

@@ -154,22 +154,28 @@ phase_e2e() {
   e2e_tools
 }
 
-# Cell 36 is the browser proof that the production-mode build's wallet proxy carries the patch:
-# add-to-wallet reaches the full-profile wallet only through registerToken. Without the register
-# import it must fail while cell 35's fail-open cases still pass, or it proves nothing.
+# Cells 35 and 36 are the browser proof that the production-mode build's wallet proxy carries the
+# patch: add-to-wallet reaches any test wallet only through registerToken. Without the register
+# import all three must fail on the thrown call (status `error`) while cell 38, which uses only
+# standard methods, still passes, or the run proves nothing.
 phase_control() {
   local session=$repo/apps/tools/src/composables/createAztecWalletSession.ts
   local import='import "@alejoamiras/nulo-wallet-sdk-schema-patch/register"'
+  local log=$report/control-e2e.log
   [ "$(grep -cxF "$import" "$session")" = 1 ] || die "the session module does not import register exactly once"
   cp "$session" "$work/session.orig"
-  trap 'cp "$work/session.orig" "$session"' EXIT
+  # Expanded now: the trap fires after this function's locals are gone.
+  trap "cp -- $(printf '%q' "$work/session.orig") $(printf '%q' "$session")" EXIT
   grep -vxF "$import" "$work/session.orig" >"$session"
-  e2e_tools specs/drip.spec.ts -g "cell 3[56]" 2>&1 | tee "$report/control-e2e.log" || true
+  e2e_tools specs/drip.spec.ts 2>&1 | tee "$log" || true
   cp "$work/session.orig" "$session"
-  [ -z "$(git -C "$repo" status --porcelain -- apps/tools/src)" ] || die "the session module was not restored"
-  [ "$(grep -cE '✓ .* cell 35 ' "$report/control-e2e.log")" = 2 ] || die "cell 35 did not pass twice without the patch"
-  grep -qE '✘ .* cell 36 ' "$report/control-e2e.log" || die "cell 36 passed without the patch registered"
-  echo "control: without the register import cell 36 fails and cell 35 still passes"
+  trap - EXIT
+  # The build also regenerates src/types/components.d.ts, so only the edited module is checked.
+  git -C "$repo" diff --quiet -- "$session" || die "the session module was not restored"
+  grep -qE '✓ .* cell 38 ' "$log" || die "cell 38 did not pass without the patch: the run proves nothing"
+  [ "$(grep -cE '✘ .* cell 3[56] ' "$log")" = 3 ] || die "an add-to-wallet cell passed without the patch registered"
+  grep -qF 'data-add-status="error"' "$log" || die "add-to-wallet did not fail on the call itself"
+  echo "control: without the register import every add-to-wallet cell fails and cell 38 still passes"
 }
 
 phase_contracts() {
