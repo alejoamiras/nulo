@@ -946,6 +946,17 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 			expect(await approve()).toEqual({ granted: TOOLS })
 		})
 
+		test("A-12, A-30: every row in the fold draws its title as held; the new row does not", async () => {
+			await mountWindow(reRequest([eventsAny], [...TOOLS, heldData]))
+			await openFold()
+			const held = w!.findAll('[data-cap-granted="true"]')
+			expect(held).toHaveLength(7)
+			for (const row of held) expect(row.classes()).toContain(STYLE.granted)
+			expect(shownRows().map((row) => [row.attributes("data-cap-row"), row.classes().includes(STYLE.granted)])).toEqual([
+				["private-events", false],
+			])
+		})
+
 		test("A-32: the same request after that rejection: the badge on the new row, none in the fold", async () => {
 			// The stored rejection drops `data` from the echo list, never from the held grants.
 			await mountWindow(reRequest([eventsAny], [...TOOLS, heldData], { existingGrants: TOOLS, reRequested: ["data"] }))

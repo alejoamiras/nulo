@@ -37,6 +37,7 @@ const emit = defineEmits<{ toggle: [key: string, on: boolean] }>()
 				:flagged="row.entry.flagged"
 				:chip="row.entry.chip"
 				:badge="row.badge"
+				:granted="granted"
 				:titleTestid="row.entry.key === 'unknown' ? 'cap-unrecognized-badge' : undefined"
 				:modelValue="row.selected"
 				@update:modelValue="(on: boolean) => emit('toggle', row.entry.key, on)"
