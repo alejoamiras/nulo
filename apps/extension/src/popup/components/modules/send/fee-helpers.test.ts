@@ -8,6 +8,7 @@ import {
 	feeDisplay,
 	feeLine,
 	formatGasBalance,
+	menuOrder,
 	settingsForMethod,
 } from "./fee-helpers"
 
@@ -266,15 +267,17 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 		])
 	})
 
-	test("Nulo's sponsor lists before hand-added ones, whatever the storage order", () => {
+	test("the menu lists Nulo's sponsor before hand-added ones; the payer list keeps storage order", () => {
 		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
-		expect(buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second]).map((m) => m.title)).toEqual([
+		const methods = buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second])
+		expect(menuOrder(methods).map((m) => m.title)).toEqual([
 			"Public Fee Juice",
 			"Private Fee Juice",
 			"Sponsored",
 			"Dev sponsor",
 			"Other sponsor",
 		])
+		expect(methods.map((m) => m.title)).toEqual(["Public Fee Juice", "Private Fee Juice", "Dev sponsor", "Sponsored", "Other sponsor"])
 	})
 })
 

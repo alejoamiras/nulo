@@ -2,8 +2,9 @@
 import { Dropdown } from "@/components/ui/Dropdown"
 import { publishGlyph } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
+import { menuOrder } from "./fee-helpers"
 
-defineProps({
+const props = defineProps({
 	modelValue: { type: Object, default: null },
 	methods: { type: Array, required: true },
 	/** "private-private" | "private-public" while this send's fee names the account, else null. The
@@ -15,6 +16,8 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 
 /** The tag only ever says the fee names the account publicly. */
 const TAG_GLYPH = publishGlyph("exposed")
+
+const menu = computed(() => menuOrder(props.methods))
 </script>
 
 <template>
@@ -48,7 +51,7 @@ const TAG_GLYPH = publishGlyph("exposed")
 
 			<template #popup>
 				<DropdownItem
-					v-for="method in methods"
+					v-for="method in menu"
 					:key="method.fpc?.id ?? method.type"
 					:class="$style.method"
 					:disabled="method.disabled"

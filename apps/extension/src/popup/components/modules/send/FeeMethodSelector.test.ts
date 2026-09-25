@@ -81,6 +81,14 @@ describe("FeeMethodSelector", () => {
 		).toHaveLength(3)
 	})
 
+	test("Nulo's sponsor renders before a hand-added one that comes first in the list", () => {
+		const handAdded = { type: "fpc", title: "Dev sponsor", subtitle: "sponsored", spend: "—", fpc: { id: "s2" } }
+		const nulo = { ...baseMethods[2], fpc: { id: "s1", isProtocol: true } }
+		const w = factory({ methods: [baseMethods[0], baseMethods[1], handAdded, nulo] })
+		const rows = w.findAll('[data-testid="send-fee-method-sponsored"]').map((n) => n.text())
+		expect(rows).toEqual([expect.stringContaining("Sponsored"), expect.stringContaining("Dev sponsor")])
+	})
+
 	test("clicking an enabled item emits update:modelValue with that method", async () => {
 		const w = factory()
 		await w.find('[data-testid="send-fee-method-private"]').trigger("click")

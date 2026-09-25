@@ -187,22 +187,32 @@ export function buildFeeMethods(
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc && f.isProtocol === true)
 	const base: FeeMethodOption[] = [feeJuiceOption(gasBalances), privateFeeJuiceOption(privateFpc, gasBalances)]
 
-	// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
-	if (!allowSponsored) return base
-	// Nulo's sponsor lists first; hand-added ones keep storage order, which is not the order they
-	// were added in.
-	const sponsors = registeredFpcs
-		.filter((f) => f.type === FpcType.DefaultSponsoredFpc)
-		.sort((a, b) => Number(b.isProtocol === true) - Number(a.isProtocol === true))
-	for (const fpc of sponsors) {
-		// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
-		// sponsorship conditional on a call from the account and then spend a token
-		// authorization the account granted it earlier.
-		const spend = fpc.isProtocol === true ? "free" : "—"
-		base.push({ type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc })
+	for (const fpc of registeredFpcs) {
+		if (fpc.type === FpcType.PrivateFpc) {
+			// already handled above
+			continue
+		}
+		if (fpc.type === FpcType.DefaultSponsoredFpc) {
+			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
+			if (!allowSponsored) continue
+			// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
+			// sponsorship conditional on a call from the account and then spend a token
+			// authorization the account granted it earlier.
+			const spend = fpc.isProtocol === true ? "free" : "—"
+			base.push({ type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc })
+		}
 	}
 
 	return base
+}
+
+/** The fee menu's rows: Nulo's sponsor before hand-added ones, which keep their order. Only the menu
+ *  is reordered, because the default payer is the first sponsor in `buildFeeMethods`' order. */
+export function menuOrder(methods: FeeMethodOption[]): FeeMethodOption[] {
+	const sponsors = methods.filter((m) => m.type === "fpc")
+	const nulo = sponsors.filter((m) => m.fpc?.isProtocol === true)
+	const handAdded = sponsors.filter((m) => m.fpc?.isProtocol !== true)
+	return [...methods.filter((m) => m.type !== "fpc"), ...nulo, ...handAdded]
 }
 
 /** `undefined` (balances not known yet) and `null` (the leg's read failed) are never printed as a
