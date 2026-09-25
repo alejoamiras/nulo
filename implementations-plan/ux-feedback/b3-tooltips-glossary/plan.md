@@ -697,7 +697,9 @@ Recorded under the program's standing approval (implementations-plan/ux-feedback
    (findings 1-3) was applied and confirmed by the round-6 pass.
 4. **Met.** No Ask is open: the eight technical Asks are decided with codex and logged
    (§ Asks → codex); the UI asks U-1 to U-8, the Settings row, U8, U9 and the U9 spec wording
-   are listed as **sign-off pending** for the PR (§ UI asks for the owner, § Delivery).
+   are listed as **sign-off pending** for the PR (§ UI asks for the owner, § Delivery). Since
+   then the owner signed off U8 and U9 on 2026-09-25, with each em dash made a full stop, and
+   § Delivery carries the list as it stands.
 5. **Met.** UI impact lists only spec surfaces (item 2, item 9, the tooltip map), round-5
    surfaces built as drawn with no pick (U8, U9) and sign-off-pending items (rows 1, 3, 4, 6, 7,
    8).
