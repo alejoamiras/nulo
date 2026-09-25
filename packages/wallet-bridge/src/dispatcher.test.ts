@@ -1979,6 +1979,15 @@ describe("dispatcher — the grant boundary", () => {
 		])
 	})
 
+	test("a held grant the popup echoes but the decision does not store is not re-validated", async () => {
+		const legacy = { type: "data" } as Capability
+		const session = makeSession({ capabilityGrants: [{ capability: legacy, grantedAt: 1 }] })
+		const transaction = { type: "transaction", scope: [{ contract: A, function: "transfer" }] }
+		const h = capabilityHarness(session, () => ({ granted: [legacy, transaction] }))
+		await h.request([transaction])
+		expect(await h.stored()).toEqual([legacy, transaction])
+	})
+
 	test("the accounts grant the safety net adds is the projected request", async () => {
 		const h = capabilityHarness(makeSession(), () => ({ granted: [], selectedAccounts: [`aztec:0:${A}`] }))
 		await h.request([{ type: "accounts", canGet: true, canCreateAuthWit: true, invented: 1 }])

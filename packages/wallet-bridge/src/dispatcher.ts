@@ -654,20 +654,21 @@ function collectNewGrants(
 	deltaApprovedTypes: Set<string>,
 	now: number,
 ): GrantedCapabilityRecord[] {
-	// The popup's answer is projected like the manifest, so no field it adds is ever stored.
-	const grantedResults = popupResults.map((cap) => projectKnownCapability(cap) as Record<string, unknown>)
+	// Every cap stored from the popup's answer is projected like the manifest, so no field the page
+	// adds is stored; an echo of a held grant the decision leaves alone is not re-validated.
+	const project = (cap: Record<string, unknown>) => projectKnownCapability(cap) as Capability
 	const replacementFor = (type: string): Capability | undefined => {
 		const stored = plan.existingGrants.find((g) => g.capability.type === type)?.capability
-		const candidates = grantedResults.filter((cap) => cap.type === type)
+		const candidates = popupResults.filter((cap) => cap.type === type).map(project)
 		const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
-		return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+		return changed[changed.length - 1] ?? candidates[candidates.length - 1]
 	}
 	const newGrants: GrantedCapabilityRecord[] = []
-	for (const cap of grantedResults) {
+	for (const cap of popupResults) {
 		const type = cap.type as string
 		if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
 		if (!plan.grantedTypes.has(type as Capability["type"]) || plan.rejectedTypes.has(type)) {
-			newGrants.push({ capability: cap as Capability, grantedAt: now })
+			newGrants.push({ capability: project(cap), grantedAt: now })
 		}
 	}
 	for (const type of deltaApprovedTypes) {
