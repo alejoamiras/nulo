@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { PERMALINK_PREFIX, type Row } from "./common"
 import { cleanupRepos, commitAll, git, P, planRepo, writeFiles } from "./fixture"
 import { promote } from "./promote"
-import { rewriteDocument, rewriteLinks, verifyCommit } from "./rewrite-links"
+import { prove, rewriteDocument, rewriteLinks, verifyCommit } from "./rewrite-links"
 import { record } from "./untrack"
 
 afterAll(cleanupRepos)
@@ -68,11 +68,16 @@ describe("rewrite-links", () => {
 		expect(git(repo, "status", "--porcelain")).toBe("")
 	})
 
-	test("a rewrite that would change what renders is refused", () => {
+	test("code is never rewritten, and the oracle refuses a rewrite that changes a code node", () => {
 		const rows = new Map<string, Row>([[`${P}/a/audit-x.md`, { path: `${P}/a/audit-x.md`, sha: "a".repeat(40), blob: "b".repeat(40) }]])
 		const ctx = { rows, replacedPlans: new Set<string>() }
-		const src = "[x](audit-x.md) and the example `[x](audit-x.md)`.\n"
-		expect(() => rewriteDocument(`${P}/a/plan.md`, src, ctx)).toThrow("changes the rendered page beyond its URLs")
+		const pin = `${PERMALINK_PREFIX}${"a".repeat(40)}/${P}/a/audit-x.md`
+		const file = `${P}/a/plan.md`
+		const src = "[audit](audit-x.md), `href=audit-x.md ` and `[x](audit-x.md)`.\n\n```\n[y](audit-x.md)\n```\n"
+		expect(rewriteDocument(file, src, ctx)).toBe(src.replace("[audit](audit-x.md)", `[audit](${pin})`))
+		const counterexample = "[audit](audit-x.md) and `href=audit-x.md `\n"
+		const corrupted = counterexample.replaceAll("audit-x.md", pin)
+		expect(() => prove(file, counterexample, corrupted, new Map([["audit-x.md", pin]]))).toThrow("changes the rendered page")
 		expect(() => rewriteDocument(`${P}/a/notes.md`, "[x](audit-x.md#why)\n", ctx)).toThrow("a fragment a permalink cannot keep")
 	})
 })

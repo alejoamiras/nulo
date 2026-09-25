@@ -3,16 +3,16 @@
  * Repoints every link in a kept document that targets a transcript to a permalink at that transcript's
  * manifest row, so the link survives untracking with its bytes pinned.
  *
- * Only URL tokens in destination positions change (`](…)`, `]: …`, `href=`, `src=`). Each file is
- * proved twice before it is written: its rendered HTML equals the old rendering with the same URL
- * substitutions, so no code span, fence or link text moved; and its links, in order, are exactly the
- * old ones mapped. `--verify <commit>` re-derives a rewrite commit from its parent and re-runs both
- * proofs. A rerun on a rewritten tree changes nothing.
+ * Only URL tokens in destination positions change (`](…)`, `]: …`, `href=`, `src=`), and never one
+ * inside code. Each file is proved before it is written: its rendered page, node by node, equals the
+ * old page with the same URL attributes substituted; every text and code node is unchanged; and its
+ * links, in order, are exactly the old ones mapped. `--verify <commit>` re-derives a rewrite commit
+ * from its parent and re-runs the proofs. A rerun on a rewritten tree changes nothing.
  */
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { git, PLANS, PROMOTIONS, permalink, planPath, type Row, readManifest, rowsByPath } from "./common"
-import { lib, links } from "./gate"
+import { html, lib, links } from "./gate"
 import type { Promotion } from "./untrack"
 
 /** A link whose target was never committed, so no permalink exists: it becomes plain text. */
@@ -69,48 +69,131 @@ export function plannedEdits(file: string, hrefs: readonly string[], ctx: Contex
 	return edits
 }
 
-export function rewriteSource(src: string, edits: Edits): string {
-	let out = src
-	for (const [old, to] of edits) {
-		const url = escapeRe(old)
-		if (to === null) {
-			out = out.replace(new RegExp(`\\[([^\\]\\n]*)\\]\\(<?${url}>?\\)`, "g"), (_, text: string) => text)
-			continue
-		}
-		const put = (_: string, head: string) => head + to
-		out = out
-			.replace(new RegExp(`(\\]\\([ \\t]*<?)${url}(?=>?(?:[ \\t]|\\)))`, "g"), put)
-			.replace(new RegExp(`^( {0,3}\\[[^\\]\\n]+\\]:[ \\t]*<?)${url}(?=>?(?:[ \\t]|$))`, "gm"), put)
-			.replace(new RegExp(`(\\b(?:href|src)[ \\t]*=[ \\t]*["']?)${url}(?=["'\\s>])`, "gi"), put)
-	}
-	return out
-}
+/** A node of the rendered page; attribute values are decoded, and an end tag names its start's index. */
+type Node =
+	| { kind: "tag"; name: string; attrs: [string, string][] }
+	| { kind: "end"; name: string; start: number }
+	| { kind: "text"; text: string; code: boolean }
+	| { kind: "comment"; text: string }
+
+const URL_ATTRIBUTES: ReadonlySet<string> = new Set(["href", "src"])
+const CODE_ELEMENTS: ReadonlySet<string> = new Set(["code", "pre"])
 
 function render(file: string, src: string): string {
 	return file.endsWith(".html") ? src : Bun.markdown.html(src, { autolinks: true })
 }
 
-function escapeHtml(text: string): string {
-	return text.replaceAll("&", "&amp;").replaceAll('"', "&quot;")
+export function nodes(file: string, src: string): Node[] {
+	const out: Node[] = []
+	let code = 0
+	new HTMLRewriter()
+		.on("*", {
+			element(e) {
+				const start = out.length
+				const name = e.tagName.toLowerCase()
+				out.push({ kind: "tag", name, attrs: [...e.attributes].map(([n, v]) => [n, html.decodeEntities(v)]) })
+				if (!e.canHaveContent) return
+				if (CODE_ELEMENTS.has(name)) code++
+				e.onEndTag(() => {
+					if (CODE_ELEMENTS.has(name)) code--
+					out.push({ kind: "end", name, start })
+				})
+			},
+		})
+		.onDocument({
+			text: (t) => void out.push({ kind: "text", text: t.text, code: code > 0 }),
+			comments: (c) => void out.push({ kind: "comment", text: c.text }),
+		})
+		.transform(render(file, src))
+	return out
 }
 
-/** The old rendering with the same substitutions applied to its attributes: what the new file must render to. */
-export function expectedRendering(file: string, oldSrc: string, edits: Edits): string {
-	let html = render(file, oldSrc)
-	for (const [old, to] of edits) {
-		const url = escapeRe(escapeHtml(old))
-		html =
-			to === null
-				? html.replace(new RegExp(`<a href="${url}">([\\s\\S]*?)</a>`, "g"), (_, text: string) => text)
-				: html.replace(new RegExp(`(\\b(?:href|src)=["']?)${url}(?=["'\\s>])`, "g"), (_, head: string) => head + escapeHtml(to))
+/** The page as one string, adjacent text merged, so a dropped link joins its text to its neighbours. */
+function serialize(ns: readonly Node[]): string {
+	return ns
+		.map((n) => {
+			if (n.kind === "tag") return `<${n.name}${n.attrs.map(([a, v]) => ` ${a}=${JSON.stringify(v)}`).join("")}>`
+			if (n.kind === "end") return `</${n.name}>`
+			return n.kind === "comment" ? `<!--${n.text}-->` : n.text
+		})
+		.join("")
+}
+
+function textOf(ns: readonly Node[], codeOnly: boolean): string {
+	return ns
+		.flatMap((n) => (n.kind === "text" && (!codeOnly || n.code) ? [n.text] : n.kind === "comment" ? [`<!--${n.text}-->`] : []))
+		.join("")
+}
+
+/** The old page with the planned URL attributes substituted, and each de-linked `<a>` unwrapped. */
+export function substituted(ns: readonly Node[], edits: Edits): Node[] {
+	const dropped = new Set<number>()
+	const out = ns.map((n, i): Node => {
+		if (n.kind !== "tag") return n
+		const attrs = n.attrs.map(([a, v]): [string, string] => {
+			const to = URL_ATTRIBUTES.has(a) ? edits.get(v) : undefined
+			if (to === null && n.name === "a") dropped.add(i)
+			return [a, typeof to === "string" ? to : v]
+		})
+		return { ...n, attrs }
+	})
+	return out.filter((n, i) => !dropped.has(i) && !(n.kind === "end" && dropped.has(n.start)))
+}
+
+type Span = { start: number; end: number; put: string }
+
+/** Every place in the source a destination-shaped token spells `old`; code may hold some of them. */
+function candidates(src: string, old: string, to: string | null): Span[] {
+	const url = escapeRe(old)
+	if (to === null) {
+		return [...src.matchAll(new RegExp(`\\[([^\\]\\n]*)\\]\\(<?${url}>?\\)`, "g"))].map((m) => ({
+			start: m.index ?? 0,
+			end: (m.index ?? 0) + m[0].length,
+			put: m[1],
+		}))
 	}
-	return html
+	const shapes = [
+		new RegExp(`(\\]\\([ \\t]*<?)${url}(?=>?(?:[ \\t]|\\)))`, "g"),
+		new RegExp(`^( {0,3}\\[[^\\]\\n]+\\]:[ \\t]*<?)${url}(?=>?(?:[ \\t]|$))`, "gm"),
+		new RegExp(`(\\b(?:href|src)[ \\t]*=[ \\t]*["']?)${url}(?=["'\\s>])`, "gi"),
+	]
+	const starts = new Set(shapes.flatMap((re) => [...src.matchAll(re)].map((m) => (m.index ?? 0) + m[1].length)))
+	return [...starts].map((start) => ({ start, end: start + old.length, put: to }))
 }
 
-/** Throws unless the rewrite changed exactly the planned URLs and nothing a reader sees. */
+function applySpans(src: string, spans: readonly Span[]): string {
+	return [...spans].sort((a, b) => b.start - a.start).reduce((s, x) => s.slice(0, x.start) + x.put + s.slice(x.end), src)
+}
+
+/**
+ * Rewrites only the tokens that are link destinations: each candidate is tried alone and kept when it
+ * leaves every text, code and comment node as it was and changes the page's tags.
+ */
+export function rewriteSource(file: string, src: string, edits: Edits): string {
+	const base = nodes(file, src)
+	const [text, code, tags] = [textOf(base, false), textOf(base, true), serialize(base.filter((n) => n.kind === "tag"))]
+	const kept = [...edits].flatMap(([old, to]) =>
+		candidates(src, old, to).filter((span) => {
+			const trial = nodes(file, applySpans(src, [span]))
+			return (
+				textOf(trial, false) === text && textOf(trial, true) === code && serialize(trial.filter((n) => n.kind === "tag")) !== tags
+			)
+		}),
+	)
+	return applySpans(src, kept)
+}
+
+/**
+ * Throws unless the rewrite changed exactly the planned URLs and nothing a reader sees: the new page
+ * equals the old one with its URL attributes substituted, every text and code node is unchanged, and
+ * the links are the old ones mapped.
+ */
 export function prove(file: string, oldSrc: string, newSrc: string, edits: Edits): void {
-	if (render(file, newSrc) !== expectedRendering(file, oldSrc, edits))
+	const [before, after] = [nodes(file, oldSrc), nodes(file, newSrc)]
+	if (serialize(after) !== serialize(substituted(before, edits)))
 		throw new Error(`${file}: the rewrite changes the rendered page beyond its URLs`)
+	if (textOf(after, false) !== textOf(before, false) || textOf(after, true) !== textOf(before, true))
+		throw new Error(`${file}: the rewrite changes the rendered page beyond its URLs (a text or code node)`)
 	const mapped = links
 		.extract(file, oldSrc)
 		.links.flatMap((l) => (edits.has(l.href) ? (edits.get(l.href) === null ? [] : [edits.get(l.href) as string]) : [l.href]))
@@ -132,7 +215,7 @@ export function rewriteDocument(file: string, src: string, ctx: Context): string
 		ctx,
 	)
 	if (edits.size === 0) return null
-	const out = rewriteSource(src, edits)
+	const out = rewriteSource(file, src, edits)
 	prove(file, src, out, edits)
 	return out
 }

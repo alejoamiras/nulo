@@ -17,5 +17,6 @@ const GATE = gateDir(import.meta.dir)
 
 export const lib: typeof import("../../../scripts/ci-cd/plans/lib") = await import(join(GATE, "lib.ts"))
 export const links: typeof import("../../../scripts/ci-cd/plans/links") = await import(join(GATE, "links.ts"))
+export const html: typeof import("../../../scripts/ci-cd/plans/html") = await import(join(GATE, "html.ts"))
 export const fixtures: typeof import("../../../scripts/ci-cd/plans/fixture-repo") = await import(join(GATE, "fixture-repo.ts"))
 export const BASES_FILE = "scripts/ci-cd/plans/permalink-bases.json"
