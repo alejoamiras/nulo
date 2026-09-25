@@ -119,8 +119,8 @@ async function rejectWindow(ctx: Connected, popup: Page, seq: number): Promise<v
 }
 
 test.skipIf(!hasConfig)(
-	"cap-window — Tab runs account, rename, term, switch, Details; keys press the rename link, the rows and Details",
-	{ timeout: 240_000 },
+	"cap-window — Tab runs account, rename, term, switch, Details; Enter opens Details, a row and the rename field",
+	{ timeout: 180_000 },
 	async ({ dappConnectedExtensionPerTest: ctx }) => {
 		const first = await openWindow(ctx, "transaction-listed")
 		const popup = first.popup
@@ -173,7 +173,15 @@ test.skipIf(!hasConfig)(
 		await popup.waitForSelector(sel("cap-account-alias-input"), { visible: true, timeout: 5_000 })
 		expect((await focusStop(popup)).testid).toBe("cap-account-alias-input")
 		await rejectWindow(ctx, popup, first.seq)
+	},
+)
 
+// Its own connect: after a rejection the same request is a re-request, whose badged rows make the
+// window scroll, and Firefox puts a scrolling region in the Tab order ahead of its controls.
+test.skipIf(!hasConfig)(
+	"cap-window — on a fresh window, Space and Enter press the account target, and Space the rename link",
+	{ timeout: 180_000 },
+	async ({ dappConnectedExtensionPerTest: ctx }) => {
 		const fresh = await openWindow(ctx, "transaction-listed")
 		await fresh.popup.bringToFront()
 		expect(await pressTab(fresh.popup)).toEqual({ testid: "cap-account-item", tag: "BUTTON" })
