@@ -59,6 +59,7 @@ watch(
 )
 
 const handleCopyAddress = (address) => {
+	if (copiedAddress.value === address) return
 	copiedAddress.value = address
 
 	void copyWithToast(address, openToast, "Sender's address is copied")
@@ -109,12 +110,15 @@ onBeforeUnmount(() => {
 
 				<Flex align="center" gap="8">
 					<Tooltip position="end" delay="350">
-						<RowAction v-if="copiedAddress !== sender" label="Copy address" @click="handleCopyAddress(sender)">
-							<Icon name="copy" size="14" color="tertiary" />
+						<!-- Inline styles keep the check's own look through the action's pointer and hover fill. -->
+						<RowAction
+							label="Copy address"
+							:style="copiedAddress === sender ? { cursor: 'default' } : undefined"
+							@click="handleCopyAddress(sender)"
+						>
+							<Icon v-if="copiedAddress !== sender" name="copy" size="14" color="tertiary" />
+							<Icon v-else name="check-circle" size="14" color="green" :style="{ transition: 'all 0.2s ease', fill: 'var(--green)' }" />
 						</RowAction>
-						<span v-else :class="$style.copied">
-							<Icon name="check-circle" size="14" color="green" :style="{ transition: 'all 0.2s ease' }" />
-						</span>
 
 						<template #content> Copy address </template>
 					</Tooltip>
@@ -147,14 +151,5 @@ onBeforeUnmount(() => {
 	border: 1px solid var(--nulo-border);
 
 	padding: 12px;
-}
-
-/* The same box as the copy action it replaces, so the row does not move while the check shows. */
-.copied {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 24px;
-	height: 24px;
 }
 </style>
