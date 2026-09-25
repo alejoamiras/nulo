@@ -1700,7 +1700,7 @@ Gate: lint, `typecheck:all`, `test:all`, Storybook build exit 0.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-#### P9 · e2e for the window ☐
+#### P9 · e2e for the window ✓
 
 1. Fixtures: `approveCapabilities({ aliases })` presses `cap-account-rename-btn` before typing.
    `getCapItems` reads `data-cap-row`, and still reads `cap-rerequested-badge`.
@@ -1768,7 +1768,8 @@ else skips.
      sample.
 2. Every Local gates row, as in P5.
 3. The whole network suite, retry-0, in each browser's gate mode as in P5, including
-   `authwit-variants`.
+   `authwit-variants` and, on both browsers, `window-placement` (batch 4 puts `v-snack-footer`
+   on `DappApprovalFooter`, which this arc keeps as it is).
 4. The execution canaries prover on, on Chrome locally; Firefox's row stays open for CI's
    canary job on the stack top's exact head, as in P5.
 5. Flake bar: `cap-window` and every e2e file changed in P9, three consecutive retry-0 runs each,
@@ -1873,8 +1874,14 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
     - a row whose rename was pressed keeps its field open when it is deselected and selected
       again, and the field still shows the name typed there. A-20 keeps the field open once
       pressed; no drawing deselects the row after that.
+    - the permission window fills its 400px window, as drawn, while the other dApp windows keep
+      the 360px column (lessons/phase-9.md, with the owner question it leaves);
+    - its snack follows the popup's rule, 368px, where 11a's 328px was set for the 360px column.
+      This lands at the restack onto arc 4's snack change (lessons/phase-9.md).
 - The tooltip count (P8.3): the spec's map lists 36; U7A's signed-off Settings term makes 37
   (lessons/phase-8.md).
+- Visible consequence (P9): Firefox: every dApp window's identity strip that shows its network
+  is 1px shorter, now the drawings' height; one without a network was already 35px.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
