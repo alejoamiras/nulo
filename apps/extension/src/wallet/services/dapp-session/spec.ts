@@ -113,7 +113,7 @@ export type Methods = {
 	deleteDappSession(sessionId: string): DappSession
 	setVerificationHash(sessionId: string, verificationHash: string): DappSession
 	setTrustedVerification(sessionId: string, trusted: boolean): DappSession
-	setAuthorizationsWithoutAsking(sessionId: string, on: boolean): DappSession
+	setAuthorizationsWithoutAsking(sessionId: string, on: boolean, shownBroad: boolean): DappSession
 	setAccountAliases(sessionId: string, aliases: Record<string, string>): DappSession
 	setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): DappSession
 	getCapabilityGrants(sessionId: string): GrantedCapabilityRecord[]

@@ -511,11 +511,14 @@ visible form (A-23's Tab behaviour, A-27's spoken names) are drawn as annotated 
     other window, and `setCapabilityGrants` (`service.ts:259`) cannot widen past a consent
     either.
   - An unrelated decision carrying no value keeps an explicitly broad On.
-- **Writing it from Settings.** `setAuthorizationsWithoutAsking(sessionId, on: boolean)`:
+- **Writing it from Settings.** `setAuthorizationsWithoutAsking(sessionId, on: boolean, shownBroad: boolean)`,
+  where `shownBroad` is the breadth the row showed when the person switched it:
   - on the service next to `setTrustedVerification` (`service.ts:247-251`), in `rpcMethods`
     (`:31-45`), `spec.ts` Methods (`:97-118`) and the client passthrough (`client.ts:25-39`);
   - under the lock: `on === true` requires `canCreateAuthWit` and stores
-    `{ broad: coversAnyContract(current grants) }`; `false` deletes; a non-boolean is refused;
+    `{ broad: shownBroad && coversAnyContract(current grants) }`, so a broad widening that commits
+    before the write leaves a narrow On narrow, which asks (A-15's broad row in Settings);
+    `false` deletes; a non-boolean is refused;
   - it fires `onDappSessionUpdated`.
   - Service ports admit only trusted same-extension contexts (recon fact 9), so no dApp reaches
     it.
