@@ -50,7 +50,7 @@ describe("composite/DappIdentityBlock", () => {
 		const w = factory({ hostname: "xn--tls-seda.nulo.sh", hostnameSuspicious: true })
 		const line = w.get('[data-testid="dapp-hostname-warning"]')
 		expect(line.text()).toBe(
-			"This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.",
+			"This hostname contains non-ASCII or punycoded characters. Verify carefully. Some characters can imitate Latin letters.",
 		)
 		const icon = line.get('[data-name="warning"]')
 		expect(icon.attributes("aria-hidden")).toBe("true")
