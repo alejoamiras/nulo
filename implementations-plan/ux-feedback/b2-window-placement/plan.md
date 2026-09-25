@@ -193,7 +193,10 @@ The passkey window is not a dApp window and keeps `centerOn` at 500×800.
        playground page, and wait for that page. Move W1 to a third spot. Confirm the browser's
        own `getLastFocused({ windowTypes: ["normal"] })` answers B, then fire Connect on B's page
        with a page-context click (`page.evaluate` on its `data-testid`), `waitForPopup` armed
-       first. The new discover window opens at B's corner, not A's or W1's. On Chrome this proves
+       first. The window it opens is the emoji check, not a discover window: B shares A's origin,
+       which already holds a session on the chain, so the wallet auto-approves the discovery
+       (`wallet-sdk/background.ts:752-755`) and goes straight to a reconnect verification. That
+       window opens at B's corner, not A's or W1's, through the same anchor lookup. On Chrome this proves
        the most recently created normal window wins over a stale A; it proves neither refocusing
        nor the rejection of a focused popup as the anchor.
      - **Firefox only.** The full A → W1 → B → W1 sequence: after B's page is ready, focus B,
@@ -439,7 +442,8 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
    ✓, and the decision it forced is Ask 7.
 2. The Chrome launch opt-out (one option through `launchExtension`, `LaunchOptions` and the Chrome
    launch), then `window-placement.test.ts` per the e2e contract: the shared test on both
-   browsers, the focused-popup case on Firefox only.
+   browsers, the focused-popup case on Firefox only. ✓ (one retry-0 pass per browser;
+   `lessons/phase-3.md`)
 3. Parity: capture each of the four windows at its native size, and record each window's measured
    bounds, its anchor's bounds and the screen size, plus the Firefox-only case's three corners and
    result. Draw each window's measured bounds over its anchor's (an SVG drawn from the measured

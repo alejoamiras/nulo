@@ -125,3 +125,67 @@ of them; `git blame` gives earlier commits):
   leaves its window to be closed."
 - `chrome-browser-api.ts:204-205` says "the dApp's window" (`57c4158a`); the query returns the
   last-focused normal window, which can differ.
+
+## Step 2 · the spec
+
+- The launch opt-out is `fixedWindowSize: false` on `launchExtension` → `LaunchOptions` → the
+  Chrome launch, which then omits `--window-size=400,600`; every other launch keeps its flags in
+  the same order. No gating test pins the launch args.
+- The spec creates A (and later B) with `chrome.windows.create` from the control page, the wallet
+  popup `openPopup` leaves open, so each id is known without reading tab URLs: the manifest has no
+  `tabs` permission and Chrome hides a `localhost` tab's URL without one.
+- `FIREFOX_ONLY` sits beside `CHROME_ONLY` in `fixtures/browser/index.ts`, used as
+  `describe.skipIf(!isFirefox)(FIREFOX_ONLY.windowRefocus, …)`; `FIREFOX.md` and the
+  `e2e-testing` skill name the form. Three fixture helpers became exports so the spec reuses them:
+  `isTargetDetachError`, `waitForMainFrame`, `PLAYGROUND_TEST_PAGE`.
+- `browser-seam.test.ts` + `unresolved-names.test.ts` → exit 0, 45 passed.
+
+## Step 5 · runs (retry 0, one browser at a time, `NODE_OPTIONS=--dns-result-order=ipv4first`)
+
+- Chrome #1 → exit 1 (145 s): `TimeoutError: Timed out after waiting 60000ms` in a
+  `waitForPopup`, with no step named. `openedBy` now reports the targets, the window census and the
+  dApp's status on a timeout.
+- Chrome #2 → exit 1: every walk window matched A's corner. Connect on B opened **no discover
+  window**: the census showed a verify window, `isReconnect=true`, at 100,80 400×440, which is B's
+  corner. Cause, read in `wallet-sdk/background.ts:752-755`: a discovery from an origin with a
+  session on the chain is auto-approved, and the session then opens the emoji check. Product
+  behaviour, not a bug; the spec now expects the emoji check there, the placement assertion
+  unchanged. A deviation from the contract, recorded in its step 5.
+- Chrome #3 → exit 0: 1 passed, 1 skipped; test 21.8 s, run 86 s.
+- Firefox #1 → exit 0: 2 passed, 30.5 s each; run 125 s. Nothing narrowed.
+- Mutation check, Firefox, the focus tracker disabled in `chrome-browser-api.ts` (copied aside,
+  restored with `cp`, tree clean after): the Firefox-only test → exit 1 as it must, the emoji
+  check from B at A's corner (right 700, top 40, 500 tall) instead of B's (500, 80, 440). The test
+  guards the tracker.
+- After a mechanical tidy (one census helper, one comment), the committed spec re-ran beside the
+  parity spec with `--reporter=verbose`: Chrome → exit 0, passed in 17.5 s, the Firefox-only case
+  listed as skipped under its reason; Firefox → exit 0, 25.9 s and 24.4 s.
+
+Gates from the worktree root, after the spec commit: `bun run lint` → exit 0 (29 warnings, 3
+infos, none in changed files; complexity baseline OK); `bun run typecheck:all` → exit 0 (15
+workspaces); `bun run test:all` → exit 0 (extension 566 files passed, 3 skipped / 7169 tests
+passed, 4 skipped, 7 todo; every other workspace green); `bun run test:ci-gating` → exit 0 (138
+pass, 2 skip, 0 fail).
+
+## Step 6 · parity capture
+
+A throwaway spec, deleted after its runs and never committed, repeated the walk with a
+screenshot of each window before its resolving click and a JSON record per case; the files were
+handed to the parent outside the repo. Measured, both browsers: anchor A 100,40 600×500; connect,
+emoji check, permissions and execute all at 300,40 400×500; the emoji check from B at 100,80
+400×440 against B at 0,80 500×440; corners A 700/40, B 500/80, W1 420/60, three distinct. Every
+window's viewport is `null`.
+
+| | Chrome 152.0.7977.42 | Firefox 153.0.4 |
+|---|---|---|
+| Screen | 800×600 | 1366×768 |
+| Inner vs outer | equal (400×500) | one pixel shorter (400×499) |
+| Anchor case | shared: B last created, opens at B | shared: opens at B; Firefox-only: W1 (a popup) last focused, opens at B |
+| Limits | focus moves only by creating a window, so the Firefox-only case is skipped | clamps an off-screen position instead of refusing it, so the size-only retry is unreachable headless; one emoji glyph renders as an empty box (a font the headless profile lacks) |
+
+Seen on both, outside this batch's scope: at 500 tall the execute window's footer is below the
+fold and the emoji check's Confirm sits at the bottom edge. Both are reached by scrolling, which
+`pointerClick` does and proves uncovered. The reconnect emoji check's header reads "chain 0"
+where the execute window reads "Local Network".
+
+`bun run e2e:reap` → exit 0, nothing to reap.
