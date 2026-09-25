@@ -34,6 +34,48 @@ describe("permalink-shape", () => {
 	})
 })
 
+describe("permalink-shape: the URL a browser follows", () => {
+	test("dot segments, raw or percent-encoded, and empty segments fail even behind an allowlisted SHA", () => {
+		const repo = makeRepo({
+			...bases(SHA),
+			"README.md": [
+				`[swap](${url(`blob/${SHA}/../../blob/${OTHER}/README.md`)})`,
+				`[escape](${url(`blob/${SHA}/../../../../evil/x/blob/${OTHER}/README.md`)})`,
+				`[dot](${url(`blob/${SHA}/./README.md`)})`,
+				`[pct](${url(`blob/${SHA}/%2e%2e/README.md`)})`,
+				`[empty](${url(`blob/${SHA}//README.md`)})`,
+				`[tree](${url(`tree/${SHA}/..`)})`,
+			].join("\n"),
+		})
+		expect(findings(repo, "permalink-shape").map((f) => f.line)).toEqual([1, 2, 3, 4, 5, 6])
+	})
+
+	test("protocol-relative, backslash, http, www and case variants of GitHub are candidates; only the canonical form passes", () => {
+		const repo = makeRepo({
+			...bases(SHA),
+			"README.md": [
+				`[pr](//github.com/alejoamiras/nulo/blob/${OTHER}/README.md)`,
+				`<a href="/\\github.com/alejoamiras/nulo/blob/${OTHER}/README.md">bs</a>`,
+				`[http](http://github.com/alejoamiras/nulo/blob/${SHA}/README.md)`,
+				`[www](https://www.github.com/alejoamiras/nulo/blob/${SHA}/README.md)`,
+				`[host](https://GitHub.com./alejoamiras/nulo/blob/${SHA}/README.md)`,
+				`[repo](https://github.com/alejoamiras/Nulo/blob/${SHA}/README.md)`,
+				`[ok](${url(`blob/${SHA}/README.md`)})`,
+			].join("\n"),
+		})
+		expect(findings(repo, "permalink-shape").map((f) => f.line)).toEqual([1, 2, 3, 4, 5, 6])
+	})
+
+	test("bare-URL autolinks are checked like any other link", () => {
+		const repo = makeRepo({
+			...bases(SHA),
+			"README.md": `See https://github.com/alejoamiras/nulo/blob/${OTHER}/README.md and www.github.com/alejoamiras/nulo/tree/${SHA}.\n`,
+		})
+		expect(findings(repo, "permalink-base").map((f) => f.detail)).toEqual([`${OTHER} is not in ${BASES_FILE}`])
+		expect(findings(repo, "permalink-shape")).toHaveLength(1)
+	})
+})
+
 describe("permalink-base", () => {
 	test("a full SHA outside the allowlist fails; an allowlisted one passes", () => {
 		const repo = makeRepo({ ...bases(SHA), "README.md": `[ok](${url(`blob/${SHA}/a.md`)})\n[no](${url(`blob/${OTHER}/a.md`)})\n` })
@@ -89,7 +131,7 @@ describe("permalink-ancestry (a shallow pull-request checkout)", () => {
 		return work
 	}
 
-	const PR_RUN = { GITHUB_ACTIONS: "true", GITHUB_BASE_REF: "parent" }
+	const PR_RUN = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "parent" }
 
 	test("the gate fetches dev by name: a dev ancestor passes, the parent arc's commit fails", () => {
 		const { origin, onParent } = stackedOrigin()
@@ -107,10 +149,21 @@ describe("permalink-ancestry (a shallow pull-request checkout)", () => {
 		expect(found[0].detail).toStartWith("cannot fetch dev")
 	}, 30_000)
 
-	test("a push, nightly or release run never fetches and only reports", () => {
+	test("a pull request with an empty base ref still fetches dev, and fails closed", () => {
 		const { origin } = stackedOrigin()
 		const work = shallowClone(origin)
 		git(work, "remote", "set-url", "origin", `file://${origin}-gone`)
-		expect(findings(work, "permalink-ancestry", { GITHUB_ACTIONS: "true" })).toEqual([])
+		const found = findings(work, "permalink-ancestry", { ...PR_RUN, GITHUB_BASE_REF: "" })
+		expect(found.map((f) => f.detail.split(":")[0])).toEqual(["cannot fetch dev"])
+	}, 30_000)
+
+	test("a push, nightly or release run never fetches and only reports, even with a base ref set", () => {
+		const { origin } = stackedOrigin()
+		const work = shallowClone(origin)
+		git(work, "remote", "set-url", "origin", `file://${origin}-gone`)
+		for (const event of ["push", "schedule", "workflow_dispatch"]) {
+			const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: event, GITHUB_BASE_REF: "dev" }
+			expect(findings(work, "permalink-ancestry", env)).toEqual([])
+		}
 	}, 30_000)
 })

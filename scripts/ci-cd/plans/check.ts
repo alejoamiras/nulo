@@ -10,6 +10,7 @@ import { loadBases, permalinkAncestryFindings, permalinkFindings } from "./perma
 import {
 	archiveStructureFindings,
 	curatedBudgetFindings,
+	documentTypeFindings,
 	hygieneFindings,
 	indexStructureFindings,
 	localPathFindings,
@@ -25,6 +26,7 @@ export function checkTree(opts: { cwd?: string; env?: Env } = {}): Finding[] {
 		...trackedArtifactFindings(ctx),
 		...hygieneFindings(ctx),
 		...nestedIgnoreFindings(ctx),
+		...documentTypeFindings(ctx),
 		...linkFindings(ctx, docs),
 		...pathTokenFindings(ctx),
 		...permalinkFindings(docs, bases),

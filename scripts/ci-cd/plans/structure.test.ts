@@ -48,12 +48,29 @@ describe("hygiene-files", () => {
 		])
 		expect(findings(repo, "tracked-artifact").map((f) => f.file)).toEqual(["implementations-plan/p/audit-codex.md"])
 	})
+
+	test("the .ignore holds `/archive/` alone: a negation or any other pattern fails", () => {
+		const repo = makeRepo({ ...HYGIENE, "implementations-plan/.ignore": "/archive/\n!/archive/\n\n*.md\n" })
+		expect(findings(repo, "hygiene-files").map((f) => `${f.file}:${f.line}`)).toEqual([
+			"implementations-plan/.ignore:2",
+			"implementations-plan/.ignore:4",
+		])
+	})
 })
 
 describe("nested-ignore", () => {
-	test("a nested .gitignore fails", () => {
-		const repo = makeRepo({ ...HYGIENE, "implementations-plan/p/.gitignore": "audit-*.md\n" })
-		expect(findings(repo, "nested-ignore").map((f) => f.file)).toEqual(["implementations-plan/p/.gitignore"])
+	test("a nested .gitignore, .ignore or .rgignore fails", () => {
+		const repo = makeRepo({
+			...HYGIENE,
+			"implementations-plan/p/.gitignore": "audit-*.md\n",
+			"implementations-plan/q/.ignore": "!/archive/\n",
+			"implementations-plan/archive/.rgignore": "!*\n",
+		})
+		expect(findings(repo, "nested-ignore").map((f) => f.file)).toEqual([
+			"implementations-plan/archive/.rgignore",
+			"implementations-plan/p/.gitignore",
+			"implementations-plan/q/.ignore",
+		])
 	})
 
 	test("an allowlisted one passes, and the allowlist only shrinks", () => {
@@ -177,6 +194,35 @@ describe("curated-budget", () => {
 		])
 	})
 
+	test("`*`, `+` and numbered items are entries too, held to evidence and one line", () => {
+		const repo = makeRepo({
+			"implementations-plan/lessons.md": [
+				"# Lessons",
+				"",
+				"* No evidence.",
+				"+ No evidence either.",
+				"1. Numbered ([log](archive/p/lessons/phase-1.md))",
+				"   and it runs on.",
+				"2) Also no evidence.",
+			].join("\n"),
+		})
+		expect(findings(repo, "curated-budget").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"3 the entry links no evidence",
+			"4 the entry links no evidence",
+			"6 an entry runs past one line",
+			"7 the entry links no evidence",
+		])
+	})
+
+	test("a reference-style entry resolves against the whole document; a definition glued to an entry is a second line", () => {
+		const ok = "# Lessons\n\n- One gotcha ([log][p1]).\n\n[p1]: archive/p/lessons/phase-1.md\n"
+		expect(findings(makeRepo({ "implementations-plan/lessons.md": ok }), "curated-budget")).toEqual([])
+		const glued = "# Lessons\n\n- One gotcha ([log][p1]).\n[p1]: archive/p/lessons/phase-1.md\n"
+		expect(
+			findings(makeRepo({ "implementations-plan/lessons.md": glued }), "curated-budget").map((f) => `${f.line} ${f.detail}`),
+		).toEqual(["3 the entry links no evidence", "4 an entry runs past one line"])
+	})
+
 	test("follow-ups may point at this repository's issues and at plans", () => {
 		const repo = makeRepo({
 			"implementations-plan/follow-ups.md":
@@ -200,6 +246,28 @@ describe("local-path", () => {
 			"implementations-plan/index.md",
 			"implementations-plan/lessons.md",
 			"implementations-plan/plans-scaffolding/lessons/phase-1.md",
+		])
+	})
+
+	test("root's home, digit and underscore usernames and Windows profiles are home paths; a URL path is not", () => {
+		const repo = makeRepo({
+			"implementations-plan/plans-scaffolding/notes.md": [
+				`cd ${abs("root", "project")}`,
+				`cd ${abs("home", "1user", "p")}`,
+				`cd ${abs("home", "_user", "p")}`,
+				`cd ${["C:", "Users", "Alice", "x"].join("\\")}`,
+				`"${["D:", "users", "bob"].join("\\\\")}"`,
+				`see https://example.com${abs("home", "alice")} and repo${abs("root", "x")}`,
+			].join("\n"),
+		})
+		expect(findings(repo, "local-path").map((f) => f.line)).toEqual([1, 2, 3, 4, 5])
+	})
+
+	test("a NUL byte in an in-scope Markdown file is a finding, and its lines are still scanned", () => {
+		const repo = makeRepo({ "implementations-plan/plans-scaffolding/notes.md": `x\0y\ncd ${abs("home", "alice")}\n` })
+		expect(findings(repo, "local-path").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"1 a NUL byte makes git treat this document as binary",
+			"2 an absolute home path",
 		])
 	})
 

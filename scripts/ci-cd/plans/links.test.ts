@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { checkTree } from "./check"
 import { cleanupRepos, findings, makeRepo, writeFiles } from "./fixture-repo"
 import { expandBraces, extract, pathTokens, resolveHref } from "./links"
 
@@ -40,6 +41,50 @@ describe("extract", () => {
 	test(".html goes straight to the rewriter", () => {
 		expect(extract("p/eli5.html", '<p><a href="plan.md">p</a></p>').links.map((l) => l.href)).toEqual(["plan.md"])
 	})
+
+	test("GFM autolinks: bare https, www. and angle-bracket URLs are links, as GitHub renders them; a bare path is not", () => {
+		const src = "x https://e.example/a y\n\nwww.e.example/b\n\n<https://e.example/c>\n\ndocs/a.md\n"
+		expect(extract("a.md", src).links.map((l) => `${l.line} ${l.href}`)).toEqual([
+			"1 https://e.example/a",
+			"3 http://www.e.example/b",
+			"5 https://e.example/c",
+		])
+	})
+
+	test("every URL-bearing attribute is a link, and srcset splits into its candidates", () => {
+		const html = [
+			'<img src="i.png" srcset="dead.md 1x, other.md 2x">',
+			'<picture><source srcset="s1.png 1x,s2.png"></picture>',
+			'<link href="style.css"><script src="app.js"></script>',
+			'<iframe src="frame.html"></iframe>',
+			'<map><area href="map.md"></map>',
+			'<video src="v.mp4" poster="p.png"><track src="t.vtt"></video>',
+		].join("\n")
+		expect(extract("p/eli5.html", html).links.map((l) => `${l.line} ${l.href}`)).toEqual([
+			"1 i.png",
+			"1 dead.md",
+			"1 other.md",
+			"2 s1.png",
+			"2 s2.png",
+			"3 style.css",
+			"3 app.js",
+			"4 frame.html",
+			"5 map.md",
+			"6 v.mp4",
+			"6 p.png",
+			"6 t.vtt",
+		])
+	})
+
+	test("an srcset in Markdown's raw HTML is checked like any link", () => {
+		const repo = makeRepo({ "README.md": '<img srcset="dead.md 1x">\n' })
+		expect(findings(repo, "link-missing").map((f) => f.detail)).toEqual(["dead.md → dead.md is not in the git index"])
+	})
+
+	test("a numeric reference past U+10FFFF in an href never crashes the run", () => {
+		const repo = makeRepo({ "README.md": '<a href="&#x110000;">x</a>\n' })
+		expect(() => checkTree({ cwd: repo })).not.toThrow()
+	})
 })
 
 describe("resolveHref", () => {
@@ -63,10 +108,19 @@ describe("path tokens", () => {
 			"implementations-plan/b/x/c.md",
 			"implementations-plan/b/x/d.md",
 		])
-		expect(pathTokens("see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x and implementations-plan/**.")).toEqual([
-			"implementations-plan/a/plan.md",
-			"implementations-plan/b/plan.md",
-		])
+		expect(pathTokens("see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x and implementations-plan/**.")).toEqual({
+			paths: ["implementations-plan/a/plan.md", "implementations-plan/b/plan.md"],
+			overflow: [],
+		})
+	})
+
+	test("expansion stops past BRACE_CAP results, before building them, and the token becomes a finding", () => {
+		const bomb = `implementations-plan/${"{a,b}".repeat(9)}/plan.md`
+		expect(expandBraces(bomb)).toBeNull()
+		expect(expandBraces("{a,b}".repeat(40))).toBeNull()
+		expect(expandBraces("{a,b}".repeat(8))).toHaveLength(256)
+		const repo = makeRepo({ "README.md": `${bomb}\n` })
+		expect(findings(repo, "path-token").map((f) => f.detail)).toEqual([`${bomb} expands to more than 256 paths`])
 	})
 })
 
@@ -114,6 +168,26 @@ describe("link-missing", () => {
 			"../q/plan.md → implementations-plan/q/plan.md is not in the git index",
 		])
 	})
+
+	test("a `:line` suffix or a repo-rooted spelling never hides a dead plan-tree target", () => {
+		const repo = makeRepo({
+			"implementations-plan/p/plan.md": [
+				"[a](../gone/plan.md:1)",
+				"[b](implementations-plan/gone/plan.md)",
+				"[c](implementations-plan/gone/plan.md:3-9)",
+				"[d](implementations-plan/p/plan.md:2)",
+				"[e](apps/missing.ts:4)",
+				"[f](.claude/skills/gone/SKILL.md:9)",
+			].join("\n"),
+			"apps/x.ts": "x\n",
+			".claude/skills/s/SKILL.md": "s\n",
+		})
+		expect(findings(repo, "link-missing").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"1 ../gone/plan.md:1 → implementations-plan/gone/plan.md is not in the git index",
+			"2 implementations-plan/gone/plan.md → implementations-plan/gone/plan.md is not in the git index",
+			"3 implementations-plan/gone/plan.md:3-9 → implementations-plan/gone/plan.md is not in the git index",
+		])
+	})
 })
 
 describe("path-token", () => {
@@ -134,6 +208,11 @@ describe("path-token", () => {
 			"implementations-plan/archive/old/plan.md": "old\n",
 		})
 		expect(findings(repo, "path-token").map((f) => f.file)).toEqual(["docs/notes.md"])
+	})
+
+	test("a NUL byte does not hide a file's plan paths", () => {
+		const repo = makeRepo({ "README.md": "x\0y\nimplementations-plan/gone/plan.md\n" })
+		expect(findings(repo, "path-token").map((f) => f.line)).toEqual([2])
 	})
 
 	test("a brace token is checked alternative by alternative", () => {

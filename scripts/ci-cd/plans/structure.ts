@@ -1,4 +1,3 @@
-/** Tree-shape rules: what may be tracked, the hygiene files, both indexes and the curated files. */
 import { posix } from "node:path"
 import { type Doc, extract, resolveHref } from "./links"
 import {
@@ -15,31 +14,40 @@ import {
 	INDEX_FILES,
 	type IndexEntry,
 	isCanonical,
+	isDocument,
 	LESSONS_FILE,
 	LESSONS_REINCLUDE,
+	lineOf,
 	PLANS,
 	parseIndex,
+	REGULAR_MODES,
 	type RuleId,
 } from "./lib"
 import { type Bases, isAllowedPermalink } from "./permalinks"
 
 const GITIGNORE = `${PLANS}/.gitignore`
 const IGNORE = `${PLANS}/.ignore`
+/** git reads `.gitignore`; ripgrep also reads `.ignore` and `.rgignore`, above it in precedence. */
+const IGNORE_FILES: ReadonlySet<string> = new Set([".gitignore", ".ignore", ".rgignore"])
 /** Shrink-only: a nested ignore file can override the lessons re-include, so each one is a reviewed exception. */
 export const NESTED_IGNORE_ALLOWLIST: readonly string[] = [`${PLANS}/vitest-on-bun/lessons/baselines/full/.gitignore`]
 /** The dirs `local-path` covers before the archive split names an active set. */
 export const PRE_SPLIT_ACTIVE: readonly string[] = ["plans-scaffolding"]
 export const LESSONS_BUDGET = 8192
 export const CLOSING_STATUS = "closed, awaiting archive"
-const LOCAL_PATH_RE = /\/Users\/[A-Za-z]|\/home\/[A-Za-z]|\/mnt\/[A-Za-z0-9._-]+\/[A-Za-z]/
+/** A home segment counts only where a path starts; the lookbehind keeps URL and relative paths out. */
+const LOCAL_PATH_RE = /(?<![\w.-])(?:\/(?:Users|home)\/\w|\/mnt\/[\w.-]+\/\w|\/root(?![\w.-]))|\b[A-Za-z]:\\{1,2}[Uu]sers\\{1,2}\w/
 const REPO_ISSUE_RE = /^https:\/\/github\.com\/alejoamiras\/nulo\/(?:issues|pull)\/\d+(?:#[\w-]+)?$/
 const OUTCOME_FIELDS = [/\bDate\s*:/, /\bStatus\s*:/, /\b(?:Shipped|Delivered)\s*:/, /\bSeeds retired\s*:/i]
+const NON_REGULAR: Readonly<Record<string, string>> = { "120000": "a symlink", "160000": "a gitlink" }
 
 function finding(rule: RuleId, file: string, line: number, detail: string, fix: string): Finding {
 	return { rule, file, line, detail, fix }
 }
 
 export function trackedArtifactFindings(ctx: Ctx): Finding[] {
+	// `--exclude-standard` reads the ignore files from the working tree, the one input not taken from the
+	// index; CI's checkout equals the commit, so only a local run with unstaged ignore edits can differ.
 	const res = ctx.git("ls-files", "-ci", "--exclude-standard", "-z", "--", PLANS)
 	if (!res.ok) throw new Error(`git ls-files -ci failed: ${res.stderr.trim()}`)
 	const ignored = new Set(res.stdout.split("\0").filter(Boolean))
@@ -53,13 +61,17 @@ export function trackedArtifactFindings(ctx: Ctx): Finding[] {
 	return findings
 }
 
-export function hygieneFindings(ctx: Ctx): Finding[] {
-	const lines = ctx.tracked.has(GITIGNORE)
+function trimmedLines(ctx: Ctx, path: string): string[] {
+	return ctx.tracked.has(path)
 		? ctx
-				.read(GITIGNORE)
+				.read(path)
 				.split("\n")
 				.map((l) => l.trim())
 		: []
+}
+
+function gitignoreFindings(ctx: Ctx): Finding[] {
+	const lines = trimmedLines(ctx, GITIGNORE)
 	const findings: Finding[] = []
 	for (const required of [...CANONICAL_PATTERNS, LESSONS_REINCLUDE]) {
 		if (!lines.includes(required))
@@ -70,26 +82,60 @@ export function hygieneFindings(ctx: Ctx): Finding[] {
 			findings.push(finding("hygiene-files", GITIGNORE, i + 1, `\`${line}\` re-includes a transcript shape`, "delete the negation"))
 		}
 	})
-	const ignore = ctx.tracked.has(IGNORE)
-		? ctx
-				.read(IGNORE)
-				.split("\n")
-				.map((l) => l.trim())
-		: []
-	if (!ignore.includes(ARCHIVE_IGNORE)) {
+	return findings
+}
+
+/** Any other pattern could hide an active plan from search, and a negation could undo the archive's. */
+function ignoreFindings(ctx: Ctx): Finding[] {
+	const lines = trimmedLines(ctx, IGNORE)
+	const findings: Finding[] = []
+	if (!lines.includes(ARCHIVE_IGNORE)) {
 		findings.push(
 			finding("hygiene-files", IGNORE, 1, `missing \`${ARCHIVE_IGNORE}\``, "restore it so default search skips closed plans"),
 		)
 	}
+	lines.forEach((line, i) => {
+		if (line !== "" && line !== ARCHIVE_IGNORE) {
+			findings.push(finding("hygiene-files", IGNORE, i + 1, `\`${line}\` is not \`${ARCHIVE_IGNORE}\``, "delete the line"))
+		}
+	})
 	return findings
+}
+
+export function hygieneFindings(ctx: Ctx): Finding[] {
+	return [...gitignoreFindings(ctx), ...ignoreFindings(ctx)]
 }
 
 export function nestedIgnoreFindings(ctx: Ctx): Finding[] {
 	return [...ctx.tracked]
-		.filter((p) => p.startsWith(`${PLANS}/`) && p.endsWith("/.gitignore") && p !== GITIGNORE && !NESTED_IGNORE_ALLOWLIST.includes(p))
-		.map((p) =>
-			finding("nested-ignore", p, 1, "a nested .gitignore can swallow lessons/", "delete it; the plans .gitignore covers the tree"),
+		.filter(
+			(p) =>
+				p.startsWith(`${PLANS}/`) &&
+				IGNORE_FILES.has(posix.basename(p)) &&
+				p !== GITIGNORE &&
+				p !== IGNORE &&
+				!NESTED_IGNORE_ALLOWLIST.includes(p),
 		)
+		.map((p) =>
+			finding(
+				"nested-ignore",
+				p,
+				1,
+				"a nested ignore file can swallow lessons/ or hide plans from search",
+				"delete it; the plans .gitignore and .ignore cover the tree",
+			),
+		)
+}
+
+/** A document or plan-tree path whose content is not a file: the gate reads neither a symlink's target nor a gitlink. */
+export function documentTypeFindings(ctx: Ctx): Finding[] {
+	const findings: Finding[] = []
+	for (const [path, mode] of ctx.modes) {
+		if (REGULAR_MODES.has(mode) || (!isDocument(path) && !path.startsWith(`${PLANS}/`))) continue
+		const kind = NON_REGULAR[mode] ?? `mode ${mode}`
+		findings.push(finding("document-type", path, 1, `${path} is ${kind}, which the gate does not read`, "commit the file itself"))
+	}
+	return findings
 }
 
 export type OutcomeState = "none" | "incomplete" | "complete"
@@ -192,18 +238,40 @@ function classifyCuratedLink(file: string, href: string, bases: Bases): LinkVerd
 	return REPO_ISSUE_RE.test(href) ? "issue" : "outside"
 }
 
-/** One line per lessons entry, each carrying its evidence link. */
+const ENTRY_RE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
+const DEFINITION_RE = /^ {0,3}\[[^\]]+\]:/
+
+/** Reference definitions as CommonMark reads them: one cannot interrupt a paragraph, so a line glued under an entry is not one. */
+function definitionLines(lines: readonly string[]): Set<number> {
+	const found = new Set<number>()
+	lines.forEach((line, i) => {
+		const above = i === 0 ? "" : lines[i - 1]
+		if (DEFINITION_RE.test(line) && (above.trim() === "" || /^ {0,3}#/.test(above) || found.has(i - 1))) found.add(i)
+	})
+	return found
+}
+
+function hasEvidence(src: string, bases: Bases): boolean {
+	return extract(LESSONS_FILE, src).links.some((l) => {
+		const verdict = classifyCuratedLink(LESSONS_FILE, l.href, bases)
+		return verdict === "plans" || verdict === "permalink"
+	})
+}
+
+/** One line per lessons entry, each carrying its evidence link; each is rendered with the file's reference definitions. */
 function lessonsEntryFindings(src: string, bases: Bases): Finding[] {
+	const lines = src.split("\n")
+	const definitions = definitionLines(lines)
+	const defined = [...definitions].map((i) => lines[i]).join("\n")
 	const findings: Finding[] = []
 	let inEntries = false
-	src.split("\n").forEach((line, i) => {
+	lines.forEach((line, i) => {
 		const at = (detail: string, fix: string) => finding("curated-budget", LESSONS_FILE, i + 1, detail, fix)
-		if (line.startsWith("- ")) {
+		if (definitions.has(i)) return
+		if (ENTRY_RE.test(line)) {
 			inEntries = true
-			const verdicts = extract(LESSONS_FILE, line).links.map((l) => classifyCuratedLink(LESSONS_FILE, l.href, bases))
-			if (!verdicts.some((v) => v === "plans" || v === "permalink")) {
+			if (!hasEvidence(`${line}\n\n${defined}`, bases))
 				findings.push(at("the entry links no evidence", "link its archived lessons log or an allowlisted permalink"))
-			}
 			return
 		}
 		if (inEntries && line.trim() !== "" && !line.startsWith("#"))
@@ -251,17 +319,36 @@ function localPathScope(ctx: Ctx): (path: string) => boolean {
 	}
 }
 
-export function localPathFindings(ctx: Ctx): Finding[] {
-	const inScope = localPathScope(ctx)
+function scanForHomePaths(path: string, src: string): Finding[] {
 	const findings: Finding[] = []
-	for (const path of ctx.tracked) {
-		if (!inScope(path)) continue
+	src.split("\n").forEach((line, i) => {
+		if (LOCAL_PATH_RE.test(line))
+			findings.push(finding("local-path", path, i + 1, "an absolute home path", "write it repo-relative or with ~"))
+	})
+	return findings
+}
+
+export function localPathFindings(ctx: Ctx): Finding[] {
+	const paths = [...ctx.tracked].filter(localPathScope(ctx))
+	ctx.load(paths)
+	const findings: Finding[] = []
+	for (const path of paths) {
 		const src = ctx.read(path)
-		if (src.includes("\0")) continue
-		src.split("\n").forEach((line, i) => {
-			if (LOCAL_PATH_RE.test(line))
-				findings.push(finding("local-path", path, i + 1, "an absolute home path", "write it repo-relative or with ~"))
-		})
+		if (src.includes("\0")) {
+			// A binary asset carries no prose. A document with a NUL is still scanned, and flagged, because
+			// git then diffs it as binary and hides its text from review.
+			if (!isDocument(path)) continue
+			findings.push(
+				finding(
+					"local-path",
+					path,
+					lineOf(src, ["\0"]),
+					"a NUL byte makes git treat this document as binary",
+					"remove the NUL byte",
+				),
+			)
+		}
+		findings.push(...scanForHomePaths(path, src))
 	}
 	return findings
 }

@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { cleanupRepos, tempDir } from "./fixture-repo"
-import { decodeEntities, type Finding, isCanonical, lineOf, mode, parseIndex, writeSummary } from "./lib"
+import { cleanupRepos, findings, git, makeRepo, tempDir, writeFiles } from "./fixture-repo"
+import { decodeEntities, type Env, type Finding, isCanonical, lineOf, mode, parseIndex, writeSummary } from "./lib"
 
 afterAll(cleanupRepos)
 
@@ -23,14 +23,45 @@ describe("isCanonical", () => {
 })
 
 describe("mode", () => {
-	test("enforces locally and on a pull request", () => {
-		expect(mode({})).toBe("enforce")
-		expect(mode({ GITHUB_ACTIONS: "true", GITHUB_BASE_REF: "dev" })).toBe("enforce")
+	const actions = (event?: string, base?: string): Env => ({ GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: event, GITHUB_BASE_REF: base })
+	const matrix: [string, Env, "enforce" | "report"][] = [
+		["local", {}, "enforce"],
+		["pull_request", actions("pull_request", "dev"), "enforce"],
+		["pull_request_target", actions("pull_request_target", "dev"), "enforce"],
+		["pull_request with an empty base (fails closed)", actions("pull_request", ""), "enforce"],
+		["pull_request without a base", actions("pull_request"), "enforce"],
+		["push with a base ref set", actions("push", "dev"), "report"],
+		["schedule", actions("schedule"), "report"],
+		["workflow_dispatch", actions("workflow_dispatch", "dev"), "report"],
+		["Actions without an event name", actions(), "report"],
+	]
+
+	test.each(matrix)("%s → %p", (_label, env, expected) => {
+		expect(mode(env)).toBe(expected)
+	})
+})
+
+describe("contents come from the index", () => {
+	test("a staged violation is judged from its blob although the working copy is clean", () => {
+		const repo = makeRepo({ "README.md": "[a](docs/a.md)\n", "docs/a.md": "a\n" })
+		writeFiles(repo, { "README.md": "[gone](docs/gone.md)\n" })
+		git(repo, "add", "README.md")
+		writeFiles(repo, { "README.md": "[a](docs/a.md)\n" })
+		expect(findings(repo, "link-missing").map((f) => f.detail)).toEqual(["docs/gone.md → docs/gone.md is not in the git index"])
 	})
 
-	test("only reports under Actions without a PR base (push, nightly, release)", () => {
-		expect(mode({ GITHUB_ACTIONS: "true" })).toBe("report")
-		expect(mode({ GITHUB_ACTIONS: "true", GITHUB_BASE_REF: "" })).toBe("report")
+	test("a tracked Markdown symlink or a plan-tree gitlink is a document-type finding, and a symlink is never followed", () => {
+		const outside = join(tempDir(), "outside.md")
+		writeFileSync(outside, "[x](nowhere.md)\n")
+		const repo = makeRepo({ "README.md": "r\n" })
+		symlinkSync(outside, join(repo, "notes.md"))
+		git(repo, "add", "notes.md")
+		const gitlink = "implementations-plan/plans-scaffolding/sub"
+		git(repo, "update-index", "--add", "--cacheinfo", `160000,${git(repo, "rev-parse", "HEAD")},${gitlink}`)
+		// Not `add -A`: the gitlink has no working-tree directory, so it would be staged as deleted.
+		git(repo, "commit", "-q", "-m", "links")
+		expect(findings(repo, "document-type").map((f) => f.file)).toEqual([gitlink, "notes.md"])
+		expect(findings(repo, "link-missing")).toEqual([])
 	})
 })
 
@@ -55,6 +86,11 @@ describe("helpers", () => {
 	test("decodeEntities handles named and numeric references", () => {
 		expect(decodeEntities("Outcome &amp; Quality Bar")).toBe("Outcome & Quality Bar")
 		expect(decodeEntities("&#x2F;a&#47;b &unknown;")).toBe("/a/b &unknown;")
+	})
+
+	test("an invalid numeric reference becomes U+FFFD, as in HTML, and never throws", () => {
+		const refs = ["&#x110000;", "&#0;", "&#xD800;", `&#${"9".repeat(40)};`, "&#x41;"]
+		expect(decodeEntities(refs.join("|"))).toBe(["�", "�", "�", "�", "A"].join("|"))
 	})
 
 	test("lineOf finds the first line holding a needle", () => {

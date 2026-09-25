@@ -1,11 +1,12 @@
 /**
  * Link and path-token rules. Links come from the rendered HTML, so code spans and fences are never
- * links while inline, reference-style and raw HTML links all are; `.html` files go straight to the
- * rewriter.
+ * links while inline, reference-style, autolinked and raw HTML links all are; `.html` files go straight
+ * to the rewriter.
  */
 import { posix } from "node:path"
 import {
 	ARCHIVE,
+	activePlanDirs,
 	type Ctx,
 	CURATED_FILES,
 	decodeEntities,
@@ -13,10 +14,12 @@ import {
 	type Finding,
 	INDEX_FILES,
 	isCanonical,
+	isDocument,
 	type Link,
 	lineOf,
 	PLANS,
-	activePlanDirs,
+	REGULAR_MODES,
+	safeDecodeUri,
 } from "./lib"
 
 export type Section = { heading: string; text: string }
@@ -43,28 +46,65 @@ const PATH_TOKEN_EXCLUDES = [
 	":!AUDIT.md",
 	":!scripts/ci-cd/plans",
 ]
+/** The attributes that load or link a resource; `srcset` holds a list of them. */
+const URL_ATTRIBUTES: readonly [tag: string, attrs: readonly string[]][] = [
+	["a", ["href"]],
+	["area", ["href"]],
+	["link", ["href"]],
+	["img", ["src", "srcset"]],
+	["source", ["src", "srcset"]],
+	["script", ["src"]],
+	["iframe", ["src"]],
+	["embed", ["src"]],
+	["video", ["src", "poster"]],
+	["audio", ["src"]],
+	["track", ["src"]],
+	["object", ["data"]],
+]
 
+/** GitHub renders GFM autolink literals, so a bare `https://` or `www.` URL is a link there too. */
 function renderMarkdown(src: string): string {
-	return Bun.markdown.html(src)
+	return Bun.markdown.html(src, { autolinks: true })
 }
 
-function safeDecodeUri(text: string): string {
-	try {
-		return decodeURIComponent(text)
-	} catch {
-		return text
+/** Each candidate's URL runs to whitespace, and its descriptors to the next comma. */
+export function srcsetUrls(value: string): string[] {
+	const urls: string[] = []
+	let rest = value
+	for (;;) {
+		rest = rest.replace(/^[\s,]+/, "")
+		const url = rest.match(/^\S+/)?.[0]
+		if (url === undefined) return urls
+		urls.push(url.replace(/,+$/, ""))
+		rest = url.endsWith(",") ? rest.slice(url.length) : rest.slice(url.length).replace(/^[^,]*/, "")
 	}
+}
+
+type RawLink = { needle: string; href: string }
+
+function urlsOf(attr: string, value: string): RawLink[] {
+	if (attr !== "srcset") return [{ needle: value, href: decodeEntities(value) }]
+	return srcsetUrls(decodeEntities(value)).map((href) => ({ needle: href, href }))
 }
 
 export function extract(file: string, src: string): { links: Link[]; h2: string[]; sections: Section[] } {
 	const html = file.endsWith(".html") ? src : renderMarkdown(src)
-	const raw: string[] = []
+	const raw: RawLink[] = []
 	const sections: Section[] = []
 	let current: Section | null = null
 	let inHeading = false
-	new HTMLRewriter()
-		.on("a[href]", { element: (e) => void raw.push(e.getAttribute("href") ?? "") })
-		.on("img[src]", { element: (e) => void raw.push(e.getAttribute("src") ?? "") })
+	const rewriter = new HTMLRewriter()
+	for (const [tag, attrs] of URL_ATTRIBUTES) {
+		rewriter.on(tag, {
+			element(e) {
+				for (const attr of attrs) {
+					const value = e.getAttribute(attr)
+					if (value !== null) raw.push(...urlsOf(attr, value))
+				}
+			},
+		})
+	}
+	rewriter
 		.on("h2", {
 			element(e) {
 				current = { heading: "", text: "" }
@@ -84,17 +124,21 @@ export function extract(file: string, src: string): { links: Link[]; h2: string[
 		})
 		.transform(html)
 	const decodedSections = sections.map((s) => ({ heading: decodeEntities(s.heading).trim(), text: decodeEntities(s.text) }))
-	const links = raw.map((r) => {
-		const href = decodeEntities(r)
-		return { href, line: lineOf(src, [r, href, safeDecodeUri(href)]) }
-	})
+	const links = raw.map(({ needle, href }) => ({ href, line: linkLine(src, needle, href) }))
 	return { links, h2: decodedSections.map((s) => s.heading), sections: decodedSections }
 }
 
+/** An autolinked `www.` URL gains an `http://` its source never had, so the bare form is the fallback needle. */
+function linkLine(src: string, needle: string, href: string): number {
+	return lineOf(src, [needle, href, safeDecodeUri(href)], 0) || lineOf(src, [href.replace(/^(?:https?:\/\/|mailto:)/, "")])
+}
+
+/** A symlinked or gitlinked document is a `document-type` finding and is never read as one. */
 export function extractDocs(ctx: Ctx): Map<string, Doc> {
+	const paths = [...ctx.tracked].filter((p) => isDocument(p) && REGULAR_MODES.has(ctx.modes.get(p) ?? ""))
+	ctx.load(paths)
 	const docs = new Map<string, Doc>()
-	for (const path of ctx.tracked) {
-		if (!path.endsWith(".md") && !path.endsWith(".html")) continue
+	for (const path of paths) {
 		const src = ctx.read(path)
 		docs.set(path, { path, src, ...extract(path, src) })
 	}
@@ -127,15 +171,25 @@ export function missingScope(ctx: Ctx, file: string): "full" | "plans" | null {
 	return LIVE_DOCS.some((re) => re.test(file)) ? "full" : null
 }
 
+const LINE_CITE_RE = /:\d+(?:-\d+)?$/
+
 /**
- * Frozen plan prose cites code the way reviewers wrote it: repo-rooted (`apps/x.ts`), often with a
- * `:line` suffix. Those links were broken before any move and stay history; only links that mean a
- * place in the plan tree are checked there.
+ * The plan-tree paths a link in frozen plan prose may mean. Reviewers cited code repo-rooted
+ * (`apps/x.ts`), often with a `:line` suffix; those cites were broken before any move and stay history.
+ * Any reading that lands in the plan tree is checked with the suffix dropped, because that target is
+ * what a move has to keep.
  */
-function citesRepoRoot(href: string, topLevel: ReadonlySet<string>): boolean {
-	const path = safeDecodeUri(href.replace(/[?#].*$/, ""))
-	if (/:\d+(?:-\d+)?$/.test(path)) return true
-	return !path.startsWith(".") && !path.startsWith("/") && topLevel.has(path.split("/")[0])
+function planTreeTargets(from: string, href: string, topLevel: ReadonlySet<string>): string[] {
+	const bare = href
+		.trim()
+		.replace(/[?#].*$/, "")
+		.replace(LINE_CITE_RE, "")
+	const decoded = safeDecodeUri(bare)
+	const rooted = !/^\.{0,2}\//.test(decoded) && topLevel.has(decoded.split("/")[0])
+	if (rooted && !decoded.startsWith(`${PLANS}/`)) return []
+	const relative = resolveHref(from, bare)
+	const readings = [rooted ? posix.normalize(decoded) : null, relative.kind === "repo" ? relative.path : null]
+	return readings.filter((p): p is string => p?.startsWith(`${PLANS}/`) === true)
 }
 
 type LinkScope = { kind: "full" | "plans" | null; topLevel: ReadonlySet<string> }
@@ -158,12 +212,12 @@ function judgeLink(ctx: Ctx, doc: Doc, link: Link, scope: LinkScope): Finding | 
 			? { ...base, rule: "link-missing", detail: `${link.href} escapes the repository`, fix: "point it inside the repo" }
 			: null
 	}
-	if (scope.kind === "plans" && (!target.path.startsWith(`${PLANS}/`) || citesRepoRoot(link.href, scope.topLevel))) return null
-	if (target.path === "" || existsInIndex(ctx, target.path)) return null
+	const candidates = scope.kind === "plans" ? planTreeTargets(doc.path, link.href, scope.topLevel) : [target.path]
+	if (candidates.length === 0 || candidates.some((p) => p === "" || existsInIndex(ctx, p))) return null
 	return {
 		...base,
 		rule: "link-missing",
-		detail: `${link.href} → ${target.path} is not in the git index`,
+		detail: `${link.href} → ${candidates[0]} is not in the git index`,
 		fix: "fix the path or link a permalink",
 	}
 }
@@ -183,27 +237,42 @@ export function linkFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>): Finding[
 	return findings
 }
 
-/** `a/{b,c}/d` → `a/b/d`, `a/c/d`; every group expands. */
-export function expandBraces(token: string): string[] {
-	const match = token.match(/\{([^{}]*)\}/)
-	if (!match || match.index === undefined) return [token]
-	const head = token.slice(0, match.index)
-	const tail = token.slice(match.index + match[0].length)
-	return match[1].split(",").flatMap((alt) => expandBraces(`${head}${alt}${tail}`))
+export const BRACE_CAP = 256
+
+/** `a/{b,c}/d` → `a/b/d`, `a/c/d`, every group expanding; null once the results would pass `BRACE_CAP`, before they exist. */
+export function expandBraces(token: string): string[] | null {
+	const done: string[] = []
+	const queue = [token]
+	for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+		const m = next.match(/\{([^{}]*)\}/)
+		if (!m || m.index === undefined) {
+			done.push(next)
+			continue
+		}
+		const alternatives = m[1].split(",")
+		if (done.length + queue.length + alternatives.length > BRACE_CAP) return null
+		const head = next.slice(0, m.index)
+		const tail = next.slice(m.index + m[0].length)
+		for (const alt of alternatives) queue.push(`${head}${alt}${tail}`)
+	}
+	return done
 }
 
 const TOKEN_RE = /implementations-plan\/[A-Za-z0-9._/{},*<>-]*/g
 
-/** Plan paths named in a line of text; templates (`<plan>`, globs) are not paths. */
-export function pathTokens(text: string): string[] {
-	const out: string[] = []
+/** Plan paths named in a line of text; templates (`<plan>`, globs) are not paths. `overflow` holds tokens past the brace cap. */
+export function pathTokens(text: string): { paths: string[]; overflow: string[] } {
+	const paths: string[] = []
+	const overflow: string[] = []
 	for (const raw of text.match(TOKEN_RE) ?? []) {
-		for (const token of expandBraces(raw)) {
+		const expanded = expandBraces(raw)
+		if (expanded === null) overflow.push(raw)
+		for (const token of expanded ?? []) {
 			const clean = token.replace(/[.,]+$/, "").replace(/\/+$/, "")
-			if (!/[*<>{}]/.test(clean) && !clean.endsWith("...")) out.push(clean)
+			if (!/[*<>{}]/.test(clean) && !clean.endsWith("...")) paths.push(clean)
 		}
 	}
-	return out
+	return { paths, overflow }
 }
 
 function tokenResolves(ctx: Ctx, token: string, isCode: boolean): boolean {
@@ -212,28 +281,30 @@ function tokenResolves(ctx: Ctx, token: string, isCode: boolean): boolean {
 	return isCode && existsInIndex(ctx, `${ARCHIVE}${token.slice(PLANS.length)}`)
 }
 
+function hitFindings(ctx: Ctx, file: string, line: number, text: string): Finding[] {
+	const isCode = !isDocument(file)
+	const where = isCode ? "at HEAD or under archive/" : "at HEAD"
+	const { paths, overflow } = pathTokens(text)
+	const at = (detail: string, fix: string): Finding => ({ rule: "path-token", file, line, detail, fix })
+	return [
+		...overflow.map((raw) => at(`${raw} expands to more than ${BRACE_CAP} paths`, "spell the paths out")),
+		...[...new Set(paths)]
+			.filter((token) => !tokenResolves(ctx, token, isCode))
+			.map((token) => at(`${token} does not resolve ${where}`, "repoint it or link a permalink")),
+	]
+}
+
 export function pathTokenFindings(ctx: Ctx): Finding[] {
-	const grep = ctx.git("grep", "--cached", "-n", "-I", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
+	// `-a`: a NUL byte would otherwise make git skip the whole file as binary.
+	const grep = ctx.git("grep", "--cached", "-n", "-a", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
 	// Exit status 1 is "no match", not an error.
 	if (grep.status === 1) return []
 	if (!grep.ok) throw new Error(`git grep failed: ${grep.stderr.trim()}`)
 	const findings: Finding[] = []
 	for (const hit of grep.stdout.split("\n")) {
-		const m = hit.match(/^([^:]+):(\d+):(.*)$/)
-		if (!m) continue
-		const [, file, line, text] = m
-		const isCode = !file.endsWith(".md") && !file.endsWith(".html")
-		for (const token of new Set(pathTokens(text))) {
-			if (tokenResolves(ctx, token, isCode)) continue
-			const where = isCode ? "at HEAD or under archive/" : "at HEAD"
-			findings.push({
-				rule: "path-token",
-				file,
-				line: Number(line),
-				detail: `${token} does not resolve ${where}`,
-				fix: "repoint it or link a permalink",
-			})
-		}
+		// dotAll: a CRLF line keeps its `\r`, which `.` alone would not match.
+		const m = hit.match(/^([^:]+):(\d+):(.*)$/s)
+		if (m) findings.push(...hitFindings(ctx, m[1], Number(m[2]), m[3]))
 	}
 	return findings
 }

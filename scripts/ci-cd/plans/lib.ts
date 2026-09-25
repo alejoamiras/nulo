@@ -2,18 +2,20 @@
  * The plan-tree gate's shared types and git access. The rule modules import this one and nothing here
  * imports them, so their top-level constants never see an uninitialized binding.
  *
- * Every check reads the git index (`git ls-files`, `git grep --cached`), never the filesystem, because
- * `git rm --cached` leaves untracked files on disk: a filesystem check would pass locally and fail on
- * CI's fresh checkout.
+ * Paths come from `git ls-files -s` and contents from those entries' blobs (`git cat-file --batch`,
+ * `git grep --cached`), never from the working tree: `git rm --cached` leaves files on disk and an edit
+ * can sit unstaged, so a working-tree read judges a different tree than the one being committed. A
+ * symlink's target is never followed and a gitlink is never read. The one input git itself takes from
+ * disk is `ls-files -ci`'s ignore rules (`trackedArtifactFindings`).
  */
 import { spawnSync } from "node:child_process"
-import { appendFileSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { appendFileSync } from "node:fs"
 
 export type RuleId =
 	| "tracked-artifact"
 	| "hygiene-files"
 	| "nested-ignore"
+	| "document-type"
 	| "link-untracked"
 	| "link-missing"
 	| "permalink-shape"
@@ -29,6 +31,7 @@ export const RULE_IDS: readonly RuleId[] = [
 	"tracked-artifact",
 	"hygiene-files",
 	"nested-ignore",
+	"document-type",
 	"link-untracked",
 	"link-missing",
 	"permalink-shape",
@@ -62,26 +65,67 @@ const CANONICAL_RES = CANONICAL_PATTERNS.map((glob) => new RegExp(`^${glob.repla
 
 export type GitResult = { ok: boolean; status: number | null; stdout: string; stderr: string }
 
+/** A partial clone would otherwise fetch a missing object on demand, and the gate must stay offline. */
+const GIT_ENV = { ...process.env, GIT_NO_LAZY_FETCH: "1" }
+const MAX_OUTPUT = 1024 * 1024 * 1024
+
 export function runGit(cwd: string, args: readonly string[]): GitResult {
-	// A partial clone would otherwise fetch a missing object on demand, and the gate must stay offline.
-	const env = { ...process.env, GIT_NO_LAZY_FETCH: "1" }
-	const res = spawnSync("git", args, { cwd, env, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 120_000 })
+	const res = spawnSync("git", args, { cwd, env: GIT_ENV, encoding: "utf8", maxBuffer: MAX_OUTPUT, timeout: 120_000 })
 	return { ok: res.status === 0, status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" }
 }
+
+export const REGULAR_MODES: ReadonlySet<string> = new Set(["100644", "100755"])
 
 export interface Ctx {
 	cwd: string
 	env: Env
 	tracked: Set<string>
 	dirs: Set<string>
+	/** Each tracked path's git mode: `REGULAR_MODES`, 120000 for a symlink, 160000 for a gitlink. */
+	modes: Map<string, string>
 	git(...args: string[]): GitResult
+	/** The staged blob as text; "" for an untracked path, a symlink or a gitlink. */
 	read(path: string): string
+	/** Batches many blobs into one `git cat-file --batch`, so the `read`s that follow are lookups. */
+	load(paths: Iterable<string>): void
 }
 
-export function trackedFiles(cwd = process.cwd()): Set<string> {
-	const res = runGit(cwd, ["ls-files", "-z"])
+type Entry = { mode: string; oid: string }
+
+function indexEntries(cwd: string): Map<string, Entry> {
+	const res = runGit(cwd, ["ls-files", "-s", "-z"])
 	if (!res.ok) throw new Error(`git ls-files failed: ${res.stderr.trim()}`)
-	return new Set(res.stdout.split("\0").filter(Boolean))
+	const entries = new Map<string, Entry>()
+	for (const record of res.stdout.split("\0")) {
+		const m = record.match(/^(\d{6}) ([0-9a-f]+) \d\t(.+)$/s)
+		// A conflicted path has one entry per stage; the first stands for it.
+		if (m && !entries.has(m[3])) entries.set(m[3], { mode: m[1], oid: m[2] })
+	}
+	return entries
+}
+
+function readBlobs(cwd: string, oids: readonly string[]): Map<string, string> {
+	const res = spawnSync("git", ["cat-file", "--batch"], {
+		cwd,
+		env: GIT_ENV,
+		input: `${oids.join("\n")}\n`,
+		maxBuffer: MAX_OUTPUT,
+		timeout: 120_000,
+	})
+	if (res.status !== 0) throw new Error(`git cat-file --batch failed: ${res.stderr?.toString().trim()}`)
+	const out = res.stdout
+	const blobs = new Map<string, string>()
+	let at = 0
+	for (const oid of oids) {
+		const eol = out.indexOf(0x0a, at)
+		const header = out.toString("latin1", at, eol)
+		const size = header.startsWith(`${oid} blob `) ? Number(header.slice(oid.length + 6)) : Number.NaN
+		// A blob a partial clone lacks cannot be judged, so the run fails instead of reading it as empty.
+		if (!Number.isSafeInteger(size)) throw new Error(`git cat-file --batch: ${header}`)
+		blobs.set(oid, out.toString("utf8", eol + 1, eol + 1 + size))
+		at = eol + 1 + size + 1
+	}
+	return blobs
 }
 
 function ancestorDirs(files: Iterable<string>): Set<string> {
@@ -94,21 +138,47 @@ function ancestorDirs(files: Iterable<string>): Set<string> {
 
 export function createCtx(opts: { cwd?: string; env?: Env } = {}): Ctx {
 	const cwd = opts.cwd ?? process.cwd()
-	const tracked = trackedFiles(cwd)
+	const entries = indexEntries(cwd)
+	const blobs = new Map<string, string>()
+	const regular = (path: string) => {
+		const entry = entries.get(path)
+		return entry && REGULAR_MODES.has(entry.mode) ? entry : undefined
+	}
+	const load = (paths: Iterable<string>) => {
+		const oids = new Set<string>()
+		for (const path of paths) {
+			const oid = regular(path)?.oid
+			if (oid && !blobs.has(oid)) oids.add(oid)
+		}
+		if (oids.size > 0) for (const [oid, text] of readBlobs(cwd, [...oids])) blobs.set(oid, text)
+	}
+	const tracked = new Set(entries.keys())
 	return {
 		cwd,
 		env: opts.env ?? process.env,
 		tracked,
 		dirs: ancestorDirs(tracked),
+		modes: new Map([...entries].map(([path, entry]) => [path, entry.mode])),
 		git: (...args) => runGit(cwd, args),
+		load,
 		read(path) {
-			try {
-				return readFileSync(join(cwd, path), "utf8")
-			} catch {
-				// A tracked file deleted in the working tree reads as empty; the index still lists it.
-				return ""
-			}
+			const oid = regular(path)?.oid
+			if (!oid) return ""
+			if (!blobs.has(oid)) load([path])
+			return blobs.get(oid) ?? ""
 		},
+	}
+}
+
+export function isDocument(path: string): boolean {
+	return path.endsWith(".md") || path.endsWith(".html")
+}
+
+export function safeDecodeUri(text: string): string {
+	try {
+		return decodeURIComponent(text)
+	} catch {
+		return text
 	}
 }
 
@@ -157,32 +227,45 @@ export function childDirs(ctx: Ctx, parent: string): string[] {
 	return [...ctx.dirs].filter((d) => d.startsWith(prefix) && !d.slice(prefix.length).includes("/")).map((d) => d.slice(prefix.length))
 }
 
+const PULL_REQUEST_EVENTS: ReadonlySet<string> = new Set(["pull_request", "pull_request_target"])
+
 /**
- * Enforce locally and on pull requests; elsewhere (push, nightly, release) only report, so a docs slip
- * never blocks a publish.
+ * Enforce locally and on pull-request events; every other Actions event (push, nightly, release,
+ * dispatch) only reports, so a docs slip never blocks a publish. The event name decides, not
+ * `GITHUB_BASE_REF`: a pull request whose base ref came through empty still enforces.
  */
 export function mode(env: Env = process.env): "enforce" | "report" {
 	if (env.GITHUB_ACTIONS !== "true") return "enforce"
-	return env.GITHUB_BASE_REF ? "enforce" : "report"
+	return PULL_REQUEST_EVENTS.has(env.GITHUB_EVENT_NAME ?? "") ? "enforce" : "report"
 }
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " }
+/** `reportOnly` holds every mode to a report. */
+export function verdict(findings: readonly Finding[], env: Env, reportOnly: boolean): "pass" | "fail" {
+	return findings.length > 0 && !reportOnly && mode(env) === "enforce" ? "fail" : "pass"
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " }
+
+/** HTML's rule for numeric references, less its C1 remap, which no path or URL depends on. */
+function fromCodePoint(code: number): string {
+	if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return "�"
+	return String.fromCodePoint(code)
+}
 
 export function decodeEntities(text: string): string {
 	return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
 		if (name[0] !== "#") return ENTITIES[name.toLowerCase()] ?? whole
-		const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10)
-		return Number.isFinite(code) ? String.fromCodePoint(code) : whole
+		const hex = name[1] === "x" || name[1] === "X"
+		return fromCodePoint(Number.parseInt(name.slice(hex ? 2 : 1), hex ? 16 : 10))
 	})
 }
 
-/** First 1-based line of `src` holding any of `needles`; 1 when none does. */
-export function lineOf(src: string, needles: readonly string[]): number {
+export function lineOf(src: string, needles: readonly string[], fallback = 1): number {
 	const lines = src.split("\n")
 	for (let i = 0; i < lines.length; i++) {
 		if (needles.some((n) => n !== "" && lines[i].includes(n))) return i + 1
 	}
-	return 1
+	return fallback
 }
 
 export function formatFinding(f: Finding): string {

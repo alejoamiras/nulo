@@ -4,20 +4,54 @@
  * parent's URL, so shape alone proves nothing about where a SHA came from.
  */
 import type { Doc } from "./links"
-import { type Ctx, type Finding, isCanonical, lineOf } from "./lib"
+import { type Ctx, type Finding, isCanonical, lineOf, mode, safeDecodeUri } from "./lib"
 
 export const BASES_FILE = "scripts/ci-cd/plans/permalink-bases.json"
 export const DEV_REF = "refs/remotes/origin/dev"
 /** A file or directory at a full SHA; only `tree` may name the repository root itself. */
 export const PERMALINK_RE =
-	/^https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob\/([0-9a-f]{40})\/[A-Za-z0-9._/-]+(?:#L\d+)?|tree\/([0-9a-f]{40})(?:\/[A-Za-z0-9._/-]+)?)$/
+	/^https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob\/([0-9a-f]{40})(?:\/[A-Za-z0-9._-]+)+(?:#L\d+)?|tree\/([0-9a-f]{40})(?:\/[A-Za-z0-9._-]+)*)$/
+const GITHUB_HOSTS: ReadonlySet<string> = new Set(["github.com", "www.github.com"])
+const FULL_SHA_RE = /^[0-9a-f]{40}$/
 
+function parseUrl(href: string): URL | null {
+	try {
+		return new URL(href.trim(), "https://relative.invalid/")
+	} catch {
+		return null
+	}
+}
+
+/**
+ * The SHA a permalink pins, or null unless the link is canonical as written: no `.` or `..` segment, and
+ * unchanged by a browser's normalization. `…/blob/GOOD/../../blob/BAD/…` has the shape and opens BAD.
+ */
 function permalinkSha(href: string): string | null {
 	const m = href.match(PERMALINK_RE)
-	return m ? (m[1] ?? m[2]) : null
+	if (!m || href.split(/[/#]/).some((s) => s === "." || s === "..")) return null
+	return parseUrl(href)?.href === href ? (m[1] ?? m[2]) : null
 }
-const CANDIDATE_RE = /^https?:\/\/(?:www\.)?github\.com\/[^/]+\/nulo\/(?:blob|tree)\//i
-const FULL_SHA_RE = /^[0-9a-f]{40}$/
+
+function namesNuloView(path: string): boolean {
+	const [, , repo, view] = path.split(/[\\/]/).map((s) => safeDecodeUri(s).toLowerCase())
+	return repo === "nulo" && (view === "blob" || view === "tree")
+}
+
+/**
+ * A link to this repository's files in any spelling a browser takes to GitHub: protocol-relative, `/\`,
+ * http, `www.`, any case, a trailing-dot host. The path is read as written and as resolved, so dot
+ * segments cannot walk a nulo link out of the candidate set.
+ */
+function isCandidate(href: string): boolean {
+	const url = parseUrl(href)
+	if (!url || !/^https?:$/.test(url.protocol) || !GITHUB_HOSTS.has(url.hostname.replace(/\.$/, ""))) return false
+	const written = href
+		.trim()
+		.replace(/^[a-z][a-z0-9+.-]*:/i, "")
+		.replace(/^[\\/]{2}[^\\/?#]*/, "")
+		.replace(/[?#].*$/, "")
+	return namesNuloView(url.pathname) || namesNuloView(written)
+}
 
 /** Allowlisted SHAs mapped to their line in the bases file. */
 export type Bases = Map<string, number>
@@ -35,15 +69,15 @@ export function isAllowedPermalink(href: string, bases: Bases): boolean {
 }
 
 function judgePermalink(doc: Doc, href: string, line: number, bases: Bases): Finding | null {
-	if (!CANDIDATE_RE.test(href)) return null
+	if (!isCandidate(href)) return null
 	const sha = permalinkSha(href)
 	if (sha === null) {
 		return {
 			rule: "permalink-shape",
 			file: doc.path,
 			line,
-			detail: `${href} is not https://github.com/alejoamiras/nulo/(blob|tree)/<40-hex sha>/<path>`,
-			fix: "pin a full SHA of this repository",
+			detail: `${href} is not the canonical https://github.com/alejoamiras/nulo/(blob|tree)/<40-hex sha>/<path>`,
+			fix: "write that URL, at a full SHA of this repository",
 		}
 	}
 	if (bases.has(sha)) return null
@@ -103,7 +137,7 @@ function judgeBase(ctx: Ctx, sha: string, line: number): Finding | null {
 
 export function permalinkAncestryFindings(ctx: Ctx, bases: Bases): Finding[] {
 	// Push, nightly and release runs only report and never touch the network.
-	if (ctx.env.GITHUB_ACTIONS === "true" && !ctx.env.GITHUB_BASE_REF) return []
+	if (mode(ctx.env) === "report") return []
 	if (bases.size === 0) return []
 	const unavailable = prepareDev(ctx)
 	if (unavailable) return [unavailable]
