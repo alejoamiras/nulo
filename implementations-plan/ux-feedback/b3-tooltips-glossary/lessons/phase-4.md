@@ -207,11 +207,11 @@ Values are Chrome's. Firefox's geometry is identical unless a difference is note
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| 1 | major | The press listeners ran in the bubble phase. `connected-apps/index.vue:162` stops its Enter keydown, so its tooltip stayed open under the confirmation and took the first Escape. A click with no pointerdown or key (a screen reader's activation) never closed a tooltip | `2145ff41`: `pointerdown`, `keydown` and a new `click` listen in the capture phase, and none prevents its default |
-| 2 | major | Placement ran only on open, so an open bubble kept its x when the window narrowed (360 → 300px: a 272px bubble at x 80 ended at 352) | `fa55f303`: while open, the bubble is placed again on every window `resize`; the listener goes on close and on unmount |
-| 3 | minor | `settings/tokens/index.vue:94` put its `v-if` on the icon inside the Tooltip, so removing the icon left the Tooltip mounted, with any open bubble and its Escape listener | `d5835a92`: the condition moved onto the `<Tooltip>` |
-| 4 | minor | The new Glossary drew the dark separator in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)`. This log wrongly called that pre-existing | `1f8bdbd0`: a `:global([theme="light"]) .entry` override, the page-local pattern `ConfirmPopup.vue:207` uses, with no new token. The log line and the plan are corrected |
-| 5 | minor | The e2e spec's header repeated its test names | `1baf8bfe`: one line, the reason (jsdom has no layout) |
+| 1 | major | The press listeners ran in the bubble phase. `connected-apps/index.vue:162` stops its Enter keydown, so its tooltip stayed open under the confirmation and took the first Escape. A click with no pointerdown or key (a screen reader's activation) never closed a tooltip | `65964b31`: `pointerdown`, `keydown` and a new `click` listen in the capture phase, and none prevents its default |
+| 2 | major | Placement ran only on open, so an open bubble kept its x when the window narrowed (360 → 300px: a 272px bubble at x 80 ended at 352) | `c81c26fe`: while open, the bubble is placed again on every window `resize`; the listener goes on close and on unmount |
+| 3 | minor | `settings/tokens/index.vue:94` put its `v-if` on the icon inside the Tooltip, so removing the icon left the Tooltip mounted, with any open bubble and its Escape listener | `cced036a`: the condition moved onto the `<Tooltip>` |
+| 4 | minor | The new Glossary drew the dark separator in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)`. This log wrongly called that pre-existing | `9c543a7e`: a `:global([theme="light"]) .entry` override, the page-local pattern `ConfirmPopup.vue:207` uses, with no new token. The log line and the plan are corrected |
+| 5 | minor | The e2e spec's header repeated its test names | `a89502d8`: one line, the reason (jsdom has no layout) |
 
 Nothing was rejected.
 
@@ -269,3 +269,33 @@ findings across the arc. Read-only Vue/CSS probes confirmed capture-event scopin
 activation, resize clamping, listener cleanup on Escape/press/unmount, and the light-theme
 override. Docs and changed comments match the fixes. Browser suites were not rerun. VERDICT:
 approve — confidence: high"*
+
+## Gates on the stack (`27704795`)
+
+Every e2e run is retry 0. The gates ran on `27704795`; the arc was then restacked onto batch 2's
+gate record, which changes only batch 2's docs.
+
+| Gate | Result |
+|---|---|
+| `bun run lint` | exit 0 (1 s) |
+| `bun run typecheck:all` | exit 0 (41 s) |
+| `bun run test:all` | exit 0 (112 s); extension 572 files passed, 3 skipped, 7209 tests passed, 4 skipped, 7 todo; design 40 files, 375 tests |
+| `bun run test:ci-gating` | exit 0 (23 s) |
+| `bun run build` | exit 0 (10 s) |
+| `bun run --cwd apps/extension build-storybook` | exit 0 (9 s) |
+| Smoke, Chrome (smoke build flags, `NULO_E2E_MIGRATION_FIXTURE=1`) | exit 0 (920 s); 36 files passed, 3 skipped; 142 tests passed, 8 skipped |
+| Smoke, Firefox | exit 0 (1,165 s); 37 files passed, 2 skipped; 138 tests passed, 12 skipped |
+| Flake bar, `tooltips-glossary.test.ts`, Chrome ×3 (retry-0 scratch config) | exit 0 each, 3/3 tests |
+| Flake bar, Firefox ×3 | exit 0 each, 3/3 tests |
+| Network, Chrome prover on: `connect-dapp`, `cap-request-basic`, `tx-sendTx-selfPay`, `popup-escape-layered` | exit 0 (185 s); 4 files, 4 tests |
+| Network, Firefox proverless: the same four | exit 0 (188 s); 4 files, 4 tests |
+| `bun run e2e:reap` (after smoke and at the end) | exit 0, nothing left running |
+
+The network list, checked against its `waitForPopup(` targets:
+
+- `connect-dapp` runs through the `dappConnectedExtension` fixture, whose `connectPlayground`
+  waits for `discover` and then `verify` (`fixtures/extension.ts:345`, `:363`).
+- `cap-request-basic` opens `capabilities`, and `tx-sendTx-selfPay` opens `execute`.
+- `popup-escape-layered` is the network suite's `pressEscape` user.
+
+Together they open all four dApp windows.

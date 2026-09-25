@@ -865,7 +865,7 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
 Gate: lint, `typecheck:all`, `test:all`, the smoke file and `passkey-backup.test.ts` (the other
 `pressEscape` user) on Chrome and Firefox, exit 0.
 
-### P4 · Parity and arc gate ☐
+### P4 · Parity and arc gate ✓
 
 1. Parity: rebuild the mocks and render the batch's shots.
    - Capture each surface at the mock's size:
@@ -898,6 +898,9 @@ Gate: lint, `typecheck:all`, `test:all`, the smoke file and `passkey-backup.test
 5. `bun run e2e:reap`.
 
 Gate: all of the above exit 0 and the parity Artifact URL printed.
+
+Passed on `27704795` ([lessons](lessons/phase-4.md)); the parity page is
+<https://claude.ai/artifact/8EE5kUaqgpr1e2WeCucYqh>.
 
 ## Arc boundary
 
