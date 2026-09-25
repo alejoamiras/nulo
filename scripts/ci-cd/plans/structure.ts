@@ -1,5 +1,6 @@
 import { posix } from "node:path"
-import { type Doc, extract, resolveHref } from "./links"
+import { type Block, blockLines, itemHrefs, topBlocks } from "./entries"
+import { type Doc, resolveHref } from "./links"
 import {
 	ACTIVE_INDEX,
 	ARCHIVE,
@@ -238,46 +239,62 @@ function classifyCuratedLink(file: string, href: string, bases: Bases): LinkVerd
 	return REPO_ISSUE_RE.test(href) ? "issue" : "outside"
 }
 
-const ENTRY_RE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
-const DEFINITION_RE = /^ {0,3}\[[^\]]+\]:/
-
-/** Reference definitions as CommonMark reads them: one cannot interrupt a paragraph, so a line glued under an entry is not one. */
-function definitionLines(lines: readonly string[]): Set<number> {
-	const found = new Set<number>()
-	lines.forEach((line, i) => {
-		const above = i === 0 ? "" : lines[i - 1]
-		if (DEFINITION_RE.test(line) && (above.trim() === "" || /^ {0,3}#/.test(above) || found.has(i - 1))) found.add(i)
-	})
-	return found
+function isEvidence(href: string, bases: Bases): boolean {
+	const verdict = classifyCuratedLink(LESSONS_FILE, href, bases)
+	return verdict === "plans" || verdict === "permalink"
 }
 
-function hasEvidence(src: string, bases: Bases): boolean {
-	return extract(LESSONS_FILE, src).links.some((l) => {
-		const verdict = classifyCuratedLink(LESSONS_FILE, l.href, bases)
-		return verdict === "plans" || verdict === "permalink"
+type Flag = { block: number; below: boolean; detail: string; fix: string }
+
+/** Past the first entry only headings and entries may stand at the top level; free text above it is a preamble. */
+function flagEntries(blocks: readonly Block[], hrefs: readonly string[][], bases: Bases): Flag[] {
+	const flags: Flag[] = []
+	let item = 0
+	blocks.forEach((block, i) => {
+		if (block.kind === "other" && item > 0)
+			flags.push({ block: i, below: false, detail: "text outside any entry", fix: "make it an entry, or move it above the first" })
+		if (block.kind !== "item") return
+		if (!hrefs[item].some((href) => isEvidence(href, bases)))
+			flags.push({
+				block: i,
+				below: false,
+				detail: "the entry links no evidence",
+				fix: "link its archived lessons log or an allowlisted permalink",
+			})
+		if (block.multiline) flags.push({ block: i, below: true, detail: "an entry runs past one line", fix: "fold it into one line" })
+		item++
 	})
+	return flags
 }
 
-/** One line per lessons entry, each carrying its evidence link; each is rendered with the file's reference definitions. */
+function nextTextLine(lines: readonly string[], start: number): number {
+	for (let i = start; i < lines.length; i++) if (lines[i].trim() !== "") return i + 1
+	return start + 1
+}
+
+/** One line per lessons entry, each carrying its evidence link, as the Markdown parser reads the whole file. */
 function lessonsEntryFindings(src: string, bases: Bases): Finding[] {
+	const blocks = topBlocks(src)
+	const hrefs = itemHrefs(src)
+	if (hrefs.length !== blocks.filter((b) => b.kind === "item").length) {
+		return [
+			finding(
+				"curated-budget",
+				LESSONS_FILE,
+				1,
+				"raw HTML list items blur which entry owns a link",
+				"write every entry as a Markdown item",
+			),
+		]
+	}
+	const flags = flagEntries(blocks, hrefs, bases)
+	if (flags.length === 0) return []
+	const starts = blockLines(src, Math.max(...flags.map((f) => f.block)) + 1)
 	const lines = src.split("\n")
-	const definitions = definitionLines(lines)
-	const defined = [...definitions].map((i) => lines[i]).join("\n")
-	const findings: Finding[] = []
-	let inEntries = false
-	lines.forEach((line, i) => {
-		const at = (detail: string, fix: string) => finding("curated-budget", LESSONS_FILE, i + 1, detail, fix)
-		if (definitions.has(i)) return
-		if (ENTRY_RE.test(line)) {
-			inEntries = true
-			if (!hasEvidence(`${line}\n\n${defined}`, bases))
-				findings.push(at("the entry links no evidence", "link its archived lessons log or an allowlisted permalink"))
-			return
-		}
-		if (inEntries && line.trim() !== "" && !line.startsWith("#"))
-			findings.push(at("an entry runs past one line", "fold it into one line"))
+	return flags.map((f) => {
+		const start = starts[f.block] ?? 1
+		return finding("curated-budget", LESSONS_FILE, f.below ? nextTextLine(lines, start) : start, f.detail, f.fix)
 	})
-	return findings
 }
 
 export function curatedBudgetFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>, bases: Bases): Finding[] {

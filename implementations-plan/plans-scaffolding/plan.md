@@ -126,6 +126,7 @@ type RuleId =
   | "document-type"      // a tracked document, or anything under implementations-plan/, that is a symlink or gitlink rather than a regular file
   | "link-untracked"     // any link form → a path a canonical pattern covers
   | "link-missing"       // any link form → a path absent from the git index (scope: A8)
+  | "link-opaque"        // a URL-bearing construct the gate cannot judge: <base href>, an undecodable reference, unreadable CSS, plugin elements, a meta refresh
   | "permalink-shape"    // not https://github.com/alejoamiras/nulo/(blob|tree)/<40-hex>/<[A-Za-z0-9._/-]+>(#L\d+)?
   | "permalink-base"     // SHA not in permalink-bases.json
   | "permalink-ancestry" // PR runs and local: an entry that is not an ancestor of `dev`, fetched by name (never the PR base)
@@ -490,7 +491,7 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
    - `README.md` L13, L27 and L60.
    - `implementations-plan/README.md` rewritten: the standard, the milestone key, and § "Portable rules", including the asset rule "a plan-dir file live code or CI reads is relocated before its plan is archived".
    - `CI.md:3` and `.github/README.md:3`.
-8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `document-type`, `link-untracked`, `link-missing`, `permalink-*`, `curated-budget` and `local-path`.
+8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `document-type`, `link-untracked`, `link-missing`, `link-opaque`, `permalink-*`, `curated-budget` and `local-path`.
 
 **Validation gate.** Commit, then run:
 - `git ls-files -ci --exclude-standard -- implementations-plan | wc -l` → `0`;

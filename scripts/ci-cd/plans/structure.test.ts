@@ -223,6 +223,55 @@ describe("curated-budget", () => {
 		).toEqual(["3 the entry links no evidence", "4 an entry runs past one line"])
 	})
 
+	test("an item indented one to three spaces is an entry, held to evidence and one line", () => {
+		const repo = makeRepo({
+			"implementations-plan/lessons.md": [
+				"# Lessons",
+				"",
+				" - One space, no evidence.",
+				"  - Two spaces ([log](archive/p/lessons/phase-1.md))",
+				"    and it runs on.",
+				"   - Three spaces, no evidence.",
+			].join("\n"),
+		})
+		expect(findings(repo, "curated-budget").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"3 the entry links no evidence",
+			"5 an entry runs past one line",
+			"6 the entry links no evidence",
+		])
+	})
+
+	test("a would-be definition that renders a link lends no entry its evidence, and after the entries it is stray text", () => {
+		const fake = "[unused]: bad target [fake](archive/p/plan.md)"
+		const after = makeRepo({ "implementations-plan/lessons.md": `# Lessons\n\n- One gotcha, no link.\n\n${fake}\n` })
+		expect(findings(after, "curated-budget").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"3 the entry links no evidence",
+			"5 text outside any entry",
+		])
+		const before = makeRepo({ "implementations-plan/lessons.md": `# Lessons\n\n${fake}\n\n- One gotcha, no link.\n` })
+		expect(findings(before, "curated-budget").map((f) => `${f.line} ${f.detail}`)).toEqual(["5 the entry links no evidence"])
+	})
+
+	test("an entry is one paragraph on one line: a nested list or a second paragraph runs past it", () => {
+		const log = "([log](archive/p/lessons/phase-1.md))"
+		const src = `# Lessons\n\n- Parent ${log}\n  - child\n- Loose ${log}\n\n  second paragraph\n- Fine ${log}\n`
+		expect(
+			findings(makeRepo({ "implementations-plan/lessons.md": src }), "curated-budget").map((f) => `${f.line} ${f.detail}`),
+		).toEqual(["4 an entry runs past one line", "7 an entry runs past one line"])
+	})
+
+	test("a raw HTML list beside the entries fails closed: no entry can borrow its links", () => {
+		const src = "# Lessons\n\n<ul><li>raw [x](archive/p/lessons/phase-1.md)</li></ul>\n\n- One gotcha, no link.\n"
+		expect(
+			findings(makeRepo({ "implementations-plan/lessons.md": src }), "curated-budget").map((f) => `${f.line} ${f.detail}`),
+		).toEqual(["1 raw HTML list items blur which entry owns a link"])
+	})
+
+	test("a valid multiline reference definition passes and resolves its entry's link", () => {
+		const src = '# Lessons\n\n- One gotcha ([log][p1]).\n\n[p1]:\n  archive/p/lessons/phase-1.md\n  "the phase-1 log"\n'
+		expect(findings(makeRepo({ "implementations-plan/lessons.md": src }), "curated-budget")).toEqual([])
+	})
+
 	test("follow-ups may point at this repository's issues and at plans", () => {
 		const repo = makeRepo({
 			"implementations-plan/follow-ups.md":

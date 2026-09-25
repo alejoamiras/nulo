@@ -76,6 +76,44 @@ describe("extract", () => {
 		])
 	})
 
+	test("every URL attribute the policy judges is a link: input src, cite, action, formaction, ping, SVG href, object data", () => {
+		const html = [
+			'<input type="image" src="in.png"><blockquote cite="bq.md"></blockquote><q cite="q.md">q</q>',
+			'<form action="f.md"><button formaction="b.md">b</button></form><del cite="d.md">d</del>',
+			'<a href="a.md" ping="p1.md p2.md">a</a><svg><image href="im.svg"/><use xlink:href="u.svg"/></svg>',
+			'<object data="o.md"></object><div data="not-a-url"></div><table background="bg.png"></table>',
+		].join("\n")
+		expect(extract("p/eli5.html", html).links.map((l) => `${l.line} ${l.href}`)).toEqual([
+			"1 in.png",
+			"1 bq.md",
+			"1 q.md",
+			"2 f.md",
+			"2 b.md",
+			"2 d.md",
+			"3 a.md",
+			"3 p1.md",
+			"3 p2.md",
+			"3 im.svg",
+			"3 u.svg",
+			"4 o.md",
+			"4 bg.png",
+		])
+	})
+
+	test("a CSS url() or @import, in a style attribute or a <style> block, is a link; url(#id) is an anchor", () => {
+		const html = [
+			'<div style="background: url(\'bg.png\')"><svg><rect fill="url(#g)"/></svg></div>',
+			'<style>@import "s.css"; @import url(t.css); b { background: url( u.png ) }</style>',
+		].join("\n")
+		expect(extract("p/eli5.html", html).links.map((l) => `${l.line} ${l.href}`)).toEqual([
+			"1 bg.png",
+			"1 #g",
+			"2 t.css",
+			"2 u.png",
+			"2 s.css",
+		])
+	})
+
 	test("an srcset in Markdown's raw HTML is checked like any link", () => {
 		const repo = makeRepo({ "README.md": '<img srcset="dead.md 1x">\n' })
 		expect(findings(repo, "link-missing").map((f) => f.detail)).toEqual(["dead.md → dead.md is not in the git index"])
@@ -188,6 +226,67 @@ describe("link-missing", () => {
 			"3 implementations-plan/gone/plan.md:3-9 → implementations-plan/gone/plan.md is not in the git index",
 		])
 	})
+
+	test("a dot segment never lets a plan-relative link pass as a repo-rooted cite", () => {
+		const repo = makeRepo({
+			"implementations-plan/p/plan.md": [
+				"[a](apps/../../gone/plan.md)",
+				"[b](apps/./../../gone/plan.md:4)",
+				"[c](%61pps/../../gone/plan.md)",
+				"[d](apps/x.ts:12)",
+				"[e](apps/gone.ts)",
+			].join("\n"),
+			"apps/x.ts": "x\n",
+		})
+		expect(findings(repo, "link-missing").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"1 apps/../../gone/plan.md → implementations-plan/gone/plan.md is not in the git index",
+			"2 apps/./../../gone/plan.md:4 → implementations-plan/gone/plan.md is not in the git index",
+			"3 %61pps/../../gone/plan.md → implementations-plan/gone/plan.md is not in the git index",
+		])
+	})
+})
+
+describe("link-opaque", () => {
+	test("a <base href>, in HTML or in Markdown's raw HTML, is a finding: it moves every relative link", () => {
+		const repo = makeRepo({
+			"docs/eli5.html": '<base href="https://attacker.example/">\n<a href="plan.md">p</a>\n',
+			"README.md": 'x\n\n<base href="/elsewhere/">\n',
+		})
+		expect(findings(repo, "link-opaque").map((f) => `${f.file}:${f.line}`)).toEqual(["docs/eli5.html:1", "README.md:3"])
+	})
+
+	test("a named reference the gate cannot decode is a finding; a semicolonless numeric one is decoded", () => {
+		const permalink = "https://github.com/alejoamiras/nulo/&#98lob/BAD/README.md"
+		const repo = makeRepo({
+			"README.md": [
+				'<a href="https://github.com&sol;alejoamiras&sol;nulo&sol;blob&sol;BAD&sol;README.md">x</a>',
+				`<a href="${permalink}">y</a>`,
+				'<a href="docs/a.md?x=1&amp;y=2">ok</a>',
+				'<a href="docs/a.md?x=1&amp/y">legacy</a>',
+				'<a href="https://fonts.example/css?family=A&family=B&notify&not=1">text</a>',
+			].join("\n"),
+			"docs/a.md": "a\n",
+		})
+		expect(findings(repo, "link-opaque").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"1 &sol; is a character reference the gate cannot decode",
+			"4 &amp is a character reference the gate cannot decode",
+		])
+		expect(findings(repo, "permalink-shape").map((f) => f.line)).toEqual([2])
+	})
+
+	test("URL-bearing constructs outside the policy are findings, never skipped; a fragment url() is not one", () => {
+		const html = [
+			'<iframe srcdoc="<a href=gone.md>x</a>"></iframe>',
+			'<object codebase="/x/" data="o.md"></object>',
+			'<meta http-equiv="refresh" content="0; url=gone.md">',
+			"<div style=\"background: image-set('a.png' 1x)\">d</div>",
+			"<style>a { background: url(a\\(b.png) }</style>",
+			'<applet code="A.class"></applet><param name="movie" value="m.swf">',
+			'<svg><rect fill="url(#grad)"/></svg><meta charset="utf-8">',
+		].join("\n")
+		const repo = makeRepo({ "docs/eli5.html": html })
+		expect(findings(repo, "link-opaque").map((f) => f.line)).toEqual([1, 2, 3, 4, 5, 6, 6])
+	})
 })
 
 describe("path-token", () => {
@@ -213,6 +312,11 @@ describe("path-token", () => {
 	test("a NUL byte does not hide a file's plan paths", () => {
 		const repo = makeRepo({ "README.md": "x\0y\nimplementations-plan/gone/plan.md\n" })
 		expect(findings(repo, "path-token").map((f) => f.line)).toEqual([2])
+	})
+
+	test("a colon in a file name never hides its plan paths", () => {
+		const repo = makeRepo({ "src/a:b.ts": "x\n// implementations-plan/gone/plan.md\r\n" })
+		expect(findings(repo, "path-token").map((f) => `${f.file}:${f.line}`)).toEqual(["src/a:b.ts:2"])
 	})
 
 	test("a brace token is checked alternative by alternative", () => {

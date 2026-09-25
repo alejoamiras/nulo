@@ -18,6 +18,7 @@ export type RuleId =
 	| "document-type"
 	| "link-untracked"
 	| "link-missing"
+	| "link-opaque"
 	| "permalink-shape"
 	| "permalink-base"
 	| "permalink-ancestry"
@@ -34,6 +35,7 @@ export const RULE_IDS: readonly RuleId[] = [
 	"document-type",
 	"link-untracked",
 	"link-missing",
+	"link-opaque",
 	"permalink-shape",
 	"permalink-base",
 	"permalink-ancestry",
@@ -242,22 +244,6 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 /** `reportOnly` holds every mode to a report. */
 export function verdict(findings: readonly Finding[], env: Env, reportOnly: boolean): "pass" | "fail" {
 	return findings.length > 0 && !reportOnly && mode(env) === "enforce" ? "fail" : "pass"
-}
-
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " }
-
-/** HTML's rule for numeric references, less its C1 remap, which no path or URL depends on. */
-function fromCodePoint(code: number): string {
-	if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return "�"
-	return String.fromCodePoint(code)
-}
-
-export function decodeEntities(text: string): string {
-	return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
-		if (name[0] !== "#") return ENTITIES[name.toLowerCase()] ?? whole
-		const hex = name[1] === "x" || name[1] === "X"
-		return fromCodePoint(Number.parseInt(name.slice(hex ? 2 : 1), hex ? 16 : 10))
-	})
 }
 
 export function lineOf(src: string, needles: readonly string[], fallback = 1): number {

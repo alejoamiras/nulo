@@ -2,7 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { cleanupRepos, findings, git, makeRepo, tempDir, writeFiles } from "./fixture-repo"
-import { decodeEntities, type Env, type Finding, isCanonical, lineOf, mode, parseIndex, writeSummary } from "./lib"
+import { decodeEntities } from "./html"
+import { type Env, type Finding, isCanonical, lineOf, mode, parseIndex, writeSummary } from "./lib"
 
 afterAll(cleanupRepos)
 
@@ -91,6 +92,10 @@ describe("helpers", () => {
 	test("an invalid numeric reference becomes U+FFFD, as in HTML, and never throws", () => {
 		const refs = ["&#x110000;", "&#0;", "&#xD800;", `&#${"9".repeat(40)};`, "&#x41;"]
 		expect(decodeEntities(refs.join("|"))).toBe(["�", "�", "�", "�", "A"].join("|"))
+	})
+
+	test("a numeric reference decodes as HTML reads it: without its semicolon, and C1 through Windows-1252", () => {
+		expect(decodeEntities("&#98lob &#x62;x &#x80; &#150; &#x81; &#x")).toBe("blob bx € – \u0081 &#x")
 	})
 
 	test("lineOf finds the first line holding a needle", () => {

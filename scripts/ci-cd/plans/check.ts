@@ -5,7 +5,7 @@
  * any; `--report` prints the same and exits 0.
  */
 import { createCtx, countByRule, type Env, type Finding, formatFinding } from "./lib"
-import { extractDocs, linkFindings, pathTokenFindings } from "./links"
+import { extractDocs, linkFindings, opaqueFindings, pathTokenFindings } from "./links"
 import { loadBases, permalinkAncestryFindings, permalinkFindings } from "./permalinks"
 import {
 	archiveStructureFindings,
@@ -28,6 +28,7 @@ export function checkTree(opts: { cwd?: string; env?: Env } = {}): Finding[] {
 		...nestedIgnoreFindings(ctx),
 		...documentTypeFindings(ctx),
 		...linkFindings(ctx, docs),
+		...opaqueFindings(docs),
 		...pathTokenFindings(ctx),
 		...permalinkFindings(docs, bases),
 		...permalinkAncestryFindings(ctx, bases),

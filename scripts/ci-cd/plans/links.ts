@@ -1,15 +1,15 @@
 /**
  * Link and path-token rules. Links come from the rendered HTML, so code spans and fences are never
  * links while inline, reference-style, autolinked and raw HTML links all are; `.html` files go straight
- * to the rewriter.
+ * to the rewriter. Which attributes carry URLs, and which constructs the gate cannot judge, is `html.ts`.
  */
 import { posix } from "node:path"
+import { type AttributeLink, cssUrls, decodeEntities, judgeAttribute, judgeElement } from "./html"
 import {
 	ARCHIVE,
 	activePlanDirs,
 	type Ctx,
 	CURATED_FILES,
-	decodeEntities,
 	existsInIndex,
 	type Finding,
 	INDEX_FILES,
@@ -23,7 +23,9 @@ import {
 } from "./lib"
 
 export type Section = { heading: string; text: string }
-export type Doc = { path: string; src: string; links: Link[]; h2: string[]; sections: Section[] }
+/** A construct whose target the gate cannot judge, located in its file. */
+export type Opaque = { line: number; detail: string }
+export type Doc = { path: string; src: string; links: Link[]; h2: string[]; sections: Section[]; opaque: Opaque[] }
 export type Target = { kind: "external" } | { kind: "anchor" } | { kind: "repo"; path: string | null }
 
 /** Live docs outside the plan tree whose links must all resolve. */
@@ -46,65 +48,56 @@ const PATH_TOKEN_EXCLUDES = [
 	":!AUDIT.md",
 	":!scripts/ci-cd/plans",
 ]
-/** The attributes that load or link a resource; `srcset` holds a list of them. */
-const URL_ATTRIBUTES: readonly [tag: string, attrs: readonly string[]][] = [
-	["a", ["href"]],
-	["area", ["href"]],
-	["link", ["href"]],
-	["img", ["src", "srcset"]],
-	["source", ["src", "srcset"]],
-	["script", ["src"]],
-	["iframe", ["src"]],
-	["embed", ["src"]],
-	["video", ["src", "poster"]],
-	["audio", ["src"]],
-	["track", ["src"]],
-	["object", ["data"]],
-]
-
 /** GitHub renders GFM autolink literals, so a bare `https://` or `www.` URL is a link there too. */
 function renderMarkdown(src: string): string {
 	return Bun.markdown.html(src, { autolinks: true })
 }
 
-/** Each candidate's URL runs to whitespace, and its descriptors to the next comma. */
-export function srcsetUrls(value: string): string[] {
-	const urls: string[] = []
-	let rest = value
-	for (;;) {
-		rest = rest.replace(/^[\s,]+/, "")
-		const url = rest.match(/^\S+/)?.[0]
-		if (url === undefined) return urls
-		urls.push(url.replace(/,+$/, ""))
-		rest = url.endsWith(",") ? rest.slice(url.length) : rest.slice(url.length).replace(/^[^,]*/, "")
+type RawOpaque = { needle: string; detail: string }
+
+/** Sorts one element's URLs into links and opaque constructs; a construct judged whole skips its attributes. */
+function readElement(e: HTMLRewriterTypes.Element, links: AttributeLink[], opaque: RawOpaque[]): void {
+	const tag = e.tagName.toLowerCase()
+	const attributes = [...e.attributes]
+	const whole = judgeElement(tag, (name) => e.getAttribute(name))
+	if (whole !== null) {
+		const longest = attributes.map(([, v]) => v).sort((a, b) => b.length - a.length)[0]
+		opaque.push({ needle: longest?.trim() ? longest : `<${e.tagName}`, detail: whole })
+		return
+	}
+	for (const [name, value] of attributes) {
+		const verdict = judgeAttribute(tag, name.toLowerCase(), value)
+		if (verdict === null) continue
+		if ("opaque" in verdict) opaque.push({ needle: value.trim() === "" ? `<${e.tagName}` : value, detail: verdict.opaque })
+		else links.push(...verdict.links)
 	}
 }
 
-type RawLink = { needle: string; href: string }
-
-function urlsOf(attr: string, value: string): RawLink[] {
-	if (attr !== "srcset") return [{ needle: value, href: decodeEntities(value) }]
-	return srcsetUrls(decodeEntities(value)).map((href) => ({ needle: href, href }))
-}
-
-export function extract(file: string, src: string): { links: Link[]; h2: string[]; sections: Section[] } {
+export function extract(file: string, src: string): Omit<Doc, "path" | "src"> {
 	const html = file.endsWith(".html") ? src : renderMarkdown(src)
-	const raw: RawLink[] = []
+	const raw: AttributeLink[] = []
+	const rawOpaque: RawOpaque[] = []
 	const sections: Section[] = []
 	let current: Section | null = null
 	let inHeading = false
-	const rewriter = new HTMLRewriter()
-	for (const [tag, attrs] of URL_ATTRIBUTES) {
-		rewriter.on(tag, {
+	let style: string | null = null
+	const endStyle = () => {
+		const urls = style === null ? [] : cssUrls(style)
+		if (urls === null) rawOpaque.push({ needle: "<style", detail: "a <style> block loads a URL through CSS the gate cannot read" })
+		else raw.push(...urls.map((href) => ({ href, needle: href })))
+		style = null
+	}
+	new HTMLRewriter()
+		.on("*", { element: (e) => readElement(e, raw, rawOpaque) })
+		.on("style", {
 			element(e) {
-				for (const attr of attrs) {
-					const value = e.getAttribute(attr)
-					if (value !== null) raw.push(...urlsOf(attr, value))
-				}
+				style = ""
+				e.onEndTag(endStyle)
+			},
+			text(t) {
+				if (style !== null) style += t.text
 			},
 		})
-	}
-	rewriter
 		.on("h2", {
 			element(e) {
 				current = { heading: "", text: "" }
@@ -123,14 +116,25 @@ export function extract(file: string, src: string): { links: Link[]; h2: string[
 			},
 		})
 		.transform(html)
+	// An unclosed <style> runs to the end of the document.
+	endStyle()
 	const decodedSections = sections.map((s) => ({ heading: decodeEntities(s.heading).trim(), text: decodeEntities(s.text) }))
 	const links = raw.map(({ needle, href }) => ({ href, line: linkLine(src, needle, href) }))
-	return { links, h2: decodedSections.map((s) => s.heading), sections: decodedSections }
+	const opaque = rawOpaque.map(({ needle, detail }) => ({ line: lineOf(src, [needle]), detail }))
+	return { links, h2: decodedSections.map((s) => s.heading), sections: decodedSections, opaque }
 }
 
-/** An autolinked `www.` URL gains an `http://` its source never had, so the bare form is the fallback needle. */
+/**
+ * The most exact spelling wins across the whole file before a looser one is tried, so a decoded form
+ * never pins a link to an earlier line that merely resembles it. An autolinked `www.` URL gains an
+ * `http://` its source never had, so the bare form is the last needle.
+ */
 function linkLine(src: string, needle: string, href: string): number {
-	return lineOf(src, [needle, href, safeDecodeUri(href)], 0) || lineOf(src, [href.replace(/^(?:https?:\/\/|mailto:)/, "")])
+	for (const form of [needle, href, safeDecodeUri(href)]) {
+		const line = lineOf(src, [form], 0)
+		if (line) return line
+	}
+	return lineOf(src, [href.replace(/^(?:https?:\/\/|mailto:)/, "")])
 }
 
 /** A symlinked or gitlinked document is a `document-type` finding and is never read as one. */
@@ -185,7 +189,9 @@ function planTreeTargets(from: string, href: string, topLevel: ReadonlySet<strin
 		.replace(/[?#].*$/, "")
 		.replace(LINE_CITE_RE, "")
 	const decoded = safeDecodeUri(bare)
-	const rooted = !/^\.{0,2}\//.test(decoded) && topLevel.has(decoded.split("/")[0])
+	// Only a spelling normalization leaves alone reads as a code cite: `apps/../../gone/plan.md` resolves
+	// from the plan into the plan tree, and a dot or empty segment never appears in a real cite.
+	const rooted = !/^\.{0,2}\//.test(decoded) && decoded === posix.normalize(decoded) && topLevel.has(decoded.split("/")[0])
 	if (rooted && !decoded.startsWith(`${PLANS}/`)) return []
 	const relative = resolveHref(from, bare)
 	const readings = [rooted ? posix.normalize(decoded) : null, relative.kind === "repo" ? relative.path : null]
@@ -220,6 +226,17 @@ function judgeLink(ctx: Ctx, doc: Doc, link: Link, scope: LinkScope): Finding | 
 		detail: `${link.href} → ${candidates[0]} is not in the git index`,
 		fix: "fix the path or link a permalink",
 	}
+}
+
+export function opaqueFindings(docs: ReadonlyMap<string, Doc>): Finding[] {
+	const findings: Finding[] = []
+	for (const doc of docs.values()) {
+		if (isCanonical(doc.path)) continue
+		for (const { line, detail } of doc.opaque) {
+			findings.push({ rule: "link-opaque", file: doc.path, line, detail, fix: "write it as a plain link the gate can check" })
+		}
+	}
+	return findings
 }
 
 export function linkFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>): Finding[] {
@@ -295,16 +312,19 @@ function hitFindings(ctx: Ctx, file: string, line: number, text: string): Findin
 }
 
 export function pathTokenFindings(ctx: Ctx): Finding[] {
-	// `-a`: a NUL byte would otherwise make git skip the whole file as binary.
-	const grep = ctx.git("grep", "--cached", "-n", "-a", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
+	// `-a`: a NUL byte would otherwise make git skip the whole file as binary. `-z`: each name ends in a
+	// NUL and is never quoted, so a colon or a newline in it cannot shift the fields.
+	const grep = ctx.git("grep", "--cached", "-n", "-a", "-z", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
 	// Exit status 1 is "no match", not an error.
 	if (grep.status === 1) return []
 	if (!grep.ok) throw new Error(`git grep failed: ${grep.stderr.trim()}`)
 	const findings: Finding[] = []
-	for (const hit of grep.stdout.split("\n")) {
-		// dotAll: a CRLF line keeps its `\r`, which `.` alone would not match.
-		const m = hit.match(/^([^:]+):(\d+):(.*)$/s)
-		if (m) findings.push(...hitFindings(ctx, m[1], Number(m[2]), m[3]))
+	const hit = /([^\0]*)\0(\d+)\0([^\n]*)\n/y
+	let at = 0
+	for (let m = hit.exec(grep.stdout); m; m = hit.exec(grep.stdout)) {
+		findings.push(...hitFindings(ctx, m[1], Number(m[2]), m[3]))
+		at = hit.lastIndex
 	}
+	if (at !== grep.stdout.length) throw new Error(`git grep printed an unparsable record at byte ${at}`)
 	return findings
 }
