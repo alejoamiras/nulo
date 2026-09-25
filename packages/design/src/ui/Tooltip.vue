@@ -117,6 +117,7 @@ const handleFocusOut = () => {
 	hide()
 }
 
+// Bound in the capture phase, so a control that stops its own keydown or click still closes it.
 const handlePress = (event: Event) => {
 	const control = (event.target as Element | null)?.closest?.(PRESS_TARGETS)
 	if (!control || !trigger.value?.contains(control)) return
@@ -170,8 +171,9 @@ onBeforeUnmount(() => {
 		@touchend="handleLeave"
 		@focusin="show"
 		@focusout="handleFocusOut"
-		@pointerdown="handlePress"
-		@keydown="handleKeydown"
+		@pointerdown.capture="handlePress"
+		@keydown.capture="handleKeydown"
+		@click.capture="handlePress"
 		:class="[$style.wrapper, inline && $style.inline]"
 		:style="{ width: wide ? '100%' : undefined }"
 	>

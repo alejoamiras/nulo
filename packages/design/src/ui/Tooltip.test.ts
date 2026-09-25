@@ -246,12 +246,40 @@ describe("Tooltip", () => {
 			["pointerdown", "pointerdown", { pointerType: "mouse" }],
 			["Enter", "keydown", { key: "Enter" }],
 			["Space", "keydown", { key: " " }],
+			["a click alone", "click", {}],
 		])("%s closes it", async (_name, event, options) => {
 			const w = mountTooltip()
 			await w.trigger("mouseenter")
 			expect(isOpen()).toBe(true)
 			await w.find("button").trigger(event, options)
 			expect(isOpen()).toBe(false)
+		})
+
+		test.each([
+			["Enter", () => new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })],
+			["a click", () => new MouseEvent("click", { bubbles: true, cancelable: true })],
+		])("%s on a control that stops propagation still closes it, and the control still acts", async (_name, make) => {
+			const activate = vi.fn()
+			const w = mount(
+				{
+					components: { Tooltip },
+					setup: () => ({ activate }),
+					template: `<Tooltip><span role="button" tabindex="0" @click.stop="activate" @keydown.enter.stop="activate">x</span><template #content>Tip body</template></Tooltip>`,
+				},
+				{ attachTo: document.body },
+			)
+			const control = w.find("span")
+			await control.trigger("focusin")
+			expect(isOpen()).toBe(true)
+			// Vue skips a listener attached no earlier than the event's first Vue handler ran, and fake
+			// time stands still, so the control's own listener would never run without this.
+			vi.advanceTimersByTime(1)
+			const event = make()
+			control.element.dispatchEvent(event)
+			await flushPromises()
+			expect(isOpen()).toBe(false)
+			expect(activate).toHaveBeenCalledTimes(1)
+			expect(event.defaultPrevented).toBe(false)
 		})
 
 		test("cancels a pending open", async () => {
