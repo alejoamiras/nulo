@@ -1,6 +1,6 @@
 # @nulo/resolve-asset
 
-Layout-agnostic location of another package's files — including files the package does **not** export (wasm binaries, contract artifacts, storage internals). One source of truth for what used to be six drifting copies of a `node_modules`-walking resolver.
+Layout-agnostic location of another package's files — including files the package does **not** export (wasm binaries, contract artifacts, storage internals). One source of truth for what used to be six drifting copies of a `node_modules`-walking resolver. [`scripts/publish/`](../../scripts/publish/README.md) also stages it for npm as `@alejoamiras/nulo-resolve-asset`.
 
 ## Why it exists
 

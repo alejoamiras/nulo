@@ -24,9 +24,14 @@ jobs:
       - name: Run unit tests in every package
         run: bun run test:all
 
+      # The staged-package tests import every published export under Node 24 ESM as well as Bun.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
       - name: Run release-script unit tests
-        # scripts/release/ isn't a @nulo/* workspace, so `test:all` (which
-        # filters @nulo/*) skips it. Run it here, guarded so this is a no-op on
+        # scripts/release/ and scripts/publish/ aren't @nulo/* workspaces, so `test:all` (which
+        # filters @nulo/*) skips them. Run them here, guarded so this is a no-op on
         # refs that predate the dir (other branches / older history).
         run: |
           if [ -d scripts/release ]; then

@@ -1,0 +1,267 @@
+name: publish-packages
+run-name: "publish-packages → ${{ inputs.version }}${{ inputs.dry_run && ' (dry run)' || '' }}"
+
+# Publishes @alejoamiras/nulo-{wallet-crypto,resolve-asset,wallet-sdk-schema-patch} at one lockstep
+# version through npm trusted publishing: no npm token exists anywhere.
+# - `test` runs the release and publish tests. They execute @aztec/* code, so it makes no bytes.
+# - `pack` makes the bytes and runs no test code: a cache-free frozen install without lifecycle
+#   scripts, then stage, pack, and refuse tarballs that differ from
+#   scripts/publish/approved-digests.json (the first publication must be listed there). A shared
+#   Actions cache is writable by any dev- or main-scoped job, so nothing here restores one.
+# - `publish` holds the only `id-token: write`, runs in the `npm-publish` environment (owner approval;
+#   its deployment branches, dev and main, bound the ref) and runs no repository code: one data file,
+#   Node, the artifact, npm.
+# - `verify` re-reads what the registry serves: each version's SLSA provenance must be signed by this
+#   workflow on dev or main (the Sigstore certificate identity) and name these bytes, and
+#   `npm audit signatures` must accept it. That also covers a re-run that skipped a version.
+# `test` runs beside `pack` and holds the same artifact runtime token, so the later jobs download
+# `pack`'s artifact by its ID and check every tarball against the digests `pack` output.
+# Each package's npm trusted-publisher record names this file and that environment, so renaming
+# either stops publishing. Node is pinned exactly because the approved digests were computed with
+# this Node's npm and zlib.
+#
+# `gh workflow run publish-packages.yml --ref dev -f version=X.Y.Z` (a dry run unless -f dry_run=false)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Lockstep version for all three packages (X.Y.Z)"
+        required: true
+        type: string
+      dry_run:
+        description: "Test, stage, pack and compare digests only; publish and verify do not run."
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: release and publish tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
+
+      - uses: ./.github/actions/setup-bun
+
+      - run: bun run test:release
+
+  pack:
+    name: stage and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.input.outputs.version }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      digests: ${{ steps.digests.outputs.json }}
+    steps:
+      - name: Check the ref and version
+        id: input
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/dev | refs/heads/main) ;;
+            *) echo "::error::dispatch from dev or main, not $GITHUB_REF"; exit 1 ;;
+          esac
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::version must be canonical X.Y.Z, got '$VERSION'"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      - name: Install
+        env:
+          BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-install-cache
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Stage and pack
+        env:
+          VERSION: ${{ steps.input.outputs.version }}
+        run: |
+          bun scripts/publish/stage.ts --all --version "$VERSION"
+          mkdir -p "$RUNNER_TEMP/tgz"
+          for dir in dist-publish/*/; do
+            npm pack "./$dir" --pack-destination "$RUNNER_TEMP/tgz" --ignore-scripts
+          done
+
+      - name: Compare with the approved digests
+        id: digests
+        env:
+          VERSION: ${{ steps.input.outputs.version }}
+        run: |
+          bun scripts/publish/check-digests.ts "$VERSION" "$RUNNER_TEMP/tgz"
+          json=$(cd "$RUNNER_TEMP/tgz" && sha256sum -- *.tgz | jq -Rcn '[inputs | capture("^(?<d>[0-9a-f]{64})  (?<n>[^/]+[.]tgz)$") | {(.n): .d}] | add')
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          {
+            echo "## publish-packages $VERSION"
+            echo "- commit \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
+            echo "- node $(node --version), npm $(npm --version), bun $(bun --version)"
+            for f in "$RUNNER_TEMP"/tgz/*.tgz; do
+              echo "- \`$(basename "$f")\` sha256 \`$(sha256sum "$f" | cut -d' ' -f1)\` integrity \`sha512-$(openssl dgst -sha512 -binary "$f" | base64 -w0)\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: upload
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/tgz/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish to npm (${{ needs.pack.outputs.version }})
+    needs: [test, pack]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /scripts/publish/approved-digests.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.pack.outputs.artifact-id }}
+          path: ${{ runner.temp }}/tgz
+
+      - name: Check the tarballs are the ones pack made
+        working-directory: ${{ runner.temp }}/tgz
+        env:
+          DIGESTS: ${{ needs.pack.outputs.digests }}
+        run: |
+          [ "$(jq -r length <<< "$DIGESTS")" = "$(find . -maxdepth 1 -type f | wc -l)" ] || { echo "::error::the downloaded files differ from pack's"; exit 1; }
+          jq -r 'to_entries[] | "\(.value)  \(.key)"' <<< "$DIGESTS" | sha256sum -c --strict -
+
+      - name: Publish
+        working-directory: ${{ runner.temp }}/tgz
+        env:
+          VERSION: ${{ needs.pack.outputs.version }}
+          EXPECTED: "@alejoamiras/nulo-resolve-asset @alejoamiras/nulo-wallet-crypto @alejoamiras/nulo-wallet-sdk-schema-patch"
+        run: |
+          printf '11.5.1\n%s\n' "$(npm --version)" | sort -V -C || { echo "::error::npm $(npm --version) predates trusted publishing"; exit 1; }
+          packed=$(for tgz in *.tgz; do tar -xOzf "$tgz" package/package.json | jq -r .name; done | LC_ALL=C sort | xargs)
+          [ "$packed" = "$EXPECTED" ] || { echo "::error::packed [$packed], expected [$EXPECTED]"; exit 1; }
+          # The same binding as scripts/publish/check-digests.ts, re-checked on the downloaded bytes.
+          approved=$(jq -r --arg v "$VERSION" '.[$v] // empty | to_entries[] | "\(.value)  \(.key)"' "$GITHUB_WORKSPACE/scripts/publish/approved-digests.json")
+          if [ -n "$approved" ]; then
+            [ "$(printf '%s\n' "$approved" | wc -l)" = "$(find . -maxdepth 1 -name '*.tgz' | wc -l)" ] || { echo "::error::the tarball set differs from the approved set"; exit 1; }
+            printf '%s\n' "$approved" | sha256sum -c --strict -
+          elif [ "$VERSION" = "0.1.0" ]; then
+            echo "::error::0.1.0 is the first publication and has no approved digests"
+            exit 1
+          fi
+          # Until the first publication exists, no other version may become the first one.
+          if [ "$VERSION" != "0.1.0" ]; then
+            for name in $EXPECTED; do
+              [ "$(npm view "$name@0.1.0" version 2> /dev/null || true)" = "0.1.0" ] || { echo "::error::$name@0.1.0 is not on npm; publish 0.1.0 first"; exit 1; }
+            done
+          fi
+          for tgz in *.tgz; do
+            manifest=$(tar -xOzf "$tgz" package/package.json)
+            name=$(jq -r .name <<< "$manifest")
+            [ "$(jq -r .version <<< "$manifest")" = "$VERSION" ] || { echo "::error::$tgz is not $VERSION"; exit 1; }
+            integrity="sha512-$(openssl dgst -sha512 -binary "$tgz" | base64 -w0)"
+            remote=$(npm view "$name@$VERSION" dist.integrity 2> /dev/null || true)
+            if [ -n "$remote" ]; then
+              [ "$remote" = "$integrity" ] || { echo "::error::$name@$VERSION is already published with other bytes"; exit 1; }
+              echo "$name@$VERSION is already published with these bytes; the verify job checks its provenance"
+              continue
+            fi
+            # Verbose: npm reports a failed OIDC exchange only at this level, then fails with ENEEDAUTH.
+            npm publish "$tgz" --provenance --access public --ignore-scripts --loglevel verbose
+          done
+
+  verify:
+    name: verify the published provenance
+    needs: [pack, publish]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /scripts/publish/verify-provenance.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.pack.outputs.artifact-id }}
+          path: ${{ runner.temp }}/tgz
+
+      - name: Check the tarballs are the ones pack made
+        working-directory: ${{ runner.temp }}/tgz
+        env:
+          DIGESTS: ${{ needs.pack.outputs.digests }}
+        run: |
+          [ "$(jq -r length <<< "$DIGESTS")" = "$(find . -maxdepth 1 -type f | wc -l)" ] || { echo "::error::the downloaded files differ from pack's"; exit 1; }
+          jq -r 'to_entries[] | "\(.value)  \(.key)"' <<< "$DIGESTS" | sha256sum -c --strict -
+
+      - name: Verify each version's provenance and its signer
+        working-directory: ${{ runner.temp }}/tgz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.pack.outputs.version }}
+        run: |
+          for tgz in *.tgz; do
+            commit=$("$GITHUB_WORKSPACE/scripts/publish/verify-provenance.sh" "$tgz")
+            echo "- \`$tgz\`: provenance signed by this workflow on dev or main, built from \`$commit\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Verify registry signatures and attestations
+        env:
+          VERSION: ${{ needs.pack.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer" || exit 1
+          npm init -y > /dev/null
+          specs=$(for tgz in "$RUNNER_TEMP"/tgz/*.tgz; do echo "$(tar -xOzf "$tgz" package/package.json | jq -r .name)@$VERSION"; done)
+          # shellcheck disable=SC2086 # one word per package spec
+          npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps $specs
+          npm audit signatures

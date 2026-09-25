@@ -17,6 +17,7 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | `release.yml` | `status` (not required) | — | push to `main` + manual `workflow_dispatch` | release-please + gates + build + smoke against artifact + assets + the landing deploy; `publish_chrome` / `publish_firefox` inputs run the store uploads in their protected environments |
 | `store-check.yml` | — | — | manual `workflow_dispatch` (`store`: chrome / firefox / both) | proves a store credential read-only (Chrome: one `fetchStatus`; Firefox: the author-scoped add-on list; no upload) |
 | `source-rebuild.yml` | — | — | weekly (Mon 05:17 UTC) + manual `workflow_dispatch` (`tag`) | rebuilds `git archive` of a release (or of the commit) on x86_64 + Ubuntu ARM64 with the reviewer script and fails on any byte differing from the shipped Firefox zip |
+| `publish-packages.yml` | — | — | manual `workflow_dispatch` (`version`, `dry_run`) | tests, stages, packs and digest-checks the three `@alejoamiras/nulo-*` npm packages; with `dry_run` false and the `npm-publish` environment approved, publishes them with provenance (no npm token) and verifies the provenance the registry serves |
 | `nightly.yml` | `status` (not required) | — | schedule (03:23 UTC daily) + manual dispatch | full quality bar incl. network suite → prerelease GitHub Release from dev (`v<ver>-nightly.<YYDDD>`) |
 
 Each required check-run is `app_id`-pinned to GitHub Actions in `required_status_checks.checks`, so only a check produced by Actions (not a same-named check from another app) can satisfy the gate.

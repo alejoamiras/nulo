@@ -316,6 +316,17 @@ CoinGecko's keyless public API every ~3 minutes. Privacy posture:
   bounded by a frozen session quote, round-down bigint conversion, a >1%%
   drift re-confirmation, and the always-visible derived token amount.
 
+## Published packages
+
+The repository publishes three npm packages, `@alejoamiras/nulo-*`, staged from workspaces by `scripts/publish/stage.ts`. Every code-bearing version (`0.1.0` on) is published only by `.github/workflows/publish-packages.yml`, through npm trusted publishing, with a provenance attestation. The one exception is the code-free, deprecated `0.0.0-bootstrap.0` placeholders, published once from a workstation to attach the trusted publisher; npm never frees a version, so they stay listed. No npm token exists in the repository, in Actions or on a workstation after that bootstrap.
+
+- **Where the bytes come from.** The `pack` job builds them from a frozen install that restores no shared Actions cache (any dev- or main-scoped job can write one) and runs no lifecycle script or test code; the tests run in a separate job. The first version is bound to the exact bytes a rehearsal proved against its consumer (`scripts/publish/approved-digests.json`), and no other version can be published before it.
+- **Who can publish.** Only the `publish` job holds `id-token: write`, and it runs no repository code. Its gate is the `npm-publish` environment (owner as required reviewer, deployment branches `dev` and `main`), which is repository configuration the owner creates, not something the workflow file enforces: GitHub creates a missing environment with no protection. Each package's trusted-publisher record names that workflow and environment. `publishConfig.provenance` in the staged manifests is only a default, which a command-line flag overrides. The boundary is each package's "require 2FA and disallow tokens" setting: no token can publish, which leaves the trusted publisher and the owner's own interactive 2FA session, and a version published that way carries no provenance, which the `verify` job rejects whenever the workflow meets that version.
+- **What is checked afterwards.** The `verify` job fetches each version's SLSA bundle from the registry and has `gh attestation verify` require that it was signed, through Sigstore, by this workflow on `dev` or `main` (the certificate identity, not the statement's own claims) and names the packed bytes (`scripts/publish/verify-provenance.sh`); then it runs `npm audit signatures`. `publish` and `verify` take `pack`'s artifact by ID and check every tarball against the digests `pack` output, so the parallel `test` job cannot swap the bytes.
+- **Consumers.** The `@aztec/*` packages are exact peer dependencies, never bundled, so a consumer *can* share a single `Fr` and `WalletSchema`; installing one copy is theirs to check (`assertPackageIdentity` with `lockstepVia` from `@alejoamiras/nulo-resolve-asset`).
+
+See [`scripts/publish/README.md`](./scripts/publish/README.md).
+
 ## Dependency policy
 
 **Supply-chain age gate.** `bunfig.toml` sets `minimumReleaseAge = 604800`
