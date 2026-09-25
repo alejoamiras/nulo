@@ -45,12 +45,15 @@ const test = base.extend<{ placement: PlacementContext }>({
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
 			const ctx = await launchExtension({ fixedWindowSize: false })
-			await registerProfile(ctx)
-			const control = await openPopup(ctx)
-			await waitForHash(control, "#/popup/general", 30_000)
-			await switchToLocalNetwork(control)
-			await use(Object.assign(ctx, { control }))
-			await ctx.close()
+			try {
+				await registerProfile(ctx)
+				const control = await openPopup(ctx)
+				await waitForHash(control, "#/popup/general", 30_000)
+				await switchToLocalNetwork(control)
+				await use(Object.assign(ctx, { control }))
+			} finally {
+				await ctx.close()
+			}
 		},
 		{ scope: "test" },
 	],
