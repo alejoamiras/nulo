@@ -123,6 +123,27 @@ describe("the cards", () => {
 		expect(currentLine(items[0])).toBe("Nulo signs its authorizations without asking.")
 	})
 
+	test("adding an account while the scopes widen to any contract brings the narrow consent back first, Off", () => {
+		const held = [accounts(true), txListed]
+		const p = params({
+			delta: [txAny, accounts(true)],
+			existingGrants: held,
+			heldGrants: held,
+			accountsMembershipOnly: true,
+			consent: { broad: false },
+		})
+		const items = buildCapabilityItems(p)
+		expect(byRow(items, "authorizations")).toHaveLength(1)
+		expect(items[0]).toMatchObject({
+			rowKey: "authorizations",
+			isNew: true,
+			selected: false,
+			switchLabel: "Authorizations without asking",
+		})
+		expect(currentLine(items[0])).toBe("You confirm each authorization first. Off because it listed any contract.")
+		expect(grant(items, p)).toEqual({ granted: [txAny, accounts(true)], rejected: [], authorizationsWithoutAsking: false })
+	})
+
 	test("data is two cards, each holding only its half; private events on any contract start Off", () => {
 		const data = cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })
 		const items = buildCapabilityItems(params({ delta: [data] }))

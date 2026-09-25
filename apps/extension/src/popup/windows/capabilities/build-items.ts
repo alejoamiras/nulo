@@ -138,10 +138,13 @@ function rowItem(
 }
 
 /** On a membership-only widening the flag is already granted: the card is the held one, reading
- *  its stored state, and the decision never touches the consent. */
+ *  its stored state, and the decision never touches the consent. When the same request widens the
+ *  scopes past a narrow consent, the widening card stands in for it. */
 function authorizationsItems(cap: Capability, params: CapabilityWindowParams, resulting: Capability[]): UICapabilityItem[] {
 	if (!Boolean((cap as { canCreateAuthWit?: unknown }).canCreateAuthWit)) return []
-	if (params.accountsMembershipOnly) return [heldAuthorizationsItem(cap, params)]
+	if (params.accountsMembershipOnly) {
+		return consentLostOnWidening(params.consent, params.heldGrants, resulting) ? [] : [heldAuthorizationsItem(cap, params)]
+	}
 	const row = authorizationsRow({ broad: coversAnyContract(resulting), noScope: !holdsCallScope(resulting) })
 	const firstGrant = !holdsCanCreateAuthWit(params.heldGrants)
 	const selected = row.switchLabel !== undefined && authorizationsDefault({ firstGrant, consent: params.consent, resulting })
@@ -157,10 +160,11 @@ function heldAuthorizationsItem(cap: Capability, params: CapabilityWindowParams)
 }
 
 /** A narrow consent the request widens to any contract no longer signs silently, so its card
- *  comes back among the new ones, Off, although accounts are not asked for again. */
+ *  comes back first among the new ones, Off, whenever the accounts flags are not asked for again:
+ *  a membership-only widening asks only which accounts. */
 function wideningItem(params: CapabilityWindowParams, resulting: Capability[]): UICapabilityItem | undefined {
-	if (params.delta.some((cap) => cap.type === "accounts")) return undefined
-	if (!consentLostOnWidening(params.consent, params.heldGrants, resulting)) return undefined
+	const flagsAsked = params.delta.some((cap) => cap.type === "accounts") && !params.accountsMembershipOnly
+	if (flagsAsked || !consentLostOnWidening(params.consent, params.heldGrants, resulting)) return undefined
 	const accounts = params.heldGrants.find((cap) => cap.type === "accounts")
 	if (!accounts) return undefined
 	const row = authorizationsRow({ broad: true, noScope: false })
