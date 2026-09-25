@@ -167,6 +167,29 @@ describe("useSnackInset", () => {
 		expect(inset.value).toBe(SNACK_GAP)
 	})
 
+	test("a footer given a value counts only while the value is true", async () => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const holds = ref(false)
+		const row = () => withDirectives(h("div", { "data-top": 520, "data-height": 48 }), [[vSnackFooter, holds.value]])
+		const wrapper = mount(defineComponent({ setup: () => row }), { attachTo: document.body })
+		await frame()
+		expect(inset.value).toBe(SNACK_GAP)
+		expect(observed).not.toContain(wrapper.element)
+
+		holds.value = true
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 520 + SNACK_GAP)
+		expect(observed).toContain(wrapper.element)
+
+		holds.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(SNACK_GAP)
+		expect(observed).not.toContain(wrapper.element)
+	})
+
 	test("an open sheet covers the nav: SNACK_GAP from the bottom, page footers ignored, 76 again once it closes", async () => {
 		mount(Host)
 		const open = ref(true)
