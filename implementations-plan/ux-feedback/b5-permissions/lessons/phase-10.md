@@ -2,13 +2,13 @@
 
 ## P10.1 · Parity captures
 
-Captured at `9892bfe8`, the chip fix below, in both browsers. The captures come from a temporary
-e2e spec, `zz-b5b-parity.test.ts`. Each run copies it into `tests/e2e/network/` and deletes it
-afterwards, and it is never committed. The spec drives the real window over the playground at
-400×800 in the dark theme, and every surface gets its own connect. S1's exact data comes from
-`DetailsTable.stories.ts`'s S1 story, the exception P10.1 records. The drawings are measured from
-`design/mocks/dist/nulo-feedback.html`, figure by figure and `.fit` by `.fit`, in the same browser
-at 1x.
+Captured at `9892bfe8`, the chip fix below, in both browsers; A-19 is re-recorded at `8e64e1eb`,
+its ring's fix. The captures come from a temporary e2e spec, `zz-b5b-parity.test.ts`. Each run
+copies it into `tests/e2e/network/` and deletes it afterwards, and it is never committed. The spec
+drives the real window over the playground at 400×800 in the dark theme, and every surface gets
+its own connect. S1's exact data comes from `DetailsTable.stories.ts`'s S1 story, the exception
+P10.1 records. The drawings are measured from `design/mocks/dist/nulo-feedback.html`, figure by
+figure and `.fit` by `.fit`, in the same browser at 1x.
 
 Everything lands outside the repo, in the program's handoff folder under `probes-b5b/parity/`:
 
@@ -32,15 +32,17 @@ whatever the outcome, then runs `bun run e2e:reap`. Chrome runs prover on, Firef
 | Chrome 4 | `9892bfe8` | stopped in setup | Stopped to reject A-4's data request once before its capture. `bun run e2e:reap` reaped the owned run. |
 | Chrome 5 | `9892bfe8` | 20 passed | The captures of record. |
 | Firefox 1 | `9892bfe8` | 20 passed | The captures of record. |
+| Chrome A-19 | `8e64e1eb` | 1 passed, 19 skipped | S2's test alone, into a separate folder. Only A-19's capture replaces its record. |
+| Firefox A-19 | `8e64e1eb` | 1 passed, 19 skipped | The same. |
 
 Every completed run's reap found nothing left.
 
 ### Results at `9892bfe8`
 
 - Per browser: 42 captures, 60 shots and one verified request that must open no window (A-32).
-  The S1 story adds one capture per browser, built at `83ac87ee`; nothing under
-  `components/composite/capabilities/` but PermissionRow's chip has changed since. 48 surfaces
-  pair with a drawing.
+  The S1 story adds one capture per browser, built at `83ac87ee`; under
+  `components/composite/capabilities/` only PermissionRow has changed since, in its chip and its
+  switch's transition. 48 surfaces pair with a drawing.
 - **The S1-like window fits** in both browsers: its scroller is 690 of 690px, 0 overflow, and the
   document 800 of 800px. The story holds the drawing's 12 rows, the window the playground's 5.
 - **Geometry**: 84 rows, 72 group labels, 34 disclosures, 39 Details rows and 26 account rows pair
@@ -52,7 +54,7 @@ Every completed run's reap found nothing left.
 
 ### Differences that remain
 
-Items 1 to 5 need nothing, and the manifest's `notes` carry each. Item 6 is open.
+None needs a change, and the manifest's `notes` carry each.
 
 1. **Firefox's strip** is 35px against its drawn 36px: P9's pin (`da48c2b4`).
 2. **The strip's separator** is drawn "/" and built "·". The spec keeps the strip as it is
@@ -66,11 +68,18 @@ Items 1 to 5 need nothing, and the manifest's `notes` carry each. Item 6 is open
    and each capture holds one, so the details-only group is shorter by the adding row and its
    border. A-23 draws every Details row closed; its capture has one open. U5 and A-11 draw the
    field's value as text; the window's is the input's value, recorded as the alias.
-6. **A-19's ring animates.** The Toggle primitive's `transition: all 0.2s ease` carries the
-   outline, so right after Tab the switch's ring reads 3px at 0 offset, then settles on the drawn
-   1px at 2px within 400ms, in both browsers. The drawn switch transitions only its background
-   and border colour (`design/mocks/src/nulo.css:443`), so its ring appears at once. The A-19
-   shots show the settled ring. Open with the driver.
+
+### A-19's ring, fixed in `8e64e1eb`
+
+The Toggle primitive's `transition: all 0.2s ease` carried the row's focus ring. Right after Tab
+the ring read 3px at 0 offset, and it settled on the drawn 1px at 2px within 400ms, in both
+browsers. The drawn switch transitions only its background and border colour
+(`design/mocks/src/nulo.css:443`), so its ring appears at once. "main" chose the drawing's
+transition, a local rule on the row's switch, as parity work like the chip.
+
+At `8e64e1eb` the ring reads 1px at 2px right after Tab, in PermissionRow's story and in the
+window, in both browsers. The change moves nothing a still capture shows (the earlier A-19 shots
+already held the settled ring), so only A-19 is re-recorded.
 
 ### Not captured
 
@@ -79,11 +88,23 @@ Items 1 to 5 need nothing, and the manifest's `notes` carry each. Item 6 is open
 - A-23's copy snack and A-28's error snack: recaptured after arc 4's snack change.
 - A-27: the unknown row's spoken name is held for the owner.
 
-### Evidence for `9892bfe8`
+### Gate at `8e64e1eb`
 
-- `bun run lint`, no scratch spec in the tree: exit 0, 29 warnings, 3 infos, complexity baseline
-  OK.
-- `bun run test`: exit 0, 593 files passed and 3 skipped, 7,700 tests passed, 4 skipped, 8 todo.
+Run once from the worktree root at `8e64e1eb`, with only this file's edits uncommitted and no
+scratch spec in the tree. The counts equal P9's gate: both fixes are CSS alone.
+
+| Command | Exit | Notes |
+|---|---|---|
+| `bun run lint` | 0 | 29 warnings and 3 infos, all pre-existing; `complexity-baseline check OK` |
+| `bun run typecheck:all` | 0 | 15 workspaces |
+| `bun run test:all` | 0 | extension 7,700 passed, 4 skipped, 8 todo (593 files, 3 skipped); wallet-bridge 423; design 393; aztec-runtime 250, 2 skipped; wallet-core 247; extension-messaging 229; wallet-crypto 120; third-party-notices 66; legal 54; landing 40; resolve-asset 14; wallet-sdk-schema-patch 11; passkey-rp 5, 6 skipped |
+
+### Held for the restack
+
+P10.2 to P10.6 (the local gates, the whole network suite, the canaries, the flake bar and the
+reap) run once, on the stack SHA, after "main" restacks 5b onto the new 5a. 5b then gains
+`FULL_WIDTH_WINDOWS`, the A-23 and A-28 snack recaptures, and `window-placement` against batch
+4's snack.
 
 ### Lesson: the drawings page renders in quirks mode
 
