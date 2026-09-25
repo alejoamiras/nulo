@@ -34,14 +34,13 @@ const focusWithin = ref(false)
 let returnFocusTo: Element | null = null
 
 // A card that appears under a still cursor gets hover events, and may get a move, all at the cursor's
-// last position. So only a move away from where the pointer rested when the card opened holds it;
-// with no position known then, the first move anywhere after the open gives that spot.
+// last position. So only a move away from where the pointer last was holds it.
 type Point = { x: number; y: number }
 let pointer: Point | null = null
-let restedAt: Point | null = null
+let previous: Point | null = null
 const trackPointer = (event: PointerEvent) => {
+	previous = pointer
 	pointer = { x: event.clientX, y: event.clientY }
-	restedAt ??= pointer
 }
 
 watch([hovered, focusWithin], ([h, f]) => holdToast(h || f))
@@ -49,7 +48,6 @@ watch([hovered, focusWithin], ([h, f]) => holdToast(h || f))
 const show = (next: ToastState | null) => {
 	hovered.value = false
 	focusWithin.value = false
-	restedAt = pointer
 	shown.value = next
 }
 
@@ -74,10 +72,11 @@ const onAfterLeave = () => {
 	show(toast.value ?? null)
 }
 
-// Under a pixel apart is rounding between a real move and one the browser synthesised at the same spot.
+// `trackPointer` captures this same move first, so `previous` is the one before it. Under a pixel
+// apart is rounding between a real move and one the browser synthesised at the same spot.
 const onPointerMove = (event: PointerEvent) => {
-	if (restedAt === null) return
-	if (Math.abs(event.clientX - restedAt.x) >= 1 || Math.abs(event.clientY - restedAt.y) >= 1) hovered.value = true
+	if (previous === null) return
+	if (Math.abs(event.clientX - previous.x) >= 1 || Math.abs(event.clientY - previous.y) >= 1) hovered.value = true
 }
 
 const onFocusIn = (event: FocusEvent) => {

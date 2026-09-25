@@ -407,7 +407,7 @@ describe("ToastManagerBase", () => {
 		expect(useToast().toast.value).toBeNull()
 	})
 
-	test("with no position known at the open, a first move at the card's spot holds nothing", async () => {
+	test("with no earlier position known, a first move at the card's spot holds nothing", async () => {
 		mountRegion()
 		open({ kind: "success", label: "Under the cursor" })
 		await settle()
@@ -418,7 +418,7 @@ describe("ToastManagerBase", () => {
 		expect(useToast().toast.value).toBeNull()
 	})
 
-	test("with no position known at the open, the first move anywhere is the rest spot: one move from there onto the card holds it", async () => {
+	test("with no position known at the open, one move from wherever the pointer was onto the card holds it", async () => {
 		mountRegion()
 		open({ kind: "success", label: "Reached" })
 		await settle()
@@ -430,6 +430,26 @@ describe("ToastManagerBase", () => {
 		expect(cards().length).toBe(1)
 		mouse(el, "mouseleave")
 		await step(2_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("a pointer that leaves the card and comes back to the spot where it opened under it holds it", async () => {
+		mountRegion()
+		pointerAt(document.body, 120, 540)
+		open({ kind: "success", label: "Returned to" })
+		await settle()
+		const el = card() as HTMLElement
+		pointerAt(el, 120, 540)
+		mouse(el, "mouseleave")
+		pointerAt(document.body, 120, 400)
+		await step(2_000)
+		pointerAt(el, 120, 540)
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		mouse(el, "mouseleave")
+		await step(3_399)
 		expect(cards().length).toBe(1)
 		await step(1)
 		expect(useToast().toast.value).toBeNull()
