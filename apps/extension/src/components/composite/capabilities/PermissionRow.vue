@@ -121,7 +121,6 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 
 .chip,
 .badge {
-	display: inline-flex;
 	align-items: center;
 	gap: 4px;
 
@@ -132,12 +131,16 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	text-transform: uppercase;
 }
 
+/* Block-level, so its line carries no strut from the inherited font. */
 .chip {
+	display: flex;
+	width: fit-content;
 	margin-top: 3px;
 	color: var(--orange);
 }
 
 .badge {
+	display: inline-flex;
 	color: var(--txt-secondary);
 }
 
