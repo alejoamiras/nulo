@@ -378,8 +378,8 @@ class ArrivalCoordinator {
 
 	/**
 	 * Synchronous, so a row carries `arriving` on its first paint. A judged id is never judged again:
-	 * it answers from its window, on the route that judged it, so a receipt another document claimed
-	 * stops after its 2.6 s and a row first shown at rest never slides later.
+	 * it answers from its window, on the route that judged it until that route is left, so a receipt
+	 * another document claimed stops after its 2.6 s and a row first shown at rest never slides later.
 	 */
 	isArriving(record: IncomingTransferRecord): boolean {
 		void this.version.value
@@ -433,8 +433,11 @@ class ArrivalCoordinator {
 		if (this.live(r) && this.route() === HOME) this.latest.value = { id: newest.id, label: arrivalChipLabel(newest, token) }
 	}
 
+	/** Leaving a route retires its windows: a row that played there is at rest when the route returns. */
 	readonly onRouteChanged = (): void => {
-		if (this.route() !== HOME) this.latest.value = null
+		const route = this.route()
+		if (route !== HOME) this.latest.value = null
+		for (const judged of this.run?.judged.values() ?? []) if (judged.route !== route) judged.arriving = false
 	}
 }
 
