@@ -18,11 +18,14 @@ import RecoveryModeBanner from "../components/modules/general/RecoveryModeBanner
 import TokensView from "../components/modules/general/TokensView.vue"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useSeedStatus } from "@/composables/useSeedStatus"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
+
+const arrivals = inject(ARRIVALS_KEY, undefined)
 
 /** One client and one seeding kick for the page: the hero and the list read the same snapshot. */
 const tokenService = new TokenServiceClient()
@@ -48,7 +51,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
-		<BalanceView :seedEntries="seed.entries.value" :seedReady="seed.ready.value" />
+		<BalanceView :seedEntries="seed.entries.value" :seedReady="seed.ready.value" :arrival="arrivals?.latest.value ?? null" />
 
 		<Flex direction="column" gap="16" :class="$style.content">
 			<RecoveryModeBanner />
