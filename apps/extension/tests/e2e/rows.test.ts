@@ -1,5 +1,6 @@
 /** In a real browser: a row's Tab stop, its ring, the native Enter/Space activation of a link and a
- *  button, a modified click's new tab, the measured 24px box and what sits on top of a titled span. */
+ *  button, a modified click's new tab, the measured 24px box and what sits on top of a titled span
+ *  and of the row's icon. */
 import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { seedsForChain } from "@/wallet/services/token/default-tokens"
@@ -249,7 +250,7 @@ async function ensureContact(page: Page): Promise<string> {
 	return name
 }
 
-test("Home's first activity row: a Tab stop with the ring, Enter and Space each open it with one pushState, the priced span is on top", async ({
+test("Home's first activity row: a Tab stop with the ring, Enter and Space each open it with one pushState, the priced span is on top, a press on the icon opens it", async ({
 	registeredExtension,
 }) => {
 	const page = await openHomeWithRow(registeredExtension)
@@ -285,6 +286,20 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 	expect(await page.$eval(sel("activity-fiat"), (el) => el.getAttribute("title"))).toBe("At today's price")
 	await armNavigationProbe(page)
 	await pointerClick(page, "activity-fiat")
+	await waitForHashPrefix(page, "#/popup/tx/")
+	expect(await probe(page)).toMatchObject({ pushes: 1 })
+
+	// The icon box is positioned for its badge, so it paints above the row's link unless it lets the
+	// pointer through: the press at its centre must land on the row.
+	await goBackTo(page, "#/popup/general")
+	const onIcon = await centreOf(page, `${sel("tx-card")} ${sel("activity-icon")}`)
+	const hit = await page.evaluate(
+		({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-testid]")?.getAttribute("data-testid") ?? "nothing",
+		onIcon,
+	)
+	expect(hit).toBe("tx-card")
+	await armNavigationProbe(page)
+	await page.mouse.click(onIcon.x, onIcon.y)
 	await waitForHashPrefix(page, "#/popup/tx/")
 	expect(await probe(page)).toMatchObject({ pushes: 1 })
 

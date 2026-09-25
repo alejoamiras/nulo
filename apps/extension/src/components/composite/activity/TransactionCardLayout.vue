@@ -93,7 +93,7 @@ function hasActionsContent() {
 		<RowTarget v-if="to || opens" ref="target" :to="to" :labelledby="titleId" />
 
 		<Flex align="center" gap="16" :class="$style.left_content">
-			<Flex align="center" justify="center" :class="$style.activity_icon">
+			<Flex align="center" justify="center" :class="$style.activity_icon" data-testid="activity-icon">
 				<Icon :name="icon" :rotate="iconRotate" size="18" color="secondary" />
 				<div v-if="$slots.badge" :class="$style.badge">
 					<slot name="badge" />
@@ -185,9 +185,11 @@ function hasActionsContent() {
 	min-width: 0;
 }
 
+/* Positioned for the badge, so it paints above the row's target: it must let the pointer through. */
 .activity_icon {
 	position: relative;
 	flex-shrink: 0;
+	pointer-events: none;
 
 	width: 40px;
 	height: 40px;
