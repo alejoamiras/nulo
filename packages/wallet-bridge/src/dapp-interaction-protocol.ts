@@ -153,6 +153,9 @@ export type CapabilityParams = {
 	authorizationsWithoutAsking?: { broad: boolean }
 	reRequested?: string[]
 	availableAccounts?: Array<{ address: string; name: string; chainId: number }>
+	/** The session's accounts on its chain at dispatch entry; `name` is the wallet's own, absent for
+	 *  an account the wallet no longer lists. */
+	heldAccounts?: Array<{ address: string; name?: string }>
 	/** Raw hex addresses the session already holds on its chain (wallet-derived). Present only
 	 *  when the session has an accounts grant: the popup locks these rows and pre-selects them. */
 	grantedAccounts?: string[]
