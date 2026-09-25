@@ -89,9 +89,8 @@ onBeforeUnmount(() => {
 			>
 				<template #right>
 					<Flex align="center" gap="8">
-						<Tooltip position="end" delay="350">
+						<Tooltip v-if="appStore.networks.length > 1" position="end" delay="350">
 							<Icon
-								v-if="appStore.networks.length > 1"
 								@click.stop="handleDelete(token)"
 								name="close-circle"
 								size="14"

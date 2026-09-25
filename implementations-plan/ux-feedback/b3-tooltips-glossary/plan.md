@@ -151,7 +151,7 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   open, and the popup's first Esc goes to the tooltip. The rule covers the controls a press can
   focus. About 20 triggers are a bare `<Icon @click>` or `<div @click>` with no `tabindex`
   (under `apps/extension/src/popup/`: `pages/settings/accounts/index.vue:150`,
-  `pages/settings/tokens/index.vue:95`,
+  `pages/settings/tokens/index.vue:94`,
   `pages/settings/advanced/account-state/senders/index.vue:132`,
   `modules/settings/fpcs/FpcRow.vue:71`, …): only a mouse presses them, no `focusin` follows, and
   the popup a press opens lays a full-window overlay (`Popup.vue:115-121`, `.wrapper` at 0 on
