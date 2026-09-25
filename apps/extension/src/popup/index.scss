@@ -24,3 +24,9 @@ body {
 
 	margin: 0 auto;
 }
+
+// A window drawn at its window's width takes that width; `min-width` keeps the popup's column as
+// its floor.
+:root[data-fills-window="true"] body {
+	width: 100%;
+}
