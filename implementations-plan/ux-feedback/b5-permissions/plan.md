@@ -1373,7 +1373,7 @@ are the cases, not a volume target.
 
 ### Arc 5a · `feat/ux-5a-authorization-confirm`
 
-#### P0 · Round-5 addendum: the undrawn asks ☐
+#### P0 · Round-5 addendum: the undrawn asks ✓
 
 Spec § How to use it: a state with no shot stops for the owner. So before any phase builds one:
 
