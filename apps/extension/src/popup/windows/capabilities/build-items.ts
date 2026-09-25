@@ -77,12 +77,10 @@ export function buildCapabilityItems(params: CapabilityWindowParams): UICapabili
 	}
 	if (unknowns.length > 0) fresh.push(unknownItem(unknowns, params.reRequested))
 	const widened = wideningItem(params, resulting)
-	return [
-		...(widened ? [widened] : []),
-		...fresh,
-		...params.existingGrants.filter((cap) => cap.type !== "data").map((cap) => plainItem(cap, false, false)),
-		...heldDataItems(params),
-	]
+	// The held authorizations card already stands for the accounts grant.
+	const heldAccountsDrawn = fresh.some((item) => item.rowKey === "authorizations" && !item.isNew)
+	const held = params.existingGrants.filter((cap) => cap.type !== "data" && !(heldAccountsDrawn && cap.type === "accounts"))
+	return [...(widened ? [widened] : []), ...fresh, ...held.map((cap) => plainItem(cap, false, false)), ...heldDataItems(params)]
 }
 
 function plainItem(cap: Capability, isNew: boolean, reRequested: boolean): UICapabilityItem {
