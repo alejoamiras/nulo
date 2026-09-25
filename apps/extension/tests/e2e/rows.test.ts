@@ -4,8 +4,8 @@
 import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { seedsForChain } from "@/wallet/services/token/default-tokens"
-import { waitForTarget } from "./fixtures/browser"
-import { clickByTestId, type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
+import { prepareKeys, waitForTarget } from "./fixtures/browser"
+import { type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	addContact,
 	captureSoleProfileId,
@@ -15,6 +15,7 @@ import {
 	navigateToSettings,
 	openNetworkDetail,
 	seedUsdQuoteAndReload,
+	setDeveloperMode,
 } from "./fixtures/helpers"
 import { settleClosedPopup } from "./fixtures/popup-leave"
 import { pointerClick } from "./helpers/legal-drivers"
@@ -98,6 +99,12 @@ async function tabTo(page: Page, testid: string, limit = 40): Promise<string[]> 
 		if (visited.at(-1) === testid) return visited
 	}
 	throw new Error(`Tab never reached ${testid}: ${visited.join(" → ")}`)
+}
+
+async function shiftTab(page: Page): Promise<void> {
+	await page.keyboard.down("Shift")
+	await page.keyboard.press("Tab")
+	await page.keyboard.up("Shift")
 }
 
 /** Counts `history.pushState` calls, scroll events until the row acts (its push), and reads whether
@@ -388,9 +395,8 @@ test("Settings → Advanced's Logs row: one Tab stop with the ring; Enter opens 
 }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
+	await setDeveloperMode(page, true)
 	await navigateByHash(page, "#/popup/settings/advanced")
-	await page.waitForSelector(sel("settings-toggle-developerMode"), { visible: true, timeout: 15_000 })
-	await clickByTestId(page, "settings-toggle-developerMode")
 	await page.waitForSelector(sel("settings-logs-row"), { visible: true, timeout: 10_000 })
 	await page.evaluate(() => {
 		const w = window as unknown as Probe
@@ -407,16 +413,25 @@ test("Settings → Advanced's Logs row: one Tab stop with the ring; Enter opens 
 		return `${style.outlineStyle} ${style.outlineWidth} ${style.outlineOffset}`
 	})
 	expect(ring).toBe("solid 2px -2px")
+	// Checked before Enter, while no window the wallet opened can take focus from the popup.
+	expect(await tabAround(page, 1)).not.toContain("settings-logs-open")
+	await shiftTab(page)
+	await waitForFocus(page, "settings-logs-open")
 
 	const before = new Set(registeredExtension.browser.targets())
 	await page.keyboard.press("Enter")
-	const logs = await waitForTarget(registeredExtension.browser, (t) => t.type() === "page" && !before.has(t), 10_000)
+	const logs = await waitForTarget(
+		registeredExtension.browser,
+		(t) => t.type() === "page" && !before.has(t) && t.url().includes("#/windows/logger"),
+		10_000,
+	)
 	try {
 		// The window is open, so Space brings it forward instead of opening a second one.
+		await prepareKeys(page)
+		await waitForFocus(page, "settings-logs-open")
 		await page.keyboard.press(SPACE)
 		await page.waitForFunction(() => (window as unknown as Probe).__logsClicks === 2, { timeout: 5_000, polling: 50 })
 		expect(registeredExtension.browser.targets().filter((t) => t.type() === "page" && !before.has(t))).toHaveLength(1)
-		expect(await tabAround(page, 1)).not.toContain("settings-logs-open")
 	} finally {
 		await (await logs.asPage()).close().catch(() => undefined)
 	}

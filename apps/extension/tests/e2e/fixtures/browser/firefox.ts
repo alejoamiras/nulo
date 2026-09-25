@@ -353,6 +353,28 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
  */
 const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
 
+const KEYS_FOCUS_BUDGET_MS = 5_000
+const KEYS_FOCUS_ATTEMPT_MS = 500
+
+/**
+ * Firefox raises a window it opens once more as it starts loading that window's page, which undoes
+ * a bringToFront made in between; so `page` is brought forward again until it reports focus.
+ */
+async function prepareKeys(page: Page): Promise<void> {
+	const deadline = Date.now() + KEYS_FOCUS_BUDGET_MS
+	while (Date.now() < deadline) {
+		await page.bringToFront()
+		const focused = await page
+			.waitForFunction(() => document.hasFocus(), { timeout: KEYS_FOCUS_ATTEMPT_MS, polling: 50 })
+			.then(
+				() => true,
+				() => false,
+			)
+		if (focused) return
+	}
+	throw new Error(`prepareKeys: the page did not take focus within ${KEYS_FOCUS_BUDGET_MS / 1000}s`)
+}
+
 const BACKGROUND_NOT_RUNNING = "the background page is not running"
 
 /** Evaluates `body` (a function body; `content` is the background window) in the background page. */
@@ -637,6 +659,7 @@ export const firefoxDriver: BrowserDriver = {
 	waitForOpenedUrl,
 	interceptRpc: (browser, _extensionId, fromOrigin, mode) => observeAndRefuse(classicSessionFor(browser), fromOrigin, mode),
 	prepareClick,
+	prepareKeys,
 	pickFile,
 	virtualAuthenticator,
 	holdNextCredentialGet,
