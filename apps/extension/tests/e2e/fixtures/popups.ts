@@ -25,9 +25,8 @@ export async function waitForPopup(
 	kind: PopupKind,
 	opts: { requestId?: string; timeout?: number } = {},
 ): Promise<Page> {
-	// CI CPU pressure pushes popup-mount latency up against the 15s cliff
-	// (see implementations-plan/network-followups/plan.md §C). 30s gives 2×
-	// margin without changing the steady-state — fast machines resolve in ms.
+	// CI CPU pressure pushes popup-mount latency up against the 15s cliff. 30s gives
+	// 2× margin without changing the steady state, since fast machines resolve in ms.
 	const timeout = opts.timeout ?? 30_000
 	// Snapshot existing matching target URLs so we only resolve a NEW popup,
 	// not a stale one left by a prior interaction. URL contains a unique
@@ -161,8 +160,7 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
 	// before close lets the next reconnect race a stale storage value.
 	//
 	// If the popup never closes within 10s, throw — silently proceeding would
-	// mask the very failure mode this wait exists to prevent. (Codex audit
-	// session 019e2b9b caught the earlier silent-resolve version.)
+	// mask the very failure mode this wait exists to prevent.
 	if (!page.isClosed()) {
 		await new Promise<void>((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -322,7 +320,7 @@ export async function rejectCapabilities(page: Page): Promise<void> {
  * fee-selection settle happens after rows render, and on a cold shard that gap
  * alone historically blew the generic 10s click wait (flake-ledger entries 4/5).
  * Budget rationale: the DEFAULT stays 10s — the suite's prior latency tolerance,
- * now on the correct signal (post-impl audit: don't widen every caller without
+ * now on the correct signal (don't widen every caller without
  * per-caller evidence). The two historically-cold callers pass 120s explicitly —
  * the budget the sibling Send flow uses for the same FeeSettingsCard gate. The
  * telemetry below accumulates the evidence for any future per-caller change.

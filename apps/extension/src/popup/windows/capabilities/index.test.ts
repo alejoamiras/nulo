@@ -2,11 +2,10 @@
  * Frozen-oracle characterization tests for the capabilities approval window's
  * SHELL lifecycle — the connect/wait/redirect/init/beforeunload skeleton, the
  * unmount disconnect ORDER, and the closeWindow/beforeunload reject routing.
- * These pin CURRENT behavior verbatim so the planned shell extraction can be
- * graded against them; they must pass unchanged before AND after it. Spec with
- * per-pin rationale: implementations-plan/harden-quality-arc/round-2/R3-characterization.md.
+ * These pin CURRENT behavior verbatim so a shell extraction can be graded
+ * against them; they must pass unchanged before AND after it.
  *
- * Pins covered here (spec ids): A1 connect set+order · A2 session gate ·
+ * Pins covered here: A1 connect set+order · A2 session gate ·
  * A3 auth redirect · A4 beforeunload-after-init (incl. init-throw) ·
  * A5 unmount disconnect order · A6 closeWindow(true) vs closeWindow() ·
  * A7 no-double-reject · B8 reject two-layer order · B9 the MISSING !requestId
@@ -358,8 +357,7 @@ describe("capabilities window — shell lifecycle frozen oracle", () => {
 		// execute/discover, which also bail on !requestId. With requestId undefined
 		// the composable-level reject is an internal no-op, but capabilities still
 		// invokes it and still runs closeWindow(true). Preserved verbatim — a shell
-		// must reproduce this asymmetry (R3-characterization.md §6.5) or get owner
-		// sign-off to normalize it.
+		// must reproduce this asymmetry or get owner sign-off to normalize it.
 		w = factory()
 		await flushPromises()
 		expect(requestIdMock.value).toBeUndefined()

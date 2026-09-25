@@ -257,16 +257,8 @@ function riskWord(r: CapabilityRisk): string {
 	white-space: nowrap;
 }
 
-/**
- * Mono treatment for the unknown-capability head label. The label
- * itself is the wallet-controlled constant "Unknown permission"
- * (build-items.ts routes through getSafeDisplay so the dApp-controlled
- * cap.type never reaches the head). The mono typography is a
- * visual-rhythm tweak that pairs with the UNRECOGNIZED chip — both
- * signal "this card is the odd one out" so the eye lands on the
- * warning. The dApp-controlled raw type is rendered separately in the
- * detail panel through sanitizeWireString.
- */
+/** The label is the wallet's constant "Unknown permission"; the dApp-controlled type reaches only
+ *  the detail panel, through sanitizeWireString. */
 .mono_label {
 	font-family: var(--font-mono);
 	letter-spacing: 0.04em;
