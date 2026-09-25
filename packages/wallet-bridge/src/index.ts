@@ -21,6 +21,13 @@ export * from "./dispatcher"
 export * from "./external-id"
 export * from "./fee"
 export * from "./fee-payer"
+export {
+	authorizationsEffective,
+	coversAnyContract,
+	effectiveGrants,
+	isAnyContractScope,
+	readConsent,
+} from "./method-scope-checkers"
 export * from "./operation"
 export * from "./operation-validation"
 export * from "./operation-result"
