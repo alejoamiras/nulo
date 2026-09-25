@@ -90,9 +90,28 @@ source tags in `apps/extension/src/**/*.vue`, less the one inside `DottedTerm`, 
 - Batch 3's 35 is 33, plus its two dotted fee terms and two balance-split labels, less the two
   rule-6 texts. The spec's 36 (spec § Tooltip map) is 35, plus the window's two dotted terms,
   less the Alias ⓘ.
-- **The mismatch is +1: the Settings row's "authorizations" term.** P3 built it as U7A draws it,
-  and the spec's tooltip map does not list it. It goes to the owner; nothing is removed or added
-  to fix it.
+- **The spec's map lists 36; U7A's signed-off Settings term makes 37.** The one over is the
+  Settings row's "authorizations" term, which P3 built as U7A draws it. The owner signed off U7
+  as drawn ("Regarding 6: Recommended.", 2026-09-25), and the spec's map was counted before U7
+  existed. "main" ruled it covered: nothing changes, and the count goes to the owner as
+  information.
+- **The Settings page keeps under the cap of two dotted terms per screen** (CLAUDE.md § Tooltips
+  and the glossary). `connected-apps/[id].vue` renders one `DottedTerm`, inside its one
+  authorizations row, and every line that row can show has at most one term segment
+  (`permission-rows.ts`):
+
+| The app's state | The row's line | Dotted terms |
+|---|---|---|
+| holds no `canCreateAuthWit` | no row | 0 |
+| no transaction or simulation scope | "You confirm each authorization first." | 1 |
+| a listed scope, On | "Nulo signs its authorizations without asking." | 1 |
+| a listed scope, Off | "You confirm each authorization first." | 1 |
+| a scope on any contract, On | "For any call, on any contract." | 0 |
+| a scope on any contract, Off | "You confirm each authorization first. Off because it listed any contract." | 1 |
+
+  While a write is pending the switch shows the asked-for state, which is one of these lines.
+  The page's other tooltip is the icon-only "Copy address" label, and neither
+  `GrantedCapabilitiesList` nor `DappSessionVerification` renders a dotted term.
 - Outside the unit, unchanged: `@nulo/design`'s own `Input.vue` tooltip and the 15 browser
   `title` tooltips.
 - The glossary scan (`DottedTerm.scan.test.ts`) reads all 5 sites, the multi-line rename link
@@ -101,7 +120,8 @@ source tags in `apps/extension/src/**/*.vue`, less the one inside `DottedTerm`, 
 
 ## Held and asked
 
-- **The tooltip count, 37 against the spec's 36**, goes to the owner through "main" (above).
+- **The tooltip count, 37 against the spec's 36.** Sent to "main", who ruled it covered by U7A's
+  sign-off (above). Nothing is held.
 
 ## Sign-off pending, added in this phase (plan.md § Delivery)
 

@@ -1873,6 +1873,8 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
     - a row whose rename was pressed keeps its field open when it is deselected and selected
       again, and the field still shows the name typed there. A-20 keeps the field open once
       pressed; no drawing deselects the row after that.
+- The tooltip count (P8.3): the spec's map lists 36; U7A's signed-off Settings term makes 37
+  (lessons/phase-8.md).
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
