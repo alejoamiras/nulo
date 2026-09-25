@@ -106,7 +106,7 @@ snackbar looks weird."), i10b "A′", i11 "A", i12 "B" — unchanged.
 
 | # | Surface | Before → after (drawn values) | Shot | Sign-off |
 |---|---|---|---|---|
-| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width and motion: **sign-off pending** (S-2, S-3) |
+| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); in a window shorter than the page, 85px up before the scroll: **sign-off pending** (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width and motion: **sign-off pending** (S-2, S-3) |
 | 2 | Success snack | → 16px `check-circle` in `--green` (`:87`, `:97`), in the polite region, one action "View" (headline 11px/700, `0.12em`, uppercase, `--nulo-accent`, `padding: 6px 4px`, `:197`) only on transaction and receipt messages; hides after 6 s, waits while hovered or focused | `10-snackbar` | i10 A′; the first open's timer: owner, 2026-09-25: 2b (S-12); which messages get View: **pending** (S-7) |
 | 3 | Error snack | → 16px `close-circle` in `--red`, `border-color: var(--red)`, title `--txt-primary` (`:473-474`), in the assertive region, a × button 24×24, `margin-right: -6px`, `--nulo-secondary`, glyph 16px, `aria-label="Close"` (`:471-472`, `r2/i10.html:21`); stays until × | `10-snackbar` | i10 A′; Details: owner, 2026-09-25: 10b (S-8) |
 | 4 | Send's result | "Transaction submitted" alone, or the failure sentence in red → title "Transaction submitted", sub "{amount} {symbol} to {0x8c02…41fa}", View opens the transaction; title "Send failed", sub today's failure sentence | `10-snackbar` | i10 A′; sub copy **pending** (S-9, S-10) |
@@ -155,7 +155,9 @@ Snackbar:
   approve/reject footer until closed. Alternative: today's top 12px wherever there is no nav.
   **Owner, 2026-09-25: 1c.** 12px above the page's bottom action row where it has one (P6.1).
   Over a sheet that covers the nav: owner, 2026-09-25: 12a, 12px from the bottom or above the
-  sheet's own row (P6.5).
+  sheet's own row (P6.5). **Sign-off pending:** in a window shorter than the page, the snack sits
+  above where the footer stops at the end of the scroll, so before scrolling it sits 85px up, over
+  the page's content (the execute window at 400×500).
 - **S-2 · Width on the onboarding tab.** Drawn only at 360px. Recommended and built:
   `calc(100% - 32px)` capped at 368px, the width it takes in the 400px dApp windows (400px less
   the drawn 16px on each side), centered. **The dApp windows: owner, 2026-09-25: 11a**, 328px,
@@ -973,8 +975,8 @@ so a close during the wait installs nothing.
   snack: `openToast` runs only in extension pages.
 - **Clickjacking and overlays.** The snack covers at most a strip above the nav or the bottom edge.
   It holds only its own buttons, and the wrap is `pointer-events: none`, so a click beside the snack
-  reaches the page. An error over the execute window's footer (S-1) hides approve/reject until
-  closed and never presses them. `NotificationManager`'s modal (z 9999) covers the snack.
+  reaches the page. An error in the execute window sits above its approve/reject footer (1c), also
+  in a window shorter than the page, and never presses them. `NotificationManager`'s modal (z 9999) covers the snack.
 - **Rows.** The target is a real link or button below every nested control; nested controls stop
   propagation; the two raised titled spans only forward a plain click to the target (R-7). A link row navigates through `navigate`, which prevents the anchor's default, so
   no key press navigates twice. The contact row's `?contact=<id>` is resolved only against the
@@ -1897,8 +1899,13 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    the nav nor a row, 12px from the bottom. The row can grow (a wrapping error line) and the snack
    follows it. A `v-snack-footer` directive marks each row and the host `ToastManager` computes
    the inset (`composables/snackInset.ts`); `ToastManagerBase` still takes a number. The inventory
-   is in the log. e2e on both browsers: Send with an estimate error and the execute window with
-   one, each at least 12px above its footer (`network/snack-placement.test.ts`).
+   is in the log. A row counts at the highest point its top edge reaches on screen, now or once the
+   page is scrolled to its end, so in a window shorter than the page the snack is already clear of
+   a row that a scroll brings up (the batch's `window-placement.test.ts` regression, found by arc
+   5a's full run and bisected to `6fbfdeb5`). e2e on both browsers: Send with an estimate error and
+   the execute window with one, each 12px above its footer, and the execute window at 400×500 with
+   Reject and Confirm clear after a scroll, with and without an error line
+   (`network/snack-placement.test.ts`); `network/window-placement.test.ts` passes unchanged.
 2. **The first open's timer (2b).** A success's 6 s starts when it opens, even under a resting
    pointer. The hold engages only on a pointer move onto the snack after it opened, or keyboard
    focus entering it; leaving resumes the remaining time (S-12). The hover and pointer-over events
@@ -1923,8 +1930,15 @@ older layout differences stay). The log is `lessons/phase-6.md`.
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`,
 `bun run build`; the full smoke suite on Chrome and on Firefox (the gate's flags); every changed or
 added network e2e file at retry 0, Chrome prover on and Firefox `NULO_E2E_PROVERLESS=1`
-(`@requires-proverless` files proverless on both); `bun run e2e:reap` after each e2e run. Then the
-parity captures for the new states, outside the repo.
+(`@requires-proverless` files proverless on both), plus `network/window-placement.test.ts` three
+times per browser at retry 0, the one spec that drives the approval footer under a persistent
+error; `bun run e2e:reap` after each e2e run. Then the parity captures for the new states, outside
+the repo.
+
+### P7 · Arc gate on the final source
+
+The driver's. It reruns P6's gate on the stack's final source; its network list keeps
+`network/window-placement.test.ts`, three runs per browser at retry 0.
 
 ## Arc boundary
 
