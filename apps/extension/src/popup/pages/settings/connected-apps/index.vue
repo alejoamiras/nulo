@@ -122,7 +122,7 @@ onBeforeUnmount(() => {
 
 		<ItemsContainer v-if="sortedSessions.length">
 			<div v-for="(ds, i) in sortedSessions" :key="ds.id" :class="$style.row">
-				<RowTarget :to="`/popup/settings/connected-apps/${ds.id}`" :labelledby="`${rowIdBase}-${i}`" />
+				<RowTarget data-testid="connected-app-row" :to="`/popup/settings/connected-apps/${ds.id}`" :labelledby="`${rowIdBase}-${i}`" />
 
 				<Flex align="center" gap="12" wide>
 					<div :class="$style.logo_wrapper">
