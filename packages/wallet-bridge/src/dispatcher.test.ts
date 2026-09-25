@@ -3234,6 +3234,123 @@ describe("dispatcher.requestCapabilities — accounts widening", () => {
 	})
 })
 
+describe("dispatcher.requestCapabilities — the held accounts the window names", () => {
+	const A = `0x${"aa".repeat(32)}`
+	const B = `0x${"bb".repeat(32)}`
+	const C = `0x${"cc".repeat(32)}`
+	const caip = (address: string, chainId = 0) => `aztec:${chainId}:${address}`
+	const accountsGrant: Capability = { type: "accounts", canGet: true, canCreateAuthWit: true, accounts: [] }
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+	const addressBook = { capabilities: [{ type: "data", addressBook: true }] }
+	const named = (address: string, name: string, chainId = 0): IAccountRef => ({ address, name, chainId })
+
+	function harness(opts: { session: Partial<IDappSessionRef>; wallet: IAccountRef[]; onRead?: () => Promise<void> }) {
+		const reads: Array<[string, number]> = []
+		const logged: string[] = []
+		let provisions = 0
+		const account: AccountFake = {
+			getAccounts: async (profileId, chainId) => {
+				reads.push([profileId, chainId])
+				await opts.onRead?.()
+				return opts.wallet.filter((acc) => acc.chainId === chainId)
+			},
+			provisionDefaultAccount: async () => {
+				provisions++
+			},
+		}
+		const logger: ILogger = { log: (_scope, _level, ...data) => logged.push(JSON.stringify(data)) }
+		const { writer } = makeSessionWriter(
+			makeSession({ capabilityGrants: [{ capability: accountsGrant, grantedAt: 1 }], ...opts.session }),
+		)
+		const seen: { params?: CapabilityParams } = {}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async (params) => {
+				seen.params = params
+				return { granted: [] }
+			},
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, writer, logger)
+		return { dispatcher, writer, seen, reads, logged, provisions: () => provisions }
+	}
+
+	test("each member is named by the wallet, in the wallet's order, matched case-blind", async () => {
+		const wallet = [named(B, "Savings"), named(C, "Account 3"), named(A, "Account 1")]
+		const h = harness({ session: { accounts: [caip(A.toUpperCase()), caip(B)] }, wallet })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([
+			{ address: B, name: "Savings" },
+			{ address: A, name: "Account 1" },
+		])
+		expect(h.reads).toEqual([["test-profile", 0]])
+	})
+
+	test("one named member, for U1A's single account", async () => {
+		const h = harness({ session: { accounts: [caip(A)] }, wallet: [named(A, "Account 1")] })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+	})
+
+	test("a member the wallet no longer lists stays, unnamed, so two members never read as one", async () => {
+		const h = harness({ session: { accounts: [caip(A), caip(B)] }, wallet: [named(A, "Account 1")] })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }, { address: B }])
+
+		const none = harness({ session: { accounts: [caip(A)] }, wallet: [] })
+		await none.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(none.seen.params?.heldAccounts).toEqual([{ address: A }])
+	})
+
+	test("only the session's chain counts, and names come from the stamped profile's accounts", async () => {
+		const wallet = [named(A, "Account 1"), named(B, "Same address, chain 0"), named(C, "Chain 7", 7)]
+		const h = harness({ session: { accounts: [caip(A), caip(B, 7), caip(C, 7)] }, wallet })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+		expect(h.reads).toEqual([["test-profile", 0]])
+	})
+
+	test("a per-app alias and the request's own account names never name a member", async () => {
+		const hostile = {
+			capabilities: [
+				{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts: [{ alias: "Treasury", item: A }] },
+				{ type: "data", addressBook: true },
+			],
+		}
+		const h = harness({
+			session: { accounts: [caip(A)], accountAliases: { [caip(A)]: "Renamed for this app" } } as Partial<IDappSessionRef>,
+			wallet: [named(A, "Account 1")],
+		})
+		await h.dispatcher.dispatch("requestCapabilities", [hostile], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+	})
+
+	test("read from the dispatch snapshot: later membership and name changes reach neither the params nor the log", async () => {
+		const wallet = [named(A, "Account 1"), named(B, "Account 2")]
+		let writer: IDappSessionWriter | undefined
+		const h = harness({
+			session: { accounts: [caip(A)] },
+			wallet,
+			onRead: async () => {
+				await writer?.applyCapabilityDecision("test-session-id", {
+					addAccounts: [caip(B)],
+					aliasPatch: {},
+					grantRecords: [],
+					replaceTypes: [],
+					approvedTypes: [],
+					rejectedTypes: [],
+				})
+			},
+		})
+		writer = h.writer
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		wallet[0] = named(A, "Renamed later")
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+		expect((await h.writer.getDappSession("test-session-id")).accounts).toEqual([caip(A), caip(B)])
+		expect(h.provisions()).toBe(0)
+		expect(h.logged.filter((line) => line.includes("Account 1") || line.toLowerCase().includes(A.slice(2, 12)))).toEqual([])
+	})
+})
+
 describe("dispatcher.requestCapabilities — a contracts permission that grants nothing", () => {
 	const A = `0x${"0a".repeat(32)}`
 	const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }

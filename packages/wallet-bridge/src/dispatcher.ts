@@ -1395,6 +1395,7 @@ export class WalletSdkDispatcher {
 			: undefined
 		plan.availableAccounts = availableAccounts
 		const consent = readConsent(dappSession.authorizationsWithoutAsking)
+		const heldAccounts = await this.heldAccountsOf(dappSession, ctx)
 		try {
 			return await this.dappInteractionService.requestCapabilities({
 				sessionId: dappSession.id,
@@ -1402,6 +1403,7 @@ export class WalletSdkDispatcher {
 				delta: plan.delta,
 				existingGrants: plan.existingCaps,
 				heldGrants: plan.existingGrants.map((g) => g.capability),
+				heldAccounts,
 				...(consent !== undefined ? { authorizationsWithoutAsking: consent } : {}),
 				reRequested: reRequestedTypes(plan),
 				availableAccounts,
@@ -1437,6 +1439,20 @@ export class WalletSdkDispatcher {
 				held,
 			),
 		)
+	}
+
+	/** The session's members on its chain, named only by the wallet's own account records: never
+	 *  by a per-app alias or anything the request carries. A member the wallet no longer lists stays,
+	 *  unnamed, so the window never counts two members as one. */
+	private async heldAccountsOf(dappSession: IDappSessionRef, ctx: SessionContext): Promise<Array<{ address: string; name?: string }>> {
+		const members = new Map([...this.getSessionAccountAddresses(dappSession, ctx.chainId)].map((a) => [a.toLowerCase(), a]))
+		if (members.size === 0) return []
+		const named = (await this.accountService.getAccounts(ctx.profileId, ctx.chainId))
+			.filter((acc) => members.has(acc.address.toLowerCase()))
+			.map((acc) => ({ address: acc.address, ...(acc.name ? { name: acc.name } : {}) }))
+		const namedKeys = new Set(named.map((acc) => acc.address.toLowerCase()))
+		const unnamed = [...members].filter(([key]) => !namedKeys.has(key)).map(([, address]) => ({ address }))
+		return [...named, ...unnamed]
 	}
 
 	/** The dApp's chain may be one the user has never activated, so its default account may not
