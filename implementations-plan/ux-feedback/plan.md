@@ -55,7 +55,7 @@ option stay out.
 | ✓ | # | Batch | Items | Tier | Arc branch(es) | Plan |
 |---|---|---|---|---|---|---|
 | ✓ | 0 | Program setup | round 5 drawings, stack init | — | on arc 1 | this file ([lessons](lessons/phase-0.md)) |
-| ☐ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
+| ✓ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
 | ☐ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ☐ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
 | ☐ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
@@ -335,6 +335,14 @@ payer ("Align with U16 (Recommended)").
 - The extension's testnet default "Test USDC" (`default-tokens.ts`) points at `0x1c81…e9ae`,
   which `apps/tools/public/testnet-bridge.json` no longer lists: its "Test USDC" is another
   address. A mirror fix for the `aztec-update` skill, noticed while drawing item 6.
+- With no saved choice, Send and the execute card default to the first sponsor in storage order,
+  so a fee contract added by hand can be the default payer over Nulo's own. Whether the default
+  should be Nulo's sponsor is an owner question; batch 1 reorders only the menu.
+- Every sponsor row in the fee menu shares the testid `send-fee-method-sponsored`, so an e2e
+  cannot pick one sponsor among several without reading its words. None needs to today.
+- The emoji-check window's header reads "NO ACCOUNT" before an account is chosen, and "chain 0"
+  rather than "Local Network" on a reconnect (batch 2's parity capture from window B). Today's
+  header, unchanged by this program.
 
 ## Seeds
 

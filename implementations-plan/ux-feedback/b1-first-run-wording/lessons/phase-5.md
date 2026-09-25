@@ -16,7 +16,22 @@ per `git range-diff`); codex's quotes keep the ids it saw.
 | 3 | changes-requested | five comments restating one-line helpers (`textOf`, `spoken`, `drawn`, `glyphOf`, `FIRST_PROFILE_NAME`) | `7987cee9` (those five, plus three of the same kind codex had not listed) |
 | 4 (confirmation) | **approve**, high | none | — |
 | 5 (after `8c39bc5e`) | **approve**, high | none; one nit on the gate wording | `000a1444` |
-| 6 (after the parity answers, P6) | changes-requested, high | the sheet priced the fee with the page's price client while the card used its own, so the two could show different dollars after a reconnect | the card hands its display to the page; a regression test (phase 6) |
+| 6 (after the parity answers, P6) | changes-requested, high | the sheet priced the fee with the page's price client while the card used its own, so the two could show different dollars after a reconnect | `df7be89b` (the card hands its display to the page; a regression test, phase 6) |
+| 7 (confirmation) | **approve**, high | none; one nit, the regression test did not unmount | `ad470e6c` |
+| 8 (after `2987c46d`, the sponsor order the P7 parity capture exposed) | changes-requested, high | major: sorting `buildFeeMethods` also moved the default payer, since Send's walk and the card's `settledSelection` take the first sponsor in that list; minor: the storage-order comment | `13a2ef6a` (the list keeps storage order; `menuOrder` sorts the menu only) |
+| 9 (confirmation) | **approve**, high | none | — |
+
+Rounds 8 and 9 review a new commit, not a continuation of round 7's loop. Round 9's verdict,
+verbatim: *"no new material findings … Only the rendered menu is reordered. Public/Private rows
+stay first, followed by Nulo's sponsor and hand-added sponsors in their existing relative order.
+`menuOrder` creates new arrays without cloning entries, preserving click payload identity and
+stable keys. Keyboard navigation follows the reordered DOM and still excludes disabled rows. …
+VERDICT: approve — confidence: high"*
+
+Round 7's verdict, verbatim: *"VERDICT: approve — confidence: high. no new material findings. The
+round-6 finding is closed. The page's `feeDisplay` ref exists before the child mounts; the
+immediate watcher publishes the card's display and subsequent changes, including `null`. The
+sheet no longer reads the page's quote."*
 
 Round 4's verdict, verbatim: *"VERDICT: approve — confidence: high. no new material findings.
 Commit `46a0ed32` closes the remaining finding: all five cited comments are deleted, along with the

@@ -93,7 +93,7 @@ Every user-visible change in this batch. "Sign-off" is the owner's pick quoted i
 | 11 | Wherever the seeded sponsor's name shows (fee menu, Settings → fee contracts) | "Sponsored Fee Juice" → "Sponsored" on fresh installs | spec item 3 surfaces | i3 V4 |
 | 12 | Fee menu with an unknown balance | not known yet "— FJ"; one balance unreadable "couldn't check balance" on either row | `03-menu-unknown-U14` | **sign-off pending** (U14) |
 | 13 | Screen-reader sentence under a tenth of a cent | "…covers less than $0.001." | `03-spoken-U15` | **sign-off pending** (U15) |
-| 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing") | `03-handadded-U16` | **sign-off pending** (U16) |
+| 14 | A fee contract added by hand | menu "—" (not "free"); "You pay" "—" (not "Nothing"); the menu lists Nulo's sponsor above hand-added ones, which keep their order, as the shot draws (found by P7's parity pass; the default payer is unchanged) | `03-handadded-U16` | **sign-off pending** (U16) |
 | 15 | Fee card's app-set rows (the locked row, the embedded banner) | left label "Pay fee with" → "Fee" on both | parity row 5; the banner, no live flow (P7) | owner, 2026-09-24: "Rename to "Fee" (Recommended)", "Rename both to "Fee" (Recommended)" |
 | 16 | Review sheet fee line | "Fee · ~0.000105 FJ" → "Fee · ~0.000105 FJ (<$0.001)" when priced, the card's "You pay" words | parity row 9 | owner, 2026-09-24: "Add dollars" |
 | 17 | Review sheet fee line, a fee contract added by hand | "Fee · ~… FJ" + "paid by the sponsor" → "Fee · —", spoken as U16's sentence, no payer; Nulo's own sponsor unchanged | parity row 10 | owner, 2026-09-24: "Align with U16 (Recommended)"; follows U16's pick |
@@ -549,7 +549,7 @@ No e2e reads these words: the review fixture reads `data-payer`, which is unchan
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-### P7 · Arc gate on the final source
+### P7 · Arc gate on the final source ✓
 
 1. P5's steps 1, 2 and 5 on the rebased arc (dev `9f11de70`) with P6: local gates, full smoke
    on Chrome and on Firefox, the thirteen network specs (Chrome prover on, its two
@@ -561,6 +561,9 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
    banner's words are proven by `FeeSettingsCard.test.ts` alone.
 
 Gate: all of the above exit 0 and the parity publish result printed.
+
+Passed on `13a2ef6a`, after the parity pass moved Nulo's sponsor to the top of the menu
+([lessons](lessons/phase-7.md)); the page is republished at the parity URL.
 
 ## Arc boundary
 
