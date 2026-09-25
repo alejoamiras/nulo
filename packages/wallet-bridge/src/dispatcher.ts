@@ -198,12 +198,6 @@ function requestedFromOf(rawOpts: Record<string, unknown>): string | undefined {
  *  and `aztec_createAuthWit` resolves `args[0]` in its own handler. */
 const FROM_ADDRESSED_KINDS: ReadonlySet<Operation["kind"]> = new Set(["aztec_simulateTx", "aztec_profileTx"])
 
-/** Compare two `accounts` capability shapes by the fields that affect
- *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
- *  so `undefined` is treated as `false` (matches the default semantics in
- *  scope-enforcement: missing flag = no permission). The `accounts` array
- *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
- *  the comparison. */
 /** Whether every address+flag the request needs is already covered by the UNION of stored
  *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
  *  (the type-only delta silently stranded new addresses after redeploys). */
@@ -282,6 +276,12 @@ function dataRequestCovered(existing: DataCapability[], requested: DataCapabilit
 	return covered.addressBook && covered.privateEvents
 }
 
+/** Compare two `accounts` capability shapes by the fields that affect
+ *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
+ *  so `undefined` is treated as `false` (matches the default semantics in
+ *  scope-enforcement: missing flag = no permission). The `accounts` array
+ *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
+ *  the comparison. */
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
@@ -430,9 +430,6 @@ function projectRequestedCapabilities(caps: readonly unknown[]): Record<string, 
 	})
 }
 
-/** Grants of one capability type, narrowed to that variant. The single typed cast
- *  lives here instead of the `existing.capability as XCapability` casts scattered
- *  across the coverage branches. */
 /** The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
  *  hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
  *  the set carries BOTH representations. Without this, every fresh session failed
@@ -680,6 +677,9 @@ function collectNewGrants(
 	return newGrants
 }
 
+/** Grants of one capability type, narrowed to that variant. The single typed cast
+ *  lives here instead of the `existing.capability as XCapability` casts scattered
+ *  across the coverage branches. */
 function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
 	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }
