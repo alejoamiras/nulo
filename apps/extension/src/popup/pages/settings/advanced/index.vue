@@ -30,8 +30,6 @@ const cacheStore = useCacheStore()
 const configService = new ConfigServiceClient()
 configService.onUpdate.add(onSettingUpdate)
 
-/** Developer-only: open the logs window (previously accessible via the
- *  hamburger MenuPopup, now relocated here as part of the menu removal). */
 const openLogs = async () => {
 	if (appStore.loggerWindowId) {
 		try {
