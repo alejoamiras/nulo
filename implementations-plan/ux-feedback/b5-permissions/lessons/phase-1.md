@@ -3,7 +3,7 @@
 Built on `b6aa6e4d` (plan + recon, then P0). No screen changes. No visible string is added, and
 the capability window ignores the new params until P2.
 
-Picks for A-30 and A-32 not re-read (the proposal artifact is unreadable from the current account); built as recommended, sign-off pending; re-read before delivery.
+Round-5 picks for item 6 signed off by the owner in chat, 2026-09-25: "Regarding 6: Recommended." (the picks store is unreadable from this account, so the chat answer is the record).
 
 ## What was built, per commit
 
