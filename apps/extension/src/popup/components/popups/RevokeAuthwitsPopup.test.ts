@@ -110,6 +110,20 @@ function pressEnter() {
 	document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
 }
 
+/** Presses `key` on a focused button as a browser does: Enter clicks it on keydown and Space on
+ *  keyup, each only when no handler cancelled the key. Returns whether each key event went through. */
+function pressOn(el: HTMLElement, key: "Enter" | " "): boolean[] {
+	el.focus()
+	const down = el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))
+	if (key === "Enter") {
+		if (down) el.click()
+		return [down]
+	}
+	const up = el.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }))
+	if (down && up) el.click()
+	return [down, up]
+}
+
 async function setAllFees(w: ReturnType<typeof mount>) {
 	const feeBtns = w.findAll(".set-fee")
 	for (const btn of feeBtns) await btn.trigger("click")
@@ -134,20 +148,23 @@ afterEach(async () => {
 })
 
 describe("RevokeAuthwitsPopup — the content button", () => {
-	test("is a named button; Enter on it opens the content and never revokes, though a revoke is ready", async () => {
-		const w = await mountAndOpen([{ id: "aw-1", content: "c1" }], true)
-		await setAllFees(w)
-		const view = w.get('[data-testid="revoke-authwits-view-content"]')
-		expect(view.element.tagName).toBe("BUTTON")
-		expect(view.attributes("aria-label")).toBe("View authwits content")
+	test.each(["Enter", " "] as const)(
+		"a named button: %j on it opens the content once and revokes nothing, though a revoke is ready",
+		async (key) => {
+			const w = await mountAndOpen([{ id: "aw-1", content: "c1" }], true)
+			await setAllFees(w)
+			const view = w.get('[data-testid="revoke-authwits-view-content"]')
+			expect(view.element.tagName).toBe("BUTTON")
+			expect(view.attributes("aria-label")).toBe("View authwits content")
 
-		view.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
-		await view.trigger("click")
-		await flushPromises()
-		expect(authwitsServiceMock.revokeAuthwits).not.toHaveBeenCalled()
-		expect(popupOpenMock).toHaveBeenCalledWith("data_viewer")
-		expect(preselected).toMatchObject({ viewerData: ["c1"] })
-	})
+			expect(pressOn(view.element as HTMLElement, key)).not.toContain(false)
+			await flushPromises()
+			expect(popupOpenMock).toHaveBeenCalledTimes(1)
+			expect(popupOpenMock).toHaveBeenCalledWith("data_viewer")
+			expect(preselected).toMatchObject({ viewerData: ["c1"] })
+			expect(authwitsServiceMock.revokeAuthwits).not.toHaveBeenCalled()
+		},
+	)
 })
 
 describe("RevokeAuthwitsPopup — Enter-key gate", () => {
