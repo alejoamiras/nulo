@@ -1361,7 +1361,7 @@ export class WalletSdkDispatcher {
 
 		const result = await this.askCapabilities(plan, { ...manifest, capabilities: negotiated }, ctx, dappSession)
 
-		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
+		// ONE atomic decision: accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
 		// formerly-separate writes, and a concurrent revoke fails cleanly (no
 		// half-written row) instead of collapsing to a bare "Invalid id". Different-type
@@ -1473,7 +1473,7 @@ export class WalletSdkDispatcher {
 	}
 
 	/** On popup reject/close, persist rejection for all delta items so the next
-	 *  request renders the "previously denied" badge. One atomic decision (B-14),
+	 *  request renders the "previously denied" badge. One atomic decision,
 	 *  and if the row was revoked meanwhile just surface the popup error. */
 	private async persistRejectionOnPopupFailure(sessionId: string, delta: Record<string, unknown>[]): Promise<void> {
 		try {

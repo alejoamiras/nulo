@@ -54,8 +54,8 @@ function collect(into: Collected, cap: Record<string, unknown>): void {
 	}
 }
 
-/** A scope or pattern the wallet cannot read as one listed contract is read as any contract, as
- *  the scope checks read it, so the table never shows less reach than the grant has. */
+/** A scope or pattern the wallet cannot read as one contract shows as any contract, so the table
+ *  never shows less reach than the grant could have. */
 function addScope(into: Collected, scope: unknown, column: "simulate" | "transact"): void {
 	const patterns = Array.isArray(scope) ? scope : [{ contract: "*", function: "*" }]
 	for (const pattern of patterns) {
@@ -66,7 +66,8 @@ function addScope(into: Collected, scope: unknown, column: "simulate" | "transac
 	}
 }
 
-/** One row per contract, matched case-blind, in the order the grants first name it. */
+/** One row per contract, in the order the grants first name it. It matches case-blind while the
+ *  scope checks compare exactly, so a merge can only overstate reach. */
 function rowFor(into: Collected, contract: unknown): DetailsRow {
 	if (typeof contract !== "string" || contract === "*") {
 		into.anyContract ??= { name: ANY_CONTRACT, simulate: [], add: false, transact: [] }

@@ -1,8 +1,4 @@
 <script setup lang="ts">
-/**
- * A folded part of the permission window: a button reading "{label} · {tag}" that shows the panel
- * under it. Opening or closing it changes only what is on screen.
- */
 defineProps<{
 	label: string
 	/** The quiet part after the label, such as a count. */
