@@ -94,3 +94,11 @@ Codex: changes needed (shared cache in the publish build, `--out packages` delet
 Codex accepted post-publication verification as the gate and an older attested commit for identical bytes once the signer is authenticated. It rated findings 2, 4 and 5 of round 1 closed, and 1 and 3 closed by this round.
 
 **Round 3 (codex): approve.** All three round-2 findings are closed, with no new ones. Codex checked the identity regex: it accepts `dev` and `main` and rejects `main-evil`, other repositories and substituted punctuation. The one remaining gap is the clean Actions rehearsal (the first `dry_run` dispatch from `dev`).
+
+### After merge: the first dry-run dispatch (`publish-packages` run 36077225851, `0.0.1`)
+
+`pack` passed on a real runner: cache-free install, `--ignore-scripts`, stage, pack, digests, artifact. `test` failed: `expect.addEqualityTesters is not a function` from `@aztec/foundation/dest/curves/bn254/field.js:413`, at load of `stage.test.ts`. The same `test:release` had passed in the PR's Quality run (174 pass).
+
+- **Cause.** Under `bun test` a bare `expect` resolves in every module (probe: a plain helper module sees `typeof expect === "function"`, while `globalThis.expect` is `undefined`), and `field.js` calls `expect.addEqualityTesters` whenever `expect` is defined. The runtime transpiler cache hides it: a transpile cached by a non-test run lacks the injection. The PR job ran `test:all` (vitest under Bun) first and warmed the cache; the dispatch `test` job ran `test:release` cold. Local proof: the same import passes warm and throws with `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`.
+- **Fix.** `stage.test.ts` no longer imports `@aztec/*` in process: the source-vs-bundle checks (patch keys, EncryptionKey cross-compat and rejections) run in a `bun` child process (`cross.mjs`) like the consumer legs. `test:release` now sets `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`, so PR CI runs cold as the publish job does. Mutation: re-adding the in-process import fails the cold run (4 fail, `addEqualityTesters` in the output).
+
