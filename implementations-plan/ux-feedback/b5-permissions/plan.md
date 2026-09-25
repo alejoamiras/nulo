@@ -176,7 +176,9 @@ Visible consequences of technical choices (stated in the PR body, program § Ope
   row's switch says (A-30's table);
 - after a declined widening, a request the held grant already covers opens no window and is
   answered from the held grant; today it reopens the window for the declined type (Ask A-32).
-  Contract classes keep today's behaviour, since their coverage checks only the type.
+  Contract classes keep today's behaviour, since their coverage checks only the type;
+- a `contracts` permission with neither `canRegister` nor `canGetMetadata` grants nothing, so it
+  is answered as asked with no window, and a request made only of such permissions opens none.
 
 ### UI asks for the owner (built as recommended, signed off 2026-09-25)
 
@@ -588,6 +590,16 @@ as annotated options.
   differing entry, so what the window shows and what is granted could differ. The playground
   sends one entry per type (`bundles.ts:49-123`); the tools app, which did too, has left this
   repo (#691).
+- **A `contracts` permission that grants nothing** (arc 5b; decided by codex high, session
+  `01a0d965-2e77-7b52-8c4b-9d23b3e094de`, 2026-09-25, confidence moderate). After validation, a
+  `contracts` capability with neither `canRegister` nor `canGetMetadata` true (omitted or `false`)
+  is left out of negotiation: it joins no delta, draws no row (`contractsRow` has none for it),
+  is never stored, and `enrichGrantedCapabilities` returns its projection in the answer as asked.
+  A request made only of such permissions opens no window and writes nothing; a mixed request
+  negotiates the rest, and held grants and rejections stay as they are. wallet-sdk requires
+  neither flag (`ContractsCapabilitySchema`), so refusing it would break a valid request. Unknown
+  types are not treated this way. Malformed and duplicate `contracts` entries are still refused
+  first, with the fixed text.
 - **The data split's coverage.** `dataRequestCovered` (`dispatcher.ts:252-261`) returns true for
   any existing data grant when the request lists no private-event contracts, so after "private
   events on, address book off" an address-book re-request never opens the window. It checks
@@ -1623,7 +1635,7 @@ the Firefox canary row recorded as open in `lessons/phase-5.md`.
 
 ### Arc 5b · `feat/ux-5b-permission-window`
 
-#### P6 · Groups, flags, known contracts ☐
+#### P6 · Groups, flags, known contracts ✓
 
 Re-read the `picks` store for `i6e`–`i6i` first.
 
@@ -1836,6 +1848,19 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
       lines", "Private messages its contracts sent to your accounts, like a transfer you
       received.", kept. The page asks the owner to sign the four undrawn states above off
       together.
+    - a held account the wallet no longer names: U2's sentence (codex high on the held accounts,
+      lessons/phase-6.md). One member with no wallet name, or two members of which the wallet
+      names one, read "See the addresses of the accounts you share";
+    - the address-book and unknown rows' flag (A-6) is read over the grants the app would hold
+      after Allow, so an app that already holds an any-contract scope has its later address-book
+      or unknown request flagged, although that request lists no contract;
+    - the S2 note beside an "Any contract" row: the note shows whenever Nulo knows none of the
+      listed contracts and at least one is listed, so a request with one unknown listed contract
+      and a scope on any contract shows it. No drawing has the note and the any-contract row
+      together;
+    - the 5b switches stay operable while the footer shows an error or a submit runs. 5a disabled
+      its ticks then; a disabled `Toggle` draws a lock no drawing has (A-12), and the footer's
+      button already holds the decision.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
