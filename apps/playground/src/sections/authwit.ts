@@ -1,6 +1,7 @@
 /**
- * createAuthWit variants (callIntent + innerHash — PRIVATE witnesses,
- * silent-path on default sessions) plus the PUBLIC registry lifecycle:
+ * createAuthWit variants (callIntent + innerHash — PRIVATE witnesses; a call
+ * intent inside the granted scope signs silently while the app's authorizations
+ * switch is On, an inner hash always asks) plus the PUBLIC registry lifecycle:
  * grant (`grantPublicAuthwit` custom RPC → on-chain `set_authorized`,
  * tracked by the wallet's settings) and consume (a `sendTx` AS the
  * authorized caller invoking `transfer_public_to_public(owner, …)`,
@@ -75,6 +76,27 @@ function safe<T>(method: string, fn: () => Promise<T>): () => Promise<void> {
 	}
 }
 
+/** Lets `consumer` call the token's `transfer_public_to_public(from, consumer, amount, nonce)`. */
+async function transferIntent(from: AztecAddress, consumer: AztecAddress) {
+	const amount = BigInt(getInput("authwitAmount") || "1")
+	const nonce = BigInt(getInput("authwitNonce") || "1")
+	return {
+		caller: consumer,
+		call: FunctionCall.from({
+			name: "transfer_public_to_public",
+			to: consumer,
+			// The wallet signs only a selector that names a function on the contract, and the
+			// token's amount is a u128: a `Field` there hashes to a selector nothing answers.
+			selector: await FunctionSelector.fromSignature("transfer_public_to_public((Field),(Field),u128,Field)"),
+			type: FunctionType.PUBLIC,
+			hideMsgSender: false,
+			isStatic: false,
+			args: [from.toField(), consumer.toField(), new Fr(amount), new Fr(nonce)],
+			returnTypes: [],
+		}),
+	}
+}
+
 export function bindAuthwit(root: HTMLElement): void {
 	root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-createAuthWit-callIntent"]')?.addEventListener(
 		"click",
@@ -85,20 +107,7 @@ export function bindAuthwit(root: HTMLElement): void {
 			const consumer = getInput("consumer") || getInput("tokenAddress")
 			if (!consumer) throw new Error("consumer or tokenAddress required")
 			const fromAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)
-			const consumerAddr = AztecAddress.fromStringUnsafe(consumer)
-			const intent = {
-				caller: consumerAddr,
-				call: FunctionCall.from({
-					name: "transfer_public_to_public",
-					to: consumerAddr,
-					selector: await FunctionSelector.fromSignature("transfer_public_to_public((Field),(Field),Field,Field)"),
-					type: FunctionType.PUBLIC,
-					hideMsgSender: false,
-					isStatic: false,
-					args: [],
-					returnTypes: [],
-				}),
-			}
+			const intent = await transferIntent(fromAddr, AztecAddress.fromStringUnsafe(consumer))
 			// biome-ignore lint/suspicious/noExplicitAny: CallIntent shape varies by aztec.js version
 			return wallet.createAuthWit(fromAddr, intent as any)
 		}),
