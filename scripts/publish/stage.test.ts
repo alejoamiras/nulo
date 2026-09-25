@@ -3,10 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync,
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import vectors from "../../implementations-plan/key-model-v2/reference/vectors.json"
-import { EncryptionKey as SourceEncryptionKey } from "../../packages/wallet-crypto/src/encryption-key"
-import { applyNuloSchemaPatch as sourceSchemaPatch } from "../../packages/wallet-sdk-schema-patch/src/apply"
 import { PACKAGES, type PublishedPackage } from "./packages"
 import { packageNameOf, REPO_ROOT, STAGING_MARKER, stagePackage } from "./stage"
+
+// Nothing that loads @aztec/* runs in this process. Under `bun test` every module sees a bare
+// `expect`, and @aztec/foundation calls `expect.addEqualityTesters` at load when it does; Bun's
+// `expect` has no such method, and only a transpile cached by an earlier non-test run hides that.
+// Such checks run in `bun` or `node` child processes instead (CHECK_SCRIPT, CROSS_SCRIPT).
 
 const scratch = mkdtempSync(join(tmpdir(), "nulo-publish-"))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -42,13 +45,6 @@ const MAX_BUNDLE_BYTES: Record<string, number> = {
 	"dist/apply.js": 6144,
 	"dist/register.js": 1024,
 }
-
-/** The methods the schema patch adds, read from the wallet's own source. */
-const PATCH_KEYS = (() => {
-	const fresh = {}
-	sourceSchemaPatch(fresh)
-	return Object.keys(fresh)
-})()
 
 interface Packed {
 	pkg: PublishedPackage
@@ -120,6 +116,7 @@ function buildFixture(packed: Packed[]): string {
 		symlinkSync(installed, target)
 	}
 	writeFileSync(join(fixture, "check.mjs"), CHECK_SCRIPT)
+	writeFileSync(join(fixture, "cross.mjs"), CROSS_SCRIPT)
 	writeFileSync(join(fixture, "consumer.ts"), CONSUMER_TS)
 	for (const [name, resolution] of [
 		["nodenext", { module: "nodenext", moduleResolution: "nodenext" }],
@@ -166,6 +163,50 @@ console.log(JSON.stringify(out))
 process.exit(0)
 `
 
+/**
+ * The wallet's sources beside the bundle: the methods the schema patch adds, and whether an
+ * EncryptionKey ciphertext from either opens with the other to the exact bytes and is refused
+ * under another AAD or with a flipped byte. Each check prints "ok" or its assertion message.
+ */
+const CROSS_SCRIPT = `import assert from "node:assert/strict"
+import { EncryptionKey as Bundled } from "@alejoamiras/nulo-wallet-crypto"
+
+const [encryptionKeySource, applySource] = process.argv.slice(2)
+const { EncryptionKey: Source } = await import(encryptionKeySource)
+const { applyNuloSchemaPatch } = await import(applySource)
+const fresh = {}
+applyNuloSchemaPatch(fresh)
+
+const text = new TextEncoder()
+const payload = text.encode("recovery secret")
+const aad = text.encode("nulo:recovery:v1")
+const otherAad = text.encode("nulo:other:v1")
+const source = await Source.fromPassword("correct horse battery staple")
+const bundle = await Bundled.fromPassword("correct horse battery staple")
+const bySource = await source.encrypt(payload, aad)
+const byBundle = await bundle.encrypt(payload, aad)
+const tampered = bySource.slice()
+tampered[tampered.length - 1] ^= 1
+
+const checks = {}
+const check = async (name, run) => {
+	try {
+		await run()
+		checks[name] = "ok"
+	} catch (error) {
+		checks[name] = String(error?.message ?? error)
+	}
+}
+await check("sourceToBundle", async () => assert.deepEqual(await bundle.decrypt(bySource, aad), payload))
+await check("bundleToSource", async () => assert.deepEqual(await source.decrypt(byBundle, aad), payload))
+for (const [who, key] of [["source", source], ["bundle", bundle]]) {
+	await check(\`\${who} refuses another AAD\`, () => assert.rejects(key.decrypt(bySource, otherAad)))
+	await check(\`\${who} refuses a flipped byte\`, () => assert.rejects(key.decrypt(tampered, aad)))
+}
+console.log(JSON.stringify({ patchKeys: Object.keys(fresh), checks }))
+process.exit(0)
+`
+
 /** Every export used at its declared type. `IsAny` catches an export typed `any`; the lib-check run catches an unresolved import in a declaration. */
 const CONSUMER_TS = `import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
@@ -209,12 +250,21 @@ export type Checks = [
 ]
 `
 
+interface CrossCheck {
+	patchKeys: string[]
+	checks: Record<string, string>
+}
+
 let packed: Packed[] = []
 let fixture = ""
+let cross: CrossCheck
 
 beforeAll(async () => {
 	packed = await stageAndPack(join(scratch, "a"))
 	fixture = buildFixture(packed)
+	const sources = ["packages/wallet-crypto/src/encryption-key.ts", "packages/wallet-sdk-schema-patch/src/apply.ts"]
+	const stdout = run([process.execPath, "cross.mjs", ...sources.map((s) => join(REPO_ROOT, s))], fixture)
+	cross = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}")
 }, 180_000)
 
 const byDir = (dir: string) => {
@@ -324,8 +374,8 @@ describe("staged packages", () => {
 
 	test("the schema-patch README documents every method the patch adds", () => {
 		const readme = readFileSync(join(import.meta.dir, "readme/wallet-sdk-schema-patch.md"), "utf8")
-		expect(PATCH_KEYS.length).toBeGreaterThan(0)
-		for (const key of PATCH_KEYS) expect({ key, documented: readme.includes(`| \`${key}\` |`) }).toEqual({ key, documented: true })
+		expect(cross.patchKeys.length).toBeGreaterThan(0)
+		for (const key of cross.patchKeys) expect({ key, documented: readme.includes(`| \`${key}\` |`) }).toEqual({ key, documented: true })
 	})
 
 	test("staging is reproducible: a second run under a stricter umask packs byte-identical tarballs", async () => {
@@ -394,8 +444,8 @@ describe("an out-of-workspace consumer of the tarballs", () => {
 			"resolvePackageRoot",
 		])
 		expect(realpathSync(out.zodRoot)).toBe(realpathSync(join(fixture, "node_modules/zod")))
-		expect(out.patchKeys).toEqual(PATCH_KEYS)
-		expect(out.patched).toEqual(PATCH_KEYS)
+		expect(out.patchKeys).toEqual(cross.patchKeys)
+		expect(out.patched).toEqual(cross.patchKeys)
 	}
 
 	test("imports every export under Bun and reproduces the key-derivation vectors", () => {
@@ -436,30 +486,20 @@ describe("an out-of-workspace consumer of the tarballs", () => {
 })
 
 describe("EncryptionKey: the bundle and the wallet's source read each other's ciphertexts", () => {
-	const password = "correct horse battery staple"
-	const aad = new TextEncoder().encode("nulo:recovery:v1")
-	const payload = new TextEncoder().encode("recovery secret")
-	const bundled = async () =>
-		(await import(Bun.resolveSync("@alejoamiras/nulo-wallet-crypto", fixture))) as { EncryptionKey: typeof SourceEncryptionKey }
+	test("sealed by either opens with the other to the exact payload bytes", () => {
+		expect({ sourceToBundle: cross.checks.sourceToBundle, bundleToSource: cross.checks.bundleToSource }).toEqual({
+			sourceToBundle: "ok",
+			bundleToSource: "ok",
+		})
+	})
 
-	test("sealed by the source opens with the bundle, and the reverse", async () => {
-		const { EncryptionKey: Bundled } = await bundled()
-		const source = await SourceEncryptionKey.fromPassword(password)
-		const bundle = await Bundled.fromPassword(password)
-		expect(await bundle.decrypt(await source.encrypt(payload, aad), aad)).toEqual(payload)
-		expect(await source.decrypt(await bundle.encrypt(payload, aad), aad)).toEqual(payload)
-	}, 60_000)
-
-	test("both reject a different AAD and a flipped ciphertext byte", async () => {
-		const { EncryptionKey: Bundled } = await bundled()
-		const source = await SourceEncryptionKey.fromPassword(password)
-		const bundle = await Bundled.fromPassword(password)
-		const sealed = await source.encrypt(payload, aad)
-		const tampered = sealed.slice()
-		tampered[tampered.length - 1] = (tampered[tampered.length - 1] ?? 0) ^ 1
-		for (const key of [source, bundle]) {
-			await expect(key.decrypt(sealed, new TextEncoder().encode("nulo:other:v1"))).rejects.toThrow()
-			await expect(key.decrypt(tampered, aad)).rejects.toThrow()
-		}
-	}, 60_000)
+	test("both refuse a different AAD and a flipped ciphertext byte", () => {
+		const refusals = Object.fromEntries(Object.entries(cross.checks).filter(([name]) => name.includes(" refuses ")))
+		expect(refusals).toEqual({
+			"source refuses another AAD": "ok",
+			"source refuses a flipped byte": "ok",
+			"bundle refuses another AAD": "ok",
+			"bundle refuses a flipped byte": "ok",
+		})
+	})
 })

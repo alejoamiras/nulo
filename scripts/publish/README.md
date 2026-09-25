@@ -42,6 +42,8 @@ It then unpacks the tarballs into a consumer outside the workspace, linking only
 
 Finally it checks that `EncryptionKey` ciphertexts are interchangeable between the bundle and the wallet's source, and that both reject a wrong AAD or a tampered byte.
 
+Nothing that loads `@aztec/*` runs inside the test process. Under `bun test`, every module sees a bare `expect`, and `@aztec/foundation` calls `expect.addEqualityTesters` at load when it sees one, which Bun's `expect` lacks. A transpile cached by an earlier non-test run hides the crash, so the checks that need `@aztec/*` run in `bun`/`node` child processes, and `test:release` disables the transpiler cache (`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`) so every run sees what a fresh runner sees.
+
 Ordinary comment-only edits (`//` and `/** */`) to a published source file leave the staged bytes unchanged: Bun drops them and the declarations are emitted without them. Legal comments (`/*! … */`, kept by the bundler), `@__PURE__` / `#__NO_SIDE_EFFECTS__` annotations (they change what the bundle keeps), code, an Azguard header line and a file's path all change them.
 
 ## Publishing
