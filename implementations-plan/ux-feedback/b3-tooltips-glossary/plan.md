@@ -90,6 +90,11 @@ Read 2026-09-24 17:4x from the artifact's `picks` store (22 documents): `tipsb` 
 (U9) have no pick, so both are built as drawn (the recommended option) and listed **sign-off
 pending**. Re-read before P3 started (2026-09-25): unchanged, 22 documents, no `tipsb` or `tipsc`.
 
+Signed off in chat on 2026-09-25, after the arc gate (the store is unreadable from the account
+now in use, so the message is the record): "And on "T" looks good. But please, drop the usage of "em dashes"." U8 and U9 are built as drawn
+with each sentence's em dash made a full stop. Approving the drawing also settles U9's place
+between the label and the field, and `spec.md`'s U8 and U9 rows now say so.
+
 ## UI impact
 
 | # | Surface | Before → after | Shot | Sign-off |
@@ -100,8 +105,8 @@ pending**. Re-read before P3 started (2026-09-25): unchanged, 22 documents, no `
 | 3 | Balance split (padlock and globe) | no tooltip → padlock "Private balance: only you can see it", globe "Public balance: anyone can see it", left-aligned; no underline, no Tab stop | `tips-icon-labels` | tips "All of it" (owner); **sign-off pending** on where: see Ask U-1 |
 | 4 | Settings → App | new row "Glossary", "What Nulo's words mean", `menu_book`, between Proving and Advanced | round 2's i9 Settings panel (not redrawn in round 3) | i9 "likes the glossary page (C)"; **sign-off pending** for the row itself |
 | 5 | Glossary page (new) | back arrow, "Glossary", four sections, nine entries (term, definition, where it appears) | `09-glossary` | i9, i9b, i9c "Authorizations" (owner) |
-| 6 | dApp identity block (connect, permissions, execute, emoji check) | warning icon with the sentence on hover → one orange line under the host, icon first, top-aligned, today's sentence | `tips-host-U8` | round 5 U8, as drawn, **sign-off pending** |
-| 7 | Import, recovery phrase (onboarding and popup) | ⓘ with the sentence on hover → the sentence between the label and the field, 8px from each as drawn; the ⓘ goes | `tips-phrase-U9` | round 5 U9, as drawn, **sign-off pending** |
+| 6 | dApp identity block (connect, permissions, execute, emoji check) | warning icon with the sentence on hover → one orange line under the host, icon first, top-aligned, today's sentence | `tips-host-U8` | round 5 U8, signed off (owner, 2026-09-25), the dash a full stop |
+| 7 | Import, recovery phrase (onboarding and popup) | ⓘ with the sentence on hover → the sentence between the label and the field, 8px from each as drawn; the ⓘ goes | `tips-phrase-U9` | round 5 U9, signed off (owner, 2026-09-25), the dash a full stop |
 
 Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabindex="0"`).
 
@@ -161,8 +166,9 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   need nothing.
 - **U9's position in the spec's text.** `spec.md:277` says "One line under the field"; the
   drawing and its note put it between the label and the field (`gen_r5.py:284-291`). Built as
-  drawn; the spec line needs the owner's correction.
-- The Settings row (row 4), U8 and U9, as listed above.
+  drawn; the spec line needs the owner's correction. Resolved 2026-09-25: the owner approved
+  the drawing, and the spec's U9 row now reads "between the label and the field".
+- The Settings row (row 4), as listed above. U8 and U9 were signed off on 2026-09-25.
 
 ## Architecture & Implementation
 
@@ -937,8 +943,9 @@ is advisory: it cannot override the spec, the owner's picks, CLAUDE.md or this s
 - Arc 3 of 6 on `feat/ux-3-tooltips-glossary`, stacked on `feat/ux-2-window-placement`.
 - Commits: conventional, lower-case, signed; one per phase at least, fixes separate.
 - `gh stack push` as checkpoints; no PR until the program's final pass (program Delivery).
-- PR body (at submit): summary, the UI impact table, the owner's quotes (i2, i9, i9b, i9c, tips),
-  the **sign-off pending** list (U-1 to U-8, the Settings row, U8, U9, the U9 spec wording), the parity Artifact
+- PR body (at submit): summary, the UI impact table, the owner's quotes (i2, i9, i9b, i9c, tips,
+  and U8/U9's "And on "T" looks good. But please, drop the usage of "em dashes"."), the **sign-off pending** list (U-1 to U-8, the
+  Settings row), the parity Artifact
   link, test evidence.
 
 ## Seeds
