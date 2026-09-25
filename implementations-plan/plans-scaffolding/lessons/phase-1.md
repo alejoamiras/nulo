@@ -210,3 +210,67 @@ The report baseline is unchanged:
 | every other rule | 0 |
 
 Autolinks surface no bare permalinks on today's tree.
+
+## Codex round 2
+
+**2026-09-25. Verdict: changes required, 8 of 11 closed, 3 not closed (6, 8, 10), 3 new (12–14), all adopted.**
+
+Every fixture was written first and run against the unfixed code: 10 tests failed. The fix landed in `a773733f`.
+
+| # | Finding | Fix | Fixtures (`scripts/ci-cd/plans/`) |
+|---|---|---|---|
+| 6 | Indented items escaped the entry rules. `[unused]: bad target [fake](…)` passed as a definition and lent its link to every entry. A valid multiline definition failed. | New `entries.ts`, driven by Bun's CommonMark parser. `Bun.markdown.render` gives the top-level blocks, each item's single-line status (one paragraph of inline text, no break), and each block's first line, via a growing-prefix parse. Links come from the rendered `<li>` the item owns, decoded as a browser reads them; `render` itself reports raw destinations, so `https\://…` and bare `www.` would read as plan paths. A raw HTML list beside the entries fails closed. Past the first entry, a top-level block that is neither an entry nor a heading is "text outside any entry". | `structure.test.ts`: "an item indented one to three spaces is an entry…", "a would-be definition that renders a link lends no entry its evidence…", "a valid multiline reference definition passes…", "a raw HTML list beside the entries fails closed…"; mutation pin: "an entry is one paragraph on one line…" |
+| 8 | `apps/../../gone/plan.md` passed as a repo-rooted cite | A spelling reads as a code cite only if `posix.normalize` leaves it unchanged; otherwise it resolves from the plan like any link. `linkLine` now tries the exact needle over the whole file before a decoded form. | `links.test.ts`: "a dot segment never lets a plan-relative link pass as a repo-rooted cite" (`apps/../..`, `apps/./..:4`, `%61pps/../..`) |
+| 10 | `input[src]`, `cite`, `action`, `formaction` and `base[href]` were missing | New `html.ts` with an explicit policy covering every HTML and SVG URL attribute. Judged as links: `href` on any element (SVG, MathML) but `base`, `xlink:href`, `src`, `poster`, `cite`, `action`, `formaction`, `longdesc`, `background`, `manifest`, `lowsrc`, `dynsrc`, `usemap`, `srcset`, `imagesrcset`, `ping`, `object[data]`, and CSS `url()` / `@import` in a style attribute or `<style>`. Opaque: `srcdoc`, `codebase`, `classid`, `archive`, `profile`, `<applet>`, `<param>`, a meta refresh, and CSS the gate cannot read exactly (an escape, `image-set()`, `src()`). | `links.test.ts`: "every URL attribute the policy judges is a link…", "a CSS url() or @import… is a link; url(#id) is an anchor", "URL-bearing constructs outside the policy are findings, never skipped…" |
+| 12 | `&sol;` and `&#98lob` hid a permalink | A numeric reference decodes as HTML reads it: no semicolon needed, C1 remapped through Windows-1252. HTML's full named table is not a dependency, so a named reference decodes only in its six common forms (with semicolon). Any other one a browser would decode is a `link-opaque` finding. Without a semicolon, HTML's frozen list of 106 legacy names applies: in an attribute such a reference decodes only when no letter, digit or `=` follows. `?a=1&family=2` and `&notify` stay text, as a browser keeps them. | `links.test.ts`: "a named reference the gate cannot decode is a finding; a semicolonless numeric one is decoded" (both of codex's regressions); `lib.test.ts`: "a numeric reference decodes as HTML reads it…" |
+| 13 | `<base href>` re-based every relative link | A `link-opaque` finding, never resolved. | `links.test.ts`: `a <base href>, in HTML or in Markdown's raw HTML, is a finding…` |
+| 14 | A colon in a file name dropped its path-token hits | `git grep -z`: NUL-terminated, unquoted names, parsed as sticky `name\0line\0text\n` records. Unparsable output throws. | `links.test.ts`: "a colon in a file name never hides its plan paths" |
+
+**`link-opaque` is a 15th rule.** Its constructs sit in any tracked document, and the link rules they defeat run everywhere, so no existing rule id fits. `plan.md`'s rule union and A's enforce list now name it.
+
+**Calibration catch.** The first cut raised 4 new findings on the real tree:
+- `&family` in two Google Fonts URLs (`isolated-linker-store/eli5-v2.html`, `on-camera-landing/prototype.html`). The rule flagged every semicolonless name, while a browser keeps this one as text. That is now HTML's exact legacy rule.
+- `url("{{font}}")` in the two store templates (`apps/extension/store/templates/{frame,tile}.html`). CSS URLs are now judged as links rather than flagged. Those templates sit outside every scoped rule, so they raise nothing.
+
+After both fixes the baseline is unchanged.
+
+**Mutation pass: 18 of 18 killed.** The mutants:
+- the rooted cite not normalized;
+- `linkLine` taking the loosest needle;
+- grep without `-z`;
+- `base[href]` judged as a link;
+- named references never opaque;
+- every semicolonless name opaque;
+- semicolonless numerics not decoded;
+- the C1 remap dropped;
+- element-level opaque off;
+- meta refresh ignored;
+- CSS never read;
+- the CSS count guard off;
+- `cite`/`action`/`formaction` dropped;
+- an item keeping ownership past its `</li>`;
+- nested blocks not counted as multiline;
+- the raw-HTML guard off;
+- stray text allowed;
+- every block on line 1.
+
+**Codex's corrections to the round-1 residue, both accepted:**
+- **`--exclude-standard` reads more than unstaged edits.** It also reads `.git/info/exclude` and the global excludes file, so a local run can differ from CI with no edit at all. CI has neither file. A local enforce run on a machine with a global exclude matching a plan artifact would under-report `tracked-artifact`, never over-report it. The residue stands, now described correctly.
+- **The C1 remap was omitted.** Now implemented.
+
+**Deviations and pushback:**
+- **A named reference with its semicolon passes only in the six common forms** (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, plus the uppercase legacy spellings). Any other, even a real one such as `&notin;`, is `link-opaque`. That is conservative and matches nothing on today's tree.
+- **Evidence is what the rendered `<li>` holds,** raw inline HTML anchors included, not only Markdown links. A reader follows those links too.
+- **`render`'s structure and the HTML's `<li>` order must agree,** or the file fails closed. A raw HTML list or a stray raw `</li>` splits them.
+- **`scripts/ci-cd/plans/` is still not type-checked.** No workspace `typecheck` covers `scripts/`, and `bun-types` is not installed at the root. Bun runs the TypeScript untyped, as in round 1.
+
+**Gate on `a773733f`:**
+
+| Command | Exit | Result |
+|---|---|---|
+| `bun test scripts/ci-cd/plans/` | 0 | 90 pass, 0 fail, ≈9 s |
+| `bun run test:ci-gating` | 0 | 240 pass, 2 skip, 0 fail |
+| `bun run lint` | 0 | Biome clean on the gate dir (the 29 warnings are elsewhere); complexity-baseline OK, with no new acceptance |
+| `time bun scripts/ci-cd/plans/check.ts --report` | 0 | 787 findings in 4.1 s (3.7–5.9 s over four runs) on a host at load average ≈130; round 1 recorded 3.3 s on a quieter host |
+
+Per-rule counts are unchanged: tracked-artifact 667, hygiene-files 6, nested-ignore 1, link-untracked 112, link-missing 1, and 0 for every other rule, `link-opaque` included.
