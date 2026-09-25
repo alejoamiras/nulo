@@ -46,14 +46,27 @@ describe("composite/DappIdentityBlock", () => {
 		expect(w.find("img").attributes("src")).toBe("blob:http://x/abc")
 	})
 
-	test("warning tooltip appears for suspicious hostnames", () => {
-		const w = factory({ hostname: "exámple.com", hostnameSuspicious: true })
-		expect(w.find("[data-tooltip]").exists()).toBe(true)
+	test("a suspicious hostname shows the warning as a visible line, not a tooltip", () => {
+		const w = factory({ hostname: "xn--tls-seda.nulo.sh", hostnameSuspicious: true })
+		const line = w.get('[data-testid="dapp-hostname-warning"]')
+		expect(line.text()).toBe(
+			"This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.",
+		)
+		const icon = line.get('[data-name="warning"]')
+		expect(icon.attributes("aria-hidden")).toBe("true")
+		expect(line.element.firstElementChild).toBe(icon.element)
+		expect(w.find("[data-tooltip]").exists()).toBe(false)
 	})
 
-	test("no warning tooltip for safe hostnames", () => {
+	test("a safe hostname shows no warning line", () => {
 		const w = factory({ hostname: "example.com", hostnameSuspicious: false })
-		expect(w.find("[data-tooltip]").exists()).toBe(false)
+		expect(w.find('[data-testid="dapp-hostname-warning"]').exists()).toBe(false)
+		expect(w.find('[data-name="warning"]').exists()).toBe(false)
+	})
+
+	test("the logo aligns to the top beside a warning line and centres otherwise", () => {
+		expect(factory({ hostname: "xn--tls-seda.nulo.sh", hostnameSuspicious: true }).attributes("align")).toBe("start")
+		expect(factory({ hostname: "example.com" }).attributes("align")).toBe("center")
 	})
 
 	test("hostnameTestId prop is forwarded to the hostname span", () => {
