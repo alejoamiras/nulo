@@ -101,7 +101,7 @@ The owner delegated the approval gate and every Ask: "Keep working, only leave t
 
 **Permanent gate: `scripts/ci-cd/plans/`** (lib, CLI and colocated tests; precedent `scripts/ci-cd/test-soak/`).
 - It lives inside `test:ci-gating` discovery (`bun test scripts/ci-cd/`, package.json:31). It therefore runs in `pr-quick.yml:211`, `release.yml:216` and `nightly.yml:161` with no workflow change.
-- **It enforces on `pull_request` and locally, and only reports elsewhere.** This is `ratchetBase()`'s rule (`complexity-baseline.test.ts:276-282`): under Actions without `GITHUB_BASE_REF`, it writes its findings to `$GITHUB_STEP_SUMMARY` and passes. Every other test in the job stays fatal.
+- **It enforces on pull requests and locally, and only reports elsewhere.** Under Actions it keys on `GITHUB_EVENT_NAME` (`pull_request` or `pull_request_target` enforce), not on `GITHUB_BASE_REF` as `ratchetBase()` does (`complexity-baseline.test.ts:276-282`): a PR with an empty base ref must still enforce, and a push must not. Outside a PR it writes its findings to `$GITHUB_STEP_SUMMARY` and passes. Every other test in the job stays fatal.
 - A0 ships it report-only in every mode. A switches enforcement on.
 
 **One-shot tools: `implementations-plan/plans-scaffolding/tools/`.**
@@ -122,7 +122,8 @@ type Finding = { rule: RuleId; file: string; line: number; detail: string; fix: 
 type RuleId =
   | "tracked-artifact"   // tracked under implementations-plan/ and (ls-files -ci OR a canonical pattern outside lessons/)
   | "hygiene-files"      // a canonical line missing, or a `!` line other than `!**/lessons/**`
-  | "nested-ignore"      // a .gitignore below implementations-plan/ outside the shrink-only allowlist
+  | "nested-ignore"      // a .gitignore below implementations-plan/ outside the shrink-only allowlist, or any nested .ignore / .rgignore
+  | "document-type"      // a tracked document, or anything under implementations-plan/, that is a symlink or gitlink rather than a regular file
   | "link-untracked"     // any link form → a path a canonical pattern covers
   | "link-missing"       // any link form → a path absent from the git index (scope: A8)
   | "permalink-shape"    // not https://github.com/alejoamiras/nulo/(blob|tree)/<40-hex>/<[A-Za-z0-9._/-]+>(#L\d+)?
@@ -136,7 +137,7 @@ type RuleId =
 export const CANONICAL_PATTERNS: readonly string[]  // audit-*.md, plan-*.md, _*.md, eli5.html (lessons/** exempt)
 export function trackedFiles(): Set<string>          // git ls-files -z, never the filesystem
 export function extract(file: string, src: string): { links: Link[]; h2: string[] }
-export function mode(): "enforce" | "report"         // enforce locally and when GITHUB_BASE_REF is set
+export function mode(): "enforce" | "report"         // enforce locally and on pull_request / pull_request_target
 export function checkTree(): Finding[]
 ```
 
@@ -458,7 +459,7 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
 - **A real shallow checkout:** a fixture origin (`uploadpack.allowFilter` on), cloned with `git clone --depth 1 file://…` at a PR-like merge commit. The gate's own fetch runs there and accepts a `dev` ancestor, rejects the parent-branch SHA, and fails closed when the origin is unreachable.
 - **Outcomes:** a fenced `## Outcome` and `## Outcome & Quality Bar` (neither counts), and a real Outcome without "Seeds retired".
 - **Budget:** `lessons.md` at 8,192 and at 8,193 B; a two-line entry; a foreign URL.
-- **Mode:** `mode()` enforces locally and with `GITHUB_BASE_REF`. Under Actions without it, it reports: the summary is written and the test passes.
+- **Mode:** `mode()` enforces locally and on `pull_request` / `pull_request_target`, whatever `GITHUB_BASE_REF` holds. Under Actions on any other event it reports: the summary is written and the test passes.
 
 `tree.test.ts` is report-only in every mode. `check.ts --report` prints the baseline. Commit the plan dir and its index line.
 
@@ -489,7 +490,7 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
    - `README.md` L13, L27 and L60.
    - `implementations-plan/README.md` rewritten: the standard, the milestone key, and § "Portable rules", including the asset rule "a plan-dir file live code or CI reads is relocated before its plan is archived".
    - `CI.md:3` and `.github/README.md:3`.
-8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `link-untracked`, `link-missing`, `permalink-*`, `curated-budget` and `local-path`.
+8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `document-type`, `link-untracked`, `link-missing`, `permalink-*`, `curated-budget` and `local-path`.
 
 **Validation gate.** Commit, then run:
 - `git ls-files -ci --exclude-standard -- implementations-plan | wc -l` → `0`;
