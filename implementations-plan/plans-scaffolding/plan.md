@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: artifact
 budget: ultracode
 status: approved 2026-09-25 (rev 3; the owner delegated the gate, see § Approval) — implementing
-base: dev @ 9f11de70 (2026-09-24, #692)
+base: dev @ ee66a233 (2026-09-25, #695)
 harden: not scheduled (Ask A12)
 ---
 
