@@ -2,16 +2,20 @@ import { onScopeDispose, ref, watch, type Ref } from "vue"
 import type { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
+import { ADDED_COALESCE, coalesce } from "@/utils/coalesce"
 
 /**
  * Shared incoming-transfer feed wiring for the activity page + the home
- * Recent-Activity widget, which previously duplicated this verbatim. The
- * parent owns the service clients and their connect/disconnect lifecycle (so
- * the page's `request()`-driven auto-connect timing is unchanged); this only
- * wires the listeners, the optimistic add/update/delete merges, the
- * `incomingTransfersVisible` toggle reload, and the D8 dust re-filter.
- * `dispose()` removes every handler (also auto-invoked via `onScopeDispose`).
+ * Recent-Activity widget. The parent owns the service clients and their
+ * connect/disconnect lifecycle (so the page's `request()`-driven auto-connect
+ * timing is unchanged); this only wires the listeners, the update and delete
+ * merges and the coalesced refresh on Added, the `incomingTransfersVisible`
+ * toggle reload, and the D8 dust re-filter. An Added is never merged as sent:
+ * only a read applies the dust filter. `dispose()` removes every handler (also
+ * auto-invoked via `onScopeDispose`).
  */
+
+export type IncomingScope = { profileId: string; networkId: string; account: string }
 
 /** Minimal slice of `IncomingTransferServiceClient` this composable touches. */
 export interface IncomingTransferServiceLike {
@@ -40,7 +44,11 @@ export interface UseIncomingTransfersOptions {
 	/** Resolves the fetch scope; returns `undefined` when the active
 	 *  profile/network/account isn't ready yet (mirrors the original guard,
 	 *  which silently skipped the load). */
-	scope: () => { profileId: string; networkId: string; account: string } | undefined
+	scope: () => IncomingScope | undefined
+	/** Awaited after each read and before its rows are assigned, under the same guards; its failure
+	 *  still assigns them. Lists that play arrivals pass the coordinator's `load`, so a row is first
+	 *  painted under the state that judges it. */
+	afterRead?: (scope: IncomingScope) => Promise<void>
 }
 
 export interface UseIncomingTransfersResult {
@@ -54,19 +62,21 @@ export interface UseIncomingTransfersResult {
 }
 
 export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseIncomingTransfersResult {
-	const { incomingTransferService, configService, priceService, scope } = options
+	const { incomingTransferService, configService, priceService, scope, afterRead } = options
 
 	const incomingTransfers = ref<IncomingTransferRecord[]>([])
 	let disposed = false
 
 	// Stable identity of the active scope ("" when not ready). Drives both the
 	// reset-on-switch watcher and the stale-fetch / foreign-event rejection.
-	const scopeKey = (s: { profileId: string; networkId: string; account: string } | undefined): string =>
-		s ? `${s.profileId} ${s.networkId} ${s.account}` : ""
+	const scopeKey = (s: IncomingScope | undefined): string => (s ? `${s.profileId} ${s.networkId} ${s.account}` : "")
 
 	// Bumped per refresh so a late fetch for a superseded scope (A→B→A) is
 	// dropped instead of clobbering the current one.
 	let refreshSeq = 0
+	// Dropped if disposed, a newer refresh started, or the active scope changed
+	// during an await — never assign a stale/foreign snapshot.
+	const isStale = (seq: number, key: string) => disposed || seq !== refreshSeq || scopeKey(scope()) !== key
 
 	const refresh = async (): Promise<void> => {
 		const s = scope()
@@ -74,11 +84,18 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 		const myKey = scopeKey(s)
 		const mySeq = ++refreshSeq
 		const rows = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
-		// Drop if disposed, a newer refresh started, or the active scope changed
-		// during the await — never assign a stale/foreign snapshot.
-		if (disposed || mySeq !== refreshSeq || scopeKey(scope()) !== myKey) return
+		if (isStale(mySeq, myKey)) return
+		if (afterRead) {
+			try {
+				await afterRead(s)
+			} catch {
+				// The rows are the feed; a judge that failed must not hide them.
+			}
+			if (isStale(mySeq, myKey)) return
+		}
 		incomingTransfers.value = rows
 	}
+	const addedRefresh = coalesce(() => void refresh(), ADDED_COALESCE)
 
 	// Layer-A containment: a record is accepted into the active view ONLY when it
 	// belongs to the CURRENTLY active (profile, network, account). The service
@@ -90,10 +107,7 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	}
 
 	const onAdded = (inc: IncomingTransferRecord) => {
-		if (!inLiveScope(inc)) return
-		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
-		if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
-		else incomingTransfers.value[idx] = inc
+		if (inLiveScope(inc)) addedRefresh.trigger()
 	}
 	const onUpdated = (inc: IncomingTransferRecord) => {
 		if (!inLiveScope(inc)) return
@@ -137,6 +151,7 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	const dispose = () => {
 		if (disposed) return
 		disposed = true
+		addedRefresh.cancel()
 		stopScopeWatch()
 		incomingTransferService.onIncomingTransferAdded.remove(onAdded)
 		incomingTransferService.onIncomingTransferUpdated.remove(onUpdated)
