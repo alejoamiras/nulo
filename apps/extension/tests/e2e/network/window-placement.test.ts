@@ -15,7 +15,7 @@ import {
 	withTimeoutMessage,
 } from "../fixtures/extension"
 import { switchToLocalNetwork } from "../fixtures/helpers"
-import { PLAYGROUND_TEST_PAGE, selectPgBundle, setPgInput, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { playgroundTestPage, selectPgBundle, setPgInput, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { type PopupKind, waitForExecuteContent, waitForMainFrame, waitForPopup } from "../fixtures/popups"
 import { pointerClick } from "../helpers/legal-drivers"
 
@@ -107,10 +107,11 @@ async function readScreen(control: Page): Promise<Bounds> {
 /** A normal window holding an unconnected playground page, created from the control page so its id is known. */
 async function openPlaygroundWindow(ctx: PlacementContext, bounds: Bounds): Promise<PlaygroundWindow> {
 	const before = new Set(ctx.browser.targets())
-	const origin = new URL(PLAYGROUND_TEST_PAGE).origin
+	const url = playgroundTestPage()
+	const origin = new URL(url).origin
 	const id = await ctx.control.evaluate(
-		async (url, b) => (await chrome.windows.create({ type: "normal", url, focused: true, ...b })).id,
-		PLAYGROUND_TEST_PAGE,
+		async (pageUrl, b) => (await chrome.windows.create({ type: "normal", url: pageUrl, focused: true, ...b })).id,
+		url,
 		bounds,
 	)
 	if (typeof id !== "number") throw new Error("windows.create returned no window id")
