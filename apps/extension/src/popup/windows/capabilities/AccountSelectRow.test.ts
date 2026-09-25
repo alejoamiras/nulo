@@ -60,6 +60,11 @@ describe("AccountSelectRow", () => {
 		expect(w.find('[data-testid="cap-account-alias-input"]').exists()).toBe(true)
 	})
 
+	test("the alias ⓘ's tooltip centres on the ⓘ", () => {
+		const w = factory({ selected: true })
+		expect(w.get('[data-name="info"]').element.parentElement?.getAttribute("position")).toBe("center")
+	})
+
 	test("alias input defaults to account name", () => {
 		const w = factory({ selected: true })
 		expect(w.find('[data-testid="cap-account-alias-input"]').attributes("value")).toBe("Alpha")
