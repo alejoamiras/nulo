@@ -44,7 +44,6 @@ const Scroller = defineComponent({
 			h("div", { style: `overflow-y: ${props.overflow}`, "data-scroll-height": props.left }, slots.default?.()),
 })
 
-/** An open sheet holding whatever footers it is given. */
 const Sheet = defineComponent({
 	props: { order: Number },
 	setup:

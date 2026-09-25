@@ -240,10 +240,11 @@ Rows:
 - **R-2 · Token rows' tint.** Today `color-mix(surface-low 50%)`. Recommended and built: the
   activity rows' `--nulo-surface-low`, since both sit on Home.
 - **R-3 · 24×24 inner buttons.** Recommended and built: the amount column and labels move by the
-  added width; the awaiting card's reservation grows from 36px to 52px. The awaiting buttons'
-  16px width was tuned by the owner (`TransactionAwaitingCard.vue:173-176`); item 11's "at least
-  24×24" supersedes it, and the owner confirms here. **Sign-off pending:** the Revoke sheet's
-  chunk header grows by the content button's 24px box, where the glyph was 16px (5b, P6.6).
+  added width; the awaiting card's reservation grows from 36px to 52px (the code's 60px is those
+  52px plus the row's 8px side padding). The awaiting buttons' 16px width was tuned by the owner
+  (`TransactionAwaitingCard.vue:173-176`); item 11's "at least 24×24" supersedes it, and the owner
+  confirms here. **Sign-off pending:** the Revoke sheet's chunk header grows by the content
+  button's 24px box, where the glyph was 16px (5b, P6.6).
 - **R-4 · The authorization revoke.** Hidden until hover today. Recommended and built: also
   visible while the row or the button has focus.
 - **R-5 · The awaiting "focus" button.** It now duplicates the row. Recommended and built: kept.
@@ -418,11 +419,14 @@ Arrivals:
     24×24, `margin-right: -6px`, `<MaterialIcon name="close" :size="16">` in `--nulo-secondary`.
   - No click-to-close on the card (round-1 note, "Clicking elsewhere leaves it running out",
     `parts/10-toasts.html:44-48`).
-- Hold: the view keeps `hovered` (`mouseenter`/`mouseleave`) and `focusWithin` (`focusin`, and
-  `focusout` whose `relatedTarget` leaves the card) separately and reports
-  `holdToast(hovered || focusWithin)` whenever either changes. On every new id it re-derives both
-  from the rendered card (`matches(":hover")`, `contains(document.activeElement)`), since a snack
-  that replaces another under a resting pointer gets no `mouseenter`. Unmount releases a hold.
+- Hold: the view keeps `hovered` and `focusWithin` separately and reports
+  `holdToast(hovered || focusWithin)` whenever either changes. One passive capture `pointermove`
+  listener on the document tracks the pointer; `hovered` turns on at a `pointermove` on the card a
+  pixel or more, on either axis, from the pointer's previous position, and off at `mouseleave`. No
+  hover event holds, and neither does a move the browser synthesises at the cursor's last spot, so
+  a card that opens under a still pointer runs its 6 s (2b, P6.2). `focusWithin` follows `focusin`,
+  and `focusout` whose `relatedTarget` leaves the card. A new card starts unheld, and unmount
+  releases a hold.
 - Transition: its own module classes through `enter-from-class`, `enter-active-class`,
   `leave-to-class` and `leave-active-class` (S-3), and an opacity-only variant under
   `prefers-reduced-motion: reduce`. `base.css`'s `.toast-*` rules stay, unused.
@@ -430,8 +434,11 @@ Arrivals:
 
 ### The wrapper and the shells
 
-- `components/ui/ToastManager.vue` passes `:bottomInset="route.meta.showBottomNav ? 76 : 12"` (76
-  from `r2/i10.html:20`; 12 is S-1). Its comment keeps one sentence: why the tag resolves locally.
+- `components/ui/ToastManager.vue` passes `:bottomInset` from `useSnackInset`
+  (`composables/snackInset.ts`): 76 on a route with the nav (`r2/i10.html:20`) and 12 elsewhere
+  (S-1), raised to 12px above a page's bottom action row (1c, P6.1); while a sheet covers the nav,
+  12, or 12px above the sheet's own row (12a, P6.5). It also passes `inColumn` in the dApp windows
+  (11a, P6.4). Its comment keeps one sentence: why the tag resolves locally.
 - `composables/toast.js` and `.d.ts` re-export the new names; the "design-system round-2" comment
   goes.
 - `popup/app.vue` and `onboarding/app.vue`: `<div id="toast" />` moves to the end of the template,
@@ -1937,22 +1944,28 @@ older layout differences stay). The log is `lessons/phase-6.md`.
 
 1. **Above the footer (1c).** On every page or window without the nav that has a bottom action
    row, the snack sits 12px above the row's top edge and never covers its buttons; with neither
-   the nav nor a row, 12px from the bottom. The row can grow (a wrapping error line) and the snack
-   follows it. A `v-snack-footer` directive marks each row and the host `ToastManager` computes
-   the inset (`composables/snackInset.ts`); `ToastManagerBase` still takes a number. The inventory
-   is in the log. A row counts at the highest point its top edge reaches on screen, now or once the
-   page is scrolled to its end, so in a window shorter than the page the snack is already clear of
-   a row that a scroll brings up (the batch's `window-placement.test.ts` regression, found by arc
-   5a's full run and bisected to `6fbfdeb5`). e2e on both browsers: Send with an estimate error and
-   the execute window with one, each 12px above its footer, and the execute window at 400×500 with
-   Reject and Confirm clear after a scroll, with and without an error line
-   (`network/snack-placement.test.ts`); `network/window-placement.test.ts` passes unchanged.
+   the nav nor a row, 12px from the bottom. The row can grow (a wrapping error line) or be moved by
+   content above it, and the snack follows it. A `v-snack-footer` directive marks each row and the
+   host `ToastManager` computes the inset (`composables/snackInset.ts`); `ToastManagerBase` still
+   takes a number. The inventory is in the log. A row counts at the highest point its top edge
+   reaches on screen, now or once every container that scrolls it (a sheet's card, the page) is at
+   its end; a sticky row keeps its place while the container it sticks to scrolls. So in a window
+   shorter than the page, or a sheet taller than the popup, the snack is already clear of a row
+   that a scroll brings up (the batch's `window-placement.test.ts` regression, found by arc 5a's
+   full run and bisected to `6fbfdeb5`). A row that keeps its place while it holds no action
+   (Presto's slot while the probe runs) counts only while it holds one. e2e on both browsers: Send
+   with an estimate error and the execute window with one, each 12px above its footer, and the
+   execute window at 400×500 with Reject and Confirm clear after a scroll, with and without an
+   error line (`network/snack-placement.test.ts`); the Receive sheet lengthened past the popup,
+   with Close clear after a scroll and a hit-test in one task (`snackbar.test.ts`);
+   `network/window-placement.test.ts` passes unchanged.
 2. **The first open's timer (2b).** A success's 6 s starts when it opens, even under a resting
-   pointer. The hold engages only on a pointer move onto the snack after it opened, or keyboard
-   focus entering it; leaving resumes the remaining time (S-12). The hover and pointer-over events
-   a browser synthesises when content appears under a still cursor do not count. e2e on both
-   browsers: a copy whose snack opens under the cursor, the mouse still, is gone within 6 s plus a
-   small tolerance.
+   pointer. The hold engages only on a pointer move on the snack, a pixel or more from where the
+   pointer last was, or keyboard focus entering it; leaving resumes the remaining time (S-12). So a
+   pointer that leaves the snack and comes back to where it opened under it holds it. The hover
+   and pointer-over events a browser synthesises when content appears under a still cursor do not
+   count. e2e on both browsers: a copy whose snack opens under the cursor, the mouse still, is gone
+   within 6 s plus a small tolerance.
 3. **Details on a failed send (10b).** "Send failed" gets "Details", drawn like View (i10 A′),
    which opens that send's journal page `/popup/journal/<id>`. Only a failed send gets it, and only
    when that send has a journal entry the wallet confirms (a failed, terminal transfer in the
@@ -1969,7 +1982,9 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    wider than 360px can take a wider snack (**sign-off pending**, S-2).
 5. **Over a sheet (12a).** While a sheet that covers the nav is open, the snack sits 12px from the
    bottom, or 12px above the sheet's own footer row if it has one; when the sheet closes it goes
-   back to 76px. `v-snack-sheet` on `components/Popup/Popup.vue` tells the host a sheet is open.
+   back to 76px. `v-snack-sheet` on `components/Popup/Popup.vue` tells the host a sheet is open
+   and passes its `displaceIdx`; the sheet drawn on top places the snack, even when a lower one
+   mounts later.
 6. **Two more rows (5b).** Settings → Advanced's Logs row becomes one button with its list's hover
    tint and the 2px accent ring, opened by Enter and Space (R-1, R-2, R-7). The Revoke
    authorizations popup's expand icon becomes a 24×24 named button (R-3). The Advanced page's
