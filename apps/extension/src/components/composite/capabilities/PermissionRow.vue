@@ -148,6 +148,11 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	margin-top: 1px;
 }
 
+/* The drawn switch animates only its colours; two classes outrank the primitive's `all`. */
+.row .switch {
+	transition: background 0.2s ease, border-color 0.2s ease;
+}
+
 /* Two classes outrank the primitive's `.wrapper:focus { outline: none }` whatever the order. */
 .row .switch:focus-visible {
 	outline: 1px solid var(--txt-primary);
