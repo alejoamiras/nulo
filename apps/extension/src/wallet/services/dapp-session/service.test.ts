@@ -9,7 +9,8 @@
  *     non-thrower; a locked wallet must decline auto-approve, NOT throw — this
  *     site was EXCLUDED from the sweep and must stay silent).
  */
-import { CapabilityNotGrantedError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, ValidationError } from "@nulo/extension-messaging/errors"
+import { authorizationsEffective, projectKnownCapability } from "@nulo/wallet-bridge"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ServiceCollection } from "@/wallet/base"
@@ -22,7 +23,7 @@ import { DappSessionService } from "./service"
 import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { asImportedKeysDek, asMasterSecretBytes, deriveDappSessionMacKey } from "@nulo/wallet-crypto"
 import { signDappSession } from "./integrity"
-import type { DappSession } from "./spec"
+import type { CapabilityDecision, DappSession, GrantedCapabilityRecord } from "./spec"
 
 let activeProfile: { id: string } | undefined
 
@@ -246,5 +247,186 @@ describe("tryGetDappSessionByOriginAndChain anchoring", () => {
 
 		const foreign = await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p2")
 		expect(foreign).toBeUndefined()
+	})
+})
+
+describe("the authorizations consent", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const grant = (capability: Record<string, unknown>) => ({ capability, grantedAt: 1 }) as GrantedCapabilityRecord
+	const withAuthWit = grant({ type: "accounts", canGet: true, canCreateAuthWit: true })
+	const withoutAuthWit = grant({ type: "accounts", canGet: true, canCreateAuthWit: false })
+	const listed = grant({ type: "transaction", scope: [{ contract: A, function: "transfer" }] })
+	const anyContract = grant({ type: "transaction", scope: "*" })
+	const decision = (patch: Partial<CapabilityDecision> = {}): CapabilityDecision => ({
+		addAccounts: [],
+		aliasPatch: {},
+		grantRecords: [],
+		replaceTypes: [],
+		approvedTypes: [],
+		rejectedTypes: [],
+		...patch,
+	})
+	const widenToAnyContract = decision({ grantRecords: [anyContract], replaceTypes: ["transaction"], approvedTypes: ["transaction"] })
+	const effective = (row: DappSession) =>
+		authorizationsEffective(
+			row.authorizationsWithoutAsking,
+			(row.capabilityGrants ?? []).map((g) => g.capability),
+		)
+
+	async function holding(grants: GrantedCapabilityRecord[], consent?: { broad: boolean }) {
+		const made = await makeService()
+		await made.service.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")
+		const id = (await made.service.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1"))?.id as string
+		await made.service.setCapabilityGrants(id, grants)
+		if (consent) await made.service.applyCapabilityDecision(id, decision({ authorizations: consent }))
+		return { ...made, svc: made.service, id }
+	}
+
+	test("a decision's object sets the consent, null deletes it and absent keeps it", async () => {
+		const { svc, id } = await holding([withAuthWit, listed])
+		expect((await svc.applyCapabilityDecision(id, decision({ authorizations: { broad: false } }))).authorizationsWithoutAsking).toEqual(
+			{
+				broad: false,
+			},
+		)
+		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toEqual({ broad: false })
+		expect((await svc.applyCapabilityDecision(id, decision())).authorizationsWithoutAsking).toEqual({ broad: false })
+		expect((await svc.applyCapabilityDecision(id, decision({ authorizations: null }))).authorizationsWithoutAsking).toBeUndefined()
+	})
+
+	test("a decision leaving the accounts grant without canCreateAuthWit deletes the consent", async () => {
+		const { svc, id } = await holding([withAuthWit, listed], { broad: false })
+		const next = await svc.applyCapabilityDecision(
+			id,
+			decision({ grantRecords: [withoutAuthWit], replaceTypes: ["accounts"], approvedTypes: ["accounts"] }),
+		)
+		expect(next.authorizationsWithoutAsking).toBeUndefined()
+	})
+
+	test("a consent the decision cannot read is refused before any write", async () => {
+		const { svc, id } = await holding([withAuthWit, listed])
+		const malformed = decision({ addAccounts: ["aztec:1:0xaa"], authorizations: { broad: "yes" } as never })
+		await expect(svc.applyCapabilityDecision(id, malformed)).rejects.toBeInstanceOf(ValidationError)
+		const row = await svc.getDappSession(id)
+		expect(row.accounts).toEqual([])
+		expect(row.authorizationsWithoutAsking).toBeUndefined()
+	})
+
+	test.each([
+		["the narrow On lands last", true],
+		["the broad widening lands last", false],
+	])("a narrow On and a concurrent widening to any contract read as ask: %s", async (_name, onLast) => {
+		const { svc, id } = await holding([withAuthWit, listed])
+		const narrowOn = decision({ authorizations: { broad: false }, requiresGrant: ["accounts"] })
+		const [first, second] = onLast ? [widenToAnyContract, narrowOn] : [narrowOn, widenToAnyContract]
+		await svc.applyCapabilityDecision(id, first)
+		const row = await svc.applyCapabilityDecision(id, second)
+		expect(row.authorizationsWithoutAsking).toEqual({ broad: false })
+		expect(effective(row)).toBe(false)
+	})
+
+	test("a widening to any contract through setCapabilityGrants reads as ask", async () => {
+		const { svc, id } = await holding([withAuthWit, listed], { broad: false })
+		expect(effective(await svc.getDappSession(id))).toBe(true)
+		expect(effective(await svc.setCapabilityGrants(id, [withAuthWit, anyContract]))).toBe(false)
+	})
+
+	test("an explicit broad On survives an unrelated decision", async () => {
+		const { svc, id } = await holding([withAuthWit, anyContract], { broad: true })
+		const data = grant({ type: "data", addressBook: true })
+		const row = await svc.applyCapabilityDecision(id, decision({ grantRecords: [data], approvedTypes: ["data"] }))
+		expect(row.authorizationsWithoutAsking).toEqual({ broad: true })
+		expect(effective(row)).toBe(true)
+	})
+
+	test("a consent given against an accounts grant revoked meanwhile is refused", async () => {
+		const { svc, id } = await holding([withAuthWit, listed])
+		await svc.setCapabilityGrants(id, [listed])
+		const late = decision({ authorizations: { broad: false }, requiresGrant: ["accounts"] })
+		await expect(svc.applyCapabilityDecision(id, late)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toBeUndefined()
+	})
+
+	test("a revoke through setCapabilityGrants deletes the consent, and a re-grant starts from ask", async () => {
+		const { svc, id } = await holding([withAuthWit, listed], { broad: false })
+		expect((await svc.setCapabilityGrants(id, [withoutAuthWit, listed])).authorizationsWithoutAsking).toBeUndefined()
+		const regranted = await svc.setCapabilityGrants(id, [withAuthWit, listed])
+		expect(regranted.authorizationsWithoutAsking).toBeUndefined()
+		expect(effective(regranted)).toBe(false)
+	})
+
+	test("the Settings switch stores broad from the current grants and emits the update", async () => {
+		const { svc, id } = await holding([withAuthWit, anyContract])
+		const updates: DappSession[] = []
+		svc.onDappSessionUpdated.add((row) => updates.push(row))
+		expect((await svc.setAuthorizationsWithoutAsking(id, true)).authorizationsWithoutAsking).toEqual({ broad: true })
+		await svc.setCapabilityGrants(id, [withAuthWit, listed])
+		expect((await svc.setAuthorizationsWithoutAsking(id, true)).authorizationsWithoutAsking).toEqual({ broad: false })
+		expect((await svc.setAuthorizationsWithoutAsking(id, false)).authorizationsWithoutAsking).toBeUndefined()
+		expect(updates.map((row) => row.authorizationsWithoutAsking)).toEqual([
+			{ broad: true },
+			{ broad: true },
+			{ broad: false },
+			undefined,
+		])
+	})
+
+	test("the Settings switch refuses On without canCreateAuthWit and a non-boolean; Off always succeeds", async () => {
+		const { svc, id } = await holding([withoutAuthWit, listed])
+		await expect(svc.setAuthorizationsWithoutAsking(id, true)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		await expect(svc.setAuthorizationsWithoutAsking(id, "true" as never)).rejects.toBeInstanceOf(ValidationError)
+		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toBeUndefined()
+		expect((await svc.setAuthorizationsWithoutAsking(id, false)).authorizationsWithoutAsking).toBeUndefined()
+		await svc.setCapabilityGrants(id, [])
+		await expect(svc.setAuthorizationsWithoutAsking(id, false)).resolves.toMatchObject({ id })
+	})
+
+	test.each([
+		["a decision, then Settings", "settings"],
+		["Settings, then a decision", "decision"],
+	])("a Settings write and a window decision leave the later one: %s", async (_name, last) => {
+		const { svc, id } = await holding([withAuthWit, anyContract])
+		const stale = decision({ authorizations: { broad: false }, requiresGrant: ["accounts"] })
+		const writes =
+			last === "settings"
+				? [svc.applyCapabilityDecision(id, stale), svc.setAuthorizationsWithoutAsking(id, true)]
+				: [svc.setAuthorizationsWithoutAsking(id, true), svc.applyCapabilityDecision(id, stale)]
+		await Promise.all(writes)
+		const expected = last === "settings" ? { broad: true } : { broad: false }
+		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toEqual(expected)
+	})
+
+	test("a tampered consent fails the MAC and the row is dropped", async () => {
+		const { svc, id, browserApi } = await holding([withAuthWit, anyContract], { broad: false })
+		const key = `${ROW_ROOT}@${id}`
+		const stored = JSON.parse((await browserApi.storage.local.get(key))[key] as string)
+		await browserApi.storage.local.set({ [key]: JSON.stringify({ ...stored, authorizationsWithoutAsking: { broad: true } }) })
+		expect(await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1")).toBeUndefined()
+	})
+
+	test("a signed consent the schema refuses hides the row", async () => {
+		const { service: svc, browserApi } = await makeService()
+		await plantRowSignedBy(browserApi, { ...rowFor("p1"), authorizationsWithoutAsking: { broad: "yes" } } as never, "p1")
+		expect(await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1")).toBeUndefined()
+		await plantRowSignedBy(browserApi, { ...rowFor("p1"), authorizationsWithoutAsking: { broad: true } }, "p1")
+		expect((await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1"))?.authorizationsWithoutAsking).toEqual({
+			broad: true,
+		})
+	})
+
+	test("a projected grant verifies its MAC after a round trip", async () => {
+		const { svc, id, browserApi } = await holding([withAuthWit])
+		const projected = [
+			{ type: "contracts", contracts: [`0x${"0aBc".repeat(16)}`], canRegister: true, extra: 1 },
+			{ type: "simulation", transactions: { scope: [{ contract: "*", function: "transfer" }] }, utilities: { scope: "*" } },
+		].map((cap) => grant(projectKnownCapability(cap) as Record<string, unknown>))
+		await svc.applyCapabilityDecision(id, decision({ grantRecords: projected, approvedTypes: ["contracts", "simulation"] }))
+		const reader = new DappSessionService(new LoggerStore(new ConfigStore()), browserApi)
+		const collection = new ServiceCollection()
+		collection.add(makeProfileStub() as never)
+		collection.add(reader)
+		await collection.start()
+		const row = await reader.getDappSession(id)
+		expect(row.capabilityGrants?.slice(1)).toEqual(projected)
 	})
 })
