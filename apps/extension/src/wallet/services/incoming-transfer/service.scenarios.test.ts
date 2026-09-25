@@ -4817,7 +4817,8 @@ describe("IncomingTransferService — arrival state", () => {
 
 describe("IncomingTransferService — arrival floors", () => {
 	test("a token floor written at N + 1 after a read that saw N stays N + 1", async () => {
-		const { service, tip } = await bootArrivals(100)
+		const { service, tip, token } = await bootArrivals(100)
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
 		await service.getArrivalState("p1", "n1", "0xa")
 		tip.standing = 101
 		await internals(service).onTokenAdded(tokenAdd(tokenB))
@@ -4845,6 +4846,23 @@ describe("IncomingTransferService — arrival floors", () => {
 		expect(row?.arrivalFloorPending).toBeUndefined()
 	})
 
+	test("a token deleted while its add reads the tip gets neither trust nor a floor back", async () => {
+		const { service, tip, token } = await bootArrivals(0)
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		const addTip = deferred<number>()
+		tip.queue.push(addTip.promise)
+
+		const add = internals(service).onTokenAdded(tokenAdd(tokenB))
+		await flushPromises()
+		token.getTokensRaw.mockResolvedValue([tokenA])
+		await token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+		await flushPromises()
+		addTip.resolve(100)
+		await add
+
+		expect(trust.get(trustKey("p1", "n1", tokenB.contract))).toBeUndefined()
+	})
+
 	test("a floor kept through a failed tip read resolves to the higher of its number and the tip", async () => {
 		const { service, tip } = await bootArrivals(new Error("node down"))
 		arrivals.set("p1|n1|0xa", { sinceBlock: 0, played: [] })
@@ -4860,7 +4878,8 @@ describe("IncomingTransferService — arrival floors", () => {
 	})
 
 	test("a pending floor with no number resolves to the tip", async () => {
-		const { service, tip } = await bootArrivals(new Error("node down"))
+		const { service, tip, token } = await bootArrivals(new Error("node down"))
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
 		arrivals.set("p1|n1|0xa", { sinceBlock: 0, played: [] })
 		await internals(service).onTokenAdded(tokenAdd(tokenB))
 		tip.standing = 150
