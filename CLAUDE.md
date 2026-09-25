@@ -62,6 +62,17 @@ Any change to what a user sees — a screen's layout, its copy, which rows it sh
 - **Wire-shaped fixtures for dApp-facing surfaces.** A component test for anything that renders dApp data (the execute / connect / sign windows) feeds at least one fixture shaped as the wire carries it — `aztec_sendTx` arguments are `0x` + 64 hex fields, never `5n` — so a rendering that only works on friendly test values cannot pass.
 - **Screenshots close the loop.** A PR that changes a popup surface attaches a screenshot or artifact of the result; the smoke e2e counts rows, it does not read them.
 
+## Tooltips and the glossary
+
+- Two kinds of tooltip only: the label of an icon-only button, or the definition of a dotted
+  term. A warning or a choice is never a tooltip; it is visible text.
+- Every definition lives in one module (`apps/extension/src/utils/glossary.ts`),
+  which Settings → Glossary renders. A dotted term takes a glossary key, never its own text,
+  so the tooltip and the glossary cannot disagree; a test fails on a key with no entry.
+- A new dotted term or a changed definition is a UI change: owner sign-off, and the glossary
+  entry lands in the same PR.
+- At most two dotted terms per screen; one sentence, 100 characters at most.
+
 ## Branching + merging
 
 - `dev` is the **default branch** and the integration lane. Feature work happens on short-lived branches off `dev` (named `feat/...`, `fix/...`, `chore/...`, `refactor/...`, `docs/...`, `test/...`, `deps/...`) and lands via **squash-merge** PRs — dev's history stays essentially linear, one commit per merged feature PR. **The one exception is the post-release `chore: sync main → dev` PR, which is MERGE-committed** (not squashed) so `main`'s release commit stays in `dev`'s ancestry — the prerelease version-anchor needs it. So `dev` carries a periodic sync merge commit; everything else is a squash.
