@@ -17,10 +17,19 @@ const changed = () => {
 }
 
 /** A bottom action row: the snack sits `SNACK_GAP` above its top edge while that edge is on screen, or
- *  would be once what scrolls it is scrolled to its end. */
-export const vSnackFooter: ObjectDirective<HTMLElement> = {
-	mounted(el) {
+ *  would be once what scrolls it is scrolled to its end. A row given a value counts only while it is
+ *  true, for a row that keeps its place in the layout while it holds no action. */
+export const vSnackFooter: ObjectDirective<HTMLElement, boolean | undefined> = {
+	mounted(el, { value }) {
+		if (value === false) return
 		footers.add(el)
+		changed()
+	},
+	updated(el, { value }) {
+		const counts = value !== false
+		if (counts === footers.has(el)) return
+		if (counts) footers.add(el)
+		else footers.delete(el)
 		changed()
 	},
 	unmounted(el) {
