@@ -1,6 +1,6 @@
 # CI guide
 
-Contributor-facing reference for what runs when, how to opt in to slow gates, how to release, and how to debug a failing PR. The implementation details (workflow YAMLs, composite actions, reusables) live in [`.github/`](./.github/); the design rationale + audits live in [`implementations-plan/ci-cd/`](./implementations-plan/ci-cd/).
+Contributor-facing reference for what runs when, how to opt in to slow gates, how to release, and how to debug a failing PR. The implementation details (workflow YAMLs, composite actions, reusables) live in [`.github/`](./.github/); the design rationale lives in [`implementations-plan/ci-cd/`](./implementations-plan/ci-cd/), whose plan links its audits by permalink.
 
 ## Branch model
 
