@@ -33,7 +33,6 @@ type Placed = { outer: WindowRead; inner: { width: number; height: number }; vie
 type PlaygroundWindow = { id: number; page: Page; window: WindowRead }
 type PlacementContext = ExtensionContext & { control: Page }
 
-/** The height every dApp window asks for. */
 const REQUESTED_HEIGHT = 800
 /** Below headless Chrome's 600-tall screen, so each window's height comes from the anchor, not the 800 it asks. */
 const ANCHOR: Bounds = { left: 100, top: 40, width: 600, height: 500 }
@@ -80,7 +79,6 @@ async function settledWindow(page: Page, windowId: number | null): Promise<Windo
 	}, windowId) as Promise<WindowRead>
 }
 
-/** The product's own anchor query, asked from the control page. */
 function lastFocused(control: Page): Promise<{ id: number; type: string }> {
 	return control.evaluate(async () => {
 		const w = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
