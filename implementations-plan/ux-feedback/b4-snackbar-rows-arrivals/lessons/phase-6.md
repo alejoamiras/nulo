@@ -192,9 +192,10 @@ Built:
 Decision: the package reads the column from the `--base-width` token its own `base.css` defines,
 so the host passes a flag rather than a width.
 
-Held: the Chrome side panel (the `sidePanel` setting) renders the popup's routes in a panel that
-can be wider than 360px, so a card there can still reach 368px, wider than the column. 11a names
-the dApp windows, so the panel keeps the popup's rule.
+Sign-off pending (S-2): the Chrome side panel (the `sidePanel` setting) renders the popup's routes
+in a panel that can be wider than 360px, so a card there can still reach 368px, wider than the
+column. 11a names the dApp windows, so the panel keeps the popup's rule: `calc(100% - 32px)`
+capped at 368px, centred. The alternative is 11a's 328px.
 
 Tests:
 
@@ -279,10 +280,16 @@ Decisions:
 Sign-off pending: the Logs row's fade, its ring box and the ring without the fade; the chunk
 header grows by the button's 24px box, where the glyph was 16px (R-3's shift).
 
-Found by reading, not changed: in the Revoke sheet and the registry sheet
-(`ChangeAuthwitsRegistryPopup.vue`, the same `submitKey`), Enter on any other focused control,
-the header's × or a fee method, reaches the same listener, so once the fees are set it submits
-the revocation or the registry change. Older than this batch.
+Found, not fixed (the coordinator's call: older than the program and outside 5b; it goes to the
+program's follow-ups and to the owner). Two sheets install `usePopupEntity` with
+`submitKey: (e) => e.key === "Enter"`, a keydown listener on the document that fires the
+sheet's submit on any Enter, whatever has focus:
+`apps/extension/src/popup/components/popups/RevokeAuthwitsPopup.vue` (the revocation) and
+`apps/extension/src/popup/components/popups/ChangeAuthwitsRegistryPopup.vue` (the registry
+change). Once the fees are set, Enter on the header's × or on a fee method sends that
+transaction. Found while building the content button: its unit test dispatched Enter with the
+fees set, and without the stop the revoke fired; reading the composable's listener and the
+registry sheet, which passes the same `submitKey`, showed any focused control does the same.
 
 Tests:
 
