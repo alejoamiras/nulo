@@ -107,3 +107,39 @@ Run from the worktree root on `c595892b`. "The 8 files" are phase-4.md's.
 
 Each run's Aztec node printed `Error: Address already in use (os error 98)` once while starting,
 then reported ready, as in phase-4.md. P5's own gate (steps 2 to 6) runs later.
+
+## Codex round 2
+
+Codex read the fixes (`7f624c6d..970bb186`) and the whole arc again (`b6aa6e4d..970bb186`), and
+ran `dapp-session/service.test.ts` (27 passed). Its verdict:
+
+> **No new material findings.** Findings 1–4, 6 and 7 are closed. Finding 5 remains held for the
+> owner; its UI wording is not approved by this review.
+>
+> Across the full arc, I found no additional authorization bypass, unprojected new known grant,
+> dApp-controlled consent write, or substitution of a re-read session for the dispatch snapshot.
+>
+> VERDICT: approve — confidence: high
+
+It checked each closure against the ways it could fail:
+- the breadth argument is required and checked at run time, and only the trusted extension RPC
+  reaches it;
+- A-5's state wins only when a widening costs the narrow consent its effect;
+- the address book with an empty contracts list is still valid;
+- finding 6's test would fail if an address-book-only grant permitted events.
+
+The loop converged in two rounds.
+
+**The declined-widening observation.** Storage and enforcement keep the older grants. A declined
+widening records a rejection and replaces nothing, and later covered requests still succeed. Only
+the window's "Already granted" list leaves out the refused types, and it did so before this arc
+(`dispatcher.ts:379` at `b6aa6e4d`). Transaction and simulation answers echo the requested
+capability rather than the stored grant, as before. What the window shows is the owner's call, and
+the parity page asks it.
+
+**On the stack.** The arc moved onto batch 4's tip as `30730df3..46c81325`:
+- 39 cherry-picks, with no conflict;
+- all signed;
+- the tree is identical to the merge-tree dry run.
+
+Round 1's fixes became `db309c4b`, `d05a29ef`, `8f49c6ad`, `97633f6a`, `a2976bea` and `5412cac3`.
