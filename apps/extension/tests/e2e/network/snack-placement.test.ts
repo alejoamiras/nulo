@@ -1,5 +1,6 @@
 /** In a real browser: where a page or window has a bottom action row, an error snack sits at least
- *  12px above the row's top edge, so it never covers the row's buttons. */
+ *  12px above the row's top edge, so it never covers the row's buttons, even in a window shorter
+ *  than the page, where a scroll brings the row up and a click lands on it in one task. */
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -14,9 +15,14 @@ const sel = (testid: string) => `[data-testid="${testid}"]`
 const SNACK = sel("snackbar")
 
 type Placement = { snackTop: number; snackBottom: number; footerTop: number; left: number; width: number; innerWidth: number }
+type AtEnd = { viewport: number; inset: number; footerTop: number; footerTopAtEnd: number; snackBottom: number }
+type Hit = { id: string; hit: string; covered: boolean }
 
-/** The settled card against the footer: the card rises 20px as it fades in. */
-async function placement(page: Page, footer: string): Promise<Placement> {
+const FOOTER = sel("dapp-approval-footer")
+const BUTTONS = ["execute-reject-btn", "execute-confirm-btn"]
+
+/** The card rises 20px as it fades in. */
+async function settledCard(page: Page): Promise<void> {
 	await page.waitForFunction(
 		(s: string) => {
 			const card = document.querySelector(s)
@@ -25,6 +31,11 @@ async function placement(page: Page, footer: string): Promise<Placement> {
 		{ timeout: 10_000, polling: 50 },
 		SNACK,
 	)
+}
+
+/** The settled card against the footer. */
+async function placement(page: Page, footer: string): Promise<Placement> {
+	await settledCard(page)
 	return page.evaluate(
 		(s: string, f: string) => {
 			const card = document.querySelector(s)?.getBoundingClientRect()
@@ -44,14 +55,25 @@ async function placement(page: Page, footer: string): Promise<Placement> {
 	)
 }
 
+/** Adds a line of `height` px at the top of the footer, as its error line does. */
+async function addFooterLine(page: Page, footer: string, height: number): Promise<void> {
+	await page.evaluate(
+		(f: string, px: number) => {
+			const line = document.createElement("div")
+			line.dataset.testid = "e2e-footer-line"
+			line.style.height = `${px}px`
+			line.style.flexShrink = "0"
+			document.querySelector(f)?.prepend(line)
+		},
+		footer,
+		height,
+	)
+}
+
 /** Grows the footer by one 40px line, as a wrapping error line does, and returns the new placement
  *  once the snack has followed it. */
 async function growFooter(page: Page, footer: string, before: Placement): Promise<Placement> {
-	await page.evaluate((f: string) => {
-		const line = document.createElement("div")
-		line.style.height = "40px"
-		document.querySelector(f)?.prepend(line)
-	}, footer)
+	await addFooterLine(page, footer, 40)
 	await page.waitForFunction(
 		(s: string, top: number) => (document.querySelector(s)?.getBoundingClientRect().top ?? top) < top - 20,
 		{ timeout: 5_000, polling: 50 },
@@ -59,6 +81,63 @@ async function growFooter(page: Page, footer: string, before: Placement): Promis
 		before.snackTop,
 	)
 	return placement(page, footer)
+}
+
+/** Waits until the card sits 12px above where the footer stops once the page is scrolled to its end,
+ *  and reads both. */
+async function placementAtEnd(page: Page, footer: string): Promise<AtEnd> {
+	await settledCard(page)
+	await page.waitForFunction(
+		(s: string, f: string) => {
+			const card = document.querySelector(s)?.getBoundingClientRect()
+			const row = document.querySelector(f)?.getBoundingClientRect()
+			const root = document.scrollingElement ?? document.documentElement
+			const toEnd = root.scrollHeight - root.clientHeight - root.scrollTop
+			return card !== undefined && row !== undefined && Math.abs(row.top - toEnd - 12 - card.bottom) < 0.5
+		},
+		{ timeout: 5_000, polling: 50 },
+		SNACK,
+		footer,
+	)
+	return page.evaluate(
+		(s: string, f: string) => {
+			const card = document.querySelector(s)?.getBoundingClientRect()
+			const row = document.querySelector(f)?.getBoundingClientRect()
+			if (!card || !row) throw new Error("no snack or no footer")
+			const root = document.scrollingElement ?? document.documentElement
+			const viewport = document.documentElement.clientHeight
+			const toEnd = root.scrollHeight - root.clientHeight - root.scrollTop
+			return {
+				viewport,
+				inset: viewport - card.bottom,
+				footerTop: row.top,
+				footerTopAtEnd: row.top - toEnd,
+				snackBottom: card.bottom,
+			}
+		},
+		SNACK,
+		footer,
+	)
+}
+
+/** From the top of the page, scrolls each control into view and hit-tests its centre in the same
+ *  task, as a pointer click does. */
+async function hitsAfterScroll(page: Page, testids: string[]): Promise<Hit[]> {
+	return page.evaluate(
+		(s: string, ids: string[]) =>
+			ids.map((id) => {
+				window.scrollTo(0, 0)
+				const el = document.querySelector(`[data-testid="${id}"]`)
+				if (!el) throw new Error(`${id} not found`)
+				el.scrollIntoView({ block: "center" })
+				const box = el.getBoundingClientRect()
+				const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+				const owner = hit?.closest("[data-testid]")?.getAttribute("data-testid") ?? hit?.tagName ?? "none"
+				return { id, hit: owner, covered: document.querySelector(s)?.contains(hit) === true }
+			}),
+		SNACK,
+		testids,
+	)
 }
 
 /** An address one past a random valid one, retried until it is off the curve: a shield to it fails
@@ -143,6 +222,30 @@ test.skipIf(!hasConfig)(
 		expect(grown.footerTop).toBeLessThanOrEqual(at.footerTop - 40)
 		expect(grown.footerTop - grown.snackBottom).toBeGreaterThanOrEqual(11.5)
 		expect(grown.footerTop - grown.snackBottom).toBeLessThanOrEqual(12.5)
+
+		// A 500px window over the 600px page: the footer starts below the fold.
+		await execute.evaluate(() => document.querySelector('[data-testid="e2e-footer-line"]')?.remove())
+		await execute.setViewport({ width: 400, height: 500 })
+		const short = await placementAtEnd(execute, FOOTER)
+		console.log(`[snack-placement] 400x500 before scrolling: ${JSON.stringify(short)}`)
+		expect(short.footerTop).toBeGreaterThanOrEqual(short.viewport)
+		const hits = await hitsAfterScroll(execute, BUTTONS)
+		console.log(`[snack-placement] 400x500 hits after the scroll: ${JSON.stringify(hits)}`)
+		expect(hits.map((h) => h.covered)).toEqual([false, false])
+		expect(hits[0]?.hit).toBe("execute-reject-btn")
+		const scrolled = await placementAtEnd(execute, FOOTER)
+		expect(scrolled.footerTop - scrolled.snackBottom).toBeCloseTo(12, 0)
+		expect(scrolled.snackBottom).toBeCloseTo(short.snackBottom, 0)
+
+		// The error line (a little taller than the real one, so the footer's top peeks onto the screen).
+		await execute.evaluate(() => window.scrollTo(0, 0))
+		await addFooterLine(execute, FOOTER, 18)
+		const lined = await placementAtEnd(execute, FOOTER)
+		console.log(`[snack-placement] 400x500 with the error line: ${JSON.stringify(lined)}`)
+		expect(lined.inset).toBeGreaterThanOrEqual(short.inset + 27.5)
+		const linedHits = await hitsAfterScroll(execute, BUTTONS)
+		expect(linedHits.map((h) => h.covered)).toEqual([false, false])
+		expect(linedHits[0]?.hit).toBe("execute-reject-btn")
 
 		expect(ctx.pageErrors).toEqual([])
 	},

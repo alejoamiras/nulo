@@ -51,8 +51,14 @@ Decisions:
 1. **The registry is DOM-side.** A directive on the row itself is the one place that knows the row
    exists, is mounted, and where it is. The alternative, a route-meta flag per page, cannot follow
    a footer that grows, a sheet's own row, or the onboarding CTAs that move with their content.
-2. **"On screen" means the row's top edge is inside the viewport.** A row below the fold places
-   nothing (the snack stays 12px from the bottom); one scrolled into view lifts it.
+2. **The snack sits above the highest point the row's top edge reaches on screen: where it is now,
+   or where it stops once the page is scrolled to its end.** Where the page cannot scroll further
+   (a pinned row, or a long page already at its end) that is where the row is, as first built. In a
+   window shorter than the page it is where the row stops, so the snack is clear of the row before
+   a scroll brings it up: `scrollIntoView` and a click can land in one task, before the next
+   measure. For a row at the page's end the result does not move with the scroll. The scroll
+   listener stays for rows that do move with it (inside an inner scroll area, or above the page's
+   end). A row off screen at both places moves nothing.
 3. **Never below the base.** On a nav page a footer low enough to sit under the nav's inset changes
    nothing. No nav page registers one today.
 4. **The inset moves at once**, as it did on a route change. There is no transition on `bottom`.
@@ -66,24 +72,54 @@ Sign-off pending (built as the closest existing pattern):
   buttons; both count as the page's bottom row.
 - The Settings pages' in-list buttons are not footers, so a snack there keeps 12px from the bottom
   and can cover a button in the list's last rows.
+- In a window shorter than the page, the snack sits above where the footer stops at the end of
+  the scroll, so before scrolling it sits 85px up, over the page's content (the execute window at
+  400×500, a 600px page and a 73px footer).
 
 Observed, not changed: the popup's Terms sheet (`components/LegalAcceptanceSheet.vue`) sits at
 z-index 9000, above the snack's 2000, so a snack raised while it is open is hidden behind it. Its
 consent row is registered (through `LegalConsent`), so the snack still rises above that row, but
 the sheet hides it either way.
 
+The regression this answers: `tests/e2e/network/window-placement.test.ts` fails from `6fbfdeb5` on
+(1 test on Chrome, 2 on Firefox). Its 400×500 execute window raises the persistent "Couldn't
+estimate fee" error, and the snack, 12px from the bottom, covered Reject's centre once
+`pointerClick` scrolled it into view. The gate list left the spec out; arc 5a's full-suite run
+caught it and bisected it to `6fbfdeb5`. 1c fixes it, but only with the end-of-scroll rule
+(decision 2): as first built (`f38e1e77`) a row counted only while its top edge was on screen, the
+footer's sat at 527 in the 500px viewport, and the spec still failed at `b3a51e73`. The footer is
+73px (1px border, 16px padding, 40px buttons, 16px padding) and stops at 427, so the inset is
+500 − 427 + 12 = 85px, before the scroll and after it. An early estimate of 68px measured from
+Reject's top edge, not the footer's.
+
+Checked for decision 2's one cost (a row with content below it on a page that scrolls would lift
+the snack above where it stops): every registered row is the last in-flow content of its page,
+window, sheet card or onboarding page. What follows is only an overlay (the passkey dialog, Send's
+review sheet, the hero layout's overlay slot), and the sheets are bottom sheets (a stretching close
+area above the card). So no row needed unregistering or measuring by its buttons.
+
 Tests:
 
-- `composables/snackInset.test.ts`, 14 cases: the pure step (the base, the highest footer, never
-  below the base, a zero-height or off-screen row); the host after a frame, a footer's removal, a
-  sheet over the nav, two stacked sheets, a footer growing, a scroll, a transition end and an
-  animation end, a snack opening before any frame, the base following its source, and disposal.
+- `composables/snackInset.test.ts`, 19 cases: the pure step (the base, the highest footer, never
+  below the base, a zero-height or off-screen row, a row below the fold counted where it stops, a
+  pinned row and a long page at its end keeping their inset, a row peeking on screen while the
+  page can still scroll); the host after a frame, a footer's removal, a sheet over the nav, two
+  stacked sheets, a footer growing, a scroll, a transition end, an animation end and a resize, a
+  window shorter than the page (placed before the scroll, unmoved after it), a snack opening
+  before any frame, the base following its source, and disposal.
 - `components/ui/ToastManager.test.ts`: a footer on a no-nav route lifts the card to
   `bottom: 92px` (600 − 520 + 12).
 - `tests/e2e/network/snack-placement.test.ts`, new: on Send, a public→private send to an off-curve
   address fails the estimate and its error sits 12px (±0.5) above `send-footer`; in the execute
   window, a public transfer the account cannot fund does the same above `dapp-approval-footer`.
-  Both then grow the footer by a 40px line and check the snack follows it.
+  Both then grow the footer by a 40px line and check the snack follows it. The execute case then
+  cuts the viewport to 400×500 over the 600px page: the footer starts below the fold, the snack
+  sits 12px above where it stops, and Reject and Confirm, each scrolled into view and hit-tested in
+  one task as `pointerClick` does, are clear; at the end of the scroll the snack has not moved. An
+  18px stand-in for the error line (the real one is a 14px icon beside 12px text) then grows the
+  footer by 28px, so its top peeks onto the screen at 499, and the same holds.
+- `tests/e2e/network/window-placement.test.ts`, unchanged, joins the gate: three runs per browser
+  at retry 0, as the one spec that drives the approval footer under a persistent error.
 
 ## P6.2 · A first open runs its 6 s (2b)
 

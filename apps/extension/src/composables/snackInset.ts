@@ -16,7 +16,8 @@ const changed = () => {
 	for (const notify of subscribers) notify()
 }
 
-/** A bottom action row: while its top edge is on screen, the snack sits `SNACK_GAP` above it. */
+/** A bottom action row: the snack sits `SNACK_GAP` above its top edge while that edge is on screen, or
+ *  would be once the page is scrolled to its end. */
 export const vSnackFooter: ObjectDirective<HTMLElement> = {
 	mounted(el) {
 		footers.add(el)
@@ -48,13 +49,17 @@ export interface FooterBox {
 
 /**
  * The snack's distance from the viewport's bottom edge: `base`, raised to `SNACK_GAP` above the
- * highest footer whose top edge is on screen. A footer with no height places nothing.
+ * highest point a footer's top edge reaches on screen, where it is now or where it stops once the
+ * page is scrolled `scrollToEnd` px further, to its end. A footer with no height places nothing.
  */
-export function snackInset(base: number, viewportHeight: number, boxes: readonly FooterBox[]): number {
+export function snackInset(base: number, viewportHeight: number, boxes: readonly FooterBox[], scrollToEnd = 0): number {
 	let inset = base
 	for (const { top, bottom } of boxes) {
-		if (bottom <= top || top <= 0 || top >= viewportHeight) continue
-		inset = Math.max(inset, viewportHeight - top + SNACK_GAP)
+		if (bottom <= top) continue
+		// A scroll can bring the row up and a click land on it in one task, before the next measure.
+		for (const at of [top, top - scrollToEnd]) {
+			if (at > 0 && at < viewportHeight) inset = Math.max(inset, viewportHeight - at + SNACK_GAP)
+		}
 	}
 	return inset
 }
@@ -76,7 +81,9 @@ export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 		const top = sheets.at(-1)
 		const placing = [...footers].filter((el) => el.isConnected && (!top || top.contains(el)))
 		const boxes = placing.map((el) => el.getBoundingClientRect())
-		inset.value = snackInset(top ? SNACK_GAP : base(), document.documentElement.clientHeight, boxes)
+		const page = document.scrollingElement ?? document.documentElement
+		const scrollToEnd = Math.max(0, page.scrollHeight - page.clientHeight - page.scrollTop)
+		inset.value = snackInset(top ? SNACK_GAP : base(), document.documentElement.clientHeight, boxes, scrollToEnd)
 	}
 	const schedule = () => {
 		frame ??= requestAnimationFrame(measure)
