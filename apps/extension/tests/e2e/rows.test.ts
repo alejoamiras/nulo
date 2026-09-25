@@ -5,7 +5,7 @@ import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { seedsForChain } from "@/wallet/services/token/default-tokens"
 import { waitForTarget } from "./fixtures/browser"
-import { type ExtensionContext, openPopup, patchPagePolling, test, waitForHash } from "./fixtures/extension"
+import { type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	addContact,
 	captureSoleProfileId,
@@ -16,7 +16,6 @@ import {
 	seedUsdQuoteAndReload,
 } from "./fixtures/helpers"
 import { settleClosedPopup } from "./fixtures/popup-leave"
-import { waitForMainFrame } from "./fixtures/popups"
 import { pointerClick } from "./helpers/legal-drivers"
 import { coveredAt, pressEscape, tabAround, waitForFocus } from "./helpers/pointer-probes"
 
@@ -231,14 +230,6 @@ async function closeTopPopup(page: Page, innerTestId: string): Promise<boolean> 
 	}
 }
 
-/** What a page is showing, for a failure message. */
-const tabState = (tab: Page) =>
-	tab.evaluate(() => ({
-		hash: window.location.hash,
-		testids: [...document.querySelectorAll("[data-testid]")].slice(0, 40).map((el) => el.getAttribute("data-testid")),
-		text: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 300),
-	}))
-
 /** The page's one contact: the one already there (a retry keeps the earlier attempt's), else a new one. */
 async function ensureContact(page: Page): Promise<string> {
 	const existing = await page.evaluate(
@@ -306,7 +297,7 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 	expect(registeredExtension.pageErrors).toEqual([])
 }, 90_000)
 
-test("a contact row: its edit action is a 24px box whose real press stays on Contacts; a Ctrl-click opens Send in a new tab with the contact", async ({
+test("a contact row: its edit action is a 24px box whose real press stays on Contacts; a Ctrl-click opens the row's link in a new tab", async ({
 	registeredExtension,
 }) => {
 	const page = await openPopup(registeredExtension)
@@ -339,23 +330,15 @@ test("a contact row: its edit action is a 24px box whose real press stays on Con
 	await page.mouse.click(point.x, point.y)
 	await page.keyboard.up("Control")
 	const target = await waitForTarget(registeredExtension.browser, (t) => t.type() === "page" && !before.has(t), 10_000)
-	const tab = await target.asPage()
 	try {
 		// The new tab's own URL is no witness to where it opened: the wallet's cold boot routes it on at
-		// once (today it bounces a deep link to Home), and Firefox's navigation entry names no URL.
-		// What opened it is the browser's default for a modified click the page left alone, on the
-		// row's link.
+		// once, and Firefox reports the tab only as about:blank. What opened it is the browser's default
+		// for a modified click the page left alone, on the row's link.
 		await page.waitForFunction(() => (window as unknown as Probe).__linkClick != null, { timeout: 5_000, polling: 50 })
 		expect(await page.evaluate(() => (window as unknown as Probe).__linkClick)).toEqual({ modified: true, href, prevented: false })
 		expect(await hash(page)).toBe("#/popup/settings/contacts")
-		await waitForMainFrame(tab, 10_000)
-		// A tab opened in the background gets no animation frames; the polls must not depend on them.
-		patchPagePolling(tab)
-		// Where the boot leaves the tab once its shell is up, for the record.
-		await tab.waitForSelector(sel("bottom-nav"), { timeout: 30_000 }).catch(() => undefined)
-		console.log(`[rows] the Ctrl-click's tab, after boot, shows ${(await tabState(tab)).hash}`)
 	} finally {
-		await tab.close().catch(() => undefined)
+		await (await target.asPage()).close().catch(() => undefined)
 	}
 
 	expect(registeredExtension.pageErrors).toEqual([])
