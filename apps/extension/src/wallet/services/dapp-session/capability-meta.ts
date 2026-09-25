@@ -27,25 +27,11 @@ export interface CapabilityInfo {
 
 /**
  * Each entry pairs the wire-level `Capability["type"]` discriminator with
- * its wallet-controlled UI metadata. The strings here are the only ones
- * the user sees for a given capability — keep them in sync with the
- * `Capability` union in `@nulo/wallet-bridge`.
+ * its wallet-controlled UI metadata; keep them in sync with the
+ * `Capability` union in `@nulo/wallet-bridge`. The capabilities window's
+ * split rows (authorizations, the two halves of `data`) take their strings
+ * from `permission-rows.ts` instead.
  */
-/**
- * Display info for the accounts `canCreateAuthWit` sub-permission, rendered as
- * its own card in the capabilities popup. Deliberately NOT a CAPABILITY_LABELS
- * key: that record is looked up by the dApp-controlled `cap.type` string, and a
- * pseudo-key would let a dApp-sent capability with that fake type render as a
- * recognized (default-ON) permission instead of "Unknown permission".
- */
-export const AUTHWIT_RIDER_INFO: CapabilityInfo = {
-	label: "Act on your behalf",
-	shortLabel: "Auth-witnesses",
-	description:
-		"This app can create auth-witnesses — request your signature to authorize actions on your behalf — for the account(s) you share.",
-	risk: "high",
-}
-
 export const CAPABILITY_LABELS: Record<string, CapabilityInfo> = {
 	accounts: {
 		label: "Account access",
@@ -133,9 +119,8 @@ export function isKnownCapability(type: string): boolean {
  *      - Tag characters (U+E0000-U+E007F).
  *      Without this, a hostile dApp could embed an RLO and visually
  *      flip the displayed text direction, or a zero-width joiner to
- *      glue two different glyphs together. Codex post-impl §1 caught
- *      that the original narrower regex missed ZWSP / soft-hyphen /
- *      the full \p{Cf} range.
+ *      glue two different glyphs together. A narrower class than the
+ *      full \p{Cf} range misses ZWSP and the soft hyphen.
  *   2. Variation selectors (U+FE00..U+FE0F, U+E0100..U+E01EF). Single
  *      codepoints that change the visual rendering of the preceding
  *      character. Not in \p{Cf}; categorised \p{Mn}, so we list them
@@ -187,9 +172,8 @@ export function sanitizeWireString(input: string, maxLen: number): string {
  * permission" / "Unknown" / the long warning) so the dApp-controlled
  * `cap.type` never lands as a visible label on any surface. The popup
  * card head, settings detail page, settings list summary, and grants
- * list all read through this helper — codex post-impl §5 caught that
- * direct `getCapabilityInfo(type).label` on the settings surfaces
- * still leaked the raw wire string.
+ * list all read through this helper; a direct `getCapabilityInfo(type).label`
+ * would put the raw wire string on screen.
  */
 export function getSafeDisplay(type: string): {
 	label: string
