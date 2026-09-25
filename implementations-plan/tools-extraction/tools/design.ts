@@ -79,7 +79,7 @@ const importedComponent = (line: string) =>
 	line.match(/\b(?:default as|import) (\w+)\b.*from "\.\/(?:core|ui|composite)\/\w+\.vue"/)?.[1] ?? ""
 const mountCase = (line: string) => line.match(/^\t\["(\w+)", \1\b/)?.[1] ?? ""
 
-/** Removes matching lines and any comment attached directly above one (not a section header after a blank line). */
+/** A comment right above a dropped entry documents only it; one after a blank line heads a section and stays. */
 function dropLines(file: string, drop: (line: string) => boolean, expected: number) {
 	const path = join(srcDir, file)
 	const kept: string[] = []
@@ -99,10 +99,13 @@ function dropLines(file: string, drop: (line: string) => boolean, expected: numb
 }
 
 const droppedIn = (file: string, pick: (line: string) => string) =>
-	readFileSync(join(srcDir, file), "utf8").split("\n").filter((l) => droppedComponents.has(pick(l))).length
+	readFileSync(join(srcDir, file), "utf8")
+		.split("\n")
+		.filter((l) => droppedComponents.has(pick(l))).length
 const indexEntries = droppedIn("index.ts", importedComponent)
 const mountEntries = droppedIn("mount-all.test.ts", importedComponent) + droppedIn("mount-all.test.ts", mountCase)
-if (indexEntries !== droppedComponents.size) throw new Error(`index.ts exports ${indexEntries} of ${droppedComponents.size} dropped components`)
+if (indexEntries !== droppedComponents.size)
+	throw new Error(`index.ts exports ${indexEntries} of ${droppedComponents.size} dropped components`)
 dropLines("index.ts", (l) => droppedComponents.has(importedComponent(l)), indexEntries)
 dropLines("mount-all.test.ts", (l) => droppedComponents.has(importedComponent(l)) || droppedComponents.has(mountCase(l)), mountEntries)
 

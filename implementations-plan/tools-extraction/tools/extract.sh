@@ -54,9 +54,7 @@ git -C "$repo" remote remove origin
 
 git -C "$repo" archive "$sha" | tar -x -C "$work/freeze"
 git -C "$repo" ls-tree -r --full-tree HEAD >"$report/tree-before.txt"
-git -C "$repo" -c diff.renameLimit=100000 log --format= --name-status -M --diff-filter=R HEAD >"$report/renames.txt"
-git -C "$repo" log --format= --name-only HEAD | sort -u >"$report/touched.txt"
-python3 "$here/check-paths.py" ancestry "$here/paths.txt" "$report/renames.txt" "$report/touched.txt"
+python3 "$here/check-paths.py" ancestry "$here/paths.txt" "$repo" "$here/lineage-reviewed.txt"
 
 git -C "$repo" filter-repo --analyze --force
 cp -R "$repo/.git/filter-repo/analysis" "$report/analysis"
@@ -73,7 +71,7 @@ cp "$repo/.git/filter-repo/commit-map" "$repo/.git/filter-repo/ref-map" "$report
 
 git -C "$repo" branch -m main
 git -C "$repo" ls-tree -r --full-tree HEAD >"$report/tree-after.txt"
-python3 "$here/check-paths.py" tree "$here/paths.txt" "$report/tree-before.txt" "$report/tree-after.txt" "$work/freeze"
+python3 "$here/check-paths.py" tree "$here/paths.txt" "$here/replace-text.txt" "$report/tree-before.txt" "$report/tree-after.txt" "$work/freeze"
 [ "$(git -C "$repo" for-each-ref --format='%(refname)')" = "refs/heads/main" ] || die "expected exactly one ref, refs/heads/main"
 
 bun "$here/bootstrap/build.ts" "$work/freeze" "$repo"

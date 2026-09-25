@@ -130,7 +130,13 @@ function tsconfig() {
 function gitignore() {
 	let lines = read(".gitignore").split("\n")
 	for (const line of DROPPED_GITIGNORE) lines = mustRemove(lines, line, ".gitignore")
-	write(".gitignore", `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`)
+	write(
+		".gitignore",
+		`${lines
+			.join("\n")
+			.replace(/\n{3,}/g, "\n\n")
+			.trimEnd()}\n`,
+	)
 }
 
 function biome() {
@@ -140,7 +146,8 @@ function biome() {
 	config.overrides = config.overrides.filter(
 		(o: { includes: string[] }) => !o.includes.every((g) => WALLET_ONLY_OVERRIDE.test(g.replace(/^!/, ""))),
 	)
-	if (before - config.overrides.length !== 9) throw new Error(`biome.json: dropped ${before - config.overrides.length} overrides, expected 9`)
+	if (before - config.overrides.length !== 9)
+		throw new Error(`biome.json: dropped ${before - config.overrides.length} overrides, expected 9`)
 	if (config.vcs.defaultBranch !== "dev") throw new Error("biome.json: expected vcs.defaultBranch dev")
 	config.vcs.defaultBranch = "main"
 	write("biome.json", `${JSON.stringify(config, null, "\t")}\n`)

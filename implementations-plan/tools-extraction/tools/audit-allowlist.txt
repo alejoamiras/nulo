@@ -15,11 +15,11 @@ filename:packages/faucet/.env.example  # template: placeholders and public endpo
 identity:Alejo Amiras <alejo.amiras@gmail.com>  # the owner, as already published in nulo's history
 identity:GitHub <noreply@github.com>  # GitHub web-flow, committer of every squash merge
 identity:alejoamiras <alejo.amiras@gmail.com>  # the owner's local identity on the bootstrap commit
-secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:41552a47556b785d  # test vector
-secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:754af835338d7e57  # test vector
-secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:917bccbb7aecf0d0  # test vector
-secret:gitleaks:generic-api-key:apps/faucet/src/composables/useFuel.pins.test.ts:54d77e1ceea9a00b  # test vector
-secret:gitleaks:generic-api-key:apps/faucet/src/composables/useWithdraw.pins.test.ts:ee6463c7a0ee968f  # test vector
+secret:gitleaks:generic-api-key:apps/tools/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:41552a47556b785d  # test vector
+secret:gitleaks:generic-api-key:apps/tools/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:754af835338d7e57  # test vector
+secret:gitleaks:generic-api-key:apps/tools/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:917bccbb7aecf0d0  # test vector
+secret:gitleaks:generic-api-key:apps/tools/src/composables/useFuel.pins.test.ts:54d77e1ceea9a00b  # test vector
+secret:gitleaks:generic-api-key:apps/tools/src/composables/useWithdraw.pins.test.ts:ee6463c7a0ee968f  # test vector
 secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:2a1dd1d8da093274  # public deployment record: addresses, class ids, artifact digests
 secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:326d8fa38eef9302  # public deployment record: addresses, class ids, artifact digests
 secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:94edcfc7590fa1b7  # public deployment record: addresses, class ids, artifact digests
@@ -72,6 +72,7 @@ secret:gitleaks:generic-api-key:packages/bridge-core/src/quote.test.ts:70d3a4829
 secret:gitleaks:generic-api-key:packages/bridge-core/src/route.test.ts:70d3a4829679a5f1  # public contract address
 secret:gitleaks:generic-api-key:packages/bridge-core/src/send-flow.test.ts:c8e89a4346727566  # public contract class id
 secret:gitleaks:generic-api-key:packages/bridge-evm/test/DeployFuelLive.fork.t.sol:754266f37380aa93  # public contract address
+secret:gitleaks:generic-api-key:contracts/bridge/evm/test/DeployFuelLive.fork.t.sol:754266f37380aa93  # public contract address
 secret:trufflehog:Circle:contracts/bridge/evm/script/DeployBridgeMainnet.s.sol:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)
 secret:trufflehog:Circle:contracts/bridge/evm/test/MainnetFuel.fork.t.sol:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)
 secret:trufflehog:Circle:packages/bridge-core/scripts/deploy-bridge-mainnet.ts:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)

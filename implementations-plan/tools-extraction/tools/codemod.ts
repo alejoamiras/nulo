@@ -42,7 +42,10 @@ const RULES: [RegExp, string][] = [
 function tracked(): string[] {
 	const out = Bun.spawnSync(["git", "-C", repo, "ls-files", "-z"], { stderr: "inherit" })
 	if (out.exitCode !== 0) throw new Error("git ls-files failed")
-	return out.stdout.toString().split("\0").filter((p) => p && !HISTORY.test(p))
+	return out.stdout
+		.toString()
+		.split("\0")
+		.filter((p) => p && !HISTORY.test(p))
 }
 
 function rewriteDependencySpecs(text: string): string {

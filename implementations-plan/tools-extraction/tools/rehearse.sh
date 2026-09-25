@@ -135,6 +135,8 @@ bridge_core_pin() {
 
 phase_e2e() {
   forge_prep
+  # A host-wide browser store may be read-only and hold other revisions; the install then hangs.
+  export PLAYWRIGHT_BROWSERS_PATH=${REHEARSAL_BROWSERS:-$HOME/.cache/ms-playwright}
   (cd "$repo" && apps/tools/node_modules/.bin/playwright install chromium)
   (cd "$repo" && PATH="$HOME/.aztec/versions/$(bridge_core_pin)/bin:$PATH" bun run e2e:tools)
 }

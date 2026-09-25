@@ -1,0 +1,2 @@
+# Owner-reviewed triage for the workspace commits (design package, codemod, dependencies),
+# audited on top of audit-allowlist.txt. Same key format.
