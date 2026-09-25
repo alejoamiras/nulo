@@ -9,21 +9,21 @@ and none of the other fixes touches a captured state.
 
 ### Round 1 · codex · changes-requested (high)
 
-GPT-6 Astra, session `01a0d7e5-f11d-7982-968c-b68e49a09382`, on `e84d784b..7681b0af`. The
+GPT-6 Astra, session `01a0d7e5-f11d-7982-968c-b68e49a09382`, on `3e664578..681dcd83`. The
 coordinator accepted all nine findings. Each fix is its own commit, and each test was written
 first and shown red on the pre-fix code, except where a row says otherwise.
 
 | # | Severity | Finding | Fix (commit) |
 |---|---|---|---|
-| 1 | major | A token add resumed after `readTip()` restored `trusted` and wrote a pending floor on a token, network or profile deleted meanwhile (`incoming-transfer/service.ts`) | The section rechecks `isCurrent()` and the token's registration before either write (`58d52f89`) |
-| 2 | major | During a same-kind replacement, View or × on the still-interactive leaving card ran the new snack's action or closed it (`ToastManagerBase.vue`) | Each control is bound at render to its card's snack id and does nothing once that snack is not the one shown (`a6696fd3`) |
-| 3 | minor | The activity icon box, positioned for its badge, painted above the stretched link, so a press on it opened nothing (`TransactionCardLayout.vue`) | `pointer-events: none` on the icon box and badge; a real-pointer press at the icon's centre in `rows.test.ts`; the icon gains the `activity-icon` testid (`5d1991b5`) |
-| 4 | minor | Home, then another route, then Home again within 2.6 s replayed an already-claimed arrival (`useArrivals.ts`) | Leaving a route retires the windows judged on it (`00693528`) |
-| 5 | minor | An older token lookup could install its chip over a newer one, including after a Home, elsewhere, Home round trip (`useArrivals.ts`) | A chip installs only in presentation order and only on the route visit that presented it (`ca25a48b`) |
-| 6 | minor | The contact Ctrl-click case swallowed the destination wait and only logged where the tab went (`rows.test.ts`) | The swallowed wait and the log are gone. The title and assertions claim only what the row builds: a modified click on the row's deep link, left to the browser, a new tab, and the origin still on Contacts. Send is not asserted, since the cold-tab landing is held for the owner (`a14218d6`) |
-| 7 | minor | A zero-value receipt got the green row, the chip and a "Received 0 …" snack (`useArrivals.ts`) | `isArrivalEligible` requires an amount above zero, and an unparsable amount counts as none, so the service's claim refuses it too. UI impact row 14, sign-off pending (`4fd72062`) |
-| 8 | minor | Copying a sender swapped the focused `RowAction` for a span for 2 s, dropping keyboard focus (`senders/index.vue`) | The button stays and switches its glyph. Inline styles keep the check's look (no pointer, green through the hover and focus fill). A press while the check shows copies nothing, as the span did (`11759261`) |
-| 9 | minor | `arrival-state.ts`'s header promised that a receipt sent after a floor lands above it; `snackbar.test.ts` still called the copy target an svg | Both corrected (`ac9ed02b`) |
+| 1 | major | A token add resumed after `readTip()` restored `trusted` and wrote a pending floor on a token, network or profile deleted meanwhile (`incoming-transfer/service.ts`) | The section rechecks `isCurrent()` and the token's registration before either write (`a086b6a1`) |
+| 2 | major | During a same-kind replacement, View or × on the still-interactive leaving card ran the new snack's action or closed it (`ToastManagerBase.vue`) | Each control is bound at render to its card's snack id and does nothing once that snack is not the one shown (`0939539a`) |
+| 3 | minor | The activity icon box, positioned for its badge, painted above the stretched link, so a press on it opened nothing (`TransactionCardLayout.vue`) | `pointer-events: none` on the icon box and badge; a real-pointer press at the icon's centre in `rows.test.ts`; the icon gains the `activity-icon` testid (`e4d2f678`) |
+| 4 | minor | Home, then another route, then Home again within 2.6 s replayed an already-claimed arrival (`useArrivals.ts`) | Leaving a route retires the windows judged on it (`90abe890`) |
+| 5 | minor | An older token lookup could install its chip over a newer one, including after a Home, elsewhere, Home round trip (`useArrivals.ts`) | A chip installs only in presentation order and only on the route visit that presented it (`06493aa1`) |
+| 6 | minor | The contact Ctrl-click case swallowed the destination wait and only logged where the tab went (`rows.test.ts`) | The swallowed wait and the log are gone. The title and assertions claim only what the row builds: a modified click on the row's deep link, left to the browser, a new tab, and the origin still on Contacts. Send is not asserted, since the cold-tab landing is held for the owner (`b4d12e9a`) |
+| 7 | minor | A zero-value receipt got the green row, the chip and a "Received 0 …" snack (`useArrivals.ts`) | `isArrivalEligible` requires an amount above zero, and an unparsable amount counts as none, so the service's claim refuses it too. UI impact row 14, sign-off pending (`95b547a7`) |
+| 8 | minor | Copying a sender swapped the focused `RowAction` for a span for 2 s, dropping keyboard focus (`senders/index.vue`) | The button stays and switches its glyph. Inline styles keep the check's look (no pointer, green through the hover and focus fill). A press while the check shows copies nothing, as the span did (`45a2338e`) |
+| 9 | minor | `arrival-state.ts`'s header promised that a receipt sent after a floor lands above it; `snackbar.test.ts` still called the copy target an svg | Both corrected (`40965ced`) |
 
 What each failing-first test showed:
 
@@ -83,16 +83,16 @@ The smoke builds and specs ran after the network runs, since `e2e:agent` rebuild
 
 ### Round 2 · codex · changes-requested (high)
 
-The same session, on `7681b0af..8b501fd5`. The coordinator accepted all four findings and asked
+The same session, on `681dcd83..4a456a55`. The coordinator accepted all four findings and asked
 each fix to cover every await between its check and its write, since round 3 is the last. Each fix
 is its own commit, and each test was shown red on the pre-fix code, except row 4 (comments only).
 
 | # | Severity | Finding | Fix (commit) |
 |---|---|---|---|
-| 1 | major | Round 1's recheck raced. The add read `isCurrent()` before awaiting the token's registration, and `setTrust` awaits its own read before it writes. A section the watchdog displaced while a delete ran could still restore trust (`incoming-transfer/service.ts`, `repository.ts`) | The registration read runs first. `setTrust` takes a fence and reads it after its own read, so each write reads ownership after its last await; the floor's write already did (`f46b502e`) |
-| 2 | major | The lock event awaited `getProfiles()` before it closed the snack, moved the epoch and cleared `isLogined`. The header's Lock left the snack up until that handler finished (`popup/app.vue`) | In `popup/locked-state.ts`, the seal runs before the lookup and the sequence guard covers only the landing. The seal closes popups and the snack, moves the epoch, clears `isLogined` and drops activity and in-flight sends. A `flush: "sync"` watcher on `isLogined` closes the snack and moves the epoch when the header marks the popup locked. Routing and the locked screen are unchanged (`dd424d55`) |
-| 3 | minor | A Deleted event while `afterRead` waited left the captured rows intact, so the assignment reinstalled the receipt (`useIncomingTransfers.ts`) | Each read collects the ids deleted while it is in flight, the service read's wait included, and drops them from its rows. A later read is unaffected (`c1b96b60`) |
-| 4 | minor | The zero-amount comment and UI impact row 14 called dust an ordinary row that never arrives | "like dust" and "as dust is" are gone and the zero rule stays (`41ab7142`) |
+| 1 | major | Round 1's recheck raced. The add read `isCurrent()` before awaiting the token's registration, and `setTrust` awaits its own read before it writes. A section the watchdog displaced while a delete ran could still restore trust (`incoming-transfer/service.ts`, `repository.ts`) | The registration read runs first. `setTrust` takes a fence and reads it after its own read, so each write reads ownership after its last await; the floor's write already did (`c9bf88f7`) |
+| 2 | major | The lock event awaited `getProfiles()` before it closed the snack, moved the epoch and cleared `isLogined`. The header's Lock left the snack up until that handler finished (`popup/app.vue`) | In `popup/locked-state.ts`, the seal runs before the lookup and the sequence guard covers only the landing. The seal closes popups and the snack, moves the epoch, clears `isLogined` and drops activity and in-flight sends. A `flush: "sync"` watcher on `isLogined` closes the snack and moves the epoch when the header marks the popup locked. Routing and the locked screen are unchanged (`22b7602d`) |
+| 3 | minor | A Deleted event while `afterRead` waited left the captured rows intact, so the assignment reinstalled the receipt (`useIncomingTransfers.ts`) | Each read collects the ids deleted while it is in flight, the service read's wait included, and drops them from its rows. A later read is unaffected (`906605cd`) |
+| 4 | minor | The zero-amount comment and UI impact row 14 called dust an ordinary row that never arrives | "like dust" and "as dust is" are gone and the zero rule stays (`691ff701`) |
 
 Every await between a check and its write, and what covers it:
 
@@ -158,11 +158,11 @@ Gate after the round:
 
 ### Round 3 · codex · approve (high)
 
-The same session, on `8b501fd5..918e2669` and then the whole arc, `e84d784b..918e2669`:
+The same session, on `4a456a55..1ff23b27` and then the whole arc, `3e664578..1ff23b27`:
 
 > The four findings are closed; no new material findings. … VERDICT: approve — confidence: high
 
-It raised two non-blocking comment cleanups, both applied in `7f36b4e7`:
+It raised two non-blocking comment cleanups, both applied in `7eea0b33`:
 
 1. **`service.scenarios.test.ts`**: the mock's comment said it reads its fence after its own read,
    but it checks the fence before a synchronous map read. The repository test covers the real async
