@@ -136,3 +136,57 @@ such a line. The mocks stay as they are: the owner signed off on what that page 
 - **Line counts from range rects misread inline boxes.** A dotted term, or a label split across
   spans, whose top is 1px off its line reads as a second line, on both sides. Compare heights.
   Rows compare net of the 1px top border that a row after another carries.
+
+## Codex fix loop
+
+### Round 1
+
+Codex (GPT-6 Astra, high effort), session `01a0da5d-0956-7ce0-945d-cfc609a529f4`, read
+`a3629ac3..d4d73633` read-only, with no build or e2e run. Its verdict: changes-requested,
+confidence high, six minor findings.
+
+| # | Finding | Verdict | Fix |
+|---|---|---|---|
+| 1 | The Details table merges addresses case-blind, while `method-scope-checkers.ts:39` compares them exactly. | Rejected. A case-blind merge can only overstate reach, which is the table's invariant. The checker's exact compare predates the arc and fails closed. It goes to the program's follow-ups at the stack move; only the comments change. | `8058a2b4` (comments) |
+| 2 | An unknown Details row is named by its address alone, and its column marks are hidden. | Accepted. Its name gains its columns, "{address}: {columns}", as a named row's does. Which form of the address it reads stays with the owner (A-27, a `test.todo`). | `f564fac6` |
+| 3 | A selected, disabled account row's rename link still opens its field by Tab and Enter. | Accepted. `startRename` returns on a disabled row, and the link is aria-disabled and out of the Tab order. Nothing drawn changes. | `b5b5c037` |
+| 4 | No test changes a switch while a submit is pending. | Accepted. The deferred-resolution pin flips the authorizations, data and unknown switches after approve() starts and checks the sent answer. | `0023f38b` |
+| 5 | The fit check finds its scroller through `body *`, and two row checks collapse duplicates through `Object.fromEntries`. | Accepted. The scroll area carries `cap-scroll-area`, and the two specs compare row arrays in order. | `ede44e94` |
+| 6 | Comments that are inaccurate or narrate. | Accepted. The details table states its display rule, two component headers go, and five review tags go while their invariants stay. | `8058a2b4` |
+
+Each new test was run against the code before its fix. Finding 2's fails on the old table.
+Finding 3's fails on the old row's missing aria-disabled, and on the opened field with only the
+guard removed. Finding 4's fails on all three switches when the answer is read from them lazily.
+
+Codex on the builder's calls, in the prompt's order:
+
+| # | Call | Codex |
+|---|---|---|
+| 1 | Held accounts named only from the wallet's records, from the dispatch snapshot | Agree, high |
+| 2 | A `contracts` capability that grants nothing is a no-op | Agree, high |
+| 3 | "Nulo knows" fails closed when the fee-payer derivation throws | Agree, high |
+| 4 | The Details table's rows and columns | Disagree, high: finding 1 |
+| 5 | `data-fills-window` cannot leak to another route | Agree, high |
+| 6 | The strip separator's `line-height: 14px` | Agree, moderate: Chrome rests on the recorded captures |
+| 7 | The rename link as a button above the row's target | Disagree, high, on a disabled row: finding 3 |
+| 8 | The answer is fixed once approve() starts | Agree, high; finding 4 adds the proof |
+| 9 | The block-level chip and the colours-only switch transition | Agree, high |
+| 10 | The e2e keys, connects, fit bound and helpers | Disagree, high, on the checks' assurance: finding 5 |
+
+### Gate at `8058a2b4`
+
+Run once from the worktree root at `8058a2b4`, the last fix, with a clean tree. The extension's
+two new passes are findings 2 and 3; finding 4 extends a test, and every other count equals the
+gate at `8e64e1eb`. The e2e are the three files finding 5 changed, each browser once, retry 0.
+
+| Command | Exit | Notes |
+|---|---|---|
+| `bun run lint` | 0 | 29 warnings and 3 infos, all pre-existing; `complexity-baseline check OK` |
+| `bun run typecheck:all` | 0 | 14 workspaces, and landing's pretypecheck |
+| `bun run test:all` | 0 | extension 7,702 passed, 4 skipped, 8 todo (593 files, 3 skipped); the other workspaces as at `8e64e1eb` |
+| The three files, Chrome, prover on | 0 | 7 passed; 143 s |
+| The three files, Firefox, proverless | 0 | 6 passed, 1 skipped (reduced motion is Chrome's alone); 173 s |
+| `bun run e2e:reap` after each | 0 | nothing to reap |
+
+Each run's Aztec node printed `Address already in use (os error 98)` once while starting, then
+reported ready, as in phase-4.md and phase-5.md.
