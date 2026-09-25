@@ -1,4 +1,4 @@
-# Phase 5 · Parity and arc gate (in progress)
+# Phase 5 · Parity and arc gate ✓
 
 P5.1's captures were taken before this round: 14 surfaces on Chrome and on Firefox, outside the
 repo with their manifest. None of the fixes below changes what a capture shows. The icon's
@@ -189,3 +189,115 @@ dynamic import on a 5 s budget. The host load average was 85 to 98 on 192 cores.
 imports anything this round touched, both passed alone (9 tests, 159 ms), and the tools-extraction
 lessons record the same timeouts under load. That makes it the known load flake, not a regression,
 so the rerun is the gate.
+
+## Parity
+
+The parity Artifact is https://claude.ai/artifact/2NDQYMuPhFWyE5yMjht1LN. It places each P5.1
+capture, Chrome and Firefox, beside its shot:
+
+- the success and error snacks on History (`10-snackbar`), and the snack above the nav (`10-round1`);
+- Home and History rows at rest, hovered and focused (`11-rows`);
+- the arrival, with and without reduced motion (`12-arrival`), and its snack on Settings (`12-incoming`);
+- the undrawn S-1, S-2 and K-1 surfaces.
+
+The driver and the fable leg listed every difference, the pre-existing ones included. The page's
+"Your calls" holds 13 questions for the owner, none decided here:
+
+1. S-1: on a page without the nav, a snack covers the footer button.
+2. A snack that opens under a resting pointer waits until the pointer moves.
+3. The snack's × and View show no focus ring (the hash-pinned `base.css` sets `button { outline: none }`).
+4. With fiat values off, Home shows no chip.
+5. Two rows outside the plan's list: Settings → Advanced → Logs, and the Revoke authorizations
+   expand icon.
+6. A Ctrl-clicked contact row's new tab loses its deep link at start-up.
+7. History's received rows read "Token" and "+1,000,00" with no dollar value (older than this batch).
+8. The received row differs from the drawing (older).
+9. Home's balance counts the dollar total (A-1′).
+10. The error snack has no "Details" (S-8).
+11. The execute window's snack overhangs its 360px column by 4px on each side.
+12. Over a sheet that covers the nav, the snack keeps the nav's 76px inset.
+13. Older layout differences around this batch's surfaces.
+
+Beside them is the sign-off pending list: S-1 to S-16, K-1, R-1 to R-7, A-1′ and A-2 to A-16.
+
+## The gate
+
+Every P5 command ran at retry 0 on `b6aa6e4d`, the arc's tip before the restack; the reader check
+ran on the restacked `d818b293`. The restack put arc 3's copy fix (`e1504b97`) and its record
+(`3e664578`) under this arc, so `b6aa6e4d` became `e13071ea`. That fix changes two sentences no
+e2e spec reads (`dapp-hostname-warning`, `import-seed-note`), their two unit tests and the
+drawings. The local gates and both smoke suites ran again on the restacked tip (last table).
+
+| P5 | What | Result | Time |
+|---|---|---|---|
+| 2 | `bun run lint` | exit 0 | 1 s |
+| 2 | `bun run typecheck:all` | exit 0 | 38 s |
+| 2 | `bun run test:all` | exit 0 | 111 s |
+| 2 | `bun run test:ci-gating` | exit 0 | 23 s |
+| 2 | `bun run build` | exit 0 | 25 s |
+| 2 | `bun run --cwd apps/extension build-storybook` | exit 0 | 8 s |
+| 3 | Network, Chrome prover on: P5.3's files without `@requires-proverless`, plus `account-balance-orphans` and `imported-account-execution` (9 files) | 21 passed; exit 0 | 885 s |
+| 3 | Network, Chrome proverless: `incoming-arrival`, `account-switch-isolation` | 9 passed; exit 0 | 534 s |
+| 3 | Network, Firefox proverless: the same 11 files | 30 passed; exit 0 | 1,219 s |
+| 4 | `incoming-arrival`, three runs per browser in its gate mode | 7 of 7 in every run; exit 0 | 397 to 457 s a run |
+| 2 | Smoke, Chrome, the gate's build | 38 files passed, 3 skipped; 152 tests passed, 7 skipped; exit 0 | 846 s |
+| 4 | `snackbar`, `rows`, `contacts`, `security-reset` on Chrome, three runs through the scratch retry-0 config | 4 files, 15 tests in every run; exit 0 | 73 to 77 s a run |
+| 2 | Smoke, Firefox, the gate's build | 39 files passed, 2 skipped; 148 tests passed, 11 skipped; exit 0 | 1,204 s |
+| 4 | the same four on Firefox, three runs | 4 files, 15 tests in every run; exit 0 | 93 to 97 s a run |
+| 5 | `bun run e2e:reap` | nothing to reap; exit 0 | |
+
+`security-reset` is the smoke spec that calls `waitForProfilePurged`, the helper at
+`helpers.ts:1895` whose comment this arc changed. Its three network callers
+(`profile-reimport-matrix`, `opfs-storage`, `backup-restore-integrity`) are in the reader check.
+
+### Every reader of the snack and the incoming card
+
+P5.3 asks for the network list to be re-checked against every reader. A script walked the e2e tree
+from each line that calls `waitForToast(` or reads `tx-incoming-card`, up through every helper
+and fixture containing one, to the specs that reach them. The helpers are `importToken`,
+`importTokenAndWaitForBalance`, `sendTransfer`, `fillSendForm` and `confirmImport`. The fixtures
+are `tokenReadyExtension`, `feeJuiceReadyExtension`, `feeJuiceImportedExtension`,
+`firstTwoAccountsFixture`, `dappConnectedExtensionWithFirstTwoAccountsCap` and
+`dappConnectedExtensionWithFirstTwoAccountsContractsCap`.
+
+- **Smoke: 7 readers** (`account-import-export`, `accounts`, `backup-imported-account`,
+  `imported-account-lifecycle`, `profile-rename`, `security`, `snackbar`), all in the full smoke
+  runs above.
+- **Network: 37 readers.** Nine were in the gate's files: all of them except `connect-dapp` and
+  `tx-sendTx-selfPay`, which P5.3 lists for the execute window's error path. The other 28 ran on
+  `d818b293`, retry 0, in each browser's gate mode: `account-switch-live-session`,
+  `authwit-consume-smoke`, `authwit-lifecycle`, `auto-lock-defers-while-proving`,
+  `backup-migration-roundtrip`, `backup-restore-integrity`, `backup-restore-sw-restart`,
+  `balance-row-reconciliation`, `execute-scope-account`, `fiat-send`, `frozen-account-canary`,
+  `holdings`, `home-cap`, `in-flight-send-guard`, `multi-account-from`, `opfs-storage`,
+  `pin-to-home`, `price-fixture`, `profile-reimport-matrix`, `profile-switch-sweeps-transfer`,
+  `receive-unregistered`, `selfpay-phase`, `send-amount-clamp`, `send-picker`,
+  `sim-from-selfpay`, `token-add-auto-trust`, `tokens`, `transfers`.
+
+| Run | Files | Result | Time |
+|---|---|---|---|
+| Chrome, prover on | 25 | 31 passed; exit 0 | 1,744 s |
+| Chrome, proverless: the three `@requires-proverless` files (`auto-lock-defers-while-proving`, `backup-restore-sw-restart`, `profile-switch-sweeps-transfer`) | 3 | 5 passed; exit 0 | 306 s |
+| Firefox, proverless | 28 | 27 passed and 1 skipped, `backup-restore-sw-restart` (Chrome-only by design, `CHROME_ONLY.backgroundKillUnderPage`); 33 tests passed, 3 skipped; exit 0 | 1,687 s |
+| `bun run e2e:reap` | | nothing to reap; exit 0 | |
+
+The two commits made during the run (`6bfe0de7`, `62199fba`) change only docs.
+`backup-restore-integrity`, the known public-network flake (program Follow-ups), passed in both
+browsers.
+
+### On the restacked tip
+
+On `62199fba`, the stack's arc 4 tip. Its code is `e13071ea`'s; the commits after it change only
+docs.
+
+| What | Result | Time |
+|---|---|---|
+| `bun run lint` | exit 0 | 2 s |
+| `bun run typecheck:all` | exit 0 | 43 s |
+| `bun run test:all` | exit 0 | 129 s |
+| `bun run test:ci-gating` | exit 0 | 26 s |
+| `bun run build` | exit 0 | 31 s |
+| `bun run --cwd apps/extension build-storybook` | exit 0 | 13 s |
+| Smoke, Chrome, the gate's build | 38 files passed, 3 skipped; 152 tests passed, 7 skipped; exit 0 | 876 s |
+| Smoke, Firefox, the gate's build | 39 files passed, 2 skipped; 148 tests passed, 11 skipped; exit 0 | 1,109 s |
+| `bun run e2e:reap` | nothing to reap; exit 0 | |
