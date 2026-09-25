@@ -593,6 +593,15 @@ describe("useArrivals — the elsewhere snack, after seeding on Settings", () =>
 		expect(c.openToast).toHaveBeenCalledTimes(1)
 	})
 
+	test("a receipt of zero opens no snack here and stays an ordinary row on Home", async () => {
+		const c = await seeded()
+		const zero = receipt(20, { amountRaw: "0" })
+		await arrive(c, zero)
+		expect(c.openToast).not.toHaveBeenCalled()
+		expect(arriving(await showOnHome(c, [zero]), zero)).toBeUndefined()
+		expect(c.svc.claimArrivals).not.toHaveBeenCalled()
+	})
+
 	test("a receipt discovered while hidden, with no Added, opens nothing when shown and plays on Home", async () => {
 		const c = await seeded()
 		setVisible(c, false)

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { ARRIVAL_PLAYED_CAP, type ArrivalState, ArrivalRowSchema, claimPlayed, isArrivalEligible } from "./arrival-state"
 
-const rec = (id: string, l2BlockNumber: number, contract = "0xtok") => ({ id, contract, l2BlockNumber })
+const rec = (id: string, l2BlockNumber: number, contract = "0xtok", amountRaw = "1") => ({ id, contract, l2BlockNumber, amountRaw })
 const state = (over: Partial<ArrivalState> = {}): ArrivalState => ({ sinceBlock: 10, floors: {}, played: [], ...over })
 
 describe("isArrivalEligible", () => {
@@ -12,6 +12,12 @@ describe("isArrivalEligible", () => {
 	test("a receipt in the account floor's block or the token floor's block is history", () => {
 		expect(isArrivalEligible(rec("a", 10), state())).toBe(false)
 		expect(isArrivalEligible(rec("a", 20), state({ floors: { "0xtok": 20 } }))).toBe(false)
+	})
+
+	test("a receipt of zero, or of an amount that does not parse, plays nothing", () => {
+		expect(isArrivalEligible(rec("a", 50, "0xtok", "0"), state())).toBe(false)
+		expect(isArrivalEligible(rec("a", 50, "0xtok", "-1"), state())).toBe(false)
+		expect(isArrivalEligible(rec("a", 50, "0xtok", "1.5"), state())).toBe(false)
 	})
 
 	test("a played receipt, an unknown baseline and a pending token floor play nothing", () => {
