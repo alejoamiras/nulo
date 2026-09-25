@@ -25,7 +25,7 @@ const panelId = useId()
 			@click="open = !open"
 		>
 			<span>{{ label }} <span :class="$style.tag">· {{ tag }}</span></span>
-			<MaterialIcon name="chevron_right" :size="16" :class="$style.chevron" aria-hidden="true" />
+			<MaterialIcon name="chevron_right" :size="16" data-testid="cap-disclosure-chevron" :class="$style.chevron" aria-hidden="true" />
 		</button>
 
 		<div v-if="open" :id="panelId" :class="$style.panel">
