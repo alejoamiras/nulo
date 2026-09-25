@@ -28,6 +28,15 @@ const formatGrantSummary = (grants) => {
 	return grants.map((g) => getSafeDisplay(g.capability.type).shortLabel).join(" \u00B7 ")
 }
 
+/** The app's host, so e2e can pick one app's row without reading its text. */
+const appHost = (session) => {
+	try {
+		return new URL(session.dappMetadata?.url ?? "").host
+	} catch {
+		return ""
+	}
+}
+
 const dappSessions = ref([])
 
 const sortedSessions = computed(() => [...dappSessions.value].sort((a, b) => a.expiry - b.expiry))
@@ -122,7 +131,7 @@ onBeforeUnmount(() => {
 
 		<ItemsContainer v-if="sortedSessions.length">
 			<div v-for="(ds, i) in sortedSessions" :key="ds.id" :class="$style.row">
-				<RowTarget data-testid="connected-app-row" :to="`/popup/settings/connected-apps/${ds.id}`" :labelledby="`${rowIdBase}-${i}`" />
+				<RowTarget data-testid="connected-app-row" :data-app-host="appHost(ds)" :to="`/popup/settings/connected-apps/${ds.id}`" :labelledby="`${rowIdBase}-${i}`" />
 
 				<Flex align="center" gap="12" wide>
 					<div :class="$style.logo_wrapper">
