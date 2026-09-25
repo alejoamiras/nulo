@@ -1,15 +1,7 @@
 <script setup>
 /**
- * dApp identity block shared by the three dApp interaction windows.
- * Shows the dApp logo (or its loading / fallback variant), the
- * normalized hostname (anti-phishing trust anchor), and the optional
- * `name` line + per-window action verb ("wants to connect", "wants to
- * call", etc.). The hostname renders next to a warning icon when it
- * contains non-ASCII or punycode segments — homograph defense.
- *
- * F-009 / Phase 6: the `name` field is dApp-controlled metadata from
- * the discovery payload. Route through sanitizeWireString to strip
- * bidi overrides, zero-width chars, etc. so a phishing dApp can't
+ * The `name` field is dApp-controlled metadata from the discovery payload. Route through
+ * sanitizeWireString to strip bidi overrides, zero-width chars, etc. so a phishing dApp can't
  * impersonate a familiar name via Unicode tricks.
  */
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
@@ -20,7 +12,7 @@ const props = defineProps({
 	dapp: { type: Object, default: null },
 	/** Pre-normalized hostname (parent computes from `dapp.url`). */
 	hostname: { type: String, default: "" },
-	/** Anti-phishing flag — surfaces the warning icon + tooltip. */
+	/** Anti-phishing flag — shows the homograph warning line under the hostname. */
 	hostnameSuspicious: { type: Boolean, default: false },
 	/** Per-window verb (e.g. "wants to connect to your wallet"). */
 	actionLabel: { type: String, required: true },
@@ -34,7 +26,7 @@ const sanitizedName = computed(() => (props.dapp?.name ? sanitizeWireString(prop
 </script>
 
 <template>
-	<Flex align="center" gap="12" :class="$style.dapp_block">
+	<Flex :align="hostnameSuspicious ? 'start' : 'center'" gap="12" :class="$style.dapp_block">
 		<div :class="$style.dapp_logo_wrapper">
 			<Icon v-if="dapp?.loadingLogo" :loading="true" name="dapp" size="24" color="tertiary" />
 			<img v-else-if="dapp?.logoBlobUrl" :src="dapp?.logoBlobUrl" :class="$style.dapp_logo" alt="" />
@@ -44,14 +36,12 @@ const sanitizedName = computed(() => (props.dapp?.name ? sanitizeWireString(prop
 		<Flex direction="column" gap="4" wide :class="$style.dapp_info">
 			<Flex align="center" gap="6">
 				<span :data-testid="hostnameTestId" :class="$style.dapp_hostname">{{ hostname }}</span>
-				<Tooltip v-if="hostnameSuspicious" position="start">
-					<Icon name="warning" size="12" color="orange" />
-					<template #content>
-						<Text size="12" color="secondary" :style="{ lineHeight: '1.3' }">
-							This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.
-						</Text>
-					</template>
-				</Tooltip>
+			</Flex>
+			<Flex v-if="hostnameSuspicious" align="start" gap="6" data-testid="dapp-hostname-warning">
+				<Icon name="warning" size="12" color="orange" aria-hidden="true" :class="$style.warning_icon" />
+				<span :class="$style.warning_text">
+					This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.
+				</span>
 			</Flex>
 			<span v-if="sanitizedName" :data-testid="nameTestId" :class="$style.dapp_name">{{ sanitizedName }}</span>
 			<span :class="$style.dapp_action">{{ actionLabel }}</span>
@@ -100,6 +90,17 @@ const sanitizedName = computed(() => (props.dapp?.name ? sanitizeWireString(prop
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.warning_icon {
+	margin-top: 1px;
+}
+
+.warning_text {
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1.3;
+	color: var(--orange);
 }
 
 .dapp_name {
