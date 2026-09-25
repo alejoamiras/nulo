@@ -93,27 +93,100 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["z"])
 	})
 
-	it("onAdded prepends a new record", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("a"))
-		incoming.onIncomingTransferAdded.invoke(rec("b"))
-		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b", "a"])
+	it("an Added is read back through the service, so a receipt the dust filter drops never appears", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService([])
+			const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
+			incoming.onIncomingTransferAdded.invoke(rec("dust"))
+			expect(incomingTransfers.value).toEqual([])
+			await vi.advanceTimersByTimeAsync(250)
+			expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+			expect(incomingTransfers.value).toEqual([])
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
-	it("onAdded replaces in place when the id already exists", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("a", { v: 1 }))
-		incoming.onIncomingTransferAdded.invoke(rec("a", { v: 2 }))
-		expect(incomingTransfers.value).toHaveLength(1)
-		expect((incomingTransfers.value[0] as unknown as { v: number }).v).toBe(2)
+	it("three Added in one tick make one read", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService([rec("a"), rec("b"), rec("c")])
+			const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
+			for (const id of ["a", "b", "c"]) incoming.onIncomingTransferAdded.invoke(rec(id))
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+			expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a", "b", "c"])
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
-	it("onUpdated replaces an existing record", () => {
+	it("an Added every 100 ms still reads within 1 s of the first", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService([rec("a")])
+			setup({ incoming, config: makeConfigService() })
+			const stream = setInterval(() => incoming.onIncomingTransferAdded.invoke(rec("a")), 100)
+			incoming.onIncomingTransferAdded.invoke(rec("a"))
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+			// The next burst starts at 1.1 s and is read by its own cap, at 2.1 s.
+			await vi.advanceTimersByTimeAsync(2_000)
+			clearInterval(stream)
+			expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("afterRead settles before the rows are assigned", async () => {
+		let release!: () => void
+		const afterRead = vi.fn(() => new Promise<void>((r) => (release = r)))
+		const incoming = makeIncomingService([rec("a")])
+		const effect = effectScope()
+		const result = effect.run(() =>
+			useIncomingTransfers({ incomingTransferService: incoming, configService: makeConfigService(), scope: READY, afterRead }),
+		)
+		const pending = result?.refresh()
+		await vi.waitFor(() => expect(afterRead).toHaveBeenCalledWith(READY()))
+		expect(result?.incomingTransfers.value).toEqual([])
+		release()
+		await pending
+		expect(result?.incomingTransfers.value.map((x) => x.id)).toEqual(["a"])
+	})
+
+	it("a scope change while afterRead runs drops the rows; a rejecting afterRead still assigns them", async () => {
+		const account = ref("a")
+		let release!: () => void
+		const afterRead = vi
+			.fn<() => Promise<void>>()
+			.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+			.mockRejectedValue(new Error("state read failed"))
 		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("a", { v: 1 }))
+		incoming.getIncomingTransfers.mockResolvedValueOnce([rec("a1")]).mockResolvedValue([rec("b1", { accountAddress: "b" })])
+		const effect = effectScope()
+		const result = effect.run(() =>
+			useIncomingTransfers({
+				incomingTransferService: incoming,
+				configService: makeConfigService(),
+				scope: () => ({ profileId: "p", networkId: "n", account: account.value }),
+				afterRead,
+			}),
+		)
+		const stale = result?.refresh()
+		await vi.waitFor(() => expect(afterRead).toHaveBeenCalledTimes(1))
+		account.value = "b"
+		release()
+		await stale
+		await vi.waitFor(() => expect(result?.incomingTransfers.value.map((x) => x.id)).toEqual(["b1"]))
+		expect(afterRead).toHaveBeenCalledTimes(2)
+	})
+
+	it("onUpdated replaces an existing record", async () => {
+		const incoming = makeIncomingService([rec("a", { v: 1 })])
+		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
+		await refresh()
 		incoming.onIncomingTransferUpdated.invoke(rec("a", { v: 9 }))
 		expect((incomingTransfers.value[0] as unknown as { v: number }).v).toBe(9)
 	})
@@ -125,11 +198,10 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value).toEqual([])
 	})
 
-	it("onDeleted removes by id", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("a"))
-		incoming.onIncomingTransferAdded.invoke(rec("b"))
+	it("onDeleted removes by id", async () => {
+		const incoming = makeIncomingService([rec("a"), rec("b")])
+		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
+		await refresh()
 		incoming.onIncomingTransferDeleted.invoke(rec("a"))
 		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b"])
 	})
@@ -153,25 +225,38 @@ describe("useIncomingTransfers", () => {
 		expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
 	})
 
-	it("dispose() removes every handler — later events are ignored", () => {
-		const incoming = makeIncomingService()
-		const config = makeConfigService()
-		const { incomingTransfers, dispose } = setup({ incoming, config })
-		dispose()
-		incoming.onIncomingTransferAdded.invoke(rec("a"))
-		incoming.onIncomingTransferUpdated.invoke(rec("a"))
-		incoming.onIncomingTransferDeleted.invoke(rec("a"))
-		config.onUpdate.invoke({ key: "incomingTransfersVisible" } as unknown as ConfigProp)
-		expect(incomingTransfers.value).toEqual([])
-		expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
+	it("dispose() removes every handler and a scheduled read — later events are ignored", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService([rec("a")])
+			const config = makeConfigService()
+			const { incomingTransfers, dispose } = setup({ incoming, config })
+			incoming.onIncomingTransferAdded.invoke(rec("a"))
+			dispose()
+			incoming.onIncomingTransferAdded.invoke(rec("a"))
+			incoming.onIncomingTransferUpdated.invoke(rec("a"))
+			incoming.onIncomingTransferDeleted.invoke(rec("a"))
+			config.onUpdate.invoke({ key: "incomingTransfersVisible" } as unknown as ConfigProp)
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(incomingTransfers.value).toEqual([])
+			expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
-	it("scope.stop() auto-disposes via onScopeDispose", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers, effect } = setup({ incoming, config: makeConfigService() })
-		effect.stop()
-		incoming.onIncomingTransferAdded.invoke(rec("a"))
-		expect(incomingTransfers.value).toEqual([])
+	it("scope.stop() auto-disposes via onScopeDispose", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService([rec("a")])
+			const { incomingTransfers, effect } = setup({ incoming, config: makeConfigService() })
+			effect.stop()
+			incoming.onIncomingTransferAdded.invoke(rec("a"))
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(incomingTransfers.value).toEqual([])
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("re-fetches when the dust threshold config changes (D8)", async () => {
@@ -209,25 +294,25 @@ describe("useIncomingTransfers", () => {
 
 	// ── Cross-account containment (privacy fix — #314 + code-review, id-keyed) ──
 
-	it("onAdded DROPS a record for a non-active account (the leak the broadcast would otherwise cause)", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("foreign", { accountAddress: "OTHER_ACCOUNT" }))
-		expect(incomingTransfers.value).toEqual([])
+	it("an Added for a non-active account, network or profile starts no read", async () => {
+		vi.useFakeTimers()
+		try {
+			const incoming = makeIncomingService()
+			setup({ incoming, config: makeConfigService() })
+			incoming.onIncomingTransferAdded.invoke(rec("foreign", { accountAddress: "OTHER_ACCOUNT" }))
+			incoming.onIncomingTransferAdded.invoke(rec("wrongNet", { networkId: "OTHER_NET" }))
+			incoming.onIncomingTransferAdded.invoke(rec("wrongProfile", { profileId: "OTHER_PROFILE" }))
+			await vi.advanceTimersByTimeAsync(1_000)
+			expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
-	it("onAdded DROPS a record for a non-active network or profile", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("wrongNet", { networkId: "OTHER_NET" }))
-		incoming.onIncomingTransferAdded.invoke(rec("wrongProfile", { profileId: "OTHER_PROFILE" }))
-		expect(incomingTransfers.value).toEqual([])
-	})
-
-	it("onUpdated DROPS a foreign-account record (never coerces it onto the active view)", () => {
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("mine"))
+	it("onUpdated DROPS a foreign-account record (never coerces it onto the active view)", async () => {
+		const incoming = makeIncomingService([rec("mine")])
+		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
+		await refresh()
 		incoming.onIncomingTransferUpdated.invoke(rec("mine", { accountAddress: "OTHER_ACCOUNT", v: 9 }))
 		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["mine"])
 	})
