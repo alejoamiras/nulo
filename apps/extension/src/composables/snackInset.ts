@@ -94,7 +94,7 @@ export function snackInset(base: number, viewportHeight: number, boxes: readonly
 	return inset
 }
 
-/** The overflow values a user can scroll; `hidden` clips without scrolling. */
+/** Overflow values a user can scroll directly; `hidden` scrolls only programmatically. */
 const SCROLLABLE = new Set(["auto", "scroll", "overlay"])
 
 const leftToScroll = (el: Element) => Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop)
