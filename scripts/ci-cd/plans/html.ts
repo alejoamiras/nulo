@@ -147,21 +147,55 @@ const CSS_URL_RE = /url\(\s*(?:"([^"\\]*)"|'([^'\\]*)'|([^\s"'()\\]*))\s*\)/gi
 const CSS_IMPORT_RE = /@import\s+(?:"([^"\\]*)"|'([^'\\]*)')/gi
 /** Loads the gate does not parse: an escape inside a URL, `image-set()` and `src()` candidates. */
 const CSS_UNPARSED_RE = /image-set\(|(?<![\w-])src\(/i
+const CSS_LOAD_RE = /url\(|image-set\(|(?<![\w-])src\(|@import/i
+/** Comments and strings, matched left to right as CSS tokenizes them; a string also ends at a newline. */
+const CSS_INERT_RE = /\/\*[\s\S]*?(?:\*\/|$)|"(?:[^"\\\n]|\\[\s\S])*"?|'(?:[^'\\\n]|\\[\s\S])*'?/g
+/** Attributes a browser parses as CSS: `style`, and the SVG presentation attributes that take a URL. */
+const CSS_ATTRIBUTES: ReadonlySet<string> = new Set([
+	"style",
+	"fill",
+	"stroke",
+	"filter",
+	"mask",
+	"clip-path",
+	"marker-start",
+	"marker-mid",
+	"marker-end",
+	"cursor",
+	"color-profile",
+])
 
-/** The URLs a stylesheet or a style attribute loads, or null when one of them cannot be read exactly. */
+/**
+ * The URLs a stylesheet or a style attribute loads, or null when one of them cannot be read exactly.
+ * The gate decodes no CSS escape, and one outside a string can spell `url(` or `@import`.
+ */
 export function cssUrls(css: string): string[] | null {
+	if (css.replace(CSS_INERT_RE, "").includes("\\")) return null
 	const urls = [...css.matchAll(CSS_URL_RE), ...css.matchAll(CSS_IMPORT_RE)].map((m) => m[1] ?? m[2] ?? m[3] ?? "")
 	const opened = css.match(/url\(|@import(?!\s*url\()/gi)?.length ?? 0
 	return opened === urls.length && !CSS_UNPARSED_RE.test(css) ? urls : null
 }
 
+/**
+ * A `<style>` block's URLs. Inside SVG a browser decodes its character references first, so the block
+ * is read both as written and decoded, and a reference the gate cannot decode makes it unreadable.
+ */
+export function styleBlockUrls(css: string): string[] | null {
+	if (undecodableReference(css) !== null) return null
+	const raw = cssUrls(css)
+	const decoded = cssUrls(decodeEntities(css))
+	return raw === null || decoded === null ? null : [...new Set([...raw, ...decoded])]
+}
+
+/** A CSS attribute is always read; any other counts as CSS once its decoded value loads a URL. */
 function cssVerdict(tag: string, name: string, value: string): AttributeVerdict {
-	if (!/url\(|image-set\(|(?<![\w-])src\(/i.test(value)) return null
+	const decoded = decodeEntities(value)
+	if (!CSS_ATTRIBUTES.has(name) && !CSS_LOAD_RE.test(decoded)) return null
 	const bad = undecodableReference(value)
 	if (bad !== null) return { opaque: `${bad} is a character reference the gate cannot decode` }
-	const urls = cssUrls(decodeEntities(value))
+	const urls = cssUrls(decoded)
 	if (urls === null) return { opaque: `${name} on <${tag}> loads a URL through CSS the gate cannot read` }
-	return { links: urls.map((href) => ({ href, needle: href })) }
+	return urls.length === 0 ? null : { links: urls.map((href) => ({ href, needle: href })) }
 }
 
 /** Each candidate's URL runs to whitespace, and its descriptors to the next comma. */
@@ -183,11 +217,17 @@ function kindOf(tag: string, name: string): AttributeKind | undefined {
 	return ATTRIBUTES.get(name)
 }
 
-/** Why the gate cannot judge an element as a whole, or null: plugin elements, and a meta refresh. */
+/**
+ * Why the gate cannot judge an element as a whole, or null: plugin elements, and a meta refresh. The
+ * `http-equiv` that makes a refresh is compared decoded, as a browser reads it.
+ */
 export function judgeElement(tag: string, attribute: (name: string) => string | null): string | null {
 	if (OPAQUE_ELEMENTS.has(tag)) return `<${tag}> loads plugin resources the gate cannot check`
-	if (tag === "meta" && attribute("http-equiv")?.trim().toLowerCase() === "refresh")
-		return "a meta refresh navigates to a URL the gate cannot check"
+	const equiv = tag === "meta" ? attribute("http-equiv") : null
+	if (equiv === null) return null
+	const bad = undecodableReference(equiv)
+	if (bad !== null) return `${bad} is a character reference the gate cannot decode`
+	if (decodeEntities(equiv).trim().toLowerCase() === "refresh") return "a meta refresh navigates to a URL the gate cannot check"
 	return null
 }
 

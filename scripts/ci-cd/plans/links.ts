@@ -4,7 +4,7 @@
  * to the rewriter. Which attributes carry URLs, and which constructs the gate cannot judge, is `html.ts`.
  */
 import { posix } from "node:path"
-import { type AttributeLink, cssUrls, decodeEntities, judgeAttribute, judgeElement } from "./html"
+import { type AttributeLink, decodeEntities, judgeAttribute, judgeElement, styleBlockUrls } from "./html"
 import {
 	ARCHIVE,
 	activePlanDirs,
@@ -82,7 +82,7 @@ export function extract(file: string, src: string): Omit<Doc, "path" | "src"> {
 	let inHeading = false
 	let style: string | null = null
 	const endStyle = () => {
-		const urls = style === null ? [] : cssUrls(style)
+		const urls = style === null ? [] : styleBlockUrls(style)
 		if (urls === null) rawOpaque.push({ needle: "<style", detail: "a <style> block loads a URL through CSS the gate cannot read" })
 		else raw.push(...urls.map((href) => ({ href, needle: href })))
 		style = null
