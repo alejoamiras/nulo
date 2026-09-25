@@ -1,0 +1,2 @@
+# Reviewed possible ancestors (check-paths.py ancestry): "<old> -> <new>  # verdict".
+# Every pair here was checked and is NOT an ancestor; a real ancestor belongs in paths.txt instead.
