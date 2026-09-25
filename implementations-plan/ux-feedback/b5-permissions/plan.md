@@ -1498,7 +1498,7 @@ Re-read the `picks` store for `i6h` first.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-#### P3 · U6 title, `PermissionRow`, U7 Settings row ☐
+#### P3 · U6 title, `PermissionRow`, U7 Settings row ✓
 
 Re-read the `picks` store for `i6j`, `i6k` first.
 
