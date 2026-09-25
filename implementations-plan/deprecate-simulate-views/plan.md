@@ -2,7 +2,7 @@
 
 Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/deprecate-simulate-views/plan.md).
 
-Supersedes [`plan.md`](plan.md). Incorporates [`audit-opus.md`](audit-opus.md) + [`audit-codex.md`](audit-codex.md).
+Supersedes [`plan.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/deprecate-simulate-views/plan.md). Incorporates [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/deprecate-simulate-views/audit-opus.md) + [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/deprecate-simulate-views/audit-codex.md).
 
 ## Diff vs plan-v1
 

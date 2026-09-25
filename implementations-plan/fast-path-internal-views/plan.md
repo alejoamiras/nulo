@@ -2,7 +2,7 @@
 
 Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fast-path-internal-views/plan.md).
 
-Supersedes [plan.md](plan.md). Consolidates [audit-opus.md](audit-opus.md) + [audit-codex.md](audit-codex.md).
+Supersedes [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fast-path-internal-views/plan.md). Consolidates [audit-opus.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fast-path-internal-views/audit-opus.md) + [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fast-path-internal-views/audit-codex.md).
 
 ## Audit verdicts on v1
 

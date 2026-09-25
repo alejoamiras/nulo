@@ -2,7 +2,7 @@
 
 **Re-verify (STEP 1, vs `dev-quality` `4906f0f`):** VALID. The 9 modules in `token/functions/` each repeat `enum <Fn>Impl{Default}` + `abstract <Fn>Fn extends ViewFn|Fn` (buildArgs / static new / getCandidates-scoring / getDefault) + `Default<Fn>Fn` (abi literal / unpackResult / getCandidates-predicate). `service.ts:322-371,401-450` repeats 9 verbatim `<Fn>Fn.getCandidates(artifact).map(x=>x.getImpl())` blocks; `spec.ts:17-25,61-104` + `utils.ts:18-27` re-thread the 9-kind set.
 
-## Decision ledger (codex leg `7yfBihLE` — [plan-leg-codex.md](./plan-leg-codex.md) — + main verification; opus leg glitched 0-tool-uses, discarded)
+## Decision ledger (codex leg `7yfBihLE` — [plan-leg-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/harden-quality-arc/findings/Q-12/plan-leg-codex.md) — + main verification; opus leg glitched 0-tool-uses, discarded)
 Main verified every codex claim against the code (all Facts confirmed): fixture source, ViewFn/Fn base, external consumers.
 
 - **Descriptor objects + TWO shared runtime wrappers** (`DescriptorViewTokenFn extends ViewFn`, `DescriptorCallTokenFn extends Fn`), **NOT 9 subclasses, NOT a base-class-per-kind.** The fpc/handlers model (`IFpcHandler` + `getFpcHandler(type)`) is the analog, but token variation is DATA (name/scoring/abi/predicate/args) → a descriptor TABLE, not 9 thinner catalogs. `TOKEN_FN_DESCRIPTORS` is the single kind list; `TokenFnKind` derived/`satisfies`-checked against it.

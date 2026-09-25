@@ -2,7 +2,7 @@
 
 Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md).
 
-**Status**: post-audit consolidation. Codex v1 verdict was **REJECT** (3 HIGH-level concerns); Opus v1 verdict was **APPROVE-WITH-FIXES** (3 HIGH + 9 MED/LOW). Both flagged the same e2e fixture-breakage class + the `useFullBackupImport` silent-name-drop. Codex additionally caught a pre-existing onboarding bug (same composable, same drop) and a passkey-reset test fallout that Opus missed. This v2 supersedes [plan.md](./plan.md).
+**Status**: post-audit consolidation. Codex v1 verdict was **REJECT** (3 HIGH-level concerns); Opus v1 verdict was **APPROVE-WITH-FIXES** (3 HIGH + 9 MED/LOW). Both flagged the same e2e fixture-breakage class + the `useFullBackupImport` silent-name-drop. Codex additionally caught a pre-existing onboarding bug (same composable, same drop) and a passkey-reset test fallout that Opus missed. This v2 supersedes [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md).
 
 ## Changes from v1
 
@@ -18,7 +18,7 @@ Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b1
 
 ## 0. Context (unchanged from v1)
 
-See [plan.md §0](./plan.md). Two flows (onboarding + extension popup) for creating/importing a profile. Onboarding requires explicit name + says "Wallet"; popup auto-generates name + says "Profile". v2 aligns both on "Profile" and gives both an identical pre-create name UX.
+See [plan.md §0](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md). Two flows (onboarding + extension popup) for creating/importing a profile. Onboarding requires explicit name + says "Wallet"; popup auto-generates name + says "Profile". v2 aligns both on "Profile" and gives both an identical pre-create name UX.
 
 ## 1. Decisions locked
 
@@ -58,13 +58,13 @@ See [plan.md §0](./plan.md). Two flows (onboarding + extension popup) for creat
 
 #### [F1] `src/popup/pages/profile/new.vue` — add Profile-name field (unchanged from v1)
 
-See [plan.md §4.1 [F1]](./plan.md). v2 detail additions:
+See [plan.md §4.1 [F1]](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md). v2 detail additions:
 - Testid: `register-name-input` (new). **Plus** mark the password and confirm inputs with explicit testids (`register-password-input`, `register-password-confirm-input`) — needed for Codex LOW #6's testid-only e2e rule and currently absent.
 - Wire `dispose()` slot: §5 P1.4 spells out cleanup-order placement.
 
 #### [F2] `src/popup/pages/import.vue` — drop pre-fill, add validation parity (unchanged from v1 + F3 plumbing)
 
-See [plan.md §4.1 [F2]](./plan.md). v2 additions:
+See [plan.md §4.1 [F2]](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md). v2 additions:
 - Testid: `import-name-input` (new).
 - Plumb `profileName` into `useFullBackupImport` (see F3).
 - Watch `parsedBackupName` (from composable) and prefill the input when it fires.
@@ -128,7 +128,7 @@ EditProfilePopup's existing `isAlreadyExist` check at L34 covers same-name-as-cu
 
 ### 4.2 Optional refactor — `useProfileNameField()` composable (R1, unchanged from v1 + duplicate hook)
 
-See [plan.md §4.2](./plan.md). v2 additions:
+See [plan.md §4.2](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md). v2 additions:
 - `validate(opts?: { existingNames?: string[] }): boolean` — **stays sync**. Optional `existingNames` arg powers the F4 duplicate check. The parent fetches the list async via `await managers.profile.getProfiles()` BEFORE calling `validate()`, behind the existing `isCreating` / `isImporting` latch. Sync `validate` preserves the no-race property of today's handlers.
 - 11 tests instead of 10 (see §6.1).
 - Recommendation unchanged: **extract**.
@@ -158,7 +158,7 @@ async function handleCreate() {
 
 ### 4.3 Onboarding copy alignment (Wallet → Profile)
 
-C1–C4 unchanged from [plan.md §4.3](./plan.md). v2 additions + clarifications:
+C1–C4 unchanged from [plan.md §4.3](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md). v2 additions + clarifications:
 
 **[C1] `src/onboarding/pages/create.vue` — L97 nuance** (Opus MED #5):
 - L97 is `return authMethod.value === "passkey" ? "Create with passkey" : "Create wallet"`. **Only the password branch flips** — the passkey branch already says "with passkey" (no rename needed). Spell this out for the implementer.
@@ -281,7 +281,7 @@ Order: **refactor → feature behavior → copy → fixtures → guards**. Imple
 4. Validate: `bun run --cwd packages/extension test src/popup/components/popups/EditProfilePopup.test.ts && bun run --cwd packages/extension build-storybook`.
 
 **P5 — Onboarding copy sweep (C1–C4)**
-1. Apply the line-by-line tables in [plan.md §4.3](./plan.md) for `create.vue`, `import.vue`, `welcome.vue`. Use the C1 note that L97 in `create.vue` is a ternary — flip only the password branch.
+1. Apply the line-by-line tables in [plan.md §4.3](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md) for `create.vue`, `import.vue`, `welcome.vue`. Use the C1 note that L97 in `create.vue` is a ternary — flip only the password branch.
 2. Apply L97/107 in `done.vue` per the whitelist (keep "Open wallet" / "open the wallet"). No change there.
 3. Validate: `bun run lint && bun run --cwd packages/extension test`.
 

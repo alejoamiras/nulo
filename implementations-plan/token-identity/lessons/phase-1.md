@@ -10,6 +10,6 @@ LESSONS_FILE=implementations-plan/token-identity/lessons/phase-1.md
 ## 2026-06-11 - P1 COMPLETE (deploys live + verified)
 - Credentials resolved: the user's key lived in the Holonym reference clone's .env under the name MNEMONIC while being a raw secp256k1 hex - values piped file-to-file into our gitignored .envs (never transiting the transcript); the bridge script gained MNEMONIC support (unused in the end), the faucet resolver gained field-reduction (`Fr.fromBufferReduce`) because an Ethereum key can exceed the BN254 modulus, and `DEPLOYER_SECRET_KEY` requires a paired `DEPLOYER_SALT`.
 - The bridge deploy's first run hit `duplicate siloed nullifier`: the proxy's constructor args don't change across token renames ⇒ same salt + universal deployer = the LIVE deployment's address. ALL L2 salts bump together per generation (0x5b11-13). Documented in-script.
-- Addresses + verification in [deployments.md](../token-identity/deployments.md): faucet verify:deployments ✓, bridge offline rebuild probe ✓ (TOKEN/BRIDGE/PROXY MATCH).
+- Addresses + verification in [deployments.md](../deployments.md): faucet verify:deployments ✓, bridge offline rebuild probe ✓ (TOKEN/BRIDGE/PROXY MATCH).
 
 LESSONS_FILE=implementations-plan/token-identity/lessons/phase-1.md

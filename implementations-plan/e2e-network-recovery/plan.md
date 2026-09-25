@@ -2,7 +2,7 @@
 
 Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/plan.md).
 
-Supersedes [plan.md (v1)](./plan.md). Tier A. Consolidates [audit-codex.md](./audit-codex.md) + [audit-opus.md](./audit-opus.md) + the **prior phase-0 investigation** at [`implementations-plan/network-test-triage/`](../network-test-triage/) which already root-caused the dominant failure cluster.
+Supersedes [plan.md (v1)](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/plan.md). Tier A. Consolidates [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/audit-codex.md) + [audit-opus.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/audit-opus.md) + the **prior phase-0 investigation** at [`implementations-plan/network-test-triage/`](../network-test-triage/) which already root-caused the dominant failure cluster.
 
 ## What changed from v1
 

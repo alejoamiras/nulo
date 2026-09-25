@@ -2,8 +2,8 @@
 
 **Consolidated plan** — merges the strongest pieces of three independent Tier-A drafts. The two non-author drafts remain on disk for reference; my own draft was overwritten by this consolidation:
 
-- [`plan-opus-draft.md`](./plan-opus-draft.md) — opus subagent (3-PR shadow-deploy, per-test counter via offscreen RPC, warn-not-fail on `"downloading"`)
-- [`plan-codex-draft.md`](./plan-codex-draft.md) — codex (`accelerator/config.ts` module, repo-pinned SHA256, runtime onPhase throw, `ALLOWED_ORIGINS` README-snippet trap)
+- [`plan-opus-draft.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/accelerator-server-ci/plan-opus-draft.md) — opus subagent (3-PR shadow-deploy, per-test counter via offscreen RPC, warn-not-fail on `"downloading"`)
+- [`plan-codex-draft.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/accelerator-server-ci/plan-codex-draft.md) — codex (`accelerator/config.ts` module, repo-pinned SHA256, runtime onPhase throw, `ALLOWED_ORIGINS` README-snippet trap)
 
 This consolidated `plan.md` is what goes through the final codex audit + approval gate. Provenance of each non-obvious decision is called out inline ("codex catch" / "opus catch" / "verified locally").
 
@@ -11,7 +11,7 @@ This consolidated `plan.md` is what goes through the final codex audit + approva
 
 **Verdict (1 line):** 1 PR, 4 logical phases, ~8 hours implementation + 1–2 CI iterations to converge. Single PR with a layered kill switch (repo Actions variable + workflow_dispatch input) — multi-PR staged rollout is an option (codex argued for it) but rejected for this scope; see [§14](#14-pr-shape-decision-1-pr-vs-3-prs).
 
-**Codex final-pass verdict (audit transcript at [`audit-codex.md`](./audit-codex.md)):** `approve-with-fixes`. All 6 findings addressed in this revision:
+**Codex final-pass verdict (audit transcript at [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/accelerator-server-ci/audit-codex.md)):** `approve-with-fixes`. All 6 findings addressed in this revision:
 - (high #1) §4.3 plumbing corrected — `PxeOffscreenDeps` extended to accept `factory`; aztec-runtime stays decoupled from extension alias.
 - (high #2) Rollback path now uses `vars.NULO_E2E_DISABLE_ACCELERATOR` repo variable (effective for PR runs) + retained `workflow_dispatch` input for one-off manual reruns.
 - (medium #3) `BB_BINARY_PATH` pinned to per-arch native ELF; Layer 1 probe relaxed to `bb_available == true` only.

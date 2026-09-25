@@ -2,7 +2,7 @@
 
 Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/plan.md).
 
-Supersedes [`plan.md`](plan.md). Incorporates [`audit-opus.md`](audit-opus.md) + [`audit-codex.md`](audit-codex.md) findings and the user's four answers on open questions:
+Supersedes [`plan.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/plan.md). Incorporates [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/audit-opus.md) + [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/faucet-add-token/audit-codex.md) findings and the user's four answers on open questions:
 
 - **Resolve token name/symbol in popup** before Allow/Deny → IN this PR (was filed as follow-up; promoted to BLOCKER per Codex H5 + Opus H4).
 - **No auto-fire on drip** → unchanged.

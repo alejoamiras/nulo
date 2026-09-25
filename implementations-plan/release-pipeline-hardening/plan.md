@@ -80,7 +80,7 @@ _Done 2026-07-03: runbook step 7 rewritten (stale claim gone, grep=0), 2 current
 - **I3 (corrected)** — the optional live-repro is a **production republish of v0.24.0**, not a no-op: `attach-assets` re-clobbers the shipped zips/SHASUMS + re-sets the release body + re-fires the deploy hooks (`release.yml:329-334`). No tag mutation, no marketplace (`publish_marketplaces=false`). Low real-risk (no consumers pin v0.24.0), but it mutates a shipped artifact — which is why the live-repro is optional, not the default gate.
 
 ## Audit verdicts
-- **Codex (xhigh, session `019f28d2…`): conditional approve.** Conditions folded: (High) dropped the `verify-live` change — leave it alone; (Low) added `!cancelled()`; (Medium) re-labeled the live-repro as a production republish + downgraded it to optional; (Medium) softened the mechanism attribution. I2 "unsafe" clarified as self-correcting. Full transcript: [audit-codex.md](audit-codex.md).
+- **Codex (xhigh, session `019f28d2…`): conditional approve.** Conditions folded: (High) dropped the `verify-live` change — leave it alone; (Low) added `!cancelled()`; (Medium) re-labeled the live-repro as a production republish + downgraded it to optional; (Medium) softened the mechanism attribution. I2 "unsafe" clarified as self-correcting. Full transcript: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/release-pipeline-hardening/audit-codex.md).
 
 ### Asks (resolved — no silent assumptions)
 - Scope → **Core + break-glass** (fetch-fallback excluded). Auto-unstick → **var ON now, code-default OFF**. Validation → **actionlint + live-repro dispatch**. All three resolved via Phase-0 `AskUserQuestion`.

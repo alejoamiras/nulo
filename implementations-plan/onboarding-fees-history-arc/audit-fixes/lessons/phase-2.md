@@ -52,7 +52,7 @@ without updating this whitelist, the raw kind never reaches the UI.
 ## What I cut vs the plan v1.2 draft
 
 Plan v1.2 §P2 mentioned a possible `console.warn` side effect when the default arm fires.
-**Cut per codex final-review Low** ([audit-codex-final.md:5](../audit-codex-final.md)) —
+**Cut per codex final-review Low** ([audit-codex-final.md:5](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex-final.md)) —
 `journal-state.ts` is a pure mapping utility today, the default → "Error" already closes
 the leak, and adding telemetry would expand the surface for no immediate value. The pure
 helper stays pure.
