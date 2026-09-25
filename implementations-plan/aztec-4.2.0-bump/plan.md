@@ -1,5 +1,7 @@
 # Plan v2: Bump Aztec packages → 4.2.0
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/aztec-4.2.0-bump/plan-v1.md).
+
 > Supersedes plan-v1. Consolidates codex (xhigh) + Plan-agent (Opus 4.7)
 > findings. Plan-v1's biggest gaps:
 > - Missed the bun-patch on `@aztec/accounts` (will silently drop)

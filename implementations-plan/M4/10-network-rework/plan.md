@@ -1,5 +1,7 @@
 # M4.10 — Network-model rework: split `Network` from `NetworkEndpoint` (v4, final, lean)
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/M4/10-network-rework/plan-v1.md), [plan-v2.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/M4/10-network-rework/plan-v2.md), [plan-v3.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/M4/10-network-rework/plan-v3.md).
+
 > **Status: PLANNING (v4, post-user-feedback, EXECUTION-READY pending approval).**
 >
 > **What changed v3 → v4**:

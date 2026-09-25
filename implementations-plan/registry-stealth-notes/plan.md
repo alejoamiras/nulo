@@ -1,5 +1,7 @@
 # Three-pronged refactor — plan v3 (final pre-execution)
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/registry-stealth-notes/plan-v1.md), [plan-v2.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/registry-stealth-notes/plan-v2.md).
+
 Date: 2026-04-29
 Supersedes: `plan-v2.md`
 Audit trail: `audit-codex.md` (R1), `audit-plan-agent.md` (R1), `audit-codex-r2.md`, `audit-plan-agent-r2.md`

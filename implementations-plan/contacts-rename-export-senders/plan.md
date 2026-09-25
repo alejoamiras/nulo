@@ -1,5 +1,7 @@
 # Contacts: rename + persist isSender across export/import — plan v2
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/contacts-rename-export-senders/plan-v1.md).
+
 Date: 2026-04-29
 Supersedes: `plan-v1.md`
 Audits: `audit-codex.md` (gpt-5.4 xhigh), `audit-plan-agent.md` (Plan agent — written to file by agent)

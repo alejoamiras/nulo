@@ -1,5 +1,7 @@
 # Pre-A11 UX cleanup arc — plan v4
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/pre-a11-ux-cleanup/plan-v1.md), [plan-v2.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/pre-a11-ux-cleanup/plan-v2.md), [plan-v3.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/pre-a11-ux-cleanup/plan-v3.md).
+
 Date: 2026-04-28
 Supersedes: `plan-v3.md` (kept for diff context)
 Audits: `audit-codex.md` (v1), `audit-agent.md` (v1), `audit-codex-v3.md` (v3 delta)

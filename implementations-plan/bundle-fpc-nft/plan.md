@@ -1,5 +1,7 @@
 # Plan v2: Bundle PrivateFPC + Wonderland NFT (note-parsing coverage)
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/bundle-fpc-nft/plan-v1.md).
+
 > Supersedes plan-v1. Consolidates findings from `audit-codex.md` and
 > `audit-plan-agent.md`. The change set itself is small; most v2 deltas
 > are about correct framing, sharper QA, and dropped wrong claims.

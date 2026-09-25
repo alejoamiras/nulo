@@ -1,250 +1,338 @@
-# Extend public-static fast path to internal `batchedViewSimulation`
+# Extend public-static fast path to internal `batchedViewSimulation` — v2
 
-## 1. Summary
+Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fast-path-internal-views/plan.md).
 
-PR #56 (deprecate-simulate-views) extracted `batchedViewSimulation` as the single internal entry point for view-shaped reads (balance-projector + `#computeGasBalances`). It preserves the original three-arm concurrency:
+Supersedes [plan.md](plan.md). Consolidates [audit-opus.md](audit-opus.md) + [audit-codex.md](audit-codex.md).
 
-| Arm | Calls | Path |
+## Audit verdicts on v1
+
+Both **needs-rework** with overlapping BLOCKERs:
+
+| | Opus | Codex |
 |---|---|---|
-| 1 | PUBLIC + PRIVATE tx-typed | bundled into one `ExecutionPayload` → `pxe.simulateTx({ simulatePublic: true })` |
-| 2 | UTILITY | launched eagerly → `pxe.executeUtility`, awaited serially after arm 1 |
+| Verdict | needs-rework | needs-rework |
+| Indexing math | BLOCKER (B2) | BLOCKER (B2 — `NestedProcessReturnValues`, not `Fr[][]`) |
+| Lock-sharing | BLOCKER (B1) | HIGH (H2) |
+| Filter-vs-prefix safety | (missed) | BLOCKER (B1 — must be leading prefix) |
+| Fallback orchestration | HIGH (H1 — masks contract bugs) | HIGH (H1 — inconsistent with allSettled) |
+| Block-header race | HIGH (H2) | MEDIUM (M1) |
+| Origin-equality after partition | HIGH (H3) | (missed) |
+| `executeUtility` lock | HIGH (H4) | HIGH (H2) |
+| `getNodeInfo` shared-fate | (missed) | HIGH (H4) |
+| `MAX_ENQUEUED_CALLS_PER_CALL` | (silently accepted 16) | HIGH (H3 — in 4.2.0 it's 32) |
+| Trust boundary breadth | MEDIUM (M4) | MEDIUM (M2 — also dApp-registered artifacts) |
+| `hideMsgSender` flag | (missed) | MEDIUM (M3) |
+| Kernel-skip wording | MEDIUM (M1) | (agrees with rewrite) |
 
-What it does **not** do: pull PUBLIC + `isStatic` calls out of the kernel and route them direct-to-node via upstream's `simulateViaNode` (PR 8c "public-static fast path"). That optimization is wired only into the dApp-facing `executeAztecSimulateTx` codepath (`service.ts:1576` → `fast-path.ts:runFastPath`). Internal balance reads still pay the kernel-setup cost AND compete for the global `ReadWriteGuard` in `pxe/service.ts:330-345` — the same lock prove holds.
+Combined: 2 BLOCKERs, 5 HIGHs, 5 MEDIUMs, 3 NITs. All adopted below except where explicitly defended in the REJECT section.
 
-This PR extends the helper with a **mixed-payload fast path** (user-locked: split prefix + remainder, run in parallel, merge per-index). UTILITY arm unchanged. No new public surface; transparent at the helper level. All current internal callers benefit automatically.
+---
 
-### Bundled scope
+## 1. Consolidated design (the real plan)
 
-- **Helper deps extension** — bundle `chainInfo` + `getContractName` lazily so the fast arm has what `simulateViaNode` needs without inflating the helper's `Deps` interface for callers that never hit the fast path.
-- **Shared block-header anchor util** — pull the `pxe.getSyncedBlockHeader() ?? node.getBlockHeader()` fallback out of `fast-path.ts` into a tiny `helpers/block-header-anchor.ts` so both helpers use the same anchor and we don't reinvent the fallback twice.
-- **Unit tests + skipIf integration test** — pin the 4-arm routing decision (was 3-arm), the chain-state anchor invariant, the silent-fallback path, and the parity contract via a real-sandbox `RUN_NETWORK_E2E` test that runs balance-projector through the helper twice (once forcing slow path, once allowing fast path) and asserts identical encoded values.
+### 1a. The two BLOCKER fixes change the shape
 
-Out of scope:
-- Microbenchmark harness (user-locked).
-- ConfigService flag (user-locked: transparent at helper level).
-- Touching the dApp `aztec_simulateTx` codepath (already optimized).
-- Optimizing the UTILITY arm (upstream `simulateViaNode` doesn't accept utility-typed calls; `pxe.executeUtility` is the only path).
-- Cross-batch block-header caching (potential follow-up; not load-bearing).
+**Fix B1 (codex)** — restrict optimization to leading prefix, not arbitrary filter:
 
-## 2. State of the world (recon)
+- Today, balance-projector enqueues `balance_of_private` (UTILITY) THEN `balance_of_public` (PUBLIC+isStatic) per token (`balance-projector.ts:110-122`). After leading-prefix-only filtering, the prefix is empty — no PUBLIC+isStatic at index 0 — and the optimization never triggers.
+- **Plan change**: rebuild the chunk enqueue as a **two-pass** loop: first pass over all balances enqueues every PUBLIC call; second pass enqueues every PRIVATE call. Result: chunk becomes `[pub_1, pub_2, …, pub_N, priv_1, priv_2, …, priv_N]` — the leading prefix is the full public-balance arm (up to 12 fast-eligible calls).
+- **Per-token swap is NOT equivalent.** A naive in-loop swap produces `[pub_1, priv_1, pub_2, priv_2, …]`, where the leading prefix is just `[pub_1]` — 1 fast call out of 24. The two-pass loop is load-bearing for the optimization to actually deliver.
+- This is also semantically more honest: the helper's contract is now identical to upstream's (`extractOptimizablePublicStaticCalls` — leading prefix of public-static).
 
-| Layer | Location | Status |
-|---|---|---|
-| Internal helper | `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts:84-187` | 3-arm: pxe.simulateTx (PUBLIC+PRIVATE) + executeUtility parallel arm |
-| Helper deps | `helpers/batched-view-simulation.ts:71-77` | `BatchedViewSimulationDeps`: pxe, node, account, contractResolver, logger |
-| Deps bundler | `helpers/get-view-simulation-deps.ts` | Resolves the 5 deps from service container |
-| Fast-path orchestrator (dApp side) | `execution/fast-path.ts:166-226` | Uses upstream `simulateViaNode` + `buildMergedSimulationResult`. Block-header fallback at `:182-187` |
-| Caller — dApp `aztec_simulateTx` | `execution/service.ts:1576` | Already on fast path. `getContractName: async () => undefined` (used only for error messages) |
-| Caller — balance projector | `services/token-balance/balance-projector.ts:130-145` | BATCH_SIZE=12 chunks → batchedViewSimulation. Mixed public+private+utility shapes |
-| Caller — gas balance public | `service.ts:1305-1343` | Single PUBLIC + isStatic call (`balance_of_public` on FeeJuice) |
-| Caller — gas balance private | `service.ts:1347-1370` | Single UTILITY call on PrivateFPC (`balance_of`) |
-| IPXE | `packages/aztec-runtime/src/pxe/ipxe.ts:49` | `getSyncedBlockHeader(): Promise<BlockHeader>` already on surface (used by fast-path.ts) |
-| Upstream | `@aztec/wallet-sdk@4.2.0/src/base-wallet/utils.ts:170-203` | `simulateViaNode` signature pinned. `MAX_ENQUEUED_CALLS_PER_CALL = 16` (constants.gen.ts) |
+**Fix B2 (both)** — unpack uses `NestedProcessReturnValues.values`, not raw `Fr[][]`:
 
-### Verified facts
+```ts
+// Existing slow-arm pattern (line 163) — model for fast arm:
+const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
 
-- `IPXE.getSyncedBlockHeader()` is on Nulo's PXE surface (no extension needed).
-- `MAX_ENQUEUED_CALLS_PER_CALL = 16` upstream. balance-projector chunks at `BATCH_SIZE = 12`. Under limit → no inner chunking required (simulateViaNode also batches itself).
-- Existing fast-path call site at `service.ts:1576` passes `getContractName: async () => undefined` — confirms no real name resolver needed (it's used only for upstream's error-message strings).
-- `simulateViaNode` returns `TxSimulationResult[]` (one per batch); each `result.publicOutput.publicReturnValues` is `Fr[][]` in original call order within the batch.
-- Upstream's `buildMergedSimulationResult` is **prefix-based** ("optimized calls are always a leading prefix, return values are simply concatenated"). Our helper unpacks per-index already → we don't need `buildMergedSimulationResult` at all. We index directly into both arms' results.
-
-### Why we don't reuse `runFastPath` wholesale
-
-`runFastPath` is shaped around dApp `aztec_simulateTx`'s output contract (returns `TxSimulationResult`). Our helper produces per-call `encoded[]` + `decoded[]`. Different output. We replicate the parallel-arm primitive (`simulateViaNode` + `pxe.simulateTx` in `Promise.all`) but unpack into our shape directly.
-
-What we DO share: the block-header anchor fallback. That moves into a new tiny `helpers/block-header-anchor.ts` and gets called by both `runFastPath` (refactor `fast-path.ts:182-187` to call it) and the new fast arm in `batchedViewSimulation`.
-
-## 3. Design — the 4-arm helper
-
-After classification (current loop at `batched-view-simulation.ts:122-131`), partition `txCalls` into two sub-batches:
-
-```
-txCalls →
-  fastTxCalls   = txCalls.filter(tuple => tuple[0].type === PUBLIC && tuple[0].isStatic)
-  slowTxCalls   = txCalls.filter(tuple => !(tuple[0].type === PUBLIC && tuple[0].isStatic))
+// Fast arm: mirror the same shape.
+const fastReturns: NestedProcessReturnValues[] = fastResults.flatMap(r => r.publicOutput?.publicReturnValues ?? [])
+// ... for each fast tuple at fast-arm slot k:
+const values = fastReturns[k]?.values ?? []
+encoded[originalIndex] = values
 ```
 
-Then dispatch:
+Plus dual-indexing fix — partition produces two index spaces (fast: 0..N-1; slow: re-numbered publicCallIndex/privateCallIndex). Hoist `flatMap` out of the per-tuple loop.
+
+### 1b. Updated 4-arm orchestration (corrects opus H4, codex H2)
 
 ```
-   ┌── fastTxCalls.length > 0  ──→ simulateViaNode(node, ..., blockHeader, ...)
-   │                                                                          ├── Promise.all
-   ├── slowTxCalls.length > 0  ──→ account.buildTxExecutionRequest + pxe.simulateTx
-   │
-   └── utility[]                ──→ already launched eagerly, awaited last (unchanged)
+1. Classify into utility[] + leadingPrefixFastCalls[] + slowTxCalls[]
+   (Important: fast partition is LEADING PREFIX of PUBLIC+isStatic, not arbitrary filter.)
+
+2. If leadingPrefixFastCalls.length > 0:
+     a. await getBlockHeaderAnchor(pxe, node)  ← READ lock, must complete before utility writes queue
+        If undefined → silent FULL fallback (drop fast arm, put all calls through slow path).
+     b. Eagerly launch utility[] AFTER the anchor read returns.
+     c. Promise.allSettled([
+          simulateViaNode(node, leadingPrefixFastCalls, ..., blockHeader, ...),
+          slowTxCalls.length > 0 ? buildSlowArm() : Promise.resolve(null)
+        ])
+     d. Branch on fast-arm settlement:
+          - fulfilled: unpack fast results into encoded[]/decoded[]. If slow-arm also fulfilled, unpack it too.
+          - rejected with SimulationError: propagate (real contract revert).
+          - rejected with other Error: WARN-log with (chainId, contract, selector); discard slow-arm
+            result; build a new payload from leadingPrefixFastCalls + slowTxCalls and run a full
+            standard pxe.simulateTx. Counter incremented (test-pinned to NOT fire on happy path).
+3. Else (no fast prefix): unchanged original 3-arm path.
+4. Utility arm: await serially as today (note in JSDoc that this is sequential with slow arm due to
+   shared withPxeWrite lock — corrects PR #56's misleading "in parallel" comment).
 ```
 
-Unpack per-tuple `(originalCall, originalIndex, slotIndex, returnTypes)` into `encoded[originalIndex]` + `decoded[originalIndex]` — same shape as today, just sourcing from a different arm based on the tuple's classification.
+Anchor-before-utility ordering (codex H2) is load-bearing: if utility is queued first (writer), the anchor read waits behind it on `ReadWriteGuard`.
 
-### Fast arm prerequisites
+**Rerun invariant (codex Phase-5 medium)**: a full rerun on fast-arm generic-Error rejection **does NOT recreate or re-await utility promises**. Utility was launched exactly once before the arm dispatch; the original promise array stays intact and is awaited at the end. The rerun rebuilds only the tx payload (`leadingPrefixFastCalls ++ slow`) and re-invokes `pxe.simulateTx` against that combined payload. Pinned by a unit test that asserts: on fast-arm generic-Error path, utility promise creation count === 1 (not 2).
 
-`simulateViaNode(node, calls, fromAddr, chainInfo, gasSettings, blockHeader, skipFeeEnforcement, getContractName)`:
+**SimulationError + utility caveat (codex Phase-5 medium)**: if the fast arm rejects with `SimulationError` and we propagate, launched utility promises are never awaited. This matches today's pre-PR behavior (`batched-view-simulation.ts:136` — any throw before the utility-await loop leaves them un-awaited). Not new, but documented in JSDoc to prevent future "fix" attempts that introduce different semantics.
 
-| Param | Source | Notes |
-|---|---|---|
-| `node` | `deps.node` | already in deps |
-| `calls` | `fastTxCalls.map(t => t[0])` | already-classified FunctionCall instances |
-| `fromAddr` | `deps.account.address` | already in deps |
-| `chainInfo` | `await node.getNodeInfo()` → `{ chainId: Fr(l1ChainId), version: Fr(rollupVersion) }` | cheap, fetched once per fast-arm invocation. Could be hoisted to deps later; lazy for now |
-| `gasSettings` | `await completeFeeOptions({ node, gasSettings: undefined, forEstimation: true })` | mirrors fast-path.ts:190-194. For views, no opts.fee → undefined → defaults |
-| `blockHeader` | `await getBlockHeaderAnchor(deps.pxe, deps.node)` | shared util (extracted from fast-path.ts) |
-| `skipFeeEnforcement` | `true` | hardcoded for views, mirrors existing simulateTx call at `batched-view-simulation.ts:150` |
-| `getContractName` | `async () => undefined` | mirrors existing service.ts:1576 use; upstream only uses for error-message strings |
+### 1c. `node.getNodeInfo()` propagates (codex H4)
 
-### Failure modes + fallback policy
+The existing `node.getNodeInfo()` call is shared-fate with the slow arm (`account.buildTxExecutionRequest` uses it transitively). Don't catch — let it propagate. Mirror `fast-path.ts:170`. The silent-fallback catch is narrowed to: `getBlockHeaderAnchor`, `completeFeeOptions`, and `simulateViaNode` non-SimulationError throws only.
 
-1. **Block-header anchor missing** (both `pxe.getSyncedBlockHeader` and `node.getBlockHeader` throw/return null) → **silent full fallback**: move all fastTxCalls back into slowTxCalls and run the original 3-arm path. User sees same correctness, slightly slower refresh.
-2. **`completeFeeOptions` or `node.getNodeInfo` throws** → silent full fallback (same as #1).
-3. **`simulateViaNode` throws `SimulationError`** → **propagate**. This is a real contract revert — the standard arm would produce the same error 3-5s later. Don't waste time retrying.
-4. **`simulateViaNode` throws non-`SimulationError`** (network blip, RPC mismatch, etc.) → silent full fallback (same as #1).
+### 1d. Realistic concurrency story (opus B1 + upstream SerialQueue finding)
 
-Fallback path implementation: a single try/catch around the fast-arm prep + dispatch. On catch, re-add fastTxCalls to slowTxCalls and continue with the original simulateTx flow. Logged via `logger?.log(LOG_SOURCE, LogLevel.Warn, ...)` so we can spot regressions.
+The earlier "POSITIVE PXE lock-starvation reduction" claim was overstated. Two layers of serialization exist:
 
-### Concurrency invariant preserved
+1. **Nulo's outer layer**: `withPxeRead` / `withPxeWrite` via `ReadWriteGuard` (`packages/aztec-runtime/src/pxe/service.ts:87` chainGuards).
+2. **Upstream PXE's inner layer**: a single `SerialQueue` (`@aztec/pxe@4.2.0/src/pxe.ts:169, 246`) that EVERY call goes through (`executeUtility`, `simulateTx`, `getSyncedBlockHeader`, `proveTx`, ...). Upstream comment (`pxe.ts:1058-1060`): *"we disable concurrent executions since those might execute oracles which read and write to the PXE stores (e.g. to the capsules), and we need to prevent concurrent runs from interfering with one another."* Tracked upstream as Aztec issue #12636.
 
-Today: utility[] launches eagerly before simulateTx (lines 117-131), then simulateTx awaits (149-152), then utility[] awaits serially (176-184).
+Implication: **any wallet-layer lock arrangement is moot for inter-method concurrency**. Even if we downgraded `executeUtility` to `withPxeRead`, upstream's SerialQueue would still serialize it with `simulateTx`. Don't try.
 
-After: utility[] launches eagerly before BOTH simulateTx AND simulateViaNode. Both tx arms run in `Promise.all` parallel. Utility awaits serially after both. The pinned `parallel-launch + serial-await` test invariant (`batched-view-simulation.test.ts` "concurrency invariant" case) needs an additional assertion: simulateViaNode and simulateTx must both have started before any utility await completes.
+Corrected framing — the real concurrency win comes from **the fast arm bypassing PXE entirely** (it calls `node.simulatePublicCalls`):
 
-## 4. File-by-file changes
+| Batch shape | Fast arm | Slow arm | Net vs today |
+|---|---|---|---|
+| Pure PUBLIC+isStatic (e.g. gas-balance) | direct-to-node, **bypasses upstream PXE queue** | empty | **Big win** — no PXE queue position required at all |
+| Public-static prefix + private/non-static tail | direct-to-node (TRUE parallel work) | still queues behind upstream SerialQueue for slow tail | **Small win** — fast arm overlaps with slow arm's queue-wait + work |
+| No public-static prefix (e.g. balance-projector pre-reorder, or all-private chunks) | not triggered | unchanged | Neutral (zero overhead — early-return before any prep) |
+
+The bundled balance-projector two-pass enqueue (1a above) is what unlocks the mixed-batch case for balance refresh.
+
+**JSDoc requirement**: helper docstring must document the upstream SerialQueue so future contributors don't attempt the "downgrade executeUtility to withPxeRead" optimization (it's unsafe per upstream's own comment, AND moot per the queue). Reference: Aztec issue #12636.
+
+### 1e. Honest block-header race documentation (opus H2, codex M1)
+
+Drop the "same block" wording. Replace in helper JSDoc + plan §6:
+
+> The fast arm pins to a `BlockHeader` snapshot via `getSyncedBlockHeader`. The slow arm has no `blockHeader` parameter; it uses PXE's internal synced state at the moment `pxe.simulateTx` runs, which may have advanced by 1+ blocks during the parallel window. For balance reads this race is benign and matches the existing inter-chunk skew (`balance-projector` already accepts different chunks observing different blocks). Pinned by a unit test asserting we DO NOT claim atomicity.
+
+### 1f. `hideMsgSender` is silently ignored by fast arm (codex M3)
+
+`simulateViaNode` builds `PublicCallRequest` without honoring `hideMsgSender` (`utils.ts:93`). The helper today preserves the flag for slow-arm calls (`batched-view-simulation.ts:235, 278`). After this PR, fast-eligible calls drop the flag.
+
+For our two internal callers, `msg.sender` is not load-bearing for PUBLIC+isStatic balance reads (the static keyword forbids reading any per-caller state in a way that would matter). But the helper's contract changes:
+
+- **New contract**: "for fast-eligible (PUBLIC+isStatic) calls, `hideSender` / `hideMsgSender` is ignored." Documented in JSDoc.
+- **Runtime guard**: by the time partition runs, calls are already constructed `FunctionCall` instances (`batched-view-simulation.ts:230, 273`). Check `FunctionCall.hideMsgSender === true` (the constructor field, not the raw `CallAction.hideSender` or `EncodedCallAction.hideMsgSender` input fields — those were already collapsed into the FunctionCall during enqueue). If true on a PUBLIC+isStatic call, the partition breaks the prefix at that point. Conservative: never silently drop the caller's flag.
+- Test pin: construct a FunctionCall with `hideMsgSender: true && type: PUBLIC && isStatic: true` → partition routes it to slow arm, fast arm receives prefix up to that point only.
+
+### 1g. Trust boundary acknowledgement (codex M2, opus M4)
+
+Threat model update: artifacts come from `contractResolver.resolveArtifacts`, which can include dApp-supplied artifacts registered via the `registerContract` path (`service.ts:1474` — accepts dApp artifact when class-id matches). A malicious dApp could register a contract whose ABI sets `isStatic: true` on a state-mutating Noir function. The fast arm would then execute that function via node-direct simulation, bypassing the entrypoint authz hop.
+
+Impact: limited to balance display. The fast arm returns view values; it cannot produce a signed tx. User sees wrong balance on UI but no on-chain effect. Mitigation: explicit acknowledgement in §6; not gated on this PR.
+
+### 1h. Kernel-skip wording correction (opus M1)
+
+`simulateViaNode` does run the kernel — it constructs a synthetic `PrivateCircuitPublicInputs` with an empty private trace (`utils.ts:103-127`). What it skips is **real private execution + the wallet entrypoint hop**. Updated wording everywhere ("entrypoint-skip" not "kernel-skip").
+
+### 1i. `MAX_ENQUEUED_CALLS_PER_CALL` correction (codex H3)
+
+The bun-cache constants module that ships with `@aztec/wallet-sdk@4.2.0` is `@aztec/constants@4.2.0`, which exports `MAX_ENQUEUED_CALLS_PER_CALL = 32` (`constants.gen.ts:50`). My v1 fact-check read the wrong cached version (`@aztec/constants@1.2.1`). Conclusion unchanged: balance-projector's `BATCH_SIZE = 12` is comfortably under 32.
+
+---
+
+## 2. Updated file-by-file
 
 ### NEW
 
 **`packages/extension/src/wallet/services/execution/helpers/block-header-anchor.ts`** (~25 lines)
+
 ```ts
+/** PXE-synced header, falling back to node head, returning undefined on
+ *  any failure. Callers treat undefined as "no anchor — fall back to
+ *  standard path." */
 export async function getBlockHeaderAnchor(pxe: IPXE, node: AztecNode): Promise<BlockHeader | undefined> {
   try {
     return await pxe.getSyncedBlockHeader()
   } catch {
-    return (await node.getBlockHeader()) ?? undefined
+    try {
+      return (await node.getBlockHeader()) ?? undefined
+    } catch {
+      return undefined
+    }
   }
 }
 ```
-Pure. No service-container. Trivially unit-testable.
 
-**`packages/extension/src/wallet/services/execution/helpers/block-header-anchor.test.ts`** (~6 cases)
-- PXE succeeds → its header returned, node not called
-- PXE throws → node fallback called
-- PXE throws + node returns null → returns undefined
-- PXE throws + node throws → throws (caller treats as "no anchor → fall back")
-  - Actually: spec for the helper is "returns undefined on no anchor available". Throw from node should be caught too and return undefined. Pinned in test.
+Returns `undefined` (not throws) on double-failure — pins opus N1 ambiguity.
+
+**`helpers/block-header-anchor.test.ts`** — 4 cases (PXE succeeds; PXE throws → node returns header; PXE throws + node returns null → undefined; PXE throws + node throws → undefined).
 
 ### MODIFIED
 
-**`packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`** (+~80 lines net, mostly inside the existing function body)
-- Imports: `simulateViaNode` from `@aztec/wallet-sdk/base-wallet`, `completeFeeOptions` from `@nulo/aztec-runtime/account`, `getBlockHeaderAnchor` from `./block-header-anchor`, types: `ChainInfo`, `BlockHeader`, `GasSettings`.
-- After current classification loop (post line 131): partition `txCalls` into `fastTxCalls` + `slowTxCalls`.
-- New inner async block for the fast arm:
-  - prep: `getBlockHeaderAnchor` → `node.getNodeInfo` → `completeFeeOptions` (all under one try/catch)
-  - dispatch: `simulateViaNode(...)`
-  - on any non-SimulationError throw: log + re-add fastTxCalls to slowTxCalls, mark fast-arm "skipped", continue
-- Promise.all([fastArm, slowArm]) where:
-  - fastArm = `simulateViaNode` promise OR `Promise.resolve([])` if fastTxCalls empty or fallback triggered
-  - slowArm = current simulateTx invocation OR `Promise.resolve(null)` if slowTxCalls empty
-- Unpack:
-  - For each fastTxCall tuple: `encoded[i] = fastResults.flatMap(r => r.publicOutput?.publicReturnValues ?? [])[fastSlotIndex]`
-  - For each slowTxCall tuple: existing public/private return unpacking (lines 154-170), indexed against slow-arm-only slot indices
-- UTILITY arm + decode loop (lines 176-184): unchanged.
-- Docstring rewrite: 3-arm → 4-arm. Update concurrency-invariant statement.
+**`packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`**
 
-**`packages/extension/src/wallet/services/execution/fast-path.ts`** (refactor only, no behavior change)
-- Replace inline block-header fallback at `:182-187` with `await getBlockHeaderAnchor(pxe, node)`. Same control flow (null → return null caller-side). Reduces fast-path.ts by ~6 lines and pins the shared anchor.
+Sequence inside the helper (rough sketch — actual structure follows existing code style):
+
+1. Existing: contract resolution + registration + ensureRegistered (unchanged).
+2. Existing: classify into `txCalls` and `utility[]` queues — BUT defer launching utility until after step 4.
+3. NEW: scan `txCalls` for a leading prefix of `FunctionCall` instances satisfying `fc.type === FunctionType.PUBLIC && fc.isStatic === true && fc.hideMsgSender !== true`. Partition into `leadingFast` (the prefix) + `slow` (the rest). Re-number publicCallIndex/privateCallIndex separately for slow only. (`FunctionCall` only carries `hideMsgSender` — the raw `CallAction.hideSender` / `EncodedCallAction.hideMsgSender` input fields were already collapsed during `enqueueCall` at `:230, 273`.)
+4. NEW: if `leadingFast.length > 0`:
+   - `await getBlockHeaderAnchor(pxe, node)` — if undefined → unset partition (everything goes slow).
+5. Launch `utility[]` eagerly (after anchor read, before tx-arm dispatch).
+6. NEW: `Promise.allSettled([fastArm, slowArm])` where:
+   - `fastArm = leadingFast.length > 0 ? simulateViaNode(...) : Promise.resolve([])`
+   - `slowArm = slow.length > 0 ? doStandardArm(slow) : Promise.resolve(null)`
+7. Branch on fast-arm settlement (per §1b orchestration).
+8. Unpack fast results: `fastReturns[k]?.values ?? []` per fast tuple (re-indexed against fastReturns).
+9. Unpack slow results: existing pattern (lines 154-170), using re-numbered slow-arm slot indices.
+10. Existing: await utility[] serially, decode each.
+
+Helper JSDoc rewritten:
+- 3-arm → 4-arm shape diagram
+- Concurrency invariant: REMOVES the misleading "in parallel kernel-side" claim (executeUtility shares withPxeWrite + the upstream PXE `SerialQueue`). New phrasing: "Utility calls are launched eagerly so the JS-side `Promise` is created before the tx-arm await, but actual execution is serialized at two layers: Nulo's outer `withPxeWrite` and upstream PXE's `SerialQueue` (`@aztec/pxe@4.2.0/src/pxe.ts:328-336`). Tracked upstream as Aztec issue #12636. Do NOT downgrade the outer lock to `withPxeRead` — upstream's queue would serialize regardless AND utility calls *can* mutate PXE state per the upstream comment."
+- Block-header race acknowledgement (per §1e).
+- `hideMsgSender` contract change (per §1f).
+- "Entrypoint-skip" not "kernel-skip" (per §1h).
+
+**`packages/extension/src/wallet/services/token-balance/balance-projector.ts`**
+
+Replace the per-token interleaved enqueue at `:100-122` with a **two-pass loop over `balances`**:
+
+```ts
+// Pass 1: enqueue every PUBLIC call across all balances.
+for (let i = 0; i < balances.length; i++) {
+  const token = await this.tokens.getTokenRaw(balances[i].token)
+  if (token.balanceOfPublicFn) {
+    const fn = BalanceOfPublicFn.new(token.balanceOfPublicFn.name, token.balanceOfPublicFn.impl)
+    await this.enqueueCall(calls, fn, token, account, i, /*isPrivate*/ false)
+  } else {
+    perBalance[balances[i].id].publicBalance = "0"
+  }
+}
+// Pass 2: enqueue every PRIVATE call across all balances.
+for (let i = 0; i < balances.length; i++) {
+  const token = await this.tokens.getTokenRaw(balances[i].token)
+  if (token.balanceOfPrivateFn) {
+    const fn = BalanceOfPrivateFn.new(token.balanceOfPrivateFn.name, token.balanceOfPrivateFn.impl)
+    await this.enqueueCall(calls, fn, token, account, i, /*isPrivate*/ true)
+  } else {
+    perBalance[balances[i].id].privateBalance = "0"
+  }
+}
+```
+
+Result: chunk is `[pub_0, pub_1, …, pub_{N-1}, priv_0, priv_1, …, priv_{N-1}]`. Leading PUBLIC+isStatic prefix = full public arm, fast-path triggers cleanly.
+
+Note: `perBalance` initialization (`:100-107`) needs to run before either pass — hoist that out into its own first loop. The `getTokenRaw` call gets executed twice per token; cache the lookups in a small `Map<balanceId, Token>` to avoid the duplicate fetch.
+
+Test: balance-projector.test.ts — add an explicit ordering test that asserts the global enqueue order across a 3-token fixture (all PUBLIC enqueued before any PRIVATE), not just per-token.
+
+**`packages/extension/src/wallet/services/execution/fast-path.ts`**
+
+Refactor `:182-187` to call `getBlockHeaderAnchor(pxe, node)`. Behavior-equivalent.
 
 ### NEW tests
 
-**`helpers/batched-view-simulation.test.ts`** — extend (current ~13 cases, add ~8 more):
-1. Pure PUBLIC+isStatic batch → simulateViaNode called once, pxe.simulateTx NOT called.
-2. Pure PRIVATE batch → pxe.simulateTx called, simulateViaNode NOT called.
-3. Mixed PUBLIC+isStatic + PRIVATE batch → both called in parallel (assert Promise.all by ordering: spy returns deferred promises, assert both spies invoked before either resolves).
-4. PUBLIC-non-static call → goes to slow arm, simulateViaNode NOT called.
-5. Mixed batch with UTILITY → utility launched eagerly BEFORE both tx arms, utility awaited LAST.
-6. Block-header anchor missing → silent full fallback to standard simulateTx. simulateViaNode never called.
-7. simulateViaNode throws SimulationError → error propagates, standard arm result discarded.
-8. simulateViaNode throws generic Error → silent fallback to standard, fastTxCalls run through simulateTx instead. Warning logged.
-9. completeFeeOptions throws → silent fallback (pinned at the prep step, distinct from sim-arm throw).
-10. Empty batch → no calls (existing test, just re-pin under new code path).
+**`helpers/batched-view-simulation.test.ts`** — extend (current ~13, add ~10 more, total ~23):
 
-**`helpers/batched-view-simulation.integration.test.ts`** — convert one `test.todo` to a real `describe.skipIf(!process.env.RUN_NETWORK_E2E)` case:
-- Deploy a Token contract on the sandbox.
-- Mint to two accounts, set distinct balances.
-- Call batchedViewSimulation with [balance_of_public(A), balance_of_public(B)] — both should route fast.
-- Assert encoded values match what `pxe.simulateTx` would return (run the same calls through `pxe.simulateTx` directly as control, compare Fr arrays).
-- Add a second invocation forcing a private call into the batch (balance_of_private as UTILITY); assert public arm still routes fast, utility routes via executeUtility, encoded indices line up.
+1. Leading prefix of PUBLIC+isStatic only → simulateViaNode called once, simulateTx NOT called.
+2. Mixed: 3 PUBLIC+isStatic prefix + 2 PRIVATE → both arms in parallel, both contribute to encoded[].
+3. Mixed: PRIVATE first + PUBLIC+isStatic after → prefix is empty, fast arm NOT triggered, today's path runs unchanged.
+4. Mixed: PUBLIC+isStatic + PUBLIC-non-static + more PUBLIC+isStatic → prefix breaks at non-static, fast arm gets only the first run.
+5. `hideSender: true` on a PUBLIC+isStatic call → breaks the prefix, that call goes slow (preserve flag honor).
+6. All-utility batch → no tx-arm, no fast-arm, unchanged.
+7. All-public-static + utility queued → fast arm runs, slow arm null, utility launches after anchor read.
+8. Block-header anchor missing → silent FULL fallback. simulateViaNode never called. Fast tuples go through slow arm.
+9. simulateViaNode throws SimulationError → propagates. Slow-arm result discarded.
+10. simulateViaNode throws generic Error → WARN logged with (contract, selector). Full rerun through standard `pxe.simulateTx`. Counter pinned to NOT increment on happy paths.
+11. completeFeeOptions throws → silent FULL fallback (pre-dispatch failure).
+12. node.getNodeInfo throws → propagates (shared-fate, no catch).
+13. Per-tuple unpack correctness on mixed 3-public-static + 2-private batch → assert encoded[i] matches expected per i.
+14. Origin-equality branch after partitioning to private-only slow payload → assert correct nested-shape branch (opus H3 pin).
+15. Concurrency ordering: anchor read completes BEFORE utility launch BEFORE fast/slow arm dispatch (test via Promise ordering + spy timeline).
+16. Hoist check: flatMap called once, not per fast tuple (assert via spy call count).
+17. Rerun invariant: on fast-arm generic-Error path, utility promise creation count === 1 (NOT re-launched during the full rerun).
+18. (concurrency test #15 implementation note) Implement #15 with **deferred promises** (`let resolveFast: (v: any) => void; const fastPromise = new Promise(r => resolveFast = r)`) and **spy timelines** (per-spy `lastCallTime: Date.now()` or push to a global order array). Do NOT use `setTimeout`/`vi.useFakeTimers` or rely on natural settlement ordering — those produce flaky tests. The assertion is over invocation order, not wall-clock or settlement timing.
 
-**`helpers/block-header-anchor.test.ts`** — net-new, 4 cases as listed above.
+**`helpers/batched-view-simulation.integration.test.ts`** — 2 cases gated on `RUN_NETWORK_E2E`:
 
-## 5. Test plan summary
+- Pure-public-static (gas-balance shape) on a real sandbox; assert encoded values match what `pxe.simulateTx` would return for the same call. Compare `Fr` arrays only, NOT gas/stats (codex REJECT — gas WILL differ).
+- Mixed (public-static prefix + private tail) on a real sandbox; same parity assertion.
+
+**`helpers/block-header-anchor.test.ts`** — 4 cases as listed.
+
+**`token-balance/balance-projector.test.ts`** — pin the **global** two-pass enqueue order across multiple tokens. Fixture: 3 tokens each with both PUBLIC + PRIVATE balance fns. Assert: dispatched `calls` array contains all 3 PUBLIC calls (indices 0, 1, 2) BEFORE any PRIVATE calls (indices 3, 4, 5). Existing per-token mapping assertions (`balance-projector.test.ts:156`) continue to pass — they don't assume interleaving order.
+
+---
+
+## 3. Updated test plan summary
 
 | Layer | Where | What |
 |---|---|---|
-| Unit — helper routing | `batched-view-simulation.test.ts` | +8 cases pinning 4-arm decision, fallback paths, concurrency |
-| Unit — anchor util | `block-header-anchor.test.ts` | 4 cases pinning PXE → node fallback semantics |
-| Integration — real sandbox | `batched-view-simulation.integration.test.ts` | 2 cases (pure-public-static parity + mixed parity) gated on `RUN_NETWORK_E2E` |
-| Existing | `fast-path.test.ts` | should pass unchanged after the refactor to use `getBlockHeaderAnchor` |
-| Existing | `balance-projector.test.ts` | should pass unchanged (helper is transparent — no shape change) |
-| E2E | `tests/e2e/` smoke + network suites | should pass unchanged. Balance refresh and gas-balance display are exercised; values must match pre-PR |
+| Unit — helper routing | `batched-view-simulation.test.ts` | +10 cases (prefix vs filter, hideSender, fallback paths, concurrency ordering, indexing correctness, origin-equality) |
+| Unit — anchor util | `block-header-anchor.test.ts` | 4 cases, undefined-on-double-failure |
+| Unit — projector enqueue | `balance-projector.test.ts` | pin: public-before-private enqueue order |
+| Integration — sandbox parity | `batched-view-simulation.integration.test.ts` | 2 RUN_NETWORK_E2E cases (pure-static + mixed); encoded/decoded comparison only |
+| Existing | `fast-path.test.ts` | should pass after anchor refactor (no behavior change) |
+| E2E | `tests/e2e/` smoke + network | should pass unchanged (balance display values unchanged) |
 
-Run gates locally: `bun run audit:vue` + `bun run --filter '@nulo/extension' test:components` + `RUN_NETWORK_E2E=1 bun --filter '@nulo/extension' test src/wallet/services/execution/helpers/batched-view-simulation.integration.test.ts`.
+Gates: `bun run audit:vue` + `bun run --filter '@nulo/extension' test:components` + `RUN_NETWORK_E2E=1 bun --filter '@nulo/extension' test ...integration.test.ts`.
 
-## 6. Security & Adversarial Considerations
+---
 
-Drawn from the global checklist (CLAUDE.md "Security & Adversarial mindset").
-
-### Threat model
-
-- **Helper is internal-only.** No new RPC surface, no new dApp interaction. Callers are balance-projector (token-list-derived, user-curated) and `#computeGasBalances` (fee-juice + FPC, both system-known).
-- **Inputs**: contract address + method/selector + arg arrays, all pre-resolved by callers from the user's own token list or system constants.
-- **Outputs**: balance integers consumed by UI display + gas-affordability checks.
-- **Trust boundary**: the helper trusts artifacts returned by `contractResolver.resolveArtifacts` and the `FunctionType + isStatic` classification on each `FunctionAbi`.
-
-### Risks + mitigations
+## 4. Security & Adversarial — consolidated
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **Chain-state divergence between fast and slow arms** | MEDIUM | Both arms anchor at the same `BlockHeader` (fast arm explicitly via `simulateViaNode`'s `blockHeader` param; slow arm via PXE's synced state, which `getSyncedBlockHeader` returns). Small race window if PXE syncs between calls — same window upstream's `BaseWallet.simulateTx` accepts. Document in helper docstring. |
-| **Class-rehydration regression** (PR 8c hit this twice — `s.isPublicStatic is not a function`) | LOW | We're SW-internal, no port crossing. Calls arrive as already-constructed `FunctionCall` instances (built inside `enqueueCall` at `:207-243`). Add explicit unit case: assert `fc.isStatic === true && fc.type === FunctionType.PUBLIC` holds on the FunctionCall instances we route to fast arm. |
-| **Misclassification → state mutation routed to fast path** | LOW | Noir compiler enforces `static` keyword at compile time. A PUBLIC+isStatic Noir function provably cannot mutate state. If we trust the artifact (we do — same trust the slow path has), classification is sound. |
-| **`getContractName` callback** | NIT | Hardcoded `async () => undefined`, identical to fast-path.ts:1576 use. Only consumed by upstream for error-message string interpolation. Not a security boundary. |
-| **`gasSettings` injection** | LOW | `completeFeeOptions({ gasSettings: undefined, forEstimation: true })` — no caller-controlled input. For dApp `aztec_simulateTx` the dApp can influence; for our helper, hardcoded path. Safe. |
-| **PXE write-lock starvation reduction** | POSITIVE | Fast-path balance reads bypass `pxe/service.ts:330-345`'s `ReadWriteGuard`. During an in-flight prove, balance refresh no longer blocks. Net security/UX win. |
-| **Empty / malformed fastResults** | LOW | Guard the unpack: if `fastResults.flatMap(...).length !== fastTxCalls.length` → log error and silent-fallback the affected indices to undefined (matches today's behavior on decode failure at `:165-169`). Pin in unit test. |
-| **MAX_ENQUEUED_CALLS_PER_CALL = 16 vs balance-projector BATCH_SIZE = 12** | NIT | Under limit. `simulateViaNode` auto-chunks if exceeded. No action needed; document in plan as "verified". |
-| **Supply chain** | NIT | Uses `@aztec/wallet-sdk@4.2.0` (`simulateViaNode`) — already in `bun.lock`, already pinned, already used by fast-path.ts. No new dependency. |
-| **Least-privilege bypass via kernel skip** | LOW | Fast path bypasses kernel — kernel-side authz (msg.sender, authwits) isn't executed. For `isStatic` reads this is correct: static functions can't read or assert msg.sender meaningfully. Slow arm still runs kernel for all non-static calls. |
+| Indexing bug silently swaps balances | (was BLOCKER, FIXED) | Re-numbered indices + unit test #13 |
+| Arbitrary filter changes execution semantics | (was BLOCKER, FIXED) | Leading-prefix-only + projector reorder |
+| Mixed batches don't bypass write lock | KNOWN | Documented in §1d. Win is via fast-arm parallel work, not slow-arm speedup |
+| Fast/slow arm chain-state race | LOW | Documented (§1e). Inter-chunk skew already exists |
+| `hideMsgSender` flag silently dropped | LOW | Routed to slow arm if set (§1f); runtime guard + test pin |
+| Malicious dApp-registered artifact lies about isStatic | LOW | Acknowledged (§1g). View-only impact, no on-chain effect |
+| Silent fallback masks real contract bugs | (was HIGH, FIXED) | WARN log + counter, distinguishes infra from contract |
+| Fallback orchestration with allSettled | (was HIGH, FIXED) | Explicit second-pass rerun on fast-arm reject (§1b) |
+| `executeUtility` shares write lock | KNOWN | JSDoc corrected (§1d); test pinning kept honest |
+| Supply-chain | NIT | No new deps. `simulateViaNode` already in @aztec/wallet-sdk@4.2.0 |
 
 ### Adversarial framing
 
-- **"What would an attacker target?"** — None of the callers expose user-controlled contract addresses to dApp surface. balance-projector reads only from the user's curated token list (user added these). gas-balance reads only system-known addresses (FeeJuice canonical + FPC discovered via FpcService).
-- **"What are we trusting that we shouldn't?"** — `simulateViaNode` correctness (upstream wallet-sdk); artifact `isStatic` flag honesty (Noir compiler). Both are well-trodden trust boundaries that the slow path already trusts.
-- **"Where are crypto/least-privilege weaknesses?"** — None introduced. Crypto unchanged. Least-privilege strictly improved (fast arm bypasses kernel for reads that don't need it).
-- **"Supply-chain"** — no new deps. Verifies 7-day min-age policy unchanged.
+- **Attack surface**: callers (balance-projector + gas-balance) are SW-internal. The dApp-supplied artifact path is the one non-trivial trust boundary (§1g) — limited impact.
+- **What we're trusting**: Noir `static` keyword enforcement (compiler), `simulateViaNode` correctness (upstream), artifact authenticity (PXE contract registry). All boundaries the slow path already trusts.
+- **Least-privilege**: fast path skips the wallet entrypoint hop for public-static reads (correct — static functions can't authenticate). Slow path runs the entrypoint for any non-static call.
+- **Supply-chain**: no new dep; relies on `@aztec/wallet-sdk@4.2.0`'s existing exports.
 
-## 7. Open questions
+---
 
-1. **Caching block-header across sub-batches?** balance-projector chunks 50-token list into 5×12 batches; each currently re-fetches `getSyncedBlockHeader`. Cheap call but 5 round-trips. Worth a single-request cache passed via deps? **Recommended**: skip in this PR; if profiling shows it dominates, follow up.
-2. **Hoist `chainInfo` to `getViewSimulationDeps`?** Same question — one call vs N. Same answer: skip for v1, follow up if measurable.
-3. **Should `fast-path.ts:runFastPath` be refactored to also use the partition-style?** No — runFastPath's contract is "leading prefix only" because upstream's `buildMergedSimulationResult` is prefix-based. Our helper has its own unpack so we can be free-form. Different contracts. Leave runFastPath alone except for the anchor refactor.
+## 5. Rejected audit findings (defended)
 
-## 8. Rollout
+- **Codex's "leading-prefix only" stays, but balance-projector reorders to make it triggerable** (not "abandon the optimization for the generic helper"). The leading-prefix discipline + projector reorder is the cleanest design.
+- **Opus's recommendation to refactor `executeUtility` to `withPxeRead`** — **rejected outright** after verifying upstream. Upstream PXE puts every operation through a single `SerialQueue` (`@aztec/pxe@4.2.0/src/pxe.ts:328-336`) and explicitly forbids concurrent execution because utility calls *can* mutate PXE stores (capsules). Downgrading our outer lock would be both unsafe (upstream's comment contradicts opus's stateless premise) and moot (upstream serializes regardless). Documented in JSDoc + plan-v2 §1d to prevent re-attempt. Aztec issue #12636 tracks any future upstream relaxation.
+- **Compare encoded/decoded only in parity tests** (codex REJECT) — accepted from opus REJECT too. Don't compare gas/stats.
+- **`SimulationError` propagation** — accepted from both audits.
+- **`getNodeInfo` shared-fate** (codex H4) — accepted; let it propagate.
+- **Block-header anchor extraction** — accepted; shared util is correct.
 
-- Branch: `feat/fast-path-internal-views` off latest `dev` (post-#56-merge).
-- Single squash-merge PR to `dev`. No flag (transparent helper change). Bisectable.
-- Title: `feat(execution): route public-static internal view calls through node fast path`.
-- Validation gate before push: `bun run audit:vue` + `bun run --filter '@nulo/extension' test:components` + `RUN_NETWORK_E2E=1 bun --filter '@nulo/extension' test ...integration.test.ts`.
-- Post-merge: watch the next manual balance-refresh smoke (popup → token list → wait for balances) — expected to be visibly faster, especially during/after a prove. No regressions in displayed amounts.
+---
 
-## 9. ASCII status tracker (Tier B)
+## 6. Updated ASCII status tracker
 
 ```
-[✓] 0. Clarifying questions               (mixed-merge / transparent / unit+skipIf / Tier B full)
-[✓] 1. Pre-draft technical verification   (IPXE.getSyncedBlockHeader, simulateViaNode sig, MAX const, callers)
-[▶] 2. Draft main plan + ELI5
-[ ] 3. Parallel opus + codex audits       (both must include adversarial ask)
-[ ] 4. Consolidate v2 plan                (adopted vs rejected)
-[ ] 5. Final codex review                 (one critical pass on plan-v2)
-[ ] 6. Approval gate                      (user explicit Go)
-[ ] 7. Implementation                     (per file-by-file above)
-[ ] 8. Post-impl codex review             (diff + summary, adversarial)
-[ ] 9. Fix loop                           (triage + close)
+[✓] 0. Clarifying questions
+[✓] 1. Pre-draft technical verification
+[✓] 2. Draft main plan + ELI5
+[✓] 3. Parallel opus + codex audits           (both: needs-rework)
+[✓] 4. Consolidate v2 plan                    (this document)
+[✓] 5. Final codex review                     (ship-with-changes; 1 HIGH + 3 MEDIUMs patched in v2 inline)
+[▶] 6. Approval gate                          (awaiting user explicit Go)
+[ ] 7. Implementation                         (per file-by-file above)
+[ ] 8. Post-impl codex review                 (diff + summary, adversarial)
+[ ] 9. Fix loop                               (triage + close)
 ```
+
+## 7. Decisions locked at the Phase 6 approval gate
+
+1. **Balance-projector two-pass enqueue** — **bundled** in this PR. Load-bearing for the optimization to trigger; one bisectable PR is cleaner than splitting.
+2. **executeUtility lock downgrade** — **dropped entirely** (was opus's suggestion). Verified against upstream: `@aztec/pxe@4.2.0/src/pxe.ts:328-336` puts every PXE operation through a single SerialQueue and explicitly forbids concurrent execution. The change would be both unsafe and moot. Documented in helper JSDoc to prevent re-attempt; Aztec issue #12636 tracked there too.

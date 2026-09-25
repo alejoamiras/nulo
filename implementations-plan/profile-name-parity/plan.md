@@ -1,412 +1,481 @@
-# Profile-name Parity — Plan v1
+# Profile-name Parity — Plan v2
 
-Bring the extension's in-app **Create** + **Import** flows to feature-parity with the onboarding flow's "set name before create" UX, and align user-facing terminology across both flows on the single word **"Profile"** (extension's existing term — onboarding currently says "Wallet").
+Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/profile-name-parity/plan.md).
 
-This is Tier B (medium / contained feature work). All changes live inside `packages/extension/src`. No cross-package surface, no RPC/schema changes, no identifier rename — only user-visible copy + one new input field + e2e fallout.
+**Status**: post-audit consolidation. Codex v1 verdict was **REJECT** (3 HIGH-level concerns); Opus v1 verdict was **APPROVE-WITH-FIXES** (3 HIGH + 9 MED/LOW). Both flagged the same e2e fixture-breakage class + the `useFullBackupImport` silent-name-drop. Codex additionally caught a pre-existing onboarding bug (same composable, same drop) and a passkey-reset test fallout that Opus missed. This v2 supersedes [plan.md](./plan.md).
 
-## 0. Context
+## Changes from v1
 
-Two user-facing flows let someone create or import a profile:
-
-| Flow | Where | Today's behavior | Term used |
+| Section | v1 said | v2 says | Source |
 |---|---|---|---|
-| **Onboarding** | `src/onboarding/pages/{create,import}.vue` | Requires the user to type a profile name (1–32 chars, trimmed, submit-time validation with shake + inline error). | "Wallet" |
-| **Extension popup** | `src/popup/pages/profile/new.vue` + `src/popup/pages/import.vue` | Create: no name input — auto-generates `` `Profile ${profiles.length + 1}` `` at submit time. Import: pre-fills `My Profile N` in `onMounted`, length-checked in `:disabled`. | "Profile" |
+| §4.1 | F1 + F2 are the only feature changes | Adds **F3** (full-backup typed-name threading) + **F4** (cross-profile duplicate hard-block) | Codex HIGH #1, Opus MED #6, user Q-NEW1/Q-NEW2 |
+| §4.3 | C1–C4 only | Adds **C5** (EditProfilePopup `:maxLength` 25→32) + **C6** (`BrutalistTitle.stories.ts` `sub` arg) | Codex MED #5, Opus MED #4, user Q-NEW3 |
+| §4.4 | "Confirmed by grep: no leaks today" | Lists every remaining `[Ww]allet` string in `packages/extension/src` as either *whitelisted* (app-name use, keep) or *rename* | Both auditors MED #4 |
+| §4.5 | "no testid selectors break"; "existing tests should still pass unchanged" | Enumerates 9 e2e fixture/test files that MUST be updated alongside F1/F2/F4 | Both auditors HIGH; Codex MED #3 |
+| §6 | 10 composable cases + light e2e additions | Adds 4 component-test cases for F3/F4 plumbing; switches new e2e assertions from text-based to attribute/testid-based per `data-testid`-only rule | Codex LOW #6 |
+| §7 | "Silent allow duplicates is current behavior" | Wrong — `service.ts:825-840` already auto-suffixes on `restore`. Direct create/import hard-blocks at UI; full-backup keeps service-side auto-suffix | Codex MED #5 |
+| §8 | Most defaults marked "open" | Q1, Q5, Q6, plus the new Q-NEW1/2/3 — all resolved at v2 approval gate prework | User picks |
 
-The product owner's intent: a user should **decide** the name before creating, so they don't land in the app with a placeholder name they have to rename. The extension flows fail at that today. And the term split is a maintenance smell: future contributors will keep adding new "Wallet" copy or new "Profile" copy on whichever side they're working in.
+## 0. Context (unchanged from v1)
 
-## 1. Decisions locked (from clarifying-question round)
+See [plan.md §0](./plan.md). Two flows (onboarding + extension popup) for creating/importing a profile. Onboarding requires explicit name + says "Wallet"; popup auto-generates name + says "Profile". v2 aligns both on "Profile" and gives both an identical pre-create name UX.
 
-| # | Decision | Choice |
-|---|---|---|
-| 1 | Term direction for user-facing copy | **"Profile" wins.** Extension copy already uses "Profile" throughout. Onboarding flips from "Wallet" → "Profile". |
-| 2 | Rename depth | **Copy + e2e testids only.** Internal code identifiers (`ProfileService`, `profileName` refs, `changeProfileName` RPC) keep their existing "Profile" naming — the rename is bidirectional only for user copy. |
-| 3 | Consistency scope | **All user-visible surfaces.** Not just Create/Import. Also covers Edit/Select/Settings/AuthProfilePill copy *if* any "Wallet" leaks exist there (sweep audit confirms none today). |
+## 1. Decisions locked
+
+| # | Decision | Choice | Source |
+|---|---|---|---|
+| 1 | Term direction | **"Profile"** wins | User pick |
+| 2 | Rename depth | **Variable names tracking the *profile concept* must use "profile."** Existing identifiers already do; one outlier (`TEST_WALLET_NAME` → `TEST_PROFILE_NAME`) is in P6. **App-level identifiers** (`lockWallet`, `openWallet`, `WalletRuntime`, `wallet-sdk/*`) and **public SDK contracts** (`walletId`, `walletName` per `@aztec/wallet-sdk`) stay — they refer to the Nulo app, not the account. RPC method names stay (no wire-format churn). | User pick + clarification 2026-05-21 |
+| 3 | Consistency scope | All user-visible surfaces | User pick |
+| **4** | **Full-backup typed-name** | **Prefill from backup on file pick.** Parsed name fills the input; user can override; the input's current value is threaded through `useFullBackupImport` → `profile.name` mutation → `ProfileService.restore`. No RPC API change. | User Q-NEW1 |
+| **5** | **Duplicate-name policy** | **Hard-block at UI submit-time for direct Create/Import.** Case-folded NFKC compare against `managers.profile.getProfiles()`. **Full-backup keeps service-side auto-suffix** (already in `service.ts:825-840`). | User Q-NEW2 |
+| **6** | **Profile-name max length** | **All three flows align at 32.** EditProfilePopup `:maxLength="25"` → 32. | User Q-NEW3 |
 
 ## 2. Goals
 
-- The extension's **Create** flow has a "Profile name" input with the same validation UX as onboarding (1–32 chars, trim, submit-time validation, shake-on-empty, inline error, focus restore).
-- The extension's **Import** flow drops the `My Profile N` pre-fill and uses the same validation UX as onboarding.
-- All onboarding user-visible copy switches from "Wallet" → "Profile" — placeholders, labels, headings, button text, error messages, notification titles.
-- E2E tests still pass — both the smoke suite (`bun run test:e2e`) and the network suite (`bun run e2e:agent`).
-- No regression on EditProfile, SelectProfile, Settings → Profile, or AuthProfilePill (already on "Profile").
+- Extension's **Create** has a Profile-name input matching onboarding's UX (1–32 chars, trim, submit-time `validateName` + cross-profile collision check, shake + inline error, focus restore).
+- Extension's **Import** drops `My Profile N` pre-fill; uses the same validation + collision check.
+- Onboarding's `useFullBackupImport`-driven path now honors the user-typed name; popup's gets the same behavior in the same PR.
+- Onboarding copy switches Wallet→Profile across all user-visible surfaces.
+- EditProfilePopup adopts the same 32-char cap.
+- Storybook stories with `sub="Wallet"` flip to `sub="Profile"`.
+- All app-name "wallet" surfaces (locking, dApp connect, settings descriptions) are **explicitly whitelisted** in §4.4 — no factual "no leaks" claim.
+- Local gate passes: `bun run audit:vue`. Smoke + network e2e suites pass after fixture updates.
 
-## 3. Non-goals
+## 3. Non-goals (unchanged + additions)
 
-- **No internal identifier rename.** `ProfileService`, `useProfileBootstrap`, `profile.store`, `profileName` refs, the RPC method names (`createProfile`, `changeProfileName`, `importMnemonic`, …) — all stay as they are. Locked at clarifying-question time.
-- **No service-side validation changes.** Length / charset validation stays at the UI layer; the service still accepts any string. (Defense-in-depth at service layer is a separate concern; flagged in §7 but out of scope.)
-- **No EditProfilePopup behavior change.** Copy stays "Profile" (it already is). Applying the shake-validation UX to that popup is listed as an open question — defaults to *no* unless approved.
-- **No "Open wallet" / "Wallet version" rename on Done/About surfaces** unless explicitly approved (open question — those refer to the *app*, not the account).
-- **No data migration.** Per memory, no production users; no need to preserve old-name shapes.
-- **No new `noExplicitAny` exceptions.**
+- No internal identifier rename (`ProfileService`, `useProfileBootstrap`, `changeProfileName` RPC, etc.).
+- No new RPC API surface — the F3 threading is local to `useFullBackupImport`, mutates the parsed-backup `profile.name` field before passing into the existing `restore()` signature.
+- No data migration.
+- No app-name rename ("Open wallet" / "Lock wallet" / "Wallet version" / "wallet locking" — see §4.4 whitelist).
+- **(new)** No homoglyph defense in this PR. Tracked as follow-up — see §7.2.
+- **(new)** No backup-restore name sanitization in this PR. Tracked as follow-up — see §7.3.
+- **(new)** No service-side name length cap. UI enforces; RPC accepts arbitrary strings (existing posture).
 
 ## 4. Work surface — file catalog
 
-### 4.1 Feature work (new code)
+### 4.1 Feature work
 
-**[F1] `src/popup/pages/profile/new.vue` — add Profile-name field**
+#### [F1] `src/popup/pages/profile/new.vue` — add Profile-name field (unchanged from v1)
 
-Today (snapshot):
-```js
-const handleCreate = async () => {
-  // …
-  const profiles = await managers.profile.getProfiles()
-  const name = `Profile ${profiles.length + 1}`
-  // …
-}
-```
+See [plan.md §4.1 [F1]](./plan.md). v2 detail additions:
+- Testid: `register-name-input` (new). **Plus** mark the password and confirm inputs with explicit testids (`register-password-input`, `register-password-confirm-input`) — needed for Codex LOW #6's testid-only e2e rule and currently absent.
+- Wire `dispose()` slot: §5 P1.4 spells out cleanup-order placement.
 
-After:
-- Replace the auto-suggest with a controlled `profileName` ref bound to an `<Input>` that lives **above** the existing `NewProfileMethodTabs`.
-- Mirror onboarding's validation pattern exactly: `trimmedName` computed, `nameError` ref, `shakeName` ref, `nameInputRef` template ref, `validateName()` called at submit time before `isAllowedToContinue` is checked.
-- Drop the `await managers.profile.getProfiles()` count lookup — no longer needed.
-- Testid: `register-name-input` (new). Symmetric with existing `register-method-{password,passkey}` and `register-submit-btn`. Do NOT reuse `profile-name-input` — that's owned by EditProfilePopup and the testid-stability rule keeps each owner unique.
+#### [F2] `src/popup/pages/import.vue` — drop pre-fill, add validation parity (unchanged from v1 + F3 plumbing)
 
-**[F2] `src/popup/pages/import.vue` — drop pre-fill, add validation parity**
-
-Today:
-```js
-const profileName = ref("My Profile")
-// …
-onMounted(async () => {
-  const profiles = await managers.profile.getProfiles()
-  profileName.value = `My Profile${profiles?.length ? ` ${profiles.length}` : ""}`
-  // …
-})
-const isAllowedToContinue = computed(() => {
-  if (!profileName.value || profileName.value.length < 2) return false
-  // …
-})
-```
-
-After:
-- `profileName.value = ""` (initial empty, matches onboarding).
-- Drop the `onMounted` pre-fill block.
-- Move name-validation OUT of `isAllowedToContinue` and INTO submit-time `validateName()` (matches onboarding pattern).
-- Add `nameError`, `shakeName`, `nameInputRef`, `validateName()`, `triggerNameShake()`, `handleNameInput()` — copy-paste from `src/onboarding/pages/import.vue:51-86`. Or **better**: extract a tiny composable (see §5).
-- Add the same `<Input>` block under the hero, before the `ImportMethodPicker`.
+See [plan.md §4.1 [F2]](./plan.md). v2 additions:
 - Testid: `import-name-input` (new).
-- Update each `handleImport*` to call `if (!validateName()) return` after the `isAllowedToContinue` checks (same as onboarding's pattern at `import.vue:154,170,189,211`).
+- Plumb `profileName` into `useFullBackupImport` (see F3).
+- Watch `parsedBackupName` (from composable) and prefill the input when it fires.
+- Choose **onboarding's `clearFormState` behavior**: do NOT clear `profileName` on Back. Matches `onboarding/pages/import.vue:269-280` comment. Resolves Opus LOW #10.
 
-### 4.2 Optional refactor (extract shared validation logic)
+#### [F3] `src/composables/useFullBackupImport.ts` — thread user-typed name + expose parsed name *(new)*
 
-**[R1] Extract `useProfileNameField()` composable** — *recommended; flagged for codex/opus opinions in §8*.
-
-The validation block in `onboarding/pages/create.vue:36-76` and `onboarding/pages/import.vue:46-86` is byte-identical (modulo the variable name). It will appear a **third time** in `popup/pages/profile/new.vue` and a **fourth time** in `popup/pages/import.vue` if we copy-paste. Per CLAUDE.md "Modularize relentlessly — same code in 3 places is a refactor signal," four copies trips the threshold cleanly.
-
-Proposed `src/composables/useProfileNameField.ts`:
+Today (`useFullBackupImport.ts:200,233`):
 ```ts
-export interface UseProfileNameFieldOptions {
-  minLength?: number // default 1
-  maxLength?: number // default 32
-  emptyErrorMessage?: string // default "Profile name is required."
-  maxLengthErrorMessage?: string // default "Max 32 characters."
-}
+const profile = data.profile as { id: string; name: string; type: "password" | "passkey" }
+// …
+const newProfile = await profileService.restore(profile, masterKey, opts.password.value, credentialData)
+```
 
-export function useProfileNameField(opts: UseProfileNameFieldOptions = {}) {
-  const min = opts.minLength ?? 1
-  const max = opts.maxLength ?? 32
-  const emptyMsg = opts.emptyErrorMessage ?? "Profile name is required."
-  const maxMsg = opts.maxLengthErrorMessage ?? `Max ${max} characters.`
+The backup-embedded `profile.name` is what gets stored — the typed `profileName` from the parent page is silently dropped. **This is a pre-existing bug in onboarding today.** Fixing it in this PR closes the bug for both surfaces.
 
-  const profileName = ref("")
-  const trimmedName = computed(() => profileName.value.trim())
-  const nameError = ref("")
-  const shakeName = ref(false)
-  const nameInputRef = ref<{ focus: () => void } | null>(null)
-  let shakeTimer: ReturnType<typeof setTimeout> | null = null
+Changes:
+1. Add to `UseFullBackupImportOptions`: `profileName?: Ref<string>` — optional reactive name the parent owns.
+2. Add to return value: `parsedBackupName: Ref<string | null>` — fired after a backup is successfully parsed (set inside `decryptBackup` for encrypted, inside `pickBackupFile` for plain).
+3. Inside `restoreBackup`, before calling `profileService.restore`:
+   ```ts
+   const override = opts.profileName?.value.trim()
+   const profileForRestore = override ? { ...profile, name: override } : profile
+   const newProfile = await profileService.restore(profileForRestore, masterKey, opts.password.value, credentialData)
+   ```
+   Service's existing collision auto-suffix at `service.ts:825-840` still applies — if `override` collides with an existing profile, the saved name becomes `override 1` (consistent with current backup-vs-backup collision semantics).
 
-  function triggerShake() {
-    shakeName.value = false
-    if (shakeTimer) clearTimeout(shakeTimer)
-    requestAnimationFrame(() => {
-      shakeName.value = true
-      shakeTimer = setTimeout(() => { shakeName.value = false }, 400)
-    })
-  }
+Parent pages (both popup + onboarding) consume:
+```ts
+const { parsedBackupName, ... } = useFullBackupImport({ profileName, password, repeatedPassword, ... })
 
-  function validate(): boolean {
-    const n = trimmedName.value
-    if (n.length < min) {
-      nameError.value = emptyMsg
-      triggerShake()
-      nameInputRef.value?.focus()
-      return false
+watch(parsedBackupName, (newName) => {
+  // Guarded prefill: only fill when the user hasn't typed anything yet.
+  // Protects against the race where the user starts typing in the name
+  // field BEFORE the file-picker completes parsing — without the guard,
+  // a delayed parse on a heavy file would clobber their input.
+  if (newName && !profileName.value.trim()) profileName.value = newName
+})
+```
+
+**Implementation note (Codex v2 finding)**: the composable MUST use the spread-clone pattern (`{ ...profile, name: override }`) before passing to `restore()`, NOT mutate `data.profile.name` in place. The clone keeps the parsed-backup data structure pristine in case the restore fails and needs to be retried with a different name.
+
+Tests: 4 new cases in `useFullBackupImport.test.ts` (see §6.1).
+
+**Why mutate locally instead of adding a 5th `restore()` arg**: avoiding RPC API churn. The mutation is on the locally parsed `data.profile` object; nothing else reads `data.profile.name` after this point in the composable, so the mutation is safe and contained. If a future requirement needs the override at the wire layer (e.g. server-side name validation), promoting to a real parameter is a follow-up.
+
+#### [F4] Cross-profile duplicate hard-block for direct Create/Import *(new)*
+
+Service-side `restore()` already auto-suffixes; direct create/import paths today have no uniqueness check. After F1/F2 force explicit naming, two "My Profile" entries are user-creatable.
+
+UI-layer enforcement in three places:
+1. `src/composables/useProfileNameField.ts` (if R1 lands — see §4.2) — extend `validate()` to consult an injected `existingNames: () => string[]` and reject on collision. Or wrap with a second composable `useProfileNameUniqueness({ getNames })`.
+2. `popup/pages/profile/new.vue` and `onboarding/pages/create.vue` — pass existing names list at submit time.
+3. `popup/pages/import.vue` and `onboarding/pages/import.vue` — same.
+
+Collision check: case-folded NFKC-normalized comparison (`a.normalize("NFKC").toLocaleLowerCase() === b.normalize("NFKC").toLocaleLowerCase()`). Inline error: `"This name is already in use."`. Submit blocked until renamed. Same shake animation.
+
+**Full-backup carve-out**: the duplicate-block does NOT run on full-backup path. The service's restore-time auto-suffix is the right semantic there (backups come pre-named; user shouldn't be blocked from restoring two backups of the same name). The UI input still shows the prefilled backup name; submit succeeds; service auto-suffixes if needed.
+
+EditProfilePopup's existing `isAlreadyExist` check at L34 covers same-name-as-current; extending it to cross-profile collision is a parallel ~10 LOC change. Listed as **optional but recommended** in §4.3 [C5b]; defaults to applying.
+
+### 4.2 Optional refactor — `useProfileNameField()` composable (R1, unchanged from v1 + duplicate hook)
+
+See [plan.md §4.2](./plan.md). v2 additions:
+- `validate(opts?: { existingNames?: string[] }): boolean` — **stays sync**. Optional `existingNames` arg powers the F4 duplicate check. The parent fetches the list async via `await managers.profile.getProfiles()` BEFORE calling `validate()`, behind the existing `isCreating` / `isImporting` latch. Sync `validate` preserves the no-race property of today's handlers.
+- 11 tests instead of 10 (see §6.1).
+- Recommendation unchanged: **extract**.
+
+Plan v2's verdict is still "extract" because the duplicate-check pulls a second piece of shared logic in, raising the cost of inlining four copies. The composable becomes `~110 LOC` instead of `~80 LOC`.
+
+**Parent-side submission shape (the latch is load-bearing):**
+```ts
+async function handleCreate() {
+  if (isCreating.value) return
+  isCreating.value = true                                  // ← latch FIRST
+  try {
+    const existing = (await managers.profile.getProfiles()).map(p => p.name)
+    if (!validateName({ existingNames: existing })) {       // sync — no race window
+      isCreating.value = false
+      return
     }
-    if (n.length > max) {
-      nameError.value = maxMsg
-      triggerShake()
-      return false
-    }
-    nameError.value = ""
-    return true
+    // … proceed with profile creation …
+  } catch (err) {
+    isCreating.value = false
+    // … existing error handling …
   }
-
-  function handleInput() {
-    if (nameError.value) nameError.value = ""
-  }
-
-  function dispose() {
-    if (shakeTimer) clearTimeout(shakeTimer)
-    shakeTimer = null
-  }
-
-  return { profileName, trimmedName, nameError, shakeName, nameInputRef, validate, handleInput, dispose }
 }
 ```
 
-This is **C0** (pure utility — no `chrome.*`, no service clients). Parents call `dispose()` in `onBeforeUnmount` per the cleanup-order rule.
-
-Test coverage minimum: 10 cases (composable rule). Covered in §6.
+**Why sync over async (Codex v2 MED #7)**: the existing handlers latch `isCreating` AFTER validation. If we make `validate()` async, two rapid submit clicks both pass the `isCreating.value` pre-check before either reaches the latch — two profile creates. Keeping `validate()` sync and moving the async fetch to the parent (inside the latch) closes the window.
 
 ### 4.3 Onboarding copy alignment (Wallet → Profile)
 
-**[C1] `src/onboarding/pages/create.vue`**
+C1–C4 unchanged from [plan.md §4.3](./plan.md). v2 additions + clarifications:
 
-| Line | Old | New |
+**[C1] `src/onboarding/pages/create.vue` — L97 nuance** (Opus MED #5):
+- L97 is `return authMethod.value === "passkey" ? "Create with passkey" : "Create wallet"`. **Only the password branch flips** — the passkey branch already says "with passkey" (no rename needed). Spell this out for the implementer.
+
+**[C5] `src/popup/components/popups/EditProfilePopup.vue`** *(new — locked decision #6)*
+- L108: `:maxLength="25"` → `:maxLength="32"`. Aligns with onboarding + the new popup inputs.
+- **[C5b] (optional but recommended)**: Extend the `isAlreadyExist` check at L34 to cross-profile collision (currently only checks `appStore.profile.name === nameTerm`, i.e. same-as-current). Use the same case-folded NFKC compare. Inline warning at L116 already exists; just generalize its trigger.
+
+**[C6] `src/components/ui/BrutalistTitle.stories.ts:20`** *(new — Opus MED #4)*
+- `args: { main: "Create", sub: "Wallet" }` → `args: { main: "Create", sub: "Profile" }`. Storybook is a developer-facing surface but it's listed in §3 consistency scope; flip.
+
+### 4.4 Cross-surface whitelist (revised — no more "no leaks" claim)
+
+`grep -rEi '[Ww]allet' packages/extension/src` returns ~50 matches. v1 claimed sweep was clean — incorrect. v2 enumerates and decides explicitly:
+
+**Rename (apply Wallet → Profile)**:
+- `src/onboarding/pages/{create,import,welcome,done}.vue` — per §4.3 C1–C4.
+- `src/components/ui/BrutalistTitle.stories.ts:20` — per §4.3 C6.
+
+**Whitelist (keep as-is — refer to the app, not the account record)**:
+| File:line | String | Why keep |
 |---|---|---|
-| 38 (comment) | `// Wallet name is required.` | `// Profile name is required.` |
-| 60 (error string) | `"Wallet name is required."` | `"Profile name is required."` |
-| 97 (button label) | `"Create wallet"` | `"Create profile"` |
-| 138 (notif title) | `"Wallet creation failed"` | `"Profile creation failed"` |
-| 188 (BrutalistTitle) | `sub="Wallet"` | `sub="Profile"` |
-| 194 (section label) | `Wallet name` | `Profile name` |
-| 200 (placeholder) | `"My Wallet"` | `"My Profile"` |
+| `popup/windows/discover/index.vue:162` | `actionLabel="wants to connect to your wallet"` | App-name use (dApp connect dialog). "Your wallet" = your Nulo install. |
+| `popup/pages/settings/security/index.vue:82,116,184` | "unlock the wallet", "the wallet will never be locked", "Automatic wallet locking (minutes)" | App-name use. Locking is an app-level action. |
+| `popup/pages/settings/advanced/account-state/senders/index.vue:61` | `"…won't appear in your wallet"` | App-name use. "Your wallet" = the app's UI. |
+| `popup/pages/settings/fpcs/index.vue:83` | (similar app-name confirm description) | App-name use. |
+| `components/Header.vue:22,82,117,247,249` | `handleLockWallet`, `handleWalletFailure`, `aria-label="Lock wallet"` | Internal identifier (handlers) + app-level user action (Lock button). |
+| `onboarding/pages/done.vue:23,97,107` | `openWallet()`, `"open the wallet from now on"`, `"Open wallet"` button | App-name use ("opening the popup app"). Internal `openWallet()` is a handler name. |
+| `wallet/services/passkey/spec.ts:75` and comments in `wallet/services/profile/*.ts` | Function-doc comments referencing the wallet | Documentation about the app/repo. Internal. |
+| Various `*.test.ts` files: `lockWallet`, `wallet-lock.test.ts`, `wallet-version` | Test helper names + test file names | Internal/test only. |
+| `tests/e2e/passkey-backup.test.ts:82` | `"wallet-version": "test"` | Stable backup JSON field key. **Do NOT rename** — it's a wire-format identifier. |
+| `tests/e2e/navigation.test.ts:75` | `text/Wallet version` (About page assertion) | App version, not account. |
 
-(Note: F1's extraction of `useProfileNameField()` absorbs lines 38–76; if R1 is approved, lines 60/76 disappear into the composable. Lines 138/188/194/200 stay in the .vue file.)
+This whitelist replaces v1's §4.4 "no leaks" claim. Implementer: do not rename anything in the whitelist column; if a new grep hit surfaces during implementation, add it here.
 
-**[C2] `src/onboarding/pages/import.vue`**
+### 4.5 E2E + test fallout (substantially revised — Codex HIGH #2, MED #3; Opus HIGH #1, #2)
 
-| Line | Old | New |
+The v1 claim "no testid selectors break, existing tests should still pass unchanged" was wrong. The auto-name behavior of today's flows is a load-bearing implicit assumption for many e2e fixtures.
+
+**Direct breakage from F1 (Create flow): tests submitting `register-submit-btn` without typing a name**
+| File:line | What it does today | Needs |
 |---|---|---|
-| 47 (comment) | `// Wallet name is required across…` | `// Profile name is required across…` |
-| 70 (error) | `"Wallet name is required."` | `"Profile name is required."` |
-| 222 (notif title) | `"Wallet import failed"` | `"Profile import failed"` |
-| 224 (notif description) | `"…importing the wallet."` | `"…importing the profile."` |
-| 230 (console.error) | `"Failed to import wallet:"` | `"Failed to import profile:"` |
-| 307 (BrutalistTitle) | `sub="Wallet"` | `sub="Profile"` |
-| 313 (section label) | `Wallet name` | `Profile name` |
-| 319 (placeholder) | `"My Wallet"` | `"My Profile"` |
-| 390 (button text) | `"Import wallet"` | `"Import profile"` |
-| 419 (button) | `Import wallet` | `Import profile` |
-| 430 (button) | `Import wallet` | `Import profile` |
-| 441 (button) | `Import wallet` | `Import profile` |
+| `tests/e2e/fixtures/extension.ts:149-167` | `registerProfile` shared fixture — clicks `register-submit-btn` | Type a name into `register-name-input` before submit. Use new `TEST_PROFILE_NAME` constant. |
+| `tests/e2e/registration.test.ts:23-45` | Direct registration smoke | Same |
+| `tests/e2e/passkey-paths.test.ts:46-58` | Passkey create paths | Same |
+| `tests/e2e/passkey-backup.test.ts:40-45` | Passkey create + backup | Same |
 
-**[C3] `src/onboarding/pages/welcome.vue`**
-
-| Line | Old | New |
+**Direct breakage from F2 (Import flow): tests submitting import buttons without typing a name**
+| File:line | What it does today | Needs |
 |---|---|---|
-| 42 (button) | `Create wallet` | `Create profile` |
-| 51 (button) | `Import wallet` | `Import profile` |
+| `tests/e2e/import-paths.test.ts:60-91` | `importPlainKey` helper | Type into `import-name-input` before submit |
+| `tests/e2e/import-paths.test.ts:93+ (importEncryptedKey)` | Encrypted key import | Same |
+| `tests/e2e/import-paths.test.ts:144-160` | `importSeed` helper | Same |
+| `tests/e2e/import-paths.test.ts:528-583` | Full-backup import helper | F3 changes the contract: prefill happens after file pick; helper may need a wait, but explicit name-typing not required if backup-prefill is allowed to win. |
+| `tests/e2e/fixtures/extension.ts:540-560` | Shared import fixture | Same |
+| `tests/e2e/passkey-paths.test.ts:174-194` | **Passkey re-import path**: navigates to `#/popup/import` then clicks `import-option-passkey` without typing a name. The passkey `get` ceremony runs and a profile is created with the auto-name. *(Codex v2 MED #2 — missed in v2.0)* | Type into `import-name-input` BEFORE clicking `import-option-passkey`. Use `TEST_PROFILE_NAME`. |
 
-**[C4] `src/onboarding/pages/done.vue`** — flagged as open question (see §8). Three surfaces here:
-- L97 subcopy: `"open the wallet from now on"` — refers to opening the *app* (popup), not an account record.
-- L107 button: `"Open wallet"` — opens the popup.
-- L23 function name `openWallet()` — internal identifier, NOT renamed regardless of decision.
+**Indirect breakage (Codex MED #3 — Opus missed)**
+| File:line | What it does today | Needs |
+|---|---|---|
+| `tests/e2e/passkey-paths.test.ts:141-160` | Asserts destructive-confirm input matches hardcoded `"Profile 1"` | Replace with `getActiveProfileName(page)` from `fixtures/helpers.ts:879-940`. |
+| `tests/e2e/passkey-backup.test.ts:383-390` | Same hardcoded-name pattern | Same fix |
+| `tests/e2e/fixtures/helpers.ts:879-940` | `getActiveProfileName` already exists | Just consume it |
 
-Default position: **leave L97 and L107 unchanged** because they refer to the app, not the account concept. Approving this as-is is the recommended option in §8.
+**Sweep fixtures**
+| File:line | Action |
+|---|---|
+| `tests/e2e/onboarding-tab.test.ts:7` | `TEST_WALLET_NAME` → `TEST_PROFILE_NAME` (value `"Onboarding Test"` unchanged). Locked. |
+| `tests/e2e/scripts/check-derivation-parity.ts:143-150` | Verify it uses a fixture or its own setup — adjust if it calls the broken helpers. |
 
-### 4.4 Cross-surface verification (no edits expected, just confirm)
+**New testids to introduce in source pages (so e2e can drive them per `data-testid`-only rule):**
+- `register-name-input` (F1)
+- `register-password-input`, `register-password-confirm-input` (F1 — fixes Codex LOW #6: existing NewProfileCredentials.vue:22-55 has no testids on password inputs, blocking testid-only assertions)
+- `import-name-input` (F2)
 
-Confirmed by grep (executed during planning):
-- `data-testid="*wallet*"` → **no hits** in `packages/extension/src`.
-- `popup/components/popups/EditProfilePopup.vue` → already says "Edit profile" / "My Profile".
-- `popup/components/popups/SelectProfilePopup.vue` → confirmed "Profile" throughout.
-- `popup/pages/settings/profile/index.vue` → already "Profile".
-- `popup/components/modules/auth/AuthProfilePill.vue` → already "Profile".
+**Testid-only assertion shape for inline-error checks** (Codex LOW #6 — replaces v1's text-based assertions):
+- Submit with empty name → assert `[data-testid="register-name-input"]` has `aria-invalid="true"` (already wired via `:ariaInvalid="!!nameError"` in onboarding's existing input — same pattern in F1/F2).
+- For duplicate check: assert `aria-invalid="true"` + the *toast text* "This name is already in use." via the existing `waitForToast` helper (toasts are the one text-assertion exception per CLAUDE.md).
 
-This step is a CI guard, not edits: after the implementation, re-run `grep -rEi '[Ww]allet' packages/extension/src --include="*.vue"` and confirm only intentional matches remain (app-name uses in done.vue, comments referencing the wallet repo, log strings).
+### 4.6 Storybook
 
-### 4.5 E2E + test fallout
+No regression risk — the only `.stories.ts` impact is `BrutalistTitle.stories.ts:20` (§4.3 C6). Run `bun run --cwd packages/extension build-storybook` once after C6 to confirm the story still builds.
 
-Direct selector breakage (text-based): **one** location.
-- `tests/e2e/onboarding-tab.test.ts:7` — `const TEST_WALLET_NAME = "Onboarding Test"`. Cosmetic rename of the constant to `TEST_PROFILE_NAME` is offered (matches §7 sweep) but not load-bearing — the constant value isn't asserted against, only typed into the input.
-- `tests/e2e/onboarding-tab.test.ts:17` — test description string `"…opens wallet popup window"` — touch only if "Open wallet" → "Open Nulo" is approved in §8.
+## 5. Phase plan (revised)
 
-No testid selectors break: `onboarding-name-input`, `onboarding-submit-create`, `onboarding-submit-import`, `register-create-btn`, `register-import-btn`, `register-submit-btn`, `register-method-*`, `import-{seed,private-key,public-key}-submit-btn`, `import-full-backup-*` — all stable.
+Order: **refactor → feature behavior → copy → fixtures → guards**. Implementing in this order keeps each commit reviewable in isolation.
 
-The new testids `register-name-input` and `import-name-input` are additive; no existing test references them.
+**P0 — `useProfileNameField` composable (R1)**
+1. Write `src/composables/useProfileNameField.ts` (~110 LOC including duplicate-hook plumbing).
+2. Write `src/composables/useProfileNameField.test.ts` (11 cases — §6.1).
+3. Refactor `onboarding/pages/{create,import}.vue` to consume the composable (no copy changes yet; no F3 yet).
+4. Validate: `bun run --cwd packages/extension test src/composables/useProfileNameField.test.ts && bun run audit:vue`.
+   E2E smoke at this point should still pass since onboarding behavior is preserved.
 
-## 5. Phase plan
+**P1 — F3: full-backup typed-name threading**
+1. Extend `useFullBackupImport.ts`: add `profileName?: Ref<string>` option + `parsedBackupName: Ref<string | null>` return. Mutate `profile.name` before `restore()`.
+2. Update `decryptBackup` to set `parsedBackupName.value = data.profile.name` after successful parse. Same for `pickBackupFile` if plain backup.
+3. Add 4 tests to `useFullBackupImport.test.ts` (§6.1).
+4. Validate: `bun run --cwd packages/extension test packages/extension/src/composables/useFullBackupImport.test.ts && bun run audit:vue`.
+5. **No call-site changes yet** — parent pages don't pass `profileName` in this commit. Behavior identical to today (backward-compatible: when `profileName` opt is absent, override is empty string, falls back to backup name).
 
-Each phase is independently verifiable. The order is: refactor first, feature next, copy last — so feature work uses the extracted composable and copy alignment is a final sweep that doesn't churn through logic edits.
+**P2 — F1: Extension Create page + F4 duplicate hard-block**
+1. Edit `src/popup/pages/profile/new.vue`: consume `useProfileNameField` (with `existingNames`), drop the `getProfiles()` count lookup, add `<Input>` block with `register-name-input`, add `.shake` CSS, plumb `validateName()` into `handleCreate`.
+2. Add `register-password-input` / `register-password-confirm-input` testids to `NewProfileCredentials.vue`.
+3. Wire `dispose()` in `onBeforeUnmount` before listener teardown (the file's `onBeforeUnmount` is at L170-174 today — only removes listeners; insert `dispose()` immediately before).
+4. Update `onboarding/pages/create.vue` to also pass `existingNames` (the duplicate hard-block applies to onboarding too — consistency).
+5. Validate: `bun run --cwd packages/extension test src/popup/pages/profile && bun run audit:vue`.
 
-**P0 — Optional precondition (R1).** If approved at the gate:
-1. Create `src/composables/useProfileNameField.ts` per §4.2.
-2. Create `src/composables/useProfileNameField.test.ts` (10 cases — see §6).
-3. Validate: `bun run --cwd packages/extension test src/composables/useProfileNameField.test.ts`.
-4. Update `onboarding/pages/create.vue` and `onboarding/pages/import.vue` to consume the composable. No copy changes yet — just the logic-extraction refactor. The output should be a no-op for users (e2e still passes).
-5. Validate: `bun run audit:vue` + `bun run test:e2e`.
+**P3 — F2: Extension Import page + onboarding Import composable wiring**
+1. Edit `src/popup/pages/import.vue`: drop `My Profile` pre-fill, drop the `length < 2` guard from `isAllowedToContinue`, consume `useProfileNameField`, add `<Input>` block with `import-name-input`, plumb `validateName()` into each `handleImport*`.
+2. Pass `profileName` to `useFullBackupImport` + watch `parsedBackupName` to prefill.
+3. Update `onboarding/pages/import.vue` to consume `useFullBackupImport`'s new options + `parsedBackupName` watch.
+4. Apply onboarding's `clearFormState` semantics (keep `profileName` on Back) — see [F2] note above. Update popup to match.
+5. Validate: `bun run --cwd packages/extension test src/popup/pages/import && bun run audit:vue`.
 
-**P1 — Extension Create: add Profile-name field (F1).**
-1. Edit `src/popup/pages/profile/new.vue`:
-   - Import `useProfileNameField` (if R1) or inline-port the validation block from onboarding.
-   - Add the `<Input>` block above `NewProfileMethodTabs` with testid `register-name-input`. Place inside a `:class="[shakeName && $style.shake]"` wrapper. Add the error `<Text>` below.
-   - Inside `handleCreate`, replace `const name = ...` with `if (!validateName()) return` followed by `const name = trimmedName.value`.
-   - Drop the unused `const profiles = await managers.profile.getProfiles()` line.
-   - Wire `dispose()` (if R1) into the existing `onBeforeUnmount` in cleanup order (after services, before timers).
-2. Add CSS for `.shake` keyframes — copy verbatim from onboarding/create.vue:390-401.
-3. Validate: `bun run --cwd packages/extension typecheck && bun run --cwd packages/extension test src/popup/pages/profile`.
+**P4 — C5 + C6: EditProfilePopup length cap + Storybook story**
+1. `EditProfilePopup.vue:108` `:maxLength="25"` → `:maxLength="32"`.
+2. (C5b — optional) Extend `isAlreadyExist` at L34 to cross-profile collision. Surface uses `case-folded NFKC compare` like F4.
+3. `BrutalistTitle.stories.ts:20` `sub: "Wallet"` → `sub: "Profile"`.
+4. Validate: `bun run --cwd packages/extension test src/popup/components/popups/EditProfilePopup.test.ts && bun run --cwd packages/extension build-storybook`.
 
-**P2 — Extension Import: drop pre-fill, add validation parity (F2).**
-1. Edit `src/popup/pages/import.vue`:
-   - Drop the `My Profile` ref default → `const profileName = ref("")`.
-   - Delete the `profileName.value = \`My Profile${...}\`` block from `onMounted`.
-   - Remove `profileName.value.length < 2` from `isAllowedToContinue` (it's now validated at submit time).
-   - Add the composable (R1) or inline-port the validation block.
-   - Add `<Input>` block under hero/before `ImportMethodPicker`, testid `import-name-input`.
-   - In each of `handleImportSeed`, `handleImportPrivateKey`, `handleImportPublicKey`, `handleImportPasskey`, `handleImport*` for backup paths if applicable: insert `if (!validateName()) return` after the `isAllowed*` early-return and before the service call.
-   - Verify `useFullBackupImport` doesn't separately reference `profileName` (it doesn't today — backup imports use the backup's embedded name).
-   - Wire `dispose()` in `onBeforeUnmount` if R1.
-2. Reuse the `.shake` CSS rule.
-3. Validate: `bun run --cwd packages/extension typecheck && bun run audit:vue`.
-
-**P3 — Onboarding copy alignment (C1–C3).**
-1. Apply the line-by-line table edits in §4.3 to `create.vue`, `import.vue`, `welcome.vue`. No logic changes.
-2. (Conditional on §8 decision) `done.vue` edits.
+**P5 — Onboarding copy sweep (C1–C4)**
+1. Apply the line-by-line tables in [plan.md §4.3](./plan.md) for `create.vue`, `import.vue`, `welcome.vue`. Use the C1 note that L97 in `create.vue` is a ternary — flip only the password branch.
+2. Apply L97/107 in `done.vue` per the whitelist (keep "Open wallet" / "open the wallet"). No change there.
 3. Validate: `bun run lint && bun run --cwd packages/extension test`.
 
-**P4 — E2E + test fixture sweep.**
-1. (Optional) Rename `TEST_WALLET_NAME` → `TEST_PROFILE_NAME` in `tests/e2e/onboarding-tab.test.ts`. Value stays `"Onboarding Test"` — it's typed into the new "Profile name" field.
-2. (Conditional on §8) Update test description string on `onboarding-tab.test.ts:17` if "Open wallet" copy changed.
-3. Run the smoke e2e: `bun run test:e2e`. If a passkey or full-backup test is gating elsewhere, run that subset.
-4. Run the network e2e under the agent runner: `bun run e2e:agent`.
+**P6 — E2E fixture + test sweep**
+1. Add name-typing step to fixtures + tests per §4.5 breakage tables. Use new constant `TEST_PROFILE_NAME = "Onboarding Test"` (drop `TEST_WALLET_NAME`).
+2. Replace the two hardcoded `"Profile 1"` assertions (`passkey-paths.test.ts:141-160`, `passkey-backup.test.ts:383-390`) with `getActiveProfileName(page)`.
+3. Verify `scripts/check-derivation-parity.ts:143-150` — adjust if it depends on broken helpers.
+4. Validate: `bun run test:e2e` (smoke), then `bun run e2e:agent` (network).
 
-**P5 — Final cross-surface grep guard.**
-1. `grep -rEi '[Ww]allet' packages/extension/src/{onboarding,popup} --include="*.vue"` — confirm zero unintentional hits. Whitelist the residual matches (e.g. `done.vue` if §8 decision is "keep"; any `// comment about the wallet repo`).
-2. `bun run audit:vue` (full local gate: typecheck → test → lint → build).
+**P7 — Final cross-surface grep guard**
+1. `grep -rEi '[Ww]allet' packages/extension/src/{onboarding,popup} --include="*.vue"` — confirm hits are only on §4.4 whitelist entries.
+2. `bun run audit:vue` (full local gate).
 
-**P6 — Implementation-codex review (per protocol §6).** Send diff + summary to codex with explicit adversarial ask.
+**P8 — Implementation-codex review (per protocol §6)**
+Send the implementation diff to codex with the same adversarial ask used in the plan audit. Save transcript to `audit-codex-impl.md`.
 
 ## 6. Test plan
 
 ### 6.1 Unit / component (Vitest)
 
-**(R1 only) `src/composables/useProfileNameField.test.ts` — 10 cases:**
+**`useProfileNameField.test.ts` — 11 cases** (was 10 in v1; Opus LOW #9 + F4 plumbing):
+1. Initial state: empty, no error, no shake.
+2. `validate()` false + error on empty.
+3. `validate()` false + error on whitespace-only.
+4. `validate()` true at exactly 32 chars.
+5. `validate()` false + error at 33 chars.
+6. **Trimmed name passes validation** (e.g., `"  Acme  "` → trimmed value `"Acme"` retained, validate passes). *(new — Opus LOW #9)*
+7. `handleInput()` clears an existing error.
+8. `triggerShake()` flips false→true and back after 400ms (fake timers).
+9. `nameInputRef.focus()` is called on empty-name validation failure.
+10. `dispose()` clears the pending shake timer.
+11. **`existingNames` collision: validate false + "This name is already in use." error; case-folded + NFKC-normalized compare** *(new — F4)*
 
-1. Initial state: empty `profileName`, no error, no shake.
-2. `validate()` returns false + sets error on empty input.
-3. `validate()` returns false + sets error on whitespace-only input.
-4. `validate()` returns true on a single non-space char (length=1).
-5. `validate()` returns true at exactly 32 chars.
-6. `validate()` returns false + sets max-char error at 33 chars.
-7. `handleInput()` clears an existing error (verifying the on-input clear).
-8. `triggerShake()` flips `shakeName` false→true and returns to false after 400ms (fake timers).
-9. `nameInputRef.focus()` is called on empty-input validation failure.
-10. `dispose()` clears the pending shake timer (no spurious mutation after unmount).
+**`useFullBackupImport.test.ts` — add 4 cases** (v1 didn't enumerate; v2 makes them explicit):
+1. `parsedBackupName` is null initially.
+2. After `pickBackupFile` parse succeeds, `parsedBackupName.value === <backup.profile.name>`.
+3. `restoreBackup` with no `profileName` opt uses `profile.name` from backup (regression pin).
+4. `restoreBackup` with `profileName.value = "Acme"` calls `profileService.restore` with `profile.name === "Acme"` (mock the client).
 
-These are the canonical 10. No more, no fewer — per the testing philosophy "smallest set that proves the implementation works."
-
-**(F1, F2 component-level)** — None required at the component level. The popup pages are L6 (pages), exempt from the component-test minimum. Behavior is covered by e2e.
+**No component-test minimums** for F1/F2/F4 page-level changes (L6 pages exempt per project rule). Covered by e2e.
 
 ### 6.2 E2E
 
-**New smoke coverage** in `tests/e2e/registration.test.ts` (popup-side flow):
-- Type a name in the new `register-name-input`, click `register-submit-btn`, assert profile is created with that exact name (read from `chrome.storage.local["nulo:ui:lastActiveProfile"]` + the profile list).
-- Submit with empty name: assert no profile created, focus is on the name input, error text "Profile name is required." renders.
+**New** in `tests/e2e/registration.test.ts` or a new sibling:
+- Submit with empty name → assert `[data-testid="register-name-input"]` has `aria-invalid="true"`; no navigation to `#/popup/general`.
+- Submit with duplicate name → existing profile is `"Acme"`; type `"acme"` (case + Unicode normalization test); assert `aria-invalid="true"`; await toast "This name is already in use." via `waitForToast`. *(testid-only + toast exception per project rule)*
 
-**New smoke coverage** in a new or existing `tests/e2e/import-paths.test.ts` test:
-- Type a name, do a seed-phrase import, assert profile saved with that name.
-- Empty name + submit: assert no profile created.
+**New** in `tests/e2e/import-paths.test.ts`:
+- Empty-name submit → `aria-invalid="true"` on `import-name-input`; no `/popup/general`.
+- Full-backup happy path: pick a backup with `profile.name = "FromBackup"`; assert `import-name-input` value becomes `"FromBackup"` after parse (testid-only — read `.value` directly).
+- Full-backup with user override: pick backup, then `setVal("import-name-input", "Renamed")`; submit; assert resulting profile name (read via existing chrome.storage.local helpers) is `"Renamed"`.
 
-If passkey paths are easy to extend, add empty-name coverage to `passkey-paths.test.ts`. If not, leave for the network suite to catch.
+**No new text-based assertions.** Existing `waitForToast` calls stay (toast text is the project's explicit exception).
 
-**Existing tests that should still pass unchanged:** all of them. The smoke + network suites are the regression net.
+### 6.3 Tests that should NOT be touched
+
+Anything in the network suite that doesn't go through register/import flows. Network e2e tests like `wallet-lock.test.ts`, `sw-restart-network.test.ts`, etc. are gated on `registeredExtension` fixture — fixture update in P6 carries them.
 
 ## 7. Security & adversarial considerations
 
-Per CLAUDE.md "Think like an attacker, always."
+### 7.1 Duplicate names (resolved by §4 decision #5)
 
-### 7.1 Duplicate profile names (key adversarial concern)
+Direct Create/Import hard-blocks at UI submit-time (case-folded NFKC compare). Full-backup keeps service-side auto-suffix (`service.ts:825-840`) — this is the right semantic for restoring two backups with colliding pre-set names.
 
-**Today**: auto-suggest (`My Profile 1`, `My Profile 2`, …) makes collisions effectively impossible without the user typing exactly the same string. After this change: the user can type "My Profile" twice and create two indistinguishable list rows in `SelectProfilePopup`. There's **no service-level uniqueness check** (`profile/service.ts:788,925` only checks passkey *credential* uniqueness, not name uniqueness).
+### 7.2 Homoglyph spoofing (out of scope — flagged for follow-up)
 
-**Threat model**: not a security vulnerability — there's no privilege boundary at the profile-name layer. But it's a real UX footgun and a phishing-adjacent confusion vector (e.g., a malicious dapp instructs the user to rename their profile to match another the attacker controls). Worth mitigating.
+`sanitizeString` (`utils/string.ts:19`) uses `/[^\p{L}0-9 \-._]/gu`. `\p{L}` admits ALL Unicode letters — Cyrillic `А` (U+0410) and Latin `A` (U+0041) both pass. A user (or a malicious dApp instructing the user) can create visually-identical-but-different profiles: `"Acme"` (all Latin) and `"Аcme"` (Cyrillic A + Latin cme).
 
-**Mitigation options** (open question in §8, defaults to **(c)**):
-- **(a)** Hard-block at submit time. UI shows inline error "Name already in use." Disable submit until renamed. **Recommended for safety**, costs +20 LOC.
-- **(b)** Soft warning + allow. Shows inline yellow text "Another profile is named X" but doesn't block. Lower friction.
-- **(c)** Silently allow (current behavior). Status quo. Easy to ship, leaves the footgun.
+**Mitigations explicitly NOT in this PR**:
+- IDNA-style script-confusable detection (e.g., `unicode-script-runs`).
+- NFKC + casefold + script-uniformity check as part of the duplicate hard-block.
 
-### 7.2 Input sanitization
+**Mitigations IN this PR**:
+- NFKC normalization in F4's duplicate check catches some homoglyphs (those that fold). Cyrillic А does NOT NFKC-fold to Latin A, so the bypass is not closed — only narrowed.
+- Apply `:sanitize` to `register-name-input` and `import-name-input` (UI sanitization). Matches EditProfilePopup. Strips bidi overrides + zero-widths.
 
-`Input.vue` has a `sanitize` prop that runs `sanitizeString` from `@/utils/string`. **EditProfilePopup uses it; onboarding's create/import do NOT.** This is an existing inconsistency, predating this PR.
+A follow-up issue should track full homoglyph defense; this PR documents the gap.
 
-**Action**: apply `:sanitize` to the new `register-name-input` and `import-name-input`. Optionally retro-apply to onboarding's existing input for consistency (zero-cost addition).
+### 7.3 Backup-restore name sanitization (out of scope — flagged for follow-up)
 
-Threat: profile names are rendered in many UI surfaces (AuthProfilePill, SelectProfilePopup, Settings, toast notifications). If `sanitizeString` is the only line of defense against an injected unicode-direction-override or zero-width character that could spoof another profile name, we want it on every input. Audit `sanitizeString`'s implementation to confirm what it strips, and decide whether the unconditional Vue template binding (`{{ profile.name }}`) is sufficient for the rendered surfaces (it is, for HTML/JS injection — Vue auto-escapes mustache content).
+`useFullBackupImport.ts:200` casts `data.profile as { name: string }` and passes that name straight to `profileService.restore`. A maliciously crafted backup file could embed:
+- A name with bidi-override characters.
+- A name with extreme length (no service-side cap today).
+- A name with unicode confusables.
 
-### 7.3 Length cap
+UI sanitization doesn't help here — the backup never goes through the input.
 
-UI enforces `:maxLength="32"`. Service accepts arbitrary strings — `createProfile(name: string, ...)`. Defense-in-depth at the service layer (clamp / validate / reject) is **out of scope** for this PR but flagged for a follow-up. The risk today is bounded: the only way past the UI cap is direct RPC calls from a compromised content script, which already has bigger attack surface than profile names.
+**Mitigation IN this PR**:
+- F3's mutation runs `override?.trim()` and respects the input's `:maxLength="32"` — but only when the user actively retypes. Backup-as-is path retains the unsanitized name.
 
-### 7.4 Supply chain / dependencies
+**Mitigation NOT in this PR**:
+- Service-side validation in `ProfileService.restore` (clamp length, strip bidi, validate `\p{L}0-9 \-._` charset).
 
-Zero new dependencies. Zero version bumps. This work is internal-only.
+Follow-up issue should track this.
 
-### 7.5 Cleanup order
+### 7.4 Cleanup order
 
-The shake timer (`shakeTimer`) is the only async resource the new code introduces. Composable (R1) exposes `dispose()`; consumers call it in `onBeforeUnmount` per the canonical order (services first, then composables, then timer/listener teardown). If R1 is rejected and we inline-port, the existing `onBeforeUnmount` blocks in both popup pages need the `if (shakeTimer) clearTimeout(shakeTimer)` line added — easy to miss; flagged for the audit.
+The shake timer (`shakeTimer`) is the only async resource the new code introduces. Composable (R1) exposes `dispose()`. Parents call it in `onBeforeUnmount`:
 
-### 7.6 Test fixture drift
+- `popup/pages/profile/new.vue` L170-174: currently only removes the `keydown` listener + clears `scrollEl`. Insert `dispose()` immediately before the listener removal.
+- `popup/pages/import.vue` L302-306: same pattern; insert `dispose()` immediately before `removeEventListener`.
+- `onboarding/pages/create.vue` L166-172: currently has `if (shakeTimer) clearTimeout(shakeTimer)` inline + secret zeroization. After R1, `clearTimeout` lives in the composable's `dispose()`; the parent calls `dispose()` instead. Keep secret zeroization (defense-in-depth).
+- `onboarding/pages/import.vue` L284-291: same.
 
-`TEST_WALLET_NAME = "Onboarding Test"` is currently typed into the input as the literal string. It still typechecks after the field rename; it's just that the *constant name* is misleading. Rename to `TEST_PROFILE_NAME` as part of P4 to avoid future-contributor confusion.
+Codex/Opus did not flag a cleanup-order regression; this section is preventive.
 
-## 8. Open questions (resolve at approval gate)
+### 7.5 Supply chain
 
-| # | Question | Default | Why this is open |
+Zero new dependencies. Zero version bumps. Pure internal work.
+
+### 7.6 Test-fixture drift
+
+`TEST_WALLET_NAME` → `TEST_PROFILE_NAME` (P6). Value unchanged. Internal-only constant; no external coupling.
+
+## 8. Open questions — resolved at v2 approval
+
+| # | v1 default | v2 resolution | How |
 |---|---|---|---|
-| Q1 | Duplicate name handling | **(c)** silent allow (status quo) | Adversarial concern is real but the fix isn't free; pick severity. |
-| Q2 | `done.vue` "Open wallet" button + "open the wallet from now on" subcopy | **Keep "wallet"** | Refers to opening the *app*, not the account concept. Renaming it to "Open Nulo" works too. |
-| Q3 | "Wallet version" string on the About / Settings page (referenced by `tests/e2e/navigation.test.ts:75`) | **Keep "wallet"** | Refers to the app version, not an account. |
-| Q4 | Extract `useProfileNameField()` composable (R1) vs. inline-port | **Extract** | CLAUDE.md "same code in 3 places is a refactor signal" — we hit 4. But 4 of 4 copies are inside the same package, and the composable adds ~80 LOC + 10 tests; codex/opus may push back. |
-| Q5 | Apply shake-validation UX to `EditProfilePopup.vue` for full surface consistency | **No (defer to follow-up)** | Edit-Profile already works; consistency improvement is bonus, not feature parity. |
-| Q6 | Apply `:sanitize` to the new inputs (and retro-apply to onboarding) | **Yes** | Free hardening; aligns with EditProfilePopup. |
-| Q7 | Rename `TEST_WALLET_NAME` → `TEST_PROFILE_NAME` constant in tests | **Yes** | Cosmetic but worth the diff to avoid future-contributor confusion. |
+| Q1 | Silent allow duplicates | **Hard-block at UI for direct paths; service-side auto-suffix for full-backup** | User Q-NEW2 + Codex MED #5 + §4.1 F4 |
+| Q2 | Keep "Open wallet" + "open the wallet" on done.vue | Same (whitelisted per §4.4) | v1 default holds — app-name use |
+| Q3 | Keep "Wallet version" on About page | Same (whitelisted per §4.4) | v1 default holds — app-name use |
+| Q4 | Extract `useProfileNameField` (R1) | Extract (now ~110 LOC; F4 hook integrated) | v1 + audits agreed |
+| Q5 | No EditProfilePopup parity | **Yes (C5)**: length cap bump 25→32. C5b cross-profile collision is optional but recommended. | User Q-NEW3 + Codex MED #5 |
+| Q6 | Apply `:sanitize` to new inputs | Yes — UI hardening | v1 default holds + Opus MED #7 (sanitize alone doesn't stop homoglyphs; documented in §7.2) |
+| Q7 | Rename `TEST_WALLET_NAME` → `TEST_PROFILE_NAME` | **Commit** (was "optional" in v1 P4; now P6.1 — locked) | Opus LOW #11 |
+| **Q-NEW1** | n/a | **Prefill from backup on file pick** (F3) | User |
+| **Q-NEW2** | n/a | **Hard-block at submit-time for direct paths** (F4) | User |
+| **Q-NEW3** | n/a | **All flows align at maxLength=32** (C5) | User |
+
+No open questions remain. Plan v2 is internally complete; awaiting final codex pass + approval gate.
 
 ## 9. Trade-offs / risks
 
-- **R1 vs. inline-port**: extracting the composable is the cleaner choice but adds a new C0 file + 10 tests + a wiring step in 4 consumers. If approval defers R1, P0 dissolves and the validation block lives inline in 4 places — minor maintenance debt, easy to fix later. Both paths land the feature.
-- **Visual regression on onboarding hero**: BrutalistTitle `sub="Wallet"` → `sub="Profile"`. Both words render the same. No layout risk — same letter count (7 vs 7).
-- **Notification copy "Profile creation failed" / "Profile import failed"**: changes the searchable string in notification history. If any error-aggregation tooling regex-matches on the old strings, it breaks. There's no such tooling in this repo today.
-- **`onboarding-name-input` testid is reused across onboarding's create + import**: confirmed; new popup testids (`register-name-input`, `import-name-input`) avoid the collision.
-- **Submit-time validation vs. disabled-button**: onboarding chose submit-time validation deliberately (visible shake + inline error beats silently-disabled-button — see `create.vue:38-42`). Extension flows currently use disabled-button. P1/P2 explicitly flip to submit-time validation; this is a **deliberate UX divergence from the old extension flows**, not a regression.
+- **Backward compat with `useFullBackupImport`**: P1 introduces optional `profileName` / `parsedBackupName`. Both default to no-op when absent — call sites can adopt incrementally. P3 wires both parent pages in the same commit.
+- **`isAllowedToContinue` redefinition in popup/import.vue**: removing the `length < 2` guard means the *submit button is no longer disabled* on empty name — it submits, then `validateName()` shakes. This is the intentional UX flip in §4.1 [F2]. Tests touching the import flow must remove any "button stays disabled" assertions if present.
+- **Test surface explosion**: P6 touches 8 e2e files. Each is a small surgical edit (1–3 lines), but the volume is real. The risk is that one of the helpers is shared more widely than the breakage table shows — recommend running `bun run test:e2e` after every two files, not after the full sweep.
+- **Race when prefilling from backup**: P3's `watch(parsedBackupName, ...)` fires synchronously after parse. If the user is mid-typing into the name input when they trigger file pick, the watch will clobber their input. Mitigation: prefill only when `profileName.value === ""` (the watch guards this). Documented in F2's watch implementation.
+- **EditProfilePopup length-cap migration**: existing profiles up to 32 chars already exist on disk (onboarding writes them today). Bumping the cap is purely permissive — zero migration risk.
+- **R1 vs inline-port redux**: v1's "if inline-port, four copies of validation"; v2 has the duplicate-check too. Inlining now means four copies of two patterns. The case for extraction is strictly stronger in v2.
+- **Codex MED #5's Q1 concern**: "silent allow isn't current behavior because backup-restore auto-suffixes." Resolved — direct paths get UI hard-block; full-backup keeps auto-suffix.
 
 ## 10. Rollout
 
-Single PR. The phases are commit-shaped — each can be a separate commit on a `feat/profile-name-parity` branch — but they land together because:
-- P3 (copy) without P1+P2 (extension parity) leaves the extension UX inconsistent with the new "Profile" copy.
-- P1+P2 without P3 leaves onboarding still saying "Wallet" — defeats the consistency goal.
-- The smoke + network e2e suites verify the full flow; splitting introduces an interim "broken-ish" state in dev.
+Single PR (unchanged from v1). Branch: `feat/profile-name-parity`. Squash-merge to `dev`.
 
-Branch name: `feat/profile-name-parity`. PR title (Conventional Commit): `feat(extension): add profile-name input + align onboarding copy to "Profile"`. Squash-merge to `dev` per the branch policy.
+PR title (Conventional Commit, lowercase per commitlint):
+```
+feat(extension): add profile-name input, align onboarding copy, fix full-backup name drop
+```
+
+Body covers F1/F2/F3/F4/C1–C6, links to `audit-codex.md` + `audit-opus.md` for context, calls out the e2e fixture sweep, and explicitly lists the §7.2/§7.3 follow-up items.
 
 ## 11. Validation gates
 
-Per CLAUDE.md "validate after each step before moving on":
+| After phase | Command |
+|---|---|
+| P0 | `bun run --cwd packages/extension test src/composables/useProfileNameField.test.ts && bun run audit:vue && bun run test:e2e` |
+| P1 | `bun run --cwd packages/extension test src/composables/useFullBackupImport.test.ts && bun run audit:vue` |
+| P2 | `bun run audit:vue && bun run test:e2e -- registration.test.ts` |
+| P3 | `bun run audit:vue && bun run test:e2e -- import-paths.test.ts` |
+| P4 | `bun run --cwd packages/extension test && bun run --cwd packages/extension build-storybook` |
+| P5 | `bun run lint && bun run --cwd packages/extension test` |
+| P6 | `bun run test:e2e && bun run e2e:agent` |
+| P7 | Full `bun run audit:vue` + grep guard |
+| P8 | Codex implementation review; fix loop |
 
-- After P0: `bun run --cwd packages/extension test src/composables/useProfileNameField.test.ts && bun run audit:vue && bun run test:e2e`
-- After P1: `bun run audit:vue && bun run test:e2e -- registration.test.ts`
-- After P2: `bun run audit:vue && bun run test:e2e -- import-paths.test.ts`
-- After P3: `bun run lint && bun run --cwd packages/extension test`
-- After P4: `bun run test:e2e && bun run e2e:agent`
-- After P5: full `bun run audit:vue` one more time + grep guard
-- After P6: address codex review feedback, repeat P5 as needed
+## 12. Out of scope (explicit)
 
-## 12. Out of scope (explicitly excluded)
-
-- Internal identifier rename (`ProfileService` → anything, etc.).
-- RPC method rename (`createProfile`, `changeProfileName`, …).
-- Service-side validation hardening (length cap, charset filter at service layer).
-- Storage migration for existing profile names.
+- Internal identifier rename (`ProfileService`, `useProfileBootstrap`, `profile.store`, RPC method names).
+- Service-side name validation / hardening (length cap, charset filter, bidi strip).
+- Homoglyph defense beyond NFKC normalization (Cyrillic-Latin and other script-mixing).
+- Backup-restore-time name sanitization.
+- "Open wallet" / "Lock wallet" / "Wallet version" / settings "wallet locking" copy — whitelisted per §4.4 (app-name use).
 - Browser-fingerprint / passkey-credential changes.
-- Any "Open wallet" / "Wallet version" copy unless Q2 / Q3 are approved.
-- EditProfilePopup UX upgrade unless Q5 is approved.
+- EditProfilePopup full UX-parity upgrade (shake animation, focus restore on error) — only the length cap + optional duplicate check land here.
 
-## 13. Codex / Opus audit asks
+## 13. Audit history
 
-Both audits (codex via the codex skill at `xhigh`, opus via Agent subagent) receive this plan with the explicit ask:
+| Version | Date | Codex verdict | Opus verdict | Notes |
+|---|---|---|---|---|
+| v1 | 2026-05-21 | REJECT (3 HIGH + 3 MED) | APPROVE-WITH-FIXES (3 HIGH + 9 MED/LOW) | Initial draft. Missed full-backup-name drop, e2e fixture blast radius, `"Profile 1"` hardcoded asserts, §4.4 sweep. |
+| v2 | 2026-05-21 | **APPROVE-WITH-FIXES (2 MED + 2 LOW)** | (re-review not run; v1 findings all consolidated into v2) | Consolidates both v1 audits + 3 user-locked decisions. Inline edits 2026-05-21 incorporated all 4 Codex v2 findings: passkey-paths re-import in F2 fallout, fpcs whitelist path, sync validate to close the submission race, explicit prefill guard. |
 
-> Review for: (a) factual accuracy of the file/line catalog in §4; (b) the test plan in §6 — succinct enough? missing critical case?; (c) the adversarial section in §7 — what would an attacker target? what are we trusting that we shouldn't?; (d) is R1 (the composable extraction) the right call, or is inline-porting cleaner given the consumer count?; (e) are any of the §8 open questions actually closed (i.e., the "default" is wrong)?; (f) any cross-cutting concerns the file catalog missed?
+### 13.1 Codex v2 fixes applied inline
 
-Audit transcripts saved at `audit-codex.md` and `audit-opus.md`.
+| Codex v2 # | Severity | Where | Fix applied in this v2 |
+|---|---|---|---|
+| #2 | MED | §4.5 F2 fallout | Added `passkey-paths.test.ts:174-194` row to the breakage table. |
+| #4 | LOW | §4.4 whitelist | Corrected `popup/pages/settings/advanced/account-state/fpcs/index.vue:83` → `popup/pages/settings/fpcs/index.vue:83`. |
+| #7 | MED | §4.2 R1 | `validate()` stays sync; parent fetches `existingNames` async behind the existing `isCreating` latch. Spelled out in the parent-side submission-shape code block. |
+| #8 | LOW | §4.1 F3 | Made the prefill `watch` guard explicit (`if (newName && !profileName.value.trim())`) + added the clone-not-mutate implementation note. |
+
+### 13.2 Next steps
+
+1. Approval gate — present consolidated plan + audit verdicts to user.
+2. On approval, begin implementation (P0 → P8) per §5.
+3. After P8, post-impl codex review (separate session); save to `audit-codex-impl.md`.

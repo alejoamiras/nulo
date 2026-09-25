@@ -1,5 +1,7 @@
 # e2e Determinism Plan — FINAL v3a (post-codex-audit + DOM-purity revision, settled-card edition)
 
+Earlier revisions: [plan-consolidated.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-determinism/plan-consolidated.md).
+
 Supersedes prior versions. Three revision passes:
 1. **Post-codex-audit v1 (session `019e2c76`)** — switched Signal 1 from tx-store scan to journal correlation; dropped Signal 3 (popup handshake); kept `waitForToast` in `sendTransfer`; pinned the 5s sleep instead of touching it.
 2. **DOM-purity v2 (user feedback)** — switched Signal 1 to observe the `TransactionAwaitingCard` lifecycle. *Codex audit (session `019e2cc5`) found this was semantically wrong*: the awaiting card unmounts at submit, not at chain confirmation.

@@ -1,5 +1,7 @@
 # Phase 2+ — durable-jobs follow-on (plan v4, implementation target)
 
+Earlier revisions: [plan-v1.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/phase-2-plus/plan-v1.md), [plan-v2.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/phase-2-plus/plan-v2.md), [plan-v3.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/phase-2-plus/plan-v3.md).
+
 **Status:** ✅ **SHIPPED.** Bundle 1 = PR #82 (`v0.15.7`, branch `feat/phase-2-plus-bundle-1`). Phase A = PR #83 (`v0.16.0`, branch `feat/phase-2-plus-phase-a`, stacked on Bundle 1). Both passed `audit:vue` (1634/1634 tests on Phase A; 1625/1625 on Bundle 1) and codex post-impl review.
 
 **Codex post-impl follow-ups applied during the implementation pass** (not in v4 above): A1 log delete failures, NO_ACCOUNT sentinel readable, A2 race-comment for the A3 boot probe; multi-in-flight card rendering on `feat/phase-2-plus-phase-a` (codex caught the single-card `topJournalOp[0]` render as a hidden Phase 2 W5 regression — fixed by rendering one card per in-flight op, per-jobId cancel emit, ambiguity-safe subtask decoration, slot accounting fix). See commit graph on each PR for the full audit trail.
