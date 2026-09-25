@@ -1929,7 +1929,7 @@ account-add paths change, `network/incoming-transfers`, `network/incoming-public
 
 Gate: all of the above exit 0 and the parity Artifact URL printed.
 
-### P6 · The owner's parity answers
+### P6 · The owner's parity answers ✓
 
 The owner, 2026-09-25, on the parity page's thirteen calls:
 
