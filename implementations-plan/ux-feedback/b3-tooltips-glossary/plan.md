@@ -750,7 +750,7 @@ Each phase ends with its validation gate; its log is `lessons/phase-N.md`, print
 
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
-### P2 · The dotted term, the fee labels and the balance split ☐
+### P2 · The dotted term, the fee labels and the balance split ✓
 
 1. `DottedTerm.vue` + `DottedTerm.test.ts`, with `Tooltip` and `Text` registered through
    `global.components`; the L3 minimum of 10:
