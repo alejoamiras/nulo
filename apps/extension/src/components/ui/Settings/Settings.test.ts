@@ -2,8 +2,11 @@
  * Combined tests for the Settings family — ItemsContainer, SettingItem,
  * SettingField, SettingValue. Each component gets ≥5 cases.
  */
-import { describe, expect, test } from "vitest"
-import { mount } from "@vue/test-utils"
+import { describe, expect, test, vi } from "vitest"
+import { flushPromises, mount } from "@vue/test-utils"
+import { h } from "vue"
+import { createMemoryHistory, createRouter } from "vue-router"
+import { RowAction } from "@nulo/design"
 
 import ItemsContainer from "./ItemsContainer.vue"
 import SettingItem from "./SettingItem.vue"
@@ -59,57 +62,150 @@ describe("ui/Settings — ItemsContainer", () => {
 })
 
 describe("ui/Settings — SettingItem", () => {
-	test("renders title prop", () => {
-		const w = mount(SettingItem, { props: { title: "Account" }, global: { stubs: STUBS } })
+	const { RouterLink: _link, ...ROW_STUBS } = STUBS
+	const makeRouter = () =>
+		createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
+	const space = (shiftKey = false) => new KeyboardEvent("keydown", { key: " ", shiftKey, bubbles: true, cancelable: true })
+	const enter = () => new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+
+	async function mountItem(props: Record<string, unknown>, attrs: Record<string, unknown> = {}, slots: Record<string, unknown> = {}) {
+		const router = makeRouter()
+		await router.push("/start")
+		const push = vi.spyOn(router, "push")
+		const w = mount(SettingItem, { props, attrs, slots, global: { stubs: ROW_STUBS, plugins: [router] }, attachTo: document.body })
+		return { w, router, push }
+	}
+
+	test("renders title and description", async () => {
+		const { w } = await mountItem({ title: "Account", description: "subline" })
 		expect(w.text()).toContain("Account")
-	})
-
-	test("renders description prop when provided", () => {
-		const w = mount(SettingItem, {
-			props: { title: "X", description: "subline" },
-			global: { stubs: STUBS },
-		})
 		expect(w.text()).toContain("subline")
+		w.unmount()
 	})
 
-	test("to prop without external renders RouterLink stub (an <a>)", () => {
-		const w = mount(SettingItem, {
-			props: { title: "X", to: "/popup/general" },
-			global: { stubs: STUBS },
-		})
-		expect(w.element.tagName.toLowerCase()).toBe("a")
+	test("link mode: an anchor root with the route's href, no tabindex; a click and Space each navigate once, Shift+Space not at all", async () => {
+		const { w, router, push } = await mountItem({ title: "X", to: "/popup/general" }, { "data-testid": "row" })
+		expect(w.element.tagName).toBe("A")
+		expect(w.attributes("href")).toBe("/popup/general")
+		expect(w.attributes("data-testid")).toBe("row")
+		expect(w.attributes("tabindex")).toBeUndefined()
+		expect(w.find("[data-row-target]").exists()).toBe(false)
+
+		await w.trigger("click")
+		await flushPromises()
+		expect(push).toHaveBeenCalledTimes(1)
+		expect(router.currentRoute.value.path).toBe("/popup/general")
+
+		await router.push("/start")
+		push.mockClear()
+		const plain = space()
+		w.element.dispatchEvent(plain)
+		await flushPromises()
+		expect(plain.defaultPrevented).toBe(true)
+		expect(push).toHaveBeenCalledTimes(1)
+
+		push.mockClear()
+		const shifted = space(true)
+		w.element.dispatchEvent(shifted)
+		await flushPromises()
+		expect(shifted.defaultPrevented).toBe(false)
+		expect(push).not.toHaveBeenCalled()
+		w.unmount()
 	})
 
-	test("external=true with to= renders an anchor with target=_blank", () => {
-		const w = mount(SettingItem, {
-			props: { title: "X", to: "https://example.com", external: true },
-			global: { stubs: STUBS },
-		})
-		expect(w.element.tagName.toLowerCase()).toBe("a")
+	test("external mode: a new-tab anchor; a bare Space presses it once and prevents the scroll, a modified Space does neither", async () => {
+		const { w } = await mountItem({ title: "X", to: "https://example.com", external: true })
+		expect(w.element.tagName).toBe("A")
 		expect(w.attributes("target")).toBe("_blank")
+		expect(w.attributes("rel")).toBe("noopener noreferrer")
 		expect(w.attributes("href")).toBe("https://example.com")
+		expect(w.attributes("tabindex")).toBeUndefined()
+		const click = vi.spyOn(w.element as HTMLAnchorElement, "click").mockImplementation(() => {})
+
+		const plain = space()
+		w.element.dispatchEvent(plain)
+		expect(click).toHaveBeenCalledTimes(1)
+		expect(plain.defaultPrevented).toBe(true)
+
+		const shifted = space(true)
+		w.element.dispatchEvent(shifted)
+		expect(click).toHaveBeenCalledTimes(1)
+		expect(shifted.defaultPrevented).toBe(false)
+		w.unmount()
 	})
 
-	test("disabled=true sets tabindex=-1 and applies the disabled class", () => {
-		const w = mount(SettingItem, {
-			props: { title: "X", to: "/popup/x", disabled: true },
-			global: { stubs: STUBS },
-		})
-		expect(w.attributes("tabindex")).toBe("-1")
-		expect(w.html()).toMatch(/disabled/)
+	test("click mode: a div root holding a button target named by the title; the target's press runs the handler once", async () => {
+		const onClick = vi.fn()
+		const { w } = await mountItem({ title: "Manage" }, { onClick })
+		expect(w.element.tagName).toBe("DIV")
+		expect(w.attributes("tabindex")).toBeUndefined()
+		const target = w.find("[data-row-target]")
+		expect(target.element.tagName).toBe("BUTTON")
+		expect(w.find(`#${target.attributes("aria-labelledby")}`).text()).toBe("Manage")
+		expect(w.html()).toMatch(/interactive/)
+
+		await target.trigger("click")
+		expect(onClick).toHaveBeenCalledTimes(1)
+		w.unmount()
 	})
 
-	test("size=small applies the small class", () => {
-		const w = mount(SettingItem, { props: { title: "X", size: "small" }, global: { stubs: STUBS } })
+	test("click mode with a nested RowAction: the action fires and the row handler does not", async () => {
+		const onClick = vi.fn()
+		const onCopy = vi.fn()
+		const { w } = await mountItem(
+			{ title: "Alice" },
+			{ onClick },
+			{ right: () => h(RowAction, { label: "Copy account address", "data-testid": "copy", onClick: onCopy }, () => "c") },
+		)
+		const action = w.find('[data-testid="copy"]')
+		expect(action.element.tagName).toBe("BUTTON")
+		expect(w.find("[data-row-target]").find('[data-testid="copy"]').exists()).toBe(false)
+		await action.trigger("click")
+		expect(onCopy).toHaveBeenCalledTimes(1)
+		expect(onClick).not.toHaveBeenCalled()
+		w.unmount()
+	})
+
+	test("inert mode: no target, no tabindex, no pointer class", async () => {
+		const { w } = await mountItem({ title: "Version", raw: true })
+		expect(w.element.tagName).toBe("DIV")
+		expect(w.find("[data-row-target]").exists()).toBe(false)
+		expect(w.find("[tabindex]").exists()).toBe(false)
+		expect(w.html()).not.toMatch(/interactive/)
+		w.unmount()
+	})
+
+	test.each([
+		["to", { to: "/popup/x" }, {}],
+		["@click", {}, { onClick: vi.fn() }],
+	])(
+		"a disabled row with %s is inert: no a, button, target or tabindex, and Enter neither navigates nor calls the handler",
+		async (_name, props, attrs) => {
+			const { w, push } = await mountItem({ title: "X", disabled: true, ...props }, attrs)
+			expect(w.element.tagName).toBe("DIV")
+			expect(w.html()).toMatch(/disabled/)
+			expect(w.find("a, button, [data-row-target], [tabindex]").exists()).toBe(false)
+			expect(w.attributes("href")).toBeUndefined()
+
+			w.element.dispatchEvent(enter())
+			await w.trigger("click")
+			await flushPromises()
+			expect(push).not.toHaveBeenCalled()
+			if ("onClick" in attrs) expect(attrs.onClick).not.toHaveBeenCalled()
+			w.unmount()
+		},
+	)
+
+	test("size=small applies the small class", async () => {
+		const { w } = await mountItem({ title: "X", size: "small" })
 		expect(w.html()).toMatch(/small/)
+		w.unmount()
 	})
 
-	test("loading + icon shows a Spinner (instead of the icon)", () => {
-		const w = mount(SettingItem, {
-			props: { title: "X", icon: "user", loading: true },
-			global: { stubs: STUBS },
-		})
+	test("loading + icon shows a Spinner (instead of the icon)", async () => {
+		const { w } = await mountItem({ title: "X", icon: "user", loading: true })
 		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(true)
+		w.unmount()
 	})
 })
 

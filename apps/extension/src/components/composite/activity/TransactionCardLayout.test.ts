@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
 import { defineComponent, h, nextTick, ref } from "vue"
+import { createMemoryHistory, createRouter } from "vue-router"
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
 const STUBS = {
@@ -124,13 +125,13 @@ describe("composite/TransactionCardLayout", () => {
 		expect(w.find("[data-testid='tx-card']").attributes("data-stage")).toBeUndefined()
 	})
 
-	// Phase 2 follow-up v4: visual clash fix. The wrapper gains a
-	// `wrapper_has_actions` modifier class when the `#actions` slot is
-	// filled, which adds `padding-right: 36px` so the absolute-positioned
-	// action button doesn't overlap the amount column on transfer cards.
+	// The `#actions` corner is absolutely positioned; the wrapper reserves its width (one 24px
+	// button, or two) so it never overlaps the amount column.
 	test("wrapper has `wrapper_has_actions` modifier when the actions slot is filled", () => {
 		const w = mountLayout({}, { actions: "<button data-testid='action'>X</button>" })
 		expect(w.html()).toMatch(/wrapper_has_actions/)
+		expect(w.html()).not.toMatch(/wrapper_two_actions/)
+		expect(mountLayout({ actionCount: 2 }, { actions: "<button>X</button>" }).html()).toMatch(/wrapper_two_actions/)
 	})
 
 	test("wrapper does NOT have the modifier when the actions slot is empty", () => {
@@ -179,6 +180,64 @@ describe("composite/TransactionCardLayout", () => {
 		await nextTick()
 		expect(w.html()).toMatch(/wrapper_has_actions/)
 		expect(w.find("[data-testid='x']").exists()).toBe(true)
+	})
+})
+
+describe("composite/TransactionCardLayout — the row's target", () => {
+	const router = () =>
+		createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
+	const mountRow = (props: Record<string, unknown>) =>
+		mount(TransactionCardLayout, {
+			props: { title: "USDC", icon: "zap", testId: "tx-card", txHash: "0xabc", stage: "queued", ...props },
+			global: { stubs: STUBS, plugins: [router()] },
+		})
+
+	test("`to` renders a link target named by the title; the root keeps its testid and data attributes", () => {
+		const w = mountRow({ to: "/popup/tx/0xabc" })
+		const target = w.find("[data-row-target]")
+		expect(target.element.tagName).toBe("A")
+		expect(target.attributes("href")).toBe("/popup/tx/0xabc")
+		expect(w.find(`#${target.attributes("aria-labelledby")}`).text()).toBe("USDC")
+		const root = w.find("[data-testid='tx-card']")
+		expect(root.attributes("data-tx-hash")).toBe("0xabc")
+		expect(root.attributes("data-stage")).toBe("queued")
+		expect(root.classes().some((c) => c.includes("interactive"))).toBe(true)
+	})
+
+	test("`opens` renders a button target, and a press on it emits `activate` once", async () => {
+		const w = mountRow({ opens: true })
+		const target = w.find("[data-row-target]")
+		expect(target.element.tagName).toBe("BUTTON")
+		await target.trigger("click")
+		expect(w.emitted("activate")).toHaveLength(1)
+	})
+
+	test("neither: the row is inert — no target, no tabindex, no pointer class, a click emits nothing", async () => {
+		const w = mountRow({})
+		expect(w.find("[data-row-target]").exists()).toBe(false)
+		expect(w.find("[tabindex]").exists()).toBe(false)
+		expect(w.html()).not.toMatch(/interactive/)
+		await w.trigger("click")
+		expect(w.emitted("activate")).toBeUndefined()
+	})
+
+	test("with `opens` and a priced amount, a click on the fiat span keeps its title and emits `activate` exactly once", async () => {
+		const w = mountRow({ opens: true, amount: "−125.00", amountSymbol: "cUSD", amountFiat: "≈ $124.98" })
+		const fiat = w.find('[data-testid="activity-fiat"]')
+		expect(fiat.attributes("title")).toBe("At today's price")
+		expect(fiat.classes().some((c) => c.includes("raised"))).toBe(true)
+		expect(w.find("[data-row-target]").find('[data-testid="activity-fiat"]').exists()).toBe(false)
+		await fiat.trigger("click")
+		expect(w.emitted("activate")).toHaveLength(1)
+	})
+
+	test("`arriving` marks the root and the amount", () => {
+		const w = mountRow({ arriving: true, amount: "+5" })
+		expect(w.find("[data-testid='tx-card']").attributes("data-arriving")).toBe("true")
+		expect(w.html()).toMatch(/n-row-in/)
+		expect(w.html()).toMatch(/n-row-glow/)
+		expect(w.html()).toMatch(/n-amt/)
+		expect(mountRow({ amount: "+5" }).find("[data-testid='tx-card']").attributes("data-arriving")).toBeUndefined()
 	})
 })
 

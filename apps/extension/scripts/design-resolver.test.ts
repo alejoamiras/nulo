@@ -38,6 +38,7 @@ const EXPECTED_MIGRATED = [
 	"Input",
 	// package-native — never had a local SFC, so there is no shadow to delete
 	"Skeleton",
+	"RowAction",
 ]
 
 // Wrapper-backed: the extension keeps a LOCAL SFC of this name, so the bare tag must resolve to that

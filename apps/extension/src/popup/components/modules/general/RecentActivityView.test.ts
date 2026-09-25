@@ -18,6 +18,7 @@
 
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
+import { createMemoryHistory, createRouter } from "vue-router"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
@@ -159,14 +160,12 @@ vi.mock("@/wallet/services/transaction/spec", () => ({
 
 vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.store.current }))
 
-vi.mock("vue-router", async (importOriginal) => {
-	const mod = await importOriginal<typeof import("vue-router")>()
-	return { ...mod, useRouter: () => ({ push: vi.fn() }) }
-})
-
 // ── Fixtures + helpers ────────────────────────────────────────────────────────
 
 import RecentActivityView from "./RecentActivityView.vue"
+
+const makeRouter = () =>
+	createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
 
 const ACCT_A = "0xacct" // matches the harness default active account
 const ACCT_B = "0xB"
@@ -222,7 +221,7 @@ const incomingRecord = (over: Record<string, unknown>) => ({
 	...over,
 })
 
-const mountView = () => mount(RecentActivityView, { shallow: true })
+const mountView = () => mount(RecentActivityView, { shallow: true, global: { plugins: [makeRouter()] } })
 
 // biome-ignore lint/suspicious/noExplicitAny: JS SFC exposes untyped refs via defineExpose.
 const vmOf = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as any
@@ -500,9 +499,42 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 	})
 })
 
+describe("RecentActivityView — rows link to their detail routes", () => {
+	test("a tx, a terminal journal record and a receipt each carry their route; the receipt row renders it as its link", async () => {
+		H.store.current.transactions = [{ hash: "0xh1", account: ACCT_A, chainId: 1, updatedAt: 3000, calls: [] } as never]
+		H.getOperations.mockResolvedValue([{ ...inFlightTransferOp(ACCT_A, "op-1"), terminalAt: 5, progress: { stage: "cancelled" } }])
+		H.getIncomingTransfers.mockResolvedValue([incomingRecord({ siloedNullifier: "sn-1", discoveredAt: 2000 })])
+
+		// The receipt card renders for real, down to its link; the other two stay stubs read by prop.
+		const w = mount(RecentActivityView, {
+			shallow: true,
+			global: {
+				plugins: [makeRouter()],
+				stubs: {
+					TransactionIncomingCard: false,
+					TransactionCardLayout: false,
+					RowTarget: false,
+					RouterLink: false,
+					Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false },
+					Icon: { template: "<i />" },
+				},
+			},
+		})
+		await flushPromises()
+		H.incomingConnected.emit()
+		await flushPromises()
+
+		expect(w.findComponent({ name: "TransactionCard" }).props("to")).toBe("/popup/tx/0xh1")
+		expect(w.findComponent({ name: "TransactionTerminalCard" }).props("to")).toBe("/popup/journal/op-1")
+		const receipt = w.find('[data-testid="tx-incoming-card"] a[data-row-target]')
+		expect(receipt.attributes("href")).toBe("/popup/received/note:p1|net-1|sn-1")
+	})
+})
+
 describe("RecentActivityView — one feed block for token and account views", () => {
 	const TOKEN = { contract: "0xtok", symbol: "TOK" }
-	const mountFeed = (props: Record<string, unknown> = {}) => mount(RecentActivityView, { shallow: true, props })
+	const mountFeed = (props: Record<string, unknown> = {}) =>
+		mount(RecentActivityView, { shallow: true, props, global: { plugins: [makeRouter()] } })
 	const awaitingCards = (w: ReturnType<typeof mountFeed>) => w.findAllComponents({ name: "TransactionAwaitingCard" })
 	const root = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='activity-feed-root']")
 
@@ -584,7 +616,8 @@ describe("RecentActivityView — one feed block for token and account views", ()
 })
 
 describe("RecentActivityView — stalled incoming scan line", () => {
-	const mountFeed = (props: Record<string, unknown> = {}) => mount(RecentActivityView, { shallow: true, props })
+	const mountFeed = (props: Record<string, unknown> = {}) =>
+		mount(RecentActivityView, { shallow: true, props, global: { plugins: [makeRouter()] } })
 	const line = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='incoming-sync-stalled']")
 	const retry = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='incoming-sync-retry']")
 

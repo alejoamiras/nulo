@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => ({
 	executionDisconnect: vi.fn(),
 	getTokens: vi.fn(),
 	getTokenBalances: vi.fn(),
-	getContacts: vi.fn(async () => []),
+	getContacts: vi.fn(async (): Promise<unknown[]> => []),
 	openToast: vi.fn(),
 	routerBack: vi.fn(),
 	routerReplace: vi.fn(),
@@ -674,6 +674,59 @@ describe("send page — the sheet on the popup stack", () => {
 		expect((w.get('[data-testid="stub-recipient"]').element as HTMLInputElement).value).toBe(DESTINATION)
 		expect(strip(w).attributes("data-to")).toBe("public")
 		expect(submit(w).attributes("data-action")).toBe("review")
+		w.unmount()
+	})
+})
+
+describe("send page — the contact in the URL", () => {
+	const ALICE = { id: "c-alice", name: "Alice", address: `0x${"a".repeat(64)}`, abbr: "AL" }
+	const recipient = (w: W) => w.findComponent(STUBS.RecipientField)
+	afterEach(() => {
+		route.query = {}
+	})
+
+	test("?contact=<id> of one of the profile's contacts preselects it, with no store involved", async () => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: ALICE.id }
+		const { w, cacheStore } = await mountSend()
+		expect(recipient(w).props("selectedContact")).toEqual(ALICE)
+		expect(recipient(w).props("searchTerm")).toBe(ALICE.address)
+		expect("preselectedContactToSend" in cacheStore).toBe(false)
+		w.unmount()
+	})
+
+	test.each([
+		["an unknown id", "c-nobody"],
+		["another profile's id", "c-bob"],
+	])("%s selects nothing", async (_name, id) => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: id }
+		const { w } = await mountSend()
+		expect(recipient(w).props("selectedContact")).toBeUndefined()
+		expect(recipient(w).props("searchTerm")).toBe("")
+		w.unmount()
+	})
+
+	test("a cold tab: the contacts arrive once the identity settles after mount, and the id still preselects", async () => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: ALICE.id }
+		installChromeStorage()
+		const pinia = createTestingPinia({ stubActions: false })
+		const appStore = useAppStore(pinia)
+		appStore.isLogined = true
+		const w = mount(Send, {
+			attachTo: document.body,
+			global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+		})
+		await flushPromises()
+		expect(recipient(w).props("selectedContact")).toBeUndefined()
+
+		appStore.profile = { id: "p1" } as never
+		appStore.network = { id: "n1", chainId: TOKEN.chainId } as never
+		appStore.account = { address: ACCOUNT } as never
+		await flushPromises()
+		expect(recipient(w).props("selectedContact")).toEqual(ALICE)
+		expect(recipient(w).props("searchTerm")).toBe(ALICE.address)
 		w.unmount()
 	})
 })

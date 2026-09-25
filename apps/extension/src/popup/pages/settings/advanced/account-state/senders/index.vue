@@ -109,33 +109,19 @@ onBeforeUnmount(() => {
 
 				<Flex align="center" gap="8">
 					<Tooltip position="end" delay="350">
-						<Icon
-							v-if="copiedAddress !== sender"
-							@click.stop="handleCopyAddress(sender)"
-							name="copy"
-							size="14"
-							color="tertiary"
-							:class="$style.icon_btn"
-						/>
-						<Icon
-							v-else-if="copiedAddress === sender"
-							name="check-circle"
-							size="14"
-							color="green"
-							:style="{ transition: 'all 0.2s ease' }"
-						/>
+						<RowAction v-if="copiedAddress !== sender" label="Copy address" @click="handleCopyAddress(sender)">
+							<Icon name="copy" size="14" color="tertiary" />
+						</RowAction>
+						<span v-else :class="$style.copied">
+							<Icon name="check-circle" size="14" color="green" :style="{ transition: 'all 0.2s ease' }" />
+						</span>
 
 						<template #content> Copy address </template>
 					</Tooltip>
 					<Tooltip position="end" delay="350">
-						<Icon
-							@click.stop="handleDelete(sender)"
-							name="close-circle"
-							size="14"
-							color="tertiary"
-							:class="$style.icon_btn"
-							data-testid="sender-delete"
-						/>
+						<RowAction label="Delete sender" data-testid="sender-delete" @click="handleDelete(sender)">
+							<Icon name="close-circle" size="14" color="tertiary" />
+						</RowAction>
 
 						<template #content> Delete sender </template>
 					</Tooltip>
@@ -161,26 +147,14 @@ onBeforeUnmount(() => {
 	border: 1px solid var(--nulo-border);
 
 	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border-color: var(--nulo-outline);
-		span {
-			color: var(--txt-primary);
-			cursor: pointer;
-		}
-	}
 }
 
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
+/* The same box as the copy action it replaces, so the row does not move while the check shows. */
+.copied {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
 }
-
 </style>

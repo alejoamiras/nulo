@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
+import { createMemoryHistory, createRouter } from "vue-router"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import type { PriceState } from "@/wallet/services/price/spec"
@@ -28,10 +29,12 @@ vi.mock("@/wallet/services/price/client", () => ({
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
-	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
 	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
 	Skeleton: { template: '<i data-testid="stub-skeleton" />', props: ["width", "height"] },
 }
+
+const makeRouter = () =>
+	createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 
@@ -58,7 +61,7 @@ const factory = (overrides: Record<string, unknown> = {}, tokenOverrides: Record
 	}
 	return mount(TokenCard, {
 		props: { tokenBalance } as never,
-		global: { stubs: STUBS },
+		global: { stubs: STUBS, plugins: [makeRouter()] },
 	})
 }
 
@@ -187,6 +190,48 @@ describe("TokenCard", () => {
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+})
+
+describe("TokenCard — the row is a link", () => {
+	async function mountLinked() {
+		const router = makeRouter()
+		await router.push("/popup/general")
+		const push = vi.spyOn(router, "push")
+		const w = mount(TokenCard, {
+			props: {
+				tokenBalance: { id: 42, token: tokenInfo, account: "0xacct", publicBalance: "0", privateBalance: "0", updatedAt: 1 },
+			} as never,
+			global: { stubs: STUBS, plugins: [router] },
+			attachTo: document.body,
+		})
+		return { w, router, push, row: w.find('[data-testid="tokens-card"]') }
+	}
+
+	test("an anchor to the token page, with no tabindex", async () => {
+		const { w, row } = await mountLinked()
+		expect(row.element.tagName).toBe("A")
+		expect(row.attributes("href")).toBe("/popup/tokens/1")
+		expect(row.attributes("tabindex")).toBeUndefined()
+		w.unmount()
+	})
+
+	test("Space navigates once and prevents the scroll; Shift+Space not at all", async () => {
+		const { w, router, push, row } = await mountLinked()
+		const plain = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })
+		row.element.dispatchEvent(plain)
+		await flushPromises()
+		expect(plain.defaultPrevented).toBe(true)
+		expect(push).toHaveBeenCalledTimes(1)
+		expect(router.currentRoute.value.path).toBe("/popup/tokens/1")
+
+		push.mockClear()
+		const shifted = new KeyboardEvent("keydown", { key: " ", shiftKey: true, bubbles: true, cancelable: true })
+		row.element.dispatchEvent(shifted)
+		await flushPromises()
+		expect(shifted.defaultPrevented).toBe(false)
+		expect(push).not.toHaveBeenCalled()
+		w.unmount()
 	})
 })
 

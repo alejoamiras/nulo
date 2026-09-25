@@ -78,10 +78,13 @@ const deactivate = async () => {
 	releaseTrap()
 }
 
+// `immediate`: a popup created already shown (its caller renders it behind a `v-if` on its data)
+// never sees `show` change, and without this it would open with no trap, no Escape and no return
+// focus. The first run reads the opener before any child's mounted hook can focus its own input.
 watch(
 	() => props.show,
 	() => (props.show ? activate() : deactivate()),
-	{ flush: "post" },
+	{ flush: "post", immediate: true },
 )
 
 onBeforeUnmount(() => {

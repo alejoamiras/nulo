@@ -67,42 +67,46 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 </script>
 
 <template>
-	<RouterLink v-if="tokenBalance" :to="`/popup/tokens/${token?.id}`" data-testid="tokens-card" :class="$style.row">
-		<Flex direction="column" gap="2">
-			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
-				{{ token.symbol }}
-			</span>
-			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
-			<span v-else :class="$style.fiat">{{ token?.name || "unknown" }}</span>
-		</Flex>
-
-		<Flex
-			v-if="isInitialSync && !syncFailed && !isMalformed"
-			direction="column"
-			align="end"
-			justify="center"
-			gap="5"
-			data-testid="token-balance-loading"
-			aria-busy="true"
-			:class="$style.loading_block"
-		>
-			<Skeleton :width="64" :height="13" />
-			<Skeleton :width="92" :height="9" />
-		</Flex>
-		<Flex v-else direction="column" align="end" gap="2">
-			<span :class="[$style.amount, syncFailed && $style.amount_stale]" :data-malformed="isMalformed || undefined">{{ totalBalance || 0 }}</span>
-			<span v-if="!isMalformed" :class="$style.detail">
-				<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
-				{{ privateFormatted }}
-				<span :class="$style.pub_group">
-					<span :class="$style.icon_public"><Icon name="globe" size="9" /></span>
-					{{ publicFormatted }}
+	<!-- Space calls `navigate` with no `.prevent`: vue-router's guardEvent refuses an event whose
+	     default is already prevented, and `navigate` prevents it itself when it navigates. -->
+	<RouterLink v-if="tokenBalance" :to="`/popup/tokens/${token?.id}`" custom v-slot="{ href, navigate }">
+		<a :href data-testid="tokens-card" :class="[$style.row, $style.link]" @click="navigate" @keydown.space="navigate">
+			<Flex direction="column" gap="2">
+				<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
+					{{ token.symbol }}
 				</span>
-			</span>
-			<span v-if="syncFailed" :class="$style.failed_text" data-testid="token-balance-failed">
-				Couldn't refresh
-			</span>
-		</Flex>
+				<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
+				<span v-else :class="$style.fiat">{{ token?.name || "unknown" }}</span>
+			</Flex>
+
+			<Flex
+				v-if="isInitialSync && !syncFailed && !isMalformed"
+				direction="column"
+				align="end"
+				justify="center"
+				gap="5"
+				data-testid="token-balance-loading"
+				aria-busy="true"
+				:class="$style.loading_block"
+			>
+				<Skeleton :width="64" :height="13" />
+				<Skeleton :width="92" :height="9" />
+			</Flex>
+			<Flex v-else direction="column" align="end" gap="2">
+				<span :class="[$style.amount, syncFailed && $style.amount_stale]" :data-malformed="isMalformed || undefined">{{ totalBalance || 0 }}</span>
+				<span v-if="!isMalformed" :class="$style.detail">
+					<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
+					{{ privateFormatted }}
+					<span :class="$style.pub_group">
+						<span :class="$style.icon_public"><Icon name="globe" size="9" /></span>
+						{{ publicFormatted }}
+					</span>
+				</span>
+				<span v-if="syncFailed" :class="$style.failed_text" data-testid="token-balance-failed">
+					Couldn't refresh
+				</span>
+			</Flex>
+		</a>
 	</RouterLink>
 
 	<Flex v-if="newToken" align="center" justify="between" :class="[$style.row, $style.minting]">
@@ -121,13 +125,21 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 	justify-content: space-between;
 
 	padding: 8px 0;
-	cursor: pointer;
 	text-decoration: none;
+}
 
+.link {
+	cursor: pointer;
 	transition: background 0.2s var(--bezier);
 
-	&:hover {
-		background: color-mix(in srgb, var(--nulo-surface-low) 50%, transparent);
+	&:hover,
+	&:focus-visible {
+		background: var(--nulo-surface-low);
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
 	}
 }
 

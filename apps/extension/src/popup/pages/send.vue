@@ -476,6 +476,21 @@ watch(
 	{ deep: true },
 )
 
+// The contact travels in the URL so a row opened in a new tab preselects it too. Applied after each
+// contacts load rather than at mount: a cold tab's identity settles after the page is up, and the
+// first load finds no contacts. Consumed once it matches; an id that is not one of this profile's
+// contacts selects nothing.
+let queryContactApplied = false
+function applyQueryContact() {
+	if (queryContactApplied || selectedContact.value || searchTerm.value) return
+	const id = typeof route.query.contact === "string" ? route.query.contact : null
+	const preselected = id === null ? undefined : contacts.value.find((c) => String(c.id) === id)
+	if (!preselected) return
+	queryContactApplied = true
+	selectedContact.value = preselected
+	searchTerm.value = preselected.address
+}
+
 // P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
 // contacts) whenever the active appStore triple changes. Sequence
 // counter guards against stale-resolve races. Post-impl audit High #2:
@@ -503,6 +518,7 @@ async function refetchIdentityScopedState() {
 	tokens.value = t
 	tokenBalances.value = tb
 	contacts.value = c
+	applyQueryContact()
 
 	// Reset activeTokenIdx if the prior selection isn't in the new token
 	// set (e.g. profile switch). Without this, `activeToken` computed
@@ -542,11 +558,6 @@ onMounted(async () => {
 		initReceiverType()
 	}
 
-	if (cacheStore.preselectedContactToSend) {
-		selectedContact.value = cacheStore.preselectedContactToSend
-		searchTerm.value = cacheStore.preselectedContactToSend.address
-	}
-
 	if (!tokens.value.length) {
 		awaitingNewToken.value = true
 	}
@@ -579,7 +590,6 @@ onBeforeUnmount(() => {
 	awaitingNewToken.value = false
 
 	cacheStore.preselectedBalanceType = "private"
-	cacheStore.preselectedContactToSend = null
 })
 </script>
 

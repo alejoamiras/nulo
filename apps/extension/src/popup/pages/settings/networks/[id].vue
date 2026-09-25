@@ -208,14 +208,9 @@ watch(network, (n) => {
 					<template #right>
 						<Flex align="center" gap="8">
 							<Tooltip position="end" delay="350">
-								<Icon
-									@click.stop="handleEditEndpoint(endpoint)"
-									name="edit"
-									size="14"
-									color="tertiary"
-									:class="$style.icon_btn"
-									data-testid="endpoint-edit-btn"
-								/>
+								<RowAction label="Edit endpoint" data-testid="endpoint-edit-btn" @click="handleEditEndpoint(endpoint)">
+									<Icon name="edit" size="14" color="tertiary" />
+								</RowAction>
 								<template #content>Edit endpoint</template>
 							</Tooltip>
 							<Tooltip
@@ -223,14 +218,9 @@ watch(network, (n) => {
 								delay="350"
 								v-if="network.primaryEndpointId !== endpoint.id && network.endpoints.length > 1"
 							>
-								<Icon
-									@click.stop="handleDeleteEndpoint(endpoint)"
-									name="close-circle"
-									size="14"
-									color="tertiary"
-									:class="$style.icon_btn"
-									data-testid="endpoint-delete-btn"
-								/>
+								<RowAction label="Delete endpoint" data-testid="endpoint-delete-btn" @click="handleDeleteEndpoint(endpoint)">
+									<Icon name="close-circle" size="14" color="tertiary" />
+								</RowAction>
 								<template #content>Delete endpoint</template>
 							</Tooltip>
 						</Flex>
@@ -267,13 +257,3 @@ watch(network, (n) => {
 		</Flex>
 	</SettingsPageShell>
 </template>
-
-<style module>
-.icon_btn {
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-}
-</style>

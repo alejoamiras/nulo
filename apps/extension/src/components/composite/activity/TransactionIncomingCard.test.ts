@@ -4,8 +4,9 @@
  * passthrough, and the no-fake-fiat rule for unpriced receives.
  */
 
-import { mount } from "@vue/test-utils"
-import { describe, expect, test } from "vitest"
+import { flushPromises, mount } from "@vue/test-utils"
+import { describe, expect, test, vi } from "vitest"
+import { createMemoryHistory, createRouter } from "vue-router"
 import TransactionIncomingCard from "./TransactionIncomingCard.vue"
 
 const STUBS = {
@@ -85,5 +86,58 @@ describe("composite/TransactionIncomingCard", () => {
 	test("kind chip renders the resolved receivedLabel (D5-D)", () => {
 		const chip = mountCard({ receivedLabel: "Private → Public" }).find('[data-testid="tx-incoming-kind-chip"]')
 		expect(chip.text()).toBe("Private → Public")
+	})
+})
+
+describe("composite/TransactionIncomingCard — the row, on the real layout and router", () => {
+	const { TransactionCardLayout: _stub, ...ATOMS } = STUBS
+	const makeRouter = () =>
+		createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }] })
+	const mountRow = async (props: Record<string, unknown> = {}) => {
+		const router = makeRouter()
+		await router.push("/popup/general")
+		const push = vi.spyOn(router, "push")
+		const w = mount(TransactionIncomingCard, {
+			props: { tokenSymbol: "cUSD", amountRaw: (500n * 10n ** 6n).toString(), tokenDecimals: 6, to: "/popup/received/r1", ...props },
+			global: { stubs: ATOMS, plugins: [router] },
+			attachTo: document.body,
+		})
+		return { w, router, push }
+	}
+
+	test("the row links to its receipt, named by the token", async () => {
+		const { w } = await mountRow()
+		const target = w.find("[data-row-target]")
+		expect(target.element.tagName).toBe("A")
+		expect(target.attributes("href")).toBe("/popup/received/r1")
+		expect(w.find(`#${target.attributes("aria-labelledby")}`).text()).toBe("cUSD")
+		w.unmount()
+	})
+
+	test("the priced span keeps its title, sits outside the target above it, and a click opens the row once", async () => {
+		const { w, router, push } = await mountRow({ amountFiat: "≈ $499.93" })
+		const fiat = w.find('[data-testid="activity-fiat"]')
+		expect(fiat.attributes("title")).toBe("At today's price")
+		expect(fiat.classes().some((c) => c.includes("raised"))).toBe(true)
+		expect(w.find("[data-row-target]").find('[data-testid="activity-fiat"]').exists()).toBe(false)
+		await fiat.trigger("click")
+		await flushPromises()
+		expect(push).toHaveBeenCalledTimes(1)
+		expect(router.currentRoute.value.path).toBe("/popup/received/r1")
+		w.unmount()
+	})
+
+	test.each([-1, 1.5, 1000])("tokenDecimals %s renders the row without an amount column and without throwing", async (decimals) => {
+		const { w } = await mountRow({ tokenDecimals: decimals, amountFiat: "≈ $1.00" })
+		expect(w.find('[data-testid="tx-incoming-card"]').exists()).toBe(true)
+		expect(w.text()).not.toContain("+")
+		expect(w.find('[data-testid="activity-fiat"]').exists()).toBe(false)
+		w.unmount()
+	})
+
+	test("`arriving` stamps the root", async () => {
+		const { w } = await mountRow({ arriving: true })
+		expect(w.find('[data-testid="tx-incoming-card"]').attributes("data-arriving")).toBe("true")
+		w.unmount()
 	})
 })

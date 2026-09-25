@@ -34,8 +34,6 @@ const appStore = useAppStore()
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
 
-const router = useRouter()
-
 const contactService = new ContactServiceClient()
 const accountStateService = new AccountStateServiceClient()
 
@@ -115,10 +113,6 @@ const { exportContacts, importContacts } = useContactImportExport({
 	accountStateService,
 })
 
-function handleClickContact(contact) {
-	cacheStore.preselectedContactToSend = contact
-	router.push("/popup/send")
-}
 const handleCopyContactAddress = (contact) => {
 	void copyWithToast(contact.address, openToast, "Address is copied")
 }
@@ -182,7 +176,6 @@ onBeforeUnmount(() => {
 				:key="c.id"
 				:contact="c"
 				:isSender="isContactSender(c.address)"
-				@select="handleClickContact"
 				@copy="handleCopyContactAddress"
 				@edit="handleEditContact"
 				@delete="handleDeleteContact"

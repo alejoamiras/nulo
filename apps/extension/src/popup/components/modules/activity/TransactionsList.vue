@@ -1,22 +1,8 @@
 <script setup>
 /**
- * Date-grouped activity list (Archives page).
- *
- * Accepts a discriminated row model from the parent so on-chain
- * transactions and journal terminal records share one date-sorted
- * timeline. Phase 2 follow-up split this from the prior "transactions
- * array only" prop after codex caught that journal terminal records
- * have no `hash` to navigate to and would break a "lightly extended"
- * implementation.
- *
- *   type ActivityRow =
- *     | { type: "tx";      key: string; sortKey: number; tx:  Transaction; navigable: true  }
- *     | { type: "journal"; key: string; sortKey: number; op:  OperationRecord; navigable: false }
- *
- * The parent (`activity.vue`) computes the rows + merges sources;
- * this component just groups by date and renders the right card per
- * type. Only "tx" rows are clickable (they have a /popup/tx/:hash
- * detail page); journal terminal rows are display-only here.
+ * Date-grouped activity list (Archives page). Rows are a discriminated union the parent merges:
+ * `{ type: "tx", tx }`, `{ type: "journal", op }` and `{ type: "incoming", inc }`, each with a
+ * `key` and a millisecond `sortKey` for ordering and date grouping.
  */
 import { DateTime } from "luxon"
 import TransactionCard from "./TransactionCard.vue"
@@ -27,15 +13,11 @@ import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
 import { buildIncomingCardProps } from "@/utils/received-display"
 
-const router = useRouter()
-
 const props = defineProps({
-	/** Mixed row list — discriminated by `type`. Parent owns the merge.
-	 *  `sortKey` is the millisecond timestamp used for ordering + date grouping. */
 	rows: { type: Array, required: true },
 	/** Token lookup map (id → Token) used by terminal transfer rows to
 	 *  format amounts. Optional — when absent, transfer cards render
-	 *  without amount info (graceful degradation). Phase 2 follow-up v4. */
+	 *  without amount info (graceful degradation). */
 	tokensById: { type: Object, default: () => ({}) },
 })
 
@@ -51,28 +33,6 @@ const groupedRows = computed(() => {
 	}
 	return Array.from(groups, ([date, rows]) => ({ date, rows }))
 })
-
-const handleSelectRow = (row) => {
-	// Three detail surfaces:
-	//   tx/:hash      — rows backed by an on-chain tx
-	//   journal/:id   — terminal journal records (no chain tx exists)
-	//   tokens/:id    — incoming-receive rows route to the token-detail
-	//                   page rather than a per-receive detail (cleaner UX
-	//                   given there's no fee / block-explorer / per-row
-	//                   debug info to surface).
-	if (row.type === "tx") {
-		router.push(`/popup/tx/${row.tx.hash}`)
-		return
-	}
-	if (row.type === "journal") {
-		router.push(`/popup/journal/${row.op.id}`)
-		return
-	}
-	if (row.type === "incoming") {
-		// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
-		router.push(`/popup/received/${row.inc.id}`)
-	}
-}
 
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
@@ -104,16 +64,16 @@ function terminalCardProps(op) {
 
 			<!-- Rows for this date — branch on type. -->
 			<template v-for="row in group.rows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectRow(row)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectRow(row)"
+					:to="`/popup/received/${row.inc.id}`"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && terminalCardProps(row.op)"
 					v-bind="terminalCardProps(row.op)"
-					@click="handleSelectRow(row)"
+					:to="`/popup/journal/${row.op.id}`"
 				/>
 			</template>
 		</Flex>
