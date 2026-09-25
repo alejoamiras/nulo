@@ -249,16 +249,29 @@ function simulationRequestCovered(existing: SimulationCapability[], requested: S
 	return true
 }
 
-function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
-	const rc = requested.privateEvents?.contracts
-	if (!rc) return existing.length > 0
-	if (rc === "*") return existing.some((e) => e.privateEvents?.contracts === "*")
-	return rc.every((addr) =>
-		existing.some((e) => {
-			const list = e.privateEvents?.contracts
+/** Which of a `data` request's fields the held grants already give; a field the request does
+ *  not ask for counts as given. */
+export function dataFieldsCovered(held: DataCapability[], requested: DataCapability): { addressBook: boolean; privateEvents: boolean } {
+	return {
+		addressBook: requested.addressBook !== true || held.some((h) => h.addressBook === true),
+		privateEvents: privateEventsCovered(held, requested.privateEvents?.contracts),
+	}
+}
+
+function privateEventsCovered(held: DataCapability[], requested: "*" | string[] | undefined): boolean {
+	if (!requested) return true
+	if (requested === "*") return held.some((h) => h.privateEvents?.contracts === "*")
+	return requested.every((addr) =>
+		held.some((h) => {
+			const list = h.privateEvents?.contracts
 			return list === "*" || (Array.isArray(list) && list.some((x) => String(x) === String(addr)))
 		}),
 	)
+}
+
+function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
+	const covered = dataFieldsCovered(existing, requested)
+	return covered.addressBook && covered.privateEvents
 }
 
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {

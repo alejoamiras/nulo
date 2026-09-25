@@ -6,8 +6,8 @@ import {
 	PxeStaleAnchorError,
 	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
-import { ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
-import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
+import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
@@ -651,16 +651,9 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(accountsResult?.canGet).toBe(true)
 	})
 
-	// ── P15.0 coverage-side DRIFT PINS (Q-04+Q-05 refactor equivalence oracle) ──
-	// Phase 1.5 above closed the field-blind coverage gap for `accounts` only.
-	// `contractClasses` (type-only fallback, dispatcher.ts:760) and `data.addressBook`
-	// (`dataRequestCovered` keys only on `privateEvents`) are STILL field-blind — the
-	// residual `wallet-sdk-capability-field-diff` follow-up finding, which is OUTSIDE
-	// the 22 quality-arc findings. These pins lock the CURRENT (drift) coverage verdict
-	// so the OperationPolicy / CapabilityStrategy refactor cannot silently move it; they
-	// flip to `popupCalls === 1` when that follow-up lands its fail-CLOSED fix. Enforcement
-	// still denies the over-broad use (scope-enforcement.test.ts), so this is a re-prompt
-	// gap, not a scope-escape.
+	// `contractClasses` coverage is type-only, so a widening after a grant reads as covered. The
+	// pin locks that verdict; enforcement still denies the over-broad use
+	// (scope-enforcement.test.ts), so it is a re-prompt gap, not a scope escape.
 	test("(DRIFT PIN) contractClasses widening after a grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
 		let popupCalls = 0
 		const existing: Capability = { type: "contractClasses", classes: [`0x${"aa".repeat(32)}`], canGetMetadata: false }
@@ -680,22 +673,18 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(popupCalls).toBe(0)
 	})
 
-	test("(DRIFT PIN) data.addressBook re-request with an existing data grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
+	test("an address-book request after a private-events-only data grant re-prompts", async () => {
 		let popupCalls = 0
 		const existing: Capability = { type: "data", privateEvents: { contracts: "*" } }
 		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
 		const { writer } = makeSessionWriter(session)
 		const dispatcher = makePhase15Dispatcher(writer, async () => {
 			popupCalls++
-			return { granted: [{ type: "data" }] } as CapabilityResult
+			return { granted: [{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }] } as CapabilityResult
 		})
-		// `addressBook:true` (no `privateEvents`): `dataRequestCovered` sets `rc = undefined`
-		// → `if (!rc) return existing.length > 0` → covered → delta empty → no popup.
-		// Enforcement (F-004, scope-enforcement.test.ts:60-73) still denies getAddressBook
-		// without an `addressBook:true` grant.
 		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
 		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
-		expect(popupCalls).toBe(0)
+		expect(popupCalls).toBe(1)
 	})
 
 	// Q11: the grant-response path projects via the shared `projectSessionAccounts`
@@ -1766,6 +1755,82 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 			ctx,
 		)
 		expect(subset.state.prompted).toBe(false)
+	})
+})
+
+describe("dataFieldsCovered", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
+	const data = (fields: Omit<DataCapability, "type">): DataCapability => ({ type: "data", ...fields })
+	const both = { addressBook: true, privateEvents: true }
+	const cases: Array<[string, DataCapability[], DataCapability, { addressBook: boolean; privateEvents: boolean }]> = [
+		["address book held", [data({ addressBook: true })], data({ addressBook: true }), both],
+		[
+			"address book not held",
+			[data({ privateEvents: { contracts: [A] } })],
+			data({ addressBook: true }),
+			{ addressBook: false, privateEvents: true },
+		],
+		[
+			"address book held as false",
+			[data({ addressBook: false, privateEvents: { contracts: "*" } })],
+			data({ addressBook: true }),
+			{ addressBook: false, privateEvents: true },
+		],
+		["private events held", [data({ privateEvents: { contracts: [A, B] } })], data({ privateEvents: { contracts: [B] } }), both],
+		[
+			"private events not held",
+			[data({ addressBook: true })],
+			data({ privateEvents: { contracts: [A] } }),
+			{ addressBook: true, privateEvents: false },
+		],
+		[
+			"private events widened to any contract",
+			[data({ privateEvents: { contracts: [A] } })],
+			data({ privateEvents: { contracts: "*" } }),
+			{ addressBook: true, privateEvents: false },
+		],
+		[
+			"any contract held covers a listed one",
+			[data({ privateEvents: { contracts: "*" } })],
+			data({ privateEvents: { contracts: [A] } }),
+			both,
+		],
+		[
+			"both asked, the address book held",
+			[data({ addressBook: true })],
+			data({ addressBook: true, privateEvents: { contracts: [A] } }),
+			{ addressBook: true, privateEvents: false },
+		],
+		[
+			"several held records cover both together",
+			[data({ addressBook: true }), data({ privateEvents: { contracts: [A] } }), data({ privateEvents: { contracts: [B] } })],
+			data({ addressBook: true, privateEvents: { contracts: [A, B] } }),
+			both,
+		],
+		[
+			"several held records, one contract missing",
+			[data({ addressBook: true }), data({ privateEvents: { contracts: [A] } })],
+			data({ addressBook: true, privateEvents: { contracts: [A, B] } }),
+			{ addressBook: true, privateEvents: false },
+		],
+		["nothing held", [], data({ addressBook: true, privateEvents: { contracts: [A] } }), { addressBook: false, privateEvents: false }],
+	]
+
+	test.each(cases)("%s", (_name, held, requested, expected) => {
+		expect(dataFieldsCovered(held, requested)).toEqual(expected)
+	})
+
+	test.each(cases)("%s: the window opens unless both fields are covered", async (_name, held, requested, expected) => {
+		const session = makeSession({ capabilityGrants: held.map((capability) => ({ capability, grantedAt: 1 })) })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			throw new UserRejectedError("declined")
+		})
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [requested] }], ctx).catch(() => {})
+		expect(prompted).toBe(!(expected.addressBook && expected.privateEvents))
 	})
 })
 
