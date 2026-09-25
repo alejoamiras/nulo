@@ -5,7 +5,7 @@ driver: claude-code
 code_review: off
 eli5_mode: artifact
 budget: ultracode
-status: draft rev 3 — final pass applied, awaiting owner approval
+status: approved 2026-09-25 (rev 3; the owner delegated the gate, see § Approval) — implementing
 base: dev @ 9f11de70 (2026-09-24, #692)
 harden: not scheduled (Ask A12)
 ---
@@ -43,6 +43,18 @@ Companion files: `recon.md` (the Phase 0.4 reuse map), `lessons/phase-N.md`, `un
 | O5 | Budget: "ultracode" (thoroughness over token cost). |
 
 Related decision: tools-extraction D24 (6534e8f1, not on dev) makes this migration a separate plan, run in parallel. Unleashed's B4 bootstrap mirrors § "Portable rules" of the new README.
+
+## Approval (2026-09-25)
+
+The owner delegated the approval gate and every Ask: "Keep working, only leave to me approving npm-publish." The agent resolved them as follows. Each resolution is the plan's default, except where noted.
+
+- **S1–S17**: as recommended. S6 and S12 are closed, each with a remaining-phases follow-up. The follow-up keeps the owner's option open, where "abandoned" would close it.
+- **A1–A3, A5–A12, A14, A15**: defaults.
+- **A4 deferred.** The scrub waits for counsel, who has cleared only the npm publication of the Azguard-derived `EncryptionKey`. So the guard's exemption narrows only in D (§ Mechanics), and the scrub becomes a follow-up.
+- **A13**: the agent creates and verifies the `origin/dev` bundle off GitHub, under `~/.cache/nulo-handoff/`, before A merges.
+- **A16**: local `--onto` rehearsal only. A sandbox repository would be an outward-facing step nobody asked for.
+- **Merging.** tools-extraction decision 22 applies to this plan's PRs. A PR merges with a plain `gh pr merge --squash` once its codex loop has converged and every required check is green; never with `--admin`, never on a red or pending check. A still waits for the A14 soak and the A13 bundle.
+- **J's owner read** (§ Security) becomes a fresh-verifier pass plus the J arc's codex loop. J's PR still asks the owner to skim `lessons.md` and `follow-ups.md`, but does not wait for it.
 
 ---
 
@@ -736,18 +748,18 @@ In order. No `/code-review`: `code_review` is `off`.
 |---|---|---|---|---|
 | L1 | Main outline, restructured to A0 → A → J → C → D, then E/F | main, fable Fa/Fc, codex | The alt (freeze in place, 2 PRs): violates O2 and O3; both audits agree | adopted |
 | L2 | Offline gate: enforces on PRs and locally, reports elsewhere | codex C3, fable F1, alt | Fatal everywhere: dev isn't strict, so a docs slip could red nightly or release | adopted |
-| L3 | Source mentions stay; the 6 broken ones are repaired | fable F2(c), alt | Permalink all 66: digest-safe (F15) but 52 files | pending owner (A6) |
-| L4 | Promote revisions before untracking | recon | Untrack all `plan-*.md`: 8 plans vanish | pending owner (A1) |
-| L5 | Top-level `reference/` | recon | `packages/wallet-crypto/vectors/`: package tree and Biome scope | pending owner (A5) |
+| L3 | Source mentions stay; the 6 broken ones are repaired | fable F2(c), alt | Permalink all 66: digest-safe (F15) but 52 files | adopted (A6 default, § Approval) |
+| L4 | Promote revisions before untracking | recon | Untrack all `plan-*.md`: 8 plans vanish | adopted (A1 default) |
+| L5 | Top-level `reference/` | recon | `packages/wallet-crypto/vectors/`: package tree and Biome scope | adopted (A5 default) |
 | L6 | Outcomes ride with the move in D | fable Fa, checked (F17) | The draft's B: a 350-file PR mixing judgement and mechanics | adopted; fallback if `--verify` finds unpaired files |
-| L7 | Wave-1 early delivery of A0 and A, each after its own loop, soak and bundle; a later finding on a merged arc blocks further delivery | codex C6, fable Fc, alt, final pass | The blueprint's "no PR before all loops" | pending owner (A9) |
-| L8 | Outcome after front matter (or at byte 0), before the H1; the exemplar grandfathered by path | codex C5, final pass 2 | Reposition the exemplar; "first h2, only an H1 between" | pending owner (A15) |
+| L7 | Wave-1 early delivery of A0 and A, each after its own loop, soak and bundle; a later finding on a merged arc blocks further delivery | codex C6, fable Fc, alt, final pass | The blueprint's "no PR before all loops" | adopted (A9 default) |
+| L8 | Outcome after front matter (or at byte 0), before the H1; the exemplar grandfathered by path | codex C5, final pass 2 | Reposition the exemplar; "first h2, only an H1 between" | adopted (A15 default) |
 | L9 | "Closed, awaiting archive" as a gate-checked index state between E and F | final pass 2 | Outcome and move in one PR: breaks the owner's two-step closure while a `/loop` reads the live path | adopted |
 | L10 | Every allowlist entry checked against `dev`, fetched by name, on every PR run | final pass 3 | Additions only, against `base.sha`: accepts parent-arc SHAs and needs the old allowlist in a depth-1 checkout | adopted |
 | L11 | `gh stack rebase` → gates → `gh stack push`; recorded-SHA `--onto` fallback | final pass 1, F20 | `gh stack sync` (pushes before validation); `init --adopt` (does not exist) | adopted |
 | L12 | Per-arc pre-merge gates in a clean clone at the PR head; D regenerated on a refreshed base | final pass 5 | One shared re-run of `check.ts` and `untrack.ts --verify` | adopted |
 | L13 | Arc sizes and diffs against `$PARENT`; complete API enumeration for D | final pass 6 | `origin/dev...HEAD`, which counts unmerged lower arcs | adopted |
-| L14 | gh-stack squash rehearsal: local `--onto` rehearsal, GitHub sandbox only with owner consent | final pass 7 | Trusting the docs alone | pending owner (A16) |
+| L14 | gh-stack squash rehearsal: local `--onto` rehearsal, GitHub sandbox only with owner consent | final pass 7 | Trusting the docs alone | adopted: local rehearsal only (A16, § Approval) |
 
 **Findings**
 
@@ -792,14 +804,14 @@ In order. No `/code-review`: `code_review` is `off`.
 
 ---
 
-## Seeds (DRAFT — finalized after approval)
+## Seeds
 
 ELI5 Artifact: https://claude.ai/artifact/APE6BrLDXTog5iaUSJ42bm (`eli5_mode: artifact`; its source stays off-repo, in the session scratchpad).
 
 **Recommended: `/goal`.** Completion shows in the transcript: gate outputs, `gh stack view`.
 
 ```
-/goal All phases 0–7 marked ✓ in implementations-plan/plans-scaffolding/plan.md (the phase headers in the file, not the chat or task list), each ✓ backed by that phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/plans-scaffolding/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged at each of the 5 arc boundaries (A0 gate, A untrack, J judgement, C repoints, D archive) and in the final fresh-context cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the owner's S1–S17 and A1–A16 answers are recorded in plan.md before Phase 3 ran; PRs A0 and A were each opened only after their own arc loop converged and PRs J, C, D only after the final cross-arc pass (`gh stack view` output in the transcript); `git ls-files -ci --exclude-standard -- implementations-plan` printed nothing, and `bun scripts/ci-cd/plans/check.ts`, `untrack.ts --verify`, `archive-move.ts --verify`, `bun run test:ci-gating`, `bun run test:all` and `bun run lint` all reported exit 0 in the transcript. Never purge, rewrite dev's history, merge, or write this plan's own Outcome block (that is close-out PR E, after D merges).
+/goal All phases 0–7 marked ✓ in implementations-plan/plans-scaffolding/plan.md (the phase headers in the file, not the chat or task list), each ✓ backed by that phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/plans-scaffolding/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged at each of the 5 arc boundaries (A0 gate, A untrack, J judgement, C repoints, D archive) and in the final fresh-context cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the owner's S1–S17 and A1–A16 answers are recorded in plan.md before Phase 3 ran; PRs A0 and A were each opened only after their own arc loop converged and PRs J, C, D only after the final cross-arc pass (`gh stack view` output in the transcript); `git ls-files -ci --exclude-standard -- implementations-plan` printed nothing, and `bun scripts/ci-cd/plans/check.ts`, `untrack.ts --verify`, `archive-move.ts --verify`, `bun run test:ci-gating`, `bun run test:all` and `bun run lint` all reported exit 0 in the transcript. Never purge or rewrite dev's history; merge only under § Approval's rule (codex loop converged, every required check green, plain `gh pr merge --squash`, A only after the A14 soak and the A13 bundle); never write this plan's own Outcome block (that is close-out PR E, after D merges).
 ```
 
 **Alternative: `/loop`.** Use exactly one per session; they do not compose.
@@ -809,7 +821,7 @@ ELI5 Artifact: https://claude.ai/artifact/APE6BrLDXTog5iaUSJ42bm (`eli5_mode: ar
 1. Reality check: read implementations-plan/plans-scaffolding/plan.md and lessons/ (authoritative, not the chat), including Outcome & Quality Bar. If that path is gone, look for implementations-plan/archive/plans-scaffolding/plan.md: the plan closed, STOP and say so. If plan.md has a real `## Outcome` heading (exactly that text, not "Outcome & Quality Bar"), it is closed: STOP. Task list empty? Rebuild it from the phase headers. Run `git status`, `git log --oneline -5`, `gh stack view`; with PRs open, `gh pr view --json statusCheckRollup` per PR.
 2. Waiting on CI is fine (Arc C's network e2e takes ~25 min). Confirm progress with `gh run watch <id>` up to 10 min; stuck → inspect logs, log as blocked. Never wait for a merge: J–D build on the unmerged stack. Use waits to review the diff or prep the next phase.
 3. No task in hand? Take the next pending step. After each meaningful edit run `bun test scripts/ci-cd/plans/ && bun run lint` (plus `bun test implementations-plan/plans-scaffolding/tools/` when tools changed). Commit (conventional, lower-case, signed) → `gh stack push`. If dev or a lower arc moved: plan.md § Stack operations (record tips, `gh stack rebase`, each arc's pre-merge gate, then `gh stack push`). Never `gh stack sync`.
-4. Stuck, or facing a decision you'd bring to me? `/codex high` with full context until you reach a defensible decision; log consult + verdict in lessons/phase-N.md. Never crossed: an unanswered S/A Ask (Phase 3 hard stop: surface and hold), `gh stack sync`, purge or history rewrite of dev, merging, required-check or workflow-permission changes, new dependencies, scope beyond plan.md, writing this plan's own Outcome (PR E only).
+4. Stuck, or facing a decision you'd bring to me? `/codex high` with full context until you reach a defensible decision; log consult + verdict in lessons/phase-N.md. Never crossed: an unanswered S/A Ask (Phase 3 hard stop: surface and hold), `gh stack sync`, purge or history rewrite of dev, merging outside § Approval's rule, required-check or workflow-permission changes, new dependencies, scope beyond plan.md, writing this plan's own Outcome (PR E only).
 5. Same step failed 5 times? Stop, reassess with codex, continue on the agreed path.
 6. Phase green = its validation gate in plan.md passes (commit first; commands + pass criteria). Paste the result, mark ✓, write the lessons entry, print `LESSONS_FILE=…/phase-N.md`, `agent-worktree status plans-scaffolding "phase N green: <next>"`. Arc boundary (after phases 1, 2, 4, 5, 7)? Run the codex loop on the arc diff (`/codex high`, arc map, adversarial + arc-specific asks, the plan's no-over-engineering and comment-quality rules, resume until no material findings; no /code-review: code_review is off). After A0 and A: wave-1 delivery (`gh stack submit --auto`, `gh pr edit` body, `gh pr checks --watch`). Then `gh stack add <next-arc-branch>`.
 7. All phases ✓? Final cross-arc pass: FRESH `/codex high` session over the net diff A0–D (stat + filtered diffs), cross-arc ask + both rules, loop until clean. Then wave-2 delivery per plan.md: Stack operations 1-3, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Wrap-up: what shipped, every contested decision codex and I debated (ELI5: question, options, why ours), open items, the pre-merge re-run and the post-merge close-out (PRs E, F). Surface and stop.
