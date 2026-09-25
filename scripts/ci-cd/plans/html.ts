@@ -169,7 +169,9 @@ const CSS_ATTRIBUTES: ReadonlySet<string> = new Set([
  * The URLs a stylesheet or a style attribute loads, or null when one of them cannot be read exactly.
  * The gate decodes no CSS escape, and one outside a string can spell `url(` or `@import`.
  */
-export function cssUrls(css: string): string[] | null {
+export function cssUrls(input: string): string[] | null {
+	// CSS input preprocessing (css-syntax-3 § 3.3): a CR or FF ends a string exactly as LF does.
+	const css = input.replace(/\r\n?|\f/g, "\n").replaceAll("\0", "�")
 	if (css.replace(CSS_INERT_RE, "").includes("\\")) return null
 	const urls = [...css.matchAll(CSS_URL_RE), ...css.matchAll(CSS_IMPORT_RE)].map((m) => m[1] ?? m[2] ?? m[3] ?? "")
 	const opened = css.match(/url\(|@import(?!\s*url\()/gi)?.length ?? 0

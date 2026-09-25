@@ -305,6 +305,24 @@ describe("link-opaque", () => {
 			"6 ../gone/d.png → implementations-plan/gone/d.png is not in the git index",
 		])
 	})
+
+	test("a CR or form feed ends a CSS string as a newline does, so the escape behind it is still read", () => {
+		const hidden = (end: string) => `"x${end};background:u\\72l(../gone/a.png);/*"`
+		const repo = makeRepo({
+			"implementations-plan/p/attr.html": [
+				`<div style='content:${hidden("&#13;")}'>x</div>`,
+				`<div style='content:${hidden("&#12;")}'>x</div>`,
+			].join("\n"),
+			"implementations-plan/p/cr.html": `<style>b { content: ${hidden("\r")} }</style>\n`,
+			"implementations-plan/p/ff.html": `<style>b { content: ${hidden("\f")} }</style>\n`,
+		})
+		expect(findings(repo, "link-opaque").map((f) => `${f.file.slice("implementations-plan/".length)}:${f.line}`)).toEqual([
+			"p/attr.html:1",
+			"p/attr.html:2",
+			"p/cr.html:1",
+			"p/ff.html:1",
+		])
+	})
 })
 
 describe("path-token", () => {
