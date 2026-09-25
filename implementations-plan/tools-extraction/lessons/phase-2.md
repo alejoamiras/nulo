@@ -224,3 +224,19 @@ New:
 Negative control: a throwaway repo with a secret behind `gitleaks:allow`, one behind `trufflehog:ignore` (and a mixed-case spelling), one in an SVG, one in `yarn.lock`, an unreviewed binary, an ambient `GITLEAKS_CONFIG` that allowlists everything, and a message carrying `\x01<path>\x01`. Every secret is reported by both scanners and the binary is untriaged. Nothing is written outside scratch.
 
 Re-run (run4, a fresh extraction with the new `paths.txt`): history audit PASS, with 2,613 text blobs and 136 messages read to their canary by both scanners. Its tip tree is `68530770…`, identical to run3's, so run3's gate results carry over. run3's workspace audit is also PASS.
+
+### Review round 3 (codex): 3 closed, 2 medium new, both adopted
+
+Closed: 8 (within the stated limit; codex re-ran the ancestry check at the freeze), New-A, New-B. Codex also re-verified the run3/run4 tree equality and the three tarball hashes.
+- **A. Predictable canaries could impersonate completion.** Canaries came from a counter, and any finding merely containing one counted. A file already holding its own canary near the top could pass without being read to the end.
+  - Canaries are now fresh `secrets` tokens, rejected if the file already holds them.
+  - Only an exact match counts, and for gitleaks only on the canary's own line.
+  - A finding that holds the canary in any other form fails the audit instead of being passed over.
+  - trufflehog is held to the value only. Its line numbers drift after its decoders and chunk overlaps: an SVG canary came back 13 lines early, and some messages were off by 1 to 15.
+- **B. One `error` string could cover two unrelated failures.** The control now runs its own spec (`tools/control.spec.ts`, copied in for the run and removed after), with zero retries. It asserts per profile, positively:
+  - add-to-wallet ends in `error`;
+  - the wallet frame received connect-flow calls;
+  - the wallet frame never received `registerToken` or `isTokenRegistered`.
+
+  The wallet logs every call it receives. With the patch, the full and selfpay wallets each logged one `→ registerToken`; without it, none did. Result on run2: 3/3 passed, and the phase exits 0 with the module restored and the spec removed.
+- Re-run with both fixes: run4's history audit and run3's workspace audit pass, and the negative control still surfaces every planted item.

@@ -4,8 +4,8 @@ Usage: audit.py <repo> <report-dir> <allowlist> [<allowlist> ...]
 
 Every reachable text blob and every commit message is written to a scratch file and scanned there,
 which covers content a merge resolution introduced as well as anything a diff would show. Each file
-ends in a canary unique to it, and each scanner must report every file's canary, so a file a scanner
-skipped or stopped short in fails the audit. Inline suppressions are disarmed first. A binary blob
+ends in a fresh random canary, and each scanner must report every file's canary, exactly and on its
+own line, so a file a scanner skipped or stopped short in fails the audit. Inline suppressions are disarmed first. A binary blob
 cannot be scanned and must be allowlisted by fingerprint. A finding is keyed by the SHA-256 of its
 value and reported only by location, so no candidate secret reaches the report. Exits 1 on an
 untriaged finding, an unused allowlist entry, a scanner error or an incomplete scan.
@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import string
 import subprocess
 import sys
@@ -54,14 +55,16 @@ def load_allowlist(paths):
     return keys
 
 
-def canary(seed):
-    """A GitHub-token-shaped string both scanners report; one in a few thousand still trips the word filter."""
-    n = int.from_bytes(hashlib.sha256(b"audit-canary:" + seed).digest(), "big")
-    body = ""
-    for _ in range(36):
-        n, r = divmod(n, len(CANARY_ALPHABET))
-        body += CANARY_ALPHABET[r]
-    return "ghp_" + body
+def canary(data):
+    """A fresh GitHub-token-shaped string, absent from <data>, that both scanners report.
+
+    Unpredictable per run, so no content can carry its own canary; one in a few thousand still
+    trips trufflehog's word filter, which the retry absorbs.
+    """
+    while True:
+        token = "ghp_" + "".join(secrets.choice(CANARY_ALPHABET) for _ in range(36))
+        if token.encode() not in data:
+            return token
 
 
 def reachable_blobs(repo):
@@ -119,10 +122,14 @@ class Audit:
         self.failures.append(reason)
 
 
-def write_framed(target, data, token, lead=b""):
+def write_framed(target, data, lead=b""):
+    """Writes <lead><data> and a canary line after it; returns the canary and its 1-based line."""
+    body = lead + data
+    token = canary(body)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, "wb") as fh:
-        fh.write(lead + data + b"\n" + token.encode() + CANARY_SUFFIX + b"\n")
+        fh.write(body + b"\n" + token.encode() + CANARY_SUFFIX + b"\n")
+    return token, body.count(b"\n") + 2
 
 
 class ScanSet:
@@ -131,19 +138,19 @@ class ScanSet:
     def __init__(self, root):
         self.root = root
         self.files = {}
+        self.sizes = {}
 
     def add(self, rel, data, label, where):
         target = os.path.normpath(os.path.join(self.root, rel))
         if not target.startswith(self.root + os.sep) or rel in self.files:
             raise RuntimeError(f"unsafe or repeated scratch path for {where}")
-        token = canary(b"%d" % len(self.files))
-        write_framed(target, TRUFFLEHOG_SUPPRESSION.sub(b"trufflehog-ignore", data), token)
-        self.files[rel] = (label, where, token)
+        disarmed = TRUFFLEHOG_SUPPRESSION.sub(b"trufflehog-ignore", data)
+        self.files[rel] = (label, where, *write_framed(target, disarmed))
+        self.sizes[rel] = len(disarmed)
 
     def content(self, rel):
         with open(os.path.join(self.root, rel), "rb") as fh:
-            framed = fh.read()
-        return framed[: -len(self.files[rel][2]) - len(CANARY_SUFFIX) - 2]
+            return fh.read(self.sizes[rel])
 
 
 def materialize(repo, blobs_set, audit):
@@ -218,23 +225,33 @@ def run_trufflehog(target, label, pinned):
 
 
 RUNNERS = {"gitleaks": run_gitleaks, "trufflehog": run_trufflehog}
+# trufflehog's line numbers drift after its decoders and chunk overlaps (an SVG canary reported 13
+# lines early), so only gitleaks is held to the canary's line.
+EXACT_LINES = {"gitleaks": True, "trufflehog": False}
 
 
 def triage(audit, scanner, findings, root, scan_set, owner, shift=0):
-    """Records findings; returns the files whose canary came back. <owner> maps a scanned name to (file, canary)."""
+    """Records findings; returns the files whose canary came back.
+
+    <owner> maps a scanned name to (file, canary, canary line). Only the exact canary counts, on its
+    own line where the scanner's lines are exact; any other finding that holds it fails the audit
+    rather than being passed over.
+    """
     seen = set()
     for rule, file, line, secret in findings:
         owned = owner(os.path.relpath(file, root))
         if owned is None:
             audit.fail(f"{scanner} reported a file outside the scan set")
             continue
-        rel, token = owned
-        if token in secret:
+        rel, token, canary_line = owned
+        path, where = scan_set.files[rel][:2]
+        if secret == token and (line == canary_line or not EXACT_LINES[scanner]):
             seen.add(rel)
-            continue
-        path, where, _ = scan_set.files[rel]
-        digest = hashlib.sha256(secret.encode()).hexdigest()[:16]
-        audit.check(f"secret:{scanner}:{rule}:{path}:{digest}", f"{where} line {line - shift}")
+        elif token in secret:
+            audit.fail(f"{scanner} reported {where}'s canary as {rule} at line {line}, not {canary_line}")
+        else:
+            digest = hashlib.sha256(secret.encode()).hexdigest()[:16]
+            audit.check(f"secret:{scanner}:{rule}:{path}:{digest}", f"{where} line {line - shift}")
     return seen
 
 
@@ -247,19 +264,20 @@ def scan(audit, label, scan_set, scratch, pinned):
     canary can still trip trufflehog's word filter. A file a scanner cannot read misses both times.
     """
     def in_place(rel):
-        return (rel, scan_set.files[rel][2]) if rel in scan_set.files else None
+        return (rel, *scan_set.files[rel][2:]) if rel in scan_set.files else None
 
     counts = []
     for scanner, run in RUNNERS.items():
         first = triage(audit, scanner, run(scan_set.root, label, pinned), scan_set.root, scan_set, in_place)
         retry = sorted(set(scan_set.files) - first)
         retry_root = os.path.join(scratch, f"{label}-{scanner}-retry")
-        tokens = [canary(b"retry:%d" % n) for n in range(len(retry))]
-        for n, rel in enumerate(retry):
-            write_framed(os.path.join(retry_root, str(n)), scan_set.content(rel), tokens[n], lead=b"audit retry\n")
+        canaries = [
+            write_framed(os.path.join(retry_root, str(n)), scan_set.content(rel), lead=b"audit retry\n")
+            for n, rel in enumerate(retry)
+        ]
 
         def numbered(name):
-            return (retry[int(name)], tokens[int(name)]) if name.isdigit() and int(name) < len(retry) else None
+            return (retry[int(name)], *canaries[int(name)]) if name.isdigit() and int(name) < len(retry) else None
 
         second = set()
         if retry:
