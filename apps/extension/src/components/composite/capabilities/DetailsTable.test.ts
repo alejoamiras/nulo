@@ -83,7 +83,13 @@ describe("composite/capabilities/DetailsTable", () => {
 		expect(spoken(w, 3)).toBe("Any contract: simulate")
 	})
 
-	test.todo("an unknown row's spoken name: which form of the address it reads is the owner's call")
+	test("an unknown row's target is named for what it lists too, after its address", async () => {
+		const w = await opened()
+		expect(spoken(w, 1)).toMatch(/^0x\S+: simulate, add, transact$/)
+		expect(spoken(w, 2)).toMatch(/^0x\S+: add, transact$/)
+	})
+
+	test.todo("an unknown row's spoken address: which form of it is read out is the owner's call")
 
 	test("a row opens on its native button and lists the functions the app sent", async () => {
 		const w = await opened()

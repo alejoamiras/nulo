@@ -56,9 +56,10 @@ const COLUMNS = [
 	["transact", (row: Row) => row.transact.length > 0],
 ] as const
 
-/** A named row's target reads "{name}: {columns}", since the head is hidden from screen readers. */
-const spokenName = (row: Row) =>
-	`${row.name}: ${COLUMNS.filter(([, has]) => has(row))
+/** A row's target reads "{name}: {columns}", since the head is hidden from screen readers. An
+ *  unknown row's name is its address as shown. */
+const spokenName = (entry: { row: Row; named: boolean }) =>
+	`${entry.named ? entry.row.name : shownAddress(entry.row.address)}: ${COLUMNS.filter(([, has]) => has(entry.row))
 		.map(([column]) => column)
 		.join(", ")}`
 </script>
@@ -86,12 +87,10 @@ const spokenName = (row: Row) =>
 							:data-details-key="entry.key"
 						/>
 
-						<template v-if="entry.named">
-							<span :id="`${uid}-${entry.key}`" hidden>{{ spokenName(entry.row) }}</span>
-							<span :class="$style.name">{{ entry.row.name }}</span>
-						</template>
+						<span :id="`${uid}-${entry.key}`" hidden>{{ spokenName(entry) }}</span>
+						<span v-if="entry.named" :class="$style.name">{{ entry.row.name }}</span>
 						<span v-else :class="$style.address">
-							<span :id="`${uid}-${entry.key}`">{{ shownAddress(entry.row.address) }}</span>
+							<span>{{ shownAddress(entry.row.address) }}</span>
 							<RowAction
 								label="Copy address"
 								tabindex="-1"
