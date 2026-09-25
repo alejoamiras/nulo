@@ -16,7 +16,8 @@ option (b): the permission window fills its window, and the other windows stay a
 | `7e05a2a5` | P9.3 | `tests/e2e/network/cap-window.test.ts`, 4 cases. |
 | `93229087` | fix | The fresh-window keyboard flow moves to its own case, on its own connect (below, red run 2). `cap-window` has 5 cases. |
 | `b7c8462d` | fix | That case presses `" "`, not `"Space"` (red run 3). `tests/e2e/FIREFOX.md` lists the difference among the others. |
-| this commit | docs | plan.md: P9 ✓, P10.3 lists `window-placement` on both browsers, two sign-off pending lines and a visible consequence. This file. |
+| `65f070ad` | docs | plan.md: P9 ✓, P10.3 lists `window-placement` on both browsers, two sign-off pending lines and a visible consequence. This file. |
+| `83ac87ee` | fix | The fit case says in one line that S2's fit bounds S1's; the Decisions bullet below names the S1-like measurement P10.1 records. |
 
 ## Tests
 
