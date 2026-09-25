@@ -389,7 +389,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
 
-		// Cancel-before-claim short-circuit (codex F2 / post-impl review):
+		// Cancel-before-claim short-circuit:
 		// If the user cancelled this sendTx while it was queued, the journal
 		// record is now at stage `cancelled`. Throw the cancelled-pipeline
 		// error directly so the popup never opens — without this, the user
@@ -504,9 +504,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// Silent path (self-paid sendTx, no popup): fast-forward the queued
 		// record to `pending` so the UI shows "Preparing..." immediately
 		// instead of briefly showing "Queued..." for a request that never
-		// opens a popup (opus post-impl F7).
+		// opens a popup.
 		//
-		// CRITICAL ORDERING (codex closeout F1): this fast-forward MUST stay
+		// CRITICAL ORDERING: this fast-forward MUST stay
 		// immediately before `executeOperations()`. If we hoisted it to the
 		// top of the method, a throw in `materializeRequest` /
 		// `refreshSession` / profile-check would leave the record stranded

@@ -1,8 +1,4 @@
 <script setup lang="ts">
-/**
- * One group of the permission window: its label, then each row with its current line, where the
- * word "authorization(s)" is the dotted term. A held row is read-only and marked granted.
- */
 import PermissionRow from "@/components/composite/capabilities/PermissionRow.vue"
 import DottedTerm from "@/components/composite/DottedTerm.vue"
 import type { PermissionRowEntry, SubSegment } from "./permission-rows"
