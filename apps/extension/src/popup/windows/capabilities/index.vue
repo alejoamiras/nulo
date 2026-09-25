@@ -379,7 +379,7 @@ onUnmounted(disposeWindow)
 			:status="stripStatus"
 		/>
 
-		<Flex direction="column" :class="$style.scroll_area">
+		<Flex direction="column" data-testid="cap-scroll-area" :class="$style.scroll_area">
 			<DappIdentityBlock
 				:dapp="dapp"
 				:hostname="dappHostname"

@@ -47,11 +47,11 @@ test.skipIf(!hasConfig)(
 		const popup2 = await popup2P
 
 		const items = await getCapItems(popup2)
-		expect(Object.fromEntries(items.map((i) => [i.row, { id: i.id, rerequested: i.rerequested }]))).toEqual({
-			contracts: { id: "contracts", rerequested: true },
-			"address-book": { id: "data", rerequested: true },
-			"private-events": { id: "data", rerequested: true },
-		})
+		expect(items.map((i) => ({ row: i.row, id: i.id, rerequested: i.rerequested }))).toEqual([
+			{ row: "contracts", id: "contracts", rerequested: true },
+			{ row: "address-book", id: "data", rerequested: true },
+			{ row: "private-events", id: "data", rerequested: true },
+		])
 
 		await approveCapabilities(popup2)
 		const ok = await waitForPgResult(page, "requestCapabilities", seqB, 20_000)

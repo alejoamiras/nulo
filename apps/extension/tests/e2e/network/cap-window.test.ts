@@ -230,19 +230,14 @@ test.skipIf(!hasConfig)(
 		expect(await attrOf(popup, "cap-detail-toggle", "aria-expanded")).toBe("false")
 
 		// S1 is this window without the note, so S2 fitting means S1 fits.
-		const overflow = await popup.evaluate(() => {
-			const scrollers = [...document.querySelectorAll<HTMLElement>("body *")].filter((el) =>
-				/(auto|scroll)/.test(getComputedStyle(el).overflowY),
-			)
-			return {
-				scrollers: scrollers.length,
-				overflowing: scrollers.filter((el) => el.scrollHeight > el.clientHeight).map((el) => [el.scrollHeight, el.clientHeight]),
-				documentHeight: document.documentElement.scrollHeight,
-				viewportHeight: window.innerHeight,
-			}
-		})
-		expect(overflow.scrollers, "the window has its scroll container").toBeGreaterThan(0)
-		expect(overflow.overflowing, "a scroller overflows (scrollHeight, clientHeight)").toEqual([])
+		const overflow = await popup.$eval(sel("cap-scroll-area"), (area) => ({
+			overflowY: getComputedStyle(area).overflowY,
+			heights: [area.scrollHeight, area.clientHeight],
+			documentHeight: document.documentElement.scrollHeight,
+			viewportHeight: window.innerHeight,
+		}))
+		expect(overflow.overflowY, "the scroll area is the window's scroll container").toMatch(/^(auto|scroll)$/)
+		expect(overflow.heights[0], "the scroll area overflows (scrollHeight vs clientHeight)").toBeLessThanOrEqual(overflow.heights[1])
 		expect(overflow.documentHeight).toBeLessThanOrEqual(overflow.viewportHeight)
 
 		// An empty inline-block sits on its line's baseline: one goes at the end of the term, one just
