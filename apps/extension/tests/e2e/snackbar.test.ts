@@ -268,7 +268,6 @@ test("an error raised inside a popup: Tab reaches its × after the popup's contr
 	await clickByTestId(page, "account-avatar-btn")
 	await page.waitForSelector(sel("accounts-popup"), { visible: true, timeout: 5_000 })
 	await stubClipboard(page, "reject")
-	// The copy glyph is an <svg>, which has no `.click()`: a real press, as a user would.
 	await pointerClick(page, "account-item-copy")
 	await waitForToast(page, "Couldn't copy", 5_000, { kind: "error" })
 
