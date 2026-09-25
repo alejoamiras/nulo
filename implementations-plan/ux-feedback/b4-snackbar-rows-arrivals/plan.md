@@ -106,15 +106,15 @@ snackbar looks weird."), i10b "A′", i11 "A", i12 "B" — unchanged.
 
 | # | Surface | Before → after (drawn values) | Shot | Sign-off |
 |---|---|---|---|---|
-| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav, width, motion: **sign-off pending** (S-1 to S-3) |
-| 2 | Success snack | → 16px `check-circle` in `--green` (`:87`, `:97`), in the polite region, one action "View" (headline 11px/700, `0.12em`, uppercase, `--nulo-accent`, `padding: 6px 4px`, `:197`) only on transaction and receipt messages; hides after 6 s, waits while hovered or focused | `10-snackbar` | i10 A′; which messages get View: **pending** (S-7) |
-| 3 | Error snack | → 16px `close-circle` in `--red`, `border-color: var(--red)`, title `--txt-primary` (`:473-474`), in the assertive region, a × button 24×24, `margin-right: -6px`, `--nulo-secondary`, glyph 16px, `aria-label="Close"` (`:471-472`, `r2/i10.html:21`); stays until × | `10-snackbar` | i10 A′; Details: **pending** (S-8) |
+| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width and motion: **sign-off pending** (S-2, S-3) |
+| 2 | Success snack | → 16px `check-circle` in `--green` (`:87`, `:97`), in the polite region, one action "View" (headline 11px/700, `0.12em`, uppercase, `--nulo-accent`, `padding: 6px 4px`, `:197`) only on transaction and receipt messages; hides after 6 s, waits while hovered or focused | `10-snackbar` | i10 A′; the first open's timer: owner, 2026-09-25: 2b (S-12); which messages get View: **pending** (S-7) |
+| 3 | Error snack | → 16px `close-circle` in `--red`, `border-color: var(--red)`, title `--txt-primary` (`:473-474`), in the assertive region, a × button 24×24, `margin-right: -6px`, `--nulo-secondary`, glyph 16px, `aria-label="Close"` (`:471-472`, `r2/i10.html:21`); stays until × | `10-snackbar` | i10 A′; Details: owner, 2026-09-25: 10b (S-8) |
 | 4 | Send's result | "Transaction submitted" alone, or the failure sentence in red → title "Transaction submitted", sub "{amount} {symbol} to {0x8c02…41fa}", View opens the transaction; title "Send failed", sub today's failure sentence | `10-snackbar` | i10 A′; sub copy **pending** (S-9, S-10) |
 | 5 | The 130 call sites | icon, colour and duration per call → a kind per call (success or error), the rest from rows 2 and 3 | none | i10 "decided per call site and listed in the PR body"; the borderline groups **pending** (S-5, S-6) |
 | 6 | Activity rows, Home and History | tx rows: a `div` with a 50% tint, no Tab stop; journal and received rows: no hover, no Tab stop; queued awaiting rows: pointer only → every openable row is a link (tx, journal, received) or a button (queued awaiting, which opens the approval window), full-row `--nulo-surface-low` tint with `transition: background 0.15s var(--bezier)`, `:active` `--nulo-surface-high`, focus = tint + `outline: 2px solid var(--nulo-accent); outline-offset: -2px` (`nulo.css:242-245`); the row box extends 8px each side (`margin: 0 -8px; padding: 6px 8px`, `:223`); the dollar figure's "At today's price" hover stays, because that span sits above the row's target and passes a plain click to it (R-7) | `11-rows` | i11 A (owner); the kept hover: **pending** (R-7) |
-| 7 | Other lists (Settings, tokens, contacts, connected apps, authorizations, notes, fee contracts, accounts, senders, endpoints, contracts, the pickers) | mixed: Tab stops on inert rows, Enter-only rows, click rows keyboards cannot open, hover on rows that do nothing, contacts and connected apps announced as buttons though they navigate → the same rules (a row that navigates is a link); each list keeps its own hover tint and gains the drawn ring; the contact row's S chip keeps its "Registered as sender" hover the same way (R-7) | `11-rows` (rules, `parts/11-rows.html:47-53`) | i11 A; the ring and the token tint off the drawing, the kept hover: **pending** (R-1, R-2, R-7) |
+| 7 | Other lists (Settings, tokens, contacts, connected apps, authorizations, notes, fee contracts, accounts, senders, endpoints, contracts, the pickers) | mixed: Tab stops on inert rows, Enter-only rows, click rows keyboards cannot open, hover on rows that do nothing, contacts and connected apps announced as buttons though they navigate → the same rules (a row that navigates is a link); each list keeps its own hover tint and gains the drawn ring; the contact row's S chip keeps its "Registered as sender" hover the same way (R-7) | `11-rows` (rules, `parts/11-rows.html:47-53`) | i11 A; the Logs row and the Revoke expand button under the rules: owner, 2026-09-25: 5b; the ring and the token tint off the drawing, the kept hover: **pending** (R-1, R-2, R-7) |
 | 8 | Buttons inside rows | 14–20px glyphs (most not focusable) and 16×28 awaiting buttons → 24×24 (awaiting 24×28) buttons with an accessible name; layouts shift by the difference | `11-rows` | i11 A; the shift: **pending** (R-3, R-4) |
-| 9 | Home on a new receipt | a row appears → the row slides in (`n-row-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1)`) and glows green (`n-row-glow 2.4s ease-out 0.2s`), its amount green then primary (`n-amt 2.6s`); a chip "+{amount} {symbol}" rises above the hero and fades (`n-plus 2.6s`, `nulo.css:517-527`); the hero counts for 900ms (`page.js:663-674`) only between two displayed aggregates | `12-arrival` | i12 B; count-up, chip text and chip width **pending** (A-1′, A-2, A-14) |
+| 9 | Home on a new receipt | a row appears → the row slides in (`n-row-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1)`) and glows green (`n-row-glow 2.4s ease-out 0.2s`), its amount green then primary (`n-amt 2.6s`); a chip "+{amount} {symbol}" rises above the hero and fades (`n-plus 2.6s`, `nulo.css:517-527`); the hero counts for 900ms (`page.js:663-674`) only between two displayed aggregates | `12-arrival` | i12 B; count-up: signed off, 9a (A-1′); chip text and chip width **pending** (A-2, A-14) |
 | 10 | History on a new receipt | as row 9's row | `12-arrival` | i12 B |
 | 11 | Anywhere else on a receipt that arrives while the page is open | nothing → one success snack, "Received {amount} {symbol}", "Private · {account}" or "Public · {account}", View opens the receipt (`parts/12-incoming.html:53`) | `12-incoming` | i12 B; where "elsewhere" is and which receipts it names: **pending** (A-3, A-4, A-11, A-13) |
 | 12 | A snack while a popup is open (keyboard) | the snack cannot be reached by Tab → Tab reaches its View or × after the popup's controls | none | **pending** (K-1) |
@@ -153,9 +153,13 @@ Snackbar:
   Recommended and built: 12px above the bottom edge on Send, the sub-pages, onboarding and the
   dApp windows. It then covers the bottom of footers; in the execute window an error covers the
   approve/reject footer until closed. Alternative: today's top 12px wherever there is no nav.
+  **Owner, 2026-09-25: 1c.** 12px above the page's bottom action row where it has one (P6.1).
+  Over a sheet that covers the nav: owner, 2026-09-25: 12a, 12px from the bottom or above the
+  sheet's own row (P6.5).
 - **S-2 · Width on the onboarding tab.** Drawn only at 360px. Recommended and built:
   `calc(100% - 32px)` capped at 368px, the width it takes in the 400px dApp windows (400px less
-  the drawn 16px on each side), centered.
+  the drawn 16px on each side), centered. **The dApp windows: owner, 2026-09-25: 11a**, 328px,
+  the 360px content column less 16px a side (P6.4). The onboarding tab stays sign-off pending.
 - **S-3 · The rise.** No keyframe or timing is drawn. Recommended and built: `opacity 0,
   translateY(20px)` → rest, 0.15s `var(--bezier)` (today's timing, mirrored); the leave reverses;
   reduced motion fades only.
@@ -175,7 +179,8 @@ Snackbar:
   one receipt (send, receipt); copy confirmations and settings saves get no action.
 - **S-8 · Details.** No error has a details surface today. Recommended and built: no Details on
   any error in this batch; the API carries an action so a later batch can add one. Alternative:
-  "Details" on a failed send opens its journal page (`/popup/journal/:id`).
+  "Details" on a failed send opens its journal page (`/popup/journal/:id`). **Owner,
+  2026-09-25: 10b**, the alternative (P6.3).
 - **S-9 · The send failure's sub line.** Drawn "Not enough Fee Juice for the fee" is sample text.
   Recommended and built: title "Send failed", sub today's sentence (`transfer-failure-copy.ts`,
   three constants).
@@ -194,7 +199,8 @@ Snackbar:
   u128 prints at most 52 characters with separators, so the snack wraps to a few lines at most.
   The chip, which does not wrap, is A-14.
 - **S-12 · After a hold.** Recommended and built: the remaining time resumes. Alternative: a fresh
-  6 s.
+  6 s. **The first open: owner, 2026-09-25: 2b.** A success's 6 s starts when it opens, even under
+  a resting pointer; only a pointer move onto the snack, or focus entering it, holds it (P6.2).
 - **S-13 · Two messages.** Recommended and built: one at a time, the newest replaces the current,
   an error included (today's behaviour). The old snack finishes leaving before the new one rises,
   in the same place, whatever the two kinds, so two never show at once, side by side or
@@ -242,6 +248,8 @@ Rows:
   Recommended and built: those two spans sit above the target and pass a plain click to it, so
   the hover text stays and pressing them opens the row; a modified click on them opens the row in
   place, not in a new tab. Alternative: lose the hover text on link rows.
+- **Two rows outside the list. Owner, 2026-09-25: 5b.** The Logs row in Settings → Advanced and
+  the Revoke authorizations popup's expand icon come under the row rules (P6.6).
 
 Arrivals:
 
@@ -251,7 +259,7 @@ Arrivals:
   before to a higher one, when that change comes within 10 s after the arrival (or came within
   10 s before it); otherwise the chip alone. No count while the aggregate is loading or unknown, or
   while fiat is off. Alternative (the first draft): count from `aggregate − receipt value`, which
-  can show a balance that never existed.
+  can show a balance that never existed. **Signed off, 9a** (owner, 2026-09-25).
 - **A-2 · The chip's text.** Drawn "+1,000 USDC"; the row reads "+1,000.00 USDC". Recommended and
   built: "+" and the S-10 amount, then the S-11 symbol.
 - **A-3 · The token page, and receipts already there (amended in rounds 4 and 5).** Recommended
@@ -1870,6 +1878,53 @@ account-add paths change, `network/incoming-transfers`, `network/incoming-public
 5. `bun run e2e:reap`.
 
 Gate: all of the above exit 0 and the parity Artifact URL printed.
+
+### P6 · The owner's parity answers
+
+The owner, 2026-09-25, on the parity page's thirteen calls:
+
+> "for batch 4: 1. c, 2. b, 3. a. 4. b? 5. b, 6. (a), 7. follow-up. 8. I don't quite see what you
+> are saying. 9. (a), 10. (b), 11. (a), 12. I don't get this. Go with (a) then. 13. (a) follow-up
+> maybe?"
+
+Built for 1, 2, 5, 10, 11 and 12. Nothing is built for the rest: 3 (no ring on × and View), 4
+("b?" is unconfirmed, so a receipt with fiat values off still gets no chip), 6 (the start-up rule
+stays), 7 (a follow-up), 8 (the received row stays as it is), 9 (A-1′ signed off) and 13 (the
+older layout differences stay). The log is `lessons/phase-6.md`.
+
+1. **Above the footer (1c).** On every page or window without the nav that has a bottom action
+   row, the snack sits 12px above the row's top edge and never covers its buttons; with neither
+   the nav nor a row, 12px from the bottom. The row can grow (a wrapping error line) and the snack
+   follows it. A `v-snack-footer` directive marks each row and the host `ToastManager` computes
+   the inset (`composables/snackInset.ts`); `ToastManagerBase` still takes a number. The inventory
+   is in the log. e2e on both browsers: Send with an estimate error and the execute window with
+   one, each at least 12px above its footer (`network/snack-placement.test.ts`).
+2. **The first open's timer (2b).** A success's 6 s starts when it opens, even under a resting
+   pointer. The hold engages only on a pointer move onto the snack after it opened, or keyboard
+   focus entering it; leaving resumes the remaining time (S-12). The hover and pointer-over events
+   a browser synthesises when content appears under a still cursor do not count. e2e on both
+   browsers: a copy whose snack opens under the cursor, the mouse still, is gone within 6 s plus a
+   small tolerance.
+3. **Details on a failed send (10b).** "Send failed" gets "Details", drawn like View (i10 A′),
+   which opens that send's journal page `/popup/journal/<id>`. Only a failed send gets it, and only
+   when that send has a journal entry the wallet confirms (a failed, terminal transfer in the
+   submitted scope); every other error keeps no action. The id travels beside the error, not in
+   it: see § Architecture, A failed send's journal id.
+4. **Width in dApp windows (11a).** In the execute, discover, permission and verify windows the
+   snack spans the 360px content column less 16px a side (328px), centred on it. The popup and the
+   onboarding tab are unchanged.
+5. **Over a sheet (12a).** While a sheet that covers the nav is open, the snack sits 12px from the
+   bottom, or 12px above the sheet's own footer row if it has one; when the sheet closes it goes
+   back to 76px. `v-snack-sheet` on `components/Popup/Popup.vue` tells the host a sheet is open.
+6. **Two more rows (5b).** Settings → Advanced's Logs row becomes one button with its list's hover
+   tint and the 2px accent ring, opened by Enter and Space (R-1, R-2, R-7). The Revoke
+   authorizations popup's expand icon becomes a 24×24 named button (R-3).
+
+Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`,
+`bun run build`; the full smoke suite on Chrome and on Firefox (the gate's flags); every changed or
+added network e2e file at retry 0, Chrome prover on and Firefox `NULO_E2E_PROVERLESS=1`
+(`@requires-proverless` files proverless on both); `bun run e2e:reap` after each e2e run. Then the
+parity captures for the new states, outside the repo.
 
 ## Arc boundary
 

@@ -1,0 +1,210 @@
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { defineComponent, h, nextTick, ref, withDirectives } from "vue"
+import { useToast } from "@/composables/toast"
+import { SNACK_GAP, snackInset, useSnackInset, vSnackFooter, vSnackSheet } from "./snackInset"
+
+const VIEWPORT = 600
+const NAV_BASE = 76
+
+enableAutoUnmount(afterEach)
+
+const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+/** A footer whose box is read from its `data-top` / `data-height`, as the stubbed rect reports it. */
+const Footer = defineComponent({
+	props: { top: { type: Number, required: true }, height: { type: Number, default: 60 } },
+	setup: (props) => () =>
+		withDirectives(h("div", { "data-top": props.top, "data-height": props.height, "data-testid": "footer" }), [[vSnackFooter]]),
+})
+
+/** An open sheet holding whatever footers it is given. */
+const Sheet = defineComponent({
+	setup:
+		(_, { slots }) =>
+		() =>
+			withDirectives(h("div", { "data-testid": "sheet" }, slots.default?.()), [[vSnackSheet]]),
+})
+
+const base = ref(NAV_BASE)
+let inset: { value: number } = { value: -1 }
+
+const Host = defineComponent({
+	setup() {
+		inset = useSnackInset(() => base.value)
+		return () => h("div")
+	},
+})
+
+let observed: Element[] = []
+let notifyResize: () => void = () => {}
+
+beforeEach(() => {
+	base.value = NAV_BASE
+	observed = []
+	vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(VIEWPORT)
+	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+		const top = Number(this.dataset.top ?? 0)
+		const height = Number(this.dataset.height ?? 0)
+		return DOMRect.fromRect({ x: 0, y: top, width: 360, height })
+	})
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			constructor(callback: () => void) {
+				notifyResize = callback
+			}
+			observe(el: Element) {
+				observed.push(el)
+			}
+			disconnect() {
+				observed = []
+			}
+		},
+	)
+})
+
+afterEach(() => {
+	useToast().closeToast()
+	vi.restoreAllMocks()
+})
+
+describe("snackInset", () => {
+	test("keeps the base when nothing places the snack", () => {
+		expect(snackInset(NAV_BASE, VIEWPORT, [])).toBe(NAV_BASE)
+	})
+
+	test("sits SNACK_GAP above a footer's top edge, and the highest footer wins", () => {
+		expect(snackInset(SNACK_GAP, VIEWPORT, [{ top: 520, bottom: 600 }])).toBe(92)
+		expect(
+			snackInset(SNACK_GAP, VIEWPORT, [
+				{ top: 540, bottom: 600 },
+				{ top: 480, bottom: 530 },
+			]),
+		).toBe(132)
+	})
+
+	test("never drops below the base", () => {
+		expect(snackInset(NAV_BASE, VIEWPORT, [{ top: 590, bottom: 600 }])).toBe(NAV_BASE)
+	})
+
+	test("ignores a footer with no height and one whose top edge is off screen", () => {
+		expect(
+			snackInset(SNACK_GAP, VIEWPORT, [
+				{ top: 500, bottom: 500 },
+				{ top: 640, bottom: 700 },
+				{ top: 0, bottom: 40 },
+			]),
+		).toBe(SNACK_GAP)
+	})
+})
+
+describe("useSnackInset", () => {
+	test("a page footer raises the snack after the next frame and its removal restores the base", async () => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const show = ref(true)
+		mount(defineComponent({ setup: () => () => (show.value ? h(Footer, { top: 520 }) : null) }), { attachTo: document.body })
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 520 + SNACK_GAP)
+
+		show.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(SNACK_GAP)
+	})
+
+	test("an open sheet covers the nav: SNACK_GAP from the bottom, page footers ignored, 76 again once it closes", async () => {
+		mount(Host)
+		const open = ref(true)
+		mount(defineComponent({ setup: () => () => [h(Footer, { top: 500 }), open.value ? h(Sheet) : null] }), {
+			attachTo: document.body,
+		})
+		await frame()
+		expect(inset.value).toBe(SNACK_GAP)
+
+		open.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 500 + SNACK_GAP)
+	})
+
+	test("only the top sheet's own footer counts; closing it hands placement to the sheet beneath", async () => {
+		mount(Host)
+		const topOpen = ref(true)
+		mount(
+			defineComponent({
+				setup: () => () => [
+					h(Sheet, null, () => h(Footer, { top: 540 })),
+					topOpen.value ? h(Sheet, null, () => h(Footer, { top: 420 })) : null,
+				],
+			}),
+			{ attachTo: document.body },
+		)
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
+
+		topOpen.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 540 + SNACK_GAP)
+	})
+
+	test("a footer that grows moves the snack with it", async () => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const wrapper = mount(Footer, { props: { top: 520 }, attachTo: document.body })
+		await frame()
+		expect(observed).toContain(wrapper.element)
+
+		;(wrapper.element as HTMLElement).dataset.top = "490"
+		notifyResize()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 490 + SNACK_GAP)
+	})
+
+	test.each(["scroll", "transitionend", "animationend"])("a %s measures again", async (type) => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const wrapper = mount(Footer, { props: { top: 540 }, attachTo: document.body })
+		await frame()
+		;(wrapper.element as HTMLElement).dataset.top = "500"
+		document.body.dispatchEvent(new Event(type, { bubbles: false }))
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 500 + SNACK_GAP)
+	})
+
+	test("a snack opening measures at once, before any frame", async () => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const wrapper = mount(Footer, { props: { top: 540 }, attachTo: document.body })
+		await frame()
+		;(wrapper.element as HTMLElement).dataset.top = "470"
+		useToast().openToast({ kind: "error", label: "Send failed" })
+		await nextTick()
+		expect(inset.value).toBe(VIEWPORT - 470 + SNACK_GAP)
+	})
+
+	test("the base follows its source", async () => {
+		mount(Host)
+		expect(inset.value).toBe(NAV_BASE)
+		base.value = SNACK_GAP
+		await frame()
+		expect(inset.value).toBe(SNACK_GAP)
+	})
+
+	test("disposing stops observing and measuring", async () => {
+		base.value = SNACK_GAP
+		const host = mount(Host)
+		mount(Footer, { props: { top: 520 }, attachTo: document.body })
+		await frame()
+		const measured = inset.value
+		host.unmount()
+		expect(observed).toEqual([])
+
+		mount(Footer, { props: { top: 400 }, attachTo: document.body })
+		document.dispatchEvent(new Event("scroll"))
+		await frame()
+		expect(inset.value).toBe(measured)
+	})
+})

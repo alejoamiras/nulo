@@ -1,4 +1,7 @@
 <script setup lang="ts">
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Utils */
 import { CONSENT_LABEL, CONTINUE_LABEL, type RiskPoint } from "@nulo/legal"
 
@@ -86,7 +89,7 @@ const accept = () => {
 			</Flex>
 		</Flex>
 
-		<Flex direction="column" align="center" gap="10" :class="$style.actions">
+		<Flex v-snack-footer direction="column" align="center" gap="10" :class="$style.actions">
 			<Button variant="primary" size="large" wide :disabled="!agreed || busy" data-testid="legal-continue" @click="accept">
 				{{ CONTINUE_LABEL }}
 			</Button>

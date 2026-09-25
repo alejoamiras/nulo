@@ -41,6 +41,7 @@ import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
 import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 import { usePrices } from "@/composables/usePrices"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useSendReview } from "@/composables/useSendReview"
 import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
@@ -671,7 +672,7 @@ onBeforeUnmount(() => {
 				</div>
 			</Flex>
 
-			<Flex direction="column" gap="10" :class="$style.bottom">
+			<Flex v-snack-footer direction="column" gap="10" :class="$style.bottom" data-testid="send-footer">
 				<PublishStrip v-if="!isBlockedTransfer" :facts="facts" @open="openReview" />
 				<Button
 					v-if="needsFeeJuice"

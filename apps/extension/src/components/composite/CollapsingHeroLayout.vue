@@ -14,6 +14,10 @@
  * Extra attributes fall through to the root element (single root), so
  * pages can pin their e2e data-* markers on the component tag.
  */
+
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 defineProps({
 	/**
 	 * Hero title is rendered in two stacked lines using the `<<main>>`
@@ -77,7 +81,7 @@ onBeforeUnmount(() => {
 			</Flex>
 		</Flex>
 
-		<div v-if="$slots.bottom" :class="$style.bottom">
+		<div v-if="$slots.bottom" v-snack-footer :class="$style.bottom">
 			<slot name="bottom" />
 		</div>
 

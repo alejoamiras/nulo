@@ -8,6 +8,9 @@
 </route>
 
 <script setup lang="ts">
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Utils */
 import { currentVersion } from "@nulo/legal"
 import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
@@ -53,7 +56,7 @@ const handleReview = async () => {
 			Only the actions that need an agreement are paused. Everything that is simply yours stays available.
 		</Text>
 
-		<Flex direction="column" gap="8" :class="$style.actions">
+		<Flex v-snack-footer direction="column" gap="8" :class="$style.actions">
 			<Button variant="primary" size="large" wide data-testid="legal-declined-review" @click="handleReview">Review the new Terms</Button>
 			<Button variant="primary_outline" size="large" wide data-testid="legal-declined-export" link="/popup/settings/security/export">
 				Export a backup

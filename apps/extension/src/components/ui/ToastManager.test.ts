@@ -2,10 +2,13 @@
  * Shell-integration coverage for the extension's <ToastManager> wrapper. The full behavioral matrix
  * lives in @nulo/design's ToastManagerBase.test.ts; here we only assert the wrapper delegates to the
  * base, that a toast driven through the extension's `@/composables/toast` shim (which re-exports the
- * package singleton) renders into the app's `#toast` root, and that the inset follows the route.
+ * package singleton) renders into the app's `#toast` root, and that the inset follows the route and
+ * the page's footer.
  */
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { h, withDirectives } from "vue"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 const routeMeta: { showBottomNav?: boolean } = {}
@@ -63,5 +66,19 @@ describe("ui/ToastManager (wrapper → @nulo/design ToastManagerBase)", () => {
 		mount(ToastManager, { attachTo: document.body })
 		await flushPromises()
 		expect((toastRoot.lastElementChild as HTMLElement).style.bottom).toBe("12px")
+	})
+
+	test("on a route without the nav, a footer on screen lifts the snack 12px above its top edge", async () => {
+		vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(600)
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+			return DOMRect.fromRect({ y: "footer" in this.dataset ? 520 : 0, width: 360, height: "footer" in this.dataset ? 80 : 0 })
+		})
+		routeMeta.showBottomNav = false
+		mount(ToastManager, { attachTo: document.body })
+		mount({ render: () => withDirectives(h("div", { "data-footer": "" }), [[vSnackFooter]]) }, { attachTo: document.body })
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await flushPromises()
+		expect((toastRoot.firstElementChild as HTMLElement).style.bottom).toBe("92px")
+		vi.restoreAllMocks()
 	})
 })
