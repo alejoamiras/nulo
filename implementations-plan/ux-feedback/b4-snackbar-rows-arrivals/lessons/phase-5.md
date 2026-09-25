@@ -155,3 +155,37 @@ Gate after the round:
 | the same six specs on Firefox, retry 0 (20 tests) | 0 | 156 s |
 
 `wallet-lock` and `auth-flows` are the smoke specs that drive the header's Lock.
+
+### Round 3 · codex · approve (high)
+
+The same session, on `12b24a1c..b9eeec3f`:
+
+> The four findings are closed; no new material findings. … VERDICT: approve — confidence: high
+
+It raised two non-blocking comment cleanups, both applied in `88b64280`:
+
+1. **`service.scenarios.test.ts`**: the mock's comment said it reads its fence after its own read,
+   but it checks the fence before a synchronous map read. The repository test covers the real async
+   boundary. The comment is back to its earlier floor-field note.
+2. **`popup/locked-state.ts`**: the doc listed the calls right under it. One sentence now says why
+   the seal precedes any await. The repeated fallback comment in the lookup's `catch` is gone.
+
+`setTrustAllow` and `setTrustReject` still write trust with no ownership fence. The pattern
+predates this arc and is outside its diff. It is listed with the plan's Delivery follow-ups, for
+`implementations-plan/follow-ups.md` at close.
+
+Gate after the cleanups (comments only, so no e2e):
+
+| Command | Exit | Duration |
+|---|---|---|
+| `bun run lint` (29 warnings, 3 infos, none in changed files) | 0 | 1 s |
+| `bun run typecheck:all` | 0 | 18 s |
+| `bun run test:all`, first run | 1 | 119 s |
+| `bun run test:all`, rerun (extension 7,421 passed, 4 skipped, 7 todo; every workspace green) | 0 | 112 s |
+
+The first `test:all` hit three timeouts. They were in `presto/client.test.ts` and
+`wallet-sdk/content-message-relay.test.ts`, whose cases each run `vi.resetModules()` and a cold
+dynamic import on a 5 s budget. The host load average was 85 to 98 on 192 cores. Neither file
+imports anything this round touched, both passed alone (9 tests, 159 ms), and the tools-extraction
+lessons record the same timeouts under load. That makes it the known load flake, not a regression,
+so the rerun is the gate.
