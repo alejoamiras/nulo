@@ -153,13 +153,37 @@ async function waitForSnackGone(page: Page, timeout: number): Promise<void> {
 	await page.waitForFunction((s: string) => !document.querySelector(s), { timeout, polling: 50 }, SNACK)
 }
 
-/** Waits until a sheet has finished sliding in, so what it holds is where it will stay. */
+/** Waits until `testid` in a sheet has stopped: the same box on three animation frames in a row, with
+ *  no finite animation running. A sheet holds its 40px start offset for up to three frames before it
+ *  slides, the last with the slide created but not yet started, so a still box alone is no proof. */
 async function sheetAtRest(page: Page, testid: string): Promise<void> {
 	await page.waitForSelector(sel(testid), { visible: true, timeout: 5_000 })
-	await page.waitForFunction(() => document.getElementById("popup")?.getAnimations({ subtree: true }).length === 0, {
-		timeout: 5_000,
-		polling: 50,
-	})
+	await page.evaluate((s: string) => {
+		const running = (a: Animation) => a.playState === "running" && Number.isFinite(a.effect?.getComputedTiming().endTime)
+		const stillBox = () => {
+			const box = document.querySelector(s)?.getBoundingClientRect()
+			return !box || document.getAnimations().some(running) ? "" : `${box.left} ${box.top} ${box.width} ${box.height}`
+		}
+		return new Promise<void>((resolve, reject) => {
+			let expired = false
+			const timer = setTimeout(() => {
+				expired = true
+				reject(new Error(`${s} did not come to rest within 5s`))
+			}, 5_000)
+			const frame = (last: string, repeats: number) => {
+				if (expired) return
+				const now = stillBox()
+				const count = now !== "" && now === last ? repeats + 1 : 0
+				if (count < 2) {
+					requestAnimationFrame(() => frame(now, count))
+					return
+				}
+				clearTimeout(timer)
+				resolve()
+			}
+			requestAnimationFrame(() => frame("", 0))
+		})
+	}, sel(testid))
 }
 
 /** Waits until the snack's bottom edge sits `inset` px above the viewport's. */
@@ -348,7 +372,7 @@ test("a success that opens under a still pointer closes itself after 6 s, though
 	const page = await openHome(registeredExtension)
 	await stubClipboard(page, "resolve")
 	await clickByTestId(page, "actions-receive")
-	await sheetAtRest(page, "receive-close")
+	await sheetAtRest(page, "receive-address")
 	await page.bringToFront()
 	await recordSnackLife(page)
 	await countCardEvents(page)
