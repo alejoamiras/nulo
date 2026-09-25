@@ -34,6 +34,7 @@ const emit = defineEmits<{ toggle: [key: string, on: boolean] }>()
 				:data-cap-id="row.capId"
 				:data-cap-row="row.entry.key"
 				:data-cap-granted="granted ? 'true' : undefined"
+				:data-cap-flagged="row.entry.flagged ? 'true' : undefined"
 				:icon="row.entry.icon"
 				:title="row.entry.title"
 				:switchLabel="row.entry.switchLabel"

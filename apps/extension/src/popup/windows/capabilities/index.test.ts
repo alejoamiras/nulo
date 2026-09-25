@@ -559,11 +559,14 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 	const readRow = (row: DOMWrapper<Element>) => {
 		const chip = row.find(`.${STYLE.chip}`)
 		const toggle = row.find('[data-testid="cap-toggle"]')
+		const flagged = row.classes().includes(STYLE.flagged)
+		// The e2e suite reads the flag from this attribute, so it must say what the class draws.
+		expect(row.attributes("data-cap-flagged") === "true").toBe(flagged)
 		return {
 			title: row.find(`.${STYLE.title}`).text(),
 			line: lineIn(row),
 			on: toggle.exists() ? toggle.attributes("aria-checked") === "true" : undefined,
-			flagged: row.classes().includes(STYLE.flagged),
+			flagged,
 			chip: chip.exists() ? chip.text() : undefined,
 		}
 	}
