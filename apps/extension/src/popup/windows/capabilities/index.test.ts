@@ -637,7 +637,7 @@ describe("capabilities window — permission cards and the answer (real cards)",
 			session: { chainId: "1" },
 		})
 		expect(rowKeys(false)).toEqual([])
-		expect(rowKeys(true)).toEqual(["authorizations", "account-address", "transaction"])
+		expect(rowKeys(true)).toEqual(["authorizations", "transaction"])
 		expect(card("authorizations", true).text()).toContain("Nulo signs its authorizations without asking.")
 		expect(w!.findAll('[data-testid="cap-toggle"]')).toHaveLength(0)
 		await w!.findAll('[data-testid="cap-account-item"]')[1].trigger("click")
