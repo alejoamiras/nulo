@@ -348,7 +348,17 @@ Batch 1's parity answers (chat, 2026-09-24): the fee card's app-set row and embe
 fee line adds dollars ("Add dollars"); a hand-added fee contract there reads "Fee · —" with no
 payer ("Align with U16 (Recommended)").
 
+Round 5 (chat, 2026-09-25): items 3, 5, 6 and T signed off, item 8 pending, and no em dash
+joining two clauses in new copy; the quote and the mapping are in § The owner's answers. The older
+strings that do: "separate follow-up for those 45 older strings" (below).
+
 ## Follow-ups (not this program)
+
+- About 45 older user-visible strings join two clauses with an em dash: toasts ("Couldn't
+  estimate fee — retry."), the migration barrier, journal, fee and account-state messages. The
+  owner's call: "separate follow-up for those 45 older strings", one PR after this stack. Find
+  them with a scan of `apps/extension/src` for " — " outside comments, logs and thrown errors;
+  the empty-value glyph "—" stays, and each string's pinning test changes with it.
 
 - 4B, one connect window that turns into the emoji check after Allow: its own blueprint (it
   touches the verify path); round 1's "A + B" drawing is its design.
