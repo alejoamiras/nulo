@@ -3,7 +3,7 @@
 Built on `614c10a8` (P2 done). This phase changes the confirmation window's title (U6) and the
 connected app's Settings page (U7).
 
-Picks for U6, U7, A-15, A-19, A-28 and A-29 not re-read (the proposal artifact is unreadable from the current account); built as drawn, sign-off pending.
+Round-5 picks for item 6 signed off by the owner in chat, 2026-09-25: "Regarding 6: Recommended." (the picks store is unreadable from this account, so the chat answer is the record).
 
 ## What was built, per commit
 

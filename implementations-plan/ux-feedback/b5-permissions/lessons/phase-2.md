@@ -2,7 +2,7 @@
 
 Built on `3248a3db` (P1 done). This phase changes the capabilities window (A-1).
 
-Picks for A-1, U4, A-2, A-5, A-10, A-16, A-30, A-31 and A-32 not re-read (the proposal artifact is unreadable from the current account); built as drawn, sign-off pending.
+Round-5 picks for item 6 signed off by the owner in chat, 2026-09-25: "Regarding 6: Recommended." (the picks store is unreadable from this account, so the chat answer is the record).
 
 ## What was built, per commit
 
