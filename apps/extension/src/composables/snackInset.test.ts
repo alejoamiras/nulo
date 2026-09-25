@@ -11,6 +11,15 @@ enableAutoUnmount(afterEach)
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
+/** The stubbed layout's one rule: a sibling's `data-flow` pushes every element after it down by that much. */
+const flowAbove = (el: Element) => {
+	let px = 0
+	for (let s = el.previousElementSibling; s; s = s.previousElementSibling) {
+		if (s instanceof HTMLElement) px += Number(s.dataset.flow ?? 0)
+	}
+	return px
+}
+
 /** A footer whose box is read from its `data-top` / `data-height`, as the stubbed rect reports it. */
 const Footer = defineComponent({
 	props: { top: { type: Number, required: true }, height: { type: Number, default: 60 }, sticky: Boolean },
@@ -64,7 +73,7 @@ beforeEach(() => {
 	pageLeft = 0
 	vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(VIEWPORT)
 	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-		const top = Number(this.dataset.top ?? 0)
+		const top = Number(this.dataset.top ?? 0) + flowAbove(this)
 		const height = Number(this.dataset.height ?? 0)
 		return DOMRect.fromRect({ x: 0, y: top, width: 360, height })
 	})
@@ -204,6 +213,26 @@ describe("useSnackInset", () => {
 		notifyResize()
 		await frame()
 		expect(inset.value).toBe(VIEWPORT - 490 + SNACK_GAP)
+	})
+
+	test("a hint added or removed above a footer that keeps its size moves the snack with it", async () => {
+		base.value = SNACK_GAP
+		mount(Host)
+		const hint = ref(false)
+		const page = () => h("div", [hint.value ? h("p", { "data-flow": 40 }) : null, h(Footer, { top: 480 })])
+		mount(defineComponent({ setup: () => page }), { attachTo: document.body })
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 480 + SNACK_GAP)
+
+		hint.value = true
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 520 + SNACK_GAP)
+
+		hint.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 480 + SNACK_GAP)
 	})
 
 	test.each([
