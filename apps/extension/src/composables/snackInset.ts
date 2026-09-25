@@ -90,8 +90,9 @@ function riseOf(el: HTMLElement): number {
 /**
  * The inset for the host that renders the snack. `base` is the inset with no sheet open (above the
  * nav, or `SNACK_GAP`). It is measured again on the next frame after anything that can move a
- * footer (one arriving or leaving, a footer resizing, a resize, a scroll, the end of a transition)
- * and at once when a snack opens, so a card never rises at a stale height.
+ * footer (one arriving or leaving, a footer resizing, the page's content changing, a resize, a
+ * scroll, the end of a transition) and at once when a snack opens, so a card never rises at a stale
+ * height.
  */
 export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 	const { toast } = useToast()
@@ -120,9 +121,12 @@ export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 		for (const el of footers) resizes?.observe(el)
 		schedule()
 	}
+	// Content added, removed or restyled above a footer moves it without resizing it.
+	const mutations = new MutationObserver(schedule)
 
 	subscribers.add(onRegistry)
 	onRegistry()
+	mutations.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
 	window.addEventListener("resize", schedule)
 	document.addEventListener("scroll", schedule, { capture: true, passive: true })
 	document.addEventListener("transitionend", schedule, true)
@@ -133,6 +137,7 @@ export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 	onScopeDispose(() => {
 		subscribers.delete(onRegistry)
 		resizes?.disconnect()
+		mutations.disconnect()
 		if (frame !== undefined) cancelAnimationFrame(frame)
 		window.removeEventListener("resize", schedule)
 		document.removeEventListener("scroll", schedule, { capture: true })
