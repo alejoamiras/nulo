@@ -96,7 +96,13 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
-import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
+import {
+	authorizationsEffective,
+	coversAnyContract,
+	effectiveGrants,
+	isCreateAuthWitCoveredByTxOrSimulationScope,
+	readConsent,
+} from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
@@ -528,6 +534,7 @@ type CapabilityDecisionInput = {
 	approvedTypes: string[]
 	rejectedTypes: string[]
 	requiresGrant?: string[]
+	authorizations?: { broad: boolean } | null
 }
 
 /** Folds the popup's answer into the ONE atomic decision the session row takes. */
@@ -557,10 +564,38 @@ function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan
 		// clearing their rejections would erase a concurrent unrelated rejection).
 		approvedTypes: [...deltaApprovedTypes],
 		rejectedTypes: rejectedDeltaTypes,
-		// The addition was consented against the grant the popup showed; revoked meanwhile, the
-		// writer refuses instead of adding accounts to a session that no longer holds it.
-		...(plan.accountsWidening !== undefined && deltaApprovedTypes.has("accounts") ? { requiresGrant: ["accounts"] } : {}),
+		...requiredGrants(result, plan, deltaApprovedTypes),
+		...consentDecision(result, plan, newGrants),
 	}
+}
+
+/** An added account and a consent are both given against the accounts grant the popup showed;
+ *  revoked meanwhile, the writer refuses instead of writing to a session that no longer holds it. */
+function requiredGrants(
+	result: CapabilityResult,
+	plan: CapabilityPlan,
+	deltaApprovedTypes: Set<string>,
+): Pick<CapabilityDecisionInput, "requiresGrant"> {
+	const widening = plan.accountsWidening !== undefined && deltaApprovedTypes.has("accounts")
+	const consentOnHeldAccounts = result.authorizationsWithoutAsking === true && !plan.delta.some((cap) => cap.type === "accounts")
+	return widening || consentOnHeldAccounts ? { requiresGrant: ["accounts"] } : {}
+}
+
+/** The window's switch, read strictly since the popup's result arrives unvalidated: `true` stores a
+ *  consent whose `broad` comes from the snapshot's grants as this decision leaves them, never from
+ *  the popup or a later row; `false` deletes it. */
+function consentDecision(
+	result: CapabilityResult,
+	plan: CapabilityPlan,
+	grantRecords: GrantedCapabilityRecord[],
+): Pick<CapabilityDecisionInput, "authorizations"> {
+	if (result.authorizationsWithoutAsking === false) return { authorizations: null }
+	if (result.authorizationsWithoutAsking !== true) return {}
+	const after = effectiveGrants(
+		plan.existingGrants.map((g) => g.capability),
+		grantRecords.map((g) => g.capability),
+	)
+	return { authorizations: { broad: coversAnyContract(after) } }
 }
 
 /** Only accounts the picker OFFERED and the session does not already hold are added, and only
@@ -784,11 +819,8 @@ export class WalletSdkDispatcher {
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
-		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
-		// ONCE at dispatch entry and thread it through every internal call.
-		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
-		// calls previously gave different handlers different views of the same
-		// session (e.g. if the session was deleted mid-dispatch).
+		// The dApp session is read ONCE here and threaded through every internal call, so every
+		// check one message runs, the consent and the scopes included, sees the same row.
 		// Anchored to ctx.profileId (the session's establishment-stamped
 		// profile, guard-verified upstream): a profile switch landing mid-await
 		// must not let this lookup resolve the NEW profile's row.
@@ -1115,11 +1147,11 @@ export class WalletSdkDispatcher {
 	}
 
 	/**
-	 * Handle createAuthWit: resolve the signer from args[0] (not the session default),
-	 * then route by scope coverage. A CallIntent covered by a granted tx/sim scope is
-	 * within authority the dApp already holds → sign silently. An uncovered call, or any
-	 * IntentInnerHash (whose inner hash is fully attacker-chosen), → confirmation popup.
-	 * No sendTx FIFO hooks: the background's non-send safety-net releases the baton.
+	 * Handle createAuthWit: resolve the signer from args[0] (not the session default), then
+	 * route. A CallIntent covered by a granted tx/sim scope signs silently only while the app's
+	 * authorizations consent is effective; every other intent, and any IntentInnerHash (whose
+	 * inner hash is fully attacker-chosen), opens the confirmation popup. No sendTx FIFO hooks:
+	 * the background's non-send safety-net releases the baton.
 	 */
 	private async handleCreateAuthWit(
 		args: unknown[],
@@ -1132,7 +1164,15 @@ export class WalletSdkDispatcher {
 		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
 
-		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+		// Both read the dispatch-entry snapshot: a Settings change applies from the next message, so
+		// a call already past dispatch entry keeps the consent it entered with.
+		if (
+			isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants) &&
+			authorizationsEffective(
+				dappSession.authorizationsWithoutAsking,
+				grants.map((g) => g.capability),
+			)
+		) {
 			// A silently-signed authwit runs under the session's admission fence, like a send:
 			// createAuthWit derives key material for the resolved account, so a lock, switch,
 			// re-unlock or same-id re-import parked before the sign must fail closed. The wire
@@ -1309,29 +1349,8 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		// Phase 3: Show capability popup for delta. If `accounts` type is in the
-		// delta, load available accounts for the popup.
-		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
-			? await this.loadAvailableAccountsForPopup(ctx)
-			: undefined
-		plan.availableAccounts = availableAccounts
-
-		let result: CapabilityResult
-		try {
-			result = await this.dappInteractionService.requestCapabilities({
-				sessionId: dappSession.id,
-				manifest: { ...manifest, capabilities: requestedCapabilities },
-				delta: plan.delta,
-				existingGrants: plan.existingCaps,
-				reRequested: reRequestedTypes(plan),
-				availableAccounts,
-				grantedAccounts: plan.accountsWidening?.granted,
-				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
-			})
-		} catch (err) {
-			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
-			throw err
-		}
+		// Phase 3: Show capability popup for delta.
+		const result = await this.askCapabilities(plan, { ...manifest, capabilities: requestedCapabilities }, ctx, dappSession)
 
 		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
@@ -1351,6 +1370,38 @@ export class WalletSdkDispatcher {
 			version: "1.0" as const,
 			granted,
 			wallet: { name: "Nulo", version: __VERSION__ },
+		}
+	}
+
+	/** Opens the capability window for the plan's delta; a close or reject records every delta type
+	 *  as rejected. */
+	private async askCapabilities(
+		plan: CapabilityPlan,
+		manifest: CapabilityManifest,
+		ctx: SessionContext,
+		dappSession: IDappSessionRef,
+	): Promise<CapabilityResult> {
+		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
+			? await this.loadAvailableAccountsForPopup(ctx)
+			: undefined
+		plan.availableAccounts = availableAccounts
+		const consent = readConsent(dappSession.authorizationsWithoutAsking)
+		try {
+			return await this.dappInteractionService.requestCapabilities({
+				sessionId: dappSession.id,
+				manifest,
+				delta: plan.delta,
+				existingGrants: plan.existingCaps,
+				heldGrants: plan.existingGrants.map((g) => g.capability),
+				...(consent !== undefined ? { authorizationsWithoutAsking: consent } : {}),
+				reRequested: reRequestedTypes(plan),
+				availableAccounts,
+				grantedAccounts: plan.accountsWidening?.granted,
+				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
+			})
+		} catch (err) {
+			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
+			throw err
 		}
 	}
 
