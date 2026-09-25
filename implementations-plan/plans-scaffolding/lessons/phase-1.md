@@ -35,6 +35,8 @@ Helpers (`lib.test.ts` 9, extraction and resolution 5) and `tree.test.ts` make 5
 
 ## Deviations from the plan text
 
+Nine. The round-1 review brief called them seven; codex counted nine and judged the eight besides the citation exemption reasonable. Round 1 narrowed that exemption; see § Codex round 1.
+
 - **`checkTree` lives in `check.ts`, not `lib.ts`.** Otherwise `lib.ts` imports the rule modules while they import it. Under ESM that cycle is a TDZ crash at load: "Cannot access 'PLANS' before initialization". `lib.ts` must stay a leaf.
 - **`link-missing` skips transcript-shaped source docs.** They are already `tracked-artifact` findings and leave the tree with their links. Counting them gave 1,310 findings, nearly all of them reviewers' `path:line` cites.
 - **Plan prose in the `plans` scope skips repo-rooted cites.** These are a `:line` suffix, or a first segment that is a top-level repo entry. They were broken before any move and stay history. Links into the plan tree are still checked. With both calibrations `link-missing` = 1 and `link-untracked` = 112, matching recon.
@@ -121,3 +123,90 @@ The rerun guards every `gh stack` call by asserting that `git rev-parse --show-t
 ## Harness note
 
 The session's worktree guard pins Bash to another worktree. This phase was built and committed in a scratch clone of `worktree-plans-scaffolding` outside the repo, and fast-forwarded into the worktree from there.
+
+## Codex round 1
+
+**2026-09-25. Verdict: changes required, 11 findings, all adopted.**
+
+Codex also confirmed as sound:
+
+- the `dev`-by-name ancestry fetch;
+- index membership;
+- UTF-8 budget counting;
+- 787 findings reproduced without fetching.
+
+Every fixture was written first and run against the unfixed code: 26 tests failed, and `tree.test.ts` failed to load (`verdict` missing). The one exception is the 40-group brace bomb, added only after the fix because the old code would hang on it. The fix landed in `8ae43352`.
+
+| # | Finding | Fix | Fixtures (`scripts/ci-cd/plans/`) |
+|---|---|---|---|
+| 1 | `blob/GOOD/../../blob/BAD` passed as GOOD, and extra `../` segments reached another repo | A permalink must be canonical as written: no `.`/`..` segment, and `new URL(href).href === href`. The shape regex also rejects empty segments. | `permalinks.test.ts`: "dot segments, raw or percent-encoded, and empty segments fail even behind an allowlisted SHA" |
+| 2 | Protocol-relative `//github.com/…` escaped the check, and bare URLs were not links | Candidates are found by parsed host (`github.com`, `www.`, any case, trailing dot; http or https; `//` and `/\`). The path is read both as written and as resolved. Markdown renders with `{ autolinks: true }`, so bare `https://`, `www.` and angle-bracket autolinks are links, as on GitHub. | `permalinks.test.ts`: "protocol-relative, backslash, http, www and case variants…" and "bare-URL autolinks are checked like any other link"; `links.test.ts`: "GFM autolinks: bare https, www. and angle-bracket URLs are links…" |
+| 3 | `ctx.read()` used `readFileSync`: it followed symlinks and read an empty string on failure | Contents come from `git ls-files -s` plus one `git cat-file --batch` (`ctx.load`). Only modes 100644/100755 are read. A missing blob throws. A new `document-type` rule flags a symlink or gitlink that is a document or sits in the plan tree. The module comment now states the one working-tree input. | `lib.test.ts`: "a staged violation is judged from its blob although the working copy is clean" and "a tracked Markdown symlink or a plan-tree gitlink is a document-type finding…" |
+| 4 | Brace expansion was exponential | A queue expansion checks `done + queued + alternatives > 256` before it builds anything. Past the cap it returns null, and the token becomes a `path-token` finding. | `links.test.ts`: "expansion stops past BRACE_CAP results, before building them, and the token becomes a finding" (9 groups, then 40) |
+| 5 | `&#x110000;` threw `RangeError` | NUL, surrogates and code points past U+10FFFF decode to U+FFFD, and decoding never throws. | `lib.test.ts`: "an invalid numeric reference becomes U+FFFD…"; `links.test.ts`: "a numeric reference past U+10FFFF in an href never crashes the run" |
+| 6 | `*` and numbered entries went unchecked, and `- [e][ref]` failed | `-`, `*`, `+`, `1.` and `1)` all open an entry, and any later non-blank, non-heading line is a second line. Each entry renders with the file's reference definitions. A definition glued under an entry is a lazy continuation in CommonMark, so it counts as a second line. | `structure.test.ts`: "`*`, `+` and numbered items are entries too…" and "a reference-style entry resolves against the whole document…" |
+| 7 | Root's home, digit and underscore usernames and Windows profiles passed; a NUL byte exempted the whole file | The regex covers those forms, including a doubled-backslash profile. A lookbehind keeps URL and relative paths out. A NUL in an in-scope document is a finding, and the file is still scanned. Fixture paths are assembled at runtime. | `structure.test.ts`: "root's home, digit and underscore usernames and Windows profiles are home paths; a URL path is not" and "a NUL byte in an in-scope Markdown file is a finding…" |
+| 8 | The citation exemption hid `../gone/plan.md:1` and `implementations-plan/gone/plan.md` | In `plans` scope a `:line` suffix is dropped, then every reading that lands in the plan tree is checked. Only repo-rooted cites of code outside `implementations-plan/` stay grandfathered. | `links.test.ts`: "a `:line` suffix or a repo-rooted spelling never hides a dead plan-tree target" |
+| 9 | `.ignore` could negate `/archive/`, and nested `.ignore` files went unchecked | The plans `.ignore` may hold only `/archive/` and blank lines. A nested `.gitignore`, `.ignore` or `.rgignore` is a `nested-ignore` finding. | `structure.test.ts`: "the .ignore holds `/archive/` alone…" and "a nested .gitignore, .ignore or .rgignore fails" |
+| 10 | Only `a[href]` and `img[src]` were extracted | `a`, `link`, `img` and `source` (`src`, `srcset`), `script` and `iframe`, plus `area`, `embed`, `video[src,poster]`, `audio`, `track` and `object[data]`; `srcset` is split into its candidates. | `links.test.ts`: "every URL-bearing attribute is a link, and srcset splits into its candidates" and "an srcset in Markdown's raw HTML is checked like any link" |
+| 11 | `mode()` keyed on `GITHUB_BASE_REF` | Enforce locally and on `pull_request`/`pull_request_target`, whatever the base ref holds; every other Actions event reports. Ancestry skips on report mode. `verdict()` is the enforcement wiring. `tree.test.ts` stays report-only (`REPORT_ONLY = true`) but asserts that a PR run with findings fails. | `lib.test.ts`: the 9-case `mode` matrix; `permalinks.test.ts`: "a pull request with an empty base ref still fetches dev, and fails closed" and "a push, nightly or release run never fetches…, even with a base ref set"; `tree.test.ts`: both tests |
+
+Also changed:
+
+- **Two narrating comments trimmed:** `structure.ts:1` and `lineOf`'s.
+- **`path-token` greps with `-a`.** `-I` skipped a NUL-containing file whole. Fixture: "a NUL byte does not hide a file's plan paths".
+- **The hit regex runs in dotAll mode.** A CRLF line's `\r` stopped it from matching, which silently dropped the hit. This was an old bug, found while editing.
+
+**Calibration catch.** The first cut of fix 8 raised 24 new `link-missing` findings on the real tree, all `.claude/skills/…:N` cites. The rooted test had excluded every `.`-prefixed path, not just `./` and `../`. After the fix, the baseline is unchanged.
+
+**Mutation pass: 13 of 13 killed.** The mutants:
+
+- `grep -I` restored;
+- candidates found by the resolved path only;
+- autolinks off;
+- `img[srcset]` dropped;
+- definitions ignored;
+- `read` of a non-regular entry;
+- `mode()` keyed on the base ref;
+- rooted plan cites grandfathered;
+- the `:line` suffix kept;
+- `.ignore` checking only negations;
+- the NUL exemption for documents;
+- `&#0;` decoded;
+- `document-type` limited to the plan tree.
+
+The first run of the non-regular-read mutant survived, because its gitlink sat outside local-path scope. The fixture moved the gitlink into `plans-scaffolding/`, and the mutant died.
+
+**Deviations and pushback:**
+
+- **`document-type` is a 14th rule.** The plan names 13. Its closest neighbour, `tracked-artifact`, only covers the plan tree.
+- **`mode()` no longer matches the plan text.** `plan.md` § Key interfaces and Phase 1's Mode line still say `GITHUB_BASE_REF`. Reconcile `plan.md` there.
+- **An Actions run with no event name reports.** It is not failed closed; the driver's round-1 brief asked for exactly that.
+- **The dot-segment check and the normalization check are redundant** behind the strict regex. Both are kept, as codex asked, which means no mutant of either one alone can die.
+- **HTML's C1 remap (0x80–0x9F → Windows-1252) is left out.** No path or URL the gate judges depends on it.
+- **Residual: `ls-files -ci --exclude-standard` still reads ignore rules from the working tree.** No git option reads them from the index. CI's checkout equals the commit, so only a local run with unstaged ignore edits can differ.
+- **A `:line` cite is read relatively when its first segment is not a tracked top-level entry**, such as a removed directory. That fails closed. It affects zero cites on today's tree.
+- **`base[href]` and `form[action]` stay unextracted.** No plan document uses either.
+
+**Gate on `8ae43352`:**
+
+| Command | Exit | Result |
+|---|---|---|
+| `bun test scripts/ci-cd/plans/` | 0 | 77 pass, 0 fail, ≈9 s |
+| `bun run test:ci-gating` | 0 | 227 pass, 2 skip, 0 fail |
+| `bun run lint` | 0 | Biome clean on the gate dir (the 29 warnings are elsewhere); complexity-baseline OK, with no new acceptance |
+| `time bun scripts/ci-cd/plans/check.ts --report` | 0 | 787 findings in 3.3 s (3.4 s wall) |
+
+The report baseline is unchanged:
+
+| Rule | Findings |
+|---|---|
+| tracked-artifact | 667 |
+| hygiene-files | 6 |
+| nested-ignore | 1 |
+| link-untracked | 112 |
+| link-missing | 1 |
+| document-type | 0 |
+| every other rule | 0 |
+
+Autolinks surface no bare permalinks on today's tree.
