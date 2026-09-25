@@ -33,7 +33,9 @@ export type IncomingSyncHealth = { stalled: boolean; since: number | null }
 export type IncomingSyncHealthChanged = { profileId: string; networkId: string }
 
 import { type PublicEventCursor, PublicEventCursorSchema } from "@nulo/aztec-runtime/pxe/public-events"
+import type { ArrivalState } from "./arrival-state"
 export type { PublicEventCursor }
+export type { ArrivalState }
 
 /** Discriminates the two receipt arms: privately-delivered notes vs public `Transfer` events. */
 export type IncomingTransferKind = "note" | "public-event"
@@ -160,6 +162,11 @@ export type IncomingTrustRecord = {
 	state: IncomingTrustState
 	/** Last transition timestamp. Debug + future analytics. */
 	updatedAt: number
+	/** The block this token's arrival history ends at, for every account of the profile on the network. */
+	arrivalFloor?: number
+	/** No tip could be read when the floor last had to move: nothing of this token plays until one
+	 *  is. `arrivalFloor` stays as its lower bound, so the floor still never moves down. */
+	arrivalFloorPending?: true
 }
 
 /** Storage codec row schema — mirrors `IncomingTrustRecord` exactly. */
@@ -169,6 +176,8 @@ export const IncomingTrustRecordSchema: z.ZodType<IncomingTrustRecord> = z.objec
 	contract: z.string(),
 	state: z.enum(["unknown", "pending", "trusted", "blocked"]),
 	updatedAt: z.number(),
+	arrivalFloor: z.number().int().nonnegative().optional(),
+	arrivalFloorPending: z.literal(true).optional(),
 })
 
 /**
@@ -348,4 +357,11 @@ export type Methods = {
 	 *  (re)connect so a user who closed the popup unresolved doesn't get
 	 *  stuck — the next popup load re-prompts. */
 	replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): void
+	/** The account's arrival row and the network's token floors. A missing row is baselined to the
+	 *  chain tip, so nothing plays that time; with no tip, or a scope that no longer exists, it
+	 *  answers `sinceBlock: null` and writes nothing. */
+	getArrivalState(profileId: string, networkId: string, accountAddress: string): ArrivalState
+	/** Marks as played the ids that are this scope's records and still eligible, and returns them.
+	 *  Every other id is ignored, so one document's claim wins and a replayed claim takes nothing. */
+	claimArrivals(profileId: string, networkId: string, accountAddress: string, ids: string[]): string[]
 }
