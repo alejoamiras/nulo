@@ -269,6 +269,26 @@ reaching one of those surfaces reads the picks first; if the owner has not picke
 recommended option and lists the surface under **sign-off pending** in its PR body. The owner's
 pick always wins, even after the PR is open.
 
+### The owner's answers (2026-09-25)
+
+The picks store refuses reads from the account now in use, even with the page shared, so the
+owner answered in chat, and the message is the record: "1. okei, shared it. Regarding 2: on
+(3)... Go with recommended. Regarding 5: Sounds good. Regarding 6: Recommended. And on "T" looks
+good. But please, drop the usage of "em dashes"." Read against the page's "Round five at a
+glance":
+
+| Page group | Spec | Batch | Answer |
+|---|---|---|---|
+| 3 · the fee menu before its balances arrive, the spoken sub-cent fee, a fee contract added by hand | U14, U15, U16 | 1 | signed off, as recommended |
+| 5 · first-run import | U11 | 1 | signed off |
+| 6 · asking for more, several accounts, banners, every row, rename, the authorization window, Settings | U1–U7, and the A-* addendum the page groups under item 6 ("the recommended option on each") | 5 | signed off, as recommended |
+| T · the hostname warning and the recovery-phrase note as text | U8, U9 | 3 | signed off; each em dash made a full stop (arc 3; proposal version 10 draws it) |
+| 8 · the review sheet and the fee tag, the strip when Nulo can't tell who pays | U12, U13 | 1 | no answer: **sign-off pending** |
+
+U10 has no picker ("Unchanged"). Copy rule from the same message: no em dash joins two clauses
+in user-visible text this program adds; the empty-value glyph "—" stays where a drawing shows it
+(U14, U16). Each PR body quotes the message for its surfaces.
+
 ## Delivery
 
 - **Stack**: arc 1 is adopted at program setup, then `gh stack add <branch>` at each arc boundary,
