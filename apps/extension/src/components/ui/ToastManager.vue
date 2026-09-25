@@ -1,11 +1,15 @@
 <script setup>
 // The bare <ToastManager> tag resolves here, not through the design resolver: the inset comes from
-// the route, which the package cannot read.
+// the route, the page's footers and the open sheets, which the package cannot read.
 import { ToastManagerBase } from "@nulo/design"
 
-const route = useRoute()
+/** Composables */
+import { SNACK_GAP, useSnackInset } from "@/composables/snackInset"
 
-const bottomInset = computed(() => (route.meta.showBottomNav ? 76 : 12))
+const NAV_HEIGHT = 64
+
+const route = useRoute()
+const bottomInset = useSnackInset(() => (route.meta.showBottomNav ? NAV_HEIGHT + SNACK_GAP : SNACK_GAP))
 </script>
 
 <template>

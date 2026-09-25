@@ -8,6 +8,10 @@
  * the Reject `:disabled` (`isLoading || !requestId`) was identical and is passed
  * as `rejectDisabled`. Test-ids are forwarded verbatim (e2e depends on them).
  */
+
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 defineProps({
 	/** The window's processing error ({ title, tooltip?, type }) or undefined. */
 	processingError: { type: Object, default: undefined },
@@ -26,7 +30,7 @@ const emit = defineEmits(["reject", "approve"])
 </script>
 
 <template>
-	<Flex direction="column" gap="10" :class="$style.footer">
+	<Flex v-snack-footer direction="column" gap="10" :class="$style.footer" data-testid="dapp-approval-footer">
 		<Tooltip v-if="processingError" side="top" position="start" :wide="wideTooltip" :disabled="!processingError.tooltip">
 			<Flex align="center" wide gap="6">
 				<Icon name="info" size="14" :color="processingError.type === 'warning' ? 'orange' : 'red'" />

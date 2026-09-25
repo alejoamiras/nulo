@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
@@ -189,6 +190,7 @@ onBeforeUnmount(() => {
 			</div>
 
 			<Button
+				v-snack-footer
 				variant="cta"
 				size="large"
 				:disabled="!isAllowedToContinue || isCreating"

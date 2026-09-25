@@ -13,6 +13,7 @@ import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vu
 
 /** Composables */
 import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 
@@ -303,7 +304,7 @@ watch(
 			</form>
 		</Flex>
 
-		<Flex justify="center" :class="$style.footer">
+		<Flex v-snack-footer justify="center" :class="$style.footer">
 			<Tooltip side="top" position="center" textAlign="center" maxWidth="220px">
 				<button
 					@click="popupStore.open('forgot_password')"
