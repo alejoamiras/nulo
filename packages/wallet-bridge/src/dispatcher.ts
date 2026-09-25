@@ -1352,7 +1352,6 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		// Phase 3: Show capability popup for delta.
 		const result = await this.askCapabilities(plan, { ...manifest, capabilities: requestedCapabilities }, ctx, dappSession)
 
 		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged

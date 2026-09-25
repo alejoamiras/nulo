@@ -24,7 +24,7 @@ describe("pass-through methods", () => {
 		expect(() => enforceScope("unknownMethod", [], [])).not.toThrow()
 	})
 
-	// F-004: registerSender and getAddressBook are NO LONGER
+	// F-004: registerSender and getAddressBook are not
 	// pass-through. They require `data.addressBook === true`. With no grants,
 	// the type-level check at enforceCapability would have thrown first, but
 	// if grants exist without the addressBook flag, the scope checker fires.
