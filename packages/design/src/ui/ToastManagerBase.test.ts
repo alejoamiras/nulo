@@ -219,6 +219,27 @@ describe("ToastManagerBase", () => {
 		expect(cards().length).toBe(0)
 	})
 
+	test.each([
+		["View", "success", "snackbar-action"],
+		["×", "error", "snackbar-close"],
+	] as const)("%s on a card leaving for a same-kind replacement acts on neither snack", async (_, kind, testid) => {
+		stubTransitionDuration()
+		mountRegion()
+		const selected: string[] = []
+		const action = (name: string) => ({ label: "View", onSelect: () => selected.push(name) })
+		open({ kind, label: "Receipt A", action: action("A") })
+		await stepUntil(entered("Receipt A"))
+
+		open({ kind, label: "Receipt B", action: action("B") })
+		await step(16)
+		expect(card()?.textContent).toContain("Receipt A")
+		card()?.querySelector<HTMLButtonElement>(`[data-testid="${testid}"]`)?.click()
+		expect(selected).toEqual([])
+		expect(useToast().toast.value?.label).toBe("Receipt B")
+
+		await stepUntil(entered("Receipt B"))
+	})
+
 	test("an error has × with aria-label Close, and × closes it", async () => {
 		mountRegion()
 		open({ kind: "error", label: "Failed" })

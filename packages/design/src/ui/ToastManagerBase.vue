@@ -74,14 +74,18 @@ const onFocusOut = (event: FocusEvent) => {
 	focusWithin.value = false
 }
 
-const onClose = () => {
+// A leaving card keeps its listeners while `shown` already holds its successor, so each control is
+// bound at render to the snack its card shows and does nothing once that snack is gone.
+const closeFor = (id: number) => () => {
+	if (shown.value?.id !== id) return
 	const target = focusWithin.value ? returnFocusTo : null
 	closeToast()
 	if (target instanceof HTMLElement && target.isConnected) target.focus()
 }
 
-const onSelect = () => {
-	const action = shown.value?.action
+const selectFor = (id: number) => () => {
+	if (shown.value?.id !== id) return
+	const action = shown.value.action
 	closeToast()
 	action?.onSelect()
 }
@@ -122,7 +126,7 @@ onBeforeUnmount(() => {
 							<span :class="$style.title" data-testid="snackbar-title">{{ shown.label }}</span>
 							<span v-if="shown.sub" :class="$style.sub" data-testid="snackbar-sub">{{ shown.sub }}</span>
 						</div>
-						<button v-if="shown.action" type="button" :class="$style.action" data-testid="snackbar-action" @click="onSelect">
+						<button v-if="shown.action" type="button" :class="$style.action" data-testid="snackbar-action" :onClick="selectFor(shown.id)">
 							{{ shown.action.label }}
 						</button>
 					</div>
@@ -154,10 +158,10 @@ onBeforeUnmount(() => {
 							<span :class="$style.title" data-testid="snackbar-title">{{ shown.label }}</span>
 							<span v-if="shown.sub" :class="$style.sub" data-testid="snackbar-sub">{{ shown.sub }}</span>
 						</div>
-						<button v-if="shown.action" type="button" :class="$style.action" data-testid="snackbar-action" @click="onSelect">
+						<button v-if="shown.action" type="button" :class="$style.action" data-testid="snackbar-action" :onClick="selectFor(shown.id)">
 							{{ shown.action.label }}
 						</button>
-						<button type="button" :class="$style.close" aria-label="Close" data-testid="snackbar-close" @click="onClose">
+						<button type="button" :class="$style.close" aria-label="Close" data-testid="snackbar-close" :onClick="closeFor(shown.id)">
 							<MaterialIcon name="close" :size="16" color="secondary" />
 						</button>
 					</div>
