@@ -106,4 +106,11 @@ describe("ui/RowTarget", () => {
 		expect(button.el.attributes("tabindex")).toBeUndefined()
 		button.w.unmount()
 	})
+
+	test("a testid given to the target lands on the link itself, where e2e clicks", async () => {
+		const withTestid = { to: "/x", "data-testid": "connected-app-row" }
+		const { el, w } = await mountRow(withTestid)
+		expect(el.attributes("data-testid")).toBe("connected-app-row")
+		w.unmount()
+	})
 })
