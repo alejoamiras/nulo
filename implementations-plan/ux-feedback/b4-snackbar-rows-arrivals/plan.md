@@ -1641,7 +1641,7 @@ Gate: as P1.
 
 Gate: lint, `typecheck:all`, `test:all`, and the smoke suite on Chrome and Firefox, all exit 0.
 
-### P4 · Arrivals and the elsewhere-snackbar ☐
+### P4 · Arrivals and the elsewhere-snackbar ✓
 
 1. Tip probe first: in the network sandbox, log the tip `getLatestBlockNumber` returns and the
    `l2BlockNumber` of a receipt sent after it, on each browser, into `lessons/phase-4.md`. The
