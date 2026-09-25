@@ -112,10 +112,19 @@ describe("Settings › Connected app › If you allow, it can", () => {
 		mocks.setAuthorizationsWithoutAsking.mockResolvedValueOnce(session([accounts(true), txListed]))
 		await toggle(w).trigger("click")
 		await flushPromises()
-		expect(mocks.setAuthorizationsWithoutAsking).toHaveBeenCalledWith("s1", false)
+		expect(mocks.setAuthorizationsWithoutAsking).toHaveBeenCalledWith("s1", false, false)
 		expect(toggle(w).attributes("aria-checked")).toBe("false")
 		expect(line(w)).toBe("You confirm each authorization first.")
 		expect(w.find('[data-testid="cap-auth-term"]').text()).toBe("authorization")
+	})
+
+	test("an On given against listed scopes carries the narrow breadth the row showed", async () => {
+		const w = await mountPage(session([accounts(true), txListed]))
+		expect(toggle(w).attributes("aria-checked")).toBe("false")
+		mocks.setAuthorizationsWithoutAsking.mockResolvedValueOnce(session([accounts(true), txListed], { broad: false }))
+		await toggle(w).trigger("click")
+		await flushPromises()
+		expect(mocks.setAuthorizationsWithoutAsking).toHaveBeenCalledWith("s1", true, false)
 	})
 
 	test("absent when the app cannot ask for authorizations", async () => {
@@ -143,7 +152,7 @@ describe("Settings › Connected app › If you allow, it can", () => {
 		mocks.setAuthorizationsWithoutAsking.mockResolvedValueOnce(session([accounts(true), txAny], { broad: true }))
 		await toggle(w).trigger("click")
 		await flushPromises()
-		expect(mocks.setAuthorizationsWithoutAsking).toHaveBeenCalledWith("s1", true)
+		expect(mocks.setAuthorizationsWithoutAsking).toHaveBeenCalledWith("s1", true, true)
 		expect(line(w)).toBe("For any call, on any contract.")
 	})
 

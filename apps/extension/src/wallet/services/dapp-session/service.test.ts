@@ -355,14 +355,14 @@ describe("the authorizations consent", () => {
 		expect(effective(regranted)).toBe(false)
 	})
 
-	test("the Settings switch stores broad from the current grants and emits the update", async () => {
+	test("the Settings switch stores broad only when the row and the grants both reach any contract, and emits the update", async () => {
 		const { svc, id } = await holding([withAuthWit, anyContract])
 		const updates: DappSession[] = []
 		svc.onDappSessionUpdated.add((row) => updates.push(row))
-		expect((await svc.setAuthorizationsWithoutAsking(id, true)).authorizationsWithoutAsking).toEqual({ broad: true })
+		expect((await svc.setAuthorizationsWithoutAsking(id, true, true)).authorizationsWithoutAsking).toEqual({ broad: true })
 		await svc.setCapabilityGrants(id, [withAuthWit, listed])
-		expect((await svc.setAuthorizationsWithoutAsking(id, true)).authorizationsWithoutAsking).toEqual({ broad: false })
-		expect((await svc.setAuthorizationsWithoutAsking(id, false)).authorizationsWithoutAsking).toBeUndefined()
+		expect((await svc.setAuthorizationsWithoutAsking(id, true, true)).authorizationsWithoutAsking).toEqual({ broad: false })
+		expect((await svc.setAuthorizationsWithoutAsking(id, false, false)).authorizationsWithoutAsking).toBeUndefined()
 		expect(updates.map((row) => row.authorizationsWithoutAsking)).toEqual([
 			{ broad: true },
 			{ broad: true },
@@ -373,12 +373,21 @@ describe("the authorizations consent", () => {
 
 	test("the Settings switch refuses On without canCreateAuthWit and a non-boolean; Off always succeeds", async () => {
 		const { svc, id } = await holding([withoutAuthWit, listed])
-		await expect(svc.setAuthorizationsWithoutAsking(id, true)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
-		await expect(svc.setAuthorizationsWithoutAsking(id, "true" as never)).rejects.toBeInstanceOf(ValidationError)
+		await expect(svc.setAuthorizationsWithoutAsking(id, true, false)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		await expect(svc.setAuthorizationsWithoutAsking(id, "true" as never, false)).rejects.toBeInstanceOf(ValidationError)
+		await expect(svc.setAuthorizationsWithoutAsking(id, true, "yes" as never)).rejects.toBeInstanceOf(ValidationError)
 		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toBeUndefined()
-		expect((await svc.setAuthorizationsWithoutAsking(id, false)).authorizationsWithoutAsking).toBeUndefined()
+		expect((await svc.setAuthorizationsWithoutAsking(id, false, false)).authorizationsWithoutAsking).toBeUndefined()
 		await svc.setCapabilityGrants(id, [])
-		await expect(svc.setAuthorizationsWithoutAsking(id, false)).resolves.toMatchObject({ id })
+		await expect(svc.setAuthorizationsWithoutAsking(id, false, false)).resolves.toMatchObject({ id })
+	})
+
+	test("a Settings On given against listed scopes, landing after a widening to any contract, stores narrow and asks", async () => {
+		const { svc, id } = await holding([withAuthWit, listed])
+		await svc.applyCapabilityDecision(id, widenToAnyContract)
+		const row = await svc.setAuthorizationsWithoutAsking(id, true, false)
+		expect(row.authorizationsWithoutAsking).toEqual({ broad: false })
+		expect(effective(row)).toBe(false)
 	})
 
 	test.each([
@@ -389,8 +398,8 @@ describe("the authorizations consent", () => {
 		const stale = decision({ authorizations: { broad: false }, requiresGrant: ["accounts"] })
 		const writes =
 			last === "settings"
-				? [svc.applyCapabilityDecision(id, stale), svc.setAuthorizationsWithoutAsking(id, true)]
-				: [svc.setAuthorizationsWithoutAsking(id, true), svc.applyCapabilityDecision(id, stale)]
+				? [svc.applyCapabilityDecision(id, stale), svc.setAuthorizationsWithoutAsking(id, true, true)]
+				: [svc.setAuthorizationsWithoutAsking(id, true, true), svc.applyCapabilityDecision(id, stale)]
 		await Promise.all(writes)
 		const expected = last === "settings" ? { broad: true } : { broad: false }
 		expect((await svc.getDappSession(id)).authorizationsWithoutAsking).toEqual(expected)

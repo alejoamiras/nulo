@@ -278,16 +278,18 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		})
 	}
 
-	/** The Settings switch. On needs `canCreateAuthWit` and records whether the current grants reach
-	 *  any contract; Off always succeeds. It takes the decision lock, so of a Settings write and a
-	 *  window decision the later one wins. */
-	public async setAuthorizationsWithoutAsking(sessionId: string, on: boolean): Promise<DappSession> {
-		if (typeof on !== "boolean") throw new ValidationError("setAuthorizationsWithoutAsking takes a boolean")
+	/** The Settings switch. On needs `canCreateAuthWit` and is broad only when the row the person
+	 *  switched (`shownBroad`) and the grants under the lock both reach any contract, so a widening
+	 *  that lands first leaves a narrow On narrow, which asks. Off always succeeds. It takes the
+	 *  decision lock, so of a Settings write and a window decision the later one wins. */
+	public async setAuthorizationsWithoutAsking(sessionId: string, on: boolean, shownBroad: boolean): Promise<DappSession> {
+		if (typeof on !== "boolean" || typeof shownBroad !== "boolean") {
+			throw new ValidationError("setAuthorizationsWithoutAsking takes two booleans")
+		}
 		return await this.patchSession(sessionId, (session) => {
 			if (on && !holdsCanCreateAuthWit(session)) throw new CapabilityNotGrantedError("accounts")
-			session.authorizationsWithoutAsking = on
-				? { broad: coversAnyContract((session.capabilityGrants ?? []).map((g) => g.capability)) }
-				: undefined
+			const grants = (session.capabilityGrants ?? []).map((g) => g.capability)
+			session.authorizationsWithoutAsking = on ? { broad: shownBroad && coversAnyContract(grants) } : undefined
 		})
 	}
 

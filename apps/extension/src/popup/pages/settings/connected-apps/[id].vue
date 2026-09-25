@@ -72,11 +72,13 @@ const grantedCapabilities = computed(() => session.value?.capabilityGrants ?? []
 const isTrusted = computed(() => session.value?.trustedVerification ?? false)
 
 const grantedCaps = computed(() => grantedCapabilities.value.map((g) => g.capability))
+// An On consents to the breadth the row shows, so the write carries it.
+const shownBroad = computed(() => coversAnyContract(grantedCaps.value))
 // Absent without `canCreateAuthWit`: there is nothing for the app to sign.
 const authorizations = computed(() => {
 	const caps = grantedCaps.value
 	if (!holdsCanCreateAuthWit(caps)) return undefined
-	return authorizationsRow({ broad: coversAnyContract(caps), noScope: !holdsCallScope(caps) })
+	return authorizationsRow({ broad: shownBroad.value, noScope: !holdsCallScope(caps) })
 })
 // The switch shows what the write asked for until the session event lands, and reverts on a failure.
 const pendingAuthorizations = ref()
@@ -172,7 +174,7 @@ const setAuthorizations = async (on) => {
 	isSavingAuthorizations.value = true
 	pendingAuthorizations.value = on
 	try {
-		onDappSessionUpdated(await dappSessionService.setAuthorizationsWithoutAsking(session.value.id, on))
+		onDappSessionUpdated(await dappSessionService.setAuthorizationsWithoutAsking(session.value.id, on, shownBroad.value))
 	} catch {
 		openToast({ kind: "error", label: "Couldn't save this setting" })
 	} finally {
