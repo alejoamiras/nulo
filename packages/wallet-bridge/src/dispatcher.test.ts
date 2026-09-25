@@ -1834,6 +1834,33 @@ describe("dataFieldsCovered", () => {
 	})
 })
 
+describe("dispatcher — the data answer comes from the stored grant", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const answerOf = async (session: IDappSessionRef, requested: Record<string, unknown>, granted: unknown[]) => {
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({ granted }) as CapabilityResult)
+		const result = (await dispatcher.dispatch("requestCapabilities", [{ capabilities: [requested] }], ctx)) as {
+			granted: Array<Record<string, unknown>>
+		}
+		return { answer: result.granted.find((c) => c.type === "data"), stored: await writer.getDappSession("test-session-id") }
+	}
+
+	test("a field the person switched off is left out of the answer", async () => {
+		const { answer } = await answerOf(makeSession(), { type: "data", addressBook: true, privateEvents: { contracts: [A] } }, [
+			{ type: "data", privateEvents: { contracts: [A] } },
+		])
+		expect(answer).toEqual({ type: "data", addressBook: false, privateEvents: { contracts: [A] } })
+	})
+
+	test("after a declined widening the answer is the retained grant", async () => {
+		const held: Capability = { type: "data", addressBook: true, privateEvents: { contracts: [A] } }
+		const session = makeSession({ capabilityGrants: [{ capability: held, grantedAt: 1 }] })
+		const { answer, stored } = await answerOf(session, { type: "data", addressBook: true, privateEvents: { contracts: "*" } }, [])
+		expect(stored.capabilityGrants?.map((g) => g.capability)).toEqual([held])
+		expect(answer).toEqual(held)
+	})
+})
+
 describe("dispatcher — contracts field-diff re-consent", () => {
 	const grant = (
 		contracts: string[],
