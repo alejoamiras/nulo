@@ -221,10 +221,14 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   - Two tooltips open at once (one hovered, one focused) both close, since `stopPropagation`
     does not stop listeners on the same target.
 - **Pressing a control inside the trigger closes it** (U-8, sign-off pending): a
-  `pointerdown`, or an Enter or Space `keydown`, whose target sits in a `button`, `a` or
-  `[role="button"]` inside the trigger closes the tooltip, cancels its timers and sets a
+  `pointerdown`, an Enter or Space `keydown`, or a `click`, whose target sits in a `button`, `a`
+  or `[role="button"]` inside the trigger closes the tooltip, cancels its timers and sets a
   dismissed latch. Neither key is `preventDefault`ed: cancelling a Space `keydown` on a native
   button suppresses its click, and `auth-reset` acts only in `@click` (`auth.vue:308`).
+  - All three listen in the capture phase, so a control that stops its own event
+    (`connected-apps/index.vue:162`, `@keydown.enter.stop`) still closes the tooltip before the
+    popup it opens; the `click` covers an activation with no `pointerdown` or key, such as a
+    screen reader's.
   - The latch blocks every open path (hover, touch, focus) and clears when a mouse or pen
     arrives (`pointerenter` with `pointerType !== "touch"`), on `mouseleave` and on `focusout`,
     never on `touchend`, which today shares the leave handler (`Tooltip.vue:155`) and which a
