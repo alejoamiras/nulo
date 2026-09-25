@@ -1917,8 +1917,9 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    when that send has a journal entry the wallet confirms (a failed, terminal transfer in the
    submitted scope); every other error keeps no action. The id travels beside the error, not in
    it: see § Architecture, A failed send's journal id.
-4. **Width in dApp windows (11a).** In the execute, discover, permission and verify windows the
-   snack spans the 360px content column less 16px a side (328px), centred on it. The popup and the
+4. **Width in dApp windows (11a).** In the execute, discover, permission, verify and passkey
+   windows the snack spans the 360px content column less 16px a side (328px), centred on it. The
+   json and logger windows fill their window, so they keep the popup's rule. The popup and the
    onboarding tab are unchanged.
 5. **Over a sheet (12a).** While a sheet that covers the nav is open, the snack sits 12px from the
    bottom, or 12px above the sheet's own footer row if it has one; when the sheet closes it goes

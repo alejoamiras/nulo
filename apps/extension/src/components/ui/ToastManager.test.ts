@@ -12,12 +12,13 @@ import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 const routeMeta: { showBottomNav?: boolean } = {}
+let routeName: string | undefined
 
 vi.mock("vue-router", async () => {
 	const actual = await vi.importActual<typeof import("vue-router")>("vue-router")
 	return {
 		...actual,
-		useRoute: () => ({ meta: routeMeta }),
+		useRoute: () => ({ meta: routeMeta, name: routeName }),
 	}
 })
 
@@ -35,6 +36,7 @@ describe("ui/ToastManager (wrapper → @nulo/design ToastManagerBase)", () => {
 		document.body.appendChild(toastRoot)
 		useToast().closeToast()
 		routeMeta.showBottomNav = undefined
+		routeName = undefined
 	})
 
 	afterEach(() => {
@@ -66,6 +68,22 @@ describe("ui/ToastManager (wrapper → @nulo/design ToastManagerBase)", () => {
 		mount(ToastManager, { attachTo: document.body })
 		await flushPromises()
 		expect((toastRoot.lastElementChild as HTMLElement).style.bottom).toBe("12px")
+	})
+
+	test.each([
+		["windows-execute", true],
+		["windows-discover", true],
+		["windows-capabilities", true],
+		["windows-verify", true],
+		["windows-passkey", true],
+		["windows-json", false],
+		["windows-logger", false],
+		["popup-general", false],
+		["onboarding-welcome", false],
+	])("on %s the card spans the content column: %s", (name, inColumn) => {
+		routeName = name
+		mount(ToastManager, { attachTo: document.body })
+		expect(/in_column/.test((toastRoot.firstElementChild as HTMLElement).className)).toBe(inColumn)
 	})
 
 	test("on a route without the nav, a footer on screen lifts the snack 12px above its top edge", async () => {

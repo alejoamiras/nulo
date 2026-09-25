@@ -167,6 +167,44 @@ got 2 `pointerover`, 3 `pointerenter`, 2 `mouseover` and 3 `mouseenter` events, 
 `pointermove` or `mousemove`. So the old `mouseenter` hold and the `:hover` re-read each held a
 snack nobody reached; now it lived 6159 ms.
 
+## P6.4 · The column in dApp windows (11a)
+
+Built:
+
+- `packages/design/src/ui/ToastManagerBase.vue`: an `inColumn` prop. With it the card's max width
+  is `calc(var(--base-width) - 32px)`, 328px, instead of 368px. The card was already centred in
+  the viewport, which is where the column sits (`body { width: var(--base-width); margin: 0 auto }`
+  in `popup/index.scss`).
+- `components/ui/ToastManager.vue` passes `inColumn` on every `windows-*` route except
+  `windows-json` and `windows-logger`, the route-name test `utils/legal-sheet.ts` and
+  `composables/useArrivals.ts` already use for the windows.
+
+| Window | Route | 328px |
+|---|---|---|
+| Execute (a send or call to approve) | `windows-execute` | yes |
+| Connect | `windows-discover` | yes |
+| Permissions | `windows-capabilities` | yes |
+| Emoji check | `windows-verify` | yes |
+| Passkey ceremony | `windows-passkey` | yes; no snack opens there today |
+| JSON viewer | `windows-json` | no: its body is the full window (`body { width: 100% }`) |
+| Log viewer | `windows-logger` | no: the same |
+
+Decision: the package reads the column from the `--base-width` token its own `base.css` defines,
+so the host passes a flag rather than a width.
+
+Held: the Chrome side panel (the `sidePanel` setting) renders the popup's routes in a panel that
+can be wider than 360px, so a card there can still reach 368px, wider than the column. 11a names
+the dApp windows, so the panel keeps the popup's rule.
+
+Tests:
+
+- `packages/design/src/ui/ToastManagerBase.test.ts`: `inColumn` sets the column class, and it is off
+  by default.
+- `components/ui/ToastManager.test.ts`: the flag is on for each of the five windows and off on json,
+  logger, a popup route and an onboarding route.
+- `tests/e2e/network/snack-placement.test.ts`: in the execute window the card is 328px (±0.5) and
+  centred on the body's column (±0.5).
+
 ## P6.5 · Over a sheet (12a)
 
 How the host knows a sheet covers the nav: every popup-app sheet renders through
