@@ -150,6 +150,21 @@ describe("AccountSelectRow", () => {
 		expect(w.emitted("toggle")).toBeUndefined()
 	})
 
+	test("a selected, disabled row: its link aria-disabled and out of the Tab order, and pressing it opens no field", async () => {
+		const enabled = rename(factory({ selected: true }))
+		expect(enabled.attributes("aria-disabled")).toBeUndefined()
+		expect(enabled.attributes("tabindex")).toBeUndefined()
+		const w = factory({ selected: true, disabled: true })
+		expect(rename(w).attributes("aria-disabled")).toBe("true")
+		expect(rename(w).attributes("tabindex")).toBe("-1")
+		// A native button, so Enter on it is this click.
+		expect((rename(w).element as HTMLButtonElement).type).toBe("button")
+		await rename(w).trigger("click")
+		await flushPromises()
+		expect(field(w).exists()).toBe(false)
+		expect(rename(w).exists()).toBe(true)
+	})
+
 	test("a locked row: granted and selected, its target out of the Tab order and aria-disabled, no link, SHARED", async () => {
 		const w = factory({ selected: true, locked: true })
 		expect(root(w).attributes("data-granted")).toBe("true")

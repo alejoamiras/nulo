@@ -39,6 +39,7 @@ const toggle = () => {
 }
 
 const startRename = async () => {
+	if (props.disabled) return
 	renaming.value = true
 	await nextTick()
 	aliasInput.value?.focus()
@@ -79,6 +80,7 @@ const startRename = async () => {
 						v-if="canRename && !renaming"
 						term="name-for-this-app"
 						action
+						:disabled="disabled"
 						testid="cap-account-rename-btn"
 						@click.stop="startRename"
 					>Rename for this app</DottedTerm>
