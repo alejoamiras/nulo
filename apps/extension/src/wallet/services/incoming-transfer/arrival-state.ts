@@ -53,7 +53,7 @@ export function arrivalKey(profileId: string, networkId: string, accountAddress:
 	return `${profileId}|${networkId}|${accountAddress}`
 }
 
-/** A receipt of nothing, like dust, is an ordinary row: only an amount above zero arrives. */
+/** A receipt of nothing is an ordinary row: only an amount above zero arrives. */
 function isPositiveAmount(amountRaw: string): boolean {
 	try {
 		return BigInt(amountRaw) > 0n
