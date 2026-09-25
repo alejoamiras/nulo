@@ -124,6 +124,9 @@ export interface CapabilityDecision {
 	 *  accounts to a grant the popup saw; if that grant was revoked meanwhile, the writer throws
 	 *  `CapabilityNotGrantedError` for the type and writes nothing. */
 	requiresGrant?: string[]
+	/** The per-app authorizations consent: an object sets it, `null` deletes it, absent leaves
+	 *  it. */
+	authorizations?: { broad: boolean } | null
 }
 
 export interface IDappSessionWriter {
