@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
-import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
+import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
 import {
 	assertPgOk,
 	callExpectingNoPopup,
@@ -105,6 +105,7 @@ test.skipIf(!hasConfig)(
 		await assertPgOk(ctx.playgroundPage, inner, "any-on:innerHash")
 
 		const settings = await openPopup(ctx)
+		await waitForHash(settings, "#/popup/general")
 		await setConnectedAppAuthorizations(settings, new URL(PLAYGROUND_TEST_URL).host, false)
 		await settings.close()
 		const asked = await signThroughWindow(ctx, "pg-btn-createAuthWit-callIntent", (popup) => approveExecute(popup))

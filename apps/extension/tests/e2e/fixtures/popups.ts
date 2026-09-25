@@ -10,7 +10,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
 import { waitForTarget } from "./browser"
-import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
+import { clickByTestId, clickSelector, patchPagePolling, waitForHash, type ExtensionContext } from "./extension"
 import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
 export type PopupKind = "discover" | "verify" | "capabilities" | "execute" | "json"
@@ -264,12 +264,16 @@ export async function readCapabilitySwitch(page: Page, rowKey: string): Promise<
 
 const APP_SWITCH = '[data-testid="connected-app-authorizations-toggle"]'
 
-/** Open Settings → Connected apps → the app served from `host` on an extension page. */
+/** Open Settings → Connected apps → the app served from `host`. A miss names the hosts listed. */
 async function openConnectedApp(page: Page, host: string): Promise<void> {
 	await page.evaluate(() => {
 		window.location.hash = "#/popup/settings/connected-apps"
 	})
-	await clickSelector(page, `[data-testid="connected-app-row"][data-app-host="${host}"]`, 15_000)
+	await waitForHash(page, "#/popup/settings/connected-apps")
+	await clickSelector(page, `[data-testid="connected-app-row"][data-app-host="${host}"]`, 15_000).catch(async (err) => {
+		const hosts = await page.$$eval('[data-testid="connected-app-row"]', (rows) => rows.map((r) => r.getAttribute("data-app-host")))
+		throw new Error(`no connected-app row for ${host}; rows: ${JSON.stringify(hosts)}`, { cause: err })
+	})
 	await page.waitForSelector(APP_SWITCH, { visible: true, timeout: 15_000 })
 }
 
@@ -284,6 +288,8 @@ const switchIs = (page: Page, on: boolean) =>
 /**
  * Set a connected app's authorizations switch in Settings, then reopen the app's page, which reads
  * the session again, so the state proved is the stored one and not the switch's pending value.
+ * `page` must have finished its start-up navigation (`waitForHash(page, "#/popup/general")` after
+ * `openPopup`), or that navigation can land after this one and take the page back home.
  */
 export async function setConnectedAppAuthorizations(page: Page, host: string, on: boolean): Promise<void> {
 	await openConnectedApp(page, host)
