@@ -77,4 +77,22 @@ describe("untrack", () => {
 			`${P}/p/plan.md leaves the tree without a row`,
 		])
 	})
+
+	test("a path whose bytes in the base being untracked differ from its row is refused, before untracking and in verify", () => {
+		const { repo, base } = planRepo({ [`${P}/a/audit-x.md`]: "x1\n" }, { [`${P}/.gitignore`]: GITIGNORE })
+		record({ cwd: repo, bases: [base] })
+		commitAll(repo, "record")
+		const [row] = readManifest(repo)
+		git(repo, "switch", "-q", "dev")
+		writeFiles(repo, { [`${P}/a/audit-x.md`]: "x2 edited upstream\n" })
+		git(repo, "update-ref", "refs/remotes/origin/dev", commitAll(repo, "upstream edit"))
+		git(repo, "switch", "-q", "work")
+		git(repo, "rebase", "-q", "dev")
+		const drifted = git(repo, "rev-parse", `HEAD:${P}/a/audit-x.md`)
+		const drift = `${P}/a/audit-x.md: the base being untracked holds ${drifted}, not the recorded ${row.blob}`
+		expect(() => apply({ cwd: repo })).toThrow(drift)
+		git(repo, "rm", "-q", "--cached", `${P}/a/audit-x.md`)
+		commitAll(repo, "untrack by hand")
+		expect(verify({ cwd: repo })).toEqual([drift])
+	})
 })

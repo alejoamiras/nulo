@@ -132,13 +132,30 @@ export function record(opts: Options): { added: Row[]; bases: string[] } {
 	}
 }
 
-/** `git rm --cached` for every tracked transcript, all of them recorded first. */
+/**
+ * Paths whose bytes in the tree being untracked (`rev`, or the index for "") are not their row's blob:
+ * an upstream edit after recording would otherwise leave the manifest pinning text that was never removed.
+ */
+function driftProblems(cwd: string, rev: string, paths: readonly string[], known: ReadonlyMap<string, Row>): string[] {
+	const ids = blobIds(
+		cwd,
+		paths.map((p) => `${rev}:${p}`),
+	)
+	return paths.flatMap((p, i) => {
+		const recorded = known.get(p)?.blob
+		return ids[i] === recorded ? [] : [`${p}: the base being untracked holds ${ids[i] ?? "nothing"}, not the recorded ${recorded}`]
+	})
+}
+
+/** `git rm --cached` for every tracked transcript, all of them recorded first and unchanged since. */
 export function apply(opts: Options): string[] {
 	const { cwd } = opts
 	const known = rowsByPath(readManifest(cwd))
 	const remove = transcripts(cwd)
 	const unrecorded = remove.filter((p) => !known.has(p))
 	if (unrecorded.length > 0) throw new Error(`run --record first; no row for:\n  ${unrecorded.join("\n  ")}`)
+	const drift = driftProblems(cwd, "", remove, known)
+	if (drift.length > 0) throw new Error(`re-record after checking these:\n  ${drift.join("\n  ")}`)
 	for (let i = 0; i < remove.length; i += 200) git(cwd, "rm", "--cached", "-q", "--", ...remove.slice(i, i + 200))
 	const left = lines0(git(cwd, "ls-files", "-ci", "--exclude-standard", "-z", "--", PLANS))
 	if (left.length > 0) throw new Error(`still tracked although ignored:\n  ${left.join("\n  ")}`)
@@ -168,7 +185,7 @@ function baseProblems(cwd: string, rows: readonly Row[]): string[] {
 	return problems
 }
 
-/** Paths the branch deletes, renames away from a transcript name, or replaces by promotion. */
+/** Paths the branch deletes, renames away from a transcript name or a deleted ignore file, or replaces by promotion. */
 export function removedOnBranch(cwd: string, promotions: readonly Promotion[] = PROMOTIONS): string[] {
 	const fields = lines0(git(cwd, "diff", "--name-status", "-M", "-z", `${DEV_REF}...HEAD`, "--", PLANS))
 	const removed: string[] = []
@@ -176,7 +193,7 @@ export function removedOnBranch(cwd: string, promotions: readonly Promotion[] = 
 		const status = fields[i]
 		const renamed = status.startsWith("R") || status.startsWith("C")
 		const source = fields[i + 1]
-		if (status === "D" || (status.startsWith("R") && lib.isCanonical(source))) removed.push(source)
+		if (status === "D" || (status.startsWith("R") && (lib.isCanonical(source) || DELETED.includes(source)))) removed.push(source)
 		i += renamed ? 3 : 2
 	}
 	const base = mergeBase(cwd)
@@ -195,13 +212,18 @@ export function verify(opts: Options): string[] {
 	const { cwd } = opts
 	const rows = readManifest(cwd)
 	const known = rowsByPath(rows)
+	const removed = removedOnBranch(cwd, opts.promotions)
 	return [
 		...shapeProblems(rows),
 		...unverifiedRows(cwd, rows).map((r) => `${r.path}: blob ${r.blob} is not at ${r.sha}`),
 		...baseProblems(cwd, rows),
-		...removedOnBranch(cwd, opts.promotions)
-			.filter((p) => !known.has(p))
-			.map((p) => `${p} leaves the tree without a row`),
+		...removed.filter((p) => !known.has(p)).map((p) => `${p} leaves the tree without a row`),
+		...driftProblems(
+			cwd,
+			mergeBase(cwd),
+			removed.filter((p) => known.has(p)),
+			known,
+		),
 	]
 }
 
