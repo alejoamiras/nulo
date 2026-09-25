@@ -23,6 +23,11 @@ Built:
   number and reads no store, route or page.
 - New testids for the e2e: `send-footer` on Send's footer, `dapp-approval-footer` on the shared
   approval footer. No existing testid moved.
+- `popup/app.vue`: the frame that clips the popup (`.wrapper`) is `overflow: clip` with zero
+  minimum sizes, where it was `overflow: hidden`. It clips the same and draws nothing new, but it
+  is no scroll container, so focus and `scrollIntoView` can no longer shift the whole popup by
+  content a fraction of a pixel past its edge. Found by the gate: rerun alone at retry 0, the
+  lengthened Receive case saw the snack move 1.2px in about one full-file run in four.
 
 The surfaces (every page or window without the nav that has a bottom action row):
 
@@ -63,9 +68,10 @@ Decisions:
    result does not move with the scroll. The scroll listener stays for rows that do move with it
    (above a container's end). A row off screen at both places moves nothing. A sticky row keeps
    its place while the container it sticks to scrolls (Send's footer), so that container adds
-   nothing; nor does `overflow: hidden`, which no one can scroll (a stacked card's 15px shift
-   overflows the app's hidden wrapper). As first built only the page's scroll counted, so a row
-   at the end of a sheet's scrolling card was missed (codex round 1).
+   nothing; nor does `overflow: hidden`, which no user can scroll directly, or the app's frame,
+   which clips and cannot scroll at all (a stacked card's 15px shift overflows it). As first built
+   only the page's scroll counted, so a row at the end of a sheet's scrolling card was missed
+   (codex round 1).
 3. **Never below the base.** On a nav page a footer low enough to sit under the nav's inset changes
    nothing. No nav page registers one today.
 4. **The inset moves at once**, as it did on a route change. There is no transition on `bottom`.
@@ -385,6 +391,11 @@ Built:
 - `popup/components/popups/RevokeAuthwitsPopup.vue`: the expand glyph, a bare `<Icon @click>` no
   keyboard could reach, is a `RowAction` (24×24, named "View authwits content",
   `revoke-authwits-view-content`, new) inside the same tooltip; its old hover fill is RowAction's.
+- The Logs handler joins a press made while its window is still being created. It learned the
+  window's id only once `windows.create` resolved, so a second press in that gap (a double-click,
+  or Enter then Space) opened a second log window. Found by the flake bar: 4 of 17 Firefox runs of
+  the row's e2e at retry 0 opened two windows. The race is older than the arc (the old div row had
+  it on a double-click) and is fixed because the arc's row and its e2e depend on it.
 
 Decisions:
 
@@ -423,9 +434,13 @@ Tests:
   content, and nothing revokes. Adding `.prevent`, dropping the stop, preventing Space and opening
   again on keydown each fail it. As first built the test dispatched Enter and then clicked on its
   own, so a cancelled Enter would have passed (codex round 1).
-- `tests/e2e/rows.test.ts`, smoke: with developer mode on, Tab reaches `settings-logs-open` and the
-  next Tab leaves the row; the row draws `solid 2px -2px`; Enter opens the log window; Space, with
-  it open, runs the same handler (a second click on the row) and opens no second window.
+- `tests/e2e/rows.test.ts`, smoke: with developer mode set on, Tab reaches `settings-logs-open`,
+  the next Tab leaves the row and Shift+Tab comes back; the row draws `solid 2px -2px`; Enter opens
+  the log window, which shows its page; Space, with it open and the popup focused again, runs the
+  same handler (a second click on the row) and opens no second window.
+- `popup/pages/settings/advanced/index.test.ts`, new: two presses while `windows.create` is
+  pending create one window, and a press after it resolves focuses that window. The handler without
+  the join fails it.
 
 ## Codex round 1 · changes-requested (high)
 
@@ -448,3 +463,35 @@ names.
 | 6 | minor | The Revoke test dispatched Enter and then clicked on its own, so `.prevent` would have passed, and Space was untested (`RevokeAuthwitsPopup.test.ts`) | Accepted. Enter and Space are cancelable events on the focused button, and the click follows only when none was cancelled; one content opening and no revocation for each. No real-browser check, the coordinator's call | `6899451d` |
 | 7 | minor | The plan's hold bullet still said `mouseenter` and `:hover`, its wrapper bullet the route-only inset, and two test helpers carried comments that restated their names | Accepted. Both bullets describe P6, and both comments are gone | `9ed97ac8` |
 | 8 | the coordinator's | R-3's "36px to 52px" did not say that the code's 60px includes the row's 8px side padding | Accepted. R-3 says it | `9ed97ac8` |
+
+## Codex round 2 · changes-requested (moderate)
+
+GPT-6 Astra at high effort, the same session resumed, on `7981f80f..2d8ab638`: round 1's fixes and
+10b. It closed round 1's findings 1 to 7 and R-3's clarification, found no production-path defect
+in 10b's provenance, scope checks or failure handling, and raised two minors. The coordinator
+accepted both. Each fix is its own commit, made after the gate's own fixes.
+
+> VERDICT: changes-requested — confidence: moderate
+
+| # | Severity | Finding | Decision | Commit |
+|---|---|---|---|---|
+| 1 | minor | The Details e2e asserted the snack gone once the journal page was ready, but that page can load inside the snack's 150ms leave (`tests/e2e/network/snack-placement.test.ts`) | Accepted. The case waits for `snackbar` to detach, then asserts it is gone | `0354327a` |
+| 2 | minor | Three comments: `SCROLLABLE`'s said `hidden` clips without scrolling, though script can scroll it (`composables/snackInset.ts`); `shape`'s said it copies every own field, though its spread leaves out the non-enumerable `stack` (`packages/extension-messaging/src/background/client.test.ts`); `recorded`'s restated its one-line constructor call (`wallet/services/execution/service.composition.test.ts`) | Accepted. The first says no user can scroll `hidden` directly, the second that `stack` is left out on purpose, and the third is gone | `c1dc6147` |
+
+The coordinator added one more: the docblock on `openLogs` narrated where the logs window used to
+open from. It is gone (`d62e34fa`).
+
+## Codex round 3 · approve (moderate)
+
+GPT-6 Astra at high effort, the same session resumed, on `2d8ab638..d62e34fa` (the gate's fixes
+and round 2's) and on the whole owner-answer range `30730df3..d62e34fa`. It ran read-only probes
+of the joined open, recovery after a failed create, recovery from a closed window's lookup and the
+bounded focus retries; it did not rerun the browser e2e.
+
+> Both round-2 findings are closed. **No new material findings** in round 3 or the full
+> `30730df3..d62e34fa` range.
+>
+> The visible changes correct frame shifting, unwanted widening, and duplicate Logs windows; I found
+> no unapproved UI state.
+
+> VERDICT: approve — confidence: moderate

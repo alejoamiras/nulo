@@ -1995,6 +1995,12 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    button's 24px box (**sign-off pending**, R-3). The sheet revokes on any Enter that reaches the
    document, so Enter on the new button stops there and only opens the content.
 
+The gate found two product faults, both fixed and logged in `lessons/phase-6.md`. The popup's
+frame is `overflow: clip` with zero minimum sizes, not `overflow: hidden`, so focus and
+`scrollIntoView` can no longer shift the popup by content a fraction of a pixel past its edge; it
+clips the same and no drawn state changes. And a Logs press made while its window is still being
+created joins that open instead of opening a second window, a race older than the arc.
+
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`,
 `bun run build`; the full smoke suite on Chrome and on Firefox (the gate's flags); every changed or
 added network e2e file at retry 0, Chrome prover on and Firefox `NULO_E2E_PROVERLESS=1`
