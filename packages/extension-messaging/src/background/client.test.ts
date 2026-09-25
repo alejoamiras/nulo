@@ -367,7 +367,7 @@ describe("a failure's journal record", () => {
 		return promise.catch((error: unknown) => error)
 	}
 
-	/** Class, message and every own field a reconstructed error carries. */
+	/** Class, message and own enumerable fields; `stack` is left out, as each rebuild has its own. */
 	const shape = (error: unknown) => ({ proto: Object.getPrototypeOf(error), ...(error as object), message: (error as Error).message })
 
 	test.each([

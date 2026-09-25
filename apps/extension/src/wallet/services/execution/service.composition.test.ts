@@ -497,7 +497,6 @@ function parkNextNetworkLookup(h: Harness) {
 	return { isEntered: () => entered, release: () => release() }
 }
 
-/** A transfer failure its record holds: the original error, with the record named beside it. */
 const recorded = (h: Harness, error: unknown) => new JournaledRejection(error, h.getJournalId())
 
 async function expectEndedUnder(h: Harness, journalId: string, profileId: string) {
