@@ -196,3 +196,58 @@ Values are Chrome's. Firefox's geometry is identical unless a difference is note
   - the trust note;
   - Deny and Allow.
 - The Firefox window is 400 × 767, and its content sits 1px lower.
+
+## Arc fix loop
+
+### Round 1 · codex · changes-requested (high)
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | major | The press listeners ran in the bubble phase. `connected-apps/index.vue:162` stops its Enter keydown, so its tooltip stayed open under the confirmation and took the first Escape. A click with no pointerdown or key (a screen reader's activation) never closed a tooltip | `c604153b`: `pointerdown`, `keydown` and a new `click` listen in the capture phase, and none prevents its default |
+| 2 | major | Placement ran only on open, so an open bubble kept its x when the window narrowed (360 → 300px: a 272px bubble at x 80 ended at 352) | `c0916a09`: while open, the bubble is placed again on every window `resize`; the listener goes on close and on unmount |
+| 3 | minor | `settings/tokens/index.vue:94` put its `v-if` on the icon inside the Tooltip, so removing the icon left the Tooltip mounted, with any open bubble and its Escape listener | `e5fcfb27`: the condition moved onto the `<Tooltip>` |
+| 4 | minor | The new Glossary drew the dark separator in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)`. This log wrongly called that pre-existing | `cd1f6cf3`: a `:global([theme="light"]) .entry` override, the page-local pattern `ConfirmPopup.vue:207` uses, with no new token. The log line and the plan are corrected |
+| 5 | minor | The e2e spec's header repeated its test names | `8263bcb9`: one line, the reason (jsdom has no layout) |
+
+Nothing was rejected.
+
+- Finding 3's sweep: a scan of every `<Tooltip>`'s default slot, at any depth, for `v-if`,
+  `v-else-if`, `v-else` or `v-show`.
+  - `settings/tokens/index.vue` (the delete icon): changed.
+  - `settings/advanced/account-state/senders/index.vue:111` (copy, then copied): a `v-if` and a
+    `v-else-if` on complementary conditions swap two icons. The trigger is never empty, so it was
+    left as it is.
+  - No other trigger is conditional. Thirteen other Tooltips carry their own condition, which is
+    the right shape.
+- Failing first:
+  - For 1, the three new cases were red on the previous `Tooltip.vue`: a click alone, and
+    Enter or a click on a control that stops propagation.
+  - For 2, both new cases were red: the re-clamp, and the listener removed on close and on
+    unmount.
+  - For 3, the new page test was red on the previous page: the bubble was still in the document
+    after the icon went.
+- Trap in a test: Vue skips a listener attached no earlier than the event's first Vue handler
+  ran (`runtime-dom`'s `_vts` check). Frozen fake time makes the two equal, so the second
+  listener on the same event never runs. The stop-propagation test advances time by 1ms before
+  it dispatches.
+- Light separator, checked in the browser: a throwaway probe (deleted) read the first entry's
+  `border-bottom-color` on the smoke build. Chrome and Firefox both gave `rgba(74, 70, 63, 0.2)`
+  under `theme="dark"` and `rgba(124, 116, 104, 0.2)` under `theme="light"`.
+- Captures: no fix changes what a capture shows. The captures press nothing, resize nothing
+  while open, do not show the tokens page, and show the Glossary in dark only.
+
+Gate:
+
+- `bun run lint`: exit 0 (29 warnings, 3 infos, the same as before).
+- `bun run typecheck:all`: exit 0 (15 workspaces).
+- `bun run test:all`: exit 0.
+  - extension: 572 files passed, 3 skipped; 7209 tests passed, 4 skipped, 7 todo.
+  - design: 40 files, 375 tests.
+  - Every other workspace is unchanged.
+- Smoke builds: `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet
+  VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension
+  build:chrome` and `build:firefox`, both exit 0.
+- Flake bar rerun (`tooltips-glossary.test.ts`, retry 0, three runs in a row per browser):
+  - Chrome: runs 1, 2 and 3 exit 0, 3/3 tests each.
+  - Firefox: runs 1, 2 and 3 exit 0, 3/3 tests each.
+- `bun run e2e:reap` after each chain: nothing to reap.
