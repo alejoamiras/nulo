@@ -5,12 +5,13 @@ import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { seedsForChain } from "@/wallet/services/token/default-tokens"
 import { waitForTarget } from "./fixtures/browser"
-import { type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
+import { clickByTestId, type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	addContact,
 	captureSoleProfileId,
 	clickNavTab,
 	getAccountAddress,
+	navigateByHash,
 	navigateToSettings,
 	openNetworkDetail,
 	seedUsdQuoteAndReload,
@@ -31,6 +32,7 @@ type Probe = {
 	__spacePrevented?: boolean | null
 	__clicks?: string[]
 	__rowClicks?: number
+	__logsClicks?: number
 	__linkClick?: { modified: boolean; href: string | null; prevented: boolean } | null
 }
 
@@ -376,6 +378,47 @@ test("a click-mode Settings row opens on Enter and on Space; an action inside a 
 		await page.waitForFunction(() => !document.querySelector('[data-testid="tooltip-bubble"]'), { timeout: 2_000, polling: 50 })
 		expect(await closeTopPopup(page, "endpoint-rpc-input")).toBe(true)
 		await waitForFocus(page, "endpoint-edit-btn")
+	}
+
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 90_000)
+
+test("Settings → Advanced's Logs row: one Tab stop with the ring; Enter opens the log window and Space runs the same handler", async ({
+	registeredExtension,
+}) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+	await navigateByHash(page, "#/popup/settings/advanced")
+	await page.waitForSelector(sel("settings-toggle-developerMode"), { visible: true, timeout: 15_000 })
+	await clickByTestId(page, "settings-toggle-developerMode")
+	await page.waitForSelector(sel("settings-logs-row"), { visible: true, timeout: 10_000 })
+	await page.evaluate(() => {
+		const w = window as unknown as Probe
+		w.__logsClicks = 0
+		document.querySelector('[data-testid="settings-logs-row"]')?.addEventListener("click", () => {
+			w.__logsClicks = (w.__logsClicks ?? 0) + 1
+		})
+	})
+	await page.bringToFront()
+
+	await tabTo(page, "settings-logs-open", 20)
+	const ring = await page.$eval(sel("settings-logs-row"), (el) => {
+		const style = getComputedStyle(el)
+		return `${style.outlineStyle} ${style.outlineWidth} ${style.outlineOffset}`
+	})
+	expect(ring).toBe("solid 2px -2px")
+
+	const before = new Set(registeredExtension.browser.targets())
+	await page.keyboard.press("Enter")
+	const logs = await waitForTarget(registeredExtension.browser, (t) => t.type() === "page" && !before.has(t), 10_000)
+	try {
+		// The window is open, so Space brings it forward instead of opening a second one.
+		await page.keyboard.press(SPACE)
+		await page.waitForFunction(() => (window as unknown as Probe).__logsClicks === 2, { timeout: 5_000, polling: 50 })
+		expect(registeredExtension.browser.targets().filter((t) => t.type() === "page" && !before.has(t))).toHaveLength(1)
+		expect(await tabAround(page, 1)).not.toContain("settings-logs-open")
+	} finally {
+		await (await logs.asPage()).close().catch(() => undefined)
 	}
 
 	expect(registeredExtension.pageErrors).toEqual([])
