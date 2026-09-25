@@ -7,6 +7,7 @@ type FakeTrap = {
 	active: boolean
 	activate: () => void
 	deactivate: (options?: Options) => void
+	containers: Element | Element[]
 	options: Options
 	/** What was focused when the trap was created — what a real trap would record as the return target. */
 	focusedAtCreate: Element | null
@@ -14,9 +15,10 @@ type FakeTrap = {
 
 const traps: FakeTrap[] = []
 vi.mock("focus-trap", () => ({
-	createFocusTrap: vi.fn((_el: Element, options: Options) => {
+	createFocusTrap: vi.fn((containers: Element | Element[], options: Options) => {
 		const trap: FakeTrap = {
 			active: false,
+			containers,
 			options,
 			focusedAtCreate: document.activeElement,
 			activate: vi.fn(() => {
@@ -73,14 +75,24 @@ describe("Popup", () => {
 		document.body.innerHTML = ""
 	})
 
-	test("shown: one trap is created after the tick and activated on the wrapper", async () => {
+	test("shown: one trap is created after the tick and activated on the wrapper, its one container without a `#toast` anchor", async () => {
 		const w = mountPopup()
 		await w.setProps({ show: true })
 		expect(traps).toHaveLength(0)
 		await settle()
 		expect(traps).toHaveLength(1)
 		expect(traps[0]?.active).toBe(true)
-		expect(traps[0]?.options.fallbackFocus).toBe(document.querySelector('[data-testid="inside"]')?.parentElement)
+		const wrapper = document.querySelector('[data-testid="inside"]')?.parentElement
+		expect(traps[0]?.containers).toBe(wrapper)
+		expect(traps[0]?.options.fallbackFocus).toBe(wrapper)
+		w.unmount()
+	})
+
+	test("with a `#toast` anchor the trap takes it as its second container, after the wrapper", async () => {
+		document.body.insertAdjacentHTML("beforeend", '<div id="toast"></div>')
+		const w = await openPopup()
+		const wrapper = document.querySelector('[data-testid="inside"]')?.parentElement
+		expect(traps[0]?.containers).toEqual([wrapper, document.getElementById("toast")])
 		w.unmount()
 	})
 

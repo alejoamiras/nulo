@@ -92,6 +92,7 @@ const handleManageAccounts = () => {
 										color="tertiary"
 										hoverColor="primary"
 										:class="$style.icon_btn"
+										data-testid="account-item-copy"
 									/>
 
 									<template #content>Copy account address</template>

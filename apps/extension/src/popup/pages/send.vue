@@ -404,6 +404,9 @@ function snapshotTransfer() {
 		feeSettings: feeSettings.value,
 		precomputedEstimateId,
 		contract: activeToken.value.contract,
+		symbol: activeToken.value.symbol,
+		decimals: activeToken.value.decimals,
+		epoch: appStore.scopeEpoch,
 	}
 }
 
@@ -411,6 +414,8 @@ const submitDeps = {
 	executeTransfer: (...args) => executionService.executeTransfer(...args),
 	awaiting: { add: appStore.addAwaitingTransaction, remove: appStore.removeAwaitingTransaction },
 	openToast,
+	isCurrent: (epoch) => appStore.isLogined && appStore.scopeEpoch === epoch,
+	viewTransaction: (hash) => router.push(`/popup/tx/${hash}`),
 	onSettled: () => {
 		submitInFlight = false
 		disconnectExecution()
