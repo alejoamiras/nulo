@@ -1518,7 +1518,7 @@ Re-read the `picks` store for `i6j`, `i6k` first.
 
 Gate: lint, `typecheck:all`, `test:all`, Storybook build (`PermissionRow.stories.ts`) exit 0.
 
-#### P4 · e2e for the consent ☐
+#### P4 · e2e for the consent ✓
 
 1. `apps/playground/src/lib/bundles.ts`: `transaction-listed`, accounts with `canCreateAuthWit`,
    the transaction pattern `{ contract: tokenAddress, function: "transfer_public_to_public" }`
