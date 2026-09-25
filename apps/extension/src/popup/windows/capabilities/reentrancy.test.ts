@@ -76,7 +76,7 @@ const STUBS = {
 		emits: ["reject", "approve"],
 		template: `<div><button data-testid="stub-approve" :disabled="confirmDisabled" @click="$emit('approve')">Approve</button></div>`,
 	},
-	CapabilityCard: { template: "<div />" },
+	PermissionRow: { template: "<div />" },
 	AccountSelectRow: { template: "<div />" },
 	Flex: { template: "<div><slot /></div>" },
 	Text: { template: "<span><slot /></span>" },

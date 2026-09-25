@@ -7,7 +7,8 @@ import DappStatusStrip from "@/components/composite/DappStatusStrip.vue"
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
 import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
-import CapabilityCard from "./CapabilityCard.vue"
+import PermissionRow from "@/components/composite/capabilities/PermissionRow.vue"
+import DottedTerm from "@/components/composite/DottedTerm.vue"
 import AccountSelectRow from "./AccountSelectRow.vue"
 
 /** Utils */
@@ -15,14 +16,16 @@ import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { requireNetwork } from "@/utils/core"
-import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type WindowRow } from "./build-items"
 import { resolveDappChain } from "./chain-mismatch"
+import { buildDetailsTable } from "./details-table"
+import { accountAddressRow, GROUP_LABELS, GROUP_ORDER, type PermissionRowEntry } from "./permission-rows"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type CapabilityPayload, DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
-import type { Capability } from "@nulo/wallet-bridge"
+import { type Capability, effectiveGrants } from "@nulo/wallet-bridge"
 
 /** Composables */
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
@@ -40,7 +43,7 @@ const appStore = useAppStore()
 const router = useRouter()
 
 const profile = ref<ProfileInfo>()
-const capabilities = ref<UICapabilityItem[]>([])
+const rows = ref<WindowRow[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
@@ -67,18 +70,18 @@ const noAccountsAvailable = ref(false)
 const dappChain = computed(() =>
 	payload.value ? resolveDappChain(payload.value.session.chainId, appStore.networks, appStore.network?.chainId) : undefined,
 )
+const chainName = computed(() => dappChain.value?.name ?? "this network")
 const isSwitching = ref(false)
 // The chain the user switched to from THIS window. The done banner shows only while it is still
 // the active one; a later switch elsewhere brings the invitation back.
 const switchedTo = ref<number>()
 
 const isLoading = ref(false)
-const expandedCards = ref(new Set<number>())
 
-// Flips once init() has the payload AND the cards: before that, Approve would grant an empty set.
+// Flips once init() has the payload AND the rows: before that, Connect would grant an empty set.
 const initComplete = ref(false)
 
-// "Approve as is" is only offered where approving is possible: not before init lands (no chain
+// "Connect as is" is only offered where connecting is possible: not before init lands (no chain
 // known yet), not on a hard error. The footer's own holds (a running switch, a submit) are momentary.
 const chainBannerState = computed(() => {
 	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
@@ -130,11 +133,6 @@ const {
 	reject: () => reject(),
 })
 
-const toggleExpand = (index: number) => {
-	if (expandedCards.value.has(index)) expandedCards.value.delete(index)
-	else expandedCards.value.add(index)
-}
-
 const init = async () => {
 	try {
 		profile.value = await profileService.getActiveProfile()
@@ -158,8 +156,8 @@ const init = async () => {
 			}
 		}
 
-		capabilities.value = buildCapabilityItems(windowParams(payload.value.params))
-		// Only flip after capabilities are committed to state. If init throws
+		rows.value = buildCapabilityItems(windowParams(payload.value.params))
+		// Only flip after the rows are committed to state. If init throws
 		// or the popup is cancelled mid-flight, the approve gate stays closed.
 		initComplete.value = true
 	} catch (error) {
@@ -168,7 +166,7 @@ const init = async () => {
 	}
 }
 
-/** Everything the cards start from is the dispatch snapshot in `params`, never `payload.session`,
+/** Everything the rows start from is the dispatch snapshot in `params`, never `payload.session`,
  *  which is re-read after the snapshot and may already hold a later Settings write. */
 const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowParams => {
 	const existingGrants = params.existingGrants as Capability[]
@@ -179,8 +177,42 @@ const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowPara
 		reRequested: new Set(params.reRequested ?? []),
 		accountsMembershipOnly: params.accountsMembershipOnly === true,
 		consent: params.authorizationsWithoutAsking,
+		networkName: chainName.value,
+		heldAccounts: params.heldAccounts ?? [],
 	}
 }
+
+const groups = computed(() =>
+	GROUP_ORDER.map((group) => ({ group, rows: rows.value.filter((row) => row.isNew && row.entry.group === group) })).filter(
+		(entry) => entry.rows.length > 0,
+	),
+)
+
+/** A new address row names the selection, not the session: it follows each click. */
+const shownEntry = (row: WindowRow): PermissionRowEntry =>
+	row.isNew && row.entry.key === "account-address" ? accountAddressRow(selectedAccounts.value) : row.entry
+
+const rowProps = (row: WindowRow) => {
+	const entry = shownEntry(row)
+	return {
+		icon: entry.icon,
+		title: entry.title,
+		switchLabel: entry.switchLabel,
+		flagged: entry.flagged,
+		chip: entry.chip,
+		badge: row.reRequested ? "previously denied" : undefined,
+		titleTestid: entry.key === "unknown" ? "cap-unrecognized-badge" : undefined,
+	}
+}
+
+/** Names come only from the wallet's list in the snapshot; the request never names a contract. */
+const detailsTable = computed(() => {
+	if (!payload.value) return undefined
+	const params = windowParams(payload.value.params)
+	return buildDetailsTable(effectiveGrants(params.heldGrants, params.delta), payload.value.params.knownContracts ?? [])
+})
+
+const recognizesNoContract = computed(() => detailsTable.value?.known.length === 0 && detailsTable.value.unknown.length > 0)
 
 /** `availableAccounts` and `grantedAccounts` are both wallet-derived (never dApp-supplied), so
  *  there is no path for a malicious dApp to inject a phantom account or a phantom lock here. */
@@ -198,11 +230,6 @@ const initAccountPicker = (params: CapabilityPayload["params"]) => {
 
 const isAccountGranted = (account: UIAccount) => grantedAccountSet.value.has(account.address.toLowerCase())
 
-const toggleCapability = (index: number) => {
-	const cap = capabilities.value[index]
-	if (cap.isNew && cap.switchLabel) cap.selected = !cap.selected
-}
-
 const selectAccount = (account: UIAccount) => {
 	if (isAccountGranted(account)) return
 	if (processingError.value?.type === "warning") clearError()
@@ -216,7 +243,7 @@ const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((a
 const decideGrant = () => {
 	const params = windowParams(payload.value!.params)
 	return buildGrant({
-		items: capabilities.value,
+		rows: rows.value,
 		delta: params.delta,
 		existingGrants: params.existingGrants,
 		heldGrants: params.heldGrants,
@@ -331,7 +358,7 @@ onUnmounted(disposeWindow)
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				:actionLabel="dappChain ? `is requesting permissions on ${dappChain.name}` : 'is requesting permissions'"
+				:actionLabel="`wants to connect on ${chainName}`"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
@@ -352,13 +379,13 @@ onUnmounted(disposeWindow)
 					<template v-else #title>Connecting on {{ dappChain.name }}</template>
 					<template v-if="chainBannerState === 'switched'" #description>Balances and activity now follow {{ dappChain.name }}.</template>
 					<template v-else #description>
-						Your wallet is on {{ appStore.network?.name }}. Approve as is, or switch to see {{ dappChain.name }} balances.
+						Your wallet is on {{ appStore.network?.name }}. Connect as is, or switch to see {{ dappChain.name }} balances.
 					</template>
 				</Banner>
 
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel
-						:label="grantedAccountSet.size > 0 ? 'Add accounts to share' : 'Select accounts to share'"
+						:label="availableAccounts.length === 1 ? 'Account to share' : 'Accounts to share'"
 						:count="availableAccounts.length"
 					/>
 
@@ -377,57 +404,32 @@ onUnmounted(disposeWindow)
 					</ItemsContainer>
 				</Flex>
 
-				<Flex v-if="capabilities.filter(c => c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="New permissions requested" :count="capabilities.filter(c => c.isNew).length" />
+				<Flex v-for="{ group, rows: groupRows } in groups" :key="group" direction="column" gap="10" wide :data-cap-group="group">
+					<SectionLabel :label="GROUP_LABELS[group]" />
 
-					<Flex direction="column" gap="6" wide>
-						<CapabilityCard
-							v-for="(cap, i) in capabilities"
-							v-show="cap.isNew"
-							:key="`new-${i}`"
-							:capability="cap.capability"
-							:panelCapabilities="cap.panelCapabilities"
-							:rowKey="cap.rowKey"
-							:capId="cap.capId"
-							:label="cap.label"
-							:description="currentLine(cap)"
-							:risk="cap.risk"
-							:selected="cap.selected"
-							:granted="false"
-							:expanded="expandedCards.has(i)"
-							:switchLabel="cap.switchLabel"
-							:reRequested="cap.reRequested"
-							:isUnknown="cap.isUnknown"
-							:disabled="isLoading || processingError?.type === 'error'"
-							@toggleExpanded="toggleExpand(i)"
-							@toggleSelected="toggleCapability(i)"
-						/>
-					</Flex>
+					<ItemsContainer>
+						<PermissionRow
+							v-for="row in groupRows"
+							:key="row.entry.key"
+							data-testid="cap-item"
+							:data-cap-id="row.capId"
+							:data-cap-row="row.entry.key"
+							v-bind="rowProps(row)"
+							v-model="row.selected"
+						>
+							<template v-if="currentLine(row).length" #sub>
+								<template v-for="(segment, i) in currentLine(row)" :key="i">
+									<DottedTerm v-if="'term' in segment" term="authorization" testid="cap-auth-term">{{ segment.term }}</DottedTerm>
+									<template v-else>{{ segment.text }}</template>
+								</template>
+							</template>
+						</PermissionRow>
+					</ItemsContainer>
 				</Flex>
 
-				<Flex v-if="capabilities.filter(c => !c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="Already granted" :count="capabilities.filter(c => !c.isNew).length" />
-
-					<Flex direction="column" gap="6" wide>
-						<CapabilityCard
-							v-for="(cap, i) in capabilities"
-							v-show="!cap.isNew"
-							:key="`existing-${i}`"
-							:capability="cap.capability"
-							:panelCapabilities="cap.panelCapabilities"
-							:rowKey="cap.rowKey"
-							:capId="cap.capId"
-							:label="cap.label"
-							:description="currentLine(cap)"
-							:risk="cap.risk"
-							:selected="cap.selected"
-							granted
-							:expanded="expandedCards.has(i)"
-							:isUnknown="cap.isUnknown"
-							@toggleExpanded="toggleExpand(i)"
-						/>
-					</Flex>
-				</Flex>
+				<div v-if="recognizesNoContract" data-testid="cap-unknown-contracts-note" :class="$style.note">
+					Nulo doesn't recognize any of its contracts.
+				</div>
 			</Flex>
 		</Flex>
 
@@ -438,7 +440,7 @@ onUnmounted(disposeWindow)
 			reject-label="Reject"
 			:reject-disabled="isLoading || isSwitching || !requestId"
 			confirm-testid="cap-approve-btn"
-			confirm-label="Approve"
+			confirm-label="Connect"
 			:confirm-loading="isLoading"
 			:confirm-disabled="isLoading || isSwitching || processingError?.type === 'error' || !initComplete"
 			@reject="reject"
@@ -464,6 +466,16 @@ onUnmounted(disposeWindow)
 
 .sections {
 	padding: 16px;
+}
+
+.note {
+	padding: 10px 12px;
+	border: 1px solid var(--nulo-border);
+	background: var(--nulo-surface-low);
+
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--nulo-secondary);
 }
 
 </style>
