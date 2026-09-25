@@ -32,7 +32,7 @@ configService.onUpdate.add(onSettingUpdate)
 
 /** Developer-only: open the logs window (previously accessible via the
  *  hamburger MenuPopup, now relocated here as part of the menu removal). */
-const handleOpenLogs = async () => {
+const openLogs = async () => {
 	if (appStore.loggerWindowId) {
 		try {
 			const win = await chrome.windows.get(appStore.loggerWindowId)
@@ -52,6 +52,16 @@ const handleOpenLogs = async () => {
 	const window = await chrome.windows.create({ type: "popup", url: url.toString(), height: 700, width: 1_200 })
 	appStore.loggerWindowId = window.id
 	cacheStore.failureLog = null
+}
+
+// The window's id is known only once windows.create resolves, so a press in that gap joins the
+// open in flight instead of opening a second window.
+let pendingOpen = null
+const handleOpenLogs = () => {
+	pendingOpen ??= openLogs().finally(() => {
+		pendingOpen = null
+	})
+	return pendingOpen
 }
 
 const isLoading = ref(true)
