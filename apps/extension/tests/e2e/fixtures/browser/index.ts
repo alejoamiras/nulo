@@ -164,6 +164,11 @@ export const CHROME_ONLY = {
 	cdpFetch: "arms CDP Fetch interception on held targets; BiDi has no equivalent",
 } as const
 
+/** Why a test does not run on Chrome: a state headless Chrome cannot be driven into — never a failing test. */
+export const FIREFOX_ONLY = {
+	windowRefocus: "refocuses an approval popup; headless Chrome moves focus only by creating a window",
+} as const
+
 /** The launch a background call is made against; every `ExtensionContext` is one. */
 export interface BackgroundOwner {
 	browser: Browser

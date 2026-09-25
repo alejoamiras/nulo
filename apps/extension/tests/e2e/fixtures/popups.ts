@@ -103,7 +103,7 @@ export async function waitForPopup(
 	return page
 }
 
-async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
+export async function waitForMainFrame(page: Page, timeout = 5_000): Promise<void> {
 	const start = Date.now()
 	while (Date.now() - start < timeout) {
 		try {

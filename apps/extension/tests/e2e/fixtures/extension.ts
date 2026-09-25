@@ -1469,7 +1469,7 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 export const pickFileByTestId = (page: Page, testId: string, filePath: string): Promise<void> =>
 	pickFile(page, () => clickByTestId(page, testId), filePath)
 
-function isTargetDetachError(err: unknown): boolean {
+export function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []
 	let current: unknown = err
 	let depth = 0
