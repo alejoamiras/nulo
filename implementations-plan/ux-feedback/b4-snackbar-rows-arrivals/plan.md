@@ -497,6 +497,37 @@ Arrivals:
 - Failure: `kind: "error"`, `label: "Send failed"`, `sub: transferFailureCopy(err)`. A cancel stays
   silent (`send-submit.ts:65`).
 
+### A failed send's journal id (10b, P6.3)
+
+The fork was codex's: (b), the wallet names the record beside the error, confidence high (codex
+high, session 01a0d965-8a4b-7e40-a40d-86fcb1c87fb1). Matching a record by its fields (a) was
+rejected because even a single match can belong to another send: a transfer takes no execution
+slot, so two identical sends run at once. A popup-minted token (c) was rejected because a buggy or
+compromised popup could reuse another operation's.
+
+- `@nulo/extension-messaging/errors` gains `JournaledRejection` (an error, and the id of the record
+  its operation settled as failed) and `journalIdOf(error)`.
+- `buildErrorResponseContent` unwraps a `JournaledRejection`: `error` and `errorPayload` exactly as
+  for the error alone, and `journalId` beside them. `remoteErrorFromResponseContent` rebuilds the
+  error as before and keeps a string `journalId` in a module-private `WeakMap`, which
+  `journalIdOf` reads; nothing on the error, its `details` included, can supply the id. Both
+  transports share the two functions, and the envelope summaries' allowlist never logs the field.
+- `TransferExecutor.execute` throws a `JournaledRejection` only when its own `failed` transition
+  landed. Cancellation conversion, `normalizeError` and `task.fail` keep the original error. A
+  refusal before the record exists (the Terms at entry, a locked wallet, a failed create) throws
+  the error alone. `ProveAndSendContext.markJournal` is typed `Promise<unknown>`, so the
+  executor's binding can report whether its write landed without an extra await on the prove path.
+- `send-submit.ts`, after a failure and only while the scope is current: the id must be 16
+  lowercase hex characters, and `deps.readJournal(id)` (a fresh `OperationJournalServiceClient`,
+  which the service answers for the active profile only) must return a `transfer` whose stage is
+  `failed`, with `terminalAt` set, on the snapshot's network and account. The epoch is checked
+  again after the read. Anything else, a failed read included, opens the same snack without
+  Details, and a failed read logs one `debug` line with no payload. Details calls
+  `deps.viewJournal(id)`, which is `router.push("/popup/journal/<id>")`; the snack closes before
+  the callback runs, and a scope change closes it (S-16).
+- No journal schema change and no classifier change: `transferFailureCopy`,
+  `transferFailureLogLevel` and `classifyCancellableRejection` see the same error classes as before.
+
 ### Rows (item 11)
 
 - **`components/ui/RowTarget.vue`** (L2, local and host-coupled, like `Button.vue`: it renders
@@ -978,7 +1009,10 @@ so a close during the wait installs nothing.
   exist, so nothing recreates a deleted scope's row.
 - **View targets are built from checked values.** A tx hash is checked as 32-byte hex before View
   is offered; a receipt id comes from the service record, is routed as a param and resolved
-  active-profile-scoped (`received/[id].vue:147`, `spec.ts:307-309`). No dApp can open a Nulo
+  active-profile-scoped (`received/[id].vue:147`, `spec.ts:307-309`). Details' journal id comes
+  only from the service that created the record, beside the error, never from the error's own
+  fields; the popup offers it only as 16 hex characters that read back, active-profile-scoped, as
+  this send's failed transfer in the submitted scope. No dApp can open a Nulo
   snack: `openToast` runs only in extension pages.
 - **Clickjacking and overlays.** The snack covers at most a strip above the nav or the bottom edge.
   It holds only its own buttons, and the wrap is `pointer-events: none`, so a click beside the snack
@@ -1923,7 +1957,11 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    which opens that send's journal page `/popup/journal/<id>`. Only a failed send gets it, and only
    when that send has a journal entry the wallet confirms (a failed, terminal transfer in the
    submitted scope); every other error keeps no action. The id travels beside the error, not in
-   it: see § Architecture, A failed send's journal id.
+   it: see § Architecture, A failed send's journal id (codex's (b), high). Tests: the round trip
+   keeps every error's class, message and details with or without the id, and only the response's
+   own field names one; two identical sends failing in reverse order each name their own record,
+   and a refusal before any record names none; the popup offers Details only for a record that
+   reads back as this send's failed transfer, never across a scope change during the read.
 4. **Width in dApp windows (11a).** In the execute, discover, permission, verify and passkey
    windows the snack spans the 360px content column less 16px a side (328px), centred on it. The
    json and logger windows fill their window, so they keep the popup's rule. The popup and the

@@ -46,6 +46,9 @@ export type ResponseContent<T extends MethodsMap> = {
 		/** Structured WalletError payload. Present only when the service threw
 		 *  a WalletError subclass; absent for plain Error / string throws. */
 		errorPayload?: WalletErrorPayload
+		/** The journal record the operation settled as failed. Present only when the service
+		 *  threw a `JournaledRejection`. */
+		journalId?: string
 		/** Set when `result` was JSON-stringified by the service-side
 		 *  `jsonStringify` fallback because structured clone refused the
 		 *  payload (rare — `jsonSanitize` already runs before postMessage,

@@ -263,6 +263,26 @@ describe("ToastManagerBase", () => {
 		expect(useToast().toast.value).toBeNull()
 	})
 
+	test("an error's action comes before × in the Tab order; selecting it closes first, then runs", async () => {
+		mountRegion()
+		const seen: unknown[] = []
+		open({
+			kind: "error",
+			label: "Send failed",
+			sub: "Simulation failed",
+			action: { label: "Details", onSelect: () => seen.push(useToast().toast.value) },
+		})
+		await settle()
+		const action = card()?.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]')
+		const close = card()?.querySelector<HTMLButtonElement>('[data-testid="snackbar-close"]')
+		expect(action?.textContent?.trim()).toBe("Details")
+		expect(close && action?.compareDocumentPosition(close)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+		action?.click()
+		await settle()
+		expect(seen).toEqual([null])
+		expect(cards().length).toBe(0)
+	})
+
 	test("× returns focus to where focus came from, when that element is still on the page", async () => {
 		mountRegion()
 		const origin = document.createElement("button")

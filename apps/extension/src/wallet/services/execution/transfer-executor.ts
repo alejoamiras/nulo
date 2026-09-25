@@ -21,7 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
+import { JournaledRejection, OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -110,12 +110,14 @@ export class TransferExecutor {
 		// journal-create refusal below throws before they are assigned.
 		let journalId: string | undefined
 		let controller: AbortController | undefined
-		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
-			if (!journalId) return
+		const markJournal = async (progress: JobProgress, error?: JobError | null): Promise<boolean> => {
+			if (!journalId) return false
 			try {
 				await this.deps.transitionJournal(journalId, progress, error)
+				return true
 			} catch (err) {
 				this.deps.logError("Failed to update journal operation", err)
+				return false
 			}
 		}
 
@@ -210,9 +212,10 @@ export class TransferExecutor {
 			maybeRethrowAsRpcCancel(error, transferTask)
 			// Classified failures keep their own kind on the transfer path too, so a
 			// popup transfer reads the same as a dApp send.
-			await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
+			const recorded = await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
 			transferTask.fail(error)
-			throw error
+			// Named only once the record holds this failure: the popup offers it as the failure's details.
+			throw recorded && journalId ? new JournaledRejection(error, journalId) : error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 		}

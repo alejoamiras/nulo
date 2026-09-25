@@ -167,6 +167,80 @@ got 2 `pointerover`, 3 `pointerenter`, 2 `mouseover` and 3 `mouseenter` events, 
 `pointermove` or `mousemove`. So the old `mouseenter` hold and the `:hover` re-read each held a
 snack nobody reached; now it lived 6159 ms.
 
+## P6.3 · Details on a failed send (10b)
+
+The fork, which id Details opens, went to codex: **(b), the wallet names the record beside the
+error, confidence high** (codex high, session 01a0d965-8a4b-7e40-a40d-86fcb1c87fb1). It rejected
+(a), matching records by their fields, because even one match can belong to another send (a
+transfer takes no execution slot), and (c), a popup-minted token, because a buggy or compromised
+popup could reuse another operation's. Facts it verified that shaped the build: `markJournal`
+swallows a failed write, so a rejection does not prove a failed record exists; the Terms are
+checked again before broadcast, so a Terms refusal can have a record; only a `WalletError`
+serializes, and reconstruction drops `details` for the Terms, session-ended and not-recorded
+errors, so `details.journalId` could not carry it.
+
+Built:
+
+- `packages/extension-messaging/src/errors.ts`: `JournaledRejection` and `journalIdOf`;
+  `remoteErrorFromResponseContent` keeps a string `journalId` in a module-private `WeakMap` keyed
+  by the rebuilt error. `core/error-response.ts` unwraps the rejection and adds `journalId`;
+  `ResponseContent` and `ResponseContentLike` gain the optional field.
+- `wallet/services/execution/transfer-executor.ts`: `markJournal` reports whether the write
+  landed, and the catch throws `new JournaledRejection(error, journalId)` only when the `failed`
+  transition did. `execution-coordinator.ts`: `markJournal` in `ProveAndSendContext` is typed
+  `Promise<unknown>`; nothing else there changed.
+- `popup/pages/send-submit.ts`: `detailsAction` and `isFailedTransferOf`; the snack is opened once,
+  after the read. `popup/pages/send.vue`: `readJournal` opens its own journal client and
+  disconnects it, since the page has left by then; `viewJournal` routes to the journal page.
+
+Decisions:
+
+1. **A plain wrapper, not an `Error` subclass.** Nothing between the executor and the response
+   boundary inspects the thrown value (the RPC method passes it through), and the one log line
+   there, the base service's `Request failed` at debug, projects the wrapped error by its fields.
+2. **A wrapper per throw, not a map keyed by the error.** A map keyed by the thrown object would
+   pair a shared or cached error instance with whichever send recorded it last, and would name a
+   record on any later response that rethrows the same object.
+3. **The snack waits for the read.** Opening it first and adding Details afterwards would replay
+   the card. The read is one local round trip on a port the page opens for it.
+4. **The id is checked as 16 lowercase hex characters** before it reaches a route, mirroring View's
+   hash check; the journal writes nothing else, and a restored row keeps its own id but is never a
+   send's failure.
+
+Sign-off pending: none new. Details is drawn like View (i10 A′), after the text and before ×.
+
+Tests:
+
+- `packages/extension-messaging/src/background/client.test.ts`: a plain `Error`, a `WalletError`
+  with details, the Terms refusal, the not-recorded refusal, a cancel and a thrown string each
+  reject with the same class, message and own fields with or without a `JournaledRejection`, and
+  only the journaled one names the record; an id inside `details`, on the error or as a number
+  names nothing. `background/service.test.ts`: a service method throwing one replies with the
+  error's fields and `journalId`. `core/core.test.ts`: the projection, and no id from the thrown
+  value's own fields.
+- `packages/design/src/ui/ToastManagerBase.test.ts`: an error's action comes before × in the DOM,
+  and selecting it closes the snack before its callback.
+- `wallet/services/execution/transfer-executor.test.ts`: a failure the record holds names it; one
+  the record could not take is thrown alone; two identical sends failing in reverse order each
+  name their own record, and a refusal before its record names none. Four session-end asserts now
+  expect the named record.
+- `wallet/services/execution/service.composition.test.ts`: the late Terms refusal names its own
+  failed record; the Terms at entry and a transfer confirmed while locked throw the error alone
+  with no record; seven session-end asserts now expect the named record.
+- `popup/pages/send-submit.test.ts`: Details opens the named record's page; a late Terms refusal
+  keeps its copy and debug level and gets Details; the three copies and log levels, and a
+  cancel's silence, are the same with or without an id; no read for no id, a short, path-shaped or
+  uppercase id, or an id on the error itself; no Details for a missing record, a failed read (and
+  no second snack or error line), an in-flight, cancelled or untimed record, a dApp record, and
+  another account's or network's; nothing opens after A → B → A or a lock and unlock during the
+  read; a scope change closes the Details snack; two identical sends failing in reverse order
+  each offer their own record. Five mutations of the guards (the recheck, the scope, the format,
+  the stage, the terminal time) each fail a test.
+
+Follow-up: the journal's id comment in `wallet/services/operation-journal/service.ts` says "16
+bytes / 128 bits", but `nextRandomId(storage, 16)` draws 16 hex characters, 64 bits, and the
+comment cites a review round. This change does not touch that file.
+
 ## P6.4 · The column in dApp windows (11a)
 
 Built:

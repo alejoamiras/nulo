@@ -19,6 +19,7 @@ import SendTypesCard from "@/components/composite/send/SendTypesCard.vue"
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -417,6 +418,16 @@ const submitDeps = {
 	openToast,
 	isCurrent: (epoch) => appStore.isLogined && appStore.scopeEpoch === epoch,
 	viewTransaction: (hash) => router.push(`/popup/tx/${hash}`),
+	// A failure lands after the page has left, so the read opens and closes its own port.
+	readJournal: async (id) => {
+		const journal = new OperationJournalServiceClient()
+		try {
+			return await journal.getOperation(id)
+		} finally {
+			journal.disconnect()
+		}
+	},
+	viewJournal: (id) => router.push(`/popup/journal/${id}`),
 	onSettled: () => {
 		submitInFlight = false
 		disconnectExecution()

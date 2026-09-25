@@ -71,6 +71,7 @@ export interface ResponseContentLike {
 	result?: unknown
 	error?: string
 	errorPayload?: unknown
+	journalId?: unknown
 	resultIsJson?: boolean
 }
 

@@ -23,7 +23,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, JournaledRejection, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
@@ -497,6 +497,9 @@ function parkNextNetworkLookup(h: Harness) {
 	return { isEntered: () => entered, release: () => release() }
 }
 
+/** A transfer failure its record holds: the original error, with the record named beside it. */
+const recorded = (h: Harness, error: unknown) => new JournaledRejection(error, h.getJournalId())
+
 async function expectEndedUnder(h: Harness, journalId: string, profileId: string) {
 	const record = await h.journal.getOperation(journalId)
 	expect(record?.progress.stage).toBe("failed")
@@ -539,7 +542,7 @@ describe("ExecutionService composition — work runs only while the session that
 			h.session.setActive(next)
 			h.ctrl.release()
 
-			expect(await run).toBeInstanceOf(SessionEndedError)
+			expect(await run).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 			expect(h.proveTx).toHaveBeenCalledTimes(1)
 			expect(h.toTx).not.toHaveBeenCalled()
 			expect(h.sendTx).not.toHaveBeenCalled()
@@ -556,7 +559,7 @@ describe("ExecutionService composition — work runs only while the session that
 		h.session.setActive("p2")
 		h.ctrl.release()
 
-		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(await run).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 		expect(h.sendTx).not.toHaveBeenCalled()
 		expect(h.getAccountContract.mock.calls.map(([profileId]) => profileId)).toEqual(["p1"])
 		await expectEndedUnder(h, h.getJournalId(), "p1")
@@ -579,7 +582,7 @@ describe("ExecutionService composition — work runs only while the session that
 		h.session.setActive("p1")
 		release()
 
-		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(await run).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 		expect(h.proveTx).not.toHaveBeenCalled()
 		await expectEndedUnder(h, h.getJournalId(), "p1")
 	}, 15_000)
@@ -648,10 +651,20 @@ describe("ExecutionService composition — work runs only while the session that
 		const h = await makeHarness()
 		h.session.setActive("p2")
 
-		expect(await transfer(h)).toBeInstanceOf(SessionEndedError)
+		expect(await transfer(h)).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 		expect(h.getAccountContract).not.toHaveBeenCalled()
 		expect(h.proveTx).not.toHaveBeenCalled()
 		await expectEndedUnder(h, h.getJournalId(), "p2")
+	}, 15_000)
+
+	test("a transfer confirmed while locked is refused before any record, and names none", async () => {
+		const h = await makeHarness()
+		h.session.setActive(undefined)
+
+		const refused = await transfer(h)
+		expect(refused).toBeInstanceOf(Error)
+		expect(refused).not.toBeInstanceOf(JournaledRejection)
+		expect(h.getJournalId()).toBe("")
 	}, 15_000)
 
 	test("a silent send whose record is already pending is failed at the slot, not stranded, and holds nothing", async () => {
@@ -829,7 +842,7 @@ describe("ExecutionService composition — a session change sweeps the work of t
 		await sweep.mock.results[0]?.value
 		create.release()
 
-		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(await run).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 		await expectEndedUnder(h, h.getJournalId(), "p1")
 		expect(h.ctrl.entered).toBe(false)
 		expect(h.proveTx).not.toHaveBeenCalled()
@@ -848,7 +861,7 @@ describe("ExecutionService composition — a session change sweeps the work of t
 		expect(logError).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ journalId: h.getJournalId() }))
 
 		h.ctrl.release()
-		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(await run).toStrictEqual(recorded(h, expect.any(SessionEndedError)))
 		await expectEndedUnder(h, h.getJournalId(), "p1")
 		expect(h.sendTx).not.toHaveBeenCalled()
 	}, 15_000)
@@ -1020,7 +1033,7 @@ describe("ExecutionService composition — nothing is broadcast without a curren
 		h.legalAssertCurrent.mockRejectedValue(new TermsAcceptanceRequiredError())
 		h.ctrl.release()
 
-		expect(await p).toBeInstanceOf(TermsAcceptanceRequiredError)
+		expect(await p).toStrictEqual(recorded(h, expect.any(TermsAcceptanceRequiredError)))
 		expect(h.proveTx).toHaveBeenCalledTimes(1)
 		expect(h.sendTx).not.toHaveBeenCalled()
 		expect(h.stages).not.toContain("succeeded")
