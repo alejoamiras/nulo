@@ -363,7 +363,9 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
     shot puts it.
   - Entries use page-local markup with the shot's values (`nulo.css:498-502`). The separator is
     `rgba(74, 70, 63, 0.2)`, the literal the fee card's rule already uses, since `base.css` has
-    no hairline token and stays untouched.
+    no hairline token and stays untouched. Under `:global([theme="light"])` it is the mock's
+    light `--hairline-soft`, `rgba(124, 116, 104, 0.2)` (`nulo.css:71`), the page-local theme
+    override `ConfirmPopup.vue:207` already uses.
   - Testids `glossary-section-<title>`, `glossary-entry-<key>`, `glossary-term-<key>`,
     `glossary-definition-<key>`, `glossary-where-<key>`. It renders `GLOSSARY_SECTIONS` in
     order.
@@ -586,7 +588,7 @@ Each finding was checked against the code before it was applied.
 | 10 | fable | minor | Enter/Space closing a dotted term is a state the mock does not draw, and Space would scroll | Confirmed (`page.js:526-527`). A press counts only on a `button`, `a` or `[role="button"]` inside the trigger; Space is prevented only when handled; P2.1 tests click-shows and Enter-keeps-open on a term |
 | 11 | fable | minor | `<Text>` always emits `lh--100`, which fights a local line-height | Confirmed (`Text.vue:17-21`). U9's note and U8's line are plain spans with the mock's declarations local |
 | 12 | fable | minor | The artifact's live bubble rises 2px on entry (0.12s ease-out) and is removed at once; the primitive only fades, in and out | Confirmed (`nulo.css:467-468`, `page.js:487`, `Tooltip.vue:240-250`). Ask U-7, built as drawn through the independent `translate` property |
-| 13 | fable | minor | The glossary separator uses the dark `--hairline-soft` in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)` | Confirmed (`nulo.css:30`, `:71`); matches the 10 files that already ship the dark literal. Listed as a parity difference in P4.1 |
+| 13 | fable | minor | The glossary separator uses the dark `--hairline-soft` in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)` | Confirmed (`nulo.css:30`, `:71`); matches the 10 files that already ship the dark literal. Listed as a parity difference in P4.1. **Superseded** by the arc loop round 1, finding 4: the light theme now gets the light value |
 | 14 | codex | minor | Touched comments missed: `Tooltip.test.ts:115-118`'s narration; the `.hint_row` comment should go, not be rewritten | Confirmed; both removed. The focus comment states the latch's invariant; the `viewport` bullet's scrollbar sentence is gone (Ask 7) |
 | 15 | codex | minor | "Only long error text" can exceed the window is false for short windows; "33 to 35" counts call sites | Both qualified (U-5, Tooltip count); no implementation change |
 | 16 | codex | info | `spec.md:277` says U9 goes "under the field"; the drawing puts it between the label and the field | Built as drawn; listed for the owner under the asks (the spec is not edited here) |
@@ -881,9 +883,7 @@ Gate: lint, `typecheck:all`, `test:all`, the smoke file and `passkey-backup.test
        `DappIdentityBlock.stories.ts` at 400px, recorded as an exception to the parity gate.
    - Publish one private Artifact placing each capture beside its shot. The driver and the fable
      leg list every difference, including the pre-existing ones: Home's hero, the sub-page
-     header, the label size, and the glossary separator in the light theme (the dark
-     `--hairline-soft` literal, `nulo.css:30`, where the mock's light value is
-     `rgba(124, 116, 104, 0.2)`, `nulo.css:71`); and the bubble's cap, 272px here against the
+     header and the label size; and the bubble's cap, 272px here against the
      mock's 270 (its text cap is `min(272, root − 16) − 24`, `page.js:392`, inside 10px + 1px
      sides, `nulo.css:180`), both within the spec's "at most 272px" (`spec.md:40`).
 2. Every row of the program's [Local gates](../plan.md#local-gates): lint, `typecheck:all`,
