@@ -596,10 +596,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		return record?.state ?? "unknown"
 	}
 
-	/** Internal trust transition. Caller MUST hold the service lock. */
-	private async _setTrustStateLocked(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<void> {
-		const record = await this.repo.setTrust(profileId, networkId, contract, state)
-		this.emit("onIncomingTrustChanged", record)
+	/** Internal trust transition. Caller MUST hold the service lock; `fence` is read just before the write. */
+	private async _setTrustStateLocked(
+		profileId: string,
+		networkId: string,
+		contract: string,
+		state: IncomingTrustState,
+		fence?: () => boolean,
+	): Promise<void> {
+		const record = await this.repo.setTrust(profileId, networkId, contract, state, fence)
+		if (record) this.emit("onIncomingTrustChanged", record)
 	}
 
 	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
@@ -1115,10 +1121,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const tip = await this.readTip(network.id)
 		await this.withServiceLock(async (isCurrent) => {
 			const current = await this.repo.getTrust(profile.id, network.id, token.contract)
-			// A delete of the token, its network or its profile can finish while the tip is read; writing
-			// after it would bring back the trust and floor that delete wiped.
-			if (!isCurrent() || !(await this.isTokenStillRegistered(profile.id, network.id, token.contract))) return
-			if (current?.state !== "trusted") await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted")
+			// A delete of the token, its network or its profile can finish while the tip is read, and one
+			// the watchdog lets in can finish at any await here: the registration read catches the first,
+			// and each write reads `isCurrent` after its last await, which catches the second.
+			if (!(await this.isTokenStillRegistered(profile.id, network.id, token.contract))) return
+			if (current?.state !== "trusted") await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted", isCurrent)
 			await this.moveArrivalFloorLocked(profile.id, network.id, token.contract, { tip, epochAtTip, isCurrent })
 		})
 
