@@ -113,11 +113,11 @@ onBeforeUnmount(() => {
 		</Text>
 
 		<!-- A Continue-sized slot, so Skip sits where Continue would and the page never jumps. -->
-		<div v-snack-footer :class="$style.ctaSlot">
-			<Button v-if="canContinue" variant="cta" size="large" data-testid="onboarding-presto-continue" @click="goNext">
+		<div :class="$style.ctaSlot">
+			<Button v-if="canContinue" v-snack-footer variant="cta" size="large" data-testid="onboarding-presto-continue" @click="goNext">
 				Continue
 			</Button>
-			<OnboardingSkipLink v-else-if="!isProbing" testid="onboarding-presto-skip" @click="skip">
+			<OnboardingSkipLink v-else-if="!isProbing" v-snack-footer testid="onboarding-presto-skip" @click="skip">
 				Skip. Proving will run in your browser.
 			</OnboardingSkipLink>
 		</div>
