@@ -17,7 +17,7 @@ const changed = () => {
 }
 
 /** A bottom action row: the snack sits `SNACK_GAP` above its top edge while that edge is on screen, or
- *  would be once the page is scrolled to its end. */
+ *  would be once what scrolls it is scrolled to its end. */
 export const vSnackFooter: ObjectDirective<HTMLElement> = {
 	mounted(el) {
 		footers.add(el)
@@ -45,23 +45,46 @@ export const vSnackSheet: ObjectDirective<HTMLElement> = {
 export interface FooterBox {
 	top: number
 	bottom: number
+	/** How far the footer rises once everything that scrolls it is scrolled to its end. */
+	riseToEnd?: number
 }
 
 /**
  * The snack's distance from the viewport's bottom edge: `base`, raised to `SNACK_GAP` above the
- * highest point a footer's top edge reaches on screen, where it is now or where it stops once the
- * page is scrolled `scrollToEnd` px further, to its end. A footer with no height places nothing.
+ * highest point a footer's top edge reaches on screen, where it is now or where it stops once
+ * everything that scrolls it is scrolled to its end. A footer with no height places nothing.
  */
-export function snackInset(base: number, viewportHeight: number, boxes: readonly FooterBox[], scrollToEnd = 0): number {
+export function snackInset(base: number, viewportHeight: number, boxes: readonly FooterBox[]): number {
 	let inset = base
-	for (const { top, bottom } of boxes) {
+	for (const { top, bottom, riseToEnd = 0 } of boxes) {
 		if (bottom <= top) continue
 		// A scroll can bring the row up and a click land on it in one task, before the next measure.
-		for (const at of [top, top - scrollToEnd]) {
+		for (const at of [top, top - riseToEnd]) {
 			if (at > 0 && at < viewportHeight) inset = Math.max(inset, viewportHeight - at + SNACK_GAP)
 		}
 	}
 	return inset
+}
+
+/** The overflow values a user can scroll; `hidden` clips without scrolling. */
+const SCROLLABLE = new Set(["auto", "scroll", "overlay"])
+
+const leftToScroll = (el: Element) => Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop)
+
+/** How far `el` rises once each container that scrolls it, the page included, is scrolled to its
+ *  end. A sticky box keeps its place while the container it sticks to scrolls. */
+function riseOf(el: HTMLElement): number {
+	let rise = 0
+	let sticky = getComputedStyle(el).position === "sticky"
+	for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+		const style = getComputedStyle(node)
+		if (SCROLLABLE.has(style.overflowY)) {
+			if (!sticky) rise += leftToScroll(node)
+			sticky = false
+		}
+		if (style.position === "sticky") sticky = true
+	}
+	return sticky ? rise : rise + leftToScroll(document.scrollingElement ?? document.documentElement)
 }
 
 /**
@@ -80,10 +103,11 @@ export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 		frame = undefined
 		const top = sheets.at(-1)
 		const placing = [...footers].filter((el) => el.isConnected && (!top || top.contains(el)))
-		const boxes = placing.map((el) => el.getBoundingClientRect())
-		const page = document.scrollingElement ?? document.documentElement
-		const scrollToEnd = Math.max(0, page.scrollHeight - page.clientHeight - page.scrollTop)
-		inset.value = snackInset(top ? SNACK_GAP : base(), document.documentElement.clientHeight, boxes, scrollToEnd)
+		const boxes = placing.map((el) => {
+			const { top: at, bottom } = el.getBoundingClientRect()
+			return { top: at, bottom, riseToEnd: riseOf(el) }
+		})
+		inset.value = snackInset(top ? SNACK_GAP : base(), document.documentElement.clientHeight, boxes)
 	}
 	const schedule = () => {
 		frame ??= requestAnimationFrame(measure)

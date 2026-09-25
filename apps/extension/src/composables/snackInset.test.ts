@@ -13,9 +13,26 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 
 /** A footer whose box is read from its `data-top` / `data-height`, as the stubbed rect reports it. */
 const Footer = defineComponent({
-	props: { top: { type: Number, required: true }, height: { type: Number, default: 60 } },
+	props: { top: { type: Number, required: true }, height: { type: Number, default: 60 }, sticky: Boolean },
 	setup: (props) => () =>
-		withDirectives(h("div", { "data-top": props.top, "data-height": props.height, "data-testid": "footer" }), [[vSnackFooter]]),
+		withDirectives(
+			h("div", {
+				"data-top": props.top,
+				"data-height": props.height,
+				"data-testid": "footer",
+				style: props.sticky ? "position: sticky" : undefined,
+			}),
+			[[vSnackFooter]],
+		),
+})
+
+/** A container with `left` px still to scroll, as the stubbed scroll metrics report it. */
+const Scroller = defineComponent({
+	props: { left: { type: Number, required: true }, overflow: { type: String, default: "auto" } },
+	setup:
+		(props, { slots }) =>
+		() =>
+			h("div", { style: `overflow-y: ${props.overflow}`, "data-scroll-height": props.left }, slots.default?.()),
 })
 
 /** An open sheet holding whatever footers it is given. */
@@ -38,15 +55,22 @@ const Host = defineComponent({
 
 let observed: Element[] = []
 let notifyResize: () => void = () => {}
+/** How far the page is still to scroll. */
+let pageLeft = 0
 
 beforeEach(() => {
 	base.value = NAV_BASE
 	observed = []
+	pageLeft = 0
 	vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(VIEWPORT)
 	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
 		const top = Number(this.dataset.top ?? 0)
 		const height = Number(this.dataset.height ?? 0)
 		return DOMRect.fromRect({ x: 0, y: top, width: 360, height })
+	})
+	vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+		if (this === document.documentElement) return VIEWPORT + pageLeft
+		return this instanceof HTMLElement ? Number(this.dataset.scrollHeight ?? 0) : 0
 	})
 	vi.stubGlobal(
 		"ResizeObserver",
@@ -98,23 +122,23 @@ describe("snackInset", () => {
 		).toBe(SNACK_GAP)
 	})
 
-	test("a footer below the fold counts where it stops once the page is scrolled to its end", () => {
+	test("a footer below the fold counts where it stops once what scrolls it is at its end", () => {
 		// A 500px window over a 600px page: the page's 73px footer starts at 527 and stops at 427.
-		expect(snackInset(SNACK_GAP, 500, [{ top: 527, bottom: 600 }], 100)).toBe(500 - 427 + SNACK_GAP)
-		expect(snackInset(SNACK_GAP, 500, [{ top: 900, bottom: 973 }], 100)).toBe(SNACK_GAP)
-		expect(snackInset(SNACK_GAP, 500, [{ top: 700, bottom: 773 }], 1_000)).toBe(SNACK_GAP)
+		expect(snackInset(SNACK_GAP, 500, [{ top: 527, bottom: 600, riseToEnd: 100 }])).toBe(500 - 427 + SNACK_GAP)
+		expect(snackInset(SNACK_GAP, 500, [{ top: 900, bottom: 973, riseToEnd: 100 }])).toBe(SNACK_GAP)
+		expect(snackInset(SNACK_GAP, 500, [{ top: 700, bottom: 773, riseToEnd: 1_000 }])).toBe(SNACK_GAP)
 	})
 
-	test("where the page cannot scroll further, a footer on screen keeps the inset it had: pinned, or a long page at its end", () => {
+	test("where nothing scrolls it further, a footer on screen keeps the inset it had: pinned, or a long page at its end", () => {
 		expect(snackInset(SNACK_GAP, VIEWPORT, [{ top: 520, bottom: 600 }])).toBe(VIEWPORT - 520 + SNACK_GAP)
-		expect(snackInset(SNACK_GAP, 500, [{ top: 427, bottom: 500 }], 0)).toBe(500 - 427 + SNACK_GAP)
+		expect(snackInset(SNACK_GAP, 500, [{ top: 427, bottom: 500, riseToEnd: 0 }])).toBe(500 - 427 + SNACK_GAP)
 	})
 
-	test("while the page can still scroll, a footer on screen also counts where it stops at the end", () => {
+	test("while something can still scroll it, a footer on screen also counts where it stops at the end", () => {
 		// The same page with the footer grown by an error line: its top peeks 1px onto the screen.
-		expect(snackInset(SNACK_GAP, 500, [{ top: 499, bottom: 600 }], 100)).toBe(500 - 399 + SNACK_GAP)
-		// One that would scroll off the top before the page's end counts where it is.
-		expect(snackInset(SNACK_GAP, 500, [{ top: 300, bottom: 373 }], 400)).toBe(500 - 300 + SNACK_GAP)
+		expect(snackInset(SNACK_GAP, 500, [{ top: 499, bottom: 600, riseToEnd: 100 }])).toBe(500 - 399 + SNACK_GAP)
+		// One that would scroll off the top before the end counts where it is.
+		expect(snackInset(SNACK_GAP, 500, [{ top: 300, bottom: 373, riseToEnd: 400 }])).toBe(500 - 300 + SNACK_GAP)
 	})
 })
 
@@ -200,18 +224,43 @@ describe("useSnackInset", () => {
 
 	test("in a window shorter than the page, the snack waits above where the footer stops, and scrolling there keeps it", async () => {
 		base.value = SNACK_GAP
-		vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(VIEWPORT + 100)
-		const scrollTop = vi.spyOn(document.documentElement, "scrollTop", "get").mockReturnValue(0)
+		pageLeft = 100
 		mount(Host)
 		const wrapper = mount(Footer, { props: { top: 627, height: 73 }, attachTo: document.body })
 		await frame()
 		expect(inset.value).toBe(VIEWPORT - 527 + SNACK_GAP)
 
-		scrollTop.mockReturnValue(100)
+		pageLeft = 0
 		;(wrapper.element as HTMLElement).dataset.top = "527"
 		document.dispatchEvent(new Event("scroll"))
 		await frame()
 		expect(inset.value).toBe(VIEWPORT - 527 + SNACK_GAP)
+	})
+
+	test("a footer inside a scrolling card rises by what the card and the page have left, not by a hidden overflow", async () => {
+		base.value = SNACK_GAP
+		pageLeft = 100
+		mount(Host)
+		mount(
+			defineComponent({
+				setup: () => () =>
+					h(Scroller, { left: 15, overflow: "hidden" }, () => h(Scroller, { left: 400 }, () => h(Footer, { top: 1_000 }))),
+			}),
+			{ attachTo: document.body },
+		)
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - (1_000 - 400 - 100) + SNACK_GAP)
+	})
+
+	test("a sticky footer keeps its place while its own container scrolls, and still rises with the page", async () => {
+		base.value = SNACK_GAP
+		pageLeft = 100
+		mount(Host)
+		mount(defineComponent({ setup: () => () => h(Scroller, { left: 400 }, () => h(Footer, { top: 540, sticky: true })) }), {
+			attachTo: document.body,
+		})
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - (540 - 100) + SNACK_GAP)
 	})
 
 	test("a snack opening measures at once, before any frame", async () => {
