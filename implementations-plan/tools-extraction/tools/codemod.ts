@@ -2,13 +2,14 @@
  * Renames nulo's package specifiers in the extracted tree: the three published packages become
  * `@alejoamiras/nulo-*` dependencies at the given spec, everything else `@unleashed/*`. Specifiers
  * and manifests only; protocol strings (`deriveNuloAccountKeys`, KDF labels, `nulo:` storage keys)
- * are not specifiers and stay byte-for-byte. Plans and audits are history and are not rewritten.
+ * are not specifiers and stay byte-for-byte. Plans and audits are history and are not rewritten,
+ * and neither is a file derived from Azguard Wallet: it stays byte-identical to nulo's copy.
  *
  *   bun codemod.ts <repo> <name>=<spec> ...
  *
  * <name> is one of the three published names, <spec> what its dependents declare (an exact
  * version, or a `file:` tarball in the rehearsal). Exits 1 if a `@nulo/` specifier survives
- * outside Markdown; Markdown survivors are listed for the docs pass.
+ * outside Markdown and derived files; those survivors are listed for the docs pass.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -16,6 +17,7 @@ import { join } from "node:path"
 const PUBLISHED = ["wallet-crypto", "resolve-asset", "wallet-sdk-schema-patch"] as const
 const RENAMED = ["bridge-core", "design", "tools", "txe-server"] as const
 const HISTORY = /^(implementations-plan|audit)\//
+const DERIVED_MARKER = "Modified from Azguard Wallet"
 const TAIL = String.raw`(?![\w-])`
 
 const [repo, ...pairs] = process.argv.slice(2)
@@ -33,6 +35,8 @@ const RULES: [RegExp, string][] = [
 	[new RegExp(`@nulo/(${PUBLISHED.join("|")})${TAIL}`, "g"), "@alejoamiras/nulo-$1"],
 	[new RegExp(`@nulo/(${RENAMED.join("|")})${TAIL}`, "g"), "@unleashed/$1"],
 	[/@nulo\/\*/g, "@unleashed/*"],
+	// A bare scope prefix selects workspaces; the published three no longer match it, which is right.
+	[/@nulo\/(?=["'`])/g, "@unleashed/"],
 ]
 
 function tracked(): string[] {
@@ -51,23 +55,25 @@ function rewriteDependencySpecs(text: string): string {
 }
 
 let changed = 0
-const survivors: string[] = []
+const survivors: { where: string; kind: "BLOCKING" | "docs" | "derived" }[] = []
 for (const path of tracked()) {
 	const bytes = readFileSync(join(repo, path))
 	if (bytes.subarray(0, 8192).includes(0)) continue
 	const before = bytes.toString("utf8")
-	let after = RULES.reduce((text, [re, to]) => text.replace(re, to), before)
-	if (path === "package.json" || path.endsWith("/package.json")) after = rewriteDependencySpecs(after)
+	const derived = before.includes(DERIVED_MARKER)
+	let after = derived ? before : RULES.reduce((text, [re, to]) => text.replace(re, to), before)
+	if (!derived && (path === "package.json" || path.endsWith("/package.json"))) after = rewriteDependencySpecs(after)
 	if (after !== before) {
 		writeFileSync(join(repo, path), after)
 		changed++
 	}
+	const kind = derived ? "derived" : path.endsWith(".md") ? "docs" : "BLOCKING"
 	after.split("\n").forEach((line, i) => {
-		if (line.includes("@nulo/")) survivors.push(`${path}:${i + 1}: ${line.trim()}`)
+		if (line.includes("@nulo/")) survivors.push({ where: `${path}:${i + 1}: ${line.trim()}`, kind })
 	})
 }
 
-const blocking = survivors.filter((s) => !s.split(":")[0].endsWith(".md"))
-console.log(`codemod: ${changed} file(s) rewritten; ${survivors.length} @nulo/ line(s) left, ${blocking.length} outside Markdown`)
-for (const line of survivors) console.log(`  ${blocking.includes(line) ? "BLOCKING" : "docs"} ${line}`)
-process.exit(blocking.length > 0 ? 1 : 0)
+const blocking = survivors.filter((s) => s.kind === "BLOCKING").length
+console.log(`codemod: ${changed} file(s) rewritten; ${survivors.length} @nulo/ line(s) left, ${blocking} blocking`)
+for (const s of survivors) console.log(`  ${s.kind} ${s.where}`)
+process.exit(blocking > 0 ? 1 : 0)

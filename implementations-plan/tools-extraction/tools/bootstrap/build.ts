@@ -144,6 +144,10 @@ function biome() {
 	if (config.vcs.defaultBranch !== "dev") throw new Error("biome.json: expected vcs.defaultBranch dev")
 	config.vcs.defaultBranch = "main"
 	write("biome.json", `${JSON.stringify(config, null, "\t")}\n`)
+	// Biome lints its own config, so it must leave in Biome's layout; nulo pins the same Biome version.
+	const biomeBin = join(import.meta.dir, "../../../../node_modules/.bin/biome")
+	const formatted = Bun.spawnSync([biomeBin, "format", "--write", "biome.json"], { cwd: repo, stderr: "inherit" })
+	if (formatted.exitCode !== 0) throw new Error("biome format biome.json failed")
 }
 
 function notice() {
