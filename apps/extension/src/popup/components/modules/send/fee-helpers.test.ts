@@ -265,6 +265,17 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 			"Sponsored",
 		])
 	})
+
+	test("Nulo's sponsor lists before hand-added ones, whatever the storage order", () => {
+		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
+		expect(buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second]).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+			"Dev sponsor",
+			"Other sponsor",
+		])
+	})
 })
 
 describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
