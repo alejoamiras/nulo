@@ -5,7 +5,9 @@ import {
 	JobCancelledError,
 	PxeStaleAnchorError,
 	UserRejectedError,
+	ValidationError,
 } from "@nulo/extension-messaging/errors"
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
@@ -150,7 +152,12 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			throw rejection
 		})
 
-		const manifest = { capabilities: [{ type: "data" }, { type: "contracts" }] }
+		const manifest = {
+			capabilities: [
+				{ type: "data", addressBook: true },
+				{ type: "contracts", contracts: "*" },
+			],
+		}
 
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toBe(rejection)
 
@@ -172,7 +179,12 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			throw new Error("User rejected")
 		})
 
-		const manifest = { capabilities: [{ type: "data" }, { type: "contracts" }] }
+		const manifest = {
+			capabilities: [
+				{ type: "data", addressBook: true },
+				{ type: "contracts", contracts: "*" },
+			],
+		}
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
 
 		expect(observedReRequested).toEqual(["data"])
@@ -185,7 +197,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			throw new Error("User rejected")
 		})
 
-		const manifest = { capabilities: [{ type: "data" }] }
+		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
 
 		expect(calls.setGrants).toHaveLength(0)
@@ -200,16 +212,20 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			n += 1
 			if (n === 1) {
 				await gateA
-				return { granted: [{ type: "data" }] } as CapabilityResult
+				return { granted: [{ type: "data", addressBook: true }] } as CapabilityResult
 			}
 			return { granted: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] } as CapabilityResult
 		})
 
 		// A snapshots the empty session then parks in its popup.
-		const pA = dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		const pA = dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data", addressBook: true }] }], ctx)
 		await new Promise((r) => setTimeout(r, 0))
 		// B snapshots the SAME empty session, approves transaction, and writes.
-		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction" }] }], ctx)
+		await dispatcher.dispatch(
+			"requestCapabilities",
+			[{ capabilities: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] }],
+			ctx,
+		)
 		// A resumes and writes — under B-14 it reacquires B's committed row and merges,
 		// rather than clobbering it with a grant list computed from the stale snapshot.
 		resolveA()
@@ -231,9 +247,15 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		// The popup approves the delta 'data' AND echoes the existing 'transaction' grant.
 		const dispatcher = makeDispatcher(
 			writer,
-			async () => ({ granted: [{ type: "data" }, { type: "transaction", scope: [{ contract: "*", function: "*" }] }] }) as never,
+			async () =>
+				({
+					granted: [
+						{ type: "data", addressBook: true },
+						{ type: "transaction", scope: [{ contract: "*", function: "*" }] },
+					],
+				}) as never,
 		)
-		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data", addressBook: true }] }], ctx)
 		const stored = await writer.getDappSession("test-session-id")
 		// Only delta-approved types clear their rejection — echoing an unrelated existing
 		// type must NOT erase its concurrent rejection (the lost-update the fix closes).
@@ -249,7 +271,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			throw new Error("User rejected")
 		})
 
-		const manifest = { capabilities: [{ type: "data" }] }
+		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
 
 		const rejected = calls.setRejections[0]
@@ -261,10 +283,15 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		const session = makeSession()
 		const { writer, calls } = makeSessionWriter(session)
 		const dispatcher = makeDispatcher(writer, async () => ({
-			granted: [{ type: "data" }],
+			granted: [{ type: "data", addressBook: true }],
 		}))
 
-		const manifest = { capabilities: [{ type: "data" }, { type: "contracts" }] }
+		const manifest = {
+			capabilities: [
+				{ type: "data", addressBook: true },
+				{ type: "contracts", contracts: "*" },
+			],
+		}
 		const result = await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
 
 		expect(result).toMatchObject({ granted: expect.any(Array) })
@@ -656,18 +683,18 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 	// (scope-enforcement.test.ts), so it is a re-prompt gap, not a scope escape.
 	test("(DRIFT PIN) contractClasses widening after a grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
 		let popupCalls = 0
-		const existing: Capability = { type: "contractClasses", classes: [`0x${"aa".repeat(32)}`], canGetMetadata: false }
+		const existing: Capability = { type: "contractClasses", classes: [`0x${"0a".repeat(32)}`], canGetMetadata: false }
 		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
 		const { writer } = makeSessionWriter(session)
 		const dispatcher = makePhase15Dispatcher(writer, async () => {
 			popupCalls++
-			return { granted: [{ type: "contractClasses" }] } as CapabilityResult
+			return { granted: [{ type: "contractClasses", classes: "*" }] } as CapabilityResult
 		})
 		// Wider `classes` + `canGetMetadata:true` after a narrower grant: coverage at
 		// dispatcher.ts:760 is type-only (`grantedTypes.has`), so it reads as covered →
 		// delta empty → early return, no popup.
 		const manifest = {
-			capabilities: [{ type: "contractClasses", classes: [`0x${"aa".repeat(32)}`, `0x${"bb".repeat(32)}`], canGetMetadata: true }],
+			capabilities: [{ type: "contractClasses", classes: [`0x${"0a".repeat(32)}`, `0x${"0b".repeat(32)}`], canGetMetadata: true }],
 		}
 		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
 		expect(popupCalls).toBe(0)
@@ -1514,7 +1541,7 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 		const session = makeSession()
 		const { writer, counter } = makeCountingWriter(session)
 		const dispatcher = dispatcherWith(writer)
-		const manifest = { capabilities: [{ type: "data" }] }
+		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
 		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
 		expect(counter.lookups).toBe(1)
 	})
@@ -1644,8 +1671,12 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 			capability: { type: "simulation", transactions: { scope: tx }, utilities: { scope: util } },
 			grantedAt: 1,
 		}) as unknown as GrantedCapabilityRecord
-	const FJ = { contract: "0xfeejuice", function: "claim_and_end_setup" }
-	const CLAIM = { contract: "0xbridge", function: "claim_public" }
+	const FEE_JUICE = `0x${"0f".repeat(32)}`
+	const BRIDGE = `0x${"0b".repeat(32)}`
+	const TOKEN = `0x${"07".repeat(32)}`
+	const OTHER = `0x${"08".repeat(32)}`
+	const FJ = { contract: FEE_JUICE, function: "claim_and_end_setup" }
+	const CLAIM = { contract: BRIDGE, function: "claim_public" }
 
 	const promptTracking = (granted: unknown[]) => {
 		const state = { prompted: false }
@@ -1695,7 +1726,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 	})
 
 	test("simulation sub-scopes diff independently; an added transactions entry re-prompts", async () => {
-		const session = makeSession({ capabilityGrants: [simGrant([CLAIM], [{ contract: "0xtoken", function: "balance_of_public" }])] })
+		const session = makeSession({ capabilityGrants: [simGrant([CLAIM], [{ contract: TOKEN, function: "balance_of_public" }])] })
 		const { writer } = makeSessionWriter(session)
 		const { state, popup } = promptTracking([])
 		const dispatcher = makeDispatcher(writer, popup)
@@ -1708,7 +1739,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 						{
 							type: "simulation",
 							transactions: { scope: [CLAIM, FJ] },
-							utilities: { scope: [{ contract: "0xtoken", function: "balance_of_public" }] },
+							utilities: { scope: [{ contract: TOKEN, function: "balance_of_public" }] },
 						},
 					],
 				},
@@ -1720,7 +1751,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 
 	test("a covered simulation request (subset of both sub-scopes) does NOT re-prompt", async () => {
 		const session = makeSession({
-			capabilityGrants: [simGrant([CLAIM, FJ], [{ contract: "0xtoken", function: "balance_of_public" }])],
+			capabilityGrants: [simGrant([CLAIM, FJ], [{ contract: TOKEN, function: "balance_of_public" }])],
 		})
 		const { writer } = makeSessionWriter(session)
 		const { state, popup } = promptTracking([])
@@ -1731,7 +1762,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 
 	test("a data request widening privateEvents re-prompts; a subset does not", async () => {
 		const dataGrant = {
-			capability: { type: "data", privateEvents: { contracts: ["0xtoken"] } },
+			capability: { type: "data", privateEvents: { contracts: [TOKEN] } },
 			grantedAt: 1,
 		} as unknown as GrantedCapabilityRecord
 		const session = makeSession({ capabilityGrants: [dataGrant] })
@@ -1740,7 +1771,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 		const dispatcher = makeDispatcher(writer, widen.popup)
 		await dispatcher.dispatch(
 			"requestCapabilities",
-			[{ capabilities: [{ type: "data", privateEvents: { contracts: ["0xtoken", "0xother"] } }] }],
+			[{ capabilities: [{ type: "data", privateEvents: { contracts: [TOKEN, OTHER] } }] }],
 			ctx,
 		)
 		expect(widen.state.prompted).toBe(true)
@@ -1751,7 +1782,7 @@ describe("dispatcher — scope-list field-diff re-consent (transaction/simulatio
 		const dispatcher2 = makeDispatcher(fresh.writer, subset.popup)
 		await dispatcher2.dispatch(
 			"requestCapabilities",
-			[{ capabilities: [{ type: "data", privateEvents: { contracts: ["0xtoken"] } }] }],
+			[{ capabilities: [{ type: "data", privateEvents: { contracts: [TOKEN] } }] }],
 			ctx,
 		)
 		expect(subset.state.prompted).toBe(false)
@@ -1861,7 +1892,224 @@ describe("dispatcher — the data answer comes from the stored grant", () => {
 	})
 })
 
+describe("dispatcher — the grant boundary", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
+	const MIXED_CASE = `0x${"0aBc".repeat(16)}`
+	const hex64 = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`
+	const BELOW_MODULUS = hex64(Fr.MODULUS - 1n)
+	const AT_MODULUS = hex64(Fr.MODULUS)
+	const ALL_F = `0x${"f".repeat(64)}`
+
+	type Seen = { params?: { delta: unknown[]; manifest: { capabilities: unknown[] } } }
+	/** A popup that approves exactly what the window was given, or what `answer` returns. */
+	function harness(session: IDappSessionRef, answer?: (params: { delta: unknown[] }) => CapabilityResult) {
+		const { writer } = makeSessionWriter(session)
+		const seen: Seen = {}
+		let decisions = 0
+		const counted: IDappSessionWriter = {
+			...writer,
+			applyCapabilityDecision: async (id, decision) => {
+				decisions += 1
+				return writer.applyCapabilityDecision(id, decision)
+			},
+		}
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async (params: Seen["params"] & { delta: unknown[] }) => {
+				seen.params = params
+				return answer ? answer(params) : { granted: params.delta }
+			}) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(network, stubAccount, stubExecution, interaction, counted, noopLogger)
+		const request = (capabilities: unknown[]) => dispatcher.dispatch("requestCapabilities", [{ capabilities }], ctx)
+		const stored = async () => (await writer.getDappSession("test-session-id")).capabilityGrants?.map((g) => g.capability) ?? []
+		return { request, stored, seen, decisions: () => decisions }
+	}
+
+	test("a field the manifest invents is neither shown nor stored", async () => {
+		const h = harness(makeSession())
+		await h.request([
+			{ type: "accounts", canGet: true, canCreateAuthWit: false, invented: 1 },
+			{ type: "transaction", scope: [{ contract: A, function: "transfer", invented: 2 }], invented: 3 },
+			{ type: "data", addressBook: true, privateEvents: { contracts: [A], invented: 4 } },
+		])
+		expect(JSON.stringify(h.seen.params?.delta)).not.toContain("invented")
+		expect(JSON.stringify(h.seen.params?.manifest)).not.toContain("invented")
+		expect(await h.stored()).toEqual([
+			{ type: "accounts", canGet: true, canCreateAuthWit: false },
+			{ type: "transaction", scope: [{ contract: A, function: "transfer" }] },
+			{ type: "data", addressBook: true, privateEvents: { contracts: [A] } },
+		])
+	})
+
+	test("a field the popup's echo invents is never stored", async () => {
+		const h = harness(makeSession(), () => ({
+			granted: [
+				{ type: "contracts", contracts: [A], canRegister: true, invented: 1 },
+				{ type: "simulation", transactions: { scope: "*", invented: 2 } },
+			],
+		}))
+		await h.request([
+			{ type: "contracts", contracts: [A], canRegister: true },
+			{ type: "simulation", transactions: { scope: "*" } },
+		])
+		expect(await h.stored()).toEqual([
+			{ type: "contracts", contracts: [A], canRegister: true },
+			{ type: "simulation", transactions: { scope: "*" } },
+		])
+	})
+
+	test("the accounts grant the safety net adds is the projected request", async () => {
+		const h = harness(makeSession(), () => ({ granted: [], selectedAccounts: [`aztec:0:${A}`] }))
+		await h.request([{ type: "accounts", canGet: true, canCreateAuthWit: true, invented: 1 }])
+		expect(await h.stored()).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true }])
+	})
+
+	test("an explicit accounts list survives", async () => {
+		const accounts = [{ alias: "Main", item: A }, { item: B }]
+		const h = harness(makeSession())
+		await h.request([{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts }])
+		expect(await h.stored()).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts }])
+	})
+
+	test("valid wire strings pass unchanged, in the case sent", async () => {
+		const requested = [
+			{
+				type: "transaction",
+				scope: [
+					{ contract: BELOW_MODULUS, function: "transfer" },
+					{ contract: "*", function: "mint" },
+				],
+			},
+			{ type: "contracts", contracts: [MIXED_CASE, BELOW_MODULUS], canRegister: true, canGetMetadata: false },
+			{ type: "contractClasses", classes: "*", canGetMetadata: true },
+			{ type: "data", addressBook: false, privateEvents: { contracts: "*" } },
+		]
+		const h = harness(makeSession())
+		await h.request(requested)
+		expect(h.seen.params?.delta).toEqual(requested)
+		expect(await h.stored()).toEqual(requested)
+	})
+
+	test("reordered fields store the same grant", async () => {
+		const first = harness(makeSession())
+		await first.request([{ type: "contracts", contracts: [A], canRegister: true, canGetMetadata: true }])
+		const second = harness(makeSession())
+		await second.request([{ canGetMetadata: true, contracts: [A], canRegister: true, type: "contracts" }])
+		expect(JSON.stringify(await second.stored())).toBe(JSON.stringify(await first.stored()))
+	})
+
+	test("an unknown type passes untouched", async () => {
+		const unknown = { type: "x-vendor", anything: { nested: [1, "two"] } }
+		const h = harness(makeSession())
+		await h.request([unknown])
+		expect(h.seen.params?.delta).toEqual([unknown])
+	})
+
+	test("a known type named twice is refused before any window", async () => {
+		const h = harness(makeSession())
+		const refusal = h.request([
+			{ type: "transaction", scope: [{ contract: A, function: "transfer" }] },
+			{ type: "transaction", scope: "*" },
+		])
+		await expect(refusal).rejects.toBeInstanceOf(ValidationError)
+		await expect(refusal).rejects.toThrow("Duplicate transaction capability")
+		expect(h.seen.params).toBeUndefined()
+		expect(h.decisions()).toBe(0)
+	})
+
+	test.each([
+		["a string flag", { type: "accounts", canGet: "yes" }],
+		["a numeric flag", { type: "contracts", contracts: [A], canRegister: 1 }],
+		["a scope entry that is an address", { type: "transaction", scope: [A] }],
+		["a scope entry without a function", { type: "transaction", scope: [{ contract: A }] }],
+		["an empty function name", { type: "transaction", scope: [{ contract: A, function: "" }] }],
+		["a scope string other than any", { type: "transaction", scope: "all" }],
+		["a short address", { type: "contracts", contracts: ["0xabc"] }],
+		["an address without its prefix", { type: "contracts", contracts: ["0a".repeat(32)] }],
+		["an accounts entry without an item", { type: "accounts", accounts: [{ alias: "Main" }] }],
+		["an accounts entry with a numeric item", { type: "accounts", accounts: [{ item: 5 }] }],
+		["an accounts list that is not a list", { type: "accounts", accounts: "*" }],
+		["contracts without its list", { type: "contracts", canRegister: true }],
+		["a transaction without its scope", { type: "transaction" }],
+		["contract classes without their list", { type: "contractClasses" }],
+		["data asking for nothing", { type: "data" }],
+		["data asking for the address book as false", { type: "data", addressBook: false }],
+		["a simulation transactions string", { type: "simulation", transactions: "*" }],
+		["a simulation utilities object without a scope", { type: "simulation", utilities: {} }],
+		["a private events list", { type: "data", privateEvents: [] }],
+		["a scope contract at the modulus", { type: "transaction", scope: [{ contract: AT_MODULUS, function: "f" }] }],
+		["a scope contract of all f", { type: "simulation", utilities: { scope: [{ contract: ALL_F, function: "f" }] } }],
+		["a listed address at the modulus", { type: "contracts", contracts: [AT_MODULUS] }],
+		["a listed address of all f", { type: "data", privateEvents: { contracts: [ALL_F] } }],
+	])("%s is refused before any window", async (_name, cap) => {
+		const h = harness(makeSession())
+		const type = (cap as { type: string }).type
+		const refusal = h.request([cap])
+		await expect(refusal).rejects.toBeInstanceOf(ValidationError)
+		await expect(refusal).rejects.toMatchObject({ message: `Malformed ${type} capability`, details: { capabilityType: type } })
+		expect(h.seen.params).toBeUndefined()
+		expect(h.decisions()).toBe(0)
+	})
+
+	test("no request value reaches the refusal", async () => {
+		const SENTINEL = "SENTINEL-7f3a"
+		const manifests = [
+			{ type: "accounts", canGet: SENTINEL, canCreateAuthWit: SENTINEL, accounts: [{ alias: SENTINEL, item: 5 }], x: SENTINEL },
+			{ type: "contracts", contracts: [SENTINEL], canRegister: SENTINEL, canGetMetadata: SENTINEL, x: SENTINEL },
+			{ type: "contractClasses", classes: [SENTINEL], canGetMetadata: SENTINEL },
+			{ type: "simulation", transactions: { scope: [{ contract: SENTINEL, function: SENTINEL }] }, utilities: SENTINEL },
+			{ type: "transaction", scope: [{ contract: SENTINEL, function: SENTINEL }] },
+			{ type: "data", addressBook: SENTINEL, privateEvents: { contracts: [SENTINEL] } },
+		]
+		for (const cap of manifests) {
+			const error = await harness(makeSession())
+				.request([cap])
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(ValidationError)
+			const err = error as ValidationError
+			expect(JSON.stringify({ ...err, message: err.message, stack: err.stack })).not.toContain(SENTINEL)
+		}
+	})
+
+	describe("A declined data row keeps the held field", () => {
+		const request = (privateEvents: "*" | string[]) => ({
+			type: "data",
+			addressBook: true,
+			privateEvents: { contracts: privateEvents },
+		})
+		const held = (cap: Capability) => makeSession({ capabilityGrants: [{ capability: cap, grantedAt: 1 }] })
+
+		test.each([
+			["private events row Off", [], { type: "data", addressBook: true, privateEvents: { contracts: [A] } }],
+			["private events row On", [request("*")], { type: "data", addressBook: true, privateEvents: { contracts: "*" } }],
+		])("held both, widened to any contract: %s", async (_name, granted, expected) => {
+			const h = harness(held({ type: "data", addressBook: true, privateEvents: { contracts: [A] } }), () => ({ granted }))
+			const answer = (await h.request([request("*")])) as { granted: unknown[] }
+			expect(await h.stored()).toEqual([expected])
+			expect(answer.granted).toEqual([expected])
+		})
+
+		test.each([
+			["address book On, private events Off", { type: "data", addressBook: true, privateEvents: { contracts: [A] } }],
+			["address book Off, private events On", { type: "data", privateEvents: { contracts: [A, B] } }],
+			["both Off", undefined],
+			["both On", { type: "data", addressBook: true, privateEvents: { contracts: [A, B] } }],
+		])("held private events only, both rows new: %s", async (_name, result) => {
+			const heldCap: Capability = { type: "data", privateEvents: { contracts: [A] } }
+			const h = harness(held(heldCap), () => ({ granted: result === undefined ? [] : [result] }))
+			await h.request([request([A, B])])
+			expect(await h.stored()).toEqual([result ?? heldCap])
+		})
+	})
+})
+
 describe("dispatcher — contracts field-diff re-consent", () => {
+	const OLD = `0x${"01".repeat(32)}`
+	const NEW = `0x${"02".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
 	const grant = (
 		contracts: string[],
 		flags: { canRegister?: boolean; canGetMetadata?: boolean } = { canRegister: true, canGetMetadata: true },
@@ -1872,31 +2120,31 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 	})
 
 	test("a request covered by the stored grant does NOT re-prompt", async () => {
-		const session = makeSession({ capabilityGrants: [grant(["0xa", "0xb"])] })
+		const session = makeSession({ capabilityGrants: [grant([OLD, B])] })
 		const { writer } = makeSessionWriter(session)
 		let prompted = false
 		const dispatcher = makeDispatcher(writer, async () => {
 			prompted = true
 			return { granted: [] } as never
 		})
-		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		await dispatcher.dispatch("requestCapabilities", [manifest([OLD])], ctx)
 		expect(prompted).toBe(false)
 	})
 
 	test("a request with NEW addresses re-prompts (the redeploy path)", async () => {
-		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const session = makeSession({ capabilityGrants: [grant([OLD])] })
 		const { writer } = makeSessionWriter(session)
 		let prompted = false
 		const dispatcher = makeDispatcher(writer, async () => {
 			prompted = true
-			return { granted: [{ type: "contracts", contracts: ["0xnew"], canRegister: true, canGetMetadata: true }] } as never
+			return { granted: [{ type: "contracts", contracts: [NEW], canRegister: true, canGetMetadata: true }] } as never
 		})
-		await dispatcher.dispatch("requestCapabilities", [manifest(["0xnew"])], ctx)
+		await dispatcher.dispatch("requestCapabilities", [manifest([NEW])], ctx)
 		expect(prompted).toBe(true)
 	})
 
 	test("an approved contracts re-consent PERSISTS the replacement grant (codex post-impl condition)", async () => {
-		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const session = makeSession({ capabilityGrants: [grant([OLD])] })
 		const { writer, calls } = makeSessionWriter(session)
 		// The popup echoes the existing cap alongside the newly approved delta (approvedNew + existing).
 		const dispatcher = makeDispatcher(
@@ -1904,17 +2152,17 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 			async () =>
 				({
 					granted: [
-						{ type: "contracts", contracts: ["0xold", "0xnew"], canRegister: true, canGetMetadata: true },
-						{ type: "contracts", contracts: ["0xold"], canRegister: true, canGetMetadata: true },
+						{ type: "contracts", contracts: [OLD, NEW], canRegister: true, canGetMetadata: true },
+						{ type: "contracts", contracts: [OLD], canRegister: true, canGetMetadata: true },
 					],
 				}) as never,
 		)
-		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		await dispatcher.dispatch("requestCapabilities", [manifest([OLD, NEW])], ctx)
 		const stored = calls.setGrants.at(-1) ?? []
 		const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
 		expect(contractsGrants).toHaveLength(1) // replaced, not duplicated
 		const addrs = (contractsGrants[0].capability as { contracts: string[] }).contracts
-		expect(addrs).toContain("0xnew")
+		expect(addrs).toContain(NEW)
 
 		// And the follow-up request is now COVERED - no second prompt.
 		let promptedAgain = false
@@ -1922,22 +2170,22 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 			promptedAgain = true
 			return { granted: [] } as never
 		})
-		await dispatcher2.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		await dispatcher2.dispatch("requestCapabilities", [manifest([OLD, NEW])], ctx)
 		expect(promptedAgain).toBe(false)
 	})
 
 	test("a REJECTED contracts re-consent keeps the old grant intact (rejection interplay)", async () => {
-		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const session = makeSession({ capabilityGrants: [grant([OLD])] })
 		const { writer } = makeSessionWriter(session)
 		// The user declines the widening — nothing new is approved.
 		const dispatcher = makeDispatcher(writer, async () => ({ granted: [] }) as never)
-		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx).catch(() => {})
+		await dispatcher.dispatch("requestCapabilities", [manifest([OLD, NEW])], ctx).catch(() => {})
 		// Assert the STORED state unconditionally: the denied widening must not drop or
-		// widen the older grant — storage still holds exactly ["0xold"].
+		// widen the older grant — storage still holds exactly [OLD].
 		const stored = await writer.getDappSession("test-session-id")
 		const contractsGrants = (stored.capabilityGrants ?? []).filter((g) => g.capability.type === "contracts")
 		expect(contractsGrants).toHaveLength(1)
-		expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
+		expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual([OLD])
 	})
 
 	test("CAIP-stored session accounts accept RAW-hex scope arrays (the fresh-session balance bug)", async () => {
@@ -2006,14 +2254,14 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 	})
 
 	test("a flag upgrade re-prompts even with the same addresses", async () => {
-		const session = makeSession({ capabilityGrants: [grant(["0xa"], { canRegister: true, canGetMetadata: false })] })
+		const session = makeSession({ capabilityGrants: [grant([OLD], { canRegister: true, canGetMetadata: false })] })
 		const { writer } = makeSessionWriter(session)
 		let prompted = false
 		const dispatcher = makeDispatcher(writer, async () => {
 			prompted = true
 			return { granted: [] } as never
 		})
-		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		await dispatcher.dispatch("requestCapabilities", [manifest([OLD])], ctx)
 		expect(prompted).toBe(true)
 	})
 })

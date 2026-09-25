@@ -51,6 +51,7 @@
 // Imports use relative paths because this file IS part of wallet-bridge — the
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { resolveAuthorizedSessionAccount } from "./account-resolution"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount } from "./caip"
 import type {
@@ -60,6 +61,7 @@ import type {
 	DataCapability,
 	GrantedCapabilityRecord,
 	Scope,
+	ScopePattern,
 	SimulationCapability,
 	TransactionCapability,
 } from "./capabilities"
@@ -98,7 +100,7 @@ import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-chec
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, ValidationError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { describeExternalId } from "./external-id"
@@ -294,6 +296,132 @@ const KNOWN_CAPABILITY_TYPES: Record<Capability["type"], true> = {
 
 function isKnownCapabilityType(type: string): type is Capability["type"] {
 	return Object.hasOwn(KNOWN_CAPABILITY_TYPES, type)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function knownTypeOf(cap: unknown): Capability["type"] | undefined {
+	return isRecord(cap) && typeof cap.type === "string" && isKnownCapabilityType(cap.type) ? cap.type : undefined
+}
+
+const FIELD_ADDRESS = /^0x[0-9a-fA-F]{64}$/
+
+/** Kept in the case sent: coverage compares addresses as strings. */
+function isFieldAddress(value: unknown): value is string {
+	return typeof value === "string" && FIELD_ADDRESS.test(value) && BigInt(value) < Fr.MODULUS
+}
+
+function malformed(): never {
+	throw new Error("malformed capability")
+}
+
+function flagOf(cap: Record<string, unknown>, key: string): Record<string, boolean> {
+	const value = cap[key]
+	if (value === undefined) return {}
+	if (typeof value !== "boolean") malformed()
+	return { [key]: value }
+}
+
+function patternOf(pattern: unknown): ScopePattern {
+	if (!isRecord(pattern)) malformed()
+	const { contract, function: fn } = pattern
+	if (!(contract === "*" || isFieldAddress(contract)) || typeof fn !== "string" || fn === "") malformed()
+	return { contract, function: fn }
+}
+
+function scopeOf(scope: unknown): Scope {
+	if (scope === "*") return "*"
+	if (!Array.isArray(scope)) malformed()
+	return scope.map(patternOf)
+}
+
+function scopeHolderOf(holder: unknown): { scope: Scope } {
+	if (!isRecord(holder)) malformed()
+	return { scope: scopeOf(holder.scope) }
+}
+
+function addressListOf(list: unknown): "*" | string[] {
+	if (list === "*") return "*"
+	if (!Array.isArray(list) || !list.every(isFieldAddress)) malformed()
+	return [...list]
+}
+
+function accountListOf(list: unknown): Record<string, unknown>[] {
+	if (!Array.isArray(list)) malformed()
+	return list.map((entry) => {
+		if (!isRecord(entry) || typeof entry.item !== "string") malformed()
+		return { ...(typeof entry.alias === "string" ? { alias: entry.alias } : {}), item: entry.item }
+	})
+}
+
+function optional<T>(cap: Record<string, unknown>, key: string, project: (value: unknown) => T): Record<string, T> {
+	return cap[key] === undefined ? {} : { [key]: project(cap[key]) }
+}
+
+function projectData(cap: Record<string, unknown>): Record<string, unknown> {
+	const addressBook = flagOf(cap, "addressBook")
+	const privateEvents = optional(cap, "privateEvents", (holder) => {
+		if (!isRecord(holder)) malformed()
+		return { contracts: addressListOf(holder.contracts) }
+	})
+	// Asking for neither would open a window with no data row and record a rejection nobody chose.
+	if (addressBook.addressBook !== true && privateEvents.privateEvents === undefined) malformed()
+	return { type: "data", ...addressBook, ...privateEvents }
+}
+
+/** Copies only the fields the window, the predicates and the checkers read, validated and kept
+ *  wire-shaped so the row MAC signs exactly what enforcement reads. */
+const CAPABILITY_PROJECTORS: Record<Capability["type"], (cap: Record<string, unknown>) => Record<string, unknown>> = {
+	accounts: (cap) => ({
+		type: "accounts",
+		...flagOf(cap, "canGet"),
+		...flagOf(cap, "canCreateAuthWit"),
+		...optional(cap, "accounts", accountListOf),
+	}),
+	contracts: (cap) => ({
+		type: "contracts",
+		contracts: addressListOf(cap.contracts),
+		...flagOf(cap, "canRegister"),
+		...flagOf(cap, "canGetMetadata"),
+	}),
+	contractClasses: (cap) => ({ type: "contractClasses", classes: addressListOf(cap.classes), ...flagOf(cap, "canGetMetadata") }),
+	simulation: (cap) => ({
+		type: "simulation",
+		...optional(cap, "transactions", scopeHolderOf),
+		...optional(cap, "utilities", scopeHolderOf),
+	}),
+	transaction: (cap) => ({ type: "transaction", scope: scopeOf(cap.scope) }),
+	data: projectData,
+}
+
+/** Validates a known capability and copies only its known fields; unknown types pass untouched.
+ *  Every failure, a throw on a hostile value included, becomes one error naming only the type, so
+ *  no request value reaches a log line. */
+export function projectKnownCapability(cap: unknown): unknown {
+	const type = knownTypeOf(cap)
+	if (type === undefined) return cap
+	try {
+		return CAPABILITY_PROJECTORS[type](cap as Record<string, unknown>)
+	} catch {
+		throw new ValidationError(`Malformed ${type} capability`, { capabilityType: type })
+	}
+}
+
+/** A known type named twice is refused: the grant would keep only one of them, so what the
+ *  window shows and what is granted could differ. */
+function projectRequestedCapabilities(caps: readonly unknown[]): Record<string, unknown>[] {
+	const seen = new Set<string>()
+	return caps.map((cap) => {
+		const projected = projectKnownCapability(cap)
+		const type = knownTypeOf(projected)
+		if (type !== undefined && seen.has(type)) {
+			throw new ValidationError(`Duplicate ${type} capability`, { capabilityType: type })
+		}
+		if (type !== undefined) seen.add(type)
+		return projected as Record<string, unknown>
+	})
 }
 
 /** Grants of one capability type, narrowed to that variant. The single typed cast
@@ -498,11 +626,13 @@ function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unk
  *  so for replaced types we take the LAST result entry of that type that differs from the
  *  stored capability (falling back to the delta's requested shape). */
 function collectNewGrants(
-	grantedResults: Record<string, unknown>[],
+	popupResults: Record<string, unknown>[],
 	plan: CapabilityPlan,
 	deltaApprovedTypes: Set<string>,
 	now: number,
 ): GrantedCapabilityRecord[] {
+	// The popup's answer is projected like the manifest, so no field it adds is ever stored.
+	const grantedResults = popupResults.map((cap) => projectKnownCapability(cap) as Record<string, unknown>)
 	const replacementFor = (type: string): Capability | undefined => {
 		const stored = plan.existingGrants.find((g) => g.capability.type === type)?.capability
 		const candidates = grantedResults.filter((cap) => cap.type === type)
@@ -1157,7 +1287,7 @@ export class WalletSdkDispatcher {
 	): Promise<unknown> {
 		this.requireSession(dappSession, ctx)
 
-		const requestedCapabilities = (manifest?.capabilities ?? []) as Record<string, unknown>[]
+		const requestedCapabilities = projectRequestedCapabilities(manifest?.capabilities ?? [])
 		if (requestedCapabilities.length === 0) {
 			return {
 				version: "1.0" as const,
@@ -1199,7 +1329,7 @@ export class WalletSdkDispatcher {
 		try {
 			result = await this.dappInteractionService.requestCapabilities({
 				sessionId: dappSession.id,
-				manifest,
+				manifest: { ...manifest, capabilities: requestedCapabilities },
 				delta: plan.delta,
 				existingGrants: plan.existingCaps,
 				reRequested: plan.reRequested,
