@@ -16,6 +16,7 @@ import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
 import { runFencedBootstrap } from "@/popup/profile-bootstrap"
+import { createScopeEpochHandlers } from "@/popup/scope-epoch"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Composables */
@@ -27,7 +28,14 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
-const { openToast } = useToast()
+const { openToast, closeToast, toast } = useToast()
+const { onScopeChanged, onLocked } = createScopeEpochHandlers({
+	bumpEpoch: () => {
+		appStore.scopeEpoch++
+	},
+	toast,
+	closeToast,
+})
 
 /** Update theme */
 const root = document.querySelector("html")
@@ -127,6 +135,9 @@ watch(
 	}),
 )
 
+// `flush: "sync"`: a send settling in the next microtask must already see the new epoch.
+watch([() => appStore.profile?.id, () => appStore.network?.id, () => appStore.account?.address], onScopeChanged, { flush: "sync" })
+
 /** Sequence token for profile events. Handlers await service round-trips, and under load a
  *  stale LOCK event can resume after its own unlock has already re-activated the profile — its
  *  routing side effects would eject an active session to the auth screen (observed as e2e
@@ -173,6 +184,7 @@ const onActiveProfileChanged = async (profile) => {
  *  that finds no session under an authenticated page (a worker restart). */
 const enterLockedState = (profiles) => {
 	popupStore.closeAll()
+	onLocked()
 	appStore.isLogined = false
 	// Every cached scope goes with the lock, so no profile's activity outlives
 	// it in memory. Switching profiles runs through lock/unlock, which means a

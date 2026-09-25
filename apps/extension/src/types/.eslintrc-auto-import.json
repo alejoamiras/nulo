@@ -247,6 +247,7 @@
     "formatFeeJuice": true,
     "formatGas": true,
     "formatGasBalance": true,
+    "formatSnackAmount": true,
     "formatTransferType": true,
     "getAccount": true,
     "getCallCountLabel": true,

@@ -4,7 +4,8 @@ import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { clickByTestId, type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import { navigateToSettings, waitForToast } from "./fixtures/helpers"
-import { activeTestId } from "./helpers/pointer-probes"
+import { pointerClick } from "./helpers/legal-drivers"
+import { activeTestId, focusInPopupOf } from "./helpers/pointer-probes"
 
 const sel = (testid: string) => `[data-testid="${testid}"]`
 const SNACK = sel("snackbar")
@@ -152,6 +153,21 @@ async function waitForSnackGone(page: Page, timeout: number): Promise<void> {
 	await page.waitForFunction((s: string) => !document.querySelector(s), { timeout, polling: 50 }, SNACK)
 }
 
+/** Presses Tab until focus lands on `testid`, at most `limit` times, noting every landing that left
+ *  the popup holding `inside`. */
+async function tabUntil(page: Page, testid: string, inside: string, limit: number): Promise<{ visited: string[]; escaped: string[] }> {
+	const visited: string[] = []
+	const escaped: string[] = []
+	for (let i = 0; i < limit; i++) {
+		await page.keyboard.press("Tab")
+		const at = await activeTestId(page)
+		visited.push(at)
+		if (at === testid) break
+		if (!(await focusInPopupOf(page, inside))) escaped.push(at)
+	}
+	return { visited, escaped }
+}
+
 test("a copy success on Home spans the viewport above the nav and closes itself after 6 s", async ({ registeredExtension }) => {
 	const page = await openHome(registeredExtension)
 	await stubClipboard(page, "resolve")
@@ -240,6 +256,33 @@ test("an error on a page without the nav sits 12px up, stays, and closes from th
 	expect(await activeTestId(page)).toBe("snackbar-close")
 	await page.keyboard.press("Enter")
 	await waitForSnackGone(page, 5_000)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("an error raised inside a popup: Tab reaches its × after the popup's controls, Enter closes it and the popup stays", async ({
+	registeredExtension,
+}) => {
+	const page = await openHome(registeredExtension)
+	await clickByTestId(page, "account-avatar-btn")
+	await page.waitForSelector(sel("accounts-popup"), { visible: true, timeout: 5_000 })
+	await stubClipboard(page, "reject")
+	// The copy glyph is an <svg>, which has no `.click()`: a real press, as a user would.
+	await pointerClick(page, "account-item-copy")
+	await waitForToast(page, "Couldn't copy", 5_000, { kind: "error" })
+
+	await page.bringToFront()
+	const { visited, escaped } = await tabUntil(page, "snackbar-close", "account-item", 24)
+	console.log(`[snackbar] the Tab walk visited ${visited.join(" → ")}`)
+	expect(visited.at(-1)).toBe("snackbar-close")
+	expect(visited.length).toBeGreaterThan(1)
+	expect(escaped).toEqual([])
+
+	await page.keyboard.press("Enter")
+	await waitForSnackGone(page, 5_000)
+	expect(await page.$(sel("accounts-popup"))).not.toBeNull()
+	expect(await focusInPopupOf(page, "account-item")).toBe(true)
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])

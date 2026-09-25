@@ -106,6 +106,7 @@ declare global {
   const formatFeeJuice: typeof import('../utils/fee-estimation').formatFeeJuice
   const formatGas: typeof import('../utils/fee-estimation').formatGas
   const formatGasBalance: typeof import('../utils/fee-estimation').formatGasBalance
+  const formatSnackAmount: typeof import('../utils/snack-amount').formatSnackAmount
   const formatTransferType: typeof import('../utils/tx-enrichment').formatTransferType
   const getAccount: typeof import('../utils/core').getAccount
   const getCallCountLabel: typeof import('../utils/tx-enrichment').getCallCountLabel
@@ -588,6 +589,7 @@ declare module 'vue' {
     readonly formatFeeJuice: UnwrapRef<typeof import('../utils/fee-estimation')['formatFeeJuice']>
     readonly formatGas: UnwrapRef<typeof import('../utils/fee-estimation')['formatGas']>
     readonly formatGasBalance: UnwrapRef<typeof import('../utils/fee-estimation')['formatGasBalance']>
+    readonly formatSnackAmount: UnwrapRef<typeof import('../utils/snack-amount')['formatSnackAmount']>
     readonly formatTransferType: UnwrapRef<typeof import('../utils/tx-enrichment')['formatTransferType']>
     readonly getAccount: UnwrapRef<typeof import('../utils/core')['getAccount']>
     readonly getCallCountLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getCallCountLabel']>
