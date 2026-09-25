@@ -1399,7 +1399,7 @@ Spec § How to use it: a state with no shot stops for the owner. So before any p
 Gate: both commands exit 0, the publish result is in the transcript, and every ask above has a
 drawing and a picker. Each later phase re-reads the picks for the asks it builds.
 
-#### P1 · The consent and the grant boundary ☐
+#### P1 · The consent and the grant boundary ✓
 
 1. `session-types.ts`, `services-contract.ts`, `dapp-interaction-protocol.ts`: the optional
    fields.
