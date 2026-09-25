@@ -146,10 +146,10 @@ async function exportLogsToCSV() {
 			data: csv,
 			filename: `NuloWalletLogs_${Math.floor(Date.now() / 1000)}.csv`,
 		})
-		openToast({ label: "Logs downloaded successfully", icon: "download" })
+		openToast({ kind: "success", label: "Logs downloaded successfully" })
 	} catch (err) {
 		console.error(err)
-		openToast({ label: "Failed to download logs", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to download logs" })
 	}
 }
 
@@ -162,7 +162,7 @@ async function handleClearLogs() {
 		await nextTick()
 		updateEditorContent()
 	} catch (err) {
-		openToast({ label: "Failed to clear logs", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to clear logs" })
 		console.error(err)
 	}
 }

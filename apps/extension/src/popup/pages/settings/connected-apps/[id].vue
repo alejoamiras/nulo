@@ -156,7 +156,7 @@ function onDappSessionUpdated(ds) {
 }
 function onDappSessionDeleted(ds) {
 	if (ds.id !== session.value?.id) return
-	openToast({ label: "The session was interrupted" })
+	openToast({ kind: "success", label: "The session was interrupted" })
 	router.go(-1)
 }
 dappSessionService.onDappSessionUpdated.add(onDappSessionUpdated)

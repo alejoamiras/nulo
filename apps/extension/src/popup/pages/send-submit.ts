@@ -1,4 +1,4 @@
-import { TOAST_DURATION } from "@/composables/toast.js"
+import type { ToastOptions } from "@/composables/toast"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
 
@@ -32,7 +32,7 @@ export interface SubmitDeps {
 		add: (row: { id: string; account: string; destination: string; contract: string }) => void
 		remove: (id: string) => void
 	}
-	openToast: (toast: { label: string; icon: string; color?: string }, duration?: number) => void
+	openToast: (toast: ToastOptions) => void
 	/** Runs once the transfer settles either way — the page's execution-port teardown. */
 	onSettled: () => void
 }
@@ -57,14 +57,14 @@ export function submitTransfer(deps: SubmitDeps, snap: TransferSnapshot): string
 		snap.precomputedEstimateId,
 	)
 		.then(() => {
-			deps.openToast({ label: "Transaction submitted", icon: "check-circle" })
+			deps.openToast({ kind: "success", label: "Transaction submitted" })
 		})
 		.catch((err: unknown) => {
 			deps.awaiting.remove(awaitingId)
 			// A cancel already reads "Cancelled" on its activity card; a failure toast would contradict it.
 			if (classifyCancellableRejection(err) === "silent") return
 
-			deps.openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+			deps.openToast({ kind: "error", label: transferFailureCopy(err) })
 			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
 			else console.error("[send] executeTransfer failed:", err)
 		})

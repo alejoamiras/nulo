@@ -44,9 +44,7 @@ async function completeImport(profile: unknown) {
 		},
 		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
 	})
-	openToast(
-		outcome === "active" ? { label: "Profile imported", icon: "check-circle" } : { label: "Profile imported. Unlock to continue." },
-	)
+	openToast({ kind: "success", label: outcome === "active" ? "Profile imported" : "Profile imported. Unlock to continue." })
 	router.push("/onboarding/learn")
 }
 

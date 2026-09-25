@@ -1,108 +1,373 @@
 /**
- * ToastManagerBase teleports its rendered toast into `teleportTo` (default `#toast`). The composable
- * `useToast` is module-scoped, so we import it directly and drive the toast state through it.
+ * ToastManagerBase teleports its two live regions into `teleportTo` (default `#toast`). The
+ * composable `useToast` is module-scoped, so the tests drive the snack through it. Transitions run
+ * for real: rAF is faked and stepped 16 ms at a time, and where a case needs the leave to last,
+ * `getComputedStyle` reports a 0.15 s transition (jsdom computes none, so Vue would otherwise end a
+ * leave after two frames).
  */
-import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { useToast } from "../composables/toast"
+import { nextTick } from "vue"
+import { type ToastOptions, useToast } from "../composables/toast"
 import ToastManagerBase from "./ToastManagerBase.vue"
 
 // Auto-unmount between tests: every region shares the module-scope toast singleton, so a lingering
-// instance from a prior test would also render the next test's toast (esp. into the default #toast).
+// instance from a prior test would also render the next test's toast.
 enableAutoUnmount(afterEach)
 
+const CARD = '[data-testid="snackbar"]'
 let toastRoot: HTMLDivElement
+const realComputedStyle = window.getComputedStyle.bind(window)
 
 const STUBS = {
-	Flex: { template: '<div :class="$attrs.class" v-bind="$attrs"><slot /></div>', inheritAttrs: false },
 	Icon: { template: '<span data-testid="stub-icon" :data-name="name" :data-color="color" />', props: ["name", "size", "color"] },
+	MaterialIcon: { template: '<span data-testid="stub-mat-icon" :data-name="name" />', props: ["name", "size", "color"] },
+	transition: false,
 }
 
 const mountRegion = (props: Record<string, unknown> = {}) =>
 	mount(ToastManagerBase, { attachTo: document.body, props, global: { stubs: STUBS } })
+
+const open = (options: ToastOptions) => useToast().openToast(options)
+const cards = () => toastRoot.querySelectorAll(CARD)
+const card = () => toastRoot.querySelector<HTMLElement>(CARD)
+const status = () => toastRoot.querySelector('[role="status"]') as HTMLElement
+const alert = () => toastRoot.querySelector('[role="alert"]') as HTMLElement
+
+/** Flushes Vue, then advances fake time in 16 ms frames, flushing between frames. */
+async function step(ms: number) {
+	await nextTick()
+	for (let t = 0; t < ms; t += 16) {
+		vi.advanceTimersByTime(Math.min(16, ms - t))
+		await nextTick()
+	}
+}
+
+/** Long enough for any leave plus any enter with the 0.15 s stub (two frames + 151 ms each). */
+const settle = () => step(600)
+
+/** Vue reads the transition duration off computed style; the stub gives the cards one. */
+function stubTransitionDuration() {
+	vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+		if (el instanceof HTMLElement && el.closest("#toast")) {
+			return {
+				transitionDelay: "0s",
+				transitionDuration: "0.15s",
+				transitionProperty: "opacity, transform",
+				animationDelay: "0s",
+				animationDuration: "0s",
+			} as unknown as CSSStyleDeclaration
+		}
+		return realComputedStyle(el, pseudo)
+	})
+}
+
+/** Steps frame by frame until `until` holds, failing if two cards ever show at once. */
+async function stepUntil(until: () => boolean, ms = 800) {
+	for (let t = 0; t < ms; t += 16) {
+		expect(cards().length, `${cards().length} cards at ${t} ms`).toBeLessThanOrEqual(1)
+		if (until()) return
+		vi.advanceTimersByTime(16)
+		await nextTick()
+	}
+	throw new Error("the condition did not hold within the window")
+}
+
+const entered = (label: string) => () => {
+	const el = card()
+	return el !== null && el.textContent?.includes(label) === true && !/enter/.test(el.className)
+}
+
+const mouse = (el: Element, type: string) => el.dispatchEvent(new MouseEvent(type, { bubbles: false }))
 
 describe("ToastManagerBase", () => {
 	beforeEach(() => {
 		toastRoot = document.createElement("div")
 		toastRoot.id = "toast"
 		document.body.appendChild(toastRoot)
-		vi.useFakeTimers()
+		vi.useFakeTimers({
+			toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"],
+		})
 		useToast().closeToast()
 	})
 
 	afterEach(() => {
+		useToast().closeToast()
 		toastRoot.remove()
+		vi.restoreAllMocks()
 		vi.useRealTimers()
 	})
 
-	test("renders nothing inside #toast when no toast is open", () => {
+	test("both regions exist before any toast, and each kind renders inside its own region", async () => {
 		mountRegion()
-		expect(toastRoot.textContent).toBe("")
+		expect(status()).not.toBeNull()
+		expect(alert()).not.toBeNull()
+		expect(status().getAttribute("aria-live")).toBe("polite")
+		expect(status().getAttribute("aria-atomic")).toBe("true")
+		expect(alert().getAttribute("aria-atomic")).toBe("true")
+		expect(cards().length).toBe(0)
+
+		open({ kind: "success", label: "Saved" })
+		await nextTick()
+		expect(status().querySelector(CARD)?.getAttribute("data-kind")).toBe("success")
+		expect(alert().querySelector(CARD)).toBeNull()
+		expect(status().querySelector('[data-name="check-circle"]')?.getAttribute("data-color")).toBe("green")
+		await settle()
+
+		open({ kind: "error", label: "Failed" })
+		await settle()
+		expect(status().querySelector(CARD)).toBeNull()
+		expect(alert().querySelector(CARD)?.getAttribute("data-kind")).toBe("error")
+		expect(alert().querySelector('[data-name="close-circle"]')?.getAttribute("data-color")).toBe("red")
 	})
 
-	test("openToast teleports the label into #toast", async () => {
+	test("the same text opened twice renders twice: the second card is a new element", async () => {
 		mountRegion()
-		useToast().openToast({ label: "Saved" })
-		await flushPromises()
-		expect(toastRoot.textContent).toContain("Saved")
+		open({ kind: "success", label: "Copied" })
+		await settle()
+		const first = card()
+		open({ kind: "success", label: "Copied" })
+		await settle()
+		const second = card()
+		expect(second).not.toBeNull()
+		expect(second).not.toBe(first)
+		expect(first?.isConnected).toBe(false)
 	})
 
-	test("default icon name is 'check-circle' when toast.icon is not set", async () => {
+	test.each([
+		["same kind", { kind: "success", label: "First" }, { kind: "success", label: "Second" }],
+		["success then error", { kind: "success", label: "First" }, { kind: "error", label: "Second" }],
+		["error then success", { kind: "error", label: "First" }, { kind: "success", label: "Second" }],
+	] as const)("a replacement (%s) never shows two cards at once and ends with the new one", async (_, a, b) => {
+		stubTransitionDuration()
 		mountRegion()
-		useToast().openToast({ label: "Saved" })
-		await flushPromises()
-		expect(toastRoot.querySelector('[data-name="check-circle"]')).not.toBeNull()
+		open(a)
+		await stepUntil(entered("First"))
+
+		open(b)
+		await nextTick()
+		expect(cards().length).toBeLessThanOrEqual(1)
+		await stepUntil(entered("Second"))
+		expect(card()?.getAttribute("data-kind")).toBe(b.kind)
+		expect(card()?.textContent).toContain("Second")
+		expect(cards().length).toBe(1)
+		expect(status().className).toBe(alert().className)
+		expect(status().parentElement).toBe(alert().parentElement)
 	})
 
-	test("custom icon prop is honored", async () => {
+	test("a close during a cross-kind leave installs nothing, on that frame or later", async () => {
+		stubTransitionDuration()
 		mountRegion()
-		useToast().openToast({ label: "Bzzt", icon: "warning" })
-		await flushPromises()
-		expect(toastRoot.querySelector('[data-name="warning"]')).not.toBeNull()
+		open({ kind: "success", label: "First" })
+		await stepUntil(entered("First"))
+		open({ kind: "error", label: "Second" })
+		await step(16)
+		useToast().closeToast()
+		await settle()
+		expect(cards().length).toBe(0)
+		expect(toastRoot.textContent?.trim()).toBe("")
+		await settle()
+		expect(cards().length).toBe(0)
 	})
 
-	test("color=red applies the variant_red CSS class on the card", async () => {
+	test("a second open during the wait: only the newest enters", async () => {
+		stubTransitionDuration()
 		mountRegion()
-		useToast().openToast({ label: "Boom", color: "red" })
-		await flushPromises()
-		expect(toastRoot.innerHTML).toMatch(/variant_red/)
-	})
-
-	test("clicking the toast card closes it (clears the label)", async () => {
-		mountRegion()
-		useToast().openToast({ label: "Disposable" })
-		await flushPromises()
-		expect(toastRoot.textContent).toContain("Disposable")
-		const card = toastRoot.querySelector("[class*='card']") as HTMLElement | null
-		card?.click()
-		await flushPromises()
-		expect(toastRoot.textContent).not.toContain("Disposable")
-	})
-
-	test("auto-close timer hides the toast after the configured duration", async () => {
-		mountRegion()
-		useToast().openToast({ label: "Timed out" }, 1500)
-		await flushPromises()
-		expect(toastRoot.textContent).toContain("Timed out")
-		vi.advanceTimersByTime(1500)
-		await flushPromises()
-		expect(toastRoot.textContent).not.toContain("Timed out")
-	})
-
-	test("rapid second openToast resets the timer; the first timeout does not kill the second early", async () => {
-		mountRegion()
-		const { openToast } = useToast()
-		openToast({ label: "First" }, 1500)
-		await flushPromises()
-		vi.advanceTimersByTime(1000)
-		openToast({ label: "Second" }, 2000)
-		await flushPromises()
-		vi.advanceTimersByTime(500)
-		await flushPromises()
-		expect(toastRoot.textContent).toContain("Second")
-		vi.advanceTimersByTime(1500)
-		await flushPromises()
+		open({ kind: "success", label: "First" })
+		await stepUntil(entered("First"))
+		open({ kind: "error", label: "Second" })
+		await step(16)
+		open({ kind: "error", label: "Third" })
+		await stepUntil(entered("Third"))
+		expect(cards().length).toBe(1)
 		expect(toastRoot.textContent).not.toContain("Second")
+		await settle()
+		expect(cards().length).toBe(1)
+		expect(card()?.textContent).toContain("Third")
+	})
+
+	test("unmounting during the wait renders nothing and throws nothing", async () => {
+		stubTransitionDuration()
+		const wrapper = mountRegion()
+		open({ kind: "success", label: "First" })
+		await stepUntil(entered("First"))
+		open({ kind: "error", label: "Second" })
+		await step(16)
+		wrapper.unmount()
+		await settle()
+		expect(toastRoot.querySelectorAll(CARD).length).toBe(0)
+	})
+
+	test("title, sub and the action render; selecting the action closes first, then runs", async () => {
+		mountRegion()
+		const seen: unknown[] = []
+		open({
+			kind: "success",
+			label: "Transaction submitted",
+			sub: "1 TST to 0x1234…5678",
+			action: { label: "View", onSelect: () => seen.push(useToast().toast.value) },
+		})
+		await settle()
+		expect(card()?.querySelector('[data-testid="snackbar-title"]')?.textContent).toBe("Transaction submitted")
+		expect(card()?.querySelector('[data-testid="snackbar-sub"]')?.textContent).toBe("1 TST to 0x1234…5678")
+		const action = card()?.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]')
+		expect(action?.textContent?.trim()).toBe("View")
+		expect(card()?.querySelector('[data-testid="snackbar-close"]')).toBeNull()
+		action?.click()
+		await settle()
+		expect(seen).toEqual([null])
+		expect(cards().length).toBe(0)
+	})
+
+	test("an error has × with aria-label Close, and × closes it", async () => {
+		mountRegion()
+		open({ kind: "error", label: "Failed" })
+		await settle()
+		expect(card()?.querySelector('[data-testid="snackbar-sub"]')).toBeNull()
+		const close = card()?.querySelector<HTMLButtonElement>('[data-testid="snackbar-close"]')
+		expect(close?.getAttribute("aria-label")).toBe("Close")
+		expect(close?.getAttribute("type")).toBe("button")
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		close?.click()
+		await settle()
+		expect(cards().length).toBe(0)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("× returns focus to where focus came from, when that element is still on the page", async () => {
+		mountRegion()
+		const origin = document.createElement("button")
+		document.body.appendChild(origin)
+		try {
+			open({ kind: "error", label: "Failed" })
+			await settle()
+			origin.focus()
+			const close = card()?.querySelector<HTMLButtonElement>('[data-testid="snackbar-close"]')
+			close?.focus()
+			expect(document.activeElement).toBe(close)
+			close?.click()
+			await settle()
+			expect(document.activeElement).toBe(origin)
+		} finally {
+			origin.remove()
+		}
+	})
+
+	test("a click on the card leaves the timer armed", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Disposable" })
+		await settle()
+		card()?.click()
+		await step(5_900 - 600)
+		expect(cards().length).toBe(1)
+		await step(100)
+		expect(useToast().toast.value).toBeNull()
+		await settle()
+		expect(cards().length).toBe(0)
+	})
+
+	test("hover then focus: leaving the pointer keeps the hold while focus holds", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Held", action: { label: "View", onSelect: () => {} } })
+		await settle()
+		const el = card() as HTMLElement
+		mouse(el, "mouseenter")
+		await step(2_000)
+		el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]')?.focus()
+		await step(60_000)
+		mouse(el, "mouseleave")
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]')?.blur()
+		await step(5_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("focus then hover: blurring keeps the hold while the pointer holds", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Held", action: { label: "View", onSelect: () => {} } })
+		await settle()
+		const el = card() as HTMLElement
+		const action = el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]') as HTMLButtonElement
+		action.focus()
+		await step(2_000)
+		mouse(el, "mouseenter")
+		await step(60_000)
+		action.blur()
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		mouse(el, "mouseleave")
+		await step(5_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("focus moving between two controls inside the card keeps the hold; leaving the card releases it", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Held", action: { label: "View", onSelect: () => {} } })
+		await settle()
+		const el = card() as HTMLElement
+		const action = el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]') as HTMLButtonElement
+		const title = el.querySelector('[data-testid="snackbar-title"]') as HTMLElement
+		action.focus()
+		await step(2_000)
+		action.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: title }))
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		action.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: document.body }))
+		await step(5_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("a replacement while the card matches :hover is held", async () => {
+		const original = Element.prototype.matches
+		Element.prototype.matches = function (this: Element, selector: string) {
+			if (selector === ":hover" && this.getAttribute("data-testid") === "snackbar") return true
+			return original.call(this, selector)
+		} as typeof Element.prototype.matches
+		try {
+			mountRegion()
+			open({ kind: "success", label: "First" })
+			await settle()
+			await step(3_000)
+			open({ kind: "success", label: "Second" })
+			await settle()
+			await step(60_000)
+			expect(card()?.textContent).toContain("Second")
+		} finally {
+			Element.prototype.matches = original
+		}
+		mouse(card() as HTMLElement, "mouseleave")
+		await step(6_000)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("bottomInset sets the wrap's bottom", () => {
+		mountRegion({ bottomInset: 76 })
+		const wrap = toastRoot.firstElementChild as HTMLElement
+		expect(wrap.style.bottom).toBe("76px")
+	})
+
+	test("the default inset is 12px", () => {
+		mountRegion()
+		expect((toastRoot.firstElementChild as HTMLElement).style.bottom).toBe("12px")
+	})
+
+	test("unmounting while held releases the hold", async () => {
+		const wrapper = mountRegion()
+		open({ kind: "success", label: "Held" })
+		await settle()
+		mouse(card() as HTMLElement, "mouseenter")
+		await step(1_000)
+		wrapper.unmount()
+		await step(6_000)
+		expect(useToast().toast.value).toBeNull()
 	})
 
 	test("teleportTo overrides the target root", async () => {
@@ -111,8 +376,8 @@ describe("ToastManagerBase", () => {
 		document.body.appendChild(custom)
 		try {
 			mountRegion({ teleportTo: "#custom-toast" })
-			useToast().openToast({ label: "Elsewhere" })
-			await flushPromises()
+			open({ kind: "success", label: "Elsewhere" })
+			await nextTick()
 			expect(custom.textContent).toContain("Elsewhere")
 			expect(toastRoot.textContent).toBe("")
 		} finally {

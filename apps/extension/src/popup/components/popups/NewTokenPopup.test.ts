@@ -88,7 +88,6 @@ vi.mock("@/stores/popup.store", () => ({
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({
 		openToast: openToastMock,
-		TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 	}),
 }))
 
@@ -282,7 +281,7 @@ describe("NewTokenPopup", () => {
 		for (const h of taskUpdatedHandlers) h(makeBalanceUpdateTask(100, { finished: true }))
 		await flushPromises()
 
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Token added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Token added" })
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
@@ -316,7 +315,7 @@ describe("NewTokenPopup", () => {
 		for (const h of taskUpdatedHandlers) h(makeBalanceUpdateTask(100, { finished: true }))
 		await flushPromises()
 		expect(w.emitted("onClose")).toBeTruthy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Token added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Token added" })
 	})
 
 	test("re-import (TB exists with updatedAt>0) closes immediately without waiting on events", async () => {
@@ -331,7 +330,7 @@ describe("NewTokenPopup", () => {
 		await submitBtn(w).trigger("click")
 		await flushPromises()
 
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Token added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Token added" })
 		expect(w.emitted("onClose")).toBeTruthy()
 		// We never had to drive any events
 		expect(balanceAddedHandlers.length).toBe(0)
@@ -355,7 +354,7 @@ describe("NewTokenPopup", () => {
 		expect(openToastMock).toHaveBeenCalled()
 		const [opts] = openToastMock.mock.calls[0]
 		expect(opts.label).toMatch(/Couldn't load balance/)
-		expect(opts.icon).toBe("warning")
+		expect(opts.kind).toBe("success")
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
@@ -416,7 +415,7 @@ describe("NewTokenPopup", () => {
 		await submitBtn(w).trigger("click")
 		await flushPromises()
 
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Token added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Token added" })
 		expect(w.emitted("onClose")).toBeTruthy()
 		// Wait was aborted — no leaked listeners
 		expect(balanceAddedHandlers.length).toBe(0)

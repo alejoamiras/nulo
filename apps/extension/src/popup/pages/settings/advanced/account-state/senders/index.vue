@@ -77,7 +77,7 @@ const handleDelete = (sender) => {
 	cacheStore.confirm.callback = async () => {
 		await accountStateClientService.deleteSender(appStore.network.id, sender)
 
-		openToast({ label: "Sender successfully deleted" })
+		openToast({ kind: "success", label: "Sender successfully deleted" })
 	}
 
 	popupStore.open("confirm")

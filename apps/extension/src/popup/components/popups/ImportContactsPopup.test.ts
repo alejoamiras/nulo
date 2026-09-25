@@ -42,7 +42,6 @@ vi.mock("@/stores/popup.store", () => ({
 }))
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: vi.fn() }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 const STUBS = {

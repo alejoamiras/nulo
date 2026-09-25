@@ -5,7 +5,7 @@ import { managers } from "@/utils/core"
 import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
@@ -77,7 +77,7 @@ const handleCreateNetwork = async () => {
 	// against. Checked up front to avoid creating one we then refuse to switch
 	// to, and again at the switch itself — a send can start during the create.
 	if (appStore.hasInFlightSend) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		return
 	}
 
@@ -107,7 +107,7 @@ const handleCreateNetwork = async () => {
 
 		emit("onClose")
 
-		openToast({ label: "Network is created" })
+		openToast({ kind: "success", label: "Network is created" })
 	} catch (error) {
 		reportCreateFailure(error)
 	} finally {
@@ -122,7 +122,7 @@ function toastNonActivatedOutcome(result) {
 		result === "blocked"
 			? "Network added. Finish or cancel your pending transaction to switch to it"
 			: "Network added, but the switch didn't confirm — reopen the popup to verify"
-	openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+	openToast({ kind: "error", label })
 }
 
 function reportCreateFailure(error) {
@@ -130,14 +130,11 @@ function reportCreateFailure(error) {
 	if (msg.startsWith("DUPLICATE_CHAIN")) {
 		// Smart-add: chain already exists in profile. Surface this clearly
 		// so the user knows to use Settings → Networks → [chain] → Add endpoint.
-		openToast(
-			{ label: "A network for this chain already exists. Add it as an endpoint instead.", icon: "warning" },
-			TOAST_DURATION.LONG,
-		)
+		openToast({ kind: "error", label: "A network for this chain already exists. Add it as an endpoint instead." })
 	} else if (msg === "Failed to fetch node info" || msg === "Failed to fetch network info") {
 		isUrlHasError.value = true
 	} else {
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 	}
 }
 

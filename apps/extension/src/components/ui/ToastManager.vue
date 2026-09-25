@@ -1,11 +1,13 @@
 <script setup>
-// The bare <ToastManager> tag stays local and resolves here (NOT via the resolver) so the package
-// exports the neutrally-named `ToastManagerBase` beside its `Toast` item rather than a second
-// root-level toast name. The base teleports to the
-// app-provided `#toast` root by default; the shared `useToast` singleton drives it.
+// The bare <ToastManager> tag resolves here, not through the design resolver: the inset comes from
+// the route, which the package cannot read.
 import { ToastManagerBase } from "@nulo/design"
+
+const route = useRoute()
+
+const bottomInset = computed(() => (route.meta.showBottomNav ? 76 : 12))
 </script>
 
 <template>
-	<ToastManagerBase />
+	<ToastManagerBase :bottomInset="bottomInset" />
 </template>

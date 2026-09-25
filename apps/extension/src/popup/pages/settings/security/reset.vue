@@ -68,7 +68,7 @@ const handleReset = async () => {
 		isResetting.value = false
 		clearTimeout(slowDeleteTimer)
 		isSlowDelete.value = false
-		openToast({ label: "Couldn't delete profile — try again", icon: "warning" })
+		openToast({ kind: "error", label: "Couldn't delete profile — try again" })
 		return
 	}
 	isResetting.value = false
@@ -95,7 +95,7 @@ const handleReset = async () => {
 	// patronizing. To restart onboarding, the user uninstalls + reinstalls
 	// the extension (which wipes chrome.storage.local).
 
-	openToast({ label: "Profile deleted", icon: "check-circle" })
+	openToast({ kind: "success", label: "Profile deleted" })
 
 	if (!appStore.profiles.length) {
 		router.push("/popup/register")

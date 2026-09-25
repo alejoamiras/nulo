@@ -56,7 +56,7 @@ const handleDelete = (target) => {
 	cacheStore.confirm.description = "Removing a token only affects the display in the interface and it does not affect the token balance"
 	cacheStore.confirm.callback = async () => {
 		await tokenService.deleteToken(target.id)
-		openToast({ label: "Token successfully deleted" })
+		openToast({ kind: "success", label: "Token successfully deleted" })
 	}
 
 	popupStore.open("confirm")

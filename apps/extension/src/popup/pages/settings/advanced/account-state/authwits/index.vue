@@ -89,7 +89,7 @@ async function fetchRegistryStatus() {
 }
 
 function handleRefetch() {
-	openToast({ label: "Fetching authwits again", icon: "zap" })
+	openToast({ kind: "success", label: "Fetching authwits again" })
 	refreshAuthwits()
 }
 

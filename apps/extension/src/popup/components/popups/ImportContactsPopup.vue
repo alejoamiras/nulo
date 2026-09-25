@@ -59,7 +59,7 @@ const incomingSenderCount = computed(() => importContacts.value.filter((c) => c?
 
 function handleSelectContact(contact) {
 	if (contact.isInvalidAddress) {
-		openToast({ label: "To select, correct the address first", icon: "info" })
+		openToast({ kind: "error", label: "To select, correct the address first" })
 
 		return
 	}

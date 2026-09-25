@@ -1480,7 +1480,7 @@ The Local gates are the program's ([Local gates](../plan.md#local-gates)). A ret
 uses a scratch config that spreads `apps/extension/vitest.e2e.config.ts` with `retry: 0`, as batch 1
 does.
 
-### P1 · The snack and every call site, atomically ☐
+### P1 · The snack and every call site, atomically ✓
 
 1. Regenerate the call-site table from the current tree (count, file:line, message, kind, rule),
    check it against recon's 130/56/7, and write it to `lessons/phase-1.md`.

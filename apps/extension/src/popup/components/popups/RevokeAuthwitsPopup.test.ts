@@ -56,7 +56,6 @@ vi.mock("@/stores/popup.store", () => ({
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 const STUBS = {
@@ -178,8 +177,8 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 	test("(REGRESSION-PIN) Enter is a no-op when isErrorOccurred (error.value set)", async () => {
 		// Pre-fix the Enter predicate ignored isErrorOccurred even though the
 		// Revoke button template gate includes it. Pin the !isErrorOccurred.value gate.
-		// Drive error.value via fetchRegistryStatus catch — avoids the TOAST_DURATION
-		// auto-import call site that triggers if we error inside handleRevokeAuthwits.
+		// Drive error.value via fetchRegistryStatus catch — avoids the toast call site
+		// that fires if we error inside handleRevokeAuthwits.
 		preselected.preselectedAuthwits = [{ id: "aw-1", content: "c1" }]
 		authwitsServiceMock.getRegistryEnabled.mockRejectedValueOnce(new Error("PXE down"))
 		const w = mount(RevokeAuthwitsPopup, {

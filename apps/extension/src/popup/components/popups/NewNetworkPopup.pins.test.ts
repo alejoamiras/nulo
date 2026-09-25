@@ -38,7 +38,6 @@ vi.mock("@/composables/toast", () => ({
 			return openToastMock(...args)
 		},
 	}),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 vi.mock("@/stores/app.store", () => ({ useAppStore: () => appStoreState }))
 vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ len: 1, popups: { new_network: { order: 1 } } }) }))
@@ -113,7 +112,7 @@ describe("NewNetworkPopup — activation outcomes", () => {
 		const w = await mountFilled()
 		await submit(w)
 		expect(trace).toEqual(["toast:Network added. Finish or cancel your pending transaction to switch to it", "getNetworks", "close"])
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "info" }), 4_000)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 
 	test("unconfirmed: warning toast → refresh → close", async () => {
@@ -121,7 +120,7 @@ describe("NewNetworkPopup — activation outcomes", () => {
 		const w = await mountFilled()
 		await submit(w)
 		expect(trace).toEqual(["toast:Network added, but the switch didn't confirm — reopen the popup to verify", "getNetworks", "close"])
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }), 4_000)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 
 	test("stale: silent refresh → close", async () => {
@@ -148,7 +147,7 @@ describe("NewNetworkPopup — failures and refusals", () => {
 		const w = await mountFilled()
 		await submit(w)
 		expect(trace).toEqual(["toast:Something went wrong"])
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }), 4000)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 
 	test("an in-flight send refuses before creating anything", async () => {

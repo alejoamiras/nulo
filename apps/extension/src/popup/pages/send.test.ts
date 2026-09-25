@@ -104,7 +104,6 @@ vi.mock("@/utils/core", () => ({
 }))
 vi.mock("@/composables/toast.js", () => ({
 	useToast: () => ({ openToast: mocks.openToast }),
-	TOAST_DURATION: { DEFAULT: 2000, LONG: 4000 },
 }))
 const route = reactive({ name: "popup-send", path: "/popup/send", query: {} as Record<string, string>, meta: {} })
 vi.mock("vue-router", () => ({
@@ -301,7 +300,7 @@ describe("send page — the submit tail", () => {
 		await submit(w).trigger("click")
 		transfer.resolve()
 		await flushPromises()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: "Transaction submitted", icon: "check-circle" })
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "success", label: "Transaction submitted" })
 		expect(awaitingIds(appStore)).toHaveLength(1)
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
 		w.unmount()
@@ -318,7 +317,7 @@ describe("send page — the submit tail", () => {
 		transfer.reject(new Error("boom"))
 		await flushPromises()
 		expect(awaitingIds(appStore)).toEqual(["other"])
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: TRANSFER_FAILED_COPY, icon: "warning", color: "red" }, 4000)
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: TRANSFER_FAILED_COPY })
 		expect(console.error).toHaveBeenCalledWith("[send] executeTransfer failed:", expect.any(Error))
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
 		w.unmount()
@@ -331,7 +330,7 @@ describe("send page — the submit tail", () => {
 		await submit(w).trigger("click")
 		transfer.reject(new TermsAcceptanceRequiredError())
 		await flushPromises()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: TRANSFER_TERMS_COPY, icon: "warning", color: "red" }, 4000)
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: TRANSFER_TERMS_COPY })
 		expect(console.debug).toHaveBeenCalledWith("[send] executeTransfer refused:", expect.any(TermsAcceptanceRequiredError))
 		expect(console.error).not.toHaveBeenCalledWith("[send] executeTransfer failed:", expect.anything())
 		w.unmount()

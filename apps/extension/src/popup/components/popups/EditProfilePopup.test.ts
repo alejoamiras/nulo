@@ -26,7 +26,6 @@ vi.mock("@/wallet/services/profile/client", () => ({
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 2_000, LONG: 5_000 },
 }))
 
 const appStoreState = { profile: { id: "p1", name: "Main" } }
@@ -253,7 +252,7 @@ describe("EditProfilePopup — Enter-submit wiring (usePopupEntity)", () => {
 		await typeName(w, "Renamed")
 		pressEnterOnInput()
 		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Something went wrong", icon: "warning" }), 5_000)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", label: "Something went wrong" }))
 		// Latch released: a retry reaches the service again.
 		pressEnterOnInput()
 		await flushPromises()

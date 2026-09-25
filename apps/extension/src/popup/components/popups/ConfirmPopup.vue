@@ -46,7 +46,7 @@ const isConfirmed = computed(() => {
 
 async function handlePasskeyConfirmation() {
 	if (isPasskeyConfirmed.value) {
-		openToast({ label: "The operation is already confirmed", icon: "info" })
+		openToast({ kind: "success", label: "The operation is already confirmed" })
 		return
 	}
 

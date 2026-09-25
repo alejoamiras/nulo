@@ -44,11 +44,11 @@ declare global {
   const REVIEW_ARM_MS: typeof import('../composables/useSendReview').REVIEW_ARM_MS
   const SEED_STATUS_RETRY_MS: typeof import('../composables/useSeedStatus').SEED_STATUS_RETRY_MS
   const STALLED_MIN_DISPLAY_MS: typeof import('../composables/useIncomingSyncHealth').STALLED_MIN_DISPLAY_MS
+  const SUCCESS_TOAST_MS: typeof import('../composables/toast.js').SUCCESS_TOAST_MS
   const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const THIRD_PARTY_NOTICES_FILE: typeof import('../utils/legal-links').THIRD_PARTY_NOTICES_FILE
-  const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const TRANSFER_LABELS: typeof import('../utils/token-transfer-vocabulary').TRANSFER_LABELS
   const TRANSFER_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').TRANSFER_SIGNATURES
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
@@ -526,11 +526,11 @@ declare module 'vue' {
     readonly REVIEW_ARM_MS: UnwrapRef<typeof import('../composables/useSendReview')['REVIEW_ARM_MS']>
     readonly SEED_STATUS_RETRY_MS: UnwrapRef<typeof import('../composables/useSeedStatus')['SEED_STATUS_RETRY_MS']>
     readonly STALLED_MIN_DISPLAY_MS: UnwrapRef<typeof import('../composables/useIncomingSyncHealth')['STALLED_MIN_DISPLAY_MS']>
+    readonly SUCCESS_TOAST_MS: UnwrapRef<typeof import('../composables/toast.js')['SUCCESS_TOAST_MS']>
     readonly TESTNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_L1_CHAIN_ID']>
     readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly THIRD_PARTY_NOTICES_FILE: UnwrapRef<typeof import('../utils/legal-links')['THIRD_PARTY_NOTICES_FILE']>
-    readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly TRANSFER_LABELS: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_LABELS']>
     readonly TRANSFER_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_SIGNATURES']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>

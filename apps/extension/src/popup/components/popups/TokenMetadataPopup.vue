@@ -52,7 +52,7 @@ const tokenService = new TokenServiceClient()
 tokenService.onTokenDeleted.add(onTokenDeleted)
 function onTokenDeleted(token) {
 	if (token.id === cacheStore.activeTokenIdx) {
-		openToast({ label: "Token has been deleted" })
+		openToast({ kind: "success", label: "Token has been deleted" })
 
 		emit("onClose")
 	}

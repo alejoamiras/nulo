@@ -134,7 +134,7 @@ function handleDeleteContact(contact) {
 	cacheStore.confirm.description = `Delete contact "${contact.name}"?`
 	cacheStore.confirm.callback = async () => {
 		await contactService.deleteContact(contact.id)
-		openToast({ label: "Contact deleted" })
+		openToast({ kind: "success", label: "Contact deleted" })
 	}
 	popupStore.open("confirm")
 }

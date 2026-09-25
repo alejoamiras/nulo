@@ -61,13 +61,13 @@ async function handleChangeRegistry() {
 
 		await authwitsService.setRegistryEnabled(appStore.network.id, appStore.account.address, !isRegistryEnabled.value, feeSettings.value)
 
-		openToast({ label: "Account authwit registry is changed" })
+		openToast({ kind: "success", label: "Account authwit registry is changed" })
 	} catch (err) {
 		// User-initiated cancel: terminal card in RecentActivityView says
 		// "Cancelled" — suppress the failure toast + error.value.
 		if (classifyCancellableRejection(err) !== "silent") {
 			error.value = err
-			openToast({ label: "Failed to change registry status", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Failed to change registry status" })
 		}
 	} finally {
 		// Handler-owned latch release — closure via the hide watcher still

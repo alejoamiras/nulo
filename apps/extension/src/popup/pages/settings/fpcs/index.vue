@@ -101,7 +101,7 @@ const handleDelete = (fpc) => {
 		}
 		await mutateSendSelections((raw) => withoutFpc(raw, fpc.id))
 
-		openToast({ label: "FPC is deleted" })
+		openToast({ kind: "success", label: "FPC is deleted" })
 	}
 	popupStore.open("confirm")
 }

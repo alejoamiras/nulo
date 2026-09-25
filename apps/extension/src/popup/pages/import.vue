@@ -73,10 +73,10 @@ const completeImport = async (profile) => {
 		timeoutMs: 30_000,
 	})
 	if (outcome === "active") {
-		openToast({ label: "Profile imported", icon: "check-circle" })
+		openToast({ kind: "success", label: "Profile imported" })
 		router.push("/popup/general")
 	} else {
-		openToast({ label: "Profile imported — unlock to continue", icon: "info" }, TOAST_DURATION.LONG)
+		openToast({ kind: "success", label: "Profile imported — unlock to continue" })
 		router.push("/popup/auth")
 	}
 }

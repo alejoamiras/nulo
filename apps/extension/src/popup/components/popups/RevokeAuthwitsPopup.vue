@@ -91,13 +91,10 @@ async function handleRevokeAuthwits() {
 		// failure summary toasts. The terminal card communicates the state.
 		emit("onClose")
 	} else if (errors.length) {
-		openToast(
-			{ label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)`, icon: "warning" },
-			TOAST_DURATION.LONG,
-		)
+		openToast({ kind: "error", label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)` })
 		error.value = errors.join(", ")
 	} else {
-		openToast({ label: "Authwit(s) successfully revoked" })
+		openToast({ kind: "success", label: "Authwit(s) successfully revoked" })
 		emit("onClose")
 	}
 }

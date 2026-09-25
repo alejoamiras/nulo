@@ -117,7 +117,7 @@ describe("NewSenderPopup — Enter-submit wiring (usePopupEntity)", () => {
 		await flushPromises()
 		expect(accountStateServiceMock.addSender).toHaveBeenCalledWith("net-1", VALID_HEX)
 		expect(w.emitted("onClose")).toBeTruthy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Sender is added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Sender is added" })
 		await dispose(w)
 	})
 
