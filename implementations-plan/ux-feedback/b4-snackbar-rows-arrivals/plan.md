@@ -118,6 +118,7 @@ snackbar looks weird."), i10b "A′", i11 "A", i12 "B" — unchanged.
 | 11 | Anywhere else on a receipt that arrives while the page is open | nothing → one success snack, "Received {amount} {symbol}", "Private · {account}" or "Public · {account}", View opens the receipt (`parts/12-incoming.html:53`) | `12-incoming` | i12 B; where "elsewhere" is and which receipts it names: **pending** (A-3, A-4, A-11, A-13) |
 | 12 | A snack while a popup is open (keyboard) | the snack cannot be reached by Tab → Tab reaches its View or × after the popup's controls | none | **pending** (K-1) |
 | 13 | Lock and account changes | a toast survives the lock screen → the snack closes on lock; a snack with View closes when the profile, network or account changes | none | **pending** (S-16) |
+| 14 | A receipt of zero (or an unreadable amount) | rows 9-11 would play it → no slide, glow, chip or snack: an ordinary row, as dust is | none | **sign-off pending** |
 
 Keyboard:
 

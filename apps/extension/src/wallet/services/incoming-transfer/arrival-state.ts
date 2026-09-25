@@ -34,7 +34,7 @@ export const ArrivalRowSchema: z.ZodType<ArrivalRow> = z.object({
 	played: z.array(z.tuple([z.string().max(ARRIVAL_ID_MAX), blockSchema])).max(ARRIVAL_PLAYED_CAP),
 })
 
-type ArrivalCandidate = Pick<IncomingTransferRecord, "id" | "contract" | "l2BlockNumber">
+type ArrivalCandidate = Pick<IncomingTransferRecord, "id" | "contract" | "l2BlockNumber" | "amountRaw">
 type FloorSource = Pick<IncomingTrustRecord, "contract" | "arrivalFloor" | "arrivalFloorPending">
 
 /** The view of an account's row under its network's token floors; no row plays nothing. */
@@ -52,8 +52,17 @@ export function arrivalKey(profileId: string, networkId: string, accountAddress:
 	return `${profileId}|${networkId}|${accountAddress}`
 }
 
+/** A receipt of nothing, like dust, is an ordinary row: only an amount above zero arrives. */
+function isPositiveAmount(amountRaw: string): boolean {
+	try {
+		return BigInt(amountRaw) > 0n
+	} catch {
+		return false
+	}
+}
+
 export function isArrivalEligible(record: ArrivalCandidate, state: ArrivalState): boolean {
-	if (state.sinceBlock === null || state.played.includes(record.id)) return false
+	if (state.sinceBlock === null || state.played.includes(record.id) || !isPositiveAmount(record.amountRaw)) return false
 	const floor = state.floors[record.contract]
 	if (floor === "pending") return false
 	return record.l2BlockNumber > Math.max(state.sinceBlock, floor ?? -1)
