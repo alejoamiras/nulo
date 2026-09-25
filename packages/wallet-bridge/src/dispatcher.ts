@@ -372,8 +372,11 @@ function projectData(cap: Record<string, unknown>): Record<string, unknown> {
 		if (!isRecord(holder)) malformed()
 		return { contracts: addressListOf(holder.contracts) }
 	})
-	// Asking for neither would open a window with no data row and record a rejection nobody chose.
-	if (addressBook.addressBook !== true && privateEvents.privateEvents === undefined) malformed()
+	// Asking for neither would open a window with no data row and record a rejection nobody chose;
+	// an empty contract list asks for no private events.
+	const events = privateEvents.privateEvents?.contracts
+	const asksEvents = events === "*" || (events !== undefined && events.length > 0)
+	if (addressBook.addressBook !== true && !asksEvents) malformed()
 	return { type: "data", ...addressBook, ...privateEvents }
 }
 

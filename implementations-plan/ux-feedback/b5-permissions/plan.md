@@ -160,8 +160,9 @@ Visible consequences of technical choices (stated in the PR body, program § Ope
 
 - a request naming one known permission type twice, missing a required field of a known
   permission, carrying a malformed value in one (an address that is not a field element
-  included), or asking for a `data` permission with neither the address book nor private events,
-  is refused before any window opens;
+  included), or asking for a `data` permission with neither the address book nor private events
+  (private events from an empty list of contracts count as none), is refused before any window
+  opens;
 - a consent given on a listed scope stops signing silently once the app's scopes are widened to
   any contract, so its next authorization opens the window;
 - a consent carries over when the app widens its list to more listed contracts or functions,
@@ -540,9 +541,11 @@ visible form (A-23's Tab behaviour, A-27's spoken names) are drawn as annotated 
     `contractClasses.classes`, `transaction.scope`. A present `simulation.transactions` or
     `simulation.utilities` must be a plain object holding `scope`, and a present
     `data.privateEvents` a plain object holding `contracts`. A `data` capability must carry
-    `addressBook: true` or `privateEvents`: one asking for neither would open a window with no
-    data row and record a rejection nobody chose (`capabilities.ts:47-51` leaves both optional;
-    `dispatcher.ts:543-546` puts it in the delta). `accounts.accounts` stays optional
+    `addressBook: true` or `privateEvents` naming at least one contract (or `"*"`): one asking
+    for neither would open a window with no data row and record a rejection nobody chose
+    (`capabilities.ts:47-51` leaves both optional; `dispatcher.ts:543-546` puts it in the
+    delta). An empty `privateEvents.contracts` counts as no private events, since coverage marks
+    an empty list covered and the window draws no row for it. `accounts.accounts` stays optional
     (request-side manifests omit it, `bundles.ts:13-14`).
   - A known field, when present, must be:
     - a flag (`canGet`, `canCreateAuthWit`, `canRegister`, `canGetMetadata`, `addressBook`):

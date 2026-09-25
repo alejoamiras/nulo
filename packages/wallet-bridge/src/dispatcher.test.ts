@@ -2064,6 +2064,7 @@ describe("dispatcher — the grant boundary", () => {
 		["contract classes without their list", { type: "contractClasses" }],
 		["data asking for nothing", { type: "data" }],
 		["data asking for the address book as false", { type: "data", addressBook: false }],
+		["data asking for private events from no contract", { type: "data", privateEvents: { contracts: [] } }],
 		["a simulation transactions string", { type: "simulation", transactions: "*" }],
 		["a simulation utilities object without a scope", { type: "simulation", utilities: {} }],
 		["a private events list", { type: "data", privateEvents: [] }],
