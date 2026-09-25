@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
  * The plan-tree gate: `checkTree()` runs every rule over the git index. From the command line,
- * `bun scripts/ci-cd/plans/check.ts [--report]` prints one line per finding and exits 1 when there is
- * any; `--report` prints the same and exits 0.
+ * `bun scripts/ci-cd/plans/check.ts [--report]` prints one line per finding, marking those of a rule
+ * that only reports, and exits 1 when any finding is under an enforced rule; `--report` exits 0.
  */
-import { createCtx, countByRule, type Env, type Finding, formatFinding } from "./lib"
+import { createCtx, countByRule, type Env, type Finding, formatFinding, isEnforced } from "./lib"
 import { extractDocs, linkFindings, opaqueFindings, pathTokenFindings } from "./links"
 import { loadBases, permalinkAncestryFindings, permalinkFindings } from "./permalinks"
 import {
@@ -45,8 +45,9 @@ if (import.meta.main) {
 	const started = performance.now()
 	const findings = checkTree()
 	const seconds = ((performance.now() - started) / 1000).toFixed(2)
-	for (const f of findings) console.log(formatFinding(f))
+	for (const f of findings) console.log(`${isEnforced(f) ? "" : "(report) "}${formatFinding(f)}`)
 	const counts = Object.entries(countByRule(findings)).map(([rule, n]) => `${rule}=${n}`)
-	console.log(`plans gate: ${findings.length} finding(s) in ${seconds}s — ${counts.join(" ")}`)
-	process.exit(report || findings.length === 0 ? 0 : 1)
+	const enforced = findings.filter(isEnforced).length
+	console.log(`plans gate: ${findings.length} finding(s), ${enforced} enforced, in ${seconds}s — ${counts.join(" ")}`)
+	process.exit(report || enforced === 0 ? 0 : 1)
 }
