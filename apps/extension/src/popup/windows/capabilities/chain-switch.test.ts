@@ -180,6 +180,21 @@ describe("capabilities window — chain mismatch banner and switch", () => {
 		expect(approveBtn()?.attributes("disabled")).toBeUndefined()
 	})
 
+	test("an app asking for more: the sentence names the footer's Allow; the title and the switch stay", async () => {
+		const held = [{ type: "accounts", canGet: true, canCreateAuthWit: false }]
+		await open({
+			session: { chainId: "0" },
+			params: { delta: [{ type: "data", addressBook: true }], existingGrants: held, heldGrants: held, reRequested: [] },
+		})
+		expect(banner()?.find('[data-testid="banner-title"]').text()).toBe("Connecting on Local Network")
+		expect(banner()?.find('[data-testid="banner-desc"]').text()).toBe(
+			"Your wallet is on Testnet. Allow as is, or switch to see Local Network balances.",
+		)
+		expect(banner()?.find('[data-testid="cap-switch-network-btn"]').text()).toBe("Switch wallet to Local Network")
+		expect(approveBtn()?.text()).toBe("Allow")
+		expect(w?.find('[data-testid="identity-block"]').attributes("data-action-label")).toBe("wants more permissions on Local Network")
+	})
+
 	test("no banner before init lands", async () => {
 		let release: (p: { id: string }) => void = () => {}
 		getActiveProfileImpl = () => new Promise((r) => (release = r))

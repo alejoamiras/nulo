@@ -7,15 +7,17 @@ import DappStatusStrip from "@/components/composite/DappStatusStrip.vue"
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
 import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
-import PermissionRow from "@/components/composite/capabilities/PermissionRow.vue"
-import DottedTerm from "@/components/composite/DottedTerm.vue"
+import CapabilityDisclosure from "@/components/composite/capabilities/CapabilityDisclosure.vue"
+import DetailsTable from "@/components/composite/capabilities/DetailsTable.vue"
 import AccountSelectRow from "./AccountSelectRow.vue"
+import PermissionGroup from "./PermissionGroup.vue"
 
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { requireNetwork } from "@/utils/core"
+import { copyWithToast } from "@/utils/clipboard"
 import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type WindowRow } from "./build-items"
 import { resolveDappChain } from "./chain-mismatch"
 import { buildDetailsTable } from "./details-table"
@@ -28,6 +30,7 @@ import { type CapabilityPayload, DappInteractionServiceClient } from "@/wallet/s
 import { type Capability, effectiveGrants } from "@nulo/wallet-bridge"
 
 /** Composables */
+import { useToast } from "@/composables/toast"
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
@@ -39,6 +42,8 @@ type UIAccount = { address: string; name: string; chainId: number }
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
+
+const { openToast } = useToast()
 
 const router = useRouter()
 
@@ -81,8 +86,9 @@ const isLoading = ref(false)
 // Flips once init() has the payload AND the rows: before that, Connect would grant an empty set.
 const initComplete = ref(false)
 
-// "Connect as is" is only offered where connecting is possible: not before init lands (no chain
-// known yet), not on a hard error. The footer's own holds (a running switch, a submit) are momentary.
+// The banner's "as is" is only offered where the footer's button can act: not before init lands
+// (no chain known yet), not on a hard error. The footer's own holds (a running switch, a submit)
+// are momentary.
 const chainBannerState = computed(() => {
 	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
 	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
@@ -182,37 +188,49 @@ const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowPara
 	}
 }
 
-const groups = computed(() =>
-	GROUP_ORDER.map((group) => ({ group, rows: rows.value.filter((row) => row.isNew && row.entry.group === group) })).filter(
-		(entry) => entry.rows.length > 0,
-	),
-)
-
 /** A new address row names the selection, not the session: it follows each click. */
 const shownEntry = (row: WindowRow): PermissionRowEntry =>
 	row.isNew && row.entry.key === "account-address" ? accountAddressRow(selectedAccounts.value) : row.entry
 
-const rowProps = (row: WindowRow) => {
-	const entry = shownEntry(row)
-	return {
-		icon: entry.icon,
-		title: entry.title,
-		switchLabel: entry.switchLabel,
-		flagged: entry.flagged,
-		chip: entry.chip,
-		badge: row.reRequested ? "previously denied" : undefined,
-		titleTestid: entry.key === "unknown" ? "cap-unrecognized-badge" : undefined,
-	}
+const groupsOf = (list: WindowRow[]) =>
+	GROUP_ORDER.map((group) => ({
+		group,
+		rows: list
+			.filter((row) => row.entry.group === group)
+			.map((row) => ({
+				entry: shownEntry(row),
+				capId: row.capId,
+				line: currentLine(row),
+				badge: row.reRequested ? "previously denied" : undefined,
+				selected: row.selected,
+			})),
+	})).filter((entry) => entry.rows.length > 0)
+
+const newGroups = computed(() => groupsOf(rows.value.filter((row) => row.isNew)))
+const heldGroups = computed(() => groupsOf(rows.value.filter((row) => !row.isNew)))
+const heldCount = computed(() => rows.value.filter((row) => !row.isNew).length)
+
+/** An app that already holds a row asks for more: "Allow" what's new, not "Connect". */
+const asksForMore = computed(() => heldCount.value > 0)
+const confirmWord = computed(() => (asksForMore.value ? "Allow" : "Connect"))
+
+const setSwitch = (key: string, on: boolean) => {
+	const row = rows.value.find((candidate) => candidate.isNew && candidate.entry.key === key)
+	if (row) row.selected = on
 }
 
-/** Names come only from the wallet's list in the snapshot; the request never names a contract. */
+/** Names come only from the wallet's list in the snapshot; the request never names a contract.
+ *  Grants that reach no contract show no Details: its table would list nothing. */
 const detailsTable = computed(() => {
 	if (!payload.value) return undefined
 	const params = windowParams(payload.value.params)
-	return buildDetailsTable(effectiveGrants(params.heldGrants, params.delta), payload.value.params.knownContracts ?? [])
+	const table = buildDetailsTable(effectiveGrants(params.heldGrants, params.delta), payload.value.params.knownContracts ?? [])
+	return table.known.length > 0 || table.unknown.length > 0 || table.anyContract ? table : undefined
 })
 
 const recognizesNoContract = computed(() => detailsTable.value?.known.length === 0 && detailsTable.value.unknown.length > 0)
+
+const copyAddress = (address: string) => void copyWithToast(address, openToast, "Address is copied", { sanitize: true })
 
 /** `availableAccounts` and `grantedAccounts` are both wallet-derived (never dApp-supplied), so
  *  there is no path for a malicious dApp to inject a phantom account or a phantom lock here. */
@@ -358,7 +376,7 @@ onUnmounted(disposeWindow)
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				:actionLabel="`wants to connect on ${chainName}`"
+				:actionLabel="asksForMore ? `wants more permissions on ${chainName}` : `wants to connect on ${chainName}`"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
@@ -379,7 +397,7 @@ onUnmounted(disposeWindow)
 					<template v-else #title>Connecting on {{ dappChain.name }}</template>
 					<template v-if="chainBannerState === 'switched'" #description>Balances and activity now follow {{ dappChain.name }}.</template>
 					<template v-else #description>
-						Your wallet is on {{ appStore.network?.name }}. Connect as is, or switch to see {{ dappChain.name }} balances.
+						Your wallet is on {{ appStore.network?.name }}. {{ confirmWord }} as is, or switch to see {{ dappChain.name }} balances.
 					</template>
 				</Banner>
 
@@ -404,32 +422,31 @@ onUnmounted(disposeWindow)
 					</ItemsContainer>
 				</Flex>
 
-				<Flex v-for="{ group, rows: groupRows } in groups" :key="group" direction="column" gap="10" wide :data-cap-group="group">
-					<SectionLabel :label="GROUP_LABELS[group]" />
+				<PermissionGroup
+					v-for="{ group, rows: groupRows } in newGroups"
+					:key="group"
+					:data-cap-group="group"
+					:label="GROUP_LABELS[group]"
+					:rows="groupRows"
+					@toggle="setSwitch"
+				/>
 
-					<ItemsContainer>
-						<PermissionRow
-							v-for="row in groupRows"
-							:key="row.entry.key"
-							data-testid="cap-item"
-							:data-cap-id="row.capId"
-							:data-cap-row="row.entry.key"
-							v-bind="rowProps(row)"
-							v-model="row.selected"
-						>
-							<template v-if="currentLine(row).length" #sub>
-								<template v-for="(segment, i) in currentLine(row)" :key="i">
-									<DottedTerm v-if="'term' in segment" term="authorization" testid="cap-auth-term">{{ segment.term }}</DottedTerm>
-									<template v-else>{{ segment.text }}</template>
-								</template>
-							</template>
-						</PermissionRow>
-					</ItemsContainer>
-				</Flex>
+				<CapabilityDisclosure v-if="asksForMore" label="Already allowed" :tag="String(heldCount)" testid="cap-already-allowed">
+					<PermissionGroup
+						v-for="{ group, rows: groupRows } in heldGroups"
+						:key="group"
+						:data-cap-group="group"
+						:label="GROUP_LABELS[group]"
+						:rows="groupRows"
+						granted
+					/>
+				</CapabilityDisclosure>
 
 				<div v-if="recognizesNoContract" data-testid="cap-unknown-contracts-note" :class="$style.note">
 					Nulo doesn't recognize any of its contracts.
 				</div>
+
+				<DetailsTable v-if="detailsTable" v-bind="detailsTable" @copy="copyAddress" />
 			</Flex>
 		</Flex>
 
@@ -440,7 +457,7 @@ onUnmounted(disposeWindow)
 			reject-label="Reject"
 			:reject-disabled="isLoading || isSwitching || !requestId"
 			confirm-testid="cap-approve-btn"
-			confirm-label="Connect"
+			:confirm-label="confirmWord"
 			:confirm-loading="isLoading"
 			:confirm-disabled="isLoading || isSwitching || processingError?.type === 'error' || !initComplete"
 			@reject="reject"

@@ -17,9 +17,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { MaterialIcon, Toggle } from "@nulo/design"
+import { MaterialIcon, RowAction, Toggle } from "@nulo/design"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
-import { flushPromises, mount } from "@vue/test-utils"
+import { type DOMWrapper, flushPromises, mount } from "@vue/test-utils"
 import { reactive, ref, type Ref } from "vue"
 
 // ── Mock state (closure refs so tests can flip values mid-test) ──────
@@ -68,6 +68,8 @@ const interactionServiceConnectMock = vi.fn(() => callLog.push("interaction.conn
 const interactionServiceDisconnectMock = vi.fn(() => callLog.push("interaction.disconnect"))
 const onActiveProfileChangedAddMock = vi.fn()
 const windowsRemoveMock = vi.fn(() => callLog.push("windows.remove"))
+
+const copyWithToastMock = vi.fn(async (..._args: unknown[]) => true)
 
 const routerPushMock = vi.fn()
 const routerMock = {
@@ -131,6 +133,10 @@ vi.mock("@/wallet/services/dapp-interaction/client", () => ({
 
 vi.mock("@/stores/app.store", () => ({
 	useAppStore: () => appStoreMock,
+}))
+
+vi.mock("@/utils/clipboard", () => ({
+	copyWithToast: (...args: unknown[]) => copyWithToastMock(...args),
 }))
 
 vi.mock("vue-router", async (importOriginal) => {
@@ -511,7 +517,7 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		resolveInteractionMock.mockClear()
 		w = mount(Capabilities, {
 			global: {
-				components: { MaterialIcon, Toggle },
+				components: { MaterialIcon, RowAction, Toggle },
 				stubs: {
 					...STUBS,
 					Flex: { inheritAttrs: false, template: "<div v-bind='$attrs'><slot /></div>" },
@@ -534,34 +540,51 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		if (!found) throw new Error(`no new ${key} row`)
 		return found
 	}
+	const heldRowOf = (key: string) => {
+		const found = w!.findAll('[data-cap-granted="true"]').find((c) => c.attributes("data-cap-row") === key)
+		if (!found) throw new Error(`no held ${key} row`)
+		return found
+	}
 	const toggleOf = (key: string) => rowOf(key).find('[data-testid="cap-toggle"]')
 	/** The line as read: the dotted term's always-mounted definition copy is `hidden`. */
-	const lineOf = (key: string) => {
-		const sub = rowOf(key).find('[data-testid="cap-row-sub"]')
+	const lineIn = (row: DOMWrapper<Element>) => {
+		const sub = row.find('[data-testid="cap-row-sub"]')
 		if (!sub.exists()) return ""
 		const copy = sub.element.cloneNode(true) as HTMLElement
 		for (const hidden of copy.querySelectorAll("[hidden]")) hidden.remove()
 		return copy.textContent?.replace(/\s+/g, " ").trim()
 	}
-	/** Each shown row as the drawing reads it: title, line, switch state, flag and chip. */
-	const read = (key: string) => {
-		const row = rowOf(key)
+	const lineOf = (key: string) => lineIn(rowOf(key))
+	/** Each row as the drawing reads it: title, line, switch state, flag and chip. */
+	const readRow = (row: DOMWrapper<Element>) => {
 		const chip = row.find(`.${STYLE.chip}`)
+		const toggle = row.find('[data-testid="cap-toggle"]')
 		return {
 			title: row.find(`.${STYLE.title}`).text(),
-			line: lineOf(key),
-			on: toggleOf(key).exists() ? toggleOf(key).attributes("aria-checked") === "true" : undefined,
+			line: lineIn(row),
+			on: toggle.exists() ? toggle.attributes("aria-checked") === "true" : undefined,
 			flagged: row.classes().includes(STYLE.flagged),
 			chip: chip.exists() ? chip.text() : undefined,
 		}
 	}
-	const groups = () =>
+	const read = (key: string) => readRow(rowOf(key))
+	const readHeld = (key: string) => readRow(heldRowOf(key))
+	const fold = () => w!.find('[data-testid="cap-already-allowed"]')
+	const foldLabel = () => fold().find("span").text()
+	const openFold = () => fold().trigger("click")
+	/** The fold's panel sits beside its button, inside the disclosure's root. */
+	const inFold = (el: Element) => fold().exists() && fold().element.parentElement?.contains(el) === true
+	const groupsWhere = (folded: boolean) =>
 		w!
 			.findAll("[data-cap-group]")
+			.filter((group) => inFold(group.element) === folded)
 			.map((group) => [
 				group.find("h2").text(),
 				group.findAll('[data-testid="cap-item"]').map((row) => row.attributes("data-cap-row")),
 			])
+	const groups = () => groupsWhere(false)
+	const foldGroups = () => groupsWhere(true)
+	const detailsToggle = () => w!.find('[data-testid="cap-detail-toggle"]')
 	const note = () => w!.find('[data-testid="cap-unknown-contracts-note"]')
 	const approve = async () => {
 		await (w!.vm as unknown as { approve: () => Promise<void> }).approve()
@@ -632,6 +655,30 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 				authorizationsWithoutAsking: true,
 			})
 		})
+
+		test("Details lists both contracts, and a copied address goes to the snack whole", async () => {
+			await mountWindow(request)
+			expect(detailsToggle().find("span").text()).toBe("Details · 2 contracts")
+			await detailsToggle().trigger("click")
+			expect(w!.findAll('[data-testid="cap-details-row"]')).toHaveLength(2)
+			await w!.find('[data-testid="cap-details-copy"]').trigger("click")
+			expect(copyWithToastMock).toHaveBeenCalledExactlyOnceWith(TOKEN, expect.any(Function), "Address is copied", { sanitize: true })
+		})
+	})
+
+	test.each([
+		["an accounts-only connect", [{ type: "accounts", canGet: true, canCreateAuthWit: false }]],
+		[
+			"U4's data and contract classes",
+			[
+				{ type: "data", privateEvents: { contracts: [TOKEN] } },
+				{ type: "contractClasses", classes: "*", canGetMetadata: true },
+			],
+		],
+	])("no Details when the grants reach no contract: %s", async (_case, capabilities) => {
+		await mountWindow(firstRequest(capabilities, { availableAccounts: [ALICE] }))
+		expect(shownRows().length).toBeGreaterThan(0)
+		expect(detailsToggle().exists()).toBe(false)
 	})
 
 	test("S2: the same rows, and the note when Nulo knows none of the contracts", async () => {
@@ -762,38 +809,6 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		expect(await approve()).toEqual({ granted: [{ type: "data", addressBook: true }, contractsAny] })
 	})
 
-	test("a membership-only accounts widening: only the address row is new, no switch, no consent sent", async () => {
-		const BOB = { address: `0x${"0b".repeat(32)}`, name: "Bob", chainId: 1 }
-		const BOB_CAIP = `aztec:1:${BOB.address}`
-		const held = [authwitAccounts, txListed]
-		await mountWindow({
-			params: {
-				sessionId: "s1",
-				manifest: manifest(held),
-				delta: [authwitAccounts],
-				existingGrants: held,
-				heldGrants: held,
-				authorizationsWithoutAsking: { broad: false },
-				availableAccounts: [ALICE, BOB],
-				grantedAccounts: [ALICE.address],
-				accountsMembershipOnly: true,
-			},
-			session: { chainId: "1" },
-		})
-		expect(rowKeys()).toEqual(["account-address"])
-		expect(w!.find("h2").text()).toBe("Accounts to share")
-		expect(w!.findAll('[data-testid="cap-toggle"]')).toHaveLength(0)
-		await w!.findAll('[data-testid="cap-account-item"]')[1].trigger("click")
-		expect(read("account-address").title).toBe("See the addresses of the accounts you share")
-		const answer = await approve()
-		expect(answer).toEqual({
-			granted: [authwitAccounts, txListed],
-			selectedAccounts: [ALICE_CAIP, BOB_CAIP],
-			accountAliases: { [ALICE_CAIP]: "Alice", [BOB_CAIP]: "Bob" },
-		})
-		expect(answer).not.toHaveProperty("authorizationsWithoutAsking")
-	})
-
 	test("a Settings change after dispatch: the defaults follow the snapshot, not the session", async () => {
 		const held = [{ type: "accounts", canGet: false, canCreateAuthWit: true }, txListed]
 		await mountWindow({
@@ -819,27 +834,6 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		})
 	})
 
-	test("a data re-request after a declined widening: private events new and badged, the address book not asked again", async () => {
-		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
-		const asked = { type: "data", addressBook: true, privateEvents: { contracts: "*" } }
-		await mountWindow({
-			params: {
-				sessionId: "s1",
-				manifest: manifest([asked, contractsAny]),
-				delta: [asked],
-				// The stored rejection drops `data` from the echo list, never from the held grants.
-				existingGrants: [contractsAny],
-				heldGrants: [contractsAny, heldData],
-				reRequested: ["data"],
-			},
-			session: { chainId: "1" },
-		})
-		expect(rowKeys()).toEqual(["private-events"])
-		expect(toggleOf("private-events").attributes("aria-checked")).toBe("false")
-		expect(rowOf("private-events").find('[data-testid="cap-rerequested-badge"]').text()).toBe("previously denied")
-		expect(await approve()).toEqual({ granted: [contractsAny] })
-	})
-
 	test("a transaction widening with a held data record: only the transaction row is new", async () => {
 		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
 		await mountWindow({
@@ -854,5 +848,139 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		})
 		expect(rowKeys()).toEqual(["transaction"])
 		expect(await approve()).toEqual({ granted: [txAny, heldData] })
+	})
+
+	describe("U1: a connected app asks for more", () => {
+		const simulation = {
+			type: "simulation",
+			transactions: { scope: listed },
+			utilities: { scope: [{ contract: FEE_JUICE, function: "balance_of_public" }] },
+		}
+		const contracts = { type: "contracts", contracts: [TOKEN], canRegister: true, canGetMetadata: true }
+		/** The tools app's four grants; its accounts give two rows, so the fold reads five. */
+		const TOOLS = [authwitAccounts, simulation, contracts, txListed]
+		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
+		const eventsAny = { type: "data", addressBook: true, privateEvents: { contracts: "*" } }
+		const TOOLS_FOLDED = [
+			["Without asking, it can", ["account-address", "simulation", "contracts"]],
+			["If you allow, it can", ["authorizations"]],
+			["Always asks you first", ["transaction"]],
+		]
+		/** A re-request under a narrow consent: the snapshot holds `held`, the request asks `delta`. */
+		const reRequest = (delta: unknown[], held: unknown[], extra: Record<string, unknown> = {}) => ({
+			params: {
+				sessionId: "s1",
+				manifest: manifest(delta),
+				delta,
+				existingGrants: held,
+				heldGrants: held,
+				authorizationsWithoutAsking: { broad: false },
+				heldAccounts: [{ address: ALICE.address, name: "Alice" }],
+				knownContracts: [{ address: FEE_JUICE, name: "Fee Juice" }],
+				...extra,
+			},
+			session: { chainId: "1" },
+		})
+
+		test("A-5: a request for any contract: its rows new, the authorizations Off again, the rest folded", async () => {
+			const simAny = { type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } }
+			await mountWindow(reRequest([simAny, txAny], TOOLS))
+			expect(identity()).toBe("wants more permissions on Aztec:1")
+			expect(groups()).toEqual([
+				["Without asking, it can", ["simulation"]],
+				["If you allow, it can", ["authorizations"]],
+				["Always asks you first", ["transaction"]],
+			])
+			expect(read("simulation")).toMatchObject({ title: "Run simulations on any contract", flagged: true, chip: "Any contract" })
+			expect(read("authorizations")).toEqual({
+				title: "Act for you in transactions you approve",
+				line: "You confirm each authorization first. Off because it listed any contract.",
+				on: false,
+				flagged: true,
+				chip: undefined,
+			})
+			expect(read("transaction").title).toBe("Every transaction, on any contract")
+			expect(foldLabel()).toBe("Already allowed · 5")
+			expect(fold().attributes("aria-expanded")).toBe("false")
+			expect(detailsToggle().find("span").text()).toBe("Details · any contract")
+			expect(confirmLabel()).toBe("Allow")
+
+			await openFold()
+			expect(foldGroups()).toEqual(TOOLS_FOLDED)
+			expect(fold().element.parentElement?.querySelector('[data-testid="cap-toggle"]')).toBeNull()
+			expect(readHeld("account-address").title).toBe("See Alice's address")
+			expect(readHeld("authorizations")).toEqual({
+				title: "Act for you in transactions you approve",
+				line: "Nulo signs its authorizations without asking.",
+				on: undefined,
+				flagged: false,
+				chip: undefined,
+			})
+			expect(await approve()).toEqual({ granted: [simAny, txAny, authwitAccounts, contracts], authorizationsWithoutAsking: false })
+		})
+
+		test("A-30: a declined data widening keeps the held rows folded; private events new and Off", async () => {
+			await mountWindow(reRequest([eventsAny], [...TOOLS, heldData]))
+			expect(groups()).toEqual([["If you allow, it can", ["private-events"]]])
+			expect(read("private-events")).toEqual({
+				title: "See private events from any contract",
+				line: "Not shared. The app may ask again later.",
+				on: false,
+				flagged: true,
+				chip: "Any contract",
+			})
+			expect(foldLabel()).toBe("Already allowed · 7")
+			await openFold()
+			expect(foldGroups()).toEqual([
+				TOOLS_FOLDED[0],
+				["If you allow, it can", ["authorizations", "address-book", "private-events"]],
+				TOOLS_FOLDED[2],
+			])
+			expect(readHeld("private-events")).toMatchObject({
+				title: "See private events from its contracts",
+				line: "Private messages its contracts sent to your accounts, like a transfer you received.",
+			})
+			expect(await approve()).toEqual({ granted: TOOLS })
+		})
+
+		test("A-32: the same request after that rejection: the badge on the new row, none in the fold", async () => {
+			// The stored rejection drops `data` from the echo list, never from the held grants.
+			await mountWindow(reRequest([eventsAny], [...TOOLS, heldData], { existingGrants: TOOLS, reRequested: ["data"] }))
+			expect(rowKeys()).toEqual(["private-events"])
+			expect(toggleOf("private-events").attributes("aria-checked")).toBe("false")
+			expect(rowOf("private-events").find('[data-testid="cap-rerequested-badge"]').text()).toBe("previously denied")
+			expect(foldLabel()).toBe("Already allowed · 7")
+			await openFold()
+			expect(heldRowOf("address-book").find('[data-testid="cap-rerequested-badge"]').exists()).toBe(false)
+			expect(await approve()).toEqual({ granted: TOOLS })
+		})
+
+		test("A-31: a membership-only accounts widening folds the authorizations row with its line; no consent sent", async () => {
+			const BOB = { address: `0x${"0b".repeat(32)}`, name: "Bob", chainId: 1 }
+			const BOB_CAIP = `aztec:1:${BOB.address}`
+			await mountWindow(
+				reRequest([authwitAccounts], TOOLS, {
+					availableAccounts: [ALICE, BOB],
+					grantedAccounts: [ALICE.address],
+					accountsMembershipOnly: true,
+				}),
+			)
+			expect(rowKeys()).toEqual(["account-address"])
+			expect(w!.find("h2").text()).toBe("Accounts to share")
+			expect(w!.findAll('[data-testid="cap-toggle"]')).toHaveLength(0)
+			await w!.findAll('[data-testid="cap-account-item"]')[1].trigger("click")
+			expect(read("account-address").title).toBe("See the addresses of the accounts you share")
+			expect(foldLabel()).toBe("Already allowed · 5")
+			await openFold()
+			expect(foldGroups()).toEqual(TOOLS_FOLDED)
+			expect(readHeld("authorizations").line).toBe("Nulo signs its authorizations without asking.")
+			const answer = await approve()
+			expect(answer).toEqual({
+				granted: TOOLS,
+				selectedAccounts: [ALICE_CAIP, BOB_CAIP],
+				accountAliases: { [ALICE_CAIP]: "Alice", [BOB_CAIP]: "Bob" },
+			})
+			expect(answer).not.toHaveProperty("authorizationsWithoutAsking")
+		})
 	})
 })
