@@ -80,3 +80,78 @@ Probes during the round, all with the scratch retry-0 config:
 - `rows.test.ts` on Firefox after fix 6: green.
 
 The smoke builds and specs ran after the network runs, since `e2e:agent` rebuilds `dist/`.
+
+### Round 2 · codex · changes-requested (high)
+
+The same session, on `12b24a1c..701d5959`. The coordinator accepted all four findings and asked
+each fix to cover every await between its check and its write, since round 3 is the last. Each fix
+is its own commit, and each test was shown red on the pre-fix code, except row 4 (comments only).
+
+| # | Severity | Finding | Fix (commit) |
+|---|---|---|---|
+| 1 | major | Round 1's recheck raced. The add read `isCurrent()` before awaiting the token's registration, and `setTrust` awaits its own read before it writes. A section the watchdog displaced while a delete ran could still restore trust (`incoming-transfer/service.ts`, `repository.ts`) | The registration read runs first. `setTrust` takes a fence and reads it after its own read, so each write reads ownership after its last await; the floor's write already did (`5606de08`) |
+| 2 | major | The lock event awaited `getProfiles()` before it closed the snack, moved the epoch and cleared `isLogined`. The header's Lock left the snack up until that handler finished (`popup/app.vue`) | In `popup/locked-state.ts`, the seal runs before the lookup and the sequence guard covers only the landing. The seal closes popups and the snack, moves the epoch, clears `isLogined` and drops activity and in-flight sends. A `flush: "sync"` watcher on `isLogined` closes the snack and moves the epoch when the header marks the popup locked. Routing and the locked screen are unchanged (`f5ae2de8`) |
+| 3 | minor | A Deleted event while `afterRead` waited left the captured rows intact, so the assignment reinstalled the receipt (`useIncomingTransfers.ts`) | Each read collects the ids deleted while it is in flight, the service read's wait included, and drops them from its rows. A later read is unaffected (`3742f35c`) |
+| 4 | minor | The zero-amount comment and UI impact row 14 called dust an ordinary row that never arrives | "like dust" and "as dust is" are gone and the zero rule stays (`fbde4ae8`) |
+
+Every await between a check and its write, and what covers it:
+
+1. **The token add**, under the service lock:
+   - the tip read and the section's trust read come before the registration read;
+   - the registration's network and token reads are covered by the fence inside `setTrust` and by
+     `moveArrivalFloorLocked`'s own `isCurrent()`;
+   - `setTrust`'s read of the stored row is followed by its fence;
+   - the floor's trust read is followed by `isCurrent()`, and `setArrivalFloor` does not await
+     before it writes.
+2. **The lock event** has one await, `getProfiles()`. The seal runs before it; only the profile
+   list and the route wait behind it and the sequence guard. On the header's Lock, `readForLock()`
+   and the confirm come before the decision, so the popup is not locked yet. The mark and the
+   watcher act at the decision.
+3. **The refresh** has two, the service read and `afterRead`. A delete in either is dropped from
+   that read's rows.
+
+What each failing-first test showed:
+
+1. **`service.scenarios.test.ts`** pauses at each of five awaits, across a watchdog handoff and a
+   delete of the token. The five are the section's trust read, the registration's network read, its
+   token read, the trust write's own read and the floor's trust read. Before the fix, the token-read
+   and trust-write pauses left `trusted` on the deleted token. The other three already passed; the
+   network-read one because the token read after it sees the delete. In **`repository.test.ts`**, a
+   fence that turns false while `setTrust` reads the stored row still wrote it.
+2. **`locked-state.test.ts`**, run first against the module in the old order, with the lookup held
+   unresolved. The snack was still open, the epoch unmoved and `isLogined` true, and the superseded
+   case showed the same. In the header case, a watcher without `flush: "sync"` left the snack open
+   in the tick of the mark; the old code had no hook on that path at all. The rejected-lookup and
+   unlock cases passed on both.
+3. **`useIncomingTransfers.test.ts`**, holding the service read, then `afterRead`: the row deleted
+   meanwhile came back (`["a", "b"]`, not `["b"]`).
+4. **Comments only**; no test.
+
+Rejected: none. Left as they were: `setTrustAllow` and `setTrustReject` still write trust without
+a fence. It is the pattern of row 1 on the Allow and Reject paths, and it predates this batch.
+
+The dust question. A receipt above zero that the dust filter lets through while it fails open
+renders and can play. The plan intends that: its Security section says the filter "fails open when
+config, token, network or a fresh quote is unavailable (`service.ts:533-564`), which is its existing
+contract: then a dust receipt renders, and it can play once (A-11)". Row 32 of the plan audit's first
+round records the same. Nothing new was built.
+
+No fix changes a P5.1 capture. The lock seal and the dropped delete act on states no capture holds,
+so nothing was recaptured.
+
+Gate after the round:
+
+| Command | Exit | Duration |
+|---|---|---|
+| `bun run lint` (29 warnings, 3 infos, none in changed files) | 0 | 1 s |
+| `bun run typecheck:all` | 0 | 40 s |
+| `bun run test:all` (extension 7,421 passed, 4 skipped, 7 todo; design 393; every workspace green) | 0 | 111 s |
+| `bun run test:ci-gating` (138 pass, 2 skip) | 0 | 24 s |
+| `network/incoming-arrival.test.ts`, Chrome, proverless, `NULO_E2E_RETRY=0` (7 tests) | 0 | 440 s |
+| the same on Firefox (7 tests) | 0 | 399 s |
+| Chrome smoke build with the gate's flags | 0 | 22 s |
+| `snackbar`, `rows`, `contacts`, `security-reset`, `wallet-lock` and `auth-flows` on Chrome, retry 0 through the scratch config (20 tests) | 0 | 106 s |
+| Firefox smoke build with the gate's flags | 0 | 25 s |
+| the same six specs on Firefox, retry 0 (20 tests) | 0 | 156 s |
+
+`wallet-lock` and `auth-flows` are the smoke specs that drive the header's Lock.
