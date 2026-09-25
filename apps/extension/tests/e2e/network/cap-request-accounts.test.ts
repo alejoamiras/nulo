@@ -10,9 +10,9 @@ const hasConfig = aztecConfig !== undefined
 /**
  * Test #06 — accounts capability triggers account selector + alias input.
  *
- * The accounts capability is special: the popup shows the account list with
- * per-account alias input. We pick the first available account, leave the
- * default alias, and approve. After grant, `state.accounts` is populated from
+ * The accounts capability is special: the popup shows the account list, and a selected row offers
+ * "Rename for this app", which opens its alias field. We pick the first available account, leave
+ * the default alias, and approve. After grant, `state.accounts` is populated from
  * the dispatcher's enriched `granted.accounts` response (canonical refactor B2).
  */
 test.skipIf(!hasConfig)(
