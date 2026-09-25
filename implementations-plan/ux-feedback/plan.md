@@ -395,6 +395,12 @@ strings" (below).
   `apps/extension/src/wallet/services/wallet-sdk/background.ts` logs the message at Error. The
   fix is a fixed category at those sinks and a sentinel test, as batch 5's two new refusals
   have. The owner, 2026-09-24: "Yes. Defer to afterwards."
+- Contract addresses in the permission window: its Details table merges them case-blind,
+  while `matchesPattern` (`packages/wallet-bridge/src/method-scope-checkers.ts:39`) compares a
+  scope's listed contract to the call by exact string. A scope listed in another case never
+  matches (it fails closed), so its Details row can show an operation the check refuses.
+  Normalising both sides changes the grant check, so it is its own PR; codex accepted the
+  deferral in batch 5b's rounds 1 and 2.
 - The Revoke authwits and authwit-registry popups (`RevokeAuthwitsPopup.vue` and
   `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
   on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
