@@ -425,21 +425,32 @@ describe("Tooltip", () => {
 		const TIP = { top: 0, left: 0, right: 100, bottom: 40, width: 100, height: 40 }
 
 		type Rect = typeof TRIGGER
+		type Viewport = { width: number; height: number }
 
-		const withRects = async (
-			props: Record<string, unknown>,
-			{ trigger = TRIGGER, viewport }: { trigger?: Rect; viewport?: { width: number; height: number } } = {},
-		): Promise<string> => {
+		const setViewport = ({ width, height }: Viewport) => {
+			Object.defineProperty(window, "innerWidth", { configurable: true, value: width })
+			Object.defineProperty(window, "innerHeight", { configurable: true, value: height })
+		}
+
+		const stubGeometry = (trigger: Rect, viewport?: Viewport) => {
 			const orig = Element.prototype.getBoundingClientRect
 			const size = { width: window.innerWidth, height: window.innerHeight }
 			Element.prototype.getBoundingClientRect = function (this: Element) {
 				const r = tooltipRoot.contains(this) ? TIP : trigger
 				return { ...r, x: r.left, y: r.top, toJSON: () => ({}) } as DOMRect
 			}
-			if (viewport) {
-				Object.defineProperty(window, "innerWidth", { configurable: true, value: viewport.width })
-				Object.defineProperty(window, "innerHeight", { configurable: true, value: viewport.height })
+			if (viewport) setViewport(viewport)
+			return () => {
+				Element.prototype.getBoundingClientRect = orig
+				setViewport(size)
 			}
+		}
+
+		const withRects = async (
+			props: Record<string, unknown>,
+			{ trigger = TRIGGER, viewport }: { trigger?: Rect; viewport?: Viewport } = {},
+		): Promise<string> => {
+			const restore = stubGeometry(trigger, viewport)
 			try {
 				const w = mountTooltip(props)
 				await w.trigger("mouseenter")
@@ -447,9 +458,7 @@ describe("Tooltip", () => {
 				await flushPromises()
 				return bubble()?.style.transform ?? ""
 			} finally {
-				Element.prototype.getBoundingClientRect = orig
-				Object.defineProperty(window, "innerWidth", { configurable: true, value: size.width })
-				Object.defineProperty(window, "innerHeight", { configurable: true, value: size.height })
+				restore()
 			}
 		}
 
@@ -497,6 +506,47 @@ describe("Tooltip", () => {
 		test("shifts right of a trigger at the left edge", async () => {
 			const trigger = { top: 100, left: 0, right: 20, bottom: 120, width: 20, height: 20 }
 			expect(await withRects({}, { trigger, viewport: { width: 360, height: 600 } })).toBe("translate3d(8px, 126px,0)")
+		})
+
+		test("an open bubble that no longer fits after the window narrows moves back inside", async () => {
+			const trigger = { top: 100, left: 250, right: 280, bottom: 120, width: 30, height: 20 }
+			const restore = stubGeometry(trigger, { width: 360, height: 600 })
+			try {
+				const w = mountTooltip()
+				await w.trigger("mouseenter")
+				await flushPromises()
+				expect(bubble()?.style.transform).toBe("translate3d(215px, 126px,0)")
+				setViewport({ width: 300, height: 600 })
+				window.dispatchEvent(new Event("resize"))
+				await flushPromises()
+				expect(bubble()?.style.transform).toBe("translate3d(192px, 126px,0)")
+			} finally {
+				restore()
+			}
+		})
+
+		test("stops listening for resize once closed, and once unmounted while open", async () => {
+			const add = vi.spyOn(window, "addEventListener")
+			const remove = vi.spyOn(window, "removeEventListener")
+			const resizeListener = () => add.mock.calls.findLast(([type]) => type === "resize")?.[1]
+			try {
+				const closed = mountTooltip()
+				await closed.trigger("focusin")
+				const first = resizeListener()
+				expect(first).toBeDefined()
+				await closed.trigger("focusout")
+				expect(remove).toHaveBeenCalledWith("resize", first)
+
+				const unmounted = mountTooltip()
+				await unmounted.trigger("focusin")
+				const second = resizeListener()
+				expect(second).toBeDefined()
+				unmounted.unmount()
+				expect(remove).toHaveBeenCalledWith("resize", second)
+			} finally {
+				add.mockRestore()
+				remove.mockRestore()
+			}
 		})
 	})
 

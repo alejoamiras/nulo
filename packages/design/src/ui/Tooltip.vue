@@ -150,15 +150,21 @@ const place = () => {
 	styles.transform = `translate3d(${x}px, ${y}px,0)`
 }
 
+const stopListening = () => {
+	window.removeEventListener("keydown", handleEscape, true)
+	window.removeEventListener("resize", place)
+}
+
 watch(isOpen, (open) => {
-	if (!open) return window.removeEventListener("keydown", handleEscape, true)
+	if (!open) return stopListening()
 	window.addEventListener("keydown", handleEscape, true)
+	window.addEventListener("resize", place)
 	nextTick(place)
 })
 
 onBeforeUnmount(() => {
 	cancelTimers()
-	window.removeEventListener("keydown", handleEscape, true)
+	stopListening()
 })
 </script>
 

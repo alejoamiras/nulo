@@ -183,7 +183,9 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   - `viewport` is `window.innerWidth`/`innerHeight`, the window the spec names.
   - The mock never flips its `start`-mode tips (`page.js:403`); the spec's "flips above/below
     when it doesn't fit" governs, so every top/bottom tooltip flips.
-  - The component calls the helper where it builds `translate3d` today.
+  - The component calls the helper where it builds `translate3d` today, and again on every
+    window `resize` while open, so a window that narrows under an open bubble keeps it inside;
+    the listener goes on close and on unmount.
 - **Width and wrapping**: `.content { max-width: min(272px, calc(100vw - 16px)) }`, with the
   bubble `border-box`, so the cap includes padding and border. `.text` drops the
   `calc(var(--base-width) - 40px)` clamp and gains `overflow-wrap: anywhere`, so an unbroken
