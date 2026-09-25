@@ -420,3 +420,25 @@ Tests:
 - `tests/e2e/rows.test.ts`, smoke: with developer mode on, Tab reaches `settings-logs-open` and the
   next Tab leaves the row; the row draws `solid 2px -2px`; Enter opens the log window; Space, with
   it open, runs the same handler (a second click on the row) and opens no second window.
+
+## Codex round 1 · changes-requested (high)
+
+GPT-6 Astra at high effort, session `01a0d9b5-f60d-75f1-b5f2-8a7d772ddc44`, on
+`30730df3..7981f80f`, the first seven P6 commits. 10b (`1668ef24`) landed after that range and goes
+to round 2 with these fixes. The coordinator accepted all seven findings and added an eighth. Each
+fix is its own commit, and each fix's test fails on the rule it replaces: the pre-fix code put
+back by a mutation run, the pre-fix component for row 4, and for row 6 the `.prevent` the finding
+names.
+
+> VERDICT: changes-requested — confidence: high
+
+| # | Severity | Finding | Decision | Commit |
+|---|---|---|---|---|
+| 1 | major | The rise counted only the document's remaining scroll, so a row inside a scrolling sheet card (`PopupCard`, `overflow: auto`) was missed until a scroll exposed it, and a scroll and a click in one task could land on the snack (`composables/snackInset.ts`) | Accepted. A row rises by what every container that scrolls it still has to scroll: `overflow: hidden` adds nothing, and a sticky row adds nothing for the container it sticks to. Unit cases for a scrolling card and a sticky row; a smoke case scrolls the lengthened Receive sheet's Close into view and hit-tests it in one task | `55811d4e` |
+| 2 | major | A row moved by content above it, without resizing, kept a stale inset (`composables/snackInset.ts`) | Accepted. A `MutationObserver` on the body (child list, attributes, text, subtree) schedules the same frame-coalesced measure and is disconnected on dispose. Unit case: a hint added and removed above a row that keeps its size | `a120bebb` |
+| 3 | major | The top sheet was the last to mount, not the one drawn on top; Token Metadata renders its `Popup` only after an await (`composables/snackInset.ts`) | Accepted. `Popup` passes its `displaceIdx` to `v-snack-sheet`, and the highest order places the snack; between equals the later mount, and a sheet with no order sits beneath. The "In open order" comment is replaced. Unit cases for a lower sheet mounting last, a sheet raised by reopening, and ties; `Popup.snackbar.test.ts` with two real `Popup`s | `45b519f9` |
+| 4 | minor | The hold compared every move with where the pointer rested at the open, so a pointer that left and came back to that spot never held the snack (`packages/design/src/ui/ToastManagerBase.vue`) | Accepted. A move on the card is compared with the pointer's previous position, keeping the under-a-pixel tolerance. The return case is new | `332d41b7` |
+| 5 | minor | Presto registered its 48px placeholder while neither Continue nor the skip link renders, a state 1c's "no row, 12px" does not have (`onboarding/pages/presto.vue`) | Accepted, as the coordinator narrowed it. The first fix put the mark on the button and the link, which measured the 12px from the link's centred box; the second keeps the slot as the row, and `v-snack-footer` takes an optional value that registers it only while one of the two renders. A directive case and `presto.test.ts` | `c38df250`, then `288c0c4b` |
+| 6 | minor | The Revoke test dispatched Enter and then clicked on its own, so `.prevent` would have passed, and Space was untested (`RevokeAuthwitsPopup.test.ts`) | Accepted. Enter and Space are cancelable events on the focused button, and the click follows only when none was cancelled; one content opening and no revocation for each. No real-browser check, the coordinator's call | `6899451d` |
+| 7 | minor | The plan's hold bullet still said `mouseenter` and `:hover`, its wrapper bullet the route-only inset, and two test helpers carried comments that restated their names | Accepted. Both bullets describe P6, and both comments are gone | `9ed97ac8` |
+| 8 | the coordinator's | R-3's "36px to 52px" did not say that the code's 60px includes the row's 8px side padding | Accepted. R-3 says it | `9ed97ac8` |
