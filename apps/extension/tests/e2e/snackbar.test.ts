@@ -195,6 +195,16 @@ async function lengthenCard(page: Page, testid: string, px: number): Promise<voi
 	)
 }
 
+/** Hangs a 2px strip below the popup's bottom edge, in no box that scrolls, as content a fraction of
+ *  a pixel taller than the popup leaves it: the frame that clips the page must not scroll by it. */
+async function overhangPopup(page: Page): Promise<void> {
+	await page.$eval(sel("bottom-nav"), (nav) => {
+		const strip = document.createElement("div")
+		strip.style.cssText = "position: absolute; top: 100%; left: 0; width: 1px; height: 2px"
+		nav.append(strip)
+	})
+}
+
 type AboveEnd = { viewport: number; controlTop: number; snackBottom: number }
 
 /** Waits until the snack sits 12px above where `testid` stops once its card is scrolled to its end,
@@ -476,6 +486,7 @@ test("in a Receive sheet taller than the popup, an error already clears where Cl
 	await clickByTestId(page, "actions-receive")
 	await sheetAtRest(page, "receive-close")
 	await lengthenCard(page, "receive-close", 400)
+	await overhangPopup(page)
 
 	await clickByTestId(page, "receive-address")
 	await waitForToast(page, "Couldn't copy", 5_000, { kind: "error" })
