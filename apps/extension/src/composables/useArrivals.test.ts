@@ -229,6 +229,39 @@ describe("useArrivals — rows", () => {
 		expect(c.svc.claimArrivals).toHaveBeenCalledTimes(1)
 	})
 
+	test("an older presentation's token lookup that answers last leaves the newer chip", async () => {
+		const c = await seeded({ route: HOME })
+		const [older, newer] = [receipt(20), receipt(21)]
+		c.store.records.push(older, newer)
+		await c.arrivals.load(SCOPE)
+		list(c, ref([newer, older]))
+		const lookup = hold(c.lookupToken)
+		c.arrivals.present([older])
+		await settle()
+		c.arrivals.present([newer])
+		await settle()
+		expect(c.arrivals.latest.value?.id).toBe(newer.id)
+		lookup.release()
+		await settle()
+		expect(c.arrivals.latest.value?.id).toBe(newer.id)
+	})
+
+	test("a token lookup that answers after Home was left and returned to shows no chip", async () => {
+		const c = await seeded({ route: HOME })
+		const r = receipt(20)
+		c.store.records.push(r)
+		await c.arrivals.load(SCOPE)
+		list(c, ref([r]))
+		const lookup = hold(c.lookupToken)
+		c.arrivals.present([r])
+		await settle()
+		c.route.value = SETTINGS
+		c.route.value = HOME
+		lookup.release()
+		await settle()
+		expect(c.arrivals.latest.value).toBeNull()
+	})
+
 	test("a row another document claimed gets no chip, stops after its 2.6 s for good and is not claimed again", async () => {
 		const c = await seeded({ route: HOME })
 		const r = receipt(20)
