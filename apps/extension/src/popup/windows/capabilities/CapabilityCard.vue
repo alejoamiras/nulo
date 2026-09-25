@@ -81,9 +81,10 @@ function riskWord(r: CapabilityRisk): string {
 			gap="10"
 			:class="$style.cap_head"
 		>
+			<!-- The hit area spans the head; top-aligning the glyph keeps it level with the title's first line. -->
 			<Flex
 				v-if="switchLabel"
-				align="center"
+				align="start"
 				data-testid="cap-toggle"
 				role="switch"
 				:aria-checked="selected ? 'true' : 'false'"
@@ -133,7 +134,7 @@ function riskWord(r: CapabilityRisk): string {
 		</Flex>
 
 		<Flex v-else gap="10" :class="$style.cap_head_readonly">
-			<Flex align="center">
+			<Flex align="start">
 				<Icon name="check-circle" size="16" color="tertiary" />
 			</Flex>
 
