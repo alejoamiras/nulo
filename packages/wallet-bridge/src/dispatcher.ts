@@ -562,6 +562,17 @@ function isCapabilityCovered(cap: Capability, existingGrants: GrantedCapabilityR
 	}
 }
 
+/** The `data` answer from the stored grant, so a field left off, or a widening declined, is not
+ *  reported as granted. */
+function dataAnswer(grantedCaps: unknown[]): Record<string, unknown> {
+	const stored = grantedCaps.find((c) => (c as Record<string, unknown>).type === "data") as DataCapability | undefined
+	return {
+		type: "data",
+		addressBook: stored?.addressBook === true,
+		...(stored?.privateEvents !== undefined ? { privateEvents: stored.privateEvents } : {}),
+	}
+}
+
 /** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
 type CapabilityManifest = {
 	capabilities?: unknown[]
@@ -1293,7 +1304,8 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef,
 	): Promise<Record<string, unknown>[]> {
 		const result: Record<string, unknown>[] = []
-		// Use requested caps as the template to preserve the dApp's original fields
+		// The answer follows the request's order; accounts and data values come from the stored
+		// grant, since the person may have granted less than was asked.
 		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
 
 		for (const cap of requestedCaps) {
@@ -1329,6 +1341,8 @@ export class WalletSdkDispatcher {
 					canCreateAuthWit: storedAccounts?.canCreateAuthWit ?? false,
 					accounts: grantedAccounts,
 				})
+			} else if (cap.type === "data") {
+				result.push(dataAnswer(grantedCaps))
 			} else {
 				result.push(cap)
 			}
