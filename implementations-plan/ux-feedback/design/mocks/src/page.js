@@ -1,13 +1,15 @@
 (() => {
 	"use strict";
 
+	/** The round-5 addendum's pickers on item 6, one per batch-5 ask, named by the ask's number. */
+	const I6_ADD = [1, 2, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].map((n) => `i6a${n}`);
 	const ITEMS = [
 		{ id: "i1", num: "01", title: "Default account name", hit: "\"Account\" reads like a label, not a name", opts: "A: \"Account 1\"", mine: "A", status: "decided" },
 		{ id: "i2", num: "02", title: "Alias tooltip", hit: "Runs off the edge of the window", opts: "A: fix the tooltip · B: helper line", mine: "A + B", status: "decided" },
 		{ id: "i3", num: "03", title: "Fee wording", hit: "\"Sponsored Fee Juice\", \"Fee source\"", opts: "Round 5: the menu before balances load, the spoken sub-cent fee, a fee contract added by hand", mine: "V4′", status: "r5", ids: ["i3", "i3b", "i3c", "i3d", "i3e", "i3f"], latest: ["i3d", "i3e", "i3f"] },
 		{ id: "i4", num: "04", title: "Window placement", hit: "Covers the app's emoji check", opts: "A: top-right · B: one connect window (later)", mine: "A (B later)", status: "decided", later: "B saved as a follow-up" },
 		{ id: "i5", num: "05", title: "Profile name at setup", hit: "\"Was too much\"", opts: "Round 5: first-run import", mine: "A", status: "r5", ids: ["i5", "i5b"], latest: ["i5b"] },
-		{ id: "i6", num: "06", title: "Permissions window", hit: "Everything \"high\", claims overstated", opts: "Round 5: seven states no round drew", mine: "Off = ask · Off · B", status: "r5", ids: ["i6", "i6b", "i6c", "i6d", "i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"], latest: ["i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k"] },
+		{ id: "i6", num: "06", title: "Permissions window", hit: "Everything \"high\", claims overstated", opts: "Round 5: seven states no round drew, and an addendum of 25", mine: "Off = ask · Off · B", status: "r5", ids: ["i6", "i6b", "i6c", "i6d", "i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k", ...I6_ADD], latest: ["i6e", "i6f", "i6g", "i6h", "i6i", "i6j", "i6k", ...I6_ADD] },
 		{ id: "i7", num: "07", title: "Lock button", hit: "Same icon as \"private\"", opts: "A1 padlock chip · A2 word only · A3 no border", mine: "A2", status: "decided", ids: ["i7", "i7b"] },
 		{ id: "i8", num: "08", title: "Privacy strip", hit: "Squares read as checkboxes", opts: "Round 5: the review sheet, fee tag, unknown payer", mine: "A", status: "r5", ids: ["i8", "i8b", "i8c"], latest: ["i8b", "i8c"] },
 		{ id: "i9", num: "09", title: "Explaining terms", hit: "Jargon with no help nearby", opts: "Dotted terms + glossary · \"Authorizations\"", mine: "Authorizations", status: "decided", ids: ["i9", "i9b", "i9c"] },

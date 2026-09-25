@@ -63,6 +63,8 @@ for (const t of TARGETS) {
 		continue;
 	}
 	await el.scrollIntoView();
+	// The last unfold click leaves the pointer over the page, and its hover tint lands in the shot.
+	await page.mouse.move(0, 0);
 	await el.screenshot({ path: path.join(out, `${t.name}.png`) });
 	text[t.name] = await el.evaluate((node) => node.innerText.replace(/\n{2,}/g, "\n").trim());
 }
