@@ -46,10 +46,11 @@ const Scroller = defineComponent({
 
 /** An open sheet holding whatever footers it is given. */
 const Sheet = defineComponent({
+	props: { order: Number },
 	setup:
-		(_, { slots }) =>
+		(props, { slots }) =>
 		() =>
-			withDirectives(h("div", { "data-testid": "sheet" }, slots.default?.()), [[vSnackSheet]]),
+			withDirectives(h("div", { "data-testid": "sheet" }, slots.default?.()), [[vSnackSheet, props.order]]),
 })
 
 const base = ref(NAV_BASE)
@@ -169,7 +170,7 @@ describe("useSnackInset", () => {
 	test("an open sheet covers the nav: SNACK_GAP from the bottom, page footers ignored, 76 again once it closes", async () => {
 		mount(Host)
 		const open = ref(true)
-		mount(defineComponent({ setup: () => () => [h(Footer, { top: 500 }), open.value ? h(Sheet) : null] }), {
+		mount(defineComponent({ setup: () => () => [h(Footer, { top: 500 }), open.value ? h(Sheet, { order: 0 }) : null] }), {
 			attachTo: document.body,
 		})
 		await frame()
@@ -187,8 +188,8 @@ describe("useSnackInset", () => {
 		mount(
 			defineComponent({
 				setup: () => () => [
-					h(Sheet, null, () => h(Footer, { top: 540 })),
-					topOpen.value ? h(Sheet, null, () => h(Footer, { top: 420 })) : null,
+					h(Sheet, { order: 0 }, () => h(Footer, { top: 540 })),
+					topOpen.value ? h(Sheet, { order: 1 }, () => h(Footer, { top: 420 })) : null,
 				],
 			}),
 			{ attachTo: document.body },
@@ -197,6 +198,70 @@ describe("useSnackInset", () => {
 		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
 
 		topOpen.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 540 + SNACK_GAP)
+	})
+
+	test("a lower sheet that mounts after a higher one, its content loaded late, leaves placement with the higher one", async () => {
+		mount(Host)
+		const lowerOpen = ref(false)
+		mount(
+			defineComponent({
+				setup: () => () => [
+					h(Sheet, { order: 1 }, () => h(Footer, { top: 420 })),
+					lowerOpen.value ? h(Sheet, { order: 0 }, () => h(Footer, { top: 540 })) : null,
+				],
+			}),
+			{ attachTo: document.body },
+		)
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
+
+		lowerOpen.value = true
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
+	})
+
+	test("a sheet with no order sits beneath every ordered one, and between equals the later one is on top", async () => {
+		mount(Host)
+		const ordered = ref(true)
+		mount(
+			defineComponent({
+				setup: () => () => [
+					ordered.value ? h(Sheet, { order: 0 }, () => h(Footer, { top: 420 })) : null,
+					h(Sheet, null, () => h(Footer, { top: 480 })),
+					h(Sheet, null, () => h(Footer, { top: 540 })),
+				],
+			}),
+			{ attachTo: document.body },
+		)
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
+
+		ordered.value = false
+		await frame()
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 540 + SNACK_GAP)
+	})
+
+	test("a sheet raised above the others, as opening it again does, takes placement", async () => {
+		mount(Host)
+		const firstOrder = ref(0)
+		mount(
+			defineComponent({
+				setup: () => () => [
+					h(Sheet, { order: firstOrder.value }, () => h(Footer, { top: 540 })),
+					h(Sheet, { order: 1 }, () => h(Footer, { top: 420 })),
+				],
+			}),
+			{ attachTo: document.body },
+		)
+		await frame()
+		expect(inset.value).toBe(VIEWPORT - 420 + SNACK_GAP)
+
+		firstOrder.value = 2
 		await frame()
 		await frame()
 		expect(inset.value).toBe(VIEWPORT - 540 + SNACK_GAP)

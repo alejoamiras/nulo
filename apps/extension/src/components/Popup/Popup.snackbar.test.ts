@@ -8,7 +8,8 @@
 import { Flex, ToastManagerBase } from "@nulo/design"
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { nextTick } from "vue"
+import { defineComponent, nextTick } from "vue"
+import { useSnackInset, vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 vi.mock("@/utils/core", () => ({ managers: { profile: { refreshSession: vi.fn() } } }))
@@ -161,5 +162,51 @@ describe("Popup with a snack", () => {
 		await openFromOpener()
 		byTestId("first")?.focus()
 		expect([await pressTab(), await pressTab()]).toEqual(["second", "first"])
+	})
+})
+
+describe("Popup and the snack's place", () => {
+	beforeEach(() => {
+		document.body.innerHTML = '<div id="popup"></div>'
+		vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(600)
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+			const top = this.dataset.top
+			return DOMRect.fromRect({ x: 0, y: Number(top ?? 0), width: 360, height: top ? 40 : 0 })
+		})
+	})
+	afterEach(() => {
+		vi.restoreAllMocks()
+		document.body.innerHTML = ""
+	})
+
+	test("the popup drawn on top places the snack, though a lower one mounted after it", async () => {
+		let inset = { value: -1 }
+		const Host = defineComponent({
+			setup() {
+				inset = useSnackInset(() => 76)
+				return () => null
+			},
+		})
+		const wrapper = mount(
+			{
+				components: { Popup, Host },
+				directives: { snackFooter: vSnackFooter },
+				data: () => ({ lower: false }),
+				template: `<div><Host />
+					<Popup :show="true" :displaceIdx="2"><div v-snack-footer data-top="420" /></Popup>
+					<Popup :show="lower" :displaceIdx="1"><div v-snack-footer data-top="540" /></Popup>
+				</div>`,
+			},
+			{ attachTo: document.body, global: { components: { Flex }, stubs: STUBS } },
+		)
+		const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+		await settle()
+		await frame()
+		expect(inset.value).toBe(600 - 420 + 12)
+
+		await wrapper.setData({ lower: true })
+		await settle()
+		await frame()
+		expect(inset.value).toBe(600 - 420 + 12)
 	})
 })

@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
 				<!-- tabindex -1: the trap's fallback when a popup has no tabbable control. -->
 				<Flex
 					ref="popupEl"
-					v-snack-sheet
+					v-snack-sheet="displaceIdx"
 					direction="column"
 					:class="$style.wrapper"
 					:style="{ zIndex: (displaceIdx + 1) * 100 * 5 }"
