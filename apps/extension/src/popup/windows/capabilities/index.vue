@@ -1,3 +1,11 @@
+<route lang="json">
+{
+	"meta": {
+		"fillsWindow": true
+	}
+}
+</route>
+
 <script setup lang="ts">
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
