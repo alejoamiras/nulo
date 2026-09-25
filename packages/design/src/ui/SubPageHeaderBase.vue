@@ -33,7 +33,14 @@ defineProps({
 
 <template>
 	<Flex align="center" justify="between" gap="12" :class="$style.wrapper">
-		<button v-if="showBack" @click="$emit('back')" :class="$style.back_btn" type="button" aria-label="Back">
+		<button
+			v-if="showBack"
+			@click="$emit('back')"
+			:class="$style.back_btn"
+			type="button"
+			aria-label="Back"
+			data-testid="subpage-back"
+		>
 			<MaterialIcon name="arrow_back" :size="22" color="primary" />
 		</button>
 		<div v-else :class="$style.back_spacer" />
