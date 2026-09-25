@@ -79,6 +79,13 @@ const entered = (label: string) => () => {
 }
 
 const mouse = (el: Element, type: string) => el.dispatchEvent(new MouseEvent(type, { bubbles: false }))
+const pointerAt = (el: EventTarget, x: number, y: number) =>
+	el.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y }))
+/** A person reaching the card: the pointer moves across it. */
+const moveOnto = (el: Element) => {
+	pointerAt(el, 40, 30)
+	pointerAt(el, 44, 31)
+}
 
 describe("ToastManagerBase", () => {
 	beforeEach(() => {
@@ -293,7 +300,7 @@ describe("ToastManagerBase", () => {
 		open({ kind: "success", label: "Held", action: { label: "View", onSelect: () => {} } })
 		await settle()
 		const el = card() as HTMLElement
-		mouse(el, "mouseenter")
+		moveOnto(el)
 		await step(2_000)
 		el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]')?.focus()
 		await step(60_000)
@@ -315,7 +322,7 @@ describe("ToastManagerBase", () => {
 		const action = el.querySelector<HTMLButtonElement>('[data-testid="snackbar-action"]') as HTMLButtonElement
 		action.focus()
 		await step(2_000)
-		mouse(el, "mouseenter")
+		moveOnto(el)
 		await step(60_000)
 		action.blur()
 		await step(60_000)
@@ -346,26 +353,65 @@ describe("ToastManagerBase", () => {
 		expect(useToast().toast.value).toBeNull()
 	})
 
-	test("a replacement while the card matches :hover is held", async () => {
-		const original = Element.prototype.matches
-		Element.prototype.matches = function (this: Element, selector: string) {
-			if (selector === ":hover" && this.getAttribute("data-testid") === "snackbar") return true
-			return original.call(this, selector)
-		} as typeof Element.prototype.matches
-		try {
-			mountRegion()
-			open({ kind: "success", label: "First" })
-			await settle()
-			await step(3_000)
-			open({ kind: "success", label: "Second" })
-			await settle()
-			await step(60_000)
-			expect(card()?.textContent).toContain("Second")
-		} finally {
-			Element.prototype.matches = original
-		}
-		mouse(card() as HTMLElement, "mouseleave")
-		await step(6_000)
+	test("a card that opens under a still pointer runs its 6 s: hover events and moves under a pixel off hold nothing", async () => {
+		mountRegion()
+		pointerAt(document.body, 120, 540)
+		open({ kind: "success", label: "Under the cursor" })
+		await settle()
+		const el = card() as HTMLElement
+		mouse(el, "mouseover")
+		mouse(el, "mouseenter")
+		el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, clientX: 120, clientY: 540 }))
+		pointerAt(el, 120, 540)
+		pointerAt(el, 120.6, 539.4)
+		await step(5_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("a replacement under a still pointer starts its own 6 s, though the card before it was held", async () => {
+		mountRegion()
+		open({ kind: "success", label: "First" })
+		await settle()
+		moveOnto(card() as HTMLElement)
+		await step(60_000)
+		expect(card()?.textContent).toContain("First")
+
+		open({ kind: "success", label: "Second" })
+		await settle()
+		pointerAt(card() as HTMLElement, 44, 31)
+		await step(5_399)
+		expect(card()?.textContent).toContain("Second")
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("with no position known at the open, a first move at the card's spot holds nothing", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Under the cursor" })
+		await settle()
+		pointerAt(card() as HTMLElement, 10, 10)
+		await step(5_399)
+		expect(cards().length).toBe(1)
+		await step(1)
+		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("with no position known at the open, the first move anywhere is the rest spot: one move from there onto the card holds it", async () => {
+		mountRegion()
+		open({ kind: "success", label: "Reached" })
+		await settle()
+		const el = card() as HTMLElement
+		pointerAt(document.body, 200, 10)
+		await step(3_000)
+		pointerAt(el, 40, 30)
+		await step(60_000)
+		expect(cards().length).toBe(1)
+		mouse(el, "mouseleave")
+		await step(2_399)
+		expect(cards().length).toBe(1)
+		await step(1)
 		expect(useToast().toast.value).toBeNull()
 	})
 
@@ -384,7 +430,7 @@ describe("ToastManagerBase", () => {
 		const wrapper = mountRegion()
 		open({ kind: "success", label: "Held" })
 		await settle()
-		mouse(card() as HTMLElement, "mouseenter")
+		moveOnto(card() as HTMLElement)
 		await step(1_000)
 		wrapper.unmount()
 		await step(6_000)

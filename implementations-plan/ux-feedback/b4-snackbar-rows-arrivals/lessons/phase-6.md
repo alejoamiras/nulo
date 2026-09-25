@@ -69,8 +69,8 @@ Sign-off pending (built as the closest existing pattern):
 
 Observed, not changed: the popup's Terms sheet (`components/LegalAcceptanceSheet.vue`) sits at
 z-index 9000, above the snack's 2000, so a snack raised while it is open is hidden behind it. Its
-consent row is registered (through `LegalConsent`), which moves nothing while the sheet hides the
-snack anyway.
+consent row is registered (through `LegalConsent`), so the snack still rises above that row, but
+the sheet hides it either way.
 
 Tests:
 
@@ -84,6 +84,52 @@ Tests:
   address fails the estimate and its error sits 12px (±0.5) above `send-footer`; in the execute
   window, a public transfer the account cannot fund does the same above `dapp-approval-footer`.
   Both then grow the footer by a 40px line and check the snack follows it.
+
+## P6.2 · A first open runs its 6 s (2b)
+
+Built in `packages/design/src/ui/ToastManagerBase.vue`:
+
+- The hold no longer starts on `mouseenter`, and a card no longer re-reads `:hover` once it has
+  risen. A card that appears under a still cursor gets the browser's hover events, so both held a
+  snack the person never reached.
+- The region follows the pointer with one passive capture `pointermove` listener on the document.
+  When a card opens it notes where the pointer rests; with no position known yet, the first move
+  after the open, anywhere, gives that spot. A `pointermove` on the card holds it only when it is at
+  least a pixel from that spot on either axis. No hover event holds, and neither does a move the
+  browser synthesises at the rest spot.
+- Unchanged: focus entering the card holds it, `mouseleave` or focus leaving releases it, the
+  remaining time resumes, and an error has no timer.
+
+Decisions:
+
+1. **Position, not event type, tells a person from the browser.** A synthesised move carries the
+   cursor's last position; a person reaching the card moves it. Under a pixel apart counts as the
+   same spot, since the two can round differently.
+2. **The first move anywhere gives the rest spot, not the first move on the card.** Puppeteer's
+   five-step move from off the card lands only its last step on it, and so can a quick flick. Had
+   the card's own first move only noted the spot, that one move would hold nothing, and the
+   existing hold e2e would fail.
+3. **A replacement starts over.** `show()` clears the hold and notes the spot again, so a card that
+   replaces a held one under a still pointer runs its own 6 s.
+
+Tests:
+
+- `packages/design/src/ui/ToastManagerBase.test.ts`: the hold cases reach the card with two real
+  moves. New: a card that opens under a still pointer (mouseover, mouseenter, pointerover, a move
+  at the spot and one 0.6px off) is gone at 6 s; a replacement under a still pointer runs its own
+  6 s after a held card; with no position known at the open, a first move at the card's spot holds
+  nothing, and a first move elsewhere then one move onto the card holds it. The old case "a
+  replacement while the card matches :hover is held" is gone: it pinned the behaviour 2b removes.
+  Mutations checked: without the pixel tolerance, or without the first-move rest spot, these fail.
+- `tests/e2e/snackbar.test.ts`, one new smoke case: in the Receive sheet the mouse moves to the
+  address line's lower edge and presses and releases there; the success opens over that point
+  (`elementFromPoint` lands inside the card) and lives 5.5 to 6.5 s with the mouse still. The
+  existing case where the pointer moves onto the card still holds it for 8 s.
+
+Observed on Chrome, with the card opening under the still pointer: the card matched `:hover` and
+got 2 `pointerover`, 3 `pointerenter`, 2 `mouseover` and 3 `mouseenter` events, but no
+`pointermove` or `mousemove`. So the old `mouseenter` hold and the `:hover` re-read each held a
+snack nobody reached; now it lived 6159 ms.
 
 ## P6.5 · Over a sheet (12a)
 
