@@ -426,6 +426,14 @@ describe("ToastManagerBase", () => {
 		expect((toastRoot.firstElementChild as HTMLElement).style.bottom).toBe("12px")
 	})
 
+	test("inColumn narrows the card to the content column; without it the card keeps the viewport's width", () => {
+		const wrapper = mountRegion({ inColumn: true })
+		expect((toastRoot.firstElementChild as HTMLElement).className).toMatch(/in_column/)
+		wrapper.unmount()
+		mountRegion()
+		expect((toastRoot.firstElementChild as HTMLElement).className).not.toMatch(/in_column/)
+	})
+
 	test("unmounting while held releases the hold", async () => {
 		const wrapper = mountRegion()
 		open({ kind: "success", label: "Held" })

@@ -10,8 +10,14 @@ import Icon from "../core/Icon.vue"
 import MaterialIcon from "../core/MaterialIcon.vue"
 
 // Host-DOM contract: teleports the snack regions to `teleportTo` (default `#toast`); the consuming
-// app must declare that root. `bottomInset` is the gap above the viewport's bottom edge.
-withDefaults(defineProps<{ teleportTo?: string; bottomInset?: number }>(), { teleportTo: "#toast", bottomInset: 12 })
+// app must declare that root. `bottomInset` is the gap above the viewport's bottom edge. `inColumn`
+// says the page is the `--base-width` column centred in a wider viewport, so the card spans that
+// column less 16px a side.
+withDefaults(defineProps<{ teleportTo?: string; bottomInset?: number; inColumn?: boolean }>(), {
+	teleportTo: "#toast",
+	bottomInset: 12,
+	inColumn: false,
+})
 
 const { toast, closeToast, holdToast } = useToast()
 
@@ -113,7 +119,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<Teleport :to="teleportTo" defer>
-		<div :class="$style.wrap" :style="{ bottom: `${bottomInset}px` }">
+		<div :class="[$style.wrap, inColumn && $style.in_column]" :style="{ bottom: `${bottomInset}px` }">
 			<div role="status" aria-live="polite" aria-atomic="true" :class="$style.region">
 				<Transition
 					mode="out-in"
@@ -211,6 +217,10 @@ onBeforeUnmount(() => {
 	box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45);
 	color: var(--txt-primary);
 	pointer-events: auto;
+}
+
+.in_column .card {
+	max-width: calc(var(--base-width) - 32px);
 }
 
 .error {
