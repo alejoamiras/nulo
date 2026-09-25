@@ -106,14 +106,14 @@ snackbar looks weird."), i10b "A′", i11 "A", i12 "B" — unchanged.
 
 | # | Surface | Before → after (drawn values) | Shot | Sign-off |
 |---|---|---|---|---|
-| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); in a window shorter than the page, 85px up before the scroll: **sign-off pending** (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width and motion: **sign-off pending** (S-2, S-3) |
+| 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); in a window shorter than the page, 85px up before the scroll: **sign-off pending** (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width, the Chrome side panel's width and motion: **sign-off pending** (S-2, S-3) |
 | 2 | Success snack | → 16px `check-circle` in `--green` (`:87`, `:97`), in the polite region, one action "View" (headline 11px/700, `0.12em`, uppercase, `--nulo-accent`, `padding: 6px 4px`, `:197`) only on transaction and receipt messages; hides after 6 s, waits while hovered or focused | `10-snackbar` | i10 A′; the first open's timer: owner, 2026-09-25: 2b (S-12); which messages get View: **pending** (S-7) |
 | 3 | Error snack | → 16px `close-circle` in `--red`, `border-color: var(--red)`, title `--txt-primary` (`:473-474`), in the assertive region, a × button 24×24, `margin-right: -6px`, `--nulo-secondary`, glyph 16px, `aria-label="Close"` (`:471-472`, `r2/i10.html:21`); stays until × | `10-snackbar` | i10 A′; Details: owner, 2026-09-25: 10b (S-8) |
 | 4 | Send's result | "Transaction submitted" alone, or the failure sentence in red → title "Transaction submitted", sub "{amount} {symbol} to {0x8c02…41fa}", View opens the transaction; title "Send failed", sub today's failure sentence | `10-snackbar` | i10 A′; sub copy **pending** (S-9, S-10) |
 | 5 | The 130 call sites | icon, colour and duration per call → a kind per call (success or error), the rest from rows 2 and 3 | none | i10 "decided per call site and listed in the PR body"; the borderline groups **pending** (S-5, S-6) |
 | 6 | Activity rows, Home and History | tx rows: a `div` with a 50% tint, no Tab stop; journal and received rows: no hover, no Tab stop; queued awaiting rows: pointer only → every openable row is a link (tx, journal, received) or a button (queued awaiting, which opens the approval window), full-row `--nulo-surface-low` tint with `transition: background 0.15s var(--bezier)`, `:active` `--nulo-surface-high`, focus = tint + `outline: 2px solid var(--nulo-accent); outline-offset: -2px` (`nulo.css:242-245`); the row box extends 8px each side (`margin: 0 -8px; padding: 6px 8px`, `:223`); the dollar figure's "At today's price" hover stays, because that span sits above the row's target and passes a plain click to it (R-7) | `11-rows` | i11 A (owner); the kept hover: **pending** (R-7) |
 | 7 | Other lists (Settings, tokens, contacts, connected apps, authorizations, notes, fee contracts, accounts, senders, endpoints, contracts, the pickers) | mixed: Tab stops on inert rows, Enter-only rows, click rows keyboards cannot open, hover on rows that do nothing, contacts and connected apps announced as buttons though they navigate → the same rules (a row that navigates is a link); each list keeps its own hover tint and gains the drawn ring; the contact row's S chip keeps its "Registered as sender" hover the same way (R-7) | `11-rows` (rules, `parts/11-rows.html:47-53`) | i11 A; the Logs row and the Revoke expand button under the rules: owner, 2026-09-25: 5b, with the Logs row's fade, its ring box and a ring without the fade **pending**; the ring and the token tint off the drawing, the kept hover: **pending** (R-1, R-2, R-7) |
-| 8 | Buttons inside rows | 14–20px glyphs (most not focusable) and 16×28 awaiting buttons → 24×24 (awaiting 24×28) buttons with an accessible name; layouts shift by the difference | `11-rows` | i11 A; the shift: **pending** (R-3, R-4) |
+| 8 | Buttons inside rows | 14–20px glyphs (most not focusable) and 16×28 awaiting buttons → 24×24 (awaiting 24×28) buttons with an accessible name; layouts shift by the difference | `11-rows` | i11 A; the shift, with the Revoke sheet's chunk header growing by the content button's box: **pending** (R-3, R-4) |
 | 9 | Home on a new receipt | a row appears → the row slides in (`n-row-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1)`) and glows green (`n-row-glow 2.4s ease-out 0.2s`), its amount green then primary (`n-amt 2.6s`); a chip "+{amount} {symbol}" rises above the hero and fades (`n-plus 2.6s`, `nulo.css:517-527`); the hero counts for 900ms (`page.js:663-674`) only between two displayed aggregates | `12-arrival` | i12 B; count-up: signed off, 9a (A-1′); chip text and chip width **pending** (A-2, A-14) |
 | 10 | History on a new receipt | as row 9's row | `12-arrival` | i12 B |
 | 11 | Anywhere else on a receipt that arrives while the page is open | nothing → one success snack, "Received {amount} {symbol}", "Private · {account}" or "Public · {account}", View opens the receipt (`parts/12-incoming.html:53`) | `12-incoming` | i12 B; where "elsewhere" is and which receipts it names: **pending** (A-3, A-4, A-11, A-13) |
@@ -162,6 +162,9 @@ Snackbar:
   `calc(100% - 32px)` capped at 368px, the width it takes in the 400px dApp windows (400px less
   the drawn 16px on each side), centered. **The dApp windows: owner, 2026-09-25: 11a**, 328px,
   the 360px content column less 16px a side (P6.4). The onboarding tab stays sign-off pending.
+  **Sign-off pending:** the Chrome side panel keeps the popup's rule, `calc(100% - 32px)`
+  capped at 368px, centred, so in a panel wider than 360px the snack is wider than the
+  column. Alternative: 11a's 328px there too.
 - **S-3 · The rise.** No keyframe or timing is drawn. Recommended and built: `opacity 0,
   translateY(20px)` → rest, 0.15s `var(--bezier)` (today's timing, mirrored); the leave reverses;
   reduced motion fades only.
@@ -230,13 +233,17 @@ Keyboard:
 Rows:
 
 - **R-1 · The ring on lists the mocks don't draw.** Recommended and built: each list's own hover
-  tint plus the drawn `2px solid var(--nulo-accent)` at `-2px`.
+  tint plus the drawn `2px solid var(--nulo-accent)` at `-2px`. **Sign-off pending:** the
+  Advanced page's rows have no tint, so the Logs row keeps their 0.8 fade on hover, and its
+  focus draws the ring at full opacity on a box 8px past the text sideways and 6px above and
+  below (5b, P6.6).
 - **R-2 · Token rows' tint.** Today `color-mix(surface-low 50%)`. Recommended and built: the
   activity rows' `--nulo-surface-low`, since both sit on Home.
 - **R-3 · 24×24 inner buttons.** Recommended and built: the amount column and labels move by the
   added width; the awaiting card's reservation grows from 36px to 52px. The awaiting buttons'
   16px width was tuned by the owner (`TransactionAwaitingCard.vue:173-176`); item 11's "at least
-  24×24" supersedes it, and the owner confirms here.
+  24×24" supersedes it, and the owner confirms here. **Sign-off pending:** the Revoke sheet's
+  chunk header grows by the content button's 24px box, where the glyph was 16px (5b, P6.6).
 - **R-4 · The authorization revoke.** Hidden until hover today. Recommended and built: also
   visible while the row or the button has focus.
 - **R-5 · The awaiting "focus" button.** It now duplicates the row. Recommended and built: kept.
@@ -1920,7 +1927,8 @@ older layout differences stay). The log is `lessons/phase-6.md`.
 4. **Width in dApp windows (11a).** In the execute, discover, permission, verify and passkey
    windows the snack spans the 360px content column less 16px a side (328px), centred on it. The
    json and logger windows fill their window, so they keep the popup's rule. The popup and the
-   onboarding tab are unchanged.
+   onboarding tab are unchanged. The Chrome side panel keeps the popup's rule, so a panel
+   wider than 360px can take a wider snack (**sign-off pending**, S-2).
 5. **Over a sheet (12a).** While a sheet that covers the nav is open, the snack sits 12px from the
    bottom, or 12px above the sheet's own footer row if it has one; when the sheet closes it goes
    back to 76px. `v-snack-sheet` on `components/Popup/Popup.vue` tells the host a sheet is open.
@@ -1928,7 +1936,8 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    tint and the 2px accent ring, opened by Enter and Space (R-1, R-2, R-7). The Revoke
    authorizations popup's expand icon becomes a 24×24 named button (R-3). The Advanced page's
    rows have no tint; they fade to 0.8 on hover, so the Logs row keeps that fade and its focus draws
-   the ring at full opacity (**pending**). The sheet revokes on any Enter that reaches the
+   the ring at full opacity (**sign-off pending**, R-1), and the chunk header grows by the
+   button's 24px box (**sign-off pending**, R-3). The sheet revokes on any Enter that reaches the
    document, so Enter on the new button stops there and only opens the content.
 
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all`, `bun run test:ci-gating`,
