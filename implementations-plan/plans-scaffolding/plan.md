@@ -445,7 +445,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 - Pass: exit 0, clean tree.
 - Layers: bookkeeping.
 
-### Phase 1: the gate library, report-only (Arc A0)
+### Phase 1: the gate library, report-only (Arc A0) ✓
 
 Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `permalink-bases.json`, with temp-repo fixtures for each case:
 
@@ -644,7 +644,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 2. `gh stack rebase`. On a conflict (exit 3): resolve, `git add`, `gh stack rebase --continue`; or `gh stack rebase --abort`, which restores every branch.
 3. Run each rebased arc's pre-merge gate (below), bottom-up.
 4. `gh stack push` (per-branch `--force-with-lease`, this plan's own branches only). A rejected branch is fixed and pushed again; the others are unchanged.
-5. **Manual fallback**, when `gh stack` cannot recover: bottom-up, `git rebase --onto <new parent tip> <old parent tip> <branch>`, where a squash-merged parent's new tip is `origin/dev` and its old tip is the one recorded in step 1 (so its commits are never replayed). Then step 3, then `git push --force-with-lease=<branch>:<old tip> origin <branch>` per branch, then `gh stack init --base dev <remaining branches>` to re-adopt them.
+5. **Manual fallback**, when `gh stack` cannot recover: bottom-up, `git rebase --onto <new parent tip> <old parent tip> <branch>`, where a squash-merged parent's new tip is `origin/dev` and its old tip is the one recorded in step 1 (so its commits are never replayed). Then step 3, then `git push --force-with-lease=<branch>:<old tip> origin <branch>` per branch, then `gh stack unstack --local` (from a stack branch; `init` refuses a branch the old stack still tracks) and `gh stack init --base dev <remaining branches>` to re-adopt them.
 
 **Before every merge (codex C8, final pass 5).** `dev` is not strict, so a PR that went green on an old base can merge into a broken tree. Before the owner merges any PR here, the session refreshes the base (Stack operations 1-4), then runs **that arc's** gate in a clean clone checked out at the PR's head (`gh pr view <n> --json headRefOid`), never whichever branch happens to be checked out, and posts the output in the PR:
 

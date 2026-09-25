@@ -1,0 +1,213 @@
+import { afterAll, describe, expect, test } from "bun:test"
+import { CANONICAL_GITIGNORE, cleanupRepos, commitAll, findings, git, makeRepo, writeFiles } from "./fixture-repo"
+import { NESTED_IGNORE_ALLOWLIST } from "./structure"
+
+afterAll(cleanupRepos)
+
+const OUTCOME = "## Outcome\n\n- **Date**: 2026-09-25. **Status**: completed.\n- **Shipped**: #1.\n- **Seeds retired**: spent.\n"
+const HYGIENE = { "implementations-plan/.gitignore": CANONICAL_GITIGNORE, "implementations-plan/.ignore": "/archive/\n" }
+
+describe("tracked-artifact", () => {
+	test("a tracked transcript fails; a lessons file with a transcript-shaped name stays tracked", () => {
+		const repo = makeRepo({ "implementations-plan/p/audit-codex.md": "a\n", "implementations-plan/p/lessons/audit-x.md": "l\n" })
+		expect(findings(repo, "tracked-artifact").map((f) => f.file)).toEqual(["implementations-plan/p/audit-codex.md"])
+	})
+
+	test("a tracked file that an ignore rule covers fails (ls-files -ci, not check-ignore)", () => {
+		const repo = makeRepo({ ".gitignore": "*.log\n", "implementations-plan/p/plan.md": "p\n" })
+		writeFiles(repo, { "implementations-plan/p/run.log": "log\n" })
+		git(repo, "add", "-f", "implementations-plan/p/run.log")
+		commitAll(repo)
+		expect(findings(repo, "tracked-artifact").map((f) => f.detail)).toEqual([
+			"implementations-plan/p/run.log is tracked although ignored",
+		])
+	})
+
+	test("a clean tree passes", () => {
+		expect(findings(makeRepo({ ...HYGIENE, "implementations-plan/p/plan.md": "p\n" }), "tracked-artifact")).toEqual([])
+	})
+})
+
+describe("hygiene-files", () => {
+	test("the canonical files pass", () => {
+		expect(findings(makeRepo(HYGIENE), "hygiene-files")).toEqual([])
+	})
+
+	test("missing files fail, one finding per missing line", () => {
+		expect(findings(makeRepo({ "README.md": "r\n" }), "hygiene-files")).toHaveLength(6)
+	})
+
+	test("an appended `!audit-*.md` reds both hygiene-files and tracked-artifact", () => {
+		const repo = makeRepo({
+			...HYGIENE,
+			"implementations-plan/.gitignore": `${CANONICAL_GITIGNORE}!audit-*.md\n`,
+			"implementations-plan/p/audit-codex.md": "a\n",
+		})
+		expect(findings(repo, "hygiene-files").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"6 `!audit-*.md` re-includes a transcript shape",
+		])
+		expect(findings(repo, "tracked-artifact").map((f) => f.file)).toEqual(["implementations-plan/p/audit-codex.md"])
+	})
+})
+
+describe("nested-ignore", () => {
+	test("a nested .gitignore fails", () => {
+		const repo = makeRepo({ ...HYGIENE, "implementations-plan/p/.gitignore": "audit-*.md\n" })
+		expect(findings(repo, "nested-ignore").map((f) => f.file)).toEqual(["implementations-plan/p/.gitignore"])
+	})
+
+	test("an allowlisted one passes, and the allowlist only shrinks", () => {
+		const repo = makeRepo({ ...HYGIENE, [NESTED_IGNORE_ALLOWLIST[0]]: "*\n!.gitignore\n" })
+		expect(findings(repo, "nested-ignore")).toEqual([])
+		expect(NESTED_IGNORE_ALLOWLIST.length).toBeLessThanOrEqual(1)
+	})
+})
+
+describe("index-structure", () => {
+	const split = { "implementations-plan/archive/index.md": "# Archive\n" }
+
+	test("before the archive split there is no active set, so nothing is checked", () => {
+		expect(findings(makeRepo({ "implementations-plan/index.md": "- [gone](gone/plan.md) — x — y\n" }), "index-structure")).toEqual([])
+	})
+
+	test("one line per active dir, pointing at its host, passes", () => {
+		const repo = makeRepo({
+			...split,
+			"implementations-plan/index.md": "- [a](a/plan.md) — active — does a\n",
+			"implementations-plan/a/plan.md": "# A\n",
+		})
+		expect(findings(repo, "index-structure")).toEqual([])
+	})
+
+	test("an unlisted dir, a duplicate, a dead target and an archive target each fail", () => {
+		const repo = makeRepo({
+			...split,
+			"implementations-plan/index.md": [
+				"- [a](a/plan.md) — active — a",
+				"- [a2](a/plan.md) — active — again",
+				"- [c](c/plan.md) — active — dead",
+				"- [z](archive/z/plan.md) — closed — wrong index",
+				"- [bad](bad/plan.md) no separators",
+			].join("\n"),
+			"implementations-plan/a/plan.md": "# A\n",
+			"implementations-plan/b/plan.md": "# B\n",
+		})
+		expect(findings(repo, "index-structure").map((f) => f.detail)).toEqual([
+			"b has no line in index.md",
+			"a is listed twice",
+			"c/plan.md is not in the git index",
+			"z points into archive/",
+			"archive/z/plan.md is not in the git index",
+			"not `- [name](target) — status — hook`",
+		])
+	})
+
+	test("an Outcome and the closing status go together", () => {
+		const repo = makeRepo({
+			...split,
+			"implementations-plan/index.md": [
+				"- [a](a/plan.md) — active — has an Outcome",
+				"- [b](b/plan.md) — closed, awaiting archive — lacks one",
+				"- [c](c/plan.md) — closed, awaiting archive — complete",
+			].join("\n"),
+			"implementations-plan/a/plan.md": `# A\n\n${OUTCOME}`,
+			"implementations-plan/b/plan.md": "# B\n\n## Outcome & Quality Bar\n",
+			"implementations-plan/c/plan.md": `# C\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "index-structure").map((f) => f.detail)).toEqual([
+			"a has an Outcome but is listed as active",
+			'b is "closed, awaiting archive" without a complete Outcome',
+		])
+	})
+})
+
+describe("archive-structure", () => {
+	const line = (dir: string) => `- [${dir}](${dir}/plan.md) — completed 2026-09-25 (#1) — ${dir}`
+
+	test("an archived plan with its line and a complete Outcome passes", () => {
+		const repo = makeRepo({
+			"implementations-plan/archive/index.md": `${line("a")}\n`,
+			"implementations-plan/archive/a/plan.md": `# A\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "archive-structure")).toEqual([])
+	})
+
+	test("a fenced Outcome, an `Outcome & Quality Bar`, a missing Seeds line and a missing index line all fail", () => {
+		const repo = makeRepo({
+			"implementations-plan/archive/index.md": ["a", "b", "c"].map(line).join("\n"),
+			"implementations-plan/archive/a/plan.md": `# A\n\n\`\`\`md\n${OUTCOME}\`\`\`\n`,
+			"implementations-plan/archive/b/plan.md":
+				"# B\n\n## Outcome & Quality Bar\n\n- **Date**: x **Status**: y **Shipped**: z **Seeds retired**: w\n",
+			"implementations-plan/archive/c/plan.md": "# C\n\n## Outcome\n\n- **Date**: x. **Status**: y.\n- **Shipped**: z.\n",
+			"implementations-plan/archive/d/plan.md": `# D\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "archive-structure").map((f) => f.file)).toEqual([
+			"implementations-plan/archive/a/plan.md",
+			"implementations-plan/archive/b/plan.md",
+			"implementations-plan/archive/c/plan.md",
+			"implementations-plan/archive/d",
+		])
+	})
+})
+
+describe("curated-budget", () => {
+	const entry = "- One gotcha, in one line ([log](archive/p/lessons/phase-1.md)).\n"
+	/** Padded before the first entry, where free text is allowed, to exactly `size` bytes. */
+	const body = (size: number) => {
+		const fixed = `# Lessons\n\n<!--  -->\n\n${entry}`
+		return `# Lessons\n\n<!-- ${"x".repeat(size - Buffer.byteLength(fixed))} -->\n\n${entry}`
+	}
+
+	test("lessons.md at 8,192 B passes and at 8,193 B fails", () => {
+		expect(Buffer.byteLength(body(8192))).toBe(8192)
+		expect(findings(makeRepo({ "implementations-plan/lessons.md": body(8192) }), "curated-budget")).toEqual([])
+		expect(findings(makeRepo({ "implementations-plan/lessons.md": body(8193) }), "curated-budget").map((f) => f.detail)).toEqual([
+			"8193 B is over the 8192 B budget",
+		])
+	})
+
+	test("a two-line entry, an entry without evidence and a foreign URL fail", () => {
+		const repo = makeRepo({
+			"implementations-plan/lessons.md": `# Lessons\n\n${entry}  continued on a second line\n- No link at all.\n- Evil [x](https://evil.example/x) and [log](archive/p/lessons/phase-1.md).\n`,
+		})
+		expect(findings(repo, "curated-budget").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"4 an entry runs past one line",
+			"5 the entry links no evidence",
+			"6 https://evil.example/x leaves the plan tree",
+		])
+	})
+
+	test("follow-ups may point at this repository's issues and at plans", () => {
+		const repo = makeRepo({
+			"implementations-plan/follow-ups.md":
+				"- Tracked in [#336](https://github.com/alejoamiras/nulo/issues/336), see [plan](archive/p/plan.md).\n",
+		})
+		expect(findings(repo, "curated-budget")).toEqual([])
+	})
+})
+
+describe("local-path", () => {
+	/** Assembled at runtime so the source never trips the repo's own home-path pre-commit guard. */
+	const abs = (...segments: string[]) => `/${segments.join("/")}`
+
+	test("a home path in a curated file, an index or the active plan dir fails", () => {
+		const repo = makeRepo({
+			"implementations-plan/lessons.md": `- Ran ${abs("home", "alice", "x")} ([l](archive/p/lessons/a.md)).\n`,
+			"implementations-plan/index.md": `Built in ${abs("mnt", "data", "bob", "repo")}.\n`,
+			"implementations-plan/plans-scaffolding/lessons/phase-1.md": `cd ${abs("Users", "carol", "nulo")}\n`,
+		})
+		expect(findings(repo, "local-path").map((f) => f.file)).toEqual([
+			"implementations-plan/index.md",
+			"implementations-plan/lessons.md",
+			"implementations-plan/plans-scaffolding/lessons/phase-1.md",
+		])
+	})
+
+	test("~ paths pass, and closed plan prose is out of scope until the split", () => {
+		const repo = makeRepo({
+			"implementations-plan/lessons.md": "- Ran ~/x ([l](archive/p/lessons/a.md)).\n",
+			"implementations-plan/old-plan/lessons/phase-1.md": `cd ${abs("Users", "carol", "nulo")}\n`,
+		})
+		expect(findings(repo, "local-path")).toEqual([])
+	})
+})
