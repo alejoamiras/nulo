@@ -76,7 +76,10 @@ vi.mock("@/wallet/services/fpc/client", () => ({
 	}),
 }))
 
-const STUBS = { Flex: { template: "<div><slot /></div>" } }
+const STUBS = {
+	Flex: { template: "<div><slot /></div>" },
+	DottedTerm: { props: ["term", "testid"], template: '<span :data-testid="testid" :data-term="term"><slot /></span>' },
+}
 const AZTEC_FRESH = () => ({ aztec: { coingeckoId: "aztec", usd: 0.02, fetchedAt: Date.now(), providerUpdatedAt: null } })
 /** Must mirror the mocked app.store identity — it is what the card's `scope` computed derives. */
 const SCOPE = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
@@ -119,6 +122,17 @@ async function mountCard() {
 	await flushPromises()
 	return w
 }
+
+describe("GasBalanceCard labels", () => {
+	test("both labels are dotted terms naming their glossary keys", async () => {
+		const w = await mountCard()
+		const label = (testid: string) => w.get(`[data-testid="${testid}"]`)
+		expect(label("gas-label-public").attributes("data-term")).toBe("public-fee-juice")
+		expect(label("gas-label-public").text()).toBe("Public Fee Juice")
+		expect(label("gas-label-private").attributes("data-term")).toBe("private-fee-juice")
+		expect(label("gas-label-private").text()).toBe("Private Fee Juice")
+	})
+})
 
 describe("GasBalanceCard fiat (D2)", () => {
 	test("non-zero public balance + usable quote → ≈ fiat line", async () => {
