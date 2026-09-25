@@ -8,8 +8,8 @@ import { useToast } from "@/composables/toast"
 export const SNACK_GAP = 12
 
 const footers = new Set<HTMLElement>()
-/** In open order, so the last one is the sheet on top. */
-const sheets: HTMLElement[] = []
+/** Each open sheet with the order that stacks it, in the order they mounted. */
+const sheets = new Map<HTMLElement, number>()
 const subscribers = new Set<() => void>()
 
 const changed = () => {
@@ -29,17 +29,36 @@ export const vSnackFooter: ObjectDirective<HTMLElement> = {
 	},
 }
 
-/** An open sheet, which covers the nav: while it is on top, only the footers inside it place the snack. */
-export const vSnackSheet: ObjectDirective<HTMLElement> = {
-	mounted(el) {
-		sheets.push(el)
+/** An open sheet, which covers the nav: while it is on top, only the footers inside it place the snack.
+ *  Its value is the order that stacks it, `Popup`'s `displaceIdx`; a sheet with none draws with no
+ *  z-index, beneath every ordered one. */
+export const vSnackSheet: ObjectDirective<HTMLElement, number | undefined> = {
+	mounted(el, { value }) {
+		sheets.set(el, value ?? -1)
+		changed()
+	},
+	updated(el, { value, oldValue }) {
+		if (value === oldValue) return
+		sheets.set(el, value ?? -1)
 		changed()
 	},
 	unmounted(el) {
-		const at = sheets.lastIndexOf(el)
-		if (at !== -1) sheets.splice(at, 1)
+		sheets.delete(el)
 		changed()
 	},
+}
+
+/** The sheet drawn on top: the highest order and, between equals, the one mounted last, which the
+ *  DOM draws over the other. */
+function topSheet(): HTMLElement | undefined {
+	let top: HTMLElement | undefined
+	let highest = Number.NEGATIVE_INFINITY
+	for (const [el, order] of sheets) {
+		if (order < highest) continue
+		top = el
+		highest = order
+	}
+	return top
 }
 
 export interface FooterBox {
@@ -102,7 +121,7 @@ export function useSnackInset(base: () => number): Readonly<Ref<number>> {
 	const measure = () => {
 		if (frame !== undefined) cancelAnimationFrame(frame)
 		frame = undefined
-		const top = sheets.at(-1)
+		const top = topSheet()
 		const placing = [...footers].filter((el) => el.isConnected && (!top || top.contains(el)))
 		const boxes = placing.map((el) => {
 			const { top: at, bottom } = el.getBoundingClientRect()
