@@ -240,3 +240,5 @@ Closed: 8 (within the stated limit; codex re-ran the ancestry check at the freez
 
   The wallet logs every call it receives. With the patch, the full and selfpay wallets each logged one `→ registerToken`; without it, none did. Result on run2: 3/3 passed, and the phase exits 0 with the module restored and the spec removed.
 - Re-run with both fixes: run4's history audit and run3's workspace audit pass, and the negative control still surfaces every planted item.
+
+The loop's cap is three rounds, and round 3 was not clean. So instead of a fourth review round, codex ran one verification-only pass, scoped to A and B. Verdict: A closed, B closed, "ready to merge: yes" (high confidence within that scope).
