@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { MaterialIcon, RowAction, Toggle } from "@nulo/design"
 import { flushPromises, mount } from "@vue/test-utils"
 import { ref } from "vue"
 
@@ -99,11 +100,44 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
+// Wire-shaped: 0x + 64 hex, below the field modulus.
+const TOKEN = `0x0c1e${"0".repeat(56)}5a7f`
+const ACCOUNT = `0x${"0a".repeat(32)}`
+
+/** A request whose window shows each kind of switch: authorizations, a data row and an unknown type. */
+const SWITCHED_ROWS = ["authorizations", "address-book", "unknown"]
+const switchedRequest = () => ({
+	params: {
+		delta: [
+			{ type: "accounts", canGet: true, canCreateAuthWit: true },
+			{ type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] },
+			{ type: "data", addressBook: true },
+			{ type: "experimental_v2" },
+		],
+		existingGrants: [],
+		reRequested: [],
+		availableAccounts: [{ address: ACCOUNT, name: "Main", chainId: 1 }],
+	},
+	session: { chainId: "1", dappMetadata: { name: "Test dApp", url: "https://dapp.example" } },
+})
+
 describe("capabilities window — approve latch", () => {
-	test("(RE-ENTRANCY PIN) double-approve mid-grant resolves the interaction ONCE, and the confirm control disables", async () => {
+	test("(RE-ENTRANCY PIN) double-approve mid-grant resolves the interaction ONCE, the confirm control disables, and switches changed meanwhile leave the sent answer as it was", async () => {
+		payloadRef.value = switchedRequest()
 		let resolveGrant!: (v?: unknown) => void
 		resolveInteractionMock.mockImplementationOnce(() => new Promise((r) => (resolveGrant = r)))
-		const w = mount(CapabilitiesWindow, { global: { stubs: STUBS } })
+		const w = mount(CapabilitiesWindow, {
+			global: {
+				components: { MaterialIcon, RowAction, Toggle },
+				stubs: {
+					...STUBS,
+					PermissionRow: false,
+					Tooltip: { template: "<div><slot /></div>" },
+					SectionLabel: { template: "<div />" },
+					ItemsContainer: { template: "<div><slot /></div>" },
+				},
+			},
+		})
 		await flushPromises() // onMounted → start → real init → initComplete
 
 		const approveBtn = w.find('[data-testid="stub-approve"]')
@@ -120,8 +154,18 @@ describe("capabilities window — approve latch", () => {
 		await flushPromises()
 		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
 
+		// The switches stay operable mid-grant, so the answer sent must not follow them.
+		const sent = (resolveInteractionMock.mock.calls[0] as unknown as [string, Record<string, unknown>])[1]
+		const asSent = JSON.parse(JSON.stringify(sent))
+		const switches = SWITCHED_ROWS.map((row) => w.get(`[data-cap-row="${row}"] [data-testid="cap-toggle"]`))
+		const before = switches.map((s) => s.attributes("aria-checked"))
+		for (const s of switches) await s.trigger("click")
+		expect(switches.map((s) => s.attributes("aria-checked"))).toEqual(before.map((on) => (on === "true" ? "false" : "true")))
+
 		resolveGrant()
 		await flushPromises()
+		expect(JSON.parse(JSON.stringify(sent))).toEqual(asSent)
+		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
 		w.unmount()
 	})
 })
