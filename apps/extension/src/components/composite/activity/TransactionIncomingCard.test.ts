@@ -140,4 +140,13 @@ describe("composite/TransactionIncomingCard — the row, on the real layout and 
 		expect(w.find('[data-testid="tx-incoming-card"]').attributes("data-arriving")).toBe("true")
 		w.unmount()
 	})
+
+	test("a receipt whose token has invalid decimals still plays, with no amount column", async () => {
+		const { w } = await mountRow({ arriving: true, tokenDecimals: 1.5 })
+		const root = w.find('[data-testid="tx-incoming-card"]')
+		expect(root.attributes("data-arriving")).toBe("true")
+		expect(root.classes().some((c) => c.includes("n-row-glow"))).toBe(true)
+		expect(w.text()).not.toContain("+")
+		w.unmount()
+	})
 })

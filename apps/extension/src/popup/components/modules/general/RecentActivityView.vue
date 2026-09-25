@@ -31,6 +31,7 @@ import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMat
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
 
@@ -243,6 +244,7 @@ const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
 const incomingPrices = usePrices(incomingPriceService)
+const arrivals = inject(ARRIVALS_KEY, undefined)
 const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTransfers({
 	incomingTransferService,
 	configService,
@@ -251,6 +253,9 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
+	// Rows are assigned under the state that judges them; the token page's never play, so its reads
+	// wait for none.
+	afterRead: arrivals && ((scope) => (props.token ? Promise.resolve() : arrivals.load(scope))),
 })
 /** Account mode only: whether the active network's incoming scan has stalled. Same client as the
  *  receipts above — the parent owns its connect/disconnect. */
@@ -752,6 +757,16 @@ watch(
 	() => void syncHealth.refresh(),
 )
 
+// After the render that showed them: only rows that rendered are claimed, so one the row budget
+// left out plays where it is first shown. The token page's rows never play.
+watch(
+	recentActivityRows,
+	(rows) => {
+		if (!props.token) arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc))
+	},
+	{ flush: "post" },
+)
+
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
  *  captured-account guards at the STATE level (a render filter alone can mask a
  *  containment gap). Placed after the declarations it references (temporal dead
@@ -875,6 +890,7 @@ onBeforeUnmount(() => {
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
 					:to="`/popup/received/${row.inc.id}`"
+					:arriving="!token && (arrivals?.isArriving(row.inc) ?? false)"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"

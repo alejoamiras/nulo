@@ -19,6 +19,8 @@ const props = defineProps({
 	 *  format amounts. Optional — when absent, transfer cards render
 	 *  without amount info (graceful degradation). */
 	tokensById: { type: Object, default: () => ({}) },
+	/** Whether an incoming row's receipt is arriving now; judged when the row renders. */
+	isArriving: { type: Function, default: undefined },
 })
 
 const groupedRows = computed(() => {
@@ -69,6 +71,7 @@ function terminalCardProps(op) {
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
 					:to="`/popup/received/${row.inc.id}`"
+					:arriving="isArriving?.(row.inc) ?? false"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && terminalCardProps(row.op)"

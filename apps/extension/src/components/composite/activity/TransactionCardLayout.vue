@@ -264,6 +264,17 @@ function hasActionsContent() {
 		n-row-glow 2.4s ease-out 0.2s both;
 }
 
+/* Calm: the glow alone, in place. "Disable animations" reads as reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+	.n-row-in.n-row-glow {
+		animation: n-row-glow 2.4s ease-out both;
+	}
+}
+
+:global(.noanimations) .n-row-in.n-row-glow {
+	animation: n-row-glow 2.4s ease-out both;
+}
+
 .n-amt {
 	animation: n-amt 2.6s ease-out both;
 }
