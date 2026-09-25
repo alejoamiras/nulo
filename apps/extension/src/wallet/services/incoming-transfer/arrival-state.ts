@@ -4,8 +4,9 @@ import type { IncomingTransferRecord, IncomingTrustRecord } from "./spec"
 /**
  * Whether a receipt has already been shown to its account. Keyed by receipt id, not by a
  * discovery-time watermark, which loses same-millisecond receipts and replays late-found history.
- * Floors are the chain's own block numbers: a receipt sent after a floor was taken is mined in a
- * higher block, whatever the device clock says.
+ * Floors are the chain's own block numbers, never the device clock. A floor is the latest proposed
+ * block, which the chain can still drop, so a receipt sent just after one can land at or below it
+ * and stay silent.
  */
 
 /** Played entries an account keeps; older ones fold into its floor. */
