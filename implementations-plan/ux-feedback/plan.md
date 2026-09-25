@@ -58,7 +58,7 @@ option stay out.
 | ✓ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
 | ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ✓ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
-| ☐ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
+| ✓ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
 | ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
 
 A row gets ✓ only when its plan has every phase ✓, its arc loop converged, and its parity
@@ -381,6 +381,13 @@ strings that do: "separate follow-up for those 45 older strings" (below).
   - Test-side fix: keep only the sandbox's account-state slice in the backup the test edits.
   - Owner questions: whether preloaded contracts should be skipped like protocol ones, and
     whether an import should wait on public networks at all.
+- The incoming row's 8-character amount drops whole-number digits (`utils/amount.ts:111-113`). A
+  visible change, so the owner decides it.
+- `nulo:ui:pinnedTokens@<profileId>` outlives the profile's deletion: the reset page removes only
+  the two fee-payment keys (`settings/security/reset.vue:85-87`), the deletion coordinator none.
+- `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits
+  (`incoming-transfer/service.ts`). Batch 4 closed the same pattern on the token add; these two
+  predate it.
 
 ## Seeds
 

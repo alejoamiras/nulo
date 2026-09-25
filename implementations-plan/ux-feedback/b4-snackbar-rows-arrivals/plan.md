@@ -1835,7 +1835,7 @@ tests/e2e/network/incoming-arrival.test.ts`; and, since the incoming service's t
 account-add paths change, `network/incoming-transfers`, `network/incoming-public-transfers` and
 `network/account-switch-isolation` on both browsers in each browser's gate mode (P5.3's), all exit 0.
 
-### P5 · Parity and arc gate ☐
+### P5 · Parity and arc gate ✓
 
 1. Parity: rebuild the mocks and render the batch's shots; capture each surface at the mock's size
    (popup 360×600, dApp window 400×800):
