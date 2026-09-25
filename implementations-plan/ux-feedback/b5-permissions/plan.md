@@ -1463,7 +1463,7 @@ drawing and a picker. Each later phase re-reads the picks for the asks it builds
 
 Gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 
-#### P2 · The row table, the popup's grant, the interim window ☐
+#### P2 · The row table, the popup's grant, the interim window ✓
 
 Re-read the `picks` store for `i6h` first.
 
