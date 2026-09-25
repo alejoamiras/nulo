@@ -398,6 +398,24 @@ describe("getPrivateEvents", () => {
 		const grants = [grant({ type: "data", privateEvents: { contracts: [ADDR_A] } })]
 		expect(() => enforceScope("getPrivateEvents", [{}, { contractAddress: addr(ADDR_B) }], grants)).toThrow(/Scope violation/)
 	})
+
+	// With the scope's account approved the account check passes, so only the grant decides.
+	describe("the scope's account approved", () => {
+		const sessionAccounts = new Set([`aztec:0:${ADDR_A}`, ADDR_A])
+		const args = [{ eventName: "Transfer" }, { contractAddress: addr(ADDR_B), scopes: [addr(ADDR_A)] }]
+
+		test("private events granted pass", () => {
+			const grants = [grant({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })]
+			expect(() => enforceScopeWithSession("getPrivateEvents", args, grants, sessionAccounts)).not.toThrow()
+		})
+
+		test("an address-book-only grant fails the private-events check", () => {
+			const grants = [grant({ type: "data", addressBook: true })]
+			expect(() => enforceScopeWithSession("getPrivateEvents", args, grants, sessionAccounts)).toThrow(
+				/not permitted by granted data\.privateEvents scope/,
+			)
+		})
+	})
 })
 
 // ── createAuthWit ─────────────────────────────────────────────────────
