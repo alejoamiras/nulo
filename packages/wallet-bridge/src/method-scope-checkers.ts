@@ -399,7 +399,7 @@ export function checkProfileTx(args: unknown[], grants: GrantedCapabilityRecord[
  * yet — `contractClasses` is read-only (no `canRegister`), and ScopeCheck is synchronous while the
  * artifact's class-id derivation is async. Deny it at scope-enforcement (the single source of truth;
  * scope runs before routing, so no dispatcher branch is needed). Revisit when canRegister + a
- * class-id-scoped async gate land. (codex audit, aztec-5.0-upgrade.)
+ * class-id-scoped async gate land.
  */
 export function checkRegisterContractClassDisabled(): never {
 	throw new Error(

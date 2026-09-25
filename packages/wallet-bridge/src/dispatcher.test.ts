@@ -439,7 +439,7 @@ describe("unwrapOperationResult", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Phase 1 (plan-v3) — handleGetAccounts contract rows
+// handleGetAccounts contract rows
 // ---------------------------------------------------------------------------
 
 /** Logger-capturing helper for the getAccounts tests below. */
@@ -487,9 +487,9 @@ function makeGetAccountsDispatcher(opts: {
 	}
 }
 
-describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
+describe("dispatcher.handleGetAccounts contract rows", () => {
 	test("no session → throws CapabilityNotGrantedError (F-006: fail-closed)", async () => {
-		// Phase 3 / F-006: pre-fix, this returned [] from enforceCapability
+		// F-006: pre-fix, this returned [] from enforceCapability
 		// and the dispatcher fell through with no grants, letting network-only
 		// methods execute unchecked after the user revoked the dApp.
 		// Post-fix: enforceCapability throws CapabilityNotGrantedError when
@@ -516,7 +516,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 	})
 
 	test("no accounts grant → throws CapabilityNotGrantedError with exact stable message + debug log", async () => {
-		// Stable-message contract (plan-v3 §5): the literal string is a public
+		// Stable-message contract: the literal string is a public
 		// contract because substring-matching dApps lock it in. If you change
 		// the wording, change it everywhere AND coordinate with downstream.
 		const session = makeSession()
@@ -580,11 +580,11 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Phase 1.5 (plan-v3) — field-aware `accounts` delta + enrich uses stored grant
+// Field-aware `accounts` delta + enrich uses stored grant
 // ---------------------------------------------------------------------------
 
-describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff", () => {
-	/** Phase 1.5 tests go through `enrichGrantedCapabilities` which calls
+describe("dispatcher.requestCapabilities — field-aware accounts diff", () => {
+	/** These tests go through `enrichGrantedCapabilities` which calls
 	 *  `resolveNetwork()` — so we need a network reader configured for the
 	 *  ctx.chainId (0). The default `stubNetwork` returns [], which throws. */
 	function makePhase15Dispatcher(
@@ -669,7 +669,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		})
 		const { writer } = makeSessionWriter(session)
 		// Popup returns ONLY the original `false` shape — simulating user deny on
-		// the upgrade. The bug Phase 1.5 fixes is that the dApp would still see
+		// the upgrade. The bug pinned here is that the dApp would still see
 		// `canCreateAuthWit:true` in the wire response because the OLD code
 		// spread the REQUESTED cap shape, not the stored one.
 		const dispatcher = makePhase15Dispatcher(writer, async () => {
@@ -774,7 +774,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 	})
 
 	test("enrichGrantedCapabilities resolves the network UNCONDITIONALLY — canGet:false on an unresolvable chain THROWS, not [] — Q11", async () => {
-		// Behavior-preservation pin (codex post-impl biggest-risk): resolveNetwork
+		// Behavior-preservation pin: resolveNetwork
 		// runs BEFORE the canGet gate, so a future gate-hoist can't silently turn a
 		// throw into accounts:[]. networkReader returns no networks → resolve throws.
 		const accountReader: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => [] }
@@ -822,9 +822,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 })
 
 /**
- * Plan §Tests #N: hooks invariant for batch dispatch.
- *
- * Codex round-3 F3 + R6 confirmation: `dispatch("batch", legs, ctx, hooks)`
+ * Hooks invariant for batch dispatch: `dispatch("batch", legs, ctx, hooks)`
  * MUST NOT forward hooks into the recursive per-leg dispatch. Otherwise a
  * batched sendTx leg's `onExecutionEnqueued` would advance the top-level
  * session FIFO baton before later batch legs complete, breaking batch's
@@ -954,8 +952,7 @@ describe("dispatcher sendTx hook forwarding", () => {
 describe("dispatcher.handleSendTx — opts.from resolution (multi-account session)", () => {
 	// Regression: a dApp connected to MULTIPLE accounts that sends `from: B` must have the
 	// tx sent from B — not silently from the first session account (A). Pre-fix, handleSendTx
-	// clobbered opts.from to the first session account. See
-	// implementations-plan/network-e2e-required/FOLLOWUP-opts-from-clobber.md.
+	// clobbered opts.from to the first session account.
 	const grants = [
 		{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
 		{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
@@ -1144,7 +1141,7 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 
 // ── registerToken (Nulo-custom) — schema-patch reachability + routing ───
 //
-// These tests pin the BLOCKER fixes from the dual audit:
+// These tests pin:
 //   - The runtime schema patch must extend WalletSchema with `registerToken`
 //     (otherwise the dApp-side Proxy refuses the call before it reaches us).
 //   - The dispatcher must route `registerToken` through DappInteractionService.execute()
@@ -1438,7 +1435,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 })
 
 /**
- * Phase 0.5: dispatcher session-lookup consolidation.
+ * Dispatcher session-lookup consolidation.
  *
  * Pre-refactor: 6 separate `tryGetDappSessionByOriginAndChain` calls in
  * dispatcher.ts (handleGetAccounts, handleSendTx, handleRegisterToken,
@@ -1450,11 +1447,8 @@ describe("dispatcher — registerToken reachability + routing", () => {
  * Post-refactor: dispatch() captures the session ONCE at entry and threads
  * it through every internal call. Pinned by counting how many times the
  * session-lookup is invoked per dispatch() call.
- *
- * Audit reference: audit/security/2026-06-08-ultra-e6759a/findings/consolidated.md
- * cross-cutting #1 + opus B-1/CC-2 + codex Round 2 B-1.
  */
-describe("F-006: network-only methods fail-closed on missing session (Phase 3)", () => {
+describe("F-006: network-only methods fail-closed on missing session", () => {
 	function dispatcherNoSession(): WalletSdkDispatcher {
 		const writer: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
@@ -1503,7 +1497,7 @@ describe("F-006: network-only methods fail-closed on missing session (Phase 3)",
 	})
 })
 
-describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
+describe("dispatch() session lookup consolidation (TOCTOU defense)", () => {
 	function makeCountingWriter(initial: IDappSessionRef | null) {
 		let session: IDappSessionRef | null = initial
 		const counter = { lookups: 0 }
@@ -2448,7 +2442,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 		expect(prompted).toBe(true)
 	})
 
-	test("an approved contracts re-consent PERSISTS the replacement grant (codex post-impl condition)", async () => {
+	test("an approved contracts re-consent PERSISTS the replacement grant", async () => {
 		const session = makeSession({ capabilityGrants: [grant([OLD])] })
 		const { writer, calls } = makeSessionWriter(session)
 		// The popup echoes the existing cap alongside the newly approved delta (approvedNew + existing).

@@ -122,10 +122,9 @@ import type {
 } from "./services-contract"
 
 /**
- * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
- * background message handler). NOT part of `SessionContext` — codex round-3
- * caught that putting hooks on the ctx would propagate them into recursive
- * batch-leg dispatches and break the batch's sequential-completion contract.
+ * Hooks the wallet-sdk background message handler hands the dispatcher, kept
+ * off `SessionContext` because the ctx reaches recursive batch-leg dispatches,
+ * where hooks would break the batch's sequential-completion contract.
  *
  * Currently consumed only by the `sendTx` path (forwarded to
  * `DappInteractionService.execute` → `executionService.executeOperations`
@@ -985,7 +984,7 @@ export class WalletSdkDispatcher {
 	 * Scoped to session accounts only and uses per-app aliases.
 	 * WalletSchema expects: Array<{ alias: string, item: AztecAddress }>
 	 *
-	 * Contract rows (see plan-v3 §3):
+	 * Contract rows:
 	 *  - Session not found → throws plain "No dApp session found" Error (unchanged
 	 *    so dApps relying on the session-expired diagnostic see it intact).
 	 *  - Session has ≥1 account → fast path, returns them.
@@ -1571,8 +1570,8 @@ export class WalletSdkDispatcher {
 			// reaching enforceCapability without the required grant type.
 			this.logDebug(`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 			// CapabilityNotGrantedError is the public contract — dApps substring-
-			// match on the error code and message. The plain `Error` form was a
-			// pre-Phase-1 mistake; F-003's removal of `getAccounts` from
+			// match on the error code and message. The plain `Error` form was an
+			// earlier mistake; F-003's removal of `getAccounts` from
 			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
 			// which has an existing CapabilityNotGrantedError-pinned test.
 			throw new CapabilityNotGrantedError(requiredType)
@@ -1594,7 +1593,8 @@ export class WalletSdkDispatcher {
 		ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): Promise<Operation> {
-		// Phase 0.5: dappSession threaded through from dispatch() entry.
+		// `dappSession` is the one lookup dispatch() made at entry; a second lookup here could
+		// see another session.
 		if (NETWORK_ONLY_KINDS.has(kind)) {
 			const network = await this.resolveNetwork(ctx)
 			return this.buildNetworkOperation(kind, args, network.id)
