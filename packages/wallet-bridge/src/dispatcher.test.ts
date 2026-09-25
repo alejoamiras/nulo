@@ -11,6 +11,7 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityParams, CapabilityResult } from "./dapp-interaction-protocol"
+import { authorizationsEffective } from "./method-scope-checkers"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type {
@@ -35,6 +36,7 @@ function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision)
 		accountAliases?: Record<string, string>
 		capabilityGrants?: GrantedCapabilityRecord[]
 		capabilityRejections?: RejectedCapabilityRecord[]
+		authorizationsWithoutAsking?: unknown
 	}
 	if (decision.addAccounts.length > 0) next.accounts = [...new Set([...(next.accounts ?? []), ...decision.addAccounts])]
 	if (Object.keys(decision.aliasPatch).length > 0) next.accountAliases = { ...next.accountAliases, ...decision.aliasPatch }
@@ -45,6 +47,10 @@ function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision)
 		...(next.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
 		...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: Date.now() })),
 	]
+	if (decision.authorizations === null) next.authorizationsWithoutAsking = undefined
+	if (decision.authorizations) next.authorizationsWithoutAsking = decision.authorizations
+	const accounts = next.capabilityGrants.find((g) => g.capability.type === "accounts")?.capability as { canCreateAuthWit?: boolean }
+	if (accounts?.canCreateAuthWit !== true) next.authorizationsWithoutAsking = undefined
 	return next
 }
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
@@ -1037,7 +1043,11 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 	const exec = { calls: [] }
 
 	function makeAccountOpDispatcher(): { dispatcher: WalletSdkDispatcher; ops: Operation[]; fences: unknown[] } {
-		const session = makeSession({ capabilityGrants: grants as never, accounts: ["aztec:0:0xaaa", "aztec:0:0xbbb"] })
+		const session = makeSession({
+			capabilityGrants: grants as never,
+			accounts: ["aztec:0:0xaaa", "aztec:0:0xbbb"],
+			authorizationsWithoutAsking: { broad: true },
+		})
 		const { writer } = makeSessionWriter(session)
 		const ops: Operation[] = []
 		const fences: unknown[] = []
@@ -1107,19 +1117,19 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 		expect((ops[0] as { opts?: { scopes?: unknown } }).opts?.scopes).toEqual(["0xbbb"])
 	})
 
-	test("createAuthWit keeps signing as `args[0]` through its own handler", async () => {
+	test("createAuthWit keeps signing as `args[0]` through its own handler (On)", async () => {
 		const { dispatcher, ops } = makeAccountOpDispatcher()
 		await dispatcher.dispatch("createAuthWit", ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }], ctx)
 		expect(accountAndFrom(ops[0]).accountAddress).toBe("0xbbb")
 	})
 
-	test("createAuthWit (covered) forwards the session fence to executeOperations", async () => {
+	test("createAuthWit (covered) forwards the session fence to executeOperations (On)", async () => {
 		const { dispatcher, fences } = makeAccountOpDispatcher()
 		await dispatcher.dispatch("createAuthWit", ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }], ctx)
 		expect(fences[0]).toBe(ctx.fence)
 	})
 
-	test("createAuthWit (covered) is refused without the session's own fence", async () => {
+	test("createAuthWit (covered) is refused without the session's own fence (On)", async () => {
 		const { dispatcher, ops } = makeAccountOpDispatcher()
 		const authwit = ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }]
 		await expect(dispatcher.dispatch("createAuthWit", authwit, { ...ctx, fence: undefined })).rejects.toThrow(
@@ -1894,14 +1904,17 @@ describe("dispatcher — the data answer comes from the stored grant", () => {
 /** A requestCapabilities round trip against the real merge fake: the popup approves exactly what
  *  the window was given unless `answer` says otherwise. */
 function capabilityHarness(session: IDappSessionRef, answer?: (params: CapabilityParams) => CapabilityResult | Promise<CapabilityResult>) {
-	const { writer } = makeSessionWriter(session)
+	let current = session
 	const seen: { params?: CapabilityParams; windows: number } = { windows: 0 }
-	let decisions = 0
+	const decisions: CapabilityDecision[] = []
 	const counted: IDappSessionWriter = {
-		...writer,
-		applyCapabilityDecision: async (id, decision) => {
-			decisions += 1
-			return writer.applyCapabilityDecision(id, decision)
+		...makeSessionWriter(session).writer,
+		tryGetDappSessionByOriginAndChain: async () => current,
+		getDappSession: async () => current,
+		applyCapabilityDecision: async (_id, decision) => {
+			decisions.push(decision)
+			current = applyDecisionTo(current, decision)
+			return current
 		},
 	}
 	const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
@@ -1916,9 +1929,12 @@ function capabilityHarness(session: IDappSessionRef, answer?: (params: Capabilit
 	const dispatcher = new WalletSdkDispatcher(network, stubAccount, stubExecution, interaction, counted, noopLogger)
 	const request = (capabilities: unknown[]) =>
 		dispatcher.dispatch("requestCapabilities", [{ capabilities }], ctx) as Promise<{ granted: unknown[] }>
-	const row = () => writer.getDappSession("test-session-id")
-	const stored = async () => (await row()).capabilityGrants?.map((g) => g.capability) ?? []
-	return { request, row, stored, seen, decisions: () => decisions }
+	const row = async () => current
+	const setRow = (patch: Record<string, unknown>) => {
+		current = { ...current, ...patch } as IDappSessionRef
+	}
+	const stored = async () => current.capabilityGrants?.map((g) => g.capability) ?? []
+	return { request, row, setRow, stored, seen, decisions }
 }
 
 describe("dispatcher — the grant boundary", () => {
@@ -2019,7 +2035,7 @@ describe("dispatcher — the grant boundary", () => {
 		await expect(refusal).rejects.toBeInstanceOf(ValidationError)
 		await expect(refusal).rejects.toThrow("Duplicate transaction capability")
 		expect(h.seen.params).toBeUndefined()
-		expect(h.decisions()).toBe(0)
+		expect(h.decisions).toHaveLength(0)
 	})
 
 	test.each([
@@ -2053,7 +2069,7 @@ describe("dispatcher — the grant boundary", () => {
 		await expect(refusal).rejects.toBeInstanceOf(ValidationError)
 		await expect(refusal).rejects.toMatchObject({ message: `Malformed ${type} capability`, details: { capabilityType: type } })
 		expect(h.seen.params).toBeUndefined()
-		expect(h.decisions()).toBe(0)
+		expect(h.decisions).toHaveLength(0)
 	})
 
 	test("no request value reaches the refusal", async () => {
@@ -2176,6 +2192,212 @@ describe("dispatcher — a declined type asked again", () => {
 		await h.request([{ type: "contractClasses", classes: [B] }]).catch(() => {})
 		expect(h.seen.windows).toBe(3)
 		expect(h.seen.params?.reRequested).toEqual(["contractClasses"])
+	})
+})
+
+describe("dispatcher — createAuthWit asks unless the authorizations consent is effective", () => {
+	const ACCOUNT = `0x${"0a".repeat(32)}`
+	const TOKEN = `0x${"07".repeat(32)}`
+	const OTHER = `0x${"08".repeat(32)}`
+	const intent = (to: string) => ({ caller: `0x${"0c".repeat(32)}`, call: { to, name: "transfer", args: [] } })
+	const accounts = { capability: { type: "accounts", canGet: true, canCreateAuthWit: true }, grantedAt: 1 }
+	const listed = { capability: { type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] }, grantedAt: 1 }
+	const anyContract = { capability: { type: "transaction", scope: "*" }, grantedAt: 1 }
+	const signed: OperationResult[] = [{ status: "ok", result: "0xsigned" } as OperationResult]
+
+	function harness(
+		row: Record<string, unknown>,
+		opts: { sign?: () => Promise<OperationResult[]>; window?: () => Promise<unknown> } = {},
+	) {
+		let session = makeSession({ accounts: [`aztec:0:${ACCOUNT}`], ...(row as Partial<IDappSessionRef>) })
+		const writer: IDappSessionWriter = {
+			...makeSessionWriter(session).writer,
+			tryGetDappSessionByOriginAndChain: async () => session,
+		}
+		const counts = { signed: 0, windows: 0 }
+		const execution: IExecutionRunner = {
+			executeOperations: async () => {
+				counts.signed += 1
+				return opts.sign ? opts.sign() : signed
+			},
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => {
+				counts.windows += 1
+				return (opts.window ? await opts.window() : [{ status: "ok", result: "0xconfirmed" }]) as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: ACCOUNT, name: "A", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+		return {
+			counts,
+			authwit: (messageHashOrIntent: unknown) => dispatcher.dispatch("createAuthWit", [ACCOUNT, messageHashOrIntent], ctx),
+			batch: (messageHashOrIntent: unknown) =>
+				dispatcher.dispatch("batch", [[{ name: "createAuthWit", args: [ACCOUNT, messageHashOrIntent] }]], ctx),
+			setRow: (patch: Record<string, unknown>) => {
+				session = { ...session, ...patch } as IDappSessionRef
+			},
+		}
+	}
+
+	test("with the consent absent, a covered call intent opens the window", async () => {
+		const h = harness({ capabilityGrants: [accounts, listed] })
+		await expect(h.authwit(intent(TOKEN))).resolves.toBe("0xconfirmed")
+		expect(h.counts).toEqual({ signed: 0, windows: 1 })
+	})
+
+	test("an effective consent signs a covered call intent without a window", async () => {
+		const h = harness({ capabilityGrants: [accounts, listed], authorizationsWithoutAsking: { broad: false } })
+		await expect(h.authwit(intent(TOKEN))).resolves.toBe("0xsigned")
+		expect(h.counts).toEqual({ signed: 1, windows: 0 })
+	})
+
+	test("an effective consent still refuses a call intent outside a held scope, with no window", async () => {
+		const h = harness({ capabilityGrants: [accounts, listed], authorizationsWithoutAsking: { broad: false } })
+		await expect(h.authwit(intent(OTHER))).rejects.toThrow(/Scope violation/)
+		expect(h.counts).toEqual({ signed: 0, windows: 0 })
+	})
+
+	test("an effective consent with no transaction or simulation scope held opens the window", async () => {
+		const h = harness({ capabilityGrants: [accounts], authorizationsWithoutAsking: { broad: false } })
+		await h.authwit(intent(OTHER))
+		expect(h.counts).toEqual({ signed: 0, windows: 1 })
+	})
+
+	test("an effective consent still opens the window for an in-scope inner hash", async () => {
+		const h = harness({ capabilityGrants: [accounts, anyContract], authorizationsWithoutAsking: { broad: true } })
+		await h.authwit({ consumer: TOKEN, innerHash: `0x${"01".repeat(32)}` })
+		expect(h.counts).toEqual({ signed: 0, windows: 1 })
+	})
+
+	test("a silent signing already past dispatch entry completes after Settings turns Off; the next call asks", async () => {
+		const gate = Promise.withResolvers<void>()
+		const h = harness(
+			{ capabilityGrants: [accounts, listed], authorizationsWithoutAsking: { broad: false } },
+			{ sign: () => gate.promise.then(() => signed) },
+		)
+		const inFlight = h.authwit(intent(TOKEN))
+		await expect.poll(() => h.counts.signed).toBe(1)
+		h.setRow({ authorizationsWithoutAsking: undefined })
+		gate.resolve()
+		await expect(inFlight).resolves.toBe("0xsigned")
+		await h.authwit(intent(TOKEN))
+		expect(h.counts).toEqual({ signed: 1, windows: 1 })
+	})
+
+	test("a rejected confirmation never signs", async () => {
+		const h = harness({ capabilityGrants: [accounts, listed] }, { window: () => Promise.reject(new UserRejectedError("declined")) })
+		await expect(h.authwit(intent(TOKEN))).rejects.toBeInstanceOf(UserRejectedError)
+		expect(h.counts).toEqual({ signed: 0, windows: 1 })
+	})
+
+	test("a batch leg with the consent absent opens the window", async () => {
+		const h = harness({ capabilityGrants: [accounts, listed] })
+		await h.batch(intent(TOKEN))
+		expect(h.counts).toEqual({ signed: 0, windows: 1 })
+	})
+})
+
+describe("dispatcher — the authorizations consent in requestCapabilities", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
+	const accounts = { type: "accounts", canGet: true, canCreateAuthWit: true } as Capability
+	const listed = (...contracts: string[]): Capability => ({
+		type: "transaction",
+		scope: contracts.map((contract) => ({ contract, function: "transfer" })),
+	})
+	const anySimulation: Capability = { type: "simulation", transactions: { scope: "*" } }
+	const holding = (caps: Capability[], extra: Record<string, unknown> = {}) =>
+		makeSession({ capabilityGrants: caps.map((capability) => ({ capability, grantedAt: 1 })), ...extra })
+
+	test.each([
+		["true over listed scopes", true, [accounts, listed(A)], listed(A, B), { broad: false }],
+		["true widened to any contract", true, [accounts, listed(A)], { type: "transaction", scope: "*" }, { broad: true }],
+		["true beside a held any-contract simulation scope", true, [accounts, anySimulation], listed(A), { broad: true }],
+		["false", false, [accounts, listed(A)], listed(A, B), null],
+		["a string", "true", [accounts, listed(A)], listed(A, B), undefined],
+		["a number", 1, [accounts, listed(A)], listed(A, B), undefined],
+		["absent", undefined, [accounts, listed(A)], listed(A, B), undefined],
+	])("the window's %s reaches the decision as the consent the snapshot gives", async (_n, value, held, request, expected) => {
+		const h = capabilityHarness(holding(held as Capability[]), (params) => ({
+			granted: params.delta,
+			authorizationsWithoutAsking: value as boolean,
+		}))
+		await h.request([accounts, request])
+		const decision = h.decisions[0]
+		expect(decision.authorizations).toEqual(expected)
+		expect("authorizations" in decision).toBe(expected !== undefined)
+		expect(decision.requiresGrant).toEqual(value === true ? ["accounts"] : undefined)
+	})
+
+	test("broad reads a grant a declined widening left in force", async () => {
+		const session = holding([accounts, anySimulation], { capabilityRejections: [{ capabilityType: "simulation", rejectedAt: 2 }] })
+		const h = capabilityHarness(session, (params) => ({ granted: params.delta, authorizationsWithoutAsking: true }))
+		await h.request([accounts, listed(A)])
+		expect(h.decisions[0].authorizations).toEqual({ broad: true })
+	})
+
+	test("writes landing while the window is open change neither its params nor the decision's broad", async () => {
+		const held = [accounts, listed(A)]
+		let atOpen: unknown
+		const h = capabilityHarness(holding(held, { authorizationsWithoutAsking: { broad: false } }), async (params) => {
+			atOpen = structuredClone({ heldGrants: params.heldGrants, consent: params.authorizationsWithoutAsking })
+			// Settings turns the switch Off, and another window widens simulation to any contract.
+			const row = await h.row()
+			h.setRow({
+				authorizationsWithoutAsking: undefined,
+				capabilityGrants: [...(row.capabilityGrants ?? []), { capability: anySimulation, grantedAt: 3 }],
+			})
+			return { granted: params.delta, authorizationsWithoutAsking: true }
+		})
+		await h.request([accounts, listed(A, B)])
+		expect(atOpen).toEqual({ heldGrants: held, consent: { broad: false } })
+		expect(h.decisions[0].authorizations).toEqual({ broad: false })
+		const row = await h.row()
+		expect(row.authorizationsWithoutAsking).toEqual({ broad: false })
+		expect(
+			authorizationsEffective(
+				row.authorizationsWithoutAsking,
+				(row.capabilityGrants ?? []).map((g) => g.capability),
+			),
+		).toBe(false)
+	})
+
+	test("a consent inside the requested accounts capability stores nothing", async () => {
+		const h = capabilityHarness(holding([]))
+		await h.request([{ ...accounts, authorizationsWithoutAsking: { broad: true } }, listed(A)])
+		expect(JSON.stringify(h.seen.params?.delta)).not.toContain("authorizationsWithoutAsking")
+		expect(h.decisions[0]).not.toHaveProperty("authorizations")
+		const row = await h.row()
+		expect(row.authorizationsWithoutAsking).toBeUndefined()
+		expect(JSON.stringify(row.capabilityGrants)).not.toContain("authorizationsWithoutAsking")
+	})
+
+	test("the consent never appears in the answer", async () => {
+		const session = holding([accounts, listed(A)], { authorizationsWithoutAsking: { broad: false } })
+		const covered = await capabilityHarness(session).request([accounts, listed(A)])
+		const asked = await capabilityHarness(session, (params) => ({ granted: params.delta, authorizationsWithoutAsking: true })).request([
+			accounts,
+			listed(A, B),
+		])
+		expect(JSON.stringify([covered, asked])).not.toContain("authorizationsWithoutAsking")
+	})
+
+	test("the window receives every held grant and the consent, a retained declined type included", async () => {
+		const data: Capability = { type: "data", addressBook: true, privateEvents: { contracts: [A] } }
+		const h = capabilityHarness(holding([accounts, data], { authorizationsWithoutAsking: { broad: false } }), () => ({
+			granted: [],
+		}))
+		await h.request([{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }])
+		await h.request([listed(A)])
+		expect(h.seen.params?.heldGrants).toEqual([accounts, data])
+		expect(h.seen.params?.existingGrants).toEqual([accounts])
+		expect(h.seen.params?.authorizationsWithoutAsking).toEqual({ broad: false })
 	})
 })
 
