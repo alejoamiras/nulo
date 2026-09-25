@@ -93,3 +93,4 @@ Codex: changes needed (shared cache in the publish build, `--out packages` delet
 
 Codex accepted post-publication verification as the gate and an older attested commit for identical bytes once the signer is authenticated. It rated findings 2, 4 and 5 of round 1 closed, and 1 and 3 closed by this round.
 
+**Round 3 (codex): approve.** All three round-2 findings are closed, with no new ones. Codex checked the identity regex: it accepts `dev` and `main` and rejects `main-evil`, other repositories and substituted punctuation. The one remaining gap is the clean Actions rehearsal (the first `dry_run` dispatch from `dev`).
