@@ -166,10 +166,10 @@ export function checkTree(): Finding[]
 | PR | Adds | Modifies | Deletes / moves |
 |---|---|---|---|
 | A0 | `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` + tests, `tree.test.ts`, `permalink-bases.json`; `plans-scaffolding/{plan.md,recon.md,lessons/}` | `index.md` (+1) | — |
-| A | `implementations-plan/{.gitignore,.ignore}` (= fee6b4a2), `{lessons,follow-ups}.md` + `archive/index.md` (stubs); `untrack-manifest.json`; `tools/{untrack,promote,rewrite-links,scrub-paths}.ts` + tests | `.gitattributes` (+3); ~45 kept files (links); 23 kept files (scrub, A4); `check-no-local-paths.sh`; `tree.test.ts`; `CLAUDE.md` L14, L42, L456, L468-475, L692; `README.md` L13, L27, L60; `implementations-plan/README.md`; `CI.md:3`; `.github/README.md:3` | `git rm --cached` ~640; promotions in 22 dirs; 3 renames; `tools-extraction/.gitignore` |
+| A | `implementations-plan/{.gitignore,.ignore}` (= fee6b4a2), `{lessons,follow-ups}.md` (stubs); `untrack-manifest.json`; `tools/{untrack,promote,rewrite-links}.ts` + tests | `.gitattributes` (+3); 48 kept files (links); A4 deferred, so no scrub and `check-no-local-paths.sh` unchanged; `tree.test.ts`; `CLAUDE.md` L14, L42, L456, L468-475, L692; `README.md` L13, L27, L60; `implementations-plan/README.md`; `CI.md:3`; `.github/README.md:3` | `git rm --cached` ~640; promotions in 22 dirs; 3 renames; `tools-extraction/.gitignore` |
 | J | `closures.json`, `mining.jsonl`, `gh-{prs,issues}.json`; `tools/{classify,mine}.ts` + tests; `transport-ready-handshake/spec-rows.md` | `lessons.md`; `follow-ups.md`; `index.md` (2 lines); this `plan.md` (answers) | — |
 | C | — | 4-5 KAT imports; `test-soak/cli.ts:39`; the 6 broken mentions; stale texts and asset cites (Phase 5 steps 4-5); `package.json` | `git mv`: 3 `reference/` projects (15 files), `phantom-sweep.ts`, `PRF-NON-PORTABLE.md`, 25 baselines (unless #669 did) |
-| D | `archive/index.md`; ~23 stub `plan.md`; `tools/{outcome,archive-move,split-index,repair-links}.ts` + tests | ~330 moved files (Outcomes, seed lines, links); `index.md`; curated-file links; live docs (Phase 7 step 3); `audit/bugs/2026-08-22-production-ready/adjudication-2026-08-24.md:64-65` | `git mv` ~250 closed dirs (~1,400 files) → `archive/` |
+| D | `archive/index.md` (never stubbed in A: its existence switches the gate's archive-split scope on); ~23 stub `plan.md`; `tools/{outcome,archive-move,split-index,repair-links}.ts` + tests | ~330 moved files (Outcomes, seed lines, links); `index.md`; curated-file links; live docs (Phase 7 step 3); `audit/bugs/2026-08-22-production-ready/adjudication-2026-08-24.md:64-65` | `git mv` ~250 closed dirs (~1,400 files) → `archive/` |
 | E | — | `plans-scaffolding/plan.md` (its Outcome); `lessons.md`; `follow-ups.md` | — |
 | F | — | `index.md` → `archive/index.md` (1 line) | `git mv plans-scaffolding archive/` |
 
@@ -195,10 +195,11 @@ export function checkTree(): Finding[]
 - The rewriter pins each permalink to its row. `file.md:24` becomes `…#L24`.
 - Append-only: a rerun adds rows for transcripts that landed meanwhile (e.g. #669). It fails if an old row no longer verifies.
 - `--verify` checks every blob at its sha, that every sha is a `dev` ancestor, and coverage: every `D` under `implementations-plan/` in `git diff --name-status -M origin/dev...HEAD`, and every promoted-away source, has a row.
-- The never-committed `dapp-interaction-lock-fix-v1/audit-codex-round-4.md` is de-linked. The doubled-dir link at `e2e-network-recovery/plan.md:179` is resolved by basename.
+- The never-committed `dapp-interaction-lock-fix-v1/audit-codex-round-4.md` is de-linked. The doubled-dir link at `token-identity/lessons/phase-1.md:13` points at the file beside its directory. (The one first cited, `e2e-network-recovery/plan.md:179`, is fenced text in the v1 that promotion replaces, not a link.)
 
 **Revision promotion (A1).**
 - In 11 dirs the latest `plan-vN`/`plan-final`/`plan-reconciled` is the only plan of record. In 11 more, `plan.md` is v1 or superseded.
+- `e2e-stabilization` and `M6` keep their own `plan.md`, which is newer than every revision beside it; e2e-stabilization's names `plan-final.md` a prior plan that never landed.
 - The promoter runs `git mv -f <latest> plan.md` and adds `Earlier revisions: <permalinks>` under the H1. That line includes the replaced `plan.md` (fable F5).
 - Without promotion, 8 plans and 4 subdirs vanish from HEAD.
 
@@ -370,7 +371,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 
 ### Inferences (attack these)
 - **I1.** The classifier is fitted to today's index text. Phase 3 re-runs it and compares per dir; the owner sees every dir whose class moved.
-- **I2.** The 22 promotions pick the plan of record everywhere except `e2e-stabilization` (A1).
+- **I2.** The 22 promotions pick the plan of record everywhere except `e2e-stabilization` (A1). Resolved in A: it keeps its own `plan.md`, as M6 does.
 - **I3.** GitHub pairs D's renames as local `git diff -M` does. D's pre-merge gate checks it against the complete API inventory; the split fallback covers a mismatch.
 - **I4.** A and D exceed the 300-file rendered-diff limit, so they are reviewed locally (`git diff -M --stat` against the arc's parent, filtered diffs), and codex gets filtered diffs.
 - **I5.** `gh stack` recovers when A0 and A squash-merge under J-D. Its docs say so (F20), but it is rehearsed before A0 opens (Phase 1), and the manual `--onto` procedure in Delivery is rehearsed too.
@@ -476,7 +477,7 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
 ### Phase 2: hygiene, untrack, permalinks, policy (Arc A; one atomic change)
 
 0. **Before enforcement is switched on**, close codex A0 round 3's open finding: classify decoded values, not raw spellings.
-   - Decode the discriminating attributes (`http-equiv`, …) before classifying. `http-equiv="ref&#114;esh"` must yield its `url=` target.
+   - Decode the discriminating attributes (`http-equiv`, …) before classifying. `http-equiv="ref&#114;esh"` is then `link-opaque`, like every meta refresh.
    - Decode `style` values before CSS detection.
    - Flag any CSS escape the scanner does not decode as `link-opaque`.
    - Each construct gets a fixture that fails first.
@@ -485,22 +486,22 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
 3. Hygiene:
    - `.gitignore` and `.ignore`, byte-identical to `git show fee6b4a2:implementations-plan/<file>`;
    - `.gitattributes` (+3 lines);
-   - the stubs;
+   - the stubs (`lessons.md`, `follow-ups.md`; `archive/index.md` waits for D, since its existence switches the archive-split scope on);
    - delete `tools-extraction/.gitignore`, and tell that session.
-4. `tools/rewrite-links.ts`: 112 links in ~43 files, plus `index.md:41`, become permalinks at their manifest SHAs, with the render-equivalence proof. De-link the never-committed target and fix the doubled-dir link.
+4. `tools/rewrite-links.ts`: 132 links in 48 files, `index.md:41` among them, with the render-equivalence proof: 119 become permalinks at their manifest SHAs, 11 in promoted plans that meant the replaced `plan.md` pin that text, 1 never-committed target is de-linked, and the doubled-dir link `token-identity/lessons/phase-1.md:13` is fixed. The first count, 112, grew because promoted plans are kept files that link their sibling audits and revisions.
 5. `tools/untrack.ts`: `git rm --cached` until `git ls-files -ci --exclude-standard -- implementations-plan` is empty.
-6. `tools/scrub-paths.ts` (A4) and the guard (`/mnt/<volume>/<user>`; exemption narrowed to `implementations-plan/archive/**`).
+6. Skipped while A4 waits on counsel (§ Approval): `tools/scrub-paths.ts` (A4) and the guard (`/mnt/<volume>/<user>`; exemption narrowed to `implementations-plan/archive/**`).
 7. Policy text, in the `.gitignore` commit:
    - CLAUDE.md §Implementation plans rewritten: verdicts inline, transcripts gitignored, uncommitted means disposable, Outcome, archive, curated files.
    - CLAUDE.md L14 and L42 (routing: cross-task gotcha → `lessons.md`, open follow-up → `follow-ups.md`), plus L456 and L692.
    - `README.md` L13, L27 and L60.
    - `implementations-plan/README.md` rewritten: the standard, the milestone key, and § "Portable rules", including the asset rule "a plan-dir file live code or CI reads is relocated before its plan is archived".
    - `CI.md:3` and `.github/README.md:3`.
-8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `document-type`, `link-untracked`, `link-missing`, `link-opaque`, `permalink-*`, `curated-budget` and `local-path`.
+8. `tree.test.ts` enforces `tracked-artifact`, `hygiene-files`, `nested-ignore`, `document-type`, `link-untracked`, `link-missing`, `link-opaque`, `permalink-*`, `curated-budget` and `local-path`. `path-token`, `index-structure` and `archive-structure` only report; A leaves 5 `path-token` findings, the code mentions C repairs (Phase 5 step 4).
 
 **Validation gate.** Commit, then run:
 - `git ls-files -ci --exclude-standard -- implementations-plan | wc -l` → `0`;
-- `bun scripts/ci-cd/plans/check.ts`;
+- `bun scripts/ci-cd/plans/check.ts` (0 enforced findings);
 - `bun implementations-plan/plans-scaffolding/tools/untrack.ts --verify`;
 - `bun test implementations-plan/plans-scaffolding/tools/`, `bun run test:ci-gating`, `bun run lint`, `./scripts/check-no-local-paths.sh`;
 - rerun every Phase 2 tool, then `git status --short` (empty);
@@ -568,7 +569,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
    - `PRF-NON-PORTABLE.md` → `apps/extension/tests/e2e/`;
    - the baselines → `scripts/ci-cd/test-soak/baselines/`, updating `cli.ts:39`. If #669 already did the move, verify its files and the `cli.ts` consumer instead.
 3. Edit the KAT import paths.
-4. Repair the 6 mentions: the transcripts get manifest permalinks, and `embedded-fpc-cap.ts:64` points at the promoted `plan.md`.
+4. Repair the 6 mentions: the transcripts get manifest permalinks, and `embedded-fpc-cap.ts:64` points at the promoted `plan.md`. Five are the report-only `path-token` findings A leaves; `nulo-phase-2-plus.html:98` is outside `path-token`'s scope.
 5. Stale texts:
    - network-test-triage in `CI.md:219`, CLAUDE.md:461 and `vitest.e2e.network.config.ts:37`;
    - CLAUDE.md L47 and L459-461 (A7);
