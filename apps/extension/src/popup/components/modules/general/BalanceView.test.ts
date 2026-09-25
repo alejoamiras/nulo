@@ -117,7 +117,14 @@ async function mountView(props: Record<string, unknown> = {}) {
 		shallow: true,
 		global: {
 			plugins: [pinia],
-			stubs: { Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] } },
+			stubs: {
+				Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] },
+				Tooltip: {
+					template:
+						'<div data-testid="stub-tooltip" :data-align="textAlign" :data-delay="delay"><slot /><div data-testid="stub-tooltip-content"><slot name="content" /></div></div>',
+					props: ["textAlign", "delay"],
+				},
+			},
 		},
 	})
 	await flushPromises()
@@ -175,6 +182,14 @@ afterEach(() => {
 })
 
 describe("BalanceView — Home aggregate", () => {
+	test("Home has no balance split and so no icon labels", async () => {
+		seedRows = SEED
+		mockQuotes = FRESH()
+		const { wrapper } = await mountView()
+		expect(wrapper.find('[data-testid="private-balance-value"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="stub-tooltip"]').exists()).toBe(false)
+	})
+
 	test("renders the real aggregate over priced tokens with the partial caption", async () => {
 		mockQuotes = FRESH()
 		const { wrapper } = await mountView()
@@ -492,6 +507,25 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(wrapper.find('[data-testid="private-balance-value"]').text()).toBe("1,000")
 		expect(wrapper.find('[data-testid="public-balance-value"]').text()).toBe("250")
+	})
+
+	test("the padlock and the globe carry their labels as tooltip and accessible name, not on the groups", async () => {
+		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
+		const tooltips = wrapper.findAll('[data-testid="stub-tooltip"]')
+		expect(tooltips.map((t) => t.get('[data-testid="stub-tooltip-content"]').text())).toEqual([
+			"Private balance: only you can see it",
+			"Public balance: anyone can see it",
+		])
+		expect(tooltips.map((t) => [t.attributes("data-align"), t.attributes("data-delay")])).toEqual([
+			["left", "300"],
+			["left", "300"],
+		])
+		const icons = wrapper.findAll('[data-testid="stub-icon"]')
+		expect(icons.map((i) => i.attributes("aria-label"))).toEqual([
+			"Private balance: only you can see it",
+			"Public balance: anyone can see it",
+		])
+		expect(wrapper.findAll("span[aria-label]")).toHaveLength(0)
 	})
 
 	test("an UNPRICED token shows no fiat element at all", async () => {
