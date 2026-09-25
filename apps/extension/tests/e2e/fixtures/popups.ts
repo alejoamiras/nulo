@@ -182,7 +182,8 @@ export async function approveVerify(page: Page, opts: { alwaysTrust?: boolean } 
  *   named keeps its default.
  * - `accounts`: account ids to select for the accounts capability. Selects
  *   each row by data-account-id.
- * - `aliases`: per-account alias overrides (writes via the alias input).
+ * - `aliases`: per-account alias overrides. Each presses the row's "Rename for this app" unless
+ *   its field is already open, then writes the field.
  */
 export async function approveCapabilities(
 	page: Page,
@@ -213,16 +214,19 @@ export async function approveCapabilities(
 		}, accountId)
 	}
 	for (const [accountId, alias] of Object.entries(opts.aliases ?? {})) {
+		const row = `[data-testid="cap-account-item"][data-account-id="${accountId}"]`
+		const field = `${row} [data-testid="cap-account-alias-input"]`
+		if (!(await page.$(field))) await clickSelector(page, `${row} [data-testid="cap-account-rename-btn"]`, 5_000)
+		await page.waitForSelector(field, { visible: true, timeout: 5_000 })
 		await page.evaluate(
-			({ id, alias }: { id: string; alias: string }) => {
-				const row = document.querySelector(`[data-testid="cap-account-item"][data-account-id="${id}"]`)
-				const input = row?.querySelector<HTMLInputElement>('[data-testid="cap-account-alias-input"]')
-				if (!input) return
+			({ sel, alias }: { sel: string; alias: string }) => {
+				const input = document.querySelector<HTMLInputElement>(sel)
+				if (!input) throw new Error(`${sel} left before its alias was written`)
 				const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
 				setter?.call(input, alias)
 				input.dispatchEvent(new Event("input", { bubbles: true }))
 			},
-			{ id: accountId, alias },
+			{ sel: field, alias },
 		)
 	}
 	await clickByTestId(page, "cap-approve-btn")
@@ -471,16 +475,22 @@ export async function waitCapabilitiesReady(page: Page, timeout = 30_000): Promi
 	)
 }
 
-/** Read the visible capability rows: returns `{ id, granted }[]`. Waits for at
- *  least one cap-item to render — the popup's init() is async. */
-export async function getCapItems(page: Page): Promise<Array<{ id: string; granted: boolean; rerequested: boolean }>> {
+export type CapItem = { id: string; row: string; granted: boolean; flagged: boolean; rerequested: boolean }
+
+/** Read the rendered permission rows in window order: `id` is the capability type (`data-cap-id`,
+ *  absent on the unknown row) and `row` the row key (`data-cap-row`), since one type can draw several
+ *  rows. The "Already allowed" fold mounts its rows only while open. Waits for at least one cap-item
+ *  to render — the popup's init() is async. */
+export async function getCapItems(page: Page): Promise<CapItem[]> {
 	// Wait for popup readiness (cap-item OR cap-account-item) instead of
 	// only cap-item — the bundle under test might be accounts-only.
 	await waitCapabilitiesReady(page).catch(() => undefined)
 	return page.evaluate(() =>
 		[...document.querySelectorAll<HTMLElement>('[data-testid="cap-item"]')].map((el) => ({
 			id: el.getAttribute("data-cap-id") ?? "",
+			row: el.getAttribute("data-cap-row") ?? "",
 			granted: el.getAttribute("data-cap-granted") === "true",
+			flagged: el.getAttribute("data-cap-flagged") === "true",
 			rerequested: !!el.querySelector('[data-testid="cap-rerequested-badge"]'),
 		})),
 	)

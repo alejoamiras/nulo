@@ -11,8 +11,9 @@ const hasConfig = aztecConfig !== undefined
  * Test #07 — re-request after rejection shows "previously denied" badge.
  *
  * 1) Request `data` bundle → user rejects.
- * 2) Re-request same bundle → popup shows the data row with a
- *    cap-rerequested-badge present.
+ * 2) Re-request same bundle → both types were declined, so each of their rows (the contracts row,
+ *    and the address book and private events rows the one `data` type draws) carries a
+ *    cap-rerequested-badge.
  * 3) Approve this time; verify dispatcher returns ok.
  */
 test.skipIf(!hasConfig)(
@@ -46,8 +47,11 @@ test.skipIf(!hasConfig)(
 		const popup2 = await popup2P
 
 		const items = await getCapItems(popup2)
-		const dataRow = items.find((i) => i.id === "data")
-		expect(dataRow?.rerequested).toBe(true)
+		expect(Object.fromEntries(items.map((i) => [i.row, { id: i.id, rerequested: i.rerequested }]))).toEqual({
+			contracts: { id: "contracts", rerequested: true },
+			"address-book": { id: "data", rerequested: true },
+			"private-events": { id: "data", rerequested: true },
+		})
 
 		await approveCapabilities(popup2)
 		const ok = await waitForPgResult(page, "requestCapabilities", seqB, 20_000)
