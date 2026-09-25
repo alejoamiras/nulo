@@ -60,6 +60,10 @@ import { GLOSSARY, GLOSSARY_SECTIONS } from "@/utils/glossary"
 	border-bottom: 1px solid rgba(74, 70, 63, 0.2);
 }
 
+:global([theme="light"]) .entry {
+	border-bottom-color: rgba(124, 116, 104, 0.2);
+}
+
 .term {
 	font-size: 14px;
 	font-weight: 600;

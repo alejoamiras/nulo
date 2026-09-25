@@ -133,8 +133,9 @@ Values are Chrome's. Firefox's geometry is identical unless a difference is note
     tall, with a 20px arrow at x 12.
   - As a result, the list starts 72px lower and the capture ends at "Private Fee Juice", where
     the mock reaches "Sponsored".
-- Pre-existing, not visible in dark: in the light theme the separator keeps the dark literal.
-  The mock's light value is `rgba(124, 116, 104, 0.2)`.
+- Light theme, not captured: the page is new in this batch, so its separator is not a
+  pre-existing difference. It first shipped with the dark literal in both themes; codex round 1
+  caught that, and the light separator is now the mock's `rgba(124, 116, 104, 0.2)`.
 - On Firefox the definition's line height computes to 18.1333px; the box is still 18.1.
 
 ### Import, recovery phrase (`tips-phrase-U9`)
