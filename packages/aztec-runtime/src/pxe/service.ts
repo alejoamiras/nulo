@@ -99,6 +99,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 		"getBlockTimestamp",
 		"getPublicTokenTransferEvents",
 		"getPublicScanTips",
+		"getLatestBlockNumber",
 		"getPublicTokenClassStatus",
 		"clearChainState",
 		"clearProfileState",
@@ -685,6 +686,11 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	/** Resolve the checkpointed + finalized tips (D6 index bound + rewind floor). Node-only read. */
 	public async getPublicScanTips(network: NetworkInfo): Promise<PublicScanTips> {
 		return this.withPxeRead("getPublicScanTips", network, (_pxe, node) => getPublicScanTips(node))
+	}
+
+	/** The latest proposed block: `getBlockNumber` with no tag. Node-only read. */
+	public async getLatestBlockNumber(network: NetworkInfo): Promise<number> {
+		return this.withPxeRead("getLatestBlockNumber", network, (_pxe, node) => node.getBlockNumber())
 	}
 
 	/** Node-direct contract-class gate (D2). Node-only read. */
