@@ -11,7 +11,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-PHASES=(prepare preinstall install fast identity tools e2e contracts history audit)
+PHASES=(prepare preinstall install fast identity tools e2e control contracts history audit)
 PUBLISHED=(wallet-crypto resolve-asset wallet-sdk-schema-patch)
 
 die() {
@@ -105,7 +105,8 @@ phase_identity() {
     console.log("identity: register adds all three methods to the WalletSchema apps/tools resolves")
   ')
   (cd "$repo" && bun run --cwd apps/tools build:testnet)
-  # The patch body is referenced only by register, so it survives tree-shaking only if the call does.
+  # The patch body is referenced only by register, so it survives tree-shaking only if the call
+  # does. Whether the browser's wallet proxy uses it is e2e cell 36, with the control phase.
   grep -rqF -- "Nulo schema-patch: upstream WalletSchema." "$repo/apps/tools/dist/assets" ||
     die "the production bundle does not carry the schema patch"
   echo "identity: the production bundle carries the schema patch"
@@ -140,12 +141,35 @@ bridge_core_pin() {
   (cd "$repo" && bun -e 'console.log(JSON.parse(require("fs").readFileSync("packages/bridge-core/package.json", "utf8")).dependencies["@aztec/aztec.js"])')
 }
 
-phase_e2e() {
+e2e_tools() {
   forge_prep
   # A host-wide browser store may be read-only and hold other revisions; the install then hangs.
   export PLAYWRIGHT_BROWSERS_PATH=${REHEARSAL_BROWSERS:-$HOME/.cache/ms-playwright}
   (cd "$repo" && apps/tools/node_modules/.bin/playwright install chromium)
-  (cd "$repo" && PATH="$HOME/.aztec/versions/$(bridge_core_pin)/bin:$PATH" bun run e2e:tools)
+  [ $# -eq 0 ] || set -- -- "$@"
+  (cd "$repo" && PATH="$HOME/.aztec/versions/$(bridge_core_pin)/bin:$PATH" bun run e2e:tools "$@")
+}
+
+phase_e2e() {
+  e2e_tools
+}
+
+# Cell 36 is the browser proof that the production-mode build's wallet proxy carries the patch:
+# add-to-wallet reaches the full-profile wallet only through registerToken. Without the register
+# import it must fail while cell 35's fail-open cases still pass, or it proves nothing.
+phase_control() {
+  local session=$repo/apps/tools/src/composables/createAztecWalletSession.ts
+  local import='import "@alejoamiras/nulo-wallet-sdk-schema-patch/register"'
+  [ "$(grep -cxF "$import" "$session")" = 1 ] || die "the session module does not import register exactly once"
+  cp "$session" "$work/session.orig"
+  trap 'cp "$work/session.orig" "$session"' EXIT
+  grep -vxF "$import" "$work/session.orig" >"$session"
+  e2e_tools specs/drip.spec.ts -g "cell 3[56]" 2>&1 | tee "$report/control-e2e.log" || true
+  cp "$work/session.orig" "$session"
+  [ -z "$(git -C "$repo" status --porcelain -- apps/tools/src)" ] || die "the session module was not restored"
+  [ "$(grep -cE '✓ .* cell 35 ' "$report/control-e2e.log")" = 2 ] || die "cell 35 did not pass twice without the patch"
+  grep -qE '✘ .* cell 36 ' "$report/control-e2e.log" || die "cell 36 passed without the patch registered"
+  echo "control: without the register import cell 36 fails and cell 35 still passes"
 }
 
 phase_contracts() {

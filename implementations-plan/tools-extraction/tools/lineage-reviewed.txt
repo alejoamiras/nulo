@@ -1,5 +1,2 @@
 # Reviewed possible ancestors (check-paths.py ancestry): "<old> -> <new>  # verdict".
 # Every pair here was checked and is NOT an ancestor; a real ancestor belongs in paths.txt instead.
-.github/actions/setup-accelerator-server/action.yml -> .github/actions/setup-playwright/action.yml  # written new in #577; the old action installed the accelerator server
-packages/extension/package.json -> apps/faucet/package.json  # merge-parent pairing only; #186 renames packages/faucet/package.json, which is listed
-packages/playground/package.json -> apps/faucet/package.json  # merge-parent pairing only; #186 renames packages/faucet/package.json, which is listed

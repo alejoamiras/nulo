@@ -1,10 +1,12 @@
 """Guards around the path filter.
 
   check-paths.py ancestry <paths.txt> <repo> <lineage.txt>
-      Every listed path was touched in history, no detected rename moves an unlisted path into a
-      listed one, and every move rename detection cannot see (a commit, or a merge against either
-      parent, that adds a listed file while deleting a same-named unlisted one) is reviewed in
-      <lineage.txt>. filter-repo does not follow renames, so a missed ancestor truncates history.
+      Every listed path was touched in history, no rename moves an unlisted path into a listed one,
+      and every move rename detection cannot see (a commit, or a merge against either parent, that
+      adds a listed file while deleting a same-named unlisted one) is reviewed in <lineage.txt>.
+      filter-repo does not follow renames, so a missed ancestor truncates history. Renames are
+      paired down to 10% similarity; a move that keeps less than that under a new basename is
+      indistinguishable from a new file and is not claimed.
   check-paths.py tree <paths.txt> <replace-text.txt> <tree-before.txt> <tree-after.txt> <freeze-dir>
       The filtered tip holds exactly the listed paths of the freeze tree, and each blob is the
       freeze blob with the replace rules applied, byte for byte.
@@ -15,6 +17,9 @@ import os
 import re
 import subprocess
 import sys
+
+# Git's default 50% misses rewrite-heavy moves: contracts.yml became bridge-contracts.yml at 43%.
+RENAMES = ["-c", "diff.renameLimit=100000", "log", "-m", "-M10%"]
 
 
 def listed(paths_file):
@@ -45,7 +50,7 @@ def hidden_moves(repo, roots):
     Rename detection stays on, so a detected rename is neither an addition nor a deletion here:
     only moves it could not pair are left.
     """
-    log = git(repo, "-c", "diff.renameLimit=100000", "log", "-m", "-M", "--name-status", "--format=%x00", "HEAD")
+    log = git(repo, *RENAMES, "--name-status", "--format=%x00", "HEAD")
     pairs = set()
     for diff in log.split("\0"):
         added, deleted = {}, {}
@@ -64,7 +69,7 @@ def ancestry(paths_file, repo, lineage_file):
     roots = listed(paths_file)
     touched = set(git(repo, "log", "-m", "--format=", "--name-only", "HEAD").splitlines())
     errors = [f"never touched in history: {r}" for r in roots if not any(covered(t, [r]) for t in touched)]
-    renames = git(repo, "-c", "diff.renameLimit=100000", "log", "-m", "--format=", "--name-status", "-M", "--diff-filter=R", "HEAD")
+    renames = git(repo, *RENAMES, "--format=", "--name-status", "--diff-filter=R", "HEAD")
     for line in renames.splitlines():
         parts = line.split("\t")
         if len(parts) == 3 and covered(parts[2], roots) and not covered(parts[1], roots):

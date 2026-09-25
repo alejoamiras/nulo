@@ -7,6 +7,7 @@ packages/bridge-evm
 contracts/bridge
 .github/workflows/bridge-contracts.yml
 .github/workflows/_bridge-contracts.yml
+.github/workflows/contracts.yml
 .github/workflows/pr-tools-e2e.yml
 .github/workflows/_tools-e2e.yml
 .github/workflows/_build-tools.yml

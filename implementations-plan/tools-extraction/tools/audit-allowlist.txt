@@ -2,6 +2,10 @@
 # Secret keys carry the first 16 hex of the value's SHA-256; the value itself is never recorded.
 
 abspath:scripts/check-no-local-paths.sh:5e6c3b8121df  # the guard's comment names Aztec's public CI build path /home/aztec-dev, not a local machine
+binary:5a8d3e72ad7f  # InterVariable.woff2: Inter v4.1 (sha256 693b77d4…), pinned by the third-party-notices font policy
+binary:2ca6ac605954  # JetBrainsMono-latin.woff2: JetBrains Mono v2.304 (sha256 2c32b9b3…), pinned by the third-party-notices font policy
+binary:e3aa61ccdd2a  # SpaceGrotesk-latin-ext.woff2: Space Grotesk (sha256 054c266f…), pinned by the third-party-notices font policy
+binary:7b0e76a5c9bd  # SpaceGrotesk-latin.woff2: Space Grotesk (sha256 a0d054c4…), pinned by the third-party-notices font policy
 filename:contracts/bridge/aztec/keystone/target/keystone.json  # a contract named keystone, not a key
 filename:contracts/bridge/aztec/token_bridge_hub/src/test/keystone.nr  # a contract named keystone, not a key
 filename:contracts/bridge/evm/test/Keystone.t.sol  # a contract named keystone, not a key
