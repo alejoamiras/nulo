@@ -389,6 +389,18 @@ strings" (below).
 - `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits
   (`incoming-transfer/service.ts`). Batch 4 closed the same pattern on the token add; these two
   predate it.
+- The older `createAuthWit` refusals carry request values into Error-level logs (batch 5's D-2).
+  Three refusals in `packages/wallet-bridge/src/method-scope-checkers.ts` interpolate the
+  account, the function and contract, or the consumer, and
+  `apps/extension/src/wallet/services/wallet-sdk/background.ts` logs the message at Error. The
+  fix is a fixed category at those sinks and a sentinel test, as batch 5's two new refusals
+  have. The owner, 2026-09-24: "Yes. Defer to afterwards."
+- The Revoke authwits and authwit-registry popups (`RevokeAuthwitsPopup.vue` and
+  `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
+  on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
+  `submitKey`). Once fees are set, Enter on the header's × or on a fee method sends the revoke
+  or registry transaction. Found by reading in batch 4, whose new Revoke expand button stops
+  Enter, and not reproduced; older than this program.
 
 ## Seeds
 

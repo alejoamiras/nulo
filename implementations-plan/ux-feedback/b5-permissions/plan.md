@@ -13,6 +13,7 @@ arc_branches:
   - feat/ux-5b-permission-window (on feat/ux-5a-authorization-confirm)
 design: implementations-plan/ux-feedback/design/spec.md (item 6, item 9's two permission-window terms, the tooltip map's Alias row, undrawn states U1–U7 and U10)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
+parity_5a: https://claude.ai/artifact/6NjcZ54XTdEYtUgzGzQhxC
 ---
 
 # Batch 5 · Permissions
@@ -1814,23 +1815,32 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
   **sign-off pending** list below, the owner's D-2 answer quoted (§ Approval; there is no
   "open" status to report), the parity Artifact link, screenshots of every changed popup
   surface, test evidence.
+  - **Signed off after the plan:** two or more unknown types in one request share one "Unknown
+    permission" card with one switch, in the singular words of `06-interim-unknown-A1` (codex
+    round 1, finding 5). Owner, 2026-09-25: "for branch 5a: (a)".
   - **Sign-off pending**, as no drawing defines it (each built as the plan recommends):
-    - two or more unknown types in one request: 5a shows one "Unknown permission" card with one
-      switch, in the singular words of `06-interim-unknown-A1`. The words for several are the
-      owner's to give (codex round 1, finding 5, held in lessons/phase-5.md);
     - A-2 in 5a: the authorizations card among the new cards, with no switch and the line "You
       confirm each authorization first." A-2 draws only 5b's row;
-    - A-5 in 5a: on a widening to any contract, the authorizations card among the new cards, Off,
-      with the broad off line. A-5 draws only 5b's rows;
-    - the data cards' detail panels, opened: each shows only its half of the permission. The A-1
-      drawing leaves them closed;
-    - the 5a switches' keyboard focus: the browser's default outline. A-19 draws its ring only on
-      5b's rows and the Settings row.
+    - A-5 in 5a: on a widening to any contract, the authorizations card first among the new
+      cards, Off, with the broad off line. A-5 draws only 5b's rows;
+    - the data cards' detail panels, opened: each lists its card's part of today's one "Private
+      data" panel, "Read address book" or "Read private events from" and the contracts, and both
+      list "Register senders". The A-1 drawing leaves them closed;
+    - the 5a switches' keyboard focus: the browser's default 1px outline around the switch's hit
+      area, which is as tall as the card's head. A-19 draws its ring only on 5b's rows and the
+      Settings row;
+    - two word checks from the parity page. 5a's "Already granted" leaves out two held grants,
+      kept as they are since arc 5b's fold shows both: the private-events grant held after a
+      data widening (as `06-interim-held-A1` draws it) and a type's held grant after a declined
+      widening (today's rule). Private events from any contract, switched On, reads U4's "Same
+      lines", "Private messages its contracts sent to your accounts, like a transfer you
+      received.", kept. The page asks the owner to sign the four undrawn states above off
+      together.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
-- On D-2 answer (a), its follow-up goes into `implementations-plan/follow-ups.md` in 5a's
-  delivery. On (b), the plan amendment that answer triggers says where the fix lands.
+- D-2 was answered (a). Its follow-up is in the program plan's § Follow-ups, since this repo
+  has no `implementations-plan/follow-ups.md` yet; the program's close moves it there.
 
 ## Seeds
 
