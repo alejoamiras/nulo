@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Vendor */
-import { onBeforeUnmount, ref, watch } from "vue"
+import { onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 /** Composables */
 import { type ToastState, useToast } from "../composables/toast"
@@ -27,11 +27,23 @@ const hovered = ref(false)
 const focusWithin = ref(false)
 let returnFocusTo: Element | null = null
 
+// A card that appears under a still cursor gets hover events, and may get a move, all at the cursor's
+// last position. So only a move away from where the pointer rested when the card opened holds it;
+// with no position known then, the first move anywhere after the open gives that spot.
+type Point = { x: number; y: number }
+let pointer: Point | null = null
+let restedAt: Point | null = null
+const trackPointer = (event: PointerEvent) => {
+	pointer = { x: event.clientX, y: event.clientY }
+	restedAt ??= pointer
+}
+
 watch([hovered, focusWithin], ([h, f]) => holdToast(h || f))
 
 const show = (next: ToastState | null) => {
 	hovered.value = false
 	focusWithin.value = false
+	restedAt = pointer
 	shown.value = next
 }
 
@@ -56,11 +68,10 @@ const onAfterLeave = () => {
 	show(toast.value ?? null)
 }
 
-// A card that replaces another under a resting pointer gets no `mouseenter`, so both holds are
-// re-read from the rendered card once it has risen.
-const onAfterEnter = (el: Element) => {
-	hovered.value = el.matches(":hover")
-	focusWithin.value = el.contains(document.activeElement)
+// Under a pixel apart is rounding between a real move and one the browser synthesised at the same spot.
+const onPointerMove = (event: PointerEvent) => {
+	if (restedAt === null) return
+	if (Math.abs(event.clientX - restedAt.x) >= 1 || Math.abs(event.clientY - restedAt.y) >= 1) hovered.value = true
 }
 
 const onFocusIn = (event: FocusEvent) => {
@@ -90,7 +101,10 @@ const selectFor = (id: number) => () => {
 	action?.onSelect()
 }
 
+onMounted(() => document.addEventListener("pointermove", trackPointer, { capture: true, passive: true }))
+
 onBeforeUnmount(() => {
+	document.removeEventListener("pointermove", trackPointer, { capture: true })
 	hovered.value = false
 	focusWithin.value = false
 	holdToast(false)
@@ -107,7 +121,6 @@ onBeforeUnmount(() => {
 					:enter-active-class="$style.enter_active"
 					:leave-to-class="$style.leave_to"
 					:leave-active-class="$style.leave_active"
-					@after-enter="onAfterEnter"
 					@after-leave="onAfterLeave"
 				>
 					<div
@@ -116,7 +129,7 @@ onBeforeUnmount(() => {
 						:class="$style.card"
 						data-testid="snackbar"
 						data-kind="success"
-						@mouseenter="hovered = true"
+						@pointermove="onPointerMove"
 						@mouseleave="hovered = false"
 						@focusin="onFocusIn"
 						@focusout="onFocusOut"
@@ -139,7 +152,6 @@ onBeforeUnmount(() => {
 					:enter-active-class="$style.enter_active"
 					:leave-to-class="$style.leave_to"
 					:leave-active-class="$style.leave_active"
-					@after-enter="onAfterEnter"
 					@after-leave="onAfterLeave"
 				>
 					<div
@@ -148,7 +160,7 @@ onBeforeUnmount(() => {
 						:class="[$style.card, $style.error]"
 						data-testid="snackbar"
 						data-kind="error"
-						@mouseenter="hovered = true"
+						@pointermove="onPointerMove"
 						@mouseleave="hovered = false"
 						@focusin="onFocusIn"
 						@focusout="onFocusOut"

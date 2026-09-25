@@ -13,7 +13,7 @@ const COPY = "account-address-copy"
 
 type Rect = { left: number; top: number; bottom: number; width: number; height: number; innerWidth: number; innerHeight: number }
 type Life = { appeared: number[]; removed: number[] }
-type Probe = { __snackLife?: Life; __snackMax?: number; __snackDone?: boolean }
+type Probe = { __snackLife?: Life; __snackMax?: number; __snackDone?: boolean; __snackEvents?: Record<string, number> }
 
 async function openHome(ctx: ExtensionContext): Promise<Page> {
 	const page = await openPopup(ctx)
@@ -175,6 +175,20 @@ async function snackInsetIs(page: Page, inset: number): Promise<void> {
 	)
 }
 
+/** Counts the pointer and hover events that reach a card, to show what the browser sent it. */
+async function countCardEvents(page: Page): Promise<void> {
+	await page.evaluate((s: string) => {
+		const counts: Record<string, number> = {}
+		;(window as unknown as Probe).__snackEvents = counts
+		for (const type of ["pointerover", "pointerenter", "pointermove", "mouseover", "mouseenter", "mousemove"]) {
+			const count = (event: Event) => {
+				if (event.target instanceof Element && event.target.closest(s)) counts[type] = (counts[type] ?? 0) + 1
+			}
+			document.addEventListener(type, count, { capture: true })
+		}
+	}, SNACK)
+}
+
 /** Presses Tab until focus lands on `testid`, at most `limit` times, noting every landing that left
  *  the popup holding `inside`. */
 async function tabUntil(page: Page, testid: string, inside: string, limit: number): Promise<{ visited: string[]; escaped: string[] }> {
@@ -250,6 +264,50 @@ test("the pointer resting on the snack keeps it; after leaving, it goes within i
 
 	await page.mouse.move(rect.left + rect.width / 2, rect.top - 40, { steps: 5 })
 	await waitForSnackGone(page, 6_500)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("a success that opens under a still pointer closes itself after 6 s, though the pointer rests on it", async ({
+	registeredExtension,
+}) => {
+	const page = await openHome(registeredExtension)
+	await stubClipboard(page, "resolve")
+	await clickByTestId(page, "actions-receive")
+	await sheetAtRest(page, "receive-close")
+	await page.bringToFront()
+	await recordSnackLife(page)
+	await countCardEvents(page)
+
+	const at = await page.$eval(sel("receive-address"), (el) => {
+		const box = el.getBoundingClientRect()
+		return { x: Math.round(box.left + box.width / 2), y: Math.round(box.bottom - 3) }
+	})
+	await page.mouse.move(at.x, at.y, { steps: 5 })
+	await page.mouse.down()
+	await page.mouse.up()
+	await waitForToast(page, "Address is copied", 5_000, { kind: "success" })
+	await settledSnack(page)
+	const under = await page.evaluate(
+		(s: string, x: number, y: number) => {
+			const card = document.querySelector(s)
+			return { covered: card?.contains(document.elementFromPoint(x, y)) === true, hover: card?.matches(":hover") === true }
+		},
+		SNACK,
+		at.x,
+		at.y,
+	)
+	expect(under.covered).toBe(true)
+
+	await waitForSnackGone(page, 7_000)
+	const life = await snackLife(page)
+	const events = await page.evaluate(() => (window as unknown as Probe).__snackEvents ?? {})
+	const lived = (life.removed[0] ?? 0) - (life.appeared[0] ?? 0)
+	console.log(`[snackbar] under a still pointer (hover ${under.hover}, events ${JSON.stringify(events)}) it lived ${Math.round(lived)}ms`)
+	expect(life.removed).toHaveLength(1)
+	expect(lived).toBeGreaterThanOrEqual(5_500)
+	expect(lived).toBeLessThanOrEqual(6_500)
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])
