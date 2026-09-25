@@ -33,7 +33,6 @@ async function settledCard(page: Page): Promise<void> {
 	)
 }
 
-/** The settled card against the footer. */
 async function placement(page: Page, footer: string): Promise<Placement> {
 	await settledCard(page)
 	return page.evaluate(

@@ -12,10 +12,12 @@ Built:
   module-level registry. `useSnackInset(base)` returns the snack's distance from the viewport's
   bottom edge: `base` (76 with the nav, 12 without), raised to 12px above the highest registered
   footer whose top edge is on screen. It measures on the next frame after a footer or sheet arrives
-  or leaves, a footer resizes (`ResizeObserver`, which catches a wrapping error line), the window
-  resizes, anything scrolls, or a transition or animation ends. It also measures at once when a
-  snack opens, so a card never rises at a stale height. The pure step is `snackInset(base,
-  viewportHeight, boxes)`.
+  or leaves, a footer resizes (`ResizeObserver`, which catches a wrapping error line), the page's
+  content changes (`MutationObserver`, which catches a hint or an error block added above a row
+  that keeps its size), the window resizes, anything scrolls, or a transition or animation ends.
+  It also measures at once when a snack opens, so a card never rises at a stale height. The pure
+  step is `snackInset(base, viewportHeight, boxes)`, each box carrying how far its row rises once
+  what scrolls it is at its end.
 - `components/ui/ToastManager.vue`, the host: `useSnackInset(() => showBottomNav ? 64 + 12 : 12)`
   replaces the route-only inset. `ToastManagerBase` is unchanged: the package still takes a
   number and reads no store, route or page.
@@ -38,7 +40,7 @@ The surfaces (every page or window without the nav that has a bottom action row)
 | Onboarding: create | the cream submit button | `onboarding/pages/create.vue` |
 | Onboarding: import | the method's buttons and Back to methods | `onboarding/pages/import.vue` `.ctas` |
 | Onboarding: terms | Continue and its hint | `components/composite/LegalConsent.vue` `.actions` |
-| Onboarding: Presto | Continue, or the skip link | `onboarding/pages/presto.vue` `.ctaSlot` |
+| Onboarding: Presto | Continue, or the skip link; no row while the probe runs | `onboarding/pages/presto.vue` `.ctaSlot`, counted while one of them renders |
 | Onboarding: done | Open wallet | `onboarding/pages/done.vue` |
 
 Not registered, because they have no bottom action row: the Settings pages' in-list buttons
@@ -52,16 +54,28 @@ Decisions:
    exists, is mounted, and where it is. The alternative, a route-meta flag per page, cannot follow
    a footer that grows, a sheet's own row, or the onboarding CTAs that move with their content.
 2. **The snack sits above the highest point the row's top edge reaches on screen: where it is now,
-   or where it stops once the page is scrolled to its end.** Where the page cannot scroll further
-   (a pinned row, or a long page already at its end) that is where the row is, as first built. In a
-   window shorter than the page it is where the row stops, so the snack is clear of the row before
-   a scroll brings it up: `scrollIntoView` and a click can land in one task, before the next
-   measure. For a row at the page's end the result does not move with the scroll. The scroll
-   listener stays for rows that do move with it (inside an inner scroll area, or above the page's
-   end). A row off screen at both places moves nothing.
+   or where it stops once every container that scrolls it (a sheet's card, the page) is at its
+   end.** The row's rise is what each of those containers still has to scroll. Where nothing can
+   scroll it further (a pinned row, or a long page already at its end) that is where the row is,
+   as first built. In a window shorter than the page, or a sheet taller than the popup, it is where
+   the row stops, so the snack is clear of the row before a scroll brings it up: `scrollIntoView`
+   and a click can land in one task, before the next measure. For a row at its container's end the
+   result does not move with the scroll. The scroll listener stays for rows that do move with it
+   (above a container's end). A row off screen at both places moves nothing. A sticky row keeps
+   its place while the container it sticks to scrolls (Send's footer), so that container adds
+   nothing; nor does `overflow: hidden`, which no one can scroll (a stacked card's 15px shift
+   overflows the app's hidden wrapper). As first built only the page's scroll counted, so a row
+   at the end of a sheet's scrolling card was missed (codex round 1).
 3. **Never below the base.** On a nav page a footer low enough to sit under the nav's inset changes
    nothing. No nav page registers one today.
 4. **The inset moves at once**, as it did on a route change. There is no transition on `bottom`.
+5. **A row can say it holds no action.** `v-snack-footer` takes an optional value; a row given one
+   counts only while it is true, and the directive's `updated` hook registers and unregisters it as
+   the value changes. Presto's 48px slot keeps its place while the probe runs, so the page never
+   jumps, and passes whether Continue or the skip link renders; every other row passes none. The
+   slot, not the button or the link, stays the row: 1c measures from the action row's top edge,
+   and the skip link's own box sits centred in the slot, lower (codex round 1, as the coordinator
+   narrowed it).
 
 Sign-off pending (built as the closest existing pattern):
 
@@ -100,13 +114,24 @@ area above the card). So no row needed unregistering or measuring by its buttons
 
 Tests:
 
-- `composables/snackInset.test.ts`, 19 cases: the pure step (the base, the highest footer, never
+- `composables/snackInset.test.ts`, 26 cases: the pure step (the base, the highest footer, never
   below the base, a zero-height or off-screen row, a row below the fold counted where it stops, a
-  pinned row and a long page at its end keeping their inset, a row peeking on screen while the
-  page can still scroll); the host after a frame, a footer's removal, a sheet over the nav, two
-  stacked sheets, a footer growing, a scroll, a transition end, an animation end and a resize, a
-  window shorter than the page (placed before the scroll, unmoved after it), a snack opening
-  before any frame, the base following its source, and disposal.
+  pinned row and a long page at its end keeping their inset, a row peeking on screen while
+  something can still scroll it); the host after a frame, a footer's removal, a row given a value
+  counting only while it is true, a sheet over the nav, two stacked sheets and the sheet order
+  (P6.5), a footer growing, a hint added and removed above a row that keeps its size, a scroll, a
+  transition end, an animation end and a resize, a window shorter than the page (placed before the
+  scroll, unmoved after it), a row inside a scrolling card rising by what the card and the page
+  have left and not by a hidden overflow, a sticky row keeping its place while its own container
+  scrolls and still rising with the page, a snack opening before any frame, the base following its
+  source, and disposal. The stubbed layout has one rule, a sibling's `data-flow` pushing what
+  follows it down, so the hint moves the row without touching the row's DOM. Mutations checked:
+  the page-only rise, no sticky rule, a sticky flag that never resets, a counted `hidden`, no page
+  rise, no observer, attributes only, no disconnect, a value ignored at mount, no `updated` hook
+  and an `updated` that never unregisters each fail a case.
+- `onboarding/pages/presto.test.ts`, new: the slot's value is false while the probe runs, true with
+  the skip link (offline) and with Continue (available), and false again on a new probe. "Only
+  Continue counts" and the bare slot mark each fail it.
 - `components/ui/ToastManager.test.ts`: a footer on a no-nav route lifts the card to
   `bottom: 92px` (600 − 520 + 12).
 - `tests/e2e/network/snack-placement.test.ts`, new: on Send, a public→private send to an off-curve
@@ -118,6 +143,11 @@ Tests:
   one task as `pointerClick` does, are clear; at the end of the scroll the snack has not moved. An
   18px stand-in for the error line (the real one is a 14px icon beside 12px text) then grows the
   footer by 28px, so its top peeks onto the screen at 499, and the same holds.
+- `tests/e2e/snackbar.test.ts`, one new smoke case: a 400px block at the top of the Receive
+  sheet's card pushes Close to 950 in the 600px popup; the copy's error already sits 12px above
+  where Close stops at the card's end, Close scrolled into view and hit-tested in one task is
+  clear, and after the next measure the snack has not moved. With the page-only rise put back it
+  fails (Chrome, checked).
 - `tests/e2e/network/window-placement.test.ts`, unchanged, joins the gate: three runs per browser
   at retry 0, as the one spec that drives the approval footer under a persistent error.
 
@@ -128,11 +158,12 @@ Built in `packages/design/src/ui/ToastManagerBase.vue`:
 - The hold no longer starts on `mouseenter`, and a card no longer re-reads `:hover` once it has
   risen. A card that appears under a still cursor gets the browser's hover events, so both held a
   snack the person never reached.
-- The region follows the pointer with one passive capture `pointermove` listener on the document.
-  When a card opens it notes where the pointer rests; with no position known yet, the first move
-  after the open, anywhere, gives that spot. A `pointermove` on the card holds it only when it is at
-  least a pixel from that spot on either axis. No hover event holds, and neither does a move the
-  browser synthesises at the rest spot.
+- The region follows the pointer with one passive capture `pointermove` listener on the document,
+  which records each move before the card sees it. A `pointermove` on the card holds it only when
+  it is at least a pixel, on either axis, from the pointer's previous position. No hover event
+  holds, and neither does a move the browser synthesises at the cursor's last spot. As first built,
+  every move was compared with where the pointer rested when the card opened, so a pointer that
+  left the card and came back to that spot never held it (codex round 1).
 - Unchanged: focus entering the card holds it, `mouseleave` or focus leaving releases it, the
   remaining time resumes, and an error has no timer.
 
@@ -141,22 +172,24 @@ Decisions:
 1. **Position, not event type, tells a person from the browser.** A synthesised move carries the
    cursor's last position; a person reaching the card moves it. Under a pixel apart counts as the
    same spot, since the two can round differently.
-2. **The first move anywhere gives the rest spot, not the first move on the card.** Puppeteer's
-   five-step move from off the card lands only its last step on it, and so can a quick flick. Had
-   the card's own first move only noted the spot, that one move would hold nothing, and the
-   existing hold e2e would fail.
-3. **A replacement starts over.** `show()` clears the hold and notes the spot again, so a card that
-   replaces a held one under a still pointer runs its own 6 s.
+2. **Each move is judged against the one before it, wherever that was.** Puppeteer's five-step
+   move from off the card lands only its last step on it, and so can a quick flick; that one move
+   still comes from somewhere else, so it holds. With no earlier position known, a first move holds
+   nothing.
+3. **A replacement starts over.** `show()` clears the hold; under a still pointer the next move, if
+   any, is at the same spot, so a card that replaces a held one runs its own 6 s.
 
 Tests:
 
 - `packages/design/src/ui/ToastManagerBase.test.ts`: the hold cases reach the card with two real
   moves. New: a card that opens under a still pointer (mouseover, mouseenter, pointerover, a move
   at the spot and one 0.6px off) is gone at 6 s; a replacement under a still pointer runs its own
-  6 s after a held card; with no position known at the open, a first move at the card's spot holds
-  nothing, and a first move elsewhere then one move onto the card holds it. The old case "a
-  replacement while the card matches :hover is held" is gone: it pinned the behaviour 2b removes.
-  Mutations checked: without the pixel tolerance, or without the first-move rest spot, these fail.
+  6 s after a held card; with no position known, a first move at the card's spot holds nothing,
+  and a first move elsewhere then one move onto the card holds it; a pointer that leaves the card
+  and comes back to the spot where it opened under it holds it. The old case "a replacement while
+  the card matches :hover is held" is gone: it pinned the behaviour 2b removes. Mutations checked:
+  without the pixel tolerance, comparing a move with itself, or comparing with the first position
+  ever, these fail; the first build's rule fails the return case.
 - `tests/e2e/snackbar.test.ts`, one new smoke case: in the Receive sheet the mouse moves to the
   address line's lower edge and presses and releases there; the success opens over that point
   (`elementFromPoint` lands inside the card) and lives 5.5 to 6.5 s with the mouse still. The
@@ -285,10 +318,15 @@ Tests:
 How the host knows a sheet covers the nav: every popup-app sheet renders through
 `components/Popup/Popup.vue`, whose wrapper is `position: absolute; inset: 0` over the whole app
 at z-index `(displaceIdx + 1) × 500`, above the nav's. So an open `Popup` always covers the nav,
-and its wrapper carries `v-snack-sheet`. While one is registered the host drops the base to 12 and
-counts only the footers inside the top sheet (the last registered, which is the last opened);
-page footers under it are ignored. The directive's `unmounted` hook runs when the close starts,
-not when the slide-out ends, so the snack goes back to 76px as the sheet leaves.
+and its wrapper carries `v-snack-sheet` with the popup's `displaceIdx`, the order behind that
+z-index. While one is registered the host drops the base to 12 and counts only the footers inside
+the top sheet, the highest order; between equals the later mount, which the DOM draws on top,
+and a sheet with no order sits beneath every ordered one. Page footers under it are ignored. As
+first built the top sheet was the last to mount, but Token Metadata renders its `Popup` only once
+its token loads, so a sheet opened over it meanwhile lost placement to it (codex round 1). The
+directive's `updated` hook follows an order that changes, as opening an open popup again raises
+it. The directive's `unmounted` hook runs when the close starts, not when the slide-out ends, so
+the snack goes back to 76px as the sheet leaves.
 
 The sheets' own rows (`v-snack-footer`):
 
@@ -317,8 +355,13 @@ it. Send's review over Send puts the snack above Send now, not above Confirm Tra
 Tests:
 
 - `components/Popup/Popup.test.ts`: an open popup drops the inset from 76 to 12, and closing it
-  restores 76. `composables/snackInset.test.ts` already covers the top sheet's own row and a
-  stacked pair.
+  restores 76. `composables/snackInset.test.ts` covers the top sheet's own row and a stacked pair,
+  and the order: a lower sheet that mounts after a higher one leaves placement with the higher
+  one; a sheet with no order sits beneath an ordered one, and between equals the later one places;
+  a sheet raised above the others takes placement. `components/Popup/Popup.snackbar.test.ts`: with
+  two real `Popup`s, the one at `displaceIdx` 2 places the snack though the one at 1 mounted after
+  it. Mutations checked: mount order, no `updated` hook, ties to the first mount, no order counted
+  as 0, and `Popup` passing no order each fail a case.
 - `tests/e2e/snackbar.test.ts`, two new smoke cases: over the accounts sheet an error sits 12px
   from the bottom, and back at 76px once Escape closes the sheet; in the Receive sheet a copy's
   success sits 12px above Close.
@@ -367,9 +410,13 @@ registry sheet, which passes the same `submitKey`, showed any focused control do
 
 Tests:
 
-- `popup/components/popups/RevokeAuthwitsPopup.test.ts`: the content control is a named button;
-  Enter on it, bubbling to the document with a revoke ready, never revokes, and its press opens the
-  data viewer with the chunk's content. Without the stop the revoke fires (mutation-checked).
+- `popup/components/popups/RevokeAuthwitsPopup.test.ts`: the content control is a named button.
+  Enter and Space are each a cancelable event on the focused button, and the click follows only
+  when no handler cancelled it (Enter on keydown, Space on keyup), as a browser activates it. For
+  both, with a revoke ready, the events go uncancelled, the data viewer opens once with the chunk's
+  content, and nothing revokes. Adding `.prevent`, dropping the stop, preventing Space and opening
+  again on keydown each fail it. As first built the test dispatched Enter and then clicked on its
+  own, so a cancelled Enter would have passed (codex round 1).
 - `tests/e2e/rows.test.ts`, smoke: with developer mode on, Tab reaches `settings-logs-open` and the
   next Tab leaves the row; the row draws `solid 2px -2px`; Enter opens the log window; Space, with
   it open, runs the same handler (a second click on the row) and opens no second window.
