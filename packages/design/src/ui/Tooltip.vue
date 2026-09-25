@@ -3,8 +3,11 @@
 /**
  * Vendor
  */
-import { ref, reactive, nextTick, watch } from "vue"
+import { ref, reactive, nextTick, watch, onBeforeUnmount } from "vue"
 import type { PropType, VNode } from "vue"
+
+/** Utils */
+import { placeTooltip } from "./tooltip-placement"
 
 const props = defineProps({
 	side: {
@@ -26,14 +29,13 @@ const props = defineProps({
 	wide: { type: Boolean, default: null },
 	disabled: { type: Boolean, default: false },
 	delay: { type: [String, Number], default: 0 },
-	/** Cap on the tooltip's text width (CSS length string, e.g. "220px").
-	 *  Default keeps the prior behavior: clamp to the popup viewport minus
-	 *  padding. Callers with a short trigger + long copy should pass an
-	 *  explicit value to avoid the tooltip rendering full-popup-width. */
+	/** Narrows the text below the bubble's width cap (CSS length string, e.g. "220px"), for a short
+	 *  trigger with long copy. */
 	maxWidth: { type: String, default: undefined },
+	/** Lays the trigger out inline on the text baseline, so it can sit inside a sentence. */
+	inline: { type: Boolean, default: false },
 	// Host-DOM contract: the consuming app must declare this teleport root (the extension declares
-	// `#tooltip` in its popup/onboarding shells). The tooltip text also clamps to
-	// `calc(var(--base-width) - 40px)`, so the host must define the `--base-width` CSS var.
+	// `#tooltip` in its popup/onboarding shells).
 	teleportTo: { type: String, default: "#tooltip" },
 })
 
@@ -42,8 +44,15 @@ defineSlots<{
 	content?: () => VNode[]
 }>()
 
-const isHovered = ref(false)
-const delayedHover = ref<ReturnType<typeof setTimeout> | null>(null)
+const CLOSE_GRACE_MS = 150
+const PRESS_TARGETS = 'button, a, [role="button"]'
+
+const isOpen = ref(false)
+let openTimer: ReturnType<typeof setTimeout> | undefined
+let closeTimer: ReturnType<typeof setTimeout> | undefined
+// A press focuses its control, and that focusin must not reopen what the press closed, until a mouse
+// or pen arrives or the pointer or focus leaves.
+let dismissed = false
 
 const trigger = ref<HTMLElement | null>(null)
 const tip = ref<HTMLElement | null>(null)
@@ -52,147 +61,152 @@ const styles = reactive({
 	transform: "translate3d(0, 0, 0)",
 })
 
-watch(
-	() => isHovered.value,
-	() => {
-		nextTick(() => {
-			if (!tip.value || !trigger.value) return
+const delayMs = () => (typeof props.delay === "number" ? props.delay : Number.parseInt(props.delay, 10))
 
-			const triggerRect = trigger.value.getBoundingClientRect()
-			const tooltipRect = tip.value.getBoundingClientRect()
-
-			// Cross-axis alignment shared by both side pairs: the same
-			// center/start/end geometry computes x for top/bottom (width axis)
-			// and y for left/right (height axis). One implementation, so a
-			// rounding/clamp fix can never land on one axis and miss the other.
-			const crossAxisOffset = (start: number, end: number, triggerSize: number, tooltipSize: number): number => {
-				switch (props.position) {
-					case "center":
-						return start - (tooltipSize / 2 - triggerSize / 2)
-					case "start":
-						return start
-					case "end":
-						return end - tooltipSize
-					default:
-						// Invalid position (the runtime validator only WARNS, it doesn't
-						// block): the old inner switches fell through leaving the
-						// coordinate at its initialized 0 — preserved exactly.
-						return 0
-				}
-			}
-			const xCross = () => crossAxisOffset(triggerRect.left, triggerRect.right, triggerRect.width, tooltipRect.width)
-			const yCross = () => crossAxisOffset(triggerRect.top, triggerRect.bottom, triggerRect.height, tooltipRect.height)
-
-			let xPos = 0
-			let yPos = 0
-
-			switch (props.side) {
-				case "top":
-					yPos = triggerRect.top - tooltipRect.height - 8
-					xPos = xCross()
-					break
-
-				case "bottom":
-					yPos = triggerRect.bottom + 8
-					xPos = xCross()
-					break
-
-				case "left":
-					xPos = triggerRect.left - tooltipRect.width - 8
-					yPos = yCross()
-					break
-
-				case "right":
-					xPos = triggerRect.right + 8
-					yPos = yCross()
-					break
-
-				default:
-					break
-			}
-
-			styles.transform = `translate3d(${xPos}px, ${yPos}px,0)`
-		})
-	},
-)
-
-const handleMouseEnter = () => {
-	if (props.disabled) return
-
-	if (props.delay) {
-		delayedHover.value = setTimeout(
-			() => {
-				isHovered.value = true
-			},
-			typeof props.delay === "number" ? props.delay : Number.parseInt(props.delay, 10),
-		)
-	} else {
-		isHovered.value = true
-	}
+const cancelTimers = () => {
+	clearTimeout(openTimer)
+	clearTimeout(closeTimer)
+	openTimer = undefined
+	closeTimer = undefined
 }
+
+const show = () => {
+	if (props.disabled || dismissed) return
+	cancelTimers()
+	isOpen.value = true
+}
+
+const hide = () => {
+	cancelTimers()
+	isOpen.value = false
+}
+
+const handleEnter = () => {
+	if (props.disabled || dismissed) return
+	clearTimeout(closeTimer)
+	if (isOpen.value) return
+	const delay = delayMs()
+	if (!delay) return show()
+	clearTimeout(openTimer)
+	openTimer = setTimeout(show, delay)
+}
+
+const handleLeave = () => {
+	clearTimeout(openTimer)
+	openTimer = undefined
+	if (!isOpen.value) return
+	clearTimeout(closeTimer)
+	closeTimer = setTimeout(hide, CLOSE_GRACE_MS)
+}
+
+const handleBubbleEnter = () => clearTimeout(closeTimer)
 
 const handleMouseLeave = () => {
-	isHovered.value = false
-
-	if (delayedHover.value) {
-		clearTimeout(delayedHover.value)
-	}
+	dismissed = false
+	handleLeave()
 }
 
-// Keyboard parity: focusin/focusout bubble from any focusable child of the trigger, so a
-// tab-focused trigger shows the tooltip. Focus is deliberate — no hover delay applies.
-const handleFocusIn = () => {
-	if (props.disabled) return
-	isHovered.value = true
+// `pointerenter`, not `mouseenter`: a tap's compatibility mouseenter falls between its pointerdown
+// and its focus. Touch is skipped because it has no hover.
+const handlePointerEnter = (event: PointerEvent) => {
+	if (event.pointerType !== "touch") dismissed = false
 }
+
+const handleFocusOut = () => {
+	dismissed = false
+	hide()
+}
+
+const handlePress = (event: Event) => {
+	const control = (event.target as Element | null)?.closest?.(PRESS_TARGETS)
+	if (!control || !trigger.value?.contains(control)) return
+	dismissed = true
+	hide()
+}
+
+const handleKeydown = (event: KeyboardEvent) => {
+	if (event.key === "Enter" || event.key === " ") handlePress(event)
+}
+
+// Window capture runs before focus-trap's and the menus' document listeners, so an open tooltip
+// takes the first Escape and the popup or menu under it stays.
+const handleEscape = (event: KeyboardEvent) => {
+	if (event.key !== "Escape") return
+	event.preventDefault()
+	event.stopPropagation()
+	hide()
+}
+
+const place = () => {
+	if (!tip.value || !trigger.value) return
+	const { x, y } = placeTooltip({
+		trigger: trigger.value.getBoundingClientRect(),
+		bubble: tip.value.getBoundingClientRect(),
+		viewport: { width: window.innerWidth, height: window.innerHeight },
+		side: props.side,
+		position: props.position,
+	})
+	styles.transform = `translate3d(${x}px, ${y}px,0)`
+}
+
+watch(isOpen, (open) => {
+	if (!open) return window.removeEventListener("keydown", handleEscape, true)
+	window.addEventListener("keydown", handleEscape, true)
+	nextTick(place)
+})
+
+onBeforeUnmount(() => {
+	cancelTimers()
+	window.removeEventListener("keydown", handleEscape, true)
+})
 </script>
 
 <template>
 	<div
-		@mouseenter="handleMouseEnter"
+		@pointerenter="handlePointerEnter"
+		@mouseenter="handleEnter"
 		@mouseleave="handleMouseLeave"
-		@touchstart="handleMouseEnter"
-		@touchend="handleMouseLeave"
-		@focusin="handleFocusIn"
-		@focusout="handleMouseLeave"
-		:class="$style.wrapper"
+		@touchstart="handleEnter"
+		@touchend="handleLeave"
+		@focusin="show"
+		@focusout="handleFocusOut"
+		@pointerdown="handlePress"
+		@keydown="handleKeydown"
+		:class="[$style.wrapper, inline && $style.inline]"
 		:style="{ width: wide ? '100%' : undefined }"
 	>
 		<div
 			ref="trigger"
-			:class="$style.trigger"
+			:class="[$style.trigger, inline && $style.inline]"
 			:style="{ width: wide ? '100%' : undefined }"
 		>
 			<slot />
 		</div>
 
 		<teleport :to="teleportTo">
-			<Transition
-				:enter-from-class="$style['fade-from']"
-				:enter-active-class="$style['fade-active']"
-				:enter-to-class="$style['fade-to']"
-				:leave-from-class="$style['fade-to']"
-				:leave-active-class="$style['fade-active']"
-				:leave-to-class="$style['fade-from']"
+			<div
+				v-if="isOpen"
+				@click.stop
+				@mousedown.prevent
+				@mouseenter="handleBubbleEnter"
+				@mouseleave="handleLeave"
+				ref="tip"
+				role="tooltip"
+				data-testid="tooltip-bubble"
+				:class="[$style.content, disabled && $style.disabled]"
+				:style="styles"
 			>
 				<div
-					v-if="isHovered"
-					@click.stop
-					ref="tip"
-					:class="[$style.content, disabled && $style.disabled]"
-					:style="styles"
+					data-testid="tooltip-text"
+					:class="[$style.text]"
+					:style="{
+						textAlign: textAlign as 'left' | 'right' | 'center' | 'justify',
+						maxWidth: maxWidth,
+					}"
 				>
-					<div
-						:class="[$style.text]"
-						:style="{
-							textAlign: textAlign as 'left' | 'right' | 'center' | 'justify',
-							maxWidth: maxWidth,
-						}"
-					>
-						<slot name="content" />
-					</div>
+					<slot name="content" />
 				</div>
-			</Transition>
+			</div>
 		</teleport>
 	</div>
 </template>
@@ -208,6 +222,11 @@ const handleFocusIn = () => {
 	display: flex;
 }
 
+.inline {
+	display: inline-flex;
+	align-items: baseline;
+}
+
 .content {
 	position: fixed;
 	top: 0;
@@ -215,6 +234,7 @@ const handleFocusIn = () => {
 	z-index: 50000;
 
 	width: max-content;
+	max-width: min(272px, calc(100vw - 16px));
 
 	box-sizing: border-box;
 	background: var(--nulo-surface-highest);
@@ -222,30 +242,22 @@ const handleFocusIn = () => {
 	box-shadow: 0 4px 12px rgba(10, 9, 8, 0.6);
 
 	padding: 6px 10px;
+
+	animation: rise 0.12s ease-out;
 }
 
 .text {
-	max-width: calc(var(--base-width) - 40px);
-
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--txt-primary);
+	overflow-wrap: anywhere;
 }
 
-/* Opacity-only fade. We can't animate transform here — the position
- * resolver applies the (x, y) translate as an inline style on the same
- * element, which would override any class-driven transform mid-animation.
- * Bound via :enter-*-class / :leave-*-class on the Transition because
- * <style module> hashes class names. */
-.fade-active {
-	transition: opacity 0.12s ease;
-}
-
-.fade-from {
-	opacity: 0;
-}
-
-.fade-to {
-	opacity: 1;
+/* The inline `transform` is the placement, so the rise animates `translate`. */
+@keyframes rise {
+	from {
+		opacity: 0;
+		translate: 0 -2px;
+	}
 }
 </style>
