@@ -107,54 +107,39 @@ const handleCopyAddress = (target) => {
 					<template #right>
 						<Flex align="center" gap="8">
 							<Tooltip position="end" delay="350">
-								<Icon
-									@click.stop="handleCopyAddress(account.address)"
-									name="copy"
-									size="14"
-									color="tertiary"
-									hoverColor="primary"
-									:class="$style.icon_btn"
-								/>
+								<RowAction label="Copy account address" @click="handleCopyAddress(account.address)">
+									<Icon name="copy" size="14" color="tertiary" />
+								</RowAction>
 
 								<template #content>Copy account address</template>
 							</Tooltip>
 
 							<Tooltip v-if="canExportAccounts" position="end" delay="350">
-								<Icon
-									@click.stop="handleExportAccount(account)"
-									name="upload-outline"
-									size="14"
-									color="tertiary"
-									hoverColor="primary"
-									:class="$style.icon_btn"
-									data-testid="account-export-btn"
-								/>
+								<RowAction label="Export account" data-testid="account-export-btn" @click="handleExportAccount(account)">
+									<Icon name="upload-outline" size="14" color="tertiary" />
+								</RowAction>
 
 								<template #content>Export account</template>
 							</Tooltip>
 
 							<Tooltip position="end" delay="350">
-								<Icon
-									@click.stop="handleEditAccount(account)"
-									name="edit"
-									size="14"
-									color="tertiary"
-									:class="$style.icon_btn"
-									data-testid="account-edit-btn"
-								/>
+								<RowAction label="Edit account" data-testid="account-edit-btn" @click="handleEditAccount(account)">
+									<Icon name="edit" size="14" color="tertiary" />
+								</RowAction>
 
 								<template #content>Edit account</template>
 							</Tooltip>
 
 							<Tooltip position="end" delay="350">
-								<div data-testid="account-hide" @click.stop="handleHideAccount(account)">
-									<Icon
-										name="close-circle"
-										size="14"
-										color="tertiary"
-										:class="[$style.icon_btn, accounts.length === 1 && $style.disabled]"
-									/>
-								</div>
+								<RowAction
+									label="Hide account"
+									data-testid="account-hide"
+									:disabled="accounts.length === 1"
+									:class="accounts.length === 1 && $style.disabled"
+									@click="handleHideAccount(account)"
+								>
+									<Icon name="close-circle" size="14" color="tertiary" />
+								</RowAction>
 
 								<template #content> Hide account </template>
 							</Tooltip>
@@ -234,18 +219,7 @@ const handleCopyAddress = (target) => {
 	white-space: nowrap;
 }
 
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-
-	&.disabled {
-		pointer-events: none;
-		opacity: 0.3;
-	}
+.disabled {
+	opacity: 0.3;
 }
 </style>

@@ -58,7 +58,7 @@ const settle = async () => {
 	await flushPromises()
 }
 
-/** Registry popups mount closed and are toggled open; the watcher is not immediate, so the harness does the same. */
+/** Registry popups mount closed and are toggled open; the harness does the same. */
 const openPopup = async (props: Record<string, unknown> = {}) => {
 	const w = mountPopup(props)
 	await w.setProps({ show: true })
@@ -162,6 +162,28 @@ describe("Popup", () => {
 		expect(traps[0]?.focusedAtCreate).toBe(document.querySelector('[data-testid="inside"]'))
 		expect(traps[0]?.options.setReturnFocus).toBe(opener)
 		w.unmount()
+	})
+
+	test("created already shown: one trap after the tick, on the wrapper, returning focus to what was focused at creation even if a child focuses its own input first", async () => {
+		document.body.insertAdjacentHTML("beforeend", '<button id="opener">open</button>')
+		const opener = document.querySelector<HTMLElement>("#opener")
+		opener?.focus()
+		const w = mountPopup({ show: true })
+		void nextTick(() => document.querySelector<HTMLElement>('[data-testid="inside"]')?.focus())
+		expect(traps).toHaveLength(0)
+		await settle()
+		expect(traps).toHaveLength(1)
+		expect(traps[0]?.active).toBe(true)
+		expect(traps[0]?.containers).toBe(document.querySelector('[data-testid="inside"]')?.parentElement)
+		expect(traps[0]?.options.setReturnFocus).toBe(opener)
+		w.unmount()
+	})
+
+	test("created already shown and unmounted before the tick: no trap is created", async () => {
+		const w = mountPopup({ show: true })
+		w.unmount()
+		await settle()
+		expect(traps).toHaveLength(0)
 	})
 
 	test("initialFocus is handed to the trap; off by default", async () => {

@@ -152,55 +152,61 @@ describe("composite/TransactionAwaitingCard", () => {
 		})
 	})
 
-	describe("focus surface (queued only)", () => {
-		test("at queued: the whole card click and its own button both emit 'focus' with the jobId, once each", async () => {
-			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
-			expect(w.attributes("title")).toBe("Show the approval window")
+	describe("focus surface (queued only), on the real layout", () => {
+		// The root listener rides on the layout's Flex, so this stub must keep its attrs.
+		const { TransactionCardLayout: _stub, ...atoms } = STUBS
+		const stubs = { ...atoms, Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false } }
+		const real = (props: Record<string, unknown>) => mount(TransactionAwaitingCard, { props, global: { stubs } })
+		const nests = (w: ReturnType<typeof real>) =>
+			w.findAll("button, a, [tabindex]").some((el) => el.find("button, a, [tabindex]").exists())
+
+		test("at queued: the row is a button, and its press and the focus button each emit 'focus' with the jobId", async () => {
+			const w = real({ cancellable: true, jobId: "abc123", stage: "queued" })
+			const target = w.find("[data-row-target]")
+			expect(target.element.tagName).toBe("BUTTON")
+			expect(w.find('[title="Show the approval window"]').find("[data-row-target]").exists()).toBe(true)
 			const focusBtn = w.find('[data-testid="tx-awaiting-focus"]')
-			expect(focusBtn.exists()).toBe(true)
 			expect(focusBtn.attributes("aria-label")).toBe("Show the approval window")
 
-			await w.trigger("click")
+			await target.trigger("click")
 			await focusBtn.trigger("click")
 			expect(w.emitted("focus")).toEqual([["abc123"], ["abc123"]])
 		})
 
-		test("no nested interactive controls: the card carries no ARIA role, and the two buttons are siblings", () => {
-			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+		test("no button, link or tabindex contains another", () => {
+			const w = real({ cancellable: true, jobId: "abc123", stage: "queued" })
+			expect(w.find("[data-row-target]").exists()).toBe(true)
+			expect(w.find('[data-testid="tx-awaiting-cancel"]').exists()).toBe(true)
+			expect(nests(w)).toBe(false)
 			expect(w.find('[role="button"]').exists()).toBe(false)
-			expect(w.attributes("tabindex")).toBeUndefined()
-			const focusBtn = w.find('[data-testid="tx-awaiting-focus"]')
-			const cancelBtn = w.find('[data-testid="tx-awaiting-cancel"]')
-			expect(focusBtn.find('[data-testid="tx-awaiting-cancel"]').exists()).toBe(false)
-			expect(cancelBtn.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
 		})
 
 		test("the cancel button's click emits only 'cancel' (never bubbles into a focus)", async () => {
-			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+			const w = real({ cancellable: true, jobId: "abc123", stage: "queued" })
 
 			await w.find('[data-testid="tx-awaiting-cancel"]').trigger("click")
 			expect(w.emitted("cancel")).toEqual([["abc123"]])
 			expect(w.emitted("focus")).toBeUndefined()
 		})
 
-		test("past queued the card is inert: no focus button, no title, click emits nothing", async () => {
-			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "proving" })
+		test("past queued the row is inert: no target, no focus button, no pointer class, a click emits nothing", async () => {
+			const w = real({ cancellable: true, jobId: "abc123", stage: "proving" })
+			expect(w.find("[data-row-target]").exists()).toBe(false)
 			expect(w.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
-			expect(w.attributes("title")).toBeUndefined()
+			expect(w.html()).not.toMatch(/interactive/)
+			expect(w.find("[title]").exists()).toBe(false)
 
 			await w.trigger("click")
 			expect(w.emitted("focus")).toBeUndefined()
 		})
 
 		test("queued without a jobId is inert (nothing to focus)", () => {
-			const w = mountCard({ cancellable: true, jobId: null, stage: "queued" })
+			const w = real({ cancellable: true, jobId: null, stage: "queued" })
+			expect(w.find("[data-row-target]").exists()).toBe(false)
 			expect(w.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
 		})
 
-		test("with the REAL layout, two buttons widen the reserved action space; one button keeps the 20px reservation", () => {
-			const { TransactionCardLayout: _stub, ...stubs } = STUBS
-			const real = (props: Record<string, unknown>) => mount(TransactionAwaitingCard, { props, global: { stubs } })
-
+		test("two buttons widen the reserved action space; one button keeps the single reservation", () => {
 			const two = real({ cancellable: true, jobId: "abc123", stage: "queued", title: "A very long dApp title that fills the row" })
 			expect(two.html()).toMatch(/wrapper_two_actions/)
 

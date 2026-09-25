@@ -185,8 +185,6 @@ const collapsingLabel = "Import Account"
 				<ItemsContainer flat>
 					<SettingItem
 						@click="handlePickFile"
-						@keydown.enter.prevent="handlePickFile"
-						@keydown.space.prevent="handlePickFile"
 						title="Choose an account file"
 						:description="fileName || 'Select a .json or .txt file'"
 						icon="key"

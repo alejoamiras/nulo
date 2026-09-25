@@ -54,11 +54,13 @@ defineProps({
 	transferTypeLabel: { type: String, default: null },
 	amount: { type: String, default: null },
 	amountSymbol: { type: String, default: null },
+	/** The route the row opens. */
+	to: { type: String, default: undefined },
 })
 </script>
 
 <template>
-	<TransactionCardLayout :title="title" :icon="activityIcon" :amount="amount" :amountSymbol="amountSymbol" testId="tx-terminal-card">
+	<TransactionCardLayout :title="title" :icon="activityIcon" :amount="amount" :amountSymbol="amountSymbol" :to="to" testId="tx-terminal-card">
 		<template #badge>
 			<Icon :name="icon" size="12" :color="color" :class="$style.status_icon" :data-color="color" />
 		</template>

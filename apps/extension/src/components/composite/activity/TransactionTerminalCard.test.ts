@@ -35,7 +35,7 @@ const STUBS = {
 				<span class="symbol">{{ amountSymbol }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId"],
+		props: ["title", "icon", "amount", "amountSymbol", "testId", "to"],
 	},
 }
 
@@ -49,6 +49,7 @@ type CardProps = {
 	transferTypeLabel?: string | null
 	amount?: string | null
 	amountSymbol?: string | null
+	to?: string
 }
 
 const CANCELLED: CardProps = { title: "swap", subtitle: "Cancelled", icon: "cancel", color: "gray" }
@@ -133,5 +134,10 @@ describe("composite/TransactionTerminalCard", () => {
 	test("testId attribute is 'tx-terminal-card' for e2e selectors", () => {
 		const w = mountCard(FAILED)
 		expect(w.find('[data-testid="tx-terminal-card"]').exists()).toBe(true)
+	})
+
+	test("`to` reaches the layout, which makes the row a link", () => {
+		const w = mountCard({ ...FAILED, to: "/popup/journal/op-1" })
+		expect(w.findComponent(STUBS.TransactionCardLayout).props("to")).toBe("/popup/journal/op-1")
 	})
 })

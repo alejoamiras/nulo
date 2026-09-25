@@ -9,6 +9,7 @@
 <script setup>
 /** Components */
 import { Dropdown } from "@/components/ui/Dropdown"
+import RowTarget from "@/components/ui/RowTarget.vue"
 
 /** Services */
 import { DappSessionServiceClient } from "@/wallet/services/dapp-session/client"
@@ -19,8 +20,6 @@ import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
-
-const router = useRouter()
 
 const formatGrantSummary = (grants) => {
 	// getSafeDisplay returns the constant "Unknown" shortLabel for
@@ -64,9 +63,7 @@ function onDappSessionDeleted(session) {
 	dappSessions.value = dappSessions.value.filter((ds) => ds.id !== session.id)
 }
 
-const handleOpenSession = (session) => {
-	router.push(`/popup/settings/connected-apps/${session.id}`)
-}
+const rowIdBase = useId()
 
 const handleDropSession = (session) => {
 	cacheStore.confirm.confirm_color = "red"
@@ -124,15 +121,9 @@ onBeforeUnmount(() => {
 		<SectionLabel label="Sessions" :count="sortedSessions.length" />
 
 		<ItemsContainer v-if="sortedSessions.length">
-			<div
-				v-for="ds in sortedSessions"
-				:key="ds.id"
-				role="button"
-				tabindex="0"
-				@click="handleOpenSession(ds)"
-				@keydown.enter="handleOpenSession(ds)"
-				:class="$style.row"
-			>
+			<div v-for="(ds, i) in sortedSessions" :key="ds.id" :class="$style.row">
+				<RowTarget :to="`/popup/settings/connected-apps/${ds.id}`" :labelledby="`${rowIdBase}-${i}`" />
+
 				<Flex align="center" gap="12" wide>
 					<div :class="$style.logo_wrapper">
 						<Icon v-if="ds.loadingLogo" :loading="true" name="dapp" size="18" color="tertiary" />
@@ -146,7 +137,7 @@ onBeforeUnmount(() => {
 					</div>
 
 					<Flex direction="column" gap="2" wide :class="$style.row_text">
-						<span :class="$style.row_name">{{ ds.dappMetadata.name }}</span>
+						<span :id="`${rowIdBase}-${i}`" :class="$style.row_name">{{ ds.dappMetadata.name }}</span>
 						<span v-if="ds.capabilityGrants?.length" :class="$style.row_grants">
 							{{ formatGrantSummary(ds.capabilityGrants) }}
 						</span>
@@ -154,17 +145,9 @@ onBeforeUnmount(() => {
 
 					<Flex align="center" gap="8" :class="$style.actions">
 						<Tooltip position="end" delay="350">
-							<span
-								role="button"
-								tabindex="0"
-								data-testid="session-disconnect"
-								@click.stop="handleDropSession(ds)"
-								@keydown.enter.stop="handleDropSession(ds)"
-								:class="[$style.action, $style.action_danger]"
-								aria-label="Disconnect session"
-							>
+							<RowAction label="Disconnect session" data-testid="session-disconnect" :class="$style.action_danger" @click="handleDropSession(ds)">
 								<Icon name="close-circle" size="14" color="tertiary" />
-							</span>
+							</RowAction>
 
 							<template #content> Disconnect session </template>
 						</Tooltip>
@@ -186,20 +169,21 @@ onBeforeUnmount(() => {
 	padding: 12px 16px;
 	cursor: pointer;
 	background: transparent;
-	outline: none;
 
 	transition: background 0.2s var(--bezier);
 
-	&:hover {
+	&:hover,
+	&:has(> [data-row-target]:focus-visible) {
 		background: var(--nulo-surface-high);
+	}
+
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
 	}
 
 	&:active {
 		background: var(--nulo-surface-highest);
-	}
-
-	&:focus-visible {
-		background: var(--nulo-surface-high);
 	}
 
 	&::after {
@@ -268,30 +252,9 @@ onBeforeUnmount(() => {
 	flex-shrink: 0;
 }
 
-.action {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-
-	width: 20px;
-	height: 20px;
-
-	cursor: pointer;
-	outline: none;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover svg {
-		fill: var(--txt-primary);
-	}
-
-	&:focus-visible {
-		background: var(--nulo-surface-high);
-	}
-}
-
 .action_danger {
-	&:hover svg {
+	&:hover svg,
+	&:focus-visible svg {
 		fill: var(--red);
 	}
 }

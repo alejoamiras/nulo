@@ -35,6 +35,7 @@ vi.mock("@/wallet/services/price/client", () => ({
 	}),
 }))
 
+import { RowAction } from "@nulo/design"
 import TransactionCard from "./TransactionCard.vue"
 
 const STUBS = {
@@ -64,6 +65,7 @@ const STUBS = {
 			"txTransferTypeLabel",
 			"txStatus",
 			"txHash",
+			"to",
 		],
 	},
 }
@@ -90,7 +92,8 @@ const dappTransferTx = {
 	origin: { type: OriginType.DAPP, name: "example.dapp.io" },
 }
 
-const mountCard = (tx: Record<string, unknown>) => mount(TransactionCard, { props: { tx }, global: { stubs: STUBS } })
+const mountCard = (tx: Record<string, unknown>, props: Record<string, unknown> = {}) =>
+	mount(TransactionCard, { props: { tx, ...props }, global: { stubs: STUBS, components: { RowAction } } })
 
 describe("modules/activity/TransactionCard (settled)", () => {
 	test("dApp-initiated transfer renders BOTH transferTypeLabel and originLabel chips (codex PR #96 regression pin)", () => {
@@ -100,6 +103,15 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		// originLabel from tx.origin.name — must NOT be silently dropped by
 		// the `||` template when the call shape ALSO produces a transferType.
 		expect(w.text()).toContain("example.dapp.io")
+	})
+
+	test("`to` reaches the layout, and the explorer link is a named action opening a new tab", () => {
+		const w = mountCard(dappTransferTx, { to: "/popup/tx/0xabcd1234abcd1234" })
+		expect(w.findComponent(STUBS.TransactionCardLayout).props("to")).toBe("/popup/tx/0xabcd1234abcd1234")
+		const explorer = w.find('a[aria-label="Open in block explorer"]')
+		expect(explorer.attributes("target")).toBe("_blank")
+		expect(explorer.attributes("rel")).toBe("noopener noreferrer")
+		expect(explorer.attributes("href")).toContain("0xabcd1234abcd1234")
 	})
 })
 

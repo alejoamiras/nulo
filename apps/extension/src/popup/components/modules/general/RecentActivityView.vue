@@ -238,7 +238,7 @@ const journalOps = ref([])
  *  (hidden=false only); the merge below adds them to recentActivityRows. */
 // Parent owns the client lifecycle (connect/disconnect in onMounted/
 // onBeforeUnmount below); useIncomingTransfers wires the listeners + the
-// `incomingTransfersVisible` toggle reload. Shared verbatim with activity.vue.
+// `incomingTransfersVisible` toggle reload.
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
@@ -266,16 +266,9 @@ function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
 	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
 }
-function handleSelectIncoming(inc) {
-	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
-	router.push(`/popup/received/${inc.id}`)
-}
-
-/** Phase 2 follow-up: execution-service client for Cancel surface.
- *  Disconnected in onBeforeUnmount alongside the others. */
 const executionService = new ExecutionServiceClient()
 
-/** Phase 2 follow-up: cancel handler for the awaiting card's `@cancel` emit.
+/** Cancel handler for the awaiting card's `@cancel` emit.
  *  Built from a pure module so the wire is unit-testable without mounting
  *  the full Vue component. The card emits `cancel(jobId)`; the handler
  *  cancels exactly that record. With multiple in-flight cards on screen
@@ -690,16 +683,6 @@ function onExecutingTaskDeleted(task) {
 	}
 }
 
-const handleSelectTx = (tx) => {
-	router.push(`/popup/tx/${tx.hash}`)
-}
-
-// Terminal journal rows (cancelled / interrupted / failed pre-broadcast)
-// have no chain tx hash. Route to the dedicated journal detail page.
-const handleSelectTerminal = (op) => {
-	router.push(`/popup/journal/${op.id}`)
-}
-
 /** Snapshot the active account's in-flight executingTask from TaskService.
  *  Shared by mount and the account-switch reset watcher. Captured-account guard:
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
@@ -887,16 +870,16 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectIncoming(row.inc)"
+					:to="`/popup/received/${row.inc.id}`"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
-					@click="handleSelectTerminal(row.op)"
+					:to="`/popup/journal/${row.op.id}`"
 				/>
 			</template>
 		</div>
