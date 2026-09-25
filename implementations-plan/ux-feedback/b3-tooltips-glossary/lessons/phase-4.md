@@ -1,7 +1,8 @@
 # Phase 4 · Parity and arc gate (in progress)
 
-Done here: step 4 (the flake bar) and step 1's captures. Not done yet: step 1's Artifact, step 2
-(the local-gate row), step 3 (the network suite) and the reap that closes them.
+Done on batch 3's build worktree: step 4 (the flake bar), step 1 (the captures and the parity
+Artifact) and the codex fix loop. Steps 2 (the local-gate row), 3 (the network suite) and 5 (the
+reap) run on the stack; their results are under § Gates on the stack.
 
 ## Flake bar (step 4)
 
@@ -51,6 +52,9 @@ the smoke build.
 - Observation: Fact 14 overstates the smoke Home. Its gas card does leave the skeletons, showing
   `0 FJ` within 5s on Firefox and within 5–15s on Chrome. Zero is not the shot's amount, though,
   so the network capture stands.
+
+The parity page is <https://claude.ai/artifact/8EE5kUaqgpr1e2WeCucYqh>: every capture beside its shot, on Chrome and on
+Firefox, with the differences below. Its version 2 carries codex round 1's corrections.
 
 ## Parity differences
 
@@ -203,11 +207,11 @@ Values are Chrome's. Firefox's geometry is identical unless a difference is note
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| 1 | major | The press listeners ran in the bubble phase. `connected-apps/index.vue:162` stops its Enter keydown, so its tooltip stayed open under the confirmation and took the first Escape. A click with no pointerdown or key (a screen reader's activation) never closed a tooltip | `c604153b`: `pointerdown`, `keydown` and a new `click` listen in the capture phase, and none prevents its default |
-| 2 | major | Placement ran only on open, so an open bubble kept its x when the window narrowed (360 → 300px: a 272px bubble at x 80 ended at 352) | `c0916a09`: while open, the bubble is placed again on every window `resize`; the listener goes on close and on unmount |
-| 3 | minor | `settings/tokens/index.vue:94` put its `v-if` on the icon inside the Tooltip, so removing the icon left the Tooltip mounted, with any open bubble and its Escape listener | `e5fcfb27`: the condition moved onto the `<Tooltip>` |
-| 4 | minor | The new Glossary drew the dark separator in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)`. This log wrongly called that pre-existing | `cd1f6cf3`: a `:global([theme="light"]) .entry` override, the page-local pattern `ConfirmPopup.vue:207` uses, with no new token. The log line and the plan are corrected |
-| 5 | minor | The e2e spec's header repeated its test names | `8263bcb9`: one line, the reason (jsdom has no layout) |
+| 1 | major | The press listeners ran in the bubble phase. `connected-apps/index.vue:162` stops its Enter keydown, so its tooltip stayed open under the confirmation and took the first Escape. A click with no pointerdown or key (a screen reader's activation) never closed a tooltip | `2145ff41`: `pointerdown`, `keydown` and a new `click` listen in the capture phase, and none prevents its default |
+| 2 | major | Placement ran only on open, so an open bubble kept its x when the window narrowed (360 → 300px: a 272px bubble at x 80 ended at 352) | `fa55f303`: while open, the bubble is placed again on every window `resize`; the listener goes on close and on unmount |
+| 3 | minor | `settings/tokens/index.vue:94` put its `v-if` on the icon inside the Tooltip, so removing the icon left the Tooltip mounted, with any open bubble and its Escape listener | `d5835a92`: the condition moved onto the `<Tooltip>` |
+| 4 | minor | The new Glossary drew the dark separator in both themes; the mock's light value is `rgba(124, 116, 104, 0.2)`. This log wrongly called that pre-existing | `1f8bdbd0`: a `:global([theme="light"]) .entry` override, the page-local pattern `ConfirmPopup.vue:207` uses, with no new token. The log line and the plan are corrected |
+| 5 | minor | The e2e spec's header repeated its test names | `1baf8bfe`: one line, the reason (jsdom has no layout) |
 
 Nothing was rejected.
 
@@ -251,3 +255,17 @@ Gate:
   - Chrome: runs 1, 2 and 3 exit 0, 3/3 tests each.
   - Firefox: runs 1, 2 and 3 exit 0, 3/3 tests each.
 - `bun run e2e:reap` after each chain: nothing to reap.
+
+### Round 2 · codex · approve (high)
+
+No new material findings. Both rounds ran in session `01a0d63d-bd4a-73d2-b0a2-ec774cbc388b`, on
+batch 3's build worktree before the arc was cherry-picked onto batch 2's top. The ids above are
+the stack's. Batch 3's diff is unchanged: the stack differs from the reviewed tip only by batch
+2's review fixes and the plans' docs. The build worktree's copy of batch 2's playground fix
+(`fixtures/playground.ts`) was left out of the move, since the stack already carries it.
+
+Round 2's verdict, verbatim: *"All five round-1 findings are closed; no new material
+findings across the arc. Read-only Vue/CSS probes confirmed capture-event scoping, repeated
+activation, resize clamping, listener cleanup on Escape/press/unmount, and the light-theme
+override. Docs and changed comments match the fixes. Browser suites were not rerun. VERDICT:
+approve — confidence: high"*

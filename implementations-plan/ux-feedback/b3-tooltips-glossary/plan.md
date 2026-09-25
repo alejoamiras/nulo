@@ -11,6 +11,7 @@ arc_branch: feat/ux-3-tooltips-glossary
 design: implementations-plan/ux-feedback/design/spec.md (items 2 and 9, the tooltip map, U8, U9)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 eli5: https://claude.ai/artifact/HtXnDzds12RLSFpS5L8paW
+parity: https://claude.ai/artifact/8EE5kUaqgpr1e2WeCucYqh
 ---
 
 # Batch 3 · Tooltips and glossary
