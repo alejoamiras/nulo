@@ -1,0 +1,78 @@
+# Owner-reviewed triage for tools/audit.py: one key per line, then "# reason".
+# Secret keys carry the first 16 hex of the value's SHA-256; the value itself is never recorded.
+
+abspath:scripts/check-no-local-paths.sh:5e6c3b8121df  # the guard's comment names Aztec's public CI build path /home/aztec-dev, not a local machine
+filename:contracts/bridge/aztec/keystone/target/keystone.json  # a contract named keystone, not a key
+filename:contracts/bridge/aztec/token_bridge_hub/src/test/keystone.nr  # a contract named keystone, not a key
+filename:contracts/bridge/evm/test/Keystone.t.sol  # a contract named keystone, not a key
+filename:packages/bridge-aztec/keystone/Nargo.toml  # a contract named keystone, not a key
+filename:packages/bridge-aztec/keystone/src/main.nr  # a contract named keystone, not a key
+filename:packages/bridge-core/.env.example  # template: placeholders and public endpoints only, every revision checked
+filename:packages/bridge-core/scripts/deployer-keys.test.ts  # derives the deployer from an operator env secret and holds none
+filename:packages/bridge-core/scripts/deployer-keys.ts  # derives the deployer from an operator env secret and holds none
+filename:packages/bridge-evm/.env.example  # template: placeholders and public endpoints only, every revision checked
+filename:packages/faucet/.env.example  # template: placeholders and public endpoints only, every revision checked
+identity:Alejo Amiras <alejo.amiras@gmail.com>  # the owner, as already published in nulo's history
+identity:GitHub <noreply@github.com>  # GitHub web-flow, committer of every squash merge
+identity:alejoamiras <alejo.amiras@gmail.com>  # the owner's local identity on the bootstrap commit
+secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:41552a47556b785d  # test vector
+secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:754af835338d7e57  # test vector
+secret:gitleaks:generic-api-key:apps/faucet/src/composables/__snapshots__/useDeposit.characterization.test.ts.snap:917bccbb7aecf0d0  # test vector
+secret:gitleaks:generic-api-key:apps/faucet/src/composables/useFuel.pins.test.ts:54d77e1ceea9a00b  # test vector
+secret:gitleaks:generic-api-key:apps/faucet/src/composables/useWithdraw.pins.test.ts:ee6463c7a0ee968f  # test vector
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:2a1dd1d8da093274  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:326d8fa38eef9302  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:94edcfc7590fa1b7  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:b8b4b0f36b3d34c8  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:c8e89a4346727566  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:apps/tools/public/testnet-bridge.json:cca346633dc4cf14  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:contracts/bridge/aztec/token_bridge/target/token_bridge_contract-TokenBridge.json:b2b68d3d312ae99e  # compiled artifact: an upstream aztec-nr test vector in the embedded Noir source
+secret:gitleaks:generic-api-key:contracts/bridge/aztec/token_bridge_hub/target/token_bridge_hub_contract-TokenBridgeHub.json:b2b68d3d312ae99e  # compiled artifact: an upstream aztec-nr test vector in the embedded Noir source
+secret:gitleaks:generic-api-key:contracts/bridge/aztec/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json:b2b68d3d312ae99e  # compiled artifact: an upstream aztec-nr test vector in the embedded Noir source
+secret:gitleaks:generic-api-key:contracts/bridge/evm/src/PortalFactory.sol:fedd57c96588fc36  # public protocol constant REGISTER_SECRET_HASH
+secret:gitleaks:generic-api-key:contracts/bridge/evm/test/Keystone.t.sol:fedd57c96588fc36  # public protocol constant REGISTER_SECRET_HASH
+secret:gitleaks:generic-api-key:implementations-plan/any-erc20-bridge/lessons/intent.json:6f466038b107b7e1  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/aztec-5.0.0-stable/lessons/intent.json:3f8743a623c76a34  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/aztec-5.0.0-stable/lessons/intent.json:832f2d40012ad31b  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/aztec-5.0.1-line/lessons/intent.json:822c15ec6c551438  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/aztec-5.0.1-line/lessons/intent.json:f24784f419f9527e  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/tools-two-network/lessons/intent.json:08b7633d5357a449  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/tools-two-network/lessons/intent.json:822c15ec6c551438  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/tools-two-network/lessons/mainnet-intent.json:665089ac27adb6a5  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:implementations-plan/tools-two-network/lessons/mainnet-intent.json:ed03879f6e22b2ec  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-aztec/token_bridge/target/token_bridge_contract-TokenBridge.json:b2b68d3d312ae99e  # compiled artifact: an upstream aztec-nr test vector in the embedded Noir source
+secret:gitleaks:generic-api-key:packages/bridge-aztec/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json:b2b68d3d312ae99e  # compiled artifact: an upstream aztec-nr test vector in the embedded Noir source
+secret:gitleaks:generic-api-key:packages/bridge-core/fixtures/sandbox-manifest.json:2a1dd1d8da093274  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-core/fixtures/sandbox-manifest.json:603a2ffc2683e08a  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-core/fixtures/sandbox-manifest.json:694abbe37267127e  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-core/fixtures/sandbox-manifest.json:c8e89a4346727566  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-core/fixtures/sandbox-manifest.json:f0b1bd3fb2acc788  # public deployment record: addresses, class ids, artifact digests
+secret:gitleaks:generic-api-key:packages/bridge-core/scripts/deploy-manifest.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-core/scripts/deploy-sandbox.ts:095101cf732c298a  # anvil default dev key #1 (hash-checked), sandbox only
+secret:gitleaks:generic-api-key:packages/bridge-core/scripts/deploy-sandbox.ts:60a09e4357868c1e  # anvil default dev key #0 (hash-checked), sandbox only
+secret:gitleaks:generic-api-key:packages/bridge-core/scripts/sandbox/cli.ts:de18db54b1c324c4  # a variable reference, not a literal
+secret:gitleaks:generic-api-key:packages/bridge-core/scripts/script-l2.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:7bec29bd09f59392  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:b170b958584bf4c0  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:ba095a27d88f81f7  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:bf987013c277e8d2  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:c3f46d09c83735c0  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/claim-secret.test.ts:ce1206f175775a90  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/erc20.test.ts:ec3ffa6c131c270e  # public contract address
+secret:gitleaks:generic-api-key:packages/bridge-core/src/hub-token.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-core/src/manifest-v2.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fpc-canonical.json:936f4938ddd850ec  # artifact digest quoted in a $comment
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fuel.test.ts:9961152f32cae8bb  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fuel.test.ts:b49aa4ca75c4e08e  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fuel.test.ts:cd0aa0d14406852f  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fuel.test.ts:d5ca6280be074aba  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/private-fuel.test.ts:f37005e614ae84fd  # test vector
+secret:gitleaks:generic-api-key:packages/bridge-core/src/promotion.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-core/src/quote.test.ts:70d3a4829679a5f1  # public contract address
+secret:gitleaks:generic-api-key:packages/bridge-core/src/route.test.ts:70d3a4829679a5f1  # public contract address
+secret:gitleaks:generic-api-key:packages/bridge-core/src/send-flow.test.ts:c8e89a4346727566  # public contract class id
+secret:gitleaks:generic-api-key:packages/bridge-evm/test/DeployFuelLive.fork.t.sol:754266f37380aa93  # public contract address
+secret:trufflehog:Circle:contracts/bridge/evm/script/DeployBridgeMainnet.s.sol:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)
+secret:trufflehog:Circle:contracts/bridge/evm/test/MainnetFuel.fork.t.sol:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)
+secret:trufflehog:Circle:packages/bridge-core/scripts/deploy-bridge-mainnet.ts:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)
+secret:trufflehog:Circle:packages/bridge-core/scripts/discover-mainnet-fuel.ts:90e002f3d39f88a7  # canonical mainnet USDC contract address (hash-checked)

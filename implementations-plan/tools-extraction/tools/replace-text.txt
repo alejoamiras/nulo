@@ -1,0 +1,3 @@
+regex:/Users/[A-Za-z][A-Za-z0-9._-]*==>~
+regex:/home/[A-Za-z][A-Za-z0-9._-]*==>~
+regex:/mnt/user-data/[A-Za-z][A-Za-z0-9._-]*==>~
