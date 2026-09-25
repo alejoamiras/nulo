@@ -77,23 +77,34 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	// Dropped if disposed, a newer refresh started, or the active scope changed
 	// during an await — never assign a stale/foreign snapshot.
 	const isStale = (seq: number, key: string) => disposed || seq !== refreshSeq || scopeKey(scope()) !== key
+	// Ids deleted while each read is in flight: its rows can predate the delete, taken by the
+	// service before it or held across `afterRead`, and assigning them would bring the row back.
+	const deletedDuringRead = new Set<Set<string>>()
 
-	const refresh = async (): Promise<void> => {
-		const s = scope()
-		if (!s) return
-		const myKey = scopeKey(s)
-		const mySeq = ++refreshSeq
+	const readRows = async (s: IncomingScope, seq: number, key: string, deleted: Set<string>): Promise<void> => {
 		const rows = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
-		if (isStale(mySeq, myKey)) return
+		if (isStale(seq, key)) return
 		if (afterRead) {
 			try {
 				await afterRead(s)
 			} catch {
 				// The rows are the feed; a judge that failed must not hide them.
 			}
-			if (isStale(mySeq, myKey)) return
+			if (isStale(seq, key)) return
 		}
-		incomingTransfers.value = rows
+		incomingTransfers.value = deleted.size ? rows.filter((x) => !deleted.has(x.id)) : rows
+	}
+
+	const refresh = async (): Promise<void> => {
+		const s = scope()
+		if (!s) return
+		const deleted = new Set<string>()
+		deletedDuringRead.add(deleted)
+		try {
+			await readRows(s, ++refreshSeq, scopeKey(s), deleted)
+		} finally {
+			deletedDuringRead.delete(deleted)
+		}
 	}
 	const addedRefresh = coalesce(() => void refresh(), ADDED_COALESCE)
 
@@ -121,6 +132,7 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 		// avoids dropping a legitimate active-scope delete during a momentary
 		// scope-read gap.
 		incomingTransfers.value = incomingTransfers.value.filter((x) => x.id !== inc.id)
+		for (const deleted of deletedDuringRead) deleted.add(inc.id)
 	}
 	const onConfigUpdate = (prop: ConfigProp) => {
 		// Both the visibility toggle and the dust threshold change the read-time filtered list (D8).
