@@ -10,12 +10,13 @@ import { trimAddress } from "@/utils/string"
 import type { TokenInfo } from "@/wallet/services/token/client"
 import OperationCard from "./OperationCard.vue"
 
-const OWNER = `0x${"a".repeat(64)}`
-const DELEGATE = `0x${"d".repeat(64)}`
-const TOKEN = `0x${"c".repeat(64)}`
+// Wire-shaped: 0x + 64 hex, each value below the field modulus.
+const OWNER = `0x${"0a".repeat(32)}`
+const DELEGATE = `0x${"0d".repeat(32)}`
+const TOKEN = `0x${"0c".repeat(32)}`
 const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
-const CONSUMER = `0x${"e".repeat(64)}`
-const INNER = `0x${"f".repeat(64)}`
+const CONSUMER = `0x${"0e".repeat(32)}`
+const INNER = `0x${"0f".repeat(32)}`
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
 
 const createAuthWit = (messageHashOrIntent: unknown) => ({
@@ -38,6 +39,25 @@ const mountCard = (op: unknown, props: Record<string, unknown> = {}) =>
 	mount(OperationCard, { props: { op: op as never, index: 0, ...props }, global: { stubs } })
 
 describe("OperationCard — aztec_createAuthWit", () => {
+	test("the operation is titled Authorization", () => {
+		const w = mountCard(
+			createAuthWit({
+				caller: DELEGATE,
+				call: {
+					name: "transfer_public_to_public",
+					to: TOKEN,
+					selector: "0x5c3d6f1b",
+					type: "public",
+					isStatic: false,
+					hideMsgSender: false,
+					args: [OWNER, DELEGATE, field(5n), field(0n)],
+					returnTypes: [],
+				},
+			}),
+		)
+		expect(w.find('[data-testid="execute-op-title"]').text()).toBe("Authorization")
+	})
+
 	test("a transfer intent on a registered token with an explicit sender renders the delegate, the target and the structured arguments", () => {
 		const w = mountCard(
 			createAuthWit({
