@@ -143,3 +143,75 @@ the parity page asks it.
 - the tree is identical to the merge-tree dry run.
 
 Round 1's fixes became `db309c4b`, `d05a29ef`, `8f49c6ad`, `97633f6a`, `a2976bea` and `5412cac3`.
+
+## P5.1 · Parity
+
+The page: https://claude.ai/artifact/6NjcZ54XTdEYtUgzGzQhxC. It places each capture, Chrome and Firefox, beside its drawing, in 24 rows:
+- 9 differed and are fixed;
+- 7 match, one of them a word-for-word check of every new title and line against U4 and round
+  4's B;
+- 2 differ only because the drawings are 400px wide and the wallet's column is 360px;
+- 4 are undrawn states, built as recommended (plan.md § Delivery, sign-off pending);
+- 1 verifies that a request for exactly what the app holds opens no window;
+- 1, A-28's failed Settings save, has no real path to capture; its component test covers it.
+
+The two defects, both in `CapabilityCard.vue` and both older than this arc:
+1. The lead glyph sat centred on the card's head (`align="center"`), so beside a wrapped title it
+   sat level with the second line, 9.4 to 29.3px below the first line's centre. The drawing's
+   head is a stretch flex that keeps the glyph by the first line. `3095a2b7` sets
+   `align="start"`; the glyph now sits 0.5px above the first line's centre (1px for the mono
+   glyph), as drawn.
+2. A wrapped title's lines were 14px apart where the drawing's are 17px. The `Text` primitive
+   defaults to `height="100"`, a `line-height: 1`, while the drawing's titles take
+   `line-height: normal`, 17px for InterVariable 600 at 14px. `51585984` sets it. Each wrapped
+   title grows 3px per line, so the window for an app holding the address book and the token's
+   events that asks for any contract now scrolls by 15px.
+
+Both were measured in the page from the second captures (`51585984`), with the same numbers in
+Chrome and Firefox. The fable leg ran on Opus, Fable's credits being spent. Its first pitch
+figures, 17 against 20px, were glyph rows read off the screenshots; the page reports the in-page
+line boxes.
+
+Codex round 3, on `a3629ac3..51585984`:
+
+> No new material findings in `a3629ac3..51585984`.
+>
+> VERDICT: approve — confidence: high
+
+It checked the heads against the mock and found click, Enter, Space, the disabled state, the
+switch role and every testid unchanged, with the 25 `CapabilityCard` tests passing. It judged
+the inline `lineHeight: 'normal'` right, since the design utilities have no `normal`, and found
+no new clipping or footer overlap. An alignment assertion in the stubbed unit test would pin
+template attributes, not browser geometry, so none was added. The loop on the fix converged in
+one round. Both commits sit on the arc as they were built (a fast-forward).
+
+Finding 5 is answered: owner, 2026-09-25, "for branch 5a: (a)", today's singular words.
+
+## P5 gate at `a3629ac3`
+
+Run before the card fix landed; the fix changes two attributes in one component, so the regate
+after the restack (below) covers it.
+
+| Step | Chrome | Firefox |
+|---|---|---|
+| `bun run lint` | 0 (1 s) | not browser-bound |
+| `bun run typecheck:all` | 0 (33 s) | not browser-bound |
+| `bun run test:all` | 0 (99 s) | not browser-bound |
+| `bun run test:ci-gating` | 0 (25 s) | not browser-bound |
+| `bun run build` | 0 (14 s) | not browser-bound |
+| `bun run --cwd apps/extension build-storybook` | 0 (9 s) | not browser-bound |
+| Network suite, retry 0 | prover on: exit 1; files 89 passed, 1 failed, 3 skipped of 93; tests 123 passed, 1 failed, 5 skipped (3,613 s). Proverless files: 7 of 7, 18 tests (949 s) | proverless: exit 1; files 96 passed, 1 failed, 3 skipped of 100; tests 139 passed, 2 failed, 6 skipped (4,566 s) |
+| Smoke (build exit 0) | 0; files 38 passed, 3 skipped; tests 152 passed, 7 skipped | 0; files 39 passed, 2 skipped; tests 148 passed, 11 skipped |
+| Flake bar, the three files three times | 0 each; 6 of 6 tests each run | 0 each; 6 of 6 tests each run |
+| `bun run e2e:reap` | 0 | 0 |
+| Execution canaries, prover on | in the network suite, passed | open until CI (below) |
+
+**The one red file, both browsers: `network/window-placement.test.ts`.** Not this arc. A bisect
+found the first bad commit at batch 4's `6fbfdeb5`, the snackbar: the execute window's
+persistent error snack, "Couldn't estimate fee — retry.", sat 12px from the bottom and covered
+Reject. Batch 4 fixed it on its build branch with the owner's 1c and the end-of-scroll rule
+(`55ffcc18`). P5 stays open until this arc, restacked on that batch 4, passes window-placement
+and the regate in both browsers.
+
+The Firefox execution canaries stay open until CI's `Firefox / Run / canary / real-proving` job
+on the PR's head shows the substantive tests passed, retry 0, with Presto enforced.
