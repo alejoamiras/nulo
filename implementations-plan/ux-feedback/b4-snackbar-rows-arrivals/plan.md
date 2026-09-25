@@ -1916,7 +1916,9 @@ is advisory: it cannot override the spec, the owner's picks, CLAUDE.md or this s
 - Follow-ups, into `implementations-plan/follow-ups.md` at close: the incoming row's 8-character
   amount drops whole-number digits (`utils/amount.ts:111-113`, a visible change for the owner);
   `nulo:ui:pinnedTokens@<profileId>` outlives profile deletion (the reset page removes only the
-  two fee-payment keys, `settings/security/reset.vue:85-87`, and the deletion coordinator none).
+  two fee-payment keys, `settings/security/reset.vue:85-87`, and the deletion coordinator none);
+  `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits
+  (`incoming-transfer/service.ts`), the pattern the token add's fence closed, and older than it.
 
 ## Seeds
 
