@@ -79,7 +79,7 @@ const toggle = () => {
 		>
 			<Flex align="center" gap="4">
 				<span :class="$style.alias_label">Alias</span>
-				<Tooltip position="start">
+				<Tooltip position="center">
 					<Icon name="info" size="11" color="tertiary" />
 					<template #content>
 						<Text size="12" color="secondary" :style="{ lineHeight: '1.2' }">
