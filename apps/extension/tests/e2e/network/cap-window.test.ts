@@ -229,6 +229,7 @@ test.skipIf(!hasConfig)(
 		expect(await popup.$(sel("cap-unknown-contracts-note"))).not.toBeNull()
 		expect(await attrOf(popup, "cap-detail-toggle", "aria-expanded")).toBe("false")
 
+		// S1 is this window without the note, so S2 fitting means S1 fits.
 		const overflow = await popup.evaluate(() => {
 			const scrollers = [...document.querySelectorAll<HTMLElement>("body *")].filter((el) =>
 				/(auto|scroll)/.test(getComputedStyle(el).overflowY),
