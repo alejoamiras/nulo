@@ -9,6 +9,7 @@
 			"packages/**",
 			"vitest.base.ts",
 			"scripts/ci-cd/test-soak/**",
+			"scripts/ci-cd/plans/**",
 			"!**/node_modules",
 			"!**/dist",
 			"!**/target",
