@@ -1652,7 +1652,7 @@ Re-read the `picks` store for `i6e`–`i6i` first.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-#### P7 · Details table and the U1 fold ☐
+#### P7 · Details table and the U1 fold ✓
 
 1. `details-table.ts` + table tests: column membership per A-9 over
    `effectiveGrants(params.heldGrants, delta)`; one entry per contract; known first; "Any
@@ -1861,6 +1861,15 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
     - the 5b switches stay operable while the footer shows an error or a submit runs. 5a disabled
       its ticks then; a disabled `Toggle` draws a lock no drawing has (A-12), and the footer's
       button already holds the decision.
+    - Details with no contract: no fold. The window shows no 'Details' when the grants it would
+      hold reach no contract (an accounts-only connect, U4's data plus contractClasses, data
+      alone). A-10's count rule defines the words, not a zero row.
+    - an app whose session holds no row reads as a first connect: "wants to connect on X",
+      "Connect", and no "Already allowed" fold. U1 draws an app that holds five;
+    - the S2 note on a re-request sits after the "Already allowed" fold, before Details. No
+      drawing has the note and the fold together;
+    - the keyboard focus of the Details and "Already allowed" buttons: batch 4's row ring, 2px
+      `--nulo-accent` inside the edge, with the hover's colours. The drawings give them none.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.
