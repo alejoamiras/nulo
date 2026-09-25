@@ -269,6 +269,12 @@ Tests:
   read; a scope change closes the Details snack; two identical sends failing in reverse order
   each offer their own record. Five mutations of the guards (the recheck, the scope, the format,
   the stage, the terminal time) each fail a test.
+- `tests/e2e/network/snack-placement.test.ts`, one new case, sharing the Send setup of the
+  placement case: 1 token, public to private, to an off-curve address, whose estimate fails and
+  whose send then fails in the build, after the executor has written the record. The public origin
+  needs no review, so the footer sends at once. "Send failed" offers Details, which closes the snack
+  and opens `/popup/journal/<id>`; that id is the one failed transfer the journal holds, and the
+  page's state reads "Failed".
 
 Follow-up: the journal's id comment in `wallet/services/operation-journal/service.ts` says "16
 bytes / 128 bits", but `nextRandomId(storage, 16)` draws 16 hex characters, 64 bits, and the

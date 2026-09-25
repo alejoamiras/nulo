@@ -1974,7 +1974,9 @@ older layout differences stay). The log is `lessons/phase-6.md`.
    keeps every error's class, message and details with or without the id, and only the response's
    own field names one; two identical sends failing in reverse order each name their own record,
    and a refusal before any record names none; the popup offers Details only for a record that
-   reads back as this send's failed transfer, never across a scope change during the read.
+   reads back as this send's failed transfer, never across a scope change during the read. e2e on
+   both browsers: a shield to an off-curve address fails once its record is written, and Details
+   opens that record's page (`network/snack-placement.test.ts`).
 4. **Width in dApp windows (11a).** In the execute, discover, permission, verify and passkey
    windows the snack spans the 360px content column less 16px a side (328px), centred on it. The
    json and logger windows fill their window, so they keep the popup's rule. The popup and the

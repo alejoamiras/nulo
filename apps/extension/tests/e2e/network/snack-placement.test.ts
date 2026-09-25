@@ -1,11 +1,13 @@
 /** In a real browser: where a page or window has a bottom action row, an error snack sits at least
  *  12px above the row's top edge, so it never covers the row's buttons, even in a window shorter
- *  than the page, where a scroll brings the row up and a click lands on it in one task. */
+ *  than the page, where a scroll brings the row up and a click lands on it in one task. A send
+ *  that fails once its record is written offers Details, which opens that record. */
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import { navigateByHash, setActiveSendType, waitForToast } from "../fixtures/helpers"
+import { readSendRecords } from "../fixtures/journal"
 import { waitForPopup } from "../fixtures/popups"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -153,26 +155,31 @@ async function offCurveAddress(): Promise<string> {
 	throw new Error("no off-curve address in 64 tries")
 }
 
+/** On Send: 1 token, public to private, to an off-curve address, until the estimate has failed. */
+async function shieldToOffCurve(page: Page): Promise<void> {
+	await waitForHash(page, "#/popup/general", 30_000)
+	await navigateByHash(page, "#/popup/send", 10_000)
+	await page.waitForSelector(sel("send-from-type"), { timeout: 10_000 })
+	await setActiveSendType(page, "send-from-type", "public")
+	await setActiveSendType(page, "send-to-type", "private")
+	await page.waitForFunction(
+		() => {
+			const input = document.querySelector<HTMLInputElement>('[data-testid="send-amount-input"]')
+			return input !== null && !input.disabled
+		},
+		{ timeout: 60_000, polling: 1_000 },
+	)
+	await replaceInputValue(page, sel("send-amount-input"), "1")
+	await replaceInputValue(page, `${sel("send-destination-field")} input`, await offCurveAddress())
+	await waitForToast(page, "Couldn't estimate fee", 120_000, { kind: "error" })
+}
+
 test.skipIf(!hasConfig)(
 	"Send: a fee-estimate error sits 12px above the footer and follows it when it grows",
 	{ timeout: 300_000 },
 	async ({ tokenReadyExtension }) => {
 		const page = await openPopup(tokenReadyExtension)
-		await waitForHash(page, "#/popup/general", 30_000)
-		await navigateByHash(page, "#/popup/send", 10_000)
-		await page.waitForSelector(sel("send-from-type"), { timeout: 10_000 })
-		await setActiveSendType(page, "send-from-type", "public")
-		await setActiveSendType(page, "send-to-type", "private")
-		await page.waitForFunction(
-			() => {
-				const input = document.querySelector<HTMLInputElement>('[data-testid="send-amount-input"]')
-				return input !== null && !input.disabled
-			},
-			{ timeout: 60_000, polling: 1_000 },
-		)
-		await replaceInputValue(page, sel("send-amount-input"), "1")
-		await replaceInputValue(page, `${sel("send-destination-field")} input`, await offCurveAddress())
-		await waitForToast(page, "Couldn't estimate fee", 120_000, { kind: "error" })
+		await shieldToOffCurve(page)
 
 		const at = await placement(page, sel("send-footer"))
 		console.log(`[snack-placement] Send: ${Math.round(at.footerTop - at.snackBottom)}px above the footer`)
@@ -183,6 +190,34 @@ test.skipIf(!hasConfig)(
 		expect(grown.footerTop).toBeLessThanOrEqual(at.footerTop - 40)
 		expect(grown.footerTop - grown.snackBottom).toBeGreaterThanOrEqual(11.5)
 		expect(grown.footerTop - grown.snackBottom).toBeLessThanOrEqual(12.5)
+
+		expect(tokenReadyExtension.pageErrors).toEqual([])
+	},
+)
+
+test.skipIf(!hasConfig)(
+	"Send: a send that fails once its record is written offers Details, which opens that record",
+	{ timeout: 300_000 },
+	async ({ tokenReadyExtension }) => {
+		const page = await openPopup(tokenReadyExtension)
+		await shieldToOffCurve(page)
+		// A public origin needs no review, so the footer sends at once.
+		expect(await page.$eval(sel("send-submit"), (el) => el.getAttribute("data-action"))).toBe("send")
+		await clickByTestId(page, "send-submit")
+
+		const card = await waitForToast(page, "Send failed", 180_000, { kind: "error" })
+		expect(await card.$eval(sel("snackbar-action"), (el) => el.textContent?.trim())).toBe("Details")
+		await clickByTestId(page, "snackbar-action")
+		await page.waitForFunction(() => window.location.hash.startsWith("#/popup/journal/"), { timeout: 10_000 })
+		const id = (await page.evaluate(() => window.location.hash)).slice("#/popup/journal/".length)
+		const failed = (await readSendRecords(page)).filter((r) => r.kind === "transfer" && r.stage === "failed")
+		expect(failed.map((r) => r.id)).toEqual([id])
+		await page.waitForFunction(
+			(s: string) => document.querySelector(s)?.textContent?.trim() === "Failed",
+			{ timeout: 10_000, polling: 100 },
+			sel("journal-detail-state"),
+		)
+		expect(await page.$(SNACK)).toBeNull()
 
 		expect(tokenReadyExtension.pageErrors).toEqual([])
 	},
