@@ -289,3 +289,13 @@ The refresh case can navigate to an unapproved SHA. Codex's call: fix before enf
 Low: this log's `--exclude-standard` residue entry had the direction reversed. It is corrected above.
 
 Probes reproduced 787 findings with unchanged counts. No defect surfaced in permalink validation or the `dev` ancestry anchor.
+
+## First CI run (#696): 789 findings, 2 of them phantom `permalink-ancestry`
+
+Locally the report had 787 findings; in CI's pull-request run it had 789. Both extra findings were the pinned bases, reported as not ancestors of `dev`.
+- **Cause:** `complexity-baseline.test.ts` runs first in the same `test:ci-gating` job and fetches the PR base, which is dev's tip, with `--depth=1`. That makes dev's tip a shallow boundary. The gate's later `git fetch origin dev` then adds nothing, so dev's history stops at its tip.
+- **Reproduced** on a depth-1 clone of the PR branch. A plain fetch leaves both bases "not an ancestor"; `--unshallow` (or `--deepen`) fixes it.
+- **Fix:** under Actions, a shallow checkout fetches dev with `--unshallow` (commits only, `--filter=tree:0`).
+- **Fixture:** "dev's tip already fetched at depth 1, as the complexity ratchet does first, still reaches a dev ancestor". It gave 2 findings before the fix and 1 after, the parent arc's commit.
+  - The existing stacked-PR fixture now reads "not an ancestor of dev" rather than "not reachable". Unshallowing also brings in the parent arc's commits, and the finding stays.
+- Report-only hid it, as designed. Enforcement would have failed every PR.

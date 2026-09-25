@@ -137,7 +137,14 @@ describe("permalink-ancestry (a shallow pull-request checkout)", () => {
 		const { origin, onParent } = stackedOrigin()
 		const work = shallowClone(origin)
 		expect(git(work, "rev-parse", "--is-shallow-repository")).toBe("true")
-		expect(findings(work, "permalink-ancestry", PR_RUN).map((f) => f.detail)).toEqual([`${onParent} is not reachable from dev here`])
+		expect(findings(work, "permalink-ancestry", PR_RUN).map((f) => f.detail)).toEqual([`${onParent} is not an ancestor of dev`])
+	}, 30_000)
+
+	test("dev's tip already fetched at depth 1, as the complexity ratchet does first, still reaches a dev ancestor", () => {
+		const { origin, onParent } = stackedOrigin()
+		const work = shallowClone(origin)
+		git(work, "fetch", "-q", "--no-tags", "--depth=1", "origin", git(origin, "rev-parse", "dev"))
+		expect(findings(work, "permalink-ancestry", PR_RUN).map((f) => f.detail)).toEqual([`${onParent} is not an ancestor of dev`])
 	}, 30_000)
 
 	test("an unreachable origin fails closed", () => {

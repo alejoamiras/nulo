@@ -110,10 +110,15 @@ function ancestry(file: string, line: number, detail: string, fix: string): Find
  * Makes `dev`'s commit graph available: a pull-request run fetches it by name (commits only) and fails
  * closed; a local run uses the existing ref. The PR base is never the anchor: on a stacked PR it is a
  * parent arc, whose commits may never reach `dev`.
+ *
+ * A shallow checkout is unshallowed: once anything has fetched dev's tip at depth 1 (the complexity
+ * ratchet does, earlier in the same job), a plain fetch adds nothing and dev's history stops at it.
  */
 function prepareDev(ctx: Ctx): Finding | null {
 	if (ctx.env.GITHUB_ACTIONS === "true") {
-		const fetched = ctx.git("fetch", "--no-tags", "--filter=tree:0", "origin", `+refs/heads/dev:${DEV_REF}`)
+		const shallow = ctx.git("rev-parse", "--is-shallow-repository").stdout.trim() === "true"
+		const deepen = shallow ? ["--unshallow"] : []
+		const fetched = ctx.git("fetch", "--no-tags", "--filter=tree:0", ...deepen, "origin", `+refs/heads/dev:${DEV_REF}`)
 		if (fetched.ok) return null
 		return ancestry(BASES_FILE, 1, `cannot fetch dev: ${fetched.stderr.trim().split("\n").pop() ?? "fetch failed"}`, "re-run the job")
 	}
