@@ -89,7 +89,7 @@ vi.mock("./repository", () => ({
 				listByContract: async (p: string, n: string, c: string) =>
 					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.contract === c),
 				getTrust: async (p: string, n: string, c: string) => trust.get(trustKey(p, n, c)),
-				// Keeps the stored floor fields and reads the fence after its own read, as the real one does.
+				// Keeps the stored floor fields, as the real repository does.
 				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState, fence?: () => boolean) => {
 					if (fence && !fence()) return undefined
 					const { arrivalFloor, arrivalFloorPending } = trust.get(trustKey(p, n, c)) ?? {}
