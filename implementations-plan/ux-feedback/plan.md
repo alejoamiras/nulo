@@ -405,8 +405,23 @@ strings" (below).
   `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
   on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
   `submitKey`). Once fees are set, Enter on the header's × or on a fee method sends the revoke
-  or registry transaction. Found by reading in batch 4, whose new Revoke expand button stops
-  Enter, and not reproduced; older than this program.
+  or registry transaction. Found in batch 4, whose new Revoke expand button stops Enter: its
+  unit test, without the stop, revoked on Enter. Not reproduced in a browser; older than this
+  program.
+- History's received rows read "Token" and "+1,000,00" with no dollar value, where Home shows
+  the same receipts as "TST", "+1,000" and "≈ $1,000.00". Older than this program; the owner,
+  2026-09-25, on batch 4's parity page: "follow-up".
+- Layout around batch 4's surfaces that predates the program: rows 4px apart (drawn 10px),
+  Home's rows 59px tall with a third "≈ $" line (drawn 52px), the History and Settings titles
+  about 31px lower than drawn, History's date heading, Home's "Recent transactions" and "View
+  archives" (drawn "Recent activity" and "View all"), and Settings' account header. The owner,
+  2026-09-25: "(a) follow-up maybe?", so these stay until the owner schedules them.
+- The operation journal's id comment (`apps/extension/src/wallet/services/operation-journal/
+  service.ts`) says "16 bytes / 128 bits", but `nextRandomId(storage, 16)` draws 16 hex
+  characters, 64 bits, and the comment cites a review round.
+- The popup's Terms sheet (`apps/extension/src/components/LegalAcceptanceSheet.vue`) sits at
+  z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden
+  behind it. Observed in batch 4, not changed.
 
 ## Seeds
 
