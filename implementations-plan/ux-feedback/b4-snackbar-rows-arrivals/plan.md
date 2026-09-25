@@ -11,6 +11,7 @@ arc_branch: feat/ux-4-snackbar-rows-arrivals
 design: implementations-plan/ux-feedback/design/spec.md (items 10, 11 and 12)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 eli5: https://claude.ai/artifact/JzvsTKxyeeRw1xdof9SAEx
+parity: https://claude.ai/artifact/2NDQYMuPhFWyE5yMjht1LN
 ---
 
 # Batch 4 · Snackbar, rows, arrivals
