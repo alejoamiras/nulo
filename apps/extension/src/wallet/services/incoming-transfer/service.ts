@@ -1115,6 +1115,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const tip = await this.readTip(network.id)
 		await this.withServiceLock(async (isCurrent) => {
 			const current = await this.repo.getTrust(profile.id, network.id, token.contract)
+			// A delete of the token, its network or its profile can finish while the tip is read; writing
+			// after it would bring back the trust and floor that delete wiped.
+			if (!isCurrent() || !(await this.isTokenStillRegistered(profile.id, network.id, token.contract))) return
 			if (current?.state !== "trusted") await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted")
 			await this.moveArrivalFloorLocked(profile.id, network.id, token.contract, { tip, epochAtTip, isCurrent })
 		})
