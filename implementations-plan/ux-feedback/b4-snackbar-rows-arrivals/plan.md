@@ -1578,7 +1578,7 @@ build:<b>`, then `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run test
 
 Gate: as P1.
 
-### P3 · One interactive row ☐
+### P3 · One interactive row ✓
 
 1. The inventory table of every list (file:line, before, after, link or button) in
    `lessons/phase-3.md`, including each click-mode `SettingItem` whose handler only navigates.
