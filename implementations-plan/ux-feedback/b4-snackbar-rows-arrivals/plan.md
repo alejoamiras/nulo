@@ -1547,7 +1547,7 @@ and Firefox — `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=tes
 VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension
 build:<b>`, then `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` — all exit 0.
 
-### P2 · Send's result, K-1 and the lock ☐
+### P2 · Send's result, K-1 and the lock ✓
 
 1. `send-submit.ts`, `send.vue`: the snapshot fields, `isCurrent`, `viewTransaction`, the success
    and failure snacks. `send-submit.test.ts` with a wire-shaped hash (`0x` + 64 hex) and a real
