@@ -434,6 +434,33 @@ strings" (below).
   `categoricalLabel` gives the `transfer` error kind the `dapp_execute` label, "Reported by app",
   "The connected app reported an error." (`apps/extension/src/utils/journal-state.ts:217-219`).
   Older than this program; batch 4's Details now opens that page from the snack.
+- The launch fixture's scratch page can die on Chrome, and vitest 4.1.10's in-test retries
+  cannot recover from it. Chrome's `openScratchPage`
+  (`apps/extension/tests/e2e/fixtures/browser/chrome.ts`) loads the popup, which on a fresh
+  wallet redirects to the onboarding tab and calls `window.close()` once the worker answers its
+  first lookup, before the fixture seeds `nulo:onboarding:completed`. Chrome honours the call,
+  contrary to the driver contract's comment (`fixtures/browser/index.ts`), the Firefox driver's,
+  and the redirect test's in `onboarding-tab.test.ts`. The fix is a scratch page whose lifetime
+  no app redirect decides: an inert extension document, or an acknowledgement that the redirect
+  decision is made before the seed. Firefox's onboarding page does not guarantee that: its
+  asynchronous read of the flag can race the seed, and Firefox loads the popup on a reused
+  profile, since `freshProfile` records whether the profile directory was empty, not whether
+  onboarding finished. Separately, vitest 4.1.10 marks a test-scoped fixture initialized before
+  its setup resolves, so after a failed setup every in-test retry gets it undefined and the
+  smoke config's `retry: 2` cannot recover; a job rerun starts fresh. Check any vitest bump with
+  a fixture-retry repro. Seen as #702's Chrome smoke (run 36271135334), where the self-close is
+  the supported hypothesis and a browser disconnect is not excluded; the evidence is in this
+  program's `lessons/final-pass.md`.
+- `network/send-picker` fails on Firefox with no ALT row visible within 15 s of the click on the
+  picker's trigger (`send-picker.test.ts:35`), after Home showed the ALT balance (line 28), on
+  dev too: the nightly's run 36230567767 on `b15f5218` (2026-09-26), then #703's run
+  36271135463. The file-scoped `tokenReadyExtension` makes each retry deploy and import another
+  ALT into the same wallet, so a retry's errors (`['ALT', 'ALT', 'TST']`, the search box) follow
+  from the first failure. The mechanism is not known: the picker may not have opened, its
+  balance request may have failed or stalled, or its rows may have been filtered out or not
+  rendered. The background page's throttled timers (`FIREFOX.md`) are one candidate. Logging the
+  picker's request and response times, its state and the page's visibility in a failing run
+  could help tell these apart.
 
 ## Seeds
 

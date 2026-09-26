@@ -75,3 +75,78 @@ suite. The Firefox canaries stay open until CI's `Firefox / Run / canary / real-
 the stack top's head shows the substantive tests passed, retry 0, with Presto enforced and native
 proofs in the server log. The restack after the gate changed only `implementations-plan/`: outside
 it, the stack top's tree is `d893ae95`'s.
+
+## The second sync
+
+The stack then moved onto `origin/dev` at `e476e919`, one commit newer: #698, which untracks the
+plan transcripts, pins their links and enforces the plan-tree gate. Outside `implementations-plan/`
+it changes 11 files, docs and the gate, none of them product code. The gate refuses a link to a
+file the tree does not hold. So each arc now names the later batches' plans as text, and the next
+arc's first commit restores the links; `912190f9` also folds the mocks' nested ignore file into
+the plans ignore file. A codex session at high (`01a0df2b-…`) read the move: "Material findings:
+no", high confidence for the rewrite. The stack-top gate then ran on that top, `bcfb0806`, the
+same way as below, and every step on both browsers exited 0.
+
+## A CI-only Firefox failure
+
+CI's Firefox smoke then failed #703 on arc 4's contact-row test, which no local run did. The cause
+and the fix are arc 4's (`../b4-snackbar-rows-arrivals/lessons/phase-7.md`). Firefox's BiDi can
+leave a link's new tab unannounced, so the fix finds the tab through the classic handle list
+instead. It changes no product code.
+
+## Two flakes on the push that carried the fix
+
+Two other checks failed on that push. Each was investigated, treated as a flake and rerun once.
+Neither the earlier failures nor the passing reruns rule out a timing change from the stack.
+
+- #702's Chrome smoke, `onboarding-tab`. The first attempt died in the launch fixture's setup
+  with `frame got detached`, and both retries ran with the fixture undefined: vitest 4.1.10
+  marks a test-scoped fixture initialized before its setup resolves (`chunk-artifact.js:353-354`
+  in `@vitest/runner`), so its in-test retries cannot recover from a setup that throws, while a
+  job rerun starts fresh. A standalone repro gives the same three attempts. That setup's only
+  such wait is the liveness wait on the scratch page, which on Chrome is the popup. On a fresh
+  wallet the popup redirects to the onboarding tab and calls `window.close()`, and Chrome honours
+  the call. A probe replaying the launch lost the scratch page in 4 of 4 launches once the worker
+  answered the popup's first lookup, and in none of 6 when the popup booted against a cold
+  worker. That is the supported hypothesis, not an established CI cause: the error's code path
+  also covers a browser disconnect. The stack changes neither the scratch page nor the redirect;
+  arc 4's popup connects two more service clients at boot, whose effect on this timing is
+  unmeasured.
+- #703's Firefox network, `send-picker`. After Home showed the imported ALT balance (line 28), no
+  ALT row was visible within 15 s of the click on the picker's trigger (line 35). Dev's nightly
+  failed the same way on 2026-09-26 without these stack changes (run 36230567767 on `b15f5218`,
+  same shard and line), and the test passed on #704, whose tree holds #703's, and in every local
+  battery. Its mechanism is not known.
+
+A codex session at high (`01a0dfb2-…`) read the first: sound as a mechanism, with high
+confidence in the vitest defect and moderate confidence in the CI trigger, and one rerun plus a
+follow-up is the right response rather than a fix inside this stack. It corrected the follow-up:
+the onboarding page is not guaranteed safe as a scratch page either, because its asynchronous
+read of the flag can race the fixture's write. Its second round cut this record's wording back
+to what the evidence shows, and its third found all seven corrections addressed: "Material
+findings: no". Both follow-ups are in the plan.
+
+## The stack-top gate, on the fix
+
+Two clean detached checkouts at `490ca181`, every e2e file at retry 0: Chrome prover on, with the
+`@requires-proverless` files run proverless, and Firefox proverless. There is no flake bar here;
+the fix's own is in arc 4's lessons.
+
+| Step | Chrome | Firefox |
+|---|---|---|
+| `bun run lint` | exit 0 (1 s) | not browser-bound |
+| `bun run typecheck:all` | exit 0 (15 s) | not browser-bound |
+| `bun run test:all` | exit 0 (96 s) | not browser-bound |
+| `bun run test:ci-gating` | exit 0 (30 s) | not browser-bound |
+| `bun run build` | exit 0 (8 s) | not browser-bound |
+| `bun run --cwd apps/extension build-storybook` | exit 0 (6 s) | not browser-bound |
+| Network suite, retry 0, 102 files | prover on: exit 0; files 92 passed, 3 skipped of 95; tests 132 passed, 5 skipped of 137 (3,503 s). The 7 `@requires-proverless` files, proverless: exit 0; files 7 passed of 7; tests 18 passed of 18 (854 s) | proverless: exit 0; files 99 passed, 3 skipped of 102; tests 148 passed, 7 skipped of 155 (4,342 s) |
+| Smoke (its build exit 0 / 0) | exit 0; files 38 passed, 3 skipped of 41; tests 157 passed, 7 skipped of 164 (816 s) | exit 0; files 39 passed, 2 skipped of 41; tests 153 passed, 11 skipped of 164 (1,054 s) |
+| `bun run e2e:reap` | exit 0 | exit 0 |
+
+Both execution canaries passed prover on inside Chrome's network suite, and `cap-window`,
+`window-placement` and `rows` passed in both browsers. The Firefox canaries again wait for CI's
+`Firefox / Run / canary / real-proving` job on the stack top's head. The job must show the
+substantive tests passed, retry 0, with Presto enforced and native proofs in the server log. The
+commit that records this changes only `implementations-plan/`: outside it, the stack top's tree
+is `490ca181`'s.
