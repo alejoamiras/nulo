@@ -215,3 +215,35 @@ and the regate in both browsers.
 
 The Firefox execution canaries stay open until CI's `Firefox / Run / canary / real-proving` job
 on the PR's head shows the substantive tests passed, retry 0, with Presto enforced.
+
+## P5 regate on the stack, at `023ca03c`
+
+The gate at `a3629ac3` was red on `network/window-placement.test.ts` in both browsers, from batch
+4's snack, which batch 4 then fixed (1c and the end-of-scroll rule). The arc now sits on that
+batch 4: `023ca03c`, on arc 4's `4c20a006` and `origin/dev` at `b15f5218`. It carries the card fix
+of P5.1 and the final cross-batch pass's comment fix in `dispatcher.ts` and
+`scope-enforcement.test.ts`. Each browser ran in its own clean detached checkout, every e2e file
+at retry 0: Chrome prover on, with the `@requires-proverless` files run proverless, and Firefox
+proverless. The flake bar is P5's three files, three runs each.
+
+| Step | Chrome | Firefox |
+|---|---|---|
+| `bun run lint` | exit 0 (2 s) | not browser-bound |
+| `bun run typecheck:all` | exit 0 (37 s) | not browser-bound |
+| `bun run test:all` | exit 0 (145 s) | not browser-bound |
+| `bun run test:ci-gating` | exit 0 (34 s) | not browser-bound |
+| `bun run build` | exit 0 (23 s) | not browser-bound |
+| `bun run --cwd apps/extension build-storybook` | exit 0 (7 s) | not browser-bound |
+| Network suite, retry 0, 101 files | prover on: exit 0; files 91 passed, 3 skipped of 94; tests 127 passed, 5 skipped of 132 (3,522 s). The 7 `@requires-proverless` files, proverless: exit 0; files 7 passed of 7; tests 18 passed of 18 (852 s) | proverless: exit 0; files 98 passed, 3 skipped of 101; tests 144 passed, 6 skipped of 150 (4,455 s) |
+| Smoke (its build exit 0 / 0) | exit 0; files 38 passed, 3 skipped of 41; tests 157 passed, 7 skipped of 164 (841 s) | exit 0; files 39 passed, 2 skipped of 41; tests 153 passed, 11 skipped of 164 (1,095 s) |
+| Flake bar, run 1 | exit 0; files 3 passed of 3; tests 6 passed of 6 (137 s) | exit 0; files 3 passed of 3; tests 6 passed of 6 (167 s) |
+| Flake bar, run 2 | exit 0; files 3 passed of 3; tests 6 passed of 6 (136 s) | exit 0; files 3 passed of 3; tests 6 passed of 6 (168 s) |
+| Flake bar, run 3 | exit 0; files 3 passed of 3; tests 6 passed of 6 (137 s) | exit 0; files 3 passed of 3; tests 6 passed of 6 (166 s) |
+| `bun run e2e:reap` | exit 0 | exit 0 |
+
+`window-placement` passed in both browsers, and both execution canaries (`frozen-account-canary`,
+`passkey-execution-canary`) passed prover on inside Chrome's network suite. The Firefox canaries
+stay open until CI's `Firefox / Run / canary / real-proving` job on the PR's head shows the
+substantive tests passed, retry 0, with Presto enforced and native proofs in the server log. The
+restack after the gate changed only `implementations-plan/`: outside it, the arc's tree is
+`023ca03c`'s.
