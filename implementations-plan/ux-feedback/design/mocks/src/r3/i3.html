@@ -1,0 +1,35 @@
+<div class="r2 r3" id="i3-r3">
+	<div class="r2-head"><span class="r2-tag">Round 3</span><span class="r2-said">You like the strikethrough and asked what I think. Keep it, and strike only the dollars.</span></div>
+	<div class="facts">
+		<div>
+			<h3>The case against it</h3>
+			<ul>
+				<li>A struck price usually means a discount. Nothing here is on sale: the fee is simply someone else's to pay.</li>
+				<li>Most screen readers don't announce a strikethrough, so the line is read as "You pay nothing, about 3.58 FJ". The row needs its own spoken text: "You pay nothing. The sponsor covers about $0.215."</li>
+				<li>As drawn in round 2 it's the busiest line in the matrix: six struck decimals of FJ, then the dollars.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>Why it's still the better line</h3>
+			<ul>
+				<li>A crossed-out fee beside "nothing" is how shops show waived shipping. People already know it, so the line needs no "sponsor" and no tooltip, which matches your call on item 9.</li>
+				<li>Like V3, it stays on one line at every fee below.</li>
+				<li>Striking only the dollars (V4′) fixes the busy part. FJ appears only when there's no live price, the same fallback V3 uses.</li>
+			</ul>
+		</div>
+	</div>
+	<div class="fx-ctl">
+		<label>Max fee in FJ<input id="fx3-fj" value="3.577824" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+		<label>Dollars per FJ<input id="fx3-rate" value="0.06" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+		<span class="hint">Same states as round 2. Clear the price to see the no-quote fallback.</span>
+	</div>
+	<div class="fx"><div class="fx-grid" id="fx3-grid"></div></div>
+	<div class="recbox">
+		<div>
+			<h3>My pick: V4′</h3>
+			<p>It's your strikethrough with one figure struck instead of two. The fee still reads as waived at a glance, and the six-decimal FJ amount goes, since nobody reads it when they aren't paying it. The spoken text goes with either version.</p>
+			<p class="conf">Confidence: moderate between V4 and V4′, which is taste. High that the row needs its own spoken text.</p>
+		</div>
+		<div class="pick" data-pick="i3c" data-options="V4|V4′|V3|Other"></div>
+	</div>
+</div>

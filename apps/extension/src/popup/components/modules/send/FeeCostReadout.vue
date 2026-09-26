@@ -1,14 +1,19 @@
 <script setup>
-/**
- * "Estimated Network Fee" readout used inside `FeeSettingsCard`. Three
- * states:
- * - `isEstimating === true && no estimate` → stacked label + skeleton in the value slot
- * - `estimate` present                     → stacked label + amount (same geometry)
- * - otherwise                              → "Fee estimated after simulation" hint
- */
-defineProps({
+import { UNVOUCHED_FEE_SENTENCE } from "@/components/composite/send/publish-facts"
+
+const props = defineProps({
 	estimate: { type: Object, default: null },
 	isEstimating: { type: Boolean, default: false },
+	/** Who pays an estimate. The parent decides: only it knows whether a sponsor is Nulo's own. */
+	payer: { type: String, default: "self", validator: (v) => ["self", "sponsor", "unvouched"].includes(v) },
+})
+
+/** Screen readers skip a strikethrough, so the sponsored row is spoken as this sentence alone. */
+const sponsoredSentence = computed(() => {
+	const usd = props.estimate?.usd
+	if (!usd) return `You pay nothing. The sponsor covers about ${props.estimate?.amount} FJ.`
+	if (usd.startsWith("<")) return `You pay nothing. The sponsor covers less than ${usd.slice(1)}.`
+	return `You pay nothing. The sponsor covers about ${usd}.`
 })
 </script>
 
@@ -18,12 +23,22 @@ defineProps({
 	     occupies the value's slot — the row never moves or grows when the
 	     number lands. -->
 	<Flex v-if="isEstimating && !estimate" direction="column" gap="4" :class="$style.detail_row">
-		<span :class="$style.fee_label">Estimated Network Fee</span>
+		<span :class="$style.fee_label">You pay</span>
 		<span :class="$style.fee_value"><span :class="$style.skeleton" /></span>
 	</Flex>
 	<Flex v-else-if="estimate" direction="column" gap="4" :class="$style.detail_row">
-		<span :class="$style.fee_label">Estimated Network Fee</span>
-		<span :class="$style.fee_value">
+		<span :class="$style.fee_label" :aria-hidden="payer === 'sponsor' ? 'true' : undefined">You pay</span>
+		<span v-if="payer === 'sponsor'" :class="$style.fee_value">
+			<span aria-hidden="true">
+				<span :class="$style.nothing">Nothing</span> <s :class="$style.fee_usd">~{{ estimate.amount }} FJ<span v-if="estimate.usd" title="At today's AZTEC price" data-testid="fee-estimate-usd"> ({{ estimate.usd }})</span></s>
+			</span>
+			<span :class="$style.visually_hidden">{{ sponsoredSentence }}</span>
+		</span>
+		<span v-else-if="payer === 'unvouched'" :class="$style.fee_value">
+			<span aria-hidden="true">—</span>
+			<span :class="$style.visually_hidden">{{ UNVOUCHED_FEE_SENTENCE }}</span>
+		</span>
+		<span v-else :class="$style.fee_value">
 			~{{ estimate.amount }} FJ<template v-if="estimate.usd">
 				<span :class="$style.fee_usd" title="At today's AZTEC price" data-testid="fee-estimate-usd"> ({{ estimate.usd }})</span>
 			</template>
@@ -56,8 +71,16 @@ defineProps({
 	color: var(--nulo-secondary);
 }
 
+.nothing {
+	font-weight: 600;
+}
+
 .skeleton {
 	composes: skeleton from "./fee-shared.module.css";
+}
+
+.visually_hidden {
+	composes: visually_hidden from "./fee-shared.module.css";
 }
 
 </style>

@@ -1,6 +1,16 @@
 import { describe, expect, test, vi } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	buildSettings,
+	FEE_JUICE_BRIDGE_URL,
+	type FeeMethodOption,
+	feeDisplay,
+	feeLine,
+	formatGasBalance,
+	menuOrder,
+	settingsForMethod,
+} from "./fee-helpers"
 
 describe("fee-helpers/formatGasBalance", () => {
 	test("returns '0' for zero raw value", () => {
@@ -184,12 +194,12 @@ describe("fee-helpers/buildFeeMethods", () => {
 		expect(priv?.disabledReason).toBe("not available")
 	})
 
-	test("private_fpc with registered FPC but null private balance is disabled with 'no balance'", () => {
+	test("private_fpc with registered FPC but null private balance is disabled with the honest reason", () => {
 		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: null })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBe(true)
-		expect(priv?.disabledReason).toBe("no balance")
+		expect(priv?.disabledReason).toBe("couldn't check balance")
 		expect(priv?.subtitle).toBe("private")
 	})
 
@@ -218,6 +228,56 @@ describe("fee-helpers/buildFeeMethods", () => {
 	test("allowSponsored defaults true (Sponsored FPC retained)", () => {
 		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
 		expect(buildFeeMethods(fpcs).find((x) => x.fpc?.id === "s1")?.subtitle).toBe("sponsored")
+	})
+})
+
+describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
+	const PRIVATE = { id: "p1", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
+	const NULO_SPONSOR = { id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsored", isProtocol: true }
+	const HAND_ADDED = { id: "s2", type: FpcType.DefaultSponsoredFpc, name: "Dev sponsor", isProtocol: false }
+	/** Hundredths of a Fee Juice, in base units. */
+	const FJ = (hundredths: string) => `${hundredths}${"0".repeat(16)}`
+	const column = (m: FeeMethodOption) => (m.disabled && m.disabledReason ? m.disabledReason : m.spend)
+
+	test.each([
+		["not known yet", [PRIVATE], undefined, ["— FJ", "— FJ"]],
+		["private unreadable", [PRIVATE], { publicFeeJuice: FJ("120"), privateFeeJuice: null }, ["1.2 FJ", "couldn't check balance"]],
+		["public unreadable", [PRIVATE], { publicFeeJuice: null, privateFeeJuice: FJ("42") }, ["couldn't check balance", "0.42 FJ"]],
+		["zero", [PRIVATE], { publicFeeJuice: "0", privateFeeJuice: "0" }, ["no balance", "no balance"]],
+		["positive", [PRIVATE], { publicFeeJuice: FJ("120"), privateFeeJuice: FJ("42") }, ["1.2 FJ", "0.42 FJ"]],
+		["no PrivateFPC, not known yet", [], undefined, ["— FJ", "not available"]],
+		["no PrivateFPC", [], { publicFeeJuice: FJ("120"), privateFeeJuice: null }, ["1.2 FJ", "not available"]],
+	] as const)("%s", (_, fpcs, balances, expected) => {
+		const methods = buildFeeMethods([...fpcs, NULO_SPONSOR, HAND_ADDED], balances)
+		expect(methods.map(column)).toEqual([...expected, "free", "—"])
+	})
+
+	test("titles: Public Fee Juice, then the FPCs' names, else Private Fee Juice and Sponsored", () => {
+		const unnamed = { id: "s3", type: FpcType.DefaultSponsoredFpc, isProtocol: true }
+		expect(buildFeeMethods([PRIVATE, NULO_SPONSOR, HAND_ADDED]).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+			"Dev sponsor",
+		])
+		expect(buildFeeMethods([{ ...PRIVATE, name: undefined }, unnamed]).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+		])
+	})
+
+	test("the menu lists Nulo's sponsor before hand-added ones; the payer list keeps storage order", () => {
+		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
+		const methods = buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second])
+		expect(menuOrder(methods).map((m) => m.title)).toEqual([
+			"Public Fee Juice",
+			"Private Fee Juice",
+			"Sponsored",
+			"Dev sponsor",
+			"Other sponsor",
+		])
+		expect(methods.map((m) => m.title)).toEqual(["Public Fee Juice", "Private Fee Juice", "Dev sponsor", "Sponsored", "Other sponsor"])
 	})
 })
 
@@ -269,5 +329,24 @@ describe("fee-helpers/buildFeeMethods — only the protocol PrivateFPC is offere
 		expect(privateOption?.fpc).toBeNull()
 		expect(privateOption?.disabled).toBe(true)
 		expect(privateOption?.disabledReason).toBe("not available")
+	})
+})
+
+describe("fee-helpers/feeDisplay + feeLine", () => {
+	// 1.05e14 base units = 0.000105 FJ; wire estimates carry maxFee as a decimal string.
+	const estimate = { maxFee: "105000000000000", maxFeeFormatted: "0.000105" }
+
+	test("priced: the card's amount and dollars, and the sheet's line in the same words", () => {
+		const display = feeDisplay(estimate, 0.004)
+		expect(display).toEqual({ amount: "0.000105", usd: "<$0.001" })
+		expect(feeLine(display)).toBe("~0.000105 FJ (<$0.001)")
+		expect(feeLine(feeDisplay({ maxFee: 10n ** 18n, maxFeeFormatted: "1" }, 2.5))).toBe("~1 FJ ($2.500)")
+	})
+
+	test("unpriced or no estimate: no dollars, and nothing at all without an estimate", () => {
+		expect(feeLine(feeDisplay(estimate, undefined))).toBe("~0.000105 FJ")
+		expect(feeLine(feeDisplay(estimate, 0))).toBe("~0.000105 FJ")
+		expect(feeDisplay(null, 0.004)).toBeNull()
+		expect(feeLine(null)).toBeUndefined()
 	})
 })

@@ -1,6 +1,7 @@
 import { computed, ref } from "vue"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { useProfileNameDefault } from "@/composables/useProfileNameDefault"
 import { useProfileNameField } from "@/composables/useProfileNameField"
 import { managers } from "@/utils/core"
 import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
@@ -29,17 +30,14 @@ export interface UseProfileCreateFlowOptions {
 	notifyCreateFailed: (isPasskey: boolean) => void
 }
 
+async function listProfileNames(): Promise<string[]> {
+	return (await managers.profile.getProfiles()).map((p) => p.name)
+}
+
 export function useProfileCreateFlow(opts: UseProfileCreateFlowOptions) {
-	const {
-		profileName,
-		trimmedName,
-		nameError,
-		shakeName,
-		nameInputRef,
-		validate: validateName,
-		handleInput: handleNameInput,
-		dispose: disposeNameField,
-	} = useProfileNameField()
+	const nameField = useProfileNameField()
+	const { profileName, nameError, shakeName, nameInputRef, handleInput: handleNameInput, dispose: disposeNameField } = nameField
+	const { nameFieldState, resolveName } = useProfileNameDefault(nameField, listProfileNames)
 
 	const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
@@ -75,18 +73,17 @@ export function useProfileCreateFlow(opts: UseProfileCreateFlowOptions) {
 		// can't both race past the validate check before the lock is set.
 		isCreating.value = true
 
-		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
-		if (!validateName({ existingNames })) {
-			isCreating.value = false
-			return
-		}
-
 		let profile: unknown
 		try {
+			const name = await resolveName()
+			if (name === null) {
+				isCreating.value = false
+				return
+			}
 			profile =
 				authMethod.value === "passkey"
-					? await createPasskeyProfileViaModal(trimmedName.value)
-					: await managers.profile.createProfile(trimmedName.value, password.value)
+					? await createPasskeyProfileViaModal(name)
+					: await managers.profile.createProfile(name, password.value)
 		} catch (e) {
 			// User cancel: silent return (no warning notification).
 			if (e instanceof UserRejectedError) {
@@ -112,6 +109,7 @@ export function useProfileCreateFlow(opts: UseProfileCreateFlowOptions) {
 	}
 
 	return {
+		nameFieldState,
 		profileName,
 		nameError,
 		shakeName,

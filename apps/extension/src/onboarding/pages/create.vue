@@ -27,6 +27,7 @@ const { bootstrapActiveProfile } = useProfileBootstrap()
 const maxPasswordLength = 128
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -69,11 +70,11 @@ const {
 
 const submitLabel = computed(() => {
 	if (isCreating.value) return "Creating..."
-	return authMethod.value === "passkey" ? "Create with passkey" : "Create profile"
+	return authMethod.value === "passkey" ? "Create with passkey" : "Create wallet"
 })
 
 // Roving tablist for the method toggle: only the active tab is in the Tab order,
-// so Tab flows name → method (ONE stop) → password; ←/→ switch the method.
+// so the method is ONE stop before the password; ←/→ switch the method.
 const passwordTabRef = ref<HTMLButtonElement>()
 const passkeyTabRef = ref<HTMLButtonElement>()
 const onMethodKeydown = (e: KeyboardEvent) => {
@@ -103,16 +104,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<OnboardingPage>
+	<OnboardingPage data-testid="onboarding-create-page" :data-name-field="nameFieldState">
 		<OnboardingBackLink testid="onboarding-create-back" />
 		<StepIndicator :current="2" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Create" sub="Profile" />
+			<BrutalistTitle main="Create" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 		</header>
 
 		<form :class="$style.form" @submit.prevent="handleSubmit">
 			<OnboardingProfileNameField
+				v-if="nameFieldState === 'shown'"
 				ref="nameInputRef"
 				v-model="profileName"
 				:error="nameError"
@@ -121,8 +123,8 @@ onBeforeUnmount(() => {
 			/>
 
 			<Flex direction="column" gap="12">
-				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
-				<Flex :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onMethodKeydown">
+				<Text size="11" weight="700" color="secondary" :class="$style.section_label">How you'll unlock Nulo</Text>
+				<Flex :class="$style.tabs" role="tablist" aria-label="How you'll unlock Nulo" @keydown="onMethodKeydown">
 					<button
 						ref="passwordTabRef"
 						type="button"
@@ -159,6 +161,7 @@ onBeforeUnmount(() => {
 						placeholder="Strong password"
 						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
+						autofocus
 						data-testid="onboarding-password-input"
 					/>
 				</Flex>

@@ -25,7 +25,7 @@ export * from "./fpc"
 export * from "./spec"
 
 /** Names seeded onto auto-discovered protocol FPCs. */
-const SPONSORED_FPC_DEFAULT_NAME = "Sponsored Fee Juice"
+const SPONSORED_FPC_DEFAULT_NAME = "Sponsored"
 const PRIVATE_FPC_DEFAULT_NAME = "Private Fee Juice"
 
 type ProtocolAddresses = { sponsored: string; private: string }

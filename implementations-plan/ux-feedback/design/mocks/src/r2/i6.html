@@ -1,0 +1,252 @@
+<div class="r2" id="i6-r2">
+	<div class="r2-head"><span class="r2-tag">Round 2</span><span class="r2-said">You were right: I over-read the request. Nulo cannot know an app wants "your USDC and ETH balances". Below is what an app actually sends, what Nulo can check, and three requests drawn from that: the tools app's real one, one where Nulo recognizes nothing, and a broad one. The signatures row becomes a real switch, and Off gets a meaning you pick.</span></div>
+
+	<div class="push">
+		<b>Correction to round 1</b>
+		I wrote that off-list signature requests "still prompt". They are refused. The real rules (<code>checkCreateAuthWit</code>, <code>handleCreateAuthWit</code>): a request for a call on the app's list is signed with no popup; a call off the list is refused; a request that names only a contract and a hash opens a confirmation popup, and only if the app's list covers every function of that contract; a bare hash is always refused. An app with no transaction or simulation list at all gets a popup for every call.
+	</div>
+
+	<div class="facts">
+		<div>
+			<h3>What an app sends</h3>
+			<ul>
+				<li>Per permission, a list of <i>contract address + function name</i> pairs, or "*" for any. Nothing else: no token names, no descriptions, no purpose.</li>
+				<li>The tools app's real request on testnet (<code>buildCombinedManifest</code>, four bridge tokens) lists 12 contracts and 57 contract-function pairs, and asks for signatures.</li>
+				<li>Function names are the app's words. When a call comes in, Nulo checks it against the list by name, and the name must match the function actually called (<code>matchesScope</code> plus the name-to-selector check). So a name can't lie about <i>which</i> function runs, but nothing says what that function does.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What Nulo can check</h3>
+			<ul>
+				<li>Today it recognizes nothing: the window prints raw addresses, with your own contact name in brackets (<code>ScopeAddress.vue</code>).</li>
+				<li>What it could vouch for is short: the tokens it ships (two on mainnet, one on testnet, each pinned to its contract class in <code>default-tokens.ts</code>) and the contracts it uses itself: Fee Juice, the sponsor, the private fee payer and the auth registry.</li>
+				<li>A token an app registered, or a contact you named, doesn't count. The address-first rule exists because a label can be planted, so those stay addresses.</li>
+				<li>Aside, not part of this item: testnet's shipped "Test USDC" (<code>0x1c81…e9ae</code>) is no longer in the tools bridge's list, whose USDC is <code>0x0024…6502</code>. So today even the tools app's own token would show as unknown.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt" data-opt="S1">
+			<div class="opt-head"><span class="opt-key">S1</span><span class="opt-name">The tools app's real request</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Testnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">tools.nulo.sh</span><span class="n-dapp-name">nulo-tools</span><span class="n-dapp-action">wants to connect on Testnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Account to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">TESTNET</span></div><div class="n-arow-line"><span class="n-arow-addr">0x1dd7...d930</span><span class="n-linkbtn n-term" role="button" tabindex="0" data-def="A private name for this account visible only to this app">Rename for this app</span></div></div></div>
+								</div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Without asking, it can</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">visibility</span><div><div class="n-perm-t">See Account 1's address</div><div class="n-perm-s">And the name it's shared under.</div></div></div>
+									<div class="n-perm-row"><span class="ms">play_circle</span><div><div class="n-perm-t">Run simulations and read the results</div><div class="n-perm-s">On your device, with your private data. Results can include balances. <b>11 contracts, Nulo knows 4.</b></div></div></div>
+									<div class="n-perm-row"><span class="ms">signature</span><div><div class="n-perm-t">Get <span class="n-term" tabindex="0" data-def="Permission for one of the app's contracts to make one specific call with your account.">signatures</span> for calls on its list</div><div class="n-perm-s" data-sub-on="No popup. Each one covers one call on the list." data-sub-off="Nulo asks you each time.">No popup. Each one covers one call on the list.</div></div><span class="n-switch on" role="switch" aria-checked="true" tabindex="0" aria-label="Signatures without asking"></span></div>
+									<div class="n-perm-row"><span class="ms">add_circle</span><div><div class="n-perm-t">Add 9 contracts to your wallet</div><div class="n-perm-s">Their public code and address.</div></div></div>
+								</div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Always asks you first</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">task_alt</span><div><div class="n-perm-t">Every transaction</div><div class="n-perm-s">You approve each one; calls off its list are refused. <b>10 contracts, Nulo knows 4.</b></div></div></div>
+								</div>
+								<span class="n-help">It can't move funds without you or see accounts you don't share.</span>
+							</div>
+							<div>
+								<div class="n-details" role="button" tabindex="0" aria-expanded="false" data-toggle="i6s1-details"><span>Details <span class="n-tag-quiet">· 4 permissions · 12 contracts</span></span><span class="ms">chevron_right</span></div>
+								<div class="n-detail-panel" id="i6s1-details" hidden>
+									<div><div class="n-detail-k">Nulo knows · 4</div>
+										<div class="n-kc"><span class="n-kc-name">Fee Juice</span><span class="n-kc-kind">protocol</span><span class="n-kc-fns">claim · claim_and_end_setup · balance_of_public</span></div>
+										<div class="n-kc"><span class="n-kc-name">Sponsored</span><span class="n-kc-kind">fee payer</span><span class="n-kc-fns">sponsor_unconditionally</span></div>
+									</div>
+									<div><div class="n-detail-k">Doesn't know · 8</div><div class="n-detail-v">0x0c1e…5a7f · 0x0024…6502 · +6</div></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Hover the dotted words · the switch and Details work</div>
+				<div class="fit"><div class="nulo n-crop w400" theme="dark" style="padding:16px;height:170px">
+					<div class="n-items"><div class="n-arow">
+						<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">TESTNET</span></div><div class="n-arow-line"><span class="n-arow-addr">0x1dd7...d930</span><span class="n-linkbtn n-term" id="i6-rename">Rename for this app</span></div></div></div>
+					</div></div>
+					<div class="n-tip" data-tip-for="i6-rename" data-tip-max="272"><div class="n-tip-text">A private name for this account visible only to this app</div></div>
+				</div></div>
+				<div class="cap">Rename, pinned open: today's Alias tooltip, word for word</div>
+				<div class="fit"><div class="nulo n-crop w400" theme="dark" style="padding:16px">
+					<div class="n-details" aria-expanded="true"><span>Details <span class="n-tag-quiet">· 4 permissions · 12 contracts</span></span><span class="ms">chevron_right</span></div>
+					<div class="n-detail-panel">
+						<div><div class="n-detail-k">Nulo knows · 4</div>
+							<div class="n-kc"><span class="n-kc-name">Fee Juice</span><span class="n-kc-kind">protocol</span><span class="n-kc-fns">claim · claim_and_end_setup · balance_of_public</span></div>
+							<div class="n-kc"><span class="n-kc-name">Sponsored</span><span class="n-kc-kind">fee payer</span><span class="n-kc-fns">sponsor_unconditionally</span></div>
+							<div class="n-kc"><span class="n-kc-name">Private Fee Juice</span><span class="n-kc-kind">fee payer</span><span class="n-kc-fns">balance_of · mint_and_pay_fee · pay_fee</span></div>
+							<div class="n-kc"><span class="n-kc-name">Auth registry</span><span class="n-kc-kind">protocol</span><span class="n-kc-fns">set_authorized</span></div>
+						</div>
+						<div><div class="n-detail-k">Nulo doesn't know · 8 · names are the app's</div>
+							<div class="n-kc"><span class="n-kc-addr">0x0c1e…5a7f</span><span class="n-kc-kind">9 functions</span><span class="n-kc-fns">register_token · register_and_claim_public · claim_public · claim_private · exit_to_l1_public · exit_to_l1_private · token_for · portal_for · exits_paused</span></div>
+							<div class="n-kc"><span class="n-kc-addr">0x0024…6502</span><span class="n-kc-kind">4 functions</span><span class="n-kc-fns">balance_of_private · balance_of_public · burn_public · burn_private</span></div>
+							<div class="n-kc"><span class="n-kc-addr">0x14c1…ed96 · 0x025c…d7e6 · 0x0455…cba9</span><span class="n-kc-kind">same 4 each</span></div>
+							<div class="n-kc"><span class="n-kc-addr">+ 3 more</span><span class="n-kc-kind">show</span></div>
+						</div>
+						<div class="n-detail-v">Each row is one address, copyable in full, as today.</div>
+					</div>
+				</div></div>
+				<div class="cap">Details open · real addresses from testnet-bridge.json</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes from round 1</h4><ul>
+					<li>Each line names the <i>kind</i> of access, which Nulo knows exactly, and counts the contracts, saying how many it knows. Function names never become sentences; they're listed in Details as the app sent them.</li>
+					<li>A contract gets a name only from the short list above. Everything else stays an address.</li>
+					<li>"Rename for this app" is dotted and carries today's Alias tooltip. The ⓘ goes.</li>
+					<li>"Signatures" is dotted too; it's the one piece of jargon on the screen.</li>
+				</ul></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="S2">
+			<div class="opt-head"><span class="opt-key">S2</span><span class="opt-name">Nulo recognizes nothing</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Mainnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">cards.example</span><span class="n-dapp-name">shielded-cards</span><span class="n-dapp-action">wants to connect on Mainnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Account to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow">
+									<div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">MAINNET</span></div><div class="n-arow-line"><span class="n-arow-addr">0x1dd7...d930</span><span class="n-linkbtn n-term" role="button" tabindex="0" data-def="A private name for this account visible only to this app">Rename for this app</span></div></div></div>
+								</div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Without asking, it can</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">visibility</span><div><div class="n-perm-t">See Account 1's address</div><div class="n-perm-s">And the name it's shared under.</div></div></div>
+									<div class="n-perm-row"><span class="ms">play_circle</span><div><div class="n-perm-t">Run simulations and read the results</div><div class="n-perm-s">On your device, with your private data. Results can include balances. <b>2 contracts Nulo doesn't know.</b></div></div></div>
+									<div class="n-perm-row"><span class="ms">signature</span><div><div class="n-perm-t">Get <span class="n-term" tabindex="0" data-def="Permission for one of the app's contracts to make one specific call with your account.">signatures</span> for calls on its list</div><div class="n-perm-s" data-sub-on="No popup. Each one covers one call on the list." data-sub-off="Nulo asks you each time.">No popup. Each one covers one call on the list.</div></div><span class="n-switch on" role="switch" aria-checked="true" tabindex="0" aria-label="Signatures without asking"></span></div>
+									<div class="n-perm-row"><span class="ms">add_circle</span><div><div class="n-perm-t">Add 2 contracts to your wallet</div><div class="n-perm-s">Their public code and address.</div></div></div>
+								</div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Always asks you first</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">task_alt</span><div><div class="n-perm-t">Every transaction</div><div class="n-perm-s">You approve each one; calls off its list are refused. <b>2 contracts Nulo doesn't know.</b></div></div></div>
+								</div>
+							</div>
+							<div class="n-note">Nulo doesn't recognize any contract this app uses. It can tell you what each permission allows, not what these contracts do. Connect if you trust cards.example itself.</div>
+							<div class="n-details" role="button" tabindex="0" aria-expanded="false"><span>Details <span class="n-tag-quiet">· 4 permissions · 2 contracts</span></span><span class="ms">chevron_right</span></div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Made-up app · the common case on mainnet</div>
+			</div>
+			<div class="notes">
+				<div><h4>What happens when Nulo doesn't know</h4><ul>
+					<li>The lines don't change: the kind of access is still exact. Only the object becomes "contracts Nulo doesn't know".</li>
+					<li>One quiet note says the limit out loud, once, instead of a warning per row. It's not orange: an unknown contract isn't dangerous by itself, and most mainnet apps will look like this.</li>
+				</ul></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="S3">
+			<div class="opt-head"><span class="opt-key">S3</span><span class="opt-name">A broad request</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-win" theme="dark" style="height:800px">
+					<div class="n-strip"><div class="n-strip-l"><span class="n-dot"></span><span class="n-strip-acct">Account 1</span><span class="n-strip-sep">/</span><span class="n-strip-net">Mainnet</span></div><span class="n-strip-brand">NULO</span></div>
+					<div class="n-scroll">
+						<div class="n-dapp"><div class="n-dapp-logo"><svg class="ic"><use href="#i-globe"/></svg></div><div class="n-dapp-info"><span class="n-dapp-host">swap.example</span><span class="n-dapp-name">swap</span><span class="n-dapp-action">wants to connect on Mainnet</span></div></div>
+						<div class="n-sections">
+							<div class="n-group">
+								<div class="n-seclabel">Account to share<span class="count">1</span></div>
+								<div class="n-items"><div class="n-arow"><div class="n-arow-top"><svg class="ic c-primary"><use href="#i-check-circle"/></svg><div class="n-arow-text"><div class="n-arow-line"><span class="n-arow-name">Account 1</span><span class="n-chain">MAINNET</span></div><div class="n-arow-line"><span class="n-arow-addr">0x1dd7...d930</span><span class="n-linkbtn n-term" role="button" tabindex="0" data-def="A private name for this account visible only to this app">Rename for this app</span></div></div></div></div></div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Without asking, it can</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">visibility</span><div><div class="n-perm-t">See Account 1's address</div></div></div>
+									<div class="n-perm-row flagged"><span class="ms">play_circle</span><div><div class="n-perm-t">Run simulations on any contract</div><div class="n-perm-s">And read the results, which can include balances.</div><span class="n-flag"><svg class="ic"><use href="#i-warning"/></svg>Any contract</span></div></div>
+									<div class="n-perm-row flagged"><span class="ms">signature</span><div><div class="n-perm-t">Get <span class="n-term" tabindex="0" data-def="Permission for one of the app's contracts to make one specific call with your account.">signatures</span> for any call</div><div class="n-perm-s" data-sub-on="No popup, for any call at all." data-sub-off="Nulo asks you each time. Off because its list is &quot;any contract&quot;.">Nulo asks you each time. Off because its list is "any contract".</div></div><span class="n-switch" role="switch" aria-checked="false" tabindex="0" aria-label="Signatures without asking"></span></div>
+									<div class="n-perm-row flagged"><span class="ms">contacts</span><div><div class="n-perm-t">See your address book</div><div class="n-perm-s" data-sub-on="Every name and address you saved." data-sub-off="Not shared. The app may ask again later.">Every name and address you saved.</div></div><span class="n-switch on" role="switch" aria-checked="true" tabindex="0" aria-label="Share address book"></span></div>
+								</div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Always asks you first</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row"><span class="ms">task_alt</span><div><div class="n-perm-t">Every transaction, on any contract</div><div class="n-perm-s">You approve each one.</div></div></div>
+								</div>
+							</div>
+							<div class="n-group">
+								<div class="n-seclabel">Nulo doesn't recognize</div>
+								<div class="n-items n-perm">
+									<div class="n-perm-row flagged"><span class="ms">help</span><div><div class="n-perm-t">1 unknown permission</div><div class="n-perm-s">Off unless you turn it on.</div></div><span class="n-switch" role="switch" aria-checked="false" tabindex="0" aria-label="Unknown permission"></span></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="n-foot"><div class="n-btn medium outline">Reject</div><div class="n-btn medium primary">Connect</div></div>
+				</div></div>
+				<div class="cap">Made-up app · every flag Nulo keeps</div>
+			</div>
+			<div class="notes">
+				<div><h4>Where orange stays</h4><ul>
+					<li>Only four things are flagged, each a fact Nulo can check: "any contract", signatures for any call, the address book, and a permission it doesn't recognize.</li>
+					<li>Signatures start Off here: with "any contract" on the list, "calls on its list" means any call. This needs the new meaning of Off below.</li>
+				</ul></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt" data-opt="OFF1">
+			<div class="opt-head"><span class="opt-key">Off = ask</span><span class="opt-name">Off means "ask me each time"</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop w400" theme="dark" style="padding:16px">
+					<div class="n-items n-perm">
+						<div class="n-perm-row"><span class="ms">signature</span><div><div class="n-perm-t">Get signatures for calls on its list</div><div class="n-perm-s">Nulo asks you each time.</div></div><span class="n-switch" role="switch" aria-checked="false"></span></div>
+					</div>
+				</div></div>
+				<div class="cap">The row with the switch off</div>
+			</div>
+			<div class="notes">
+				<div><h4>What it does</h4><ul>
+					<li>The app still gets signatures, but each one opens Nulo's confirmation window first. That window already exists: it's what opens today for the requests Nulo never signs silently, like a contract-and-hash request.</li>
+					<li>The wallet change is one stored flag per app that sends covered requests to that window instead of signing them on the spot.</li>
+				</ul></div>
+				<p class="cost">Effort: small in the dispatcher, but it's the silent-signing path, so it gets its own tests and an audit.</p>
+			</div>
+		</div>
+		<div class="opt" data-opt="OFF2">
+			<div class="opt-head"><span class="opt-key">Off = none</span><span class="opt-name">Off means "no signatures" (today)</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop w400" theme="dark" style="padding:16px">
+					<div class="n-items n-perm">
+						<div class="n-perm-row"><span class="ms">signature</span><div><div class="n-perm-t">Get signatures for calls on its list</div><div class="n-perm-s">The app can't get any. Parts of it that need them, like the bridge's exit, stop working.</div></div><span class="n-switch" role="switch" aria-checked="false"></span></div>
+					</div>
+				</div></div>
+				<div class="cap">The row with the switch off</div>
+			</div>
+			<div class="notes">
+				<div><h4>What it does</h4><ul>
+					<li>Exactly today's behavior (<code>buildGrantedAccountsCap</code> strips <code>canCreateAuthWit</code>), finally shown as a switch with its consequence.</li>
+					<li>The tools app's exit to Ethereum needs a burn signature, so Off breaks exits there.</li>
+				</ul></div>
+				<p class="cost">Effort: copy and layout only.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: Off = ask</h3>
+			<p>An Off that quietly breaks the app is a trap: people who switch it off meet a failure later, with no link back to this screen. "Ask me each time" is what someone switching it off actually wants, and the confirmation window it needs already exists. It also lets Nulo default to Off whenever the list is "any contract". Separately, I'd stop letting every card be unticked: unticking simulation, contracts or transactions just breaks the app, so switches stay only where Off leaves a working app (signatures, the address book, unknown permissions). Naming the four known contracts relaxes the address-first rule for that list only; if you'd rather not, the lines keep only the counts.</p>
+			<p class="conf">Confidence: high that the check becomes a real switch with its consequence on screen; moderate on "ask" as the meaning of Off.</p>
+		</div>
+		<p class="conf">Still open: this pick moved up into round 3.</p>
+	</div>
+</div>

@@ -20,7 +20,7 @@
  */
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, expectNoNameField, openPopup, waitForHash, test } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "./fixtures/passkey"
 
@@ -168,11 +168,8 @@ test("register → reset profile → import via passkey discovery → same addre
 			polling: 500,
 		})
 
-		// F2: passkey re-import requires an explicit Profile name now. Type
-		// before triggering the discovery ceremony — same testid as the
-		// non-passkey import paths (`import-name-input`).
-		await page.waitForSelector('[data-testid="import-name-input"]', { visible: true, timeout: 10_000 })
-		await replaceInputValue(page, '[data-testid="import-name-input"]', "Reimported Profile")
+		// The reset left no profile, so the re-import is a first profile: no name field.
+		await expectNoNameField(page, "import-page", "import-name-input")
 
 		await page.waitForSelector('[data-testid="import-option-passkey"]', { visible: true, timeout: 10_000 })
 		await clickByTestId(page, "import-option-passkey")

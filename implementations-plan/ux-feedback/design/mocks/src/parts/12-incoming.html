@@ -1,0 +1,86 @@
+<section class="wrap item" id="i12" data-item="i12" aria-labelledby="i12-title">
+	<div class="item-head">
+		<span class="item-num">12</span>
+		<h2 class="item-title" id="i12-title">Incoming transfers appear from nowhere</h2>
+		<div class="item-surface"><span class="chip">Home</span><span class="chip">History</span><span class="chip">Toolbar icon</span><span class="chip">New item</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>Incoming transfers appear from nowhere. It'd be cool to have an animation + a toast maybe? Or maybe just an animation? My friend was just like "huh, I'd like some more party around that" (obviously, don't over do it, but it makes sense what he is saying. He wants more feedback there).</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>The background checks each account every 30 s for private notes and public transfers of tokens you added (<code>incoming-transfer/service.ts</code>).</li>
+				<li>Each new receipt fires <code>onIncomingTransferAdded</code>; Home's Recent activity and History merge it in place (<code>useIncomingTransfers.ts</code>). No motion, no message, no count: the row is simply there next time you look.</li>
+				<li>Two filters already run first: the first receipt from a token stays hidden until you allow that token (the trust popup), and receipts below the dust threshold stay hidden. Anything that celebrates must come after both, or spam tokens get a party.</li>
+				<li>A receipt record carries the amount, token and transaction, not the sender, so no message can say who sent it.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>None of the eleven wallets and money apps checked (Phantom, Rainbow, MetaMask, Coinbase Wallet, Rabby, Zashi, Cash App, Revolut, Venmo, Monzo, PayPal) documents confetti, sound or a count-up for money arriving. MetaMask ships toasts, plus a toolbar badge for failed transactions; Rainbow ships toasts and live balances (<a href="https://github.com/MetaMask/metamask-extension/blob/main/CHANGELOG.md">MetaMask</a>, <a href="https://github.com/rainbow-me/rainbow/blob/develop/CHANGELOG.md">Rainbow</a>).</li>
+				<li>Motion should serve a purpose and never carry the message alone; keep it brief (<a href="https://developer.apple.com/design/human-interface-guidelines/motion">Apple HIG</a>, <a href="https://www.nngroup.com/articles/microinteractions/">NN/g</a>).</li>
+				<li>A toolbar badge (<code>chrome.action.setBadgeText</code>) needs no permission. System notifications need one that shows a warning at install, and adding it after launch disables Nulo for every user until they accept it (<a href="https://developer.chrome.com/docs/extensions/develop/concepts/permission-warnings">Chrome</a>).</li>
+			</ul>
+		</div>
+	</div>
+	<div class="opts">
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">The arrival plays once</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" id="i12-a" style="position:relative"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-scroll" style="padding-bottom:72px">
+<div class="n-home-bal"><span class="n-bal-wrap"><span class="n-bal-amount" data-count-from="1514.10" data-count-to="2514.10">2,514.10</span><span class="n-plus">+1,000 USDC</span></span><span class="n-bal-fiat">USDC · $<span data-count-from="1514.10" data-count-to="2514.10">2,514.10</span></span><div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg><span data-count-from="1204.10" data-count-to="2204.10">2,204.10</span></span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div></div>
+<div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Fee Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div>
+<div class="n-actions"><div class="n-act fill">Send</div><div class="n-act line">Receive</div></div>
+<div class="n-list-head"><span class="n-list-title">Recent activity</span><span class="n-list-link">View all</span></div>
+<div class="n-txlist" style="gap:10px"><div class="n-tx n-row-new"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">south_west</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Receive</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Just now</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+1,000.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">north_east</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Send</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Private</span></div><div class="n-tx-sub">Today · 11:40</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">−250.00</span><span class="n-tx-sym">USDC</span></div></div><div class="n-tx"><div class="n-tx-left"><div class="n-tx-icon"><span class="ms" style="font-size:18px">water_drop</span></div><div class="n-tx-text"><div class="n-tx-titlerow"><span class="n-tx-title">Drip</span><span class="n-tx-sep">/</span><span class="n-tx-chip">Public</span></div><div class="n-tx-sub">Yesterday</div></div></div><div class="n-tx-amt"><span class="n-tx-amount">+100.00</span><span class="n-tx-sym">ETH</span></div></div></div>
+</div><div class="n-nav"><div class="n-navtab active"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="replay"><button type="button" class="btn" id="i12-replay">Replay the arrival</button><label class="hint"><input type="checkbox" id="i12-rm"> Reduced motion</label></div>
+				<div class="cap">Example values · the row, balance and chip together</div>
+			</div>
+			<div class="notes">
+				<div><h4>What happens</h4><ul>
+					<li>The new row slides in and glows green for about two seconds; the balance counts up; "+1,000 USDC" rises above it and fades.</li>
+					<li>It plays the first time you see the receipt: live if Home or History is open, otherwise the next time you open the popup. Each receipt plays once, then it's an ordinary row.</li>
+					<li>Reduced motion: no sliding or counting; the glow and the chip fade in place.</li>
+				</ul></div>
+				<p class="cost">Effort: small. A "seen" marker per account, a class on the row, one number animation.</p>
+			</div>
+		</div>
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">A + a snackbar when the row isn't on screen</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-pop" theme="dark" style="position:relative"><div class="n-scroll" style="padding-bottom:72px"><div class="n-hist-hero"><h1>Settings</h1><span></span></div><div class="n-setwrap"><div class="n-setsec"><span class="n-setsec-t">Identity</span><div class="n-setbox"><div class="n-si"><span class="ms">person</span><div class="n-si-t"><span class="n-si-title">Profile</span><span class="n-si-desc">Profile name, password, backup</span></div><span class="ms chev">chevron_right</span></div><div class="n-si"><span class="ms">account_balance_wallet</span><div class="n-si-t"><span class="n-si-title">Accounts</span><span class="n-si-desc">Switch, create, manage</span></div><span class="ms chev">chevron_right</span></div></div></div><div class="n-setsec"><span class="n-setsec-t">Connections</span><div class="n-setbox"><div class="n-si"><span class="ms">contacts</span><div class="n-si-t"><span class="n-si-title">Contacts</span><span class="n-si-desc">3 saved</span></div><span class="ms chev">chevron_right</span></div></div></div></div></div><div class="n-toast-wrap" style="bottom:76px"><div class="n-snack" role="status" style="position:relative"><svg class="ic c-green"><use href="#i-check-circle"/></svg><div class="n-snack-text"><span class="n-snack-title">Received 1,000 USDC</span><span class="n-snack-sub">Private · Account 1</span></div><span class="n-snack-act">View</span></div></div><div class="n-nav"><div class="n-navtab"><span class="ms">home</span><span class="n-navtab-label">Home</span></div><div class="n-navtab"><span class="ms">account_balance_wallet</span><span class="n-navtab-label">Holdings</span></div><div class="n-navtab"><span class="ms">history</span><span class="n-navtab-label">History</span></div><div class="n-navtab active"><span class="ms">settings</span><span class="n-navtab-label">Settings</span></div></div></div></div>
+				<div class="cap">Arrives while you're in Settings · item 10's snackbar</div>
+			</div>
+			<div class="notes">
+				<div><h4>What happens</h4><ul>
+					<li>On Home and History the animation is the message, so nothing else appears. Anywhere else, the snackbar says it once; View opens the receipt.</li>
+					<li>It says "Private" or "Public" and the account, never a sender, because Nulo doesn't know one.</li>
+				</ul></div>
+			</div>
+		</div>
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">B + a count on the toolbar icon</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="width:300px;padding:18px;background:transparent"><div class="n-toolbar"><i></i><i></i><span style="flex:1;height:14px;background:#eeebe5;display:block;min-width:120px"></span><div class="n-extbtn">N<span class="n-extbadge">1</span></div><i></i></div></div></div>
+				<div class="cap">Popup closed · clears when you open it</div>
+			</div>
+			<div class="notes">
+				<div><h4>What happens</h4><ul>
+					<li>With the popup closed, the Nulo icon shows how many receipts you haven't seen yet. Opening the popup clears it and plays A.</li>
+					<li>The only option that tells you anything while the popup is closed, which is when most money arrives. It can only count what the background has found; I haven't checked whether scanning continues while Nulo is locked.</li>
+				</ul></div>
+			</div>
+		</div>
+	</div>
+	<div class="push"><b>Left out on purpose</b>System notifications: a permission with an install-time warning, for something the badge already covers. Sound and confetti: no wallet I checked documents either, and "party" wears off by the third transfer, while motion that means "money arrived" keeps meaning it.</div>
+	<div class="recbox">
+		<div>
+			<h3>My pick: B</h3>
+			<p>Your friend wants to notice money arriving; B makes sure that happens exactly once per receipt, wherever you are in the popup, without stacking two signals on the same screen. A alone misses receipts that land while you're in Send or Settings. C is the one to add if you want feedback before opening the popup; it's cheap and permission-free, but it's a third mechanism, and I'd watch whether testers notice A and B first.</p>
+			<p class="conf">Confidence: moderate. No wallet documents this, so it's judgment, not precedent.</p>
+		</div>
+		<div class="pick" data-pick="i12" data-options="A|B|C|Other"></div>
+	</div>
+</section>

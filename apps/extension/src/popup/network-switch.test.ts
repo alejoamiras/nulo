@@ -66,7 +66,7 @@ describe("createNetworkSwitchHandler (N-05)", () => {
 		const h = makeDeps()
 		h.client.getAccounts.mockResolvedValueOnce([]).mockResolvedValueOnce([ACCOUNT])
 		await createNetworkSwitchHandler(h.deps)()
-		expect(h.client.ensureDefaultAccount).toHaveBeenCalledWith("p1", 1, expect.anything(), "Account")
+		expect(h.client.ensureDefaultAccount).toHaveBeenCalledWith("p1", 1, expect.anything(), "Account 1")
 		expect(h.setAccounts).toHaveBeenNthCalledWith(1, [])
 		expect(h.setAccounts).toHaveBeenNthCalledWith(2, [ACCOUNT])
 	})
@@ -185,7 +185,7 @@ describe("createNetworkSwitchHandler (N-05)", () => {
 		h.setScope({ profileId: "p9", chainId: 9 })
 		gate.resolve([]) // empty chain → the post-await calls carry the scope values
 		await run
-		expect(h.client.ensureDefaultAccount).toHaveBeenCalledWith("p1", 1, expect.anything(), "Account")
+		expect(h.client.ensureDefaultAccount).toHaveBeenCalledWith("p1", 1, expect.anything(), "Account 1")
 		expect(h.client.getAccounts).toHaveBeenLastCalledWith("p1", 1, true)
 		expect(h.setAccounts).toHaveBeenCalledWith([ACCOUNT])
 	})

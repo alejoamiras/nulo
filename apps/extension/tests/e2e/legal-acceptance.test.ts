@@ -12,6 +12,7 @@ import type { Page } from "puppeteer"
 import { extensionUrl, reloadExtensionPage, waitForOpenedUrl } from "./fixtures/browser"
 import {
 	clickByTestId,
+	expectNoNameField,
 	launchExtension,
 	openOnboarding,
 	openPopup,
@@ -22,7 +23,7 @@ import {
 } from "./fixtures/extension"
 import { ensureUnlocked, lockWallet, navigateByHash, waitForLockScreen } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
-import { exportAccountBody } from "./helpers/account-io"
+import { exportAccountBody, FIRST_ACCOUNT_NAME } from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { CANONICAL_SEED_24, importSeed, ONBOARDING_IMPORT_SHELL, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
 import {
@@ -61,7 +62,7 @@ describe("onboarding: the Terms gate", () => {
 		expect(record?.acceptedAt).toBeGreaterThanOrEqual(before)
 		expect(record?.history).toHaveLength(1)
 
-		await replaceInputValue(page, '[data-testid="onboarding-name-input"]', "Gate Test")
+		await expectNoNameField(page, "onboarding-create-page", "onboarding-name-input")
 		await replaceInputValue(page, '[data-testid="onboarding-password-input"]', TEST_PASSWORD)
 		await replaceInputValue(page, '[data-testid="onboarding-password-confirm"]', TEST_PASSWORD)
 		await clickByTestId(page, "onboarding-submit-create")
@@ -205,7 +206,7 @@ describe("popup: declining never locks a person out", () => {
 				expect(phrase.split(" ")).toHaveLength(24)
 				expect(await isSheetPresent(page)).toBe(false)
 
-				const body = await exportAccountBody(page, "Account", false)
+				const body = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 				expect(Object.keys(JSON.parse(body) as object).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)
 
@@ -331,8 +332,7 @@ describe("popup: a passkey wallet that declined", () => {
 			await waitForHash(page, "#/popup/register", 15_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 500 })
 			await clickByTestId(page, "register-create-btn")
-			await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-			await replaceInputValue(page, '[data-testid="register-name-input"]', "Passkey Profile")
+			await expectNoNameField(page, "register-page", "register-name-input")
 			await clickByTestId(page, "register-method-passkey")
 			await clickByTestId(page, "register-submit-btn")
 			await waitForHash(page, "#/popup/general", 60_000)

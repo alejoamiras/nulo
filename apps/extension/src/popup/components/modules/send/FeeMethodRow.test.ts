@@ -20,12 +20,12 @@ describe("FeeMethodRow", () => {
 		})
 		const text = w.text()
 		expect(text).toContain("Available")
-		expect(text).toContain("12.5 Fee Juice")
+		expect(text).toContain("12.5 FJ")
 	})
 
 	test("'fj' method shows skeleton while loading", () => {
 		const w = factory({ method: { type: "fj" }, isLoading: true, feeJuiceBalanceFormatted: "12" })
-		expect(w.text()).not.toContain("12 Fee Juice")
+		expect(w.text()).not.toContain("12 FJ")
 		expect(w.html()).toMatch(/skeleton/)
 	})
 
@@ -75,7 +75,7 @@ describe("FeeMethodRow", () => {
 
 	test("'fj' method with NULL formatted balance falls back to em dash (unknown, never zero)", () => {
 		const w = factory({ method: { type: "fj" }, feeJuiceBalanceFormatted: null })
-		expect(w.text()).toContain("— Fee Juice")
-		expect(w.text()).not.toContain("0 Fee Juice")
+		expect(w.text()).toContain("— FJ")
+		expect(w.text()).not.toContain("0 FJ")
 	})
 })

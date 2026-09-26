@@ -1,18 +1,19 @@
 /**
  * Imported-account EXECUTION — the end-to-end proof of the credential-rooted imported-key chain
- * on a live sandbox, prover-ON.
+ * on a live sandbox. Prover-on, the transactions carry real proofs; in a proverless run
+ * (`NULO_E2E_PROVERLESS=1`, as CI's shards run it) the node accepts them without one.
  *
  * Nothing else executes with a FILE-imported account: `account-import-export.test.ts` proves the
  * file round-trips (address re-derivation), and the unit/integration layers prove sealing —
  * but "the stored ciphertext, unsealed under the profile DEK, reconstructs a signing key that a
- * real node accepts a REAL-proved transaction from" only falls out of doing exactly that:
+ * real node accepts a transaction from" only falls out of doing exactly that:
  *
  *   1. Browser 1 (profile A, token-ready): A executes one self-transfer — its FIRST tx, which
  *      runs the frozen ctor via the deploy path and leaves the account contract DEPLOYED. Then
  *      A's account is exported to a NULO-ACCOUNT-EXPORT file body.
  *   2. Browser 2 (profile B, a DIFFERENT master): imports the file — the signing key is sealed
  *      under B's DEK, the row is B's — switches to the imported account, and self-transfers.
- *      That signature comes from the unsealed imported key; simulate, REAL proof, node
+ *      That signature comes from the unsealed imported key; simulate, prove, node
  *      acceptance, confirmed activity row.
  *
  * A executes FIRST on purpose: the imported account's tx in B is then a post-deploy tx, so this
@@ -23,7 +24,7 @@
  * PRF-derived wrap key, not a passhash — and account EXPORT is password-gated by design, so the
  * re-export-preview probe the smoke suites use cannot exist for passkey profiles. Execution is
  * therefore the ONLY end-to-end proof of the passkey-rooted imported-key chain: PRF ceremony →
- * wrap key → DEK unseal → row unseal → sign → real proof → mined. The import additionally
+ * wrap key → DEK unseal → row unseal → sign → prove → mined. The import additionally
  * survives a full lock → ceremony-unlock cycle before signing, so the row is proven against a
  * RE-unsealed DEK, not the still-warm session that imported it. FTN discipline applies (see the
  * canary): every ceremony runs on the anchor popup, which stays open for the whole test.
@@ -44,7 +45,7 @@ import {
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
-import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "../helpers/account-io"
+import { confirmImport, exportAccountBody, FIRST_ACCOUNT_NAME, gotoAccounts, previewImport } from "../helpers/account-io"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -69,7 +70,7 @@ test.skipIf(!hasConfig)(
 			await waitForTxConfirmation(page, { amount: "10", fromType: "public", toType: "public" })
 			console.log("✓ Source account deployed via its first self-transfer")
 
-			accountFile = await exportAccountBody(page, "Account", false)
+			accountFile = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 			expect(accountFile.trim().startsWith("{")).toBe(true)
 			await page.close()
 		}
@@ -97,10 +98,10 @@ test.skipIf(!hasConfig)(
 			await switchAccountByAddress(page, sourceAddress)
 
 			// The signature under this transfer comes from the imported key, unsealed from B's
-			// DEK-rooted row. Real proof, node acceptance, confirmed row — no tolerated failure.
+			// DEK-rooted row. Node acceptance and a confirmed row — no tolerated failure.
 			await sendTransfer(page, { fromType: "public", toType: "public", amount: "5", destination: sourceAddress, expect: "send" })
 			await waitForTxConfirmation(page, { amount: "5", fromType: "public", toType: "public" })
-			console.log("✓ Imported account executed a real-proved transfer in the second profile")
+			console.log("✓ Imported account executed a transfer in the second profile")
 
 			expect(target.pageErrors.filter((e) => !e.message.includes("Client disconnected"))).toEqual([])
 		} finally {
@@ -122,7 +123,7 @@ test.skipIf(!hasConfig)(
 		{
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general", 30_000)
-			accountFile = await exportAccountBody(page, "Account", false)
+			accountFile = await exportAccountBody(page, FIRST_ACCOUNT_NAME, false)
 			expect(accountFile.trim().startsWith("{")).toBe(true)
 			await page.close()
 		}
@@ -178,7 +179,7 @@ test.skipIf(!hasConfig)(
 					expect: "send",
 				})
 				await waitForTxConfirmation(anchorPopup, { amount: "3", fromType: "public", toType: "public" })
-				console.log("✓ Imported account executed a real-proved transfer inside a passkey profile")
+				console.log("✓ Imported account executed a transfer inside a passkey profile")
 
 				expect(target.pageErrors.filter((e) => !e.message.includes("Client disconnected"))).toEqual([])
 			} finally {

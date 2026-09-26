@@ -1,0 +1,49 @@
+<section class="wrap item" id="tips" data-item="tips" aria-labelledby="tips-title">
+	<div class="item-head">
+		<span class="item-num">T</span>
+		<h2 class="item-title" id="tips-title">Tooltip map: every tooltip, where it goes</h2>
+		<div class="item-surface"><span class="chip">Whole extension</span><span class="chip">New section</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>Let's also talk very explicitly where we want / you'll add tooltips please. Let's define that so we don't find out something huge filled with tooltips all of a sudden.</blockquote>
+	<div class="r2 r3" id="tips-r3"><div class="r2-head"><span class="r2-tag">Round 3</span><span class="r2-said">Decided: all of it, minus "sponsor". That leaves four new definitions, not five; "signatures" becomes "authorizations" with a plainer sentence, and the Fee Juice ones are shorter. The map below is the current version.</span></div></div>
+	<div class="budget">
+		<div><b>33</b><span>&lt;Tooltip&gt;s in the extension today, in 24 files, plus 15 browser <code>title</code> tooltips</span></div>
+		<div><b>+4</b><span>new dotted definitions, in 4 places, on 2 screens</span></div>
+		<div><b>−3</b><span>the Alias ⓘ, merged into "Rename for this app", and the two rule-6 warnings, which become visible text</span></div>
+		<div><b>36</b><span>after this arc, as decided: 33, plus 4 definitions and 2 candidates, minus the Alias ⓘ and the 2 rule-6 warnings</span></div>
+	</div>
+	<div class="facts">
+		<div>
+			<h3>The rules</h3>
+			<ol class="rules">
+				<li>Two kinds only: the label of an icon-only button, or the definition of a dotted term.</li>
+				<li>Never the only copy. Every definition is also in the glossary; every icon label is also the button's <code>aria-label</code>.</li>
+				<li>Nothing clickable inside. Opens on hover and on focus; Esc closes it; the pointer can move onto it.</li>
+				<li>One sentence, at most 100 characters, at most 272px wide (item 2's fix).</li>
+				<li>At most two dotted terms per screen. A new one needs a glossary entry first and your sign-off in its PR.</li>
+				<li>Never for a warning you must read or a choice you must make: those are visible text.</li>
+			</ol>
+		</div>
+		<div>
+			<h3>Two that already break rule 6</h3>
+			<ul>
+				<li>The suspicious-hostname warning in the dApp windows (<code>DappIdentityBlock.vue</code>) hides "some characters can imitate Latin letters" behind a hover.</li>
+				<li>The recovery-phrase ⓘ on import (<code>ImportSecretForm.vue</code>) hides that a phrase shared with another wallet lets that software derive your keys.</li>
+				<li>Both are security messages someone has to read, so both become visible text in this arc: a copy-and-layout change, outside what testers raised.</li>
+			</ul>
+		</div>
+	</div>
+	<div class="scroll-x" style="margin-top:28px"><table class="tmap"><thead><tr><th>Where</th><th>What</th><th>Tooltip says</th><th>Item</th></tr></thead><tbody><tr class="grp"><td colspan="4">New · dotted definitions<span>4 terms, 4 places</span></td></tr><tr><td class="w">Home</td><td class="x">"Public Fee Juice" label</td><td class="q">Paying a fee with it shows your address.</td><td class="x"><a href='#i9'>9</a></td></tr><tr><td class="w">Home</td><td class="x">"Private Fee Juice" label</td><td class="q">Paying a fee with it keeps your address hidden.</td><td class="x"><a href='#i9'>9</a></td></tr><tr><td class="w">Permission window</td><td class="x">"Rename for this app"</td><td class="q">A private name for this account visible only to this app.</td><td class="x"><a href='#i6'>6</a></td></tr><tr><td class="w">Permission window</td><td class="x">"authorizations"</td><td class="q">Lets a contract do one specific thing for you, once.</td><td class="x"><a href='#i6'>6</a></td></tr><tr class="grp"><td colspan="4">New · icon labels<span>2, no underline</span></td></tr><tr><td class="w">Home balance split</td><td class="x">padlock</td><td class="q">Private balance: only you can see it</td><td class="x"><a href='#i7'>7</a></td></tr><tr><td class="w">Home balance split</td><td class="x">globe</td><td class="q">Public balance: anyone can see it</td><td class="x"><a href='#i7'>7</a></td></tr><tr class="grp"><td colspan="4">Removed<span>1</span></td></tr><tr><td class="w">Permission window</td><td class="x">Alias ⓘ</td><td class="q">Its sentence moves onto "Rename for this app"</td><td class="x"><a href='#i6'>6</a></td></tr><tr class="grp"><td colspan="4">Kept, with item 2's placement fix<span>32 of today's 33 &lt;Tooltip&gt;s</span></td></tr><tr><td class="w">Icon-only buttons · 20</td><td class="x">copy ×6 · delete/remove ×6 · edit ×3 · export · revoke · view · refresh · disconnect</td><td class="q">Their label, e.g. "Copy FPC address", "Edit endpoint"</td><td class="x">settings, popups</td></tr><tr><td class="w">Error and status details · 9</td><td class="x">ⓘ next to "Something went wrong", the auto-lock setting and similar</td><td class="q">The error or status text</td><td class="x">popups, dApp footer</td></tr><tr><td class="w">Explanations · 3</td><td class="x">token network · suspicious hostname · recovery-phrase format</td><td class="q">As today</td><td class="x">token popup, dApp windows, import</td></tr><tr class="grp"><td colspan="4">Kept as the browser's own title tooltip<span>15, untouched in this arc</span></td></tr><tr><td class="w">Prices · 10</td><td class="x">dollar figures</td><td class="q">"At today's price" ×4 · "At today's AZTEC price" ×4 · amount conversion ×2</td><td class="x">activity, tx detail, fee rows</td></tr><tr><td class="w">Full values · 3</td><td class="x">truncated hashes and fields</td><td class="q">The untruncated value</td><td class="x">approval window</td></tr><tr><td class="w">Other · 2</td><td class="x">waiting card · debug panel</td><td class="q">"Show the approval window" · "Re-entry call"</td><td class="x">History, tx debug</td></tr><tr class="grp"><td colspan="4">Deliberately not a tooltip<span>where the explanation lives instead</span></td></tr><tr><td class="w">Lock button</td><td class="x">label</td><td class="q">The word "Lock"</td><td class="x"><a href='#i7'>7</a></td></tr><tr><td class="w">Permission rows</td><td class="x">description</td><td class="q">The line under each row</td><td class="x"><a href='#i6'>6</a></td></tr><tr><td class="w">Authorizations switch</td><td class="x">consequence</td><td class="q">Its On/Off sentence</td><td class="x"><a href='#i6'>6</a></td></tr><tr><td class="w">Privacy strip</td><td class="x">what's public</td><td class="q">Its words, and the review sheet behind the chevron</td><td class="x"><a href='#i8'>8</a></td></tr><tr><td class="w">History stages</td><td class="x">progress</td><td class="q">The transaction's detail screen</td><td class="x"><a href='#i11'>11</a></td></tr><tr><td class="w">Network chip</td><td class="x">which network</td><td class="q">It's a button; the menu says it</td><td class="x">—</td></tr><tr><td class="w">Fee amounts</td><td class="x">what you pay</td><td class="q">The "You pay" line</td><td class="x"><a href='#i3'>3</a></td></tr><tr><td class="w">Sponsored fee</td><td class="x">who pays</td><td class="q">"Nothing" and the struck fee say it</td><td class="x"><a href='#i3'>3</a></td></tr></tbody></table></div>
+	<div class="opts">
+		<div class="opt" data-opt="C"><div class="opt-head"><span class="opt-key">Icon labels</span><span class="opt-name">The balance-split glyphs</span></div><div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark" style="height:260px"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-home-bal"><span class="n-bal-amount">1,514.10</span><span class="n-bal-fiat">USDC · $1,514.10</span><div class="n-split"><span id="tp-lock"><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div></div><div class="n-tip" data-tip-for="tp-lock" data-tip-max="272"><div class="n-tip-text">Private balance: only you can see it</div></div></div></div><div class="cap">Padlock pinned open; no underline, it's an icon label</div></div>
+			<div class="notes"><div><ul><li>The one place the padlock and globe appear without a word. A label on hover teaches them once; token rows then use the same glyphs.</li><li>Not added to token rows: same glyphs, already learned on Home.</li></ul></div></div></div>
+	</div>
+	<div class="recbox">
+		<div>
+			<h3>Decided: the four definitions, the two candidates, and the rule-6 fixes</h3>
+			<p>That's the whole list: 36 tooltips after the arc against 33 today, and every new one is a definition you can also read in the glossary. Nothing else gets a tooltip in this arc, and rule 5 keeps any screen from filling up later.</p>
+			<p class="conf">Recorded from "everything else sounds pretty good". Change it here if you meant less.</p>
+		</div>
+		<div class="pick" data-pick="tips" data-options="All of it|Without the candidates|Without the rule-6 fixes|Other"></div>
+	</div>
+</section>

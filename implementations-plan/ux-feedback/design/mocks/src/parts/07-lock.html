@@ -1,0 +1,115 @@
+<section class="wrap item" id="i7" data-item="i7" aria-labelledby="i7-title">
+	<div class="item-head">
+		<span class="item-num">07</span>
+		<h2 class="item-title" id="i7-title">The lock button looks like the privacy lock</h2>
+		<div class="item-surface"><span class="chip">Popup header</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>The icon for locking the wallet is the same as for PUBLIC / PRIVATE references. And it's also not very clear it's going to lock the wallet, maybe a tooltip on hover?</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>The header's lock is a bare 20px padlock (<code>Header.vue</code>) with only an <code>aria-label</code>. One click locks at once, unless a send is still going out, in which case it asks "Lock anyway".</li>
+				<li>Right below it, the same padlock means <i>private</i>: the balance split and every token row pair lock (private) with globe (public), on purpose, with no words (<code>BalanceView.vue</code>).</li>
+				<li>The padlock also marks Security &amp; Backup, the brand mark and password fields.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>None of the nine wallets and password managers surveyed ships a bare, unlabeled lock button: MetaMask's menu says "Lock", Phantom's settings say "Lock Wallet", 1Password's toolbar says "Lock 1Password".</li>
+				<li>Bitwarden users ask for a visible "Lock now" (<a href="https://community.bitwarden.com/t/lock-button-in-browser-extensions/28846">forum</a>). The alternatives each mean something else: power means quit, a key means credentials, logout means signing out.</li>
+				<li>A tooltip only helps people who already hover over it, and never on a first glance (<a href="https://www.nngroup.com/articles/tooltip-guidelines/">NN/g</a>).</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Bare padlock, next to padlocks that mean "private"</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-hdr">
+						<div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div>
+						<div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-iconbtn" style="position:relative"><span class="ms">lock</span></div></div>
+					</div>
+					<div class="n-home-bal">
+						<span class="n-bal-amount">1,514.10</span>
+						<span class="n-bal-fiat">USDC · $1,514.10</span>
+						<div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div>
+					</div>
+					<div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div>
+					<div style="height:18px"></div>
+					<span class="n-pin bad" style="right:8px;top:62px">lock = lock?</span>
+					<span class="n-pin bad" style="left:6px;top:146px">lock = private ›</span>
+				</div></div>
+				<div class="cap">Popup home, top half</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Say it: a "Lock" chip</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-hdr">
+						<div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div>
+						<div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div>
+					</div>
+					<div class="n-home-bal">
+						<span class="n-bal-amount">1,514.10</span>
+						<span class="n-bal-fiat">USDC · $1,514.10</span>
+						<div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div>
+					</div>
+					<div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div>
+					<div style="height:18px"></div>
+				</div></div>
+				<div class="cap">The word does the explaining</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The icon button becomes a small bordered chip, "Lock", matching the network chip beside it. Same testid, same <code>aria-label</code>.</li>
+					<li>The privacy glyphs don't change. They were your deliberate call, and the label is enough to separate the two.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Unchanged: one click locks; if a send is in flight, you're asked first.</p></div>
+				<p class="cost">Effort: small. The chip is about 30px wider than the icon; long network names already truncate.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">Keep the icon, add a tooltip</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="position:relative">
+					<div class="n-hdr">
+						<div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div>
+						<div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-iconbtn" id="i7-trig"><span class="ms">lock</span></div></div>
+					</div>
+					<div class="n-home-bal">
+						<span class="n-bal-amount">1,514.10</span>
+						<span class="n-bal-fiat">USDC · $1,514.10</span>
+						<div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div>
+					</div>
+					<div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div>
+					<div style="height:18px"></div>
+					<div class="n-tip" data-tip-for="i7-trig" data-tip-mode="below-end"><div class="n-tip-text">Lock wallet</div></div>
+				</div></div>
+				<div class="cap">Tooltip pinned open (hover or keyboard focus)</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>"Lock wallet" appears after a short hover, or on keyboard focus. Nothing else changes.</li>
+					<li>It explains the button only to people who already suspect it's a button. On first look it still reads like the privacy lock.</li>
+				</ul></div>
+				<p class="cost">Effort: trivial, once the tooltip fix from item 2 lands.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A</h3>
+			<p>The confusion comes from the glyph standing alone, and a label fixes that for everyone at first sight; a tooltip fixes it only after someone investigates. Changing the glyph instead would cost more: every alternative means something else, and the lock/globe privacy pair is doing its job.</p>
+			<p class="conf">Confidence: high.</p>
+		</div>
+		<div class="pick" data-pick="i7" data-options="A|B|Other"></div>
+	</div>
+</section>

@@ -12,7 +12,9 @@ import {
 	type PayerKind,
 	paidBy,
 	type PublishFacts,
+	publishGlyph,
 	rowSentence,
+	UNVOUCHED_FEE_SENTENCE,
 } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
 import { FEE_JUICE_BRIDGE_URL } from "./fee-helpers"
@@ -57,7 +59,7 @@ const rows = computed(() =>
 		return {
 			...row,
 			visibility,
-			filled: visibility === "public" || visibility === "exposed",
+			glyph: publishGlyph(visibility),
 			word: factWord(row.cell, props.facts),
 			sentence: rowSentence(row.cell, props.facts, props.payerKind),
 			remedy: row.cell === "you" && visibility === "exposed",
@@ -101,7 +103,8 @@ const handleSend = () => {
 							:data-visibility="row.visibility"
 							:data-notice-shape="row.noticeShape"
 						>
-							<i :class="[mark.mark, row.filled && mark.filled, $style.row_mark]" aria-hidden="true" />
+							<Icon v-if="row.glyph" :name="row.glyph" size="10" aria-hidden="true" :class="$style.row_mark" />
+							<span v-else :class="$style.row_gap" aria-hidden="true" />
 							<div :class="$style.row_body">
 								<div :class="$style.row_top">
 									<span>{{ row.name }}</span>
@@ -121,7 +124,8 @@ const handleSend = () => {
 					</div>
 
 					<div :class="$style.fee" data-testid="send-review-fee" :data-payer="payerKind ?? 'none'">
-						<span>Fee · {{ feeText || "—" }}</span>
+						<span v-if="payerKind === 'unvouched'">Fee · <span aria-hidden="true">—</span><span :class="$style.visually_hidden">{{ UNVOUCHED_FEE_SENTENCE }}</span></span>
+						<span v-else>Fee · {{ feeText || "—" }}</span>
 						<b v-if="paid">{{ paid }}</b>
 					</div>
 
@@ -227,7 +231,14 @@ const handleSend = () => {
 }
 
 .row_mark {
-	margin-top: 3px;
+	flex: none;
+	margin-top: 2px;
+}
+
+/* Keeps an unmarked row's words in line with the marked ones. */
+.row_gap {
+	flex: none;
+	width: 10px;
 }
 
 .row_body {
@@ -285,6 +296,10 @@ const handleSend = () => {
 	font-family: var(--font-mono);
 	font-size: 11px;
 	color: var(--nulo-secondary);
+}
+
+.visually_hidden {
+	composes: visually_hidden from "./fee-shared.module.css";
 }
 
 .fee b {

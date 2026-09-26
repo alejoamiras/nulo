@@ -1,4 +1,5 @@
 import { effectScope } from "vue"
+import { flushPromises } from "@vue/test-utils"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
@@ -75,8 +76,23 @@ describe("useProfileCreateFlow", () => {
 		expect(opts.onCreated).toHaveBeenCalledTimes(1)
 	})
 
-	test("empty name blocks creation and resets the latch", async () => {
+	test("a first profile shows no name field and is created as Main", async () => {
+		const { flow } = makeFlow()
+		await flushPromises()
+		expect(flow.nameFieldState.value).toBe("hidden")
+		flow.password.value = "password123"
+		flow.repeatedPassword.value = "password123"
+		await flow.handleCreate()
+		expect(profileApi.createProfile).toHaveBeenCalledWith("Main", "password123")
+	})
+
+	test("a later profile shows the field prefilled; clearing it blocks creation and resets the latch", async () => {
+		profileApi.getProfiles.mockResolvedValue([{ name: "Main" }])
 		const { flow, opts } = makeFlow()
+		await flushPromises()
+		expect(flow.nameFieldState.value).toBe("shown")
+		expect(flow.profileName.value).toBe("Profile 2")
+		flow.profileName.value = ""
 		flow.password.value = "password123"
 		flow.repeatedPassword.value = "password123"
 		await flow.handleCreate()
@@ -84,6 +100,20 @@ describe("useProfileCreateFlow", () => {
 		expect(opts.onCreated).not.toHaveBeenCalled()
 		expect(flow.isCreating.value).toBe(false)
 		expect(flow.nameError.value).toBeTruthy()
+	})
+
+	test("a rejected profile read releases the latch and notifies; a retry creates", async () => {
+		const { flow, opts } = makeFlow()
+		await flushPromises()
+		profileApi.getProfiles.mockRejectedValueOnce(new Error("worker gone"))
+		flow.password.value = "password123"
+		flow.repeatedPassword.value = "password123"
+		await flow.handleCreate()
+		expect(opts.notifyCreateFailed).toHaveBeenCalledWith(false)
+		expect(profileApi.createProfile).not.toHaveBeenCalled()
+		expect(flow.isCreating.value).toBe(false)
+		await flow.handleCreate()
+		expect(profileApi.createProfile).toHaveBeenCalledWith("Main", "password123")
 	})
 
 	test("duplicate name blocks creation", async () => {

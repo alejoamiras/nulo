@@ -19,10 +19,16 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	FEE_JUICE_BRIDGE_URL,
+	feeDisplay,
+	formatGasBalance,
+	resolveSavedSelection,
+	settingsForMethod,
+} from "./fee-helpers"
 import { applyFpcEdits, previewForPick, recordOf, resolveSendSelection } from "./fee-privacy"
 import { loadSendSelections, mutateSendSelections, readSendSlots, withSendSlot } from "./fee-send-selection"
-import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
 
 /** Composables */
@@ -74,6 +80,10 @@ const needsFeeJuiceOut = defineModel("needsFeeJuice", { type: Boolean, default: 
  *  does (pending, held, none). The parent reads the payer off the submitted settings; this only says
  *  whether the contract those settings name is one the wallet vouches for. */
 const payerOut = defineModel("payer", { default: null })
+
+/** One-way child→parent: the fee as "You pay" shows it. The review sheet repeats this value rather
+ *  than pricing it again, since the page's own price client can hold a different quote. */
+const feeDisplayOut = defineModel("feeDisplay", { default: null })
 
 const methodId = getRandomHex(6)
 
@@ -141,11 +151,7 @@ const privateFeeJuiceFormatted = computed(() =>
  *  expired entirely, where the figure must disappear). */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
-const estimatedFeeDisplay = computed(() => {
-	if (!props.feeEstimate) return null
-	const usd = feeToUsd(BigInt(props.feeEstimate.maxFee), feeJuicePricingFromUsd(prices.feeJuiceQuote.value?.usd))
-	return { amount: props.feeEstimate.maxFeeFormatted, usd }
-})
+const estimatedFeeDisplay = computed(() => feeDisplay(props.feeEstimate, prices.feeJuiceQuote.value?.usd))
 
 const showMethodSelector = computed(() => {
 	if (!isCustomMethod.value) return true
@@ -198,6 +204,14 @@ const nudgeCopy = computed(() =>
 
 /** What the dropdown trigger shows: the paying method, or the saved pick's row while loading. */
 const displayMethod = computed(() => effectiveMethod.value ?? sendSelection.value?.preview)
+
+/** Who pays the estimate the readout shows. Only Nulo's own sponsor is promised "Nothing"; a
+ *  sponsor added by hand can charge the account through an authorization it granted earlier. */
+const feePayer = computed(() => {
+	const m = effectiveMethod.value
+	if (m?.type !== "fpc") return "self"
+	return m.fpc?.isProtocol === true ? "sponsor" : "unvouched"
+})
 
 /** The dApp-locked method's fresh row from `methods` (balance-aware), never a saved record. */
 const lockedOption = () => methods.value.find((m) => m.type === props.lockedMethod)
@@ -259,6 +273,13 @@ watch(
 	effectiveMethod,
 	(m) => {
 		payerOut.value = m ? { type: m.type, fpcId: m.fpc?.id, isProtocol: m.fpc?.isProtocol === true } : null
+	},
+	{ immediate: true },
+)
+watch(
+	estimatedFeeDisplay,
+	(d) => {
+		feeDisplayOut.value = d
 	},
 	{ immediate: true },
 )
@@ -717,8 +738,8 @@ onBeforeUnmount(() => {
 	<Flex direction="column" :class="[$style.wrapper, embedded && $style.embedded]" data-testid="fee-settings-card" :data-origin="originPrivacy">
 		<!-- Embedded fee override banner -->
 		<template v-if="isCustomMethod && !useOwnMethod">
-			<Flex align="center" justify="between" :class="$style.card">
-				<Text size="13" weight="600" color="primary">Pay fee with</Text>
+			<Flex align="center" justify="between" :class="$style.card" data-testid="send-fee-embedded">
+				<Text size="13" weight="600" color="primary">Fee</Text>
 				<Text size="13" weight="600" color="primary">Embedded payload</Text>
 			</Flex>
 			<Flex direction="column" gap="8" :class="$style.detail_row">
@@ -736,8 +757,8 @@ onBeforeUnmount(() => {
 		<template v-if="showMethodSelector">
 			<!-- A method the dApp asked for: shown, never a choice. -->
 			<Flex v-if="lockedMethod" align="center" justify="between" :class="$style.card" data-testid="send-fee-locked">
-				<Text size="13" weight="600" color="primary">Pay fee with</Text>
-				<Text size="13" weight="600" color="primary">Fee Juice · set by the app</Text>
+				<Text size="13" weight="600" color="primary">Fee</Text>
+				<Text size="13" weight="600" color="primary">Public Fee Juice · set by the app</Text>
 			</Flex>
 			<FeeMethodSelector
 				v-else
@@ -799,6 +820,7 @@ onBeforeUnmount(() => {
 				v-if="effectiveMethod && !feeJuiceMissing"
 				:estimate="estimatedFeeDisplay"
 				:isEstimating="isEstimating"
+				:payer="feePayer"
 			/>
 
 			<FeePriorityRow v-if="effectiveMethod && !feeJuiceMissing" v-model="selectedPriority" />

@@ -29,7 +29,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 import { managers } from "@/utils/core"
 import { LEGAL_DISMISSED_KEY } from "@/utils/legal-sheet"
 import { isValidHex } from "@/utils/string"
-import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
+import { FEE_JUICE_BRIDGE_URL, feeLine } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
@@ -74,6 +74,7 @@ const payer = ref(null)
  *  When true, the primary CTA becomes "Get fee juice" (C) and the fee card
  *  shows the explainer banner (A). */
 const needsFeeJuice = ref(false)
+const feeDisplay = ref(null)
 
 /** Open the fee-juice bridge in a new tab. */
 const openFeeJuiceBridge = () => {
@@ -282,7 +283,7 @@ const openReview = () => {
 const closeReview = () => popupStore.close(REVIEW_KEY)
 
 const amountText = computed(() => (amountTerm.value ? String(amountTerm.value) : undefined))
-const feeText = computed(() => (feeEstimate.value ? `~${feeEstimate.value.maxFeeFormatted} FJ` : undefined))
+const feeText = computed(() => feeLine(feeDisplay.value))
 
 const transferType = computed(() => {
 	if (selectedSendType.value === "private" && selectedReceiverType.value === "private") return TransferType.Private
@@ -650,6 +651,7 @@ onBeforeUnmount(() => {
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 						v-model:payer="payer"
+						v-model:feeDisplay="feeDisplay"
 					/>
 				</div>
 			</Flex>

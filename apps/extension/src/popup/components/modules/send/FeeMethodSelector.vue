@@ -1,36 +1,36 @@
 <script setup>
-/**
- * Fee-method dropdown trigger + popup used by `FeeSettingsCard`. The
- * trigger shows the active method's title (or "Select method"); the
- * popup lists every entry from `methods` with the per-entry testid
- * `send-fee-method-{subtitle}`. Disabled entries (token_fpc placeholder)
- * cannot be selected. `payerNoticeShape` hangs the "names your address" tag
- * on the label: the page decides when, this only draws it.
- */
 import { Dropdown } from "@/components/ui/Dropdown"
+import { publishGlyph } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
+import { menuOrder } from "./fee-helpers"
 
-defineProps({
+const props = defineProps({
 	modelValue: { type: Object, default: null },
 	methods: { type: Array, required: true },
-	/** "private-private" | "private-public" while this send's fee names the account; null otherwise. */
+	/** "private-private" | "private-public" while this send's fee names the account, else null. The
+	 *  page decides; this only draws the tag. */
 	payerNoticeShape: { type: String, default: null },
 })
 
 const emit = defineEmits(["update:modelValue", "open", "close"])
+
+/** The tag only ever says the fee names the account publicly. */
+const TAG_GLYPH = publishGlyph("exposed")
+
+const menu = computed(() => menuOrder(props.methods))
 </script>
 
 <template>
 	<Flex direction="column" gap="4" :class="$style.card">
 		<Flex align="center" justify="between">
-			<span :class="$style.fee_label">Fee Source</span>
+			<span :class="$style.fee_label">Fee</span>
 			<span
 				v-if="payerNoticeShape"
 				:class="[$style.tag, mark.exposed]"
 				data-testid="send-fee-privacy-notice"
 				:data-notice-shape="payerNoticeShape"
 			>
-				<i :class="[mark.mark, mark.filled]" aria-hidden="true" />
+				<Icon :name="TAG_GLYPH" size="10" aria-hidden="true" />
 				NAMES YOUR ADDRESS
 			</span>
 		</Flex>
@@ -51,8 +51,9 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 
 			<template #popup>
 				<DropdownItem
-					v-for="method in methods"
+					v-for="method in menu"
 					:key="method.fpc?.id ?? method.type"
+					:class="$style.method"
 					:disabled="method.disabled"
 					:data-testid="`send-fee-method-${method.subtitle}`"
 					@click="!method.disabled && emit('update:modelValue', method)"
@@ -62,7 +63,7 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 							{{ method.title }}
 						</Text>
 						<Text size="11" color="tertiary">
-							{{ method.disabled && method.disabledReason ? method.disabledReason : method.subtitle }}
+							{{ method.disabled && method.disabledReason ? method.disabledReason : method.spend }}
 						</Text>
 					</Flex>
 				</DropdownItem>
@@ -88,6 +89,12 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 
 .fee_placeholder {
 	color: var(--nulo-secondary);
+}
+
+/* A disabled method already reads in tertiary ink, so DropdownItem's own fade would dim it twice.
+   The doubled class outranks `.wrapper.disabled` whichever sheet loads last. */
+.method.method[aria-disabled="true"] {
+	opacity: 1;
 }
 
 .tag {
