@@ -1586,7 +1586,7 @@ Gate: lint, `typecheck:all`, `test:all`, Storybook build (`PermissionRow.stories
 Gate: lint, and those three files on Chrome (prover on) and on Firefox (proverless), retry-0,
 exit 0.
 
-#### P5 · Parity and arc 5a gate ☐
+#### P5 · Parity and arc 5a gate ✓
 
 1. Parity: rebuild the mocks. Capture at 400×800, the viewport set explicitly:
    - the interim window for `transaction` and `data` (no shot: compared with the U4 list's and
