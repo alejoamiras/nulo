@@ -14,6 +14,7 @@ arc_branches:
 design: implementations-plan/ux-feedback/design/spec.md (item 6, item 9's two permission-window terms, the tooltip map's Alias row, undrawn states U1–U7 and U10)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 parity_5a: https://claude.ai/artifact/6NjcZ54XTdEYtUgzGzQhxC
+parity_5b: https://claude.ai/artifact/WBSu4JhW9ztuiMMczM8N3f
 ---
 
 # Batch 5 · Permissions
@@ -1748,7 +1749,7 @@ Gate: lint, and the changed and new files on Chrome (prover on) and on Firefox (
 retry-0, exit 0; on Firefox the reduced-motion case reports skipped by its name, and nothing
 else skips.
 
-#### P10 · Parity and arc 5b gate ☐
+#### P10 · Parity and arc 5b gate ✓
 
 1. Parity: rebuild the mocks. Capture at 400×800, the viewport set explicitly, from the real
    window over the playground:
