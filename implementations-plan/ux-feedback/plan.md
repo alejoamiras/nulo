@@ -283,7 +283,7 @@ glance":
 | 5 · first-run import | U11 | 1 | signed off |
 | 6 · asking for more, several accounts, banners, every row, rename, the authorization window, Settings | U1–U7, and the A-* addendum the page groups under item 6 ("the recommended option on each") | 5 | signed off, as recommended |
 | T · the hostname warning and the recovery-phrase note as text | U8, U9 | 3 | signed off; each em dash made a full stop (arc 3; proposal version 10 draws it) |
-| 8 · the review sheet and the fee tag, the strip when Nulo can't tell who pays | U12, U13 | 1 | no answer: **sign-off pending** |
+| 8 · the review sheet and the fee tag, the strip when Nulo can't tell who pays | U12, U13 | 1 | signed off, option (a) on each, in a later message: "for U12: (a) for U13: (a)" |
 
 U10 has no picker ("Unchanged"). Copy rule from the same message: no em dash joins two clauses
 in user-visible text this program adds; the empty-value glyph "—" stays where a drawing shows it
@@ -348,9 +348,10 @@ Batch 1's parity answers (chat, 2026-09-24): the fee card's app-set row and embe
 fee line adds dollars ("Add dollars"); a hand-added fee contract there reads "Fee · —" with no
 payer ("Align with U16 (Recommended)").
 
-Round 5 (chat, 2026-09-25): items 3, 5, 6 and T signed off, item 8 pending, and no em dash
-joining two clauses in new copy; the quote and the mapping are in § The owner's answers. The older
-strings that do: "separate follow-up for those 45 older strings" (below).
+Round 5 (chat, 2026-09-25): items 3, 5, 6 and T signed off, then item 8 ("for U12: (a) for
+U13: (a)"), and no em dash joining two clauses in new copy; the quotes and the mapping are in
+§ The owner's answers. The older strings that do: "separate follow-up for those 45 older
+strings" (below).
 
 ## Follow-ups (not this program)
 
