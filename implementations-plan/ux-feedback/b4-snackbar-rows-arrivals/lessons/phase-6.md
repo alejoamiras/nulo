@@ -577,3 +577,10 @@ The rerun on the fix tip ran every e2e file at retry 0, each run followed by `bu
 
 The parity captures of the new states were then taken from `037b6c6c` on both browsers, outside
 the repo.
+
+## The parity page
+
+The captures are on a copy of the parity page, published 2026-09-26:
+https://claude.ai/artifact/DR1MrepVrh8Fyy63JRyUyF. It holds every P5 capture and P6's rows 15 to 27, in both browsers. The first page (phase
+5's link) cannot be updated from the account the CLI now publishes from, and the owner chose a
+copy over sharing it. The front matter's `parity:` points to the copy.
