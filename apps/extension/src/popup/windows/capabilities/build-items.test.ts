@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import type { Capability } from "@nulo/wallet-bridge"
-import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type WindowRow } from "./build-items"
+import { plainText } from "./permission-rows"
 
 const A = `0x${"0a".repeat(32)}`
 const B = `0x${"0b".repeat(32)}`
@@ -8,6 +9,7 @@ const cap = (value: object) => value as Capability
 const accounts = (canCreateAuthWit: boolean) => cap({ type: "accounts", canGet: true, canCreateAuthWit })
 const txAny = cap({ type: "transaction", scope: "*" })
 const txListed = cap({ type: "transaction", scope: [{ contract: A, function: "transfer" }] })
+const simListed = cap({ type: "simulation", transactions: { scope: [{ contract: A, function: "transfer" }] } })
 const contracts = cap({ type: "contracts", contracts: "*", canRegister: true, canGetMetadata: true })
 const unknownA = cap({ type: "experimental_v2" })
 const unknownB = cap({ type: "experimental_v3" })
@@ -20,84 +22,107 @@ function params(overrides: Partial<CapabilityWindowParams>): CapabilityWindowPar
 		reRequested: new Set(),
 		accountsMembershipOnly: false,
 		consent: undefined,
+		networkName: "Testnet",
+		heldAccounts: [],
 		...overrides,
 	}
 }
 
-function grant(items: UICapabilityItem[], p: CapabilityWindowParams, accountsSelected = true) {
-	return buildGrant({ items, delta: p.delta, existingGrants: p.existingGrants, heldGrants: p.heldGrants, accountsSelected })
+function grant(rows: WindowRow[], p: CapabilityWindowParams, accountsSelected = true) {
+	return buildGrant({ rows, delta: p.delta, existingGrants: p.existingGrants, heldGrants: p.heldGrants, accountsSelected })
 }
 
-const byRow = (items: UICapabilityItem[], key: string) => items.filter((item) => item.rowKey === key)
-const setSwitch = (items: UICapabilityItem[], key: string, on: boolean) => {
-	for (const item of byRow(items, key)) if (item.isNew) item.selected = on
+const fresh = (rows: WindowRow[]) => rows.filter((row) => row.isNew)
+const held = (rows: WindowRow[]) => rows.filter((row) => !row.isNew)
+const keys = (rows: WindowRow[]) => rows.map((row) => row.entry.key)
+const line = (row: WindowRow) => plainText(currentLine(row))
+const newRow = (rows: WindowRow[], key: string) => {
+	const found = fresh(rows).find((row) => row.entry.key === key)
+	if (!found) throw new Error(`no new ${key} row`)
+	return found
+}
+const setSwitch = (rows: WindowRow[], key: string, on: boolean) => {
+	newRow(rows, key).selected = on
 }
 
-describe("the cards", () => {
-	test("switchless cards are granted as requested and carry no switch", () => {
-		const items = buildCapabilityItems(params({ delta: [txAny, contracts] }))
-		expect(items.map((item) => [item.rowKey, item.switchLabel, item.selected])).toEqual([
-			["transaction", undefined, true],
-			["contracts", undefined, true],
+describe("the new rows", () => {
+	test("switchless rows are granted as requested, carry no switch, and follow the row list's order", () => {
+		const rows = buildCapabilityItems(params({ delta: [txAny, contracts, simListed] }))
+		expect(rows.map((row) => [row.entry.key, row.entry.switchLabel, row.selected, row.isNew])).toEqual([
+			["simulation", undefined, true, true],
+			["contracts", undefined, true, true],
+			["transaction", undefined, true, true],
 		])
 	})
 
-	test("the authorizations card replaces the rider: the row's title, its switch, High", () => {
-		const [item] = buildCapabilityItems(params({ delta: [accounts(true), txListed] }))
-		expect(item).toMatchObject({
-			rowKey: "authorizations",
-			capId: "accounts",
-			label: "Act for you in transactions you approve",
+	test("accounts give the address row and, with canCreateAuthWit, the authorizations row with its switch", () => {
+		const rows = buildCapabilityItems(params({ delta: [accounts(true), txListed] }))
+		expect(keys(rows)).toEqual(["account-address", "authorizations", "transaction"])
+		const row = newRow(rows, "authorizations")
+		expect(row).toMatchObject({ capId: "accounts", isNew: true, selected: true })
+		expect(row.entry).toMatchObject({
+			group: "if-you-allow",
+			title: "Act for you in transactions you approve",
 			switchLabel: "Authorizations without asking",
-			isNew: true,
-			selected: true,
-			risk: "high",
 		})
-		expect(currentLine(item)).toBe("Nulo signs its authorizations without asking.")
-		item.selected = false
-		expect(currentLine(item)).toBe("You confirm each authorization first.")
+		expect(line(row)).toBe("Nulo signs its authorizations without asking.")
+		row.selected = false
+		expect(line(row)).toBe("You confirm each authorization first.")
+		expect(newRow(rows, "account-address")).toMatchObject({ capId: "accounts", selected: true })
 	})
 
-	test("any contract starts the authorizations switch Off, with the broad lines", () => {
-		const [item] = buildCapabilityItems(params({ delta: [accounts(true), txAny] }))
-		expect(item.selected).toBe(false)
-		expect(currentLine(item)).toBe("You confirm each authorization first. Off because it listed any contract.")
-		item.selected = true
-		expect(currentLine(item)).toBe("For any call, on any contract.")
+	test("accounts without canGet give no address row, and without canCreateAuthWit no authorizations row", () => {
+		expect(keys(buildCapabilityItems(params({ delta: [cap({ ...accounts(true), canGet: false }), txListed] })))).toEqual([
+			"authorizations",
+			"transaction",
+		])
+		expect(keys(buildCapabilityItems(params({ delta: [accounts(false), txListed] })))).toEqual(["account-address", "transaction"])
 	})
 
-	test("with no transaction or simulation scope the authorizations card has no switch and the off line", () => {
-		const [item] = buildCapabilityItems(params({ delta: [accounts(true), contracts] }))
-		expect(item.switchLabel).toBeUndefined()
-		expect(currentLine(item)).toBe("You confirm each authorization first.")
+	test("any contract starts the authorizations switch Off, with the broad lines, flagged", () => {
+		const row = newRow(buildCapabilityItems(params({ delta: [accounts(true), txAny] })), "authorizations")
+		expect(row.selected).toBe(false)
+		expect(row.entry.flagged).toBe(true)
+		expect(line(row)).toBe("You confirm each authorization first. Off because it listed any contract.")
+		row.selected = true
+		expect(line(row)).toBe("For any call, on any contract.")
 	})
 
-	test("accounts without canCreateAuthWit draw no card (the picker is their section)", () => {
-		expect(buildCapabilityItems(params({ delta: [accounts(false), txListed] })).map((item) => item.rowKey)).toEqual(["transaction"])
+	test("with no transaction or simulation scope the authorizations row always asks: no switch, the off line", () => {
+		const row = newRow(buildCapabilityItems(params({ delta: [accounts(true), contracts] })), "authorizations")
+		expect(row.entry.group).toBe("always-asks")
+		expect(row.entry.switchLabel).toBeUndefined()
+		expect(line(row)).toBe("You confirm each authorization first.")
+	})
+
+	test("contract classes name the dApp's network", () => {
+		const [row] = buildCapabilityItems(params({ delta: [cap({ type: "contractClasses", classes: "*" })], networkName: "Sandbox" }))
+		expect(row.entry.title).toBe("Look up contract code on Sandbox")
+	})
+
+	test("a contracts permission with neither flag draws no row", () => {
+		expect(buildCapabilityItems(params({ delta: [cap({ type: "contracts", contracts: [A] })] }))).toEqual([])
 	})
 
 	test("a re-request starts from the snapshot's consent over the grants after Allow", () => {
-		const held = [accounts(true), txListed]
-		const on = buildCapabilityItems(
-			params({ delta: [cap({ ...accounts(true), canGet: false })], heldGrants: held, consent: { broad: false } }),
-		)
-		expect(on[0].selected).toBe(true)
-		const off = buildCapabilityItems(params({ delta: [cap({ ...accounts(true), canGet: false })], heldGrants: held }))
-		expect(off[0].selected).toBe(false)
+		const heldGrants = [accounts(true), txListed]
+		const delta = [cap({ ...accounts(true), canGet: false })]
+		const on = buildCapabilityItems(params({ delta, heldGrants, consent: { broad: false } }))
+		expect(newRow(on, "authorizations").selected).toBe(true)
+		const off = buildCapabilityItems(params({ delta, heldGrants }))
+		expect(newRow(off, "authorizations").selected).toBe(false)
 	})
 
-	test("a narrow consent widened to any contract comes back as a new card, Off, broad", () => {
-		const items = buildCapabilityItems(params({ delta: [txAny], heldGrants: [accounts(true), txListed], consent: { broad: false } }))
-		expect(items[0]).toMatchObject({
-			rowKey: "authorizations",
-			isNew: true,
-			selected: false,
-			switchLabel: "Authorizations without asking",
-		})
-		expect(currentLine(items[0])).toBe("You confirm each authorization first. Off because it listed any contract.")
+	test("a narrow consent widened to any contract comes back as a new row, Off, broad", () => {
+		const rows = buildCapabilityItems(params({ delta: [txAny], heldGrants: [accounts(true), txListed], consent: { broad: false } }))
+		expect(keys(fresh(rows))).toEqual(["authorizations", "transaction"])
+		const row = newRow(rows, "authorizations")
+		expect(row).toMatchObject({ capId: "accounts", selected: false })
+		expect(row.entry).toMatchObject({ switchLabel: "Authorizations without asking", flagged: true })
+		expect(line(row)).toBe("You confirm each authorization first. Off because it listed any contract.")
 	})
 
-	test("a widening to more listed contracts keeps a narrow consent and draws no authorizations card", () => {
+	test("a widening to more listed contracts keeps a narrow consent: the authorizations row stays folded", () => {
 		const wider = cap({
 			type: "transaction",
 			scope: [
@@ -105,12 +130,13 @@ describe("the cards", () => {
 				{ contract: B, function: "*" },
 			],
 		})
-		const items = buildCapabilityItems(params({ delta: [wider], heldGrants: [accounts(true), txListed], consent: { broad: false } }))
-		expect(byRow(items, "authorizations")).toEqual([])
+		const rows = buildCapabilityItems(params({ delta: [wider], heldGrants: [accounts(true), txListed], consent: { broad: false } }))
+		expect(keys(fresh(rows))).toEqual(["transaction"])
+		expect(keys(held(rows))).toContain("authorizations")
 	})
 
-	test("a membership-only widening shows the held card with its stored line and no switch", () => {
-		const items = buildCapabilityItems(
+	test("a membership-only widening: only the address row is new, the authorizations row folds with its stored line", () => {
+		const rows = buildCapabilityItems(
 			params({
 				delta: [accounts(true)],
 				heldGrants: [accounts(true), txListed],
@@ -118,107 +144,163 @@ describe("the cards", () => {
 				consent: { broad: false },
 			}),
 		)
-		expect(items[0]).toMatchObject({ rowKey: "authorizations", isNew: false })
-		expect(items[0].switchLabel).toBeUndefined()
-		expect(currentLine(items[0])).toBe("Nulo signs its authorizations without asking.")
+		expect(keys(fresh(rows))).toEqual(["account-address"])
+		const folded = held(rows).find((row) => row.entry.key === "authorizations")!
+		expect(folded.entry.switchLabel).toBeUndefined()
+		expect(line(folded)).toBe("Nulo signs its authorizations without asking.")
 	})
 
-	test("adding an account while the scopes widen to any contract brings the narrow consent back first, Off", () => {
-		const held = [accounts(true), txListed]
+	test("adding an account while the scopes widen to any contract brings the narrow consent back, Off", () => {
+		const heldGrants = [accounts(true), txListed]
 		const p = params({
 			delta: [txAny, accounts(true)],
-			existingGrants: held,
-			heldGrants: held,
+			existingGrants: heldGrants,
+			heldGrants,
 			accountsMembershipOnly: true,
 			consent: { broad: false },
 		})
-		const items = buildCapabilityItems(p)
-		expect(byRow(items, "authorizations")).toHaveLength(1)
-		expect(items[0]).toMatchObject({
-			rowKey: "authorizations",
-			isNew: true,
-			selected: false,
-			switchLabel: "Authorizations without asking",
-		})
-		expect(currentLine(items[0])).toBe("You confirm each authorization first. Off because it listed any contract.")
-		expect(grant(items, p)).toEqual({ granted: [txAny, accounts(true)], rejected: [], authorizationsWithoutAsking: false })
+		const rows = buildCapabilityItems(p)
+		expect(keys(fresh(rows))).toEqual(["account-address", "authorizations", "transaction"])
+		const row = newRow(rows, "authorizations")
+		expect(row).toMatchObject({ selected: false })
+		expect(line(row)).toBe("You confirm each authorization first. Off because it listed any contract.")
+		expect(grant(rows, p)).toEqual({ granted: [txAny, accounts(true)], rejected: [], authorizationsWithoutAsking: false })
 	})
 
-	test("data is two cards, each holding only its half; private events on any contract start Off", () => {
+	test("data is two rows; private events on any contract start Off", () => {
 		const data = cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })
-		const items = buildCapabilityItems(params({ delta: [data] }))
-		expect(items.map((item) => [item.rowKey, item.label, item.selected, item.capability])).toEqual([
-			["address-book", "See your address book", true, { type: "data", addressBook: true }],
-			["private-events", "See private events from any contract", false, { type: "data", privateEvents: { contracts: "*" } }],
+		const rows = buildCapabilityItems(params({ delta: [data] }))
+		expect(rows.map((row) => [row.entry.key, row.entry.title, row.selected, row.capId])).toEqual([
+			["address-book", "See your address book", true, "data"],
+			["private-events", "See private events from any contract", false, "data"],
 		])
-		expect(items.map(currentLine)).toEqual(["Every name and address you saved.", "Not shared. The app may ask again later."])
+		expect(rows.map(line)).toEqual(["Every name and address you saved.", "Not shared. The app may ask again later."])
 	})
 
 	test("private events from listed contracts start On", () => {
-		const data = cap({ type: "data", privateEvents: { contracts: [A] } })
-		const [item] = buildCapabilityItems(params({ delta: [data] }))
-		expect([item.label, item.selected, currentLine(item)]).toEqual([
+		const [row] = buildCapabilityItems(params({ delta: [cap({ type: "data", privateEvents: { contracts: [A] } })] }))
+		expect([row.entry.title, row.selected, line(row)]).toEqual([
 			"See private events from its contracts",
 			true,
 			"Private messages its contracts sent to your accounts, like a transfer you received.",
 		])
 	})
 
-	test("a held data half the request does not newly ask for sits in Already granted, from the held record", () => {
-		const held = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
-		const asked = cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })
-		const items = buildCapabilityItems(
-			params({ delta: [asked], existingGrants: [], heldGrants: [held], reRequested: new Set(["data"]) }),
+	test("the address book and unknown rows are flagged when the grants after Allow reach any contract", () => {
+		const data = cap({ type: "data", addressBook: true })
+		const broad = buildCapabilityItems(params({ delta: [data, unknownA], heldGrants: [txAny] }))
+		expect(fresh(broad).map((row) => [row.entry.key, row.entry.flagged])).toEqual([
+			["address-book", true],
+			["unknown", true],
+		])
+		const listed = buildCapabilityItems(params({ delta: [data, unknownA], heldGrants: [txListed] }))
+		expect(fresh(listed).map((row) => row.entry.flagged)).toEqual([false, false])
+	})
+
+	test("unknown types are one row, Off, with the counted title, its switch and no type of its own", () => {
+		const rows = buildCapabilityItems(params({ delta: [unknownA, txListed, unknownB], reRequested: new Set(["experimental_v3"]) }))
+		const row = newRow(rows, "unknown")
+		expect(row).toMatchObject({ selected: false, reRequested: true })
+		expect(row.entry).toMatchObject({ title: "Use 2 permissions Nulo doesn't recognize", switchLabel: "Unknown permission" })
+		expect(row.capId).toBeUndefined()
+		expect(line(row)).toBe("Nulo can't tell you what it allows.")
+	})
+
+	test("the re-requested mark sits on each new row of a type with a stored rejection", () => {
+		const data = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
+		const rows = buildCapabilityItems(params({ delta: [data, txListed], reRequested: new Set(["data"]) }))
+		expect(rows.map((row) => [row.entry.key, row.reRequested])).toEqual([
+			["address-book", true],
+			["private-events", true],
+			["transaction", false],
+		])
+	})
+})
+
+describe("the held rows", () => {
+	const toolsApp = [accounts(true), simListed, cap({ type: "contracts", contracts: [A], canRegister: true }), txListed]
+
+	test("every stored grant folds, read-only, in the row list's order: four permissions, five rows", () => {
+		const rows = buildCapabilityItems(
+			params({
+				delta: [cap({ type: "data", addressBook: true })],
+				heldGrants: toolsApp,
+				consent: { broad: false },
+				heldAccounts: [{ name: "Account 1" }],
+			}),
 		)
-		expect(items.map((item) => [item.rowKey, item.isNew, item.reRequested])).toEqual([
-			["private-events", true, true],
-			["address-book", false, false],
+		expect(keys(fresh(rows))).toEqual(["address-book"])
+		expect(held(rows).map((row) => [row.entry.key, row.entry.title, line(row)])).toEqual([
+			["account-address", "See Account 1's address", ""],
+			["simulation", "Run simulations and read the results", "Results can include your private balances."],
+			["contracts", "Add contracts to your wallet", ""],
+			["authorizations", "Act for you in transactions you approve", "Nulo signs its authorizations without asking."],
+			["transaction", "Every transaction", ""],
+		])
+		expect(held(rows).every((row) => row.entry.switchLabel === undefined && row.selected && !row.reRequested)).toBe(true)
+	})
+
+	test("the folded address row names the session's accounts by their wallet names", () => {
+		const shown = (heldAccounts: CapabilityWindowParams["heldAccounts"]) =>
+			held(buildCapabilityItems(params({ heldGrants: [accounts(false)], heldAccounts })))[0].entry.title
+		expect(shown([{ name: "Savings" }])).toBe("See Savings's address")
+		expect(shown([{ name: "Account 1" }, { name: "Account 2" }])).toBe("See the addresses of the accounts you share")
+		expect(shown([{}])).toBe("See the addresses of the accounts you share")
+	})
+
+	test("a held accounts grant without canGet folds no address row", () => {
+		const rows = buildCapabilityItems(
+			params({ heldGrants: [cap({ ...accounts(true), canGet: false }), txListed], heldAccounts: [{ name: "Account 1" }] }),
+		)
+		expect(keys(held(rows))).toEqual(["authorizations", "transaction"])
+	})
+
+	test("the folded authorizations row reads the snapshot's consent over the held grants", () => {
+		const off = held(buildCapabilityItems(params({ heldGrants: [accounts(true), txListed] })))
+		expect(line(off.find((row) => row.entry.key === "authorizations")!)).toBe("You confirm each authorization first.")
+		const broad = held(buildCapabilityItems(params({ heldGrants: [accounts(true), txAny], consent: { broad: true } })))
+		expect(line(broad.find((row) => row.entry.key === "authorizations")!)).toBe("For any call, on any contract.")
+	})
+
+	test("a held data half the request does not newly ask for folds, and so does the half it widens", () => {
+		const heldData = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
+		const asked = cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })
+		const rows = buildCapabilityItems(params({ delta: [asked], heldGrants: [heldData], reRequested: new Set(["data"]) }))
+		expect(rows.map((row) => [row.entry.key, row.entry.title, row.isNew, row.reRequested])).toEqual([
+			["private-events", "See private events from any contract", true, true],
+			["address-book", "See your address book", false, false],
+			["private-events", "See private events from its contracts", false, false],
 		])
 	})
 
-	test("a held data record draws one card per half, never a second copy from existingGrants", () => {
-		const held = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
-		const items = buildCapabilityItems(params({ delta: [txAny], existingGrants: [held], heldGrants: [held] }))
-		expect(items.filter((item) => !item.isNew).map((item) => [item.rowKey, item.label])).toEqual([
-			["address-book", "See your address book"],
-			["private-events", "See private events from its contracts"],
-		])
+	test("the held rows come from every stored grant, never from the echo list", () => {
+		const heldData = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
+		const rows = buildCapabilityItems(params({ delta: [txAny], existingGrants: [heldData, txListed], heldGrants: [heldData] }))
+		expect(keys(held(rows))).toEqual(["address-book", "private-events"])
 	})
 
-	test("unknown types are one card, Off, with the constant label and the switch", () => {
-		const items = buildCapabilityItems(params({ delta: [unknownA, txListed, unknownB] }))
-		const [unknown] = byRow(items, "unknown")
-		expect(unknown).toMatchObject({
-			label: "Unknown permission",
-			isUnknown: true,
-			selected: false,
-			switchLabel: "Unknown permission",
-			risk: "high",
-			panelCapabilities: [unknownA, unknownB],
-		})
-		expect(unknown.capId).toBeUndefined()
-		expect(unknown.description).toMatch(/doesn't recognize/)
-	})
-
-	test("an unknown type already granted keeps its read-only card and the constant label", () => {
-		const [item] = buildCapabilityItems(params({ existingGrants: [unknownA] }))
-		expect([item.label, item.isNew, item.isUnknown, item.capId]).toEqual(["Unknown permission", false, true, "experimental_v2"])
+	test("held unknown types fold as one unknown row", () => {
+		const rows = buildCapabilityItems(params({ heldGrants: [unknownA, unknownB] }))
+		expect(rows).toHaveLength(1)
+		expect(rows[0].isNew).toBe(false)
+		expect(rows[0].entry.title).toBe("Use 2 permissions Nulo doesn't recognize")
+		expect(rows[0].capId).toBeUndefined()
 	})
 })
 
 describe("the grant", () => {
-	test("switchless cards go as requested, and existing grants of other types are echoed", () => {
-		const p = params({ delta: [txAny, contracts], existingGrants: [txListed] })
-		expect(grant(buildCapabilityItems(p), p)).toEqual({ granted: [txAny, contracts], rejected: [] })
+	test("switchless rows go as requested, and existing grants of other types are echoed", () => {
+		const p = params({ delta: [txAny, contracts], existingGrants: [txListed, simListed] })
+		expect(grant(buildCapabilityItems(p), p)).toEqual({ granted: [txAny, contracts, simListed], rejected: [] })
 	})
 
 	test("canCreateAuthWit is granted as requested with the switch Off; the switch rides beside it", () => {
 		const p = params({ delta: [accounts(true), txListed] })
-		const items = buildCapabilityItems(p)
-		setSwitch(items, "authorizations", false)
-		expect(grant(items, p)).toEqual({ granted: [accounts(true), txListed], rejected: [], authorizationsWithoutAsking: false })
-		setSwitch(items, "authorizations", true)
-		expect(grant(items, p).authorizationsWithoutAsking).toBe(true)
+		const rows = buildCapabilityItems(p)
+		setSwitch(rows, "authorizations", false)
+		expect(grant(rows, p)).toEqual({ granted: [accounts(true), txListed], rejected: [], authorizationsWithoutAsking: false })
+		setSwitch(rows, "authorizations", true)
+		expect(grant(rows, p).authorizationsWithoutAsking).toBe(true)
 	})
 
 	test("no switch shown, no switch value sent: no scope, and a membership-only widening", () => {
@@ -228,7 +310,7 @@ describe("the grant", () => {
 		expect(grant(buildCapabilityItems(membership), membership)).toEqual({ granted: [accounts(true)], rejected: [] })
 	})
 
-	test("the widened consent's card sends its switch although accounts are not asked for", () => {
+	test("the widened consent's row sends its switch although accounts are not asked for", () => {
 		const p = params({ delta: [txAny], heldGrants: [accounts(true), txListed], consent: { broad: false } })
 		expect(grant(buildCapabilityItems(p), p)).toEqual({ granted: [txAny], rejected: [], authorizationsWithoutAsking: false })
 	})
@@ -240,39 +322,38 @@ describe("the grant", () => {
 
 	test("unknown types are granted all or none", () => {
 		const p = params({ delta: [unknownA, unknownB] })
-		const items = buildCapabilityItems(p)
-		expect(grant(items, p)).toEqual({ granted: [], rejected: ["experimental_v2", "experimental_v3"] })
-		setSwitch(items, "unknown", true)
-		expect(grant(items, p)).toEqual({ granted: [unknownA, unknownB], rejected: [] })
+		const rows = buildCapabilityItems(p)
+		expect(grant(rows, p)).toEqual({ granted: [], rejected: ["experimental_v2", "experimental_v3"] })
+		setSwitch(rows, "unknown", true)
+		expect(grant(rows, p)).toEqual({ granted: [unknownA, unknownB], rejected: [] })
 	})
 
 	test("a first data grant with both rows Off is rejected; never a data grant with neither field", () => {
 		const p = params({ delta: [cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })] })
-		const items = buildCapabilityItems(p)
-		setSwitch(items, "address-book", false)
-		setSwitch(items, "private-events", false)
-		expect(grant(items, p)).toEqual({ granted: [], rejected: ["data"] })
+		const rows = buildCapabilityItems(p)
+		setSwitch(rows, "address-book", false)
+		setSwitch(rows, "private-events", false)
+		expect(grant(rows, p)).toEqual({ granted: [], rejected: ["data"] })
 	})
 
-	test("a first data grant sends only the halves left On", () => {
+	test("a first data grant sends only the rows left On", () => {
 		const p = params({ delta: [cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })] })
-		const items = buildCapabilityItems(p)
-		expect(grant(items, p)).toEqual({ granted: [{ type: "data", addressBook: true }], rejected: [] })
+		expect(grant(buildCapabilityItems(p), p)).toEqual({ granted: [{ type: "data", addressBook: true }], rejected: [] })
 	})
 
 	describe("a data record held with the address book and private events from A, asked for any contract", () => {
-		const held = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
+		const heldData = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
 		const asked = cap({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })
-		const p = params({ delta: [asked], existingGrants: [held], heldGrants: [held] })
+		const p = params({ delta: [asked], existingGrants: [heldData], heldGrants: [heldData] })
 
 		test("private events left Off: the type is rejected and the held record stays", () => {
 			expect(grant(buildCapabilityItems(p), p)).toEqual({ granted: [], rejected: ["data"] })
 		})
 
 		test("private events On: the address book kept, private events from any contract", () => {
-			const items = buildCapabilityItems(p)
-			setSwitch(items, "private-events", true)
-			expect(grant(items, p)).toEqual({
+			const rows = buildCapabilityItems(p)
+			setSwitch(rows, "private-events", true)
+			expect(grant(rows, p)).toEqual({
 				granted: [{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }],
 				rejected: [],
 			})
@@ -280,17 +361,17 @@ describe("the grant", () => {
 	})
 
 	describe("a data record held with private events from A, asked for the address book and A and B", () => {
-		const held = cap({ type: "data", privateEvents: { contracts: [A] } })
+		const heldData = cap({ type: "data", privateEvents: { contracts: [A] } })
 		const p = params({
 			delta: [cap({ type: "data", addressBook: true, privateEvents: { contracts: [A, B] } })],
-			existingGrants: [held],
-			heldGrants: [held],
+			existingGrants: [heldData],
+			heldGrants: [heldData],
 		})
 		const decide = (book: boolean, events: boolean) => {
-			const items = buildCapabilityItems(p)
-			setSwitch(items, "address-book", book)
-			setSwitch(items, "private-events", events)
-			return grant(items, p)
+			const rows = buildCapabilityItems(p)
+			setSwitch(rows, "address-book", book)
+			setSwitch(rows, "private-events", events)
+			return grant(rows, p)
 		}
 
 		test.each([

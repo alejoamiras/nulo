@@ -59,7 +59,7 @@ option stay out.
 | ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ✓ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
 | ✓ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
-| ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
+| ✓ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
 
 A row gets ✓ only when its plan has every phase ✓, its arc loop converged, and its parity
 evidence is published (below). Order is the stack order: batch 1 changes the first-run flow that
@@ -312,6 +312,14 @@ the stack top, asking for seams between batches, duplication across them, and dr
 spec, with the rules below; loop until clean. Then every row of [Local gates](#local-gates) on
 the stack top, smoke and network on both browsers, the full network suite (no file filter).
 
+**Record** ([lessons/final-pass.md](lessons/final-pass.md)). Round 1 raised two minors: the
+comment fix landed on arc 5a, and the account row's ring went to the owner. The stack then moved
+onto `origin/dev` at `b15f5218`. Round 2: "no new material findings", "VERDICT: approve —
+confidence: high". Round 3, on arc 5b's fold fix `d893ae95`: "no new material findings",
+"VERDICT: approve — confidence: high". At `d893ae95`, every Local gates row exited 0,
+with smoke and the full network suite on both browsers; the Firefox canaries wait for CI on the
+stack top's head.
+
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
 - *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions,
@@ -395,12 +403,37 @@ strings" (below).
   `apps/extension/src/wallet/services/wallet-sdk/background.ts` logs the message at Error. The
   fix is a fixed category at those sinks and a sentinel test, as batch 5's two new refusals
   have. The owner, 2026-09-24: "Yes. Defer to afterwards."
+- Contract addresses in the permission window: its Details table merges them case-blind,
+  while `matchesPattern` (`packages/wallet-bridge/src/method-scope-checkers.ts:39`) compares a
+  scope's listed contract to the call by exact string. A scope listed in another case never
+  matches (it fails closed), so its Details row can show an operation the check refuses.
+  Normalising both sides changes the grant check, so it is its own PR; codex accepted the
+  deferral in batch 5b's rounds 1 and 2.
 - The Revoke authwits and authwit-registry popups (`RevokeAuthwitsPopup.vue` and
   `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
   on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
   `submitKey`). Once fees are set, Enter on the header's × or on a fee method sends the revoke
-  or registry transaction. Found by reading in batch 4, whose new Revoke expand button stops
-  Enter, and not reproduced; older than this program.
+  or registry transaction. Found in batch 4, whose new Revoke expand button stops Enter: its
+  unit test, without the stop, revoked on Enter. Not reproduced in a browser; older than this
+  program.
+- History's received rows read "Token" and "+1,000,00" with no dollar value, where Home shows
+  the same receipts as "TST", "+1,000" and "≈ $1,000.00". Older than this program; the owner,
+  2026-09-25, on batch 4's parity page: "follow-up".
+- Layout around batch 4's surfaces that predates the program: rows 4px apart (drawn 10px),
+  Home's rows 59px tall with a third "≈ $" line (drawn 52px), the History and Settings titles
+  about 31px lower than drawn, History's date heading, Home's "Recent transactions" and "View
+  archives" (drawn "Recent activity" and "View all"), and Settings' account header. The owner,
+  2026-09-25: "(a) follow-up maybe?", so these stay until the owner schedules them.
+- The operation journal's id comment (`apps/extension/src/wallet/services/operation-journal/
+  service.ts`) says "16 bytes / 128 bits", but `nextRandomId(storage, 16)` draws 16 hex
+  characters, 64 bits, and the comment cites a review round.
+- The popup's Terms sheet (`apps/extension/src/components/LegalAcceptanceSheet.vue`) sits at
+  z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden
+  behind it. Observed in batch 4, not changed.
+- A failed send made from the wallet's own Send page reads as the app's fault on its journal page:
+  `categoricalLabel` gives the `transfer` error kind the `dapp_execute` label, "Reported by app",
+  "The connected app reported an error." (`apps/extension/src/utils/journal-state.ts:217-219`).
+  Older than this program; batch 4's Details now opens that page from the snack.
 
 ## Seeds
 

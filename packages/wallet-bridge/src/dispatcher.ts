@@ -404,6 +404,12 @@ const CAPABILITY_PROJECTORS: Record<Capability["type"], (cap: Record<string, unk
 	data: projectData,
 }
 
+/** A contracts permission with neither flag grants nothing the checkers honour, and wallet-sdk
+ *  requires neither, so it is answered as asked and never negotiated or stored. */
+function grantsNothing(cap: Record<string, unknown>): boolean {
+	return cap.type === "contracts" && cap.canRegister !== true && cap.canGetMetadata !== true
+}
+
 /** Validates a known capability and copies only its known fields; unknown types pass untouched.
  *  Every failure, a throw on a hostile value included, becomes one error naming only the type, so
  *  no request value reaches a log line. */
@@ -750,7 +756,7 @@ type CapabilityManifest = {
 /**
  * Structural arg-shape guard for authorization-sensitive dApp methods, run before
  * capability/scope enforcement so the scope checkers + handlers dereference validated
- * shapes rather than raw `unknown` (F-08). Deliberately dependency-free — wallet-bridge is
+ * shapes rather than raw `unknown`. Deliberately dependency-free — wallet-bridge is
  * transport-shaped and does NOT import `WalletSchema`; it validates only the
  * authorization-relevant fields the scope/handler layer uses. Full Aztec-object parsing
  * stays downstream (execution-layer Zod). Residual: this is not a complete WalletSchema parse;
@@ -776,8 +782,7 @@ function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
 	switch (methodName) {
 		case "sendTx":
 		case "profileTx":
-			// simulateTx is intentionally NOT guarded here: post-merge with dev's
-			// arg-guard refactor, its exec validation is owned by
+			// simulateTx is intentionally NOT guarded here: its exec validation is owned by
 			// `checkSimulationTransactions` (optional-chains `exec?.calls`, requires
 			// an array, coerces `to`/tolerates missing `name`) plus the downstream
 			// execution-layer Zod — so a dispatcher-level shape guard is redundant and
@@ -882,16 +887,15 @@ export class WalletSdkDispatcher {
 			throw new Error(`Invalid arguments for wallet method: ${methodName}`)
 		}
 
-		// F-08: structural arg-shape guard for authorization-sensitive methods, before any
-		// capability/scope logic dereferences the args.
+		// Must run before any capability or scope logic dereferences the args.
 		assertAuthRelevantArgShape(methodName, args)
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
 		const grants = this.enforceCapability(methodName, ctx, dappSession)
 		if (grants.length) {
-			// F-005: enforceScopeWithSession includes account-scope-array
-			// validation. Build the approved-accounts set from the session.
+			// enforceScopeWithSession includes account-scope-array validation. Build the
+			// approved-accounts set from the session.
 			// If the session is missing (shouldn't happen when grants.length>0
 			// since enforceCapability would have returned []), fall back to
 			// the plain enforceScope to avoid throwing on the wrong thing.
@@ -1331,7 +1335,8 @@ export class WalletSdkDispatcher {
 		}
 
 		// Phase 1: existing grants/rejections → the delta to negotiate.
-		const plan = computeCapabilityDelta(requestedCapabilities, dappSession)
+		const negotiated = requestedCapabilities.filter((cap) => !grantsNothing(cap))
+		const plan = computeCapabilityDelta(negotiated, dappSession)
 		const requestedAccounts = requestedCapabilities.find((cap) => cap.type === "accounts")
 		if (requestedAccounts !== undefined && grantsOfType(plan.existingGrants, "accounts").length > 0) {
 			await this.applyAccountsWidening(plan, requestedAccounts as unknown as AccountsCapability, ctx, dappSession)
@@ -1352,9 +1357,9 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		const result = await this.askCapabilities(plan, { ...manifest, capabilities: requestedCapabilities }, ctx, dappSession)
+		const result = await this.askCapabilities(plan, { ...manifest, capabilities: negotiated }, ctx, dappSession)
 
-		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
+		// ONE atomic decision: accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
 		// formerly-separate writes, and a concurrent revoke fails cleanly (no
 		// half-written row) instead of collapsing to a bare "Invalid id". Different-type
@@ -1388,6 +1393,7 @@ export class WalletSdkDispatcher {
 			: undefined
 		plan.availableAccounts = availableAccounts
 		const consent = readConsent(dappSession.authorizationsWithoutAsking)
+		const heldAccounts = await this.heldAccountsOf(dappSession, ctx)
 		try {
 			return await this.dappInteractionService.requestCapabilities({
 				sessionId: dappSession.id,
@@ -1395,6 +1401,7 @@ export class WalletSdkDispatcher {
 				delta: plan.delta,
 				existingGrants: plan.existingCaps,
 				heldGrants: plan.existingGrants.map((g) => g.capability),
+				heldAccounts,
 				...(consent !== undefined ? { authorizationsWithoutAsking: consent } : {}),
 				reRequested: reRequestedTypes(plan),
 				availableAccounts,
@@ -1432,6 +1439,20 @@ export class WalletSdkDispatcher {
 		)
 	}
 
+	/** The session's members on its chain, named only by the wallet's own account records: never
+	 *  by a per-app alias or anything the request carries. A member the wallet no longer lists stays,
+	 *  unnamed, so the window never counts two members as one. */
+	private async heldAccountsOf(dappSession: IDappSessionRef, ctx: SessionContext): Promise<Array<{ address: string; name?: string }>> {
+		const members = new Map([...this.getSessionAccountAddresses(dappSession, ctx.chainId)].map((a) => [a.toLowerCase(), a]))
+		if (members.size === 0) return []
+		const named = (await this.accountService.getAccounts(ctx.profileId, ctx.chainId))
+			.filter((acc) => members.has(acc.address.toLowerCase()))
+			.map((acc) => ({ address: acc.address, ...(acc.name ? { name: acc.name } : {}) }))
+		const namedKeys = new Set(named.map((acc) => acc.address.toLowerCase()))
+		const unnamed = [...members].filter(([key]) => !namedKeys.has(key)).map(([, address]) => ({ address }))
+		return [...named, ...unnamed]
+	}
+
 	/** The dApp's chain may be one the user has never activated, so its default account may not
 	 *  exist yet; provisioning it here is what lets the picker list it instead of blocking. The
 	 *  re-read (not the provisioner's result) is what the popup sees — the network switch's pattern. */
@@ -1450,7 +1471,7 @@ export class WalletSdkDispatcher {
 	}
 
 	/** On popup reject/close, persist rejection for all delta items so the next
-	 *  request renders the "previously denied" badge. One atomic decision (B-14),
+	 *  request renders the "previously denied" badge. One atomic decision,
 	 *  and if the row was revoked meanwhile just surface the popup error. */
 	private async persistRejectionOnPopupFailure(sessionId: string, delta: Record<string, unknown>[]): Promise<void> {
 		try {
@@ -1483,7 +1504,7 @@ export class WalletSdkDispatcher {
 		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
 
 		for (const cap of requestedCaps) {
-			if (!grantedTypes.has(cap.type)) continue
+			if (!grantedTypes.has(cap.type) && !grantsNothing(cap)) continue
 
 			if (cap.type === "accounts") {
 				const network = await this.resolveNetwork(ctx)
@@ -1499,11 +1520,8 @@ export class WalletSdkDispatcher {
 					| AccountsCapability
 					| undefined
 
-				// F-003: honor canGet on the GRANT-RESPONSE path. Previously the
-				// accounts list was echoed unconditionally — a dApp could request
-				// `canGet:false` and still receive the full account list in the
-				// grant response (and later via getAccounts because that method
-				// was exempt). Both paths now require `canGet === true`.
+				// Return account identities only when the stored grant permits `canGet`,
+				// matching `getAccounts`.
 				const canGet = storedAccounts?.canGet === true
 				const grantedAccounts = canGet
 					? this.projectSessionAccounts(allAccounts, sessionAddresses, ctx.chainId, dappSession.accountAliases)
@@ -1528,7 +1546,7 @@ export class WalletSdkDispatcher {
 	 * Enforce capability grants before dispatching a method call.
 	 *
 	 * - Exempt methods (getChainInfo, requestCapabilities, batch) skip enforcement.
-	 *   NOTE: getAccounts is NOT exempt — F-003 made it require accounts.canGet=true.
+	 *   NOTE: getAccounts is NOT exempt: it requires accounts.canGet=true.
 	 * - The method's required capability type must be in the session's grants.
 	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
 	 *   so non-exempt methods are blocked until requestCapabilities() is called.
@@ -1544,12 +1562,11 @@ export class WalletSdkDispatcher {
 		if (!requiredType) return [] // Unknown method — let dispatch() handle it
 
 		if (!dappSession) {
-			// F-006: fail-closed when the stored DappSession is missing. Pre-fix,
-			// this returned [] and the dispatcher fell through to the sink with
-			// no grants — network-only methods (getPrivateEvents, getAddressBook,
-			// registerSender, registerContract, getContractMetadata,
-			// getContractClassMetadata) executed unchecked after the user
-			// disconnected the dApp from Settings or after session expiry.
+			// Fail closed when the stored DappSession is missing: returning [] here would
+			// fall through to the sink with no grants, and network-only methods
+			// (getPrivateEvents, getAddressBook, registerSender, registerContract,
+			// getContractMetadata, getContractClassMetadata) would run unchecked after the
+			// user disconnects the dApp in Settings or the session expires.
 			//
 			// Throwing CapabilityNotGrantedError gives the dApp a structured
 			// signal to re-request capabilities (the same path used for
@@ -1569,10 +1586,8 @@ export class WalletSdkDispatcher {
 			// reaching enforceCapability without the required grant type.
 			this.logDebug(`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 			// CapabilityNotGrantedError is the public contract — dApps substring-
-			// match on the error code and message. The plain `Error` form was an
-			// earlier mistake; F-003's removal of `getAccounts` from
-			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
-			// which has an existing CapabilityNotGrantedError-pinned test.
+			// match on the error code and message. getAccounts reaches this path too, since
+			// it is not exempt, and a test pins its CapabilityNotGrantedError.
 			throw new CapabilityNotGrantedError(requiredType)
 		}
 		return grants

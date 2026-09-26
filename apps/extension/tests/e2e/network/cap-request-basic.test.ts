@@ -11,8 +11,8 @@ const hasConfig = aztecConfig !== undefined
  * Test #05 — basic bundle request grants contracts + simulation.
  *
  * Bundle: `basic` = [contracts(*, canRegister, canGetMetadata), simulation(*, *)].
- * Verifies cap-item rows render with the requested types and the
- * requestCapabilities() call settles ok.
+ * Verifies the window draws one row per requested type, keyed by row and typed by capability, and
+ * the requestCapabilities() call settles ok.
  */
 test.skipIf(!hasConfig)(
 	"cap-request-basic — basic bundle approves and grants contracts+simulation",
@@ -32,8 +32,10 @@ test.skipIf(!hasConfig)(
 
 		const popup = await popupP
 		const items = await getCapItems(popup)
-		const ids = items.map((i) => i.id)
-		expect(ids).toEqual(expect.arrayContaining(["contracts", "simulation"]))
+		expect(items.map((i) => ({ row: i.row, id: i.id }))).toEqual([
+			{ row: "simulation", id: "simulation" },
+			{ row: "contracts", id: "contracts" },
+		])
 
 		await approveCapabilities(popup)
 

@@ -16,6 +16,11 @@ const props = defineProps<{
 	switchTestid?: string
 	flagged?: boolean
 	chip?: string
+	/** A quiet fact on the title line, such as a permission declined before. */
+	badge?: string
+	/** A permission the app already holds: its title reads in the secondary colour. */
+	granted?: boolean
+	titleTestid?: string
 	modelValue?: boolean
 }>()
 
@@ -30,11 +35,17 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 </script>
 
 <template>
-	<div :class="[$style.row, flagged && $style.flagged]">
+	<div :class="[$style.row, flagged && $style.flagged, granted && $style.granted]">
 		<MaterialIcon :name="icon" :size="16" :class="$style.icon" aria-hidden="true" />
 
 		<div :class="$style.body">
-			<div :class="$style.title">{{ title }}</div>
+			<div :data-testid="titleTestid" :class="$style.title">
+				<span v-if="badge" :class="$style.title_line">
+					<span>{{ title }}</span>
+					<span data-testid="cap-rerequested-badge" :class="$style.badge">{{ badge }}</span>
+				</span>
+				<template v-else>{{ title }}</template>
+			</div>
 			<div v-if="hasSub" :id="subId" data-testid="cap-row-sub" :class="$style.sub">
 				<slot name="sub" :on="modelValue === true">{{ line }}</slot>
 			</div>
@@ -95,6 +106,10 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	color: var(--txt-primary);
 }
 
+.row.granted .title {
+	color: var(--nulo-secondary);
+}
+
 .sub {
 	margin-top: 2px;
 
@@ -103,23 +118,45 @@ const hasSub = computed(() => line.value !== undefined || slots.sub !== undefine
 	color: var(--nulo-secondary);
 }
 
-.chip {
-	display: inline-flex;
+.title_line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 6px;
+}
+
+.chip,
+.badge {
 	align-items: center;
 	gap: 4px;
-
-	margin-top: 3px;
 
 	font-family: var(--font-headline);
 	font-size: 10px;
 	font-weight: 700;
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
+}
+
+/* Block-level, so its line carries no strut from the inherited font. */
+.chip {
+	display: flex;
+	width: fit-content;
+	margin-top: 3px;
 	color: var(--orange);
+}
+
+.badge {
+	display: inline-flex;
+	color: var(--txt-secondary);
 }
 
 .switch {
 	margin-top: 1px;
+}
+
+/* The drawn switch animates only its colours; two classes outrank the primitive's `all`. */
+.row .switch {
+	transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 /* Two classes outrank the primitive's `.wrapper:focus { outline: none }` whatever the order. */

@@ -11,7 +11,7 @@ import { h, withDirectives } from "vue"
 import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
-const routeMeta: { showBottomNav?: boolean } = {}
+const routeMeta: { showBottomNav?: boolean; fillsWindow?: boolean } = {}
 let routeName: string | undefined
 
 vi.mock("vue-router", async () => {
@@ -36,6 +36,7 @@ describe("ui/ToastManager (wrapper → @nulo/design ToastManagerBase)", () => {
 		document.body.appendChild(toastRoot)
 		useToast().closeToast()
 		routeMeta.showBottomNav = undefined
+		routeMeta.fillsWindow = undefined
 		routeName = undefined
 	})
 
@@ -71,17 +72,18 @@ describe("ui/ToastManager (wrapper → @nulo/design ToastManagerBase)", () => {
 	})
 
 	test.each([
-		["windows-execute", true],
-		["windows-discover", true],
-		["windows-capabilities", true],
-		["windows-verify", true],
-		["windows-passkey", true],
-		["windows-json", false],
-		["windows-logger", false],
-		["popup-general", false],
-		["onboarding-welcome", false],
-	])("on %s the card spans the content column: %s", (name, inColumn) => {
+		["windows-execute", false, true],
+		["windows-discover", false, true],
+		["windows-capabilities", true, false],
+		["windows-verify", false, true],
+		["windows-passkey", false, true],
+		["windows-json", false, false],
+		["windows-logger", false, false],
+		["popup-general", false, false],
+		["onboarding-welcome", false, false],
+	])("on %s, filling its window: %s, the card spans the content column: %s", (name, fillsWindow, inColumn) => {
 		routeName = name
+		routeMeta.fillsWindow = fillsWindow
 		mount(ToastManager, { attachTo: document.body })
 		expect(/in_column/.test((toastRoot.firstElementChild as HTMLElement).className)).toBe(inColumn)
 	})

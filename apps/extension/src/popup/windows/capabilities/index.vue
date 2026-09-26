@@ -1,3 +1,11 @@
+<route lang="json">
+{
+	"meta": {
+		"fillsWindow": true
+	}
+}
+</route>
+
 <script setup lang="ts">
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
@@ -7,24 +15,30 @@ import DappStatusStrip from "@/components/composite/DappStatusStrip.vue"
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
 import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
-import CapabilityCard from "./CapabilityCard.vue"
+import CapabilityDisclosure from "@/components/composite/capabilities/CapabilityDisclosure.vue"
+import DetailsTable from "@/components/composite/capabilities/DetailsTable.vue"
 import AccountSelectRow from "./AccountSelectRow.vue"
+import PermissionGroup from "./PermissionGroup.vue"
 
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { requireNetwork } from "@/utils/core"
-import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type UICapabilityItem } from "./build-items"
+import { copyWithToast } from "@/utils/clipboard"
+import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type WindowRow } from "./build-items"
 import { resolveDappChain } from "./chain-mismatch"
+import { buildDetailsTable } from "./details-table"
+import { accountAddressRow, GROUP_LABELS, GROUP_ORDER, type PermissionRowEntry } from "./permission-rows"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type CapabilityPayload, DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
-import type { Capability } from "@nulo/wallet-bridge"
+import { type Capability, effectiveGrants } from "@nulo/wallet-bridge"
 
 /** Composables */
+import { useToast } from "@/composables/toast"
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
@@ -37,10 +51,12 @@ type UIAccount = { address: string; name: string; chainId: number }
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
+const { openToast } = useToast()
+
 const router = useRouter()
 
 const profile = ref<ProfileInfo>()
-const capabilities = ref<UICapabilityItem[]>([])
+const rows = ref<WindowRow[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
@@ -67,19 +83,20 @@ const noAccountsAvailable = ref(false)
 const dappChain = computed(() =>
 	payload.value ? resolveDappChain(payload.value.session.chainId, appStore.networks, appStore.network?.chainId) : undefined,
 )
+const chainName = computed(() => dappChain.value?.name ?? "this network")
 const isSwitching = ref(false)
 // The chain the user switched to from THIS window. The done banner shows only while it is still
 // the active one; a later switch elsewhere brings the invitation back.
 const switchedTo = ref<number>()
 
 const isLoading = ref(false)
-const expandedCards = ref(new Set<number>())
 
-// Flips once init() has the payload AND the cards: before that, Approve would grant an empty set.
+// Flips once init() has the payload AND the rows: before that, Connect would grant an empty set.
 const initComplete = ref(false)
 
-// "Approve as is" is only offered where approving is possible: not before init lands (no chain
-// known yet), not on a hard error. The footer's own holds (a running switch, a submit) are momentary.
+// The banner's "as is" is only offered where the footer's button can act: not before init lands
+// (no chain known yet), not on a hard error. The footer's own holds (a running switch, a submit)
+// are momentary.
 const chainBannerState = computed(() => {
 	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
 	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
@@ -130,11 +147,6 @@ const {
 	reject: () => reject(),
 })
 
-const toggleExpand = (index: number) => {
-	if (expandedCards.value.has(index)) expandedCards.value.delete(index)
-	else expandedCards.value.add(index)
-}
-
 const init = async () => {
 	try {
 		profile.value = await profileService.getActiveProfile()
@@ -158,8 +170,8 @@ const init = async () => {
 			}
 		}
 
-		capabilities.value = buildCapabilityItems(windowParams(payload.value.params))
-		// Only flip after capabilities are committed to state. If init throws
+		rows.value = buildCapabilityItems(windowParams(payload.value.params))
+		// Only flip after the rows are committed to state. If init throws
 		// or the popup is cancelled mid-flight, the approve gate stays closed.
 		initComplete.value = true
 	} catch (error) {
@@ -168,7 +180,7 @@ const init = async () => {
 	}
 }
 
-/** Everything the cards start from is the dispatch snapshot in `params`, never `payload.session`,
+/** Everything the rows start from is the dispatch snapshot in `params`, never `payload.session`,
  *  which is re-read after the snapshot and may already hold a later Settings write. */
 const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowParams => {
 	const existingGrants = params.existingGrants as Capability[]
@@ -179,8 +191,54 @@ const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowPara
 		reRequested: new Set(params.reRequested ?? []),
 		accountsMembershipOnly: params.accountsMembershipOnly === true,
 		consent: params.authorizationsWithoutAsking,
+		networkName: chainName.value,
+		heldAccounts: params.heldAccounts ?? [],
 	}
 }
+
+/** A new address row names the selection, not the session: it follows each click. */
+const shownEntry = (row: WindowRow): PermissionRowEntry =>
+	row.isNew && row.entry.key === "account-address" ? accountAddressRow(selectedAccounts.value) : row.entry
+
+const groupsOf = (list: WindowRow[]) =>
+	GROUP_ORDER.map((group) => ({
+		group,
+		rows: list
+			.filter((row) => row.entry.group === group)
+			.map((row) => ({
+				entry: shownEntry(row),
+				capId: row.capId,
+				line: currentLine(row),
+				badge: row.reRequested ? "previously denied" : undefined,
+				selected: row.selected,
+			})),
+	})).filter((entry) => entry.rows.length > 0)
+
+const newGroups = computed(() => groupsOf(rows.value.filter((row) => row.isNew)))
+const heldGroups = computed(() => groupsOf(rows.value.filter((row) => !row.isNew)))
+const heldCount = computed(() => rows.value.filter((row) => !row.isNew).length)
+
+/** An app that already holds a row asks for more: "Allow" what's new, not "Connect". */
+const asksForMore = computed(() => heldCount.value > 0)
+const confirmWord = computed(() => (asksForMore.value ? "Allow" : "Connect"))
+
+const setSwitch = (key: string, on: boolean) => {
+	const row = rows.value.find((candidate) => candidate.isNew && candidate.entry.key === key)
+	if (row) row.selected = on
+}
+
+/** Names come only from the wallet's list in the snapshot; the request never names a contract.
+ *  Grants that reach no contract show no Details: its table would list nothing. */
+const detailsTable = computed(() => {
+	if (!payload.value) return undefined
+	const params = windowParams(payload.value.params)
+	const table = buildDetailsTable(effectiveGrants(params.heldGrants, params.delta), payload.value.params.knownContracts ?? [])
+	return table.known.length > 0 || table.unknown.length > 0 || table.anyContract ? table : undefined
+})
+
+const recognizesNoContract = computed(() => detailsTable.value?.known.length === 0 && detailsTable.value.unknown.length > 0)
+
+const copyAddress = (address: string) => void copyWithToast(address, openToast, "Address is copied", { sanitize: true })
 
 /** `availableAccounts` and `grantedAccounts` are both wallet-derived (never dApp-supplied), so
  *  there is no path for a malicious dApp to inject a phantom account or a phantom lock here. */
@@ -198,11 +256,6 @@ const initAccountPicker = (params: CapabilityPayload["params"]) => {
 
 const isAccountGranted = (account: UIAccount) => grantedAccountSet.value.has(account.address.toLowerCase())
 
-const toggleCapability = (index: number) => {
-	const cap = capabilities.value[index]
-	if (cap.isNew && cap.switchLabel) cap.selected = !cap.selected
-}
-
 const selectAccount = (account: UIAccount) => {
 	if (isAccountGranted(account)) return
 	if (processingError.value?.type === "warning") clearError()
@@ -216,7 +269,7 @@ const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((a
 const decideGrant = () => {
 	const params = windowParams(payload.value!.params)
 	return buildGrant({
-		items: capabilities.value,
+		rows: rows.value,
 		delta: params.delta,
 		existingGrants: params.existingGrants,
 		heldGrants: params.heldGrants,
@@ -326,12 +379,12 @@ onUnmounted(disposeWindow)
 			:status="stripStatus"
 		/>
 
-		<Flex direction="column" :class="$style.scroll_area">
+		<Flex direction="column" data-testid="cap-scroll-area" :class="$style.scroll_area">
 			<DappIdentityBlock
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				:actionLabel="dappChain ? `is requesting permissions on ${dappChain.name}` : 'is requesting permissions'"
+				:actionLabel="asksForMore ? `wants more permissions on ${chainName}` : `wants to connect on ${chainName}`"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
@@ -352,13 +405,13 @@ onUnmounted(disposeWindow)
 					<template v-else #title>Connecting on {{ dappChain.name }}</template>
 					<template v-if="chainBannerState === 'switched'" #description>Balances and activity now follow {{ dappChain.name }}.</template>
 					<template v-else #description>
-						Your wallet is on {{ appStore.network?.name }}. Approve as is, or switch to see {{ dappChain.name }} balances.
+						Your wallet is on {{ appStore.network?.name }}. {{ confirmWord }} as is, or switch to see {{ dappChain.name }} balances.
 					</template>
 				</Banner>
 
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel
-						:label="grantedAccountSet.size > 0 ? 'Add accounts to share' : 'Select accounts to share'"
+						:label="availableAccounts.length === 1 ? 'Account to share' : 'Accounts to share'"
 						:count="availableAccounts.length"
 					/>
 
@@ -377,57 +430,31 @@ onUnmounted(disposeWindow)
 					</ItemsContainer>
 				</Flex>
 
-				<Flex v-if="capabilities.filter(c => c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="New permissions requested" :count="capabilities.filter(c => c.isNew).length" />
+				<PermissionGroup
+					v-for="{ group, rows: groupRows } in newGroups"
+					:key="group"
+					:data-cap-group="group"
+					:label="GROUP_LABELS[group]"
+					:rows="groupRows"
+					@toggle="setSwitch"
+				/>
 
-					<Flex direction="column" gap="6" wide>
-						<CapabilityCard
-							v-for="(cap, i) in capabilities"
-							v-show="cap.isNew"
-							:key="`new-${i}`"
-							:capability="cap.capability"
-							:panelCapabilities="cap.panelCapabilities"
-							:rowKey="cap.rowKey"
-							:capId="cap.capId"
-							:label="cap.label"
-							:description="currentLine(cap)"
-							:risk="cap.risk"
-							:selected="cap.selected"
-							:granted="false"
-							:expanded="expandedCards.has(i)"
-							:switchLabel="cap.switchLabel"
-							:reRequested="cap.reRequested"
-							:isUnknown="cap.isUnknown"
-							:disabled="isLoading || processingError?.type === 'error'"
-							@toggleExpanded="toggleExpand(i)"
-							@toggleSelected="toggleCapability(i)"
-						/>
-					</Flex>
-				</Flex>
+				<CapabilityDisclosure v-if="asksForMore" label="Already allowed" :tag="String(heldCount)" testid="cap-already-allowed">
+					<PermissionGroup
+						v-for="{ group, rows: groupRows } in heldGroups"
+						:key="group"
+						:data-cap-group="group"
+						:label="GROUP_LABELS[group]"
+						:rows="groupRows"
+						granted
+					/>
+				</CapabilityDisclosure>
 
-				<Flex v-if="capabilities.filter(c => !c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="Already granted" :count="capabilities.filter(c => !c.isNew).length" />
+				<div v-if="recognizesNoContract" data-testid="cap-unknown-contracts-note" :class="$style.note">
+					Nulo doesn't recognize any of its contracts.
+				</div>
 
-					<Flex direction="column" gap="6" wide>
-						<CapabilityCard
-							v-for="(cap, i) in capabilities"
-							v-show="!cap.isNew"
-							:key="`existing-${i}`"
-							:capability="cap.capability"
-							:panelCapabilities="cap.panelCapabilities"
-							:rowKey="cap.rowKey"
-							:capId="cap.capId"
-							:label="cap.label"
-							:description="currentLine(cap)"
-							:risk="cap.risk"
-							:selected="cap.selected"
-							granted
-							:expanded="expandedCards.has(i)"
-							:isUnknown="cap.isUnknown"
-							@toggleExpanded="toggleExpand(i)"
-						/>
-					</Flex>
-				</Flex>
+				<DetailsTable v-if="detailsTable" v-bind="detailsTable" @copy="copyAddress" />
 			</Flex>
 		</Flex>
 
@@ -438,7 +465,7 @@ onUnmounted(disposeWindow)
 			reject-label="Reject"
 			:reject-disabled="isLoading || isSwitching || !requestId"
 			confirm-testid="cap-approve-btn"
-			confirm-label="Approve"
+			:confirm-label="confirmWord"
 			:confirm-loading="isLoading"
 			:confirm-disabled="isLoading || isSwitching || processingError?.type === 'error' || !initComplete"
 			@reject="reject"
@@ -464,6 +491,16 @@ onUnmounted(disposeWindow)
 
 .sections {
 	padding: 16px;
+}
+
+.note {
+	padding: 10px 12px;
+	border: 1px solid var(--nulo-border);
+	background: var(--nulo-surface-low);
+
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--nulo-secondary);
 }
 
 </style>

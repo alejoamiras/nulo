@@ -125,4 +125,45 @@ describe("composite/DottedTerm", () => {
 		expect(tooltip.props("inline")).toBe(true)
 		expect(tooltip.classes()).toHaveLength(2)
 	})
+
+	describe("the action variant", () => {
+		const STYLE = (DottedTerm as unknown as { __cssModules: { $style: Record<string, string> } }).__cssModules.$style
+		const mountAction = () => mountTerm({ term: "name-for-this-app", testid: "rename", action: true }, "Rename for this app")
+
+		test("is a button that emits click with its event", async () => {
+			const w = mountAction()
+			const button = w.get('[data-testid="rename"]')
+			expect(button.element.tagName).toBe("BUTTON")
+			expect(button.attributes("type")).toBe("button")
+			expect(button.text()).toBe("Rename for this app")
+			await button.trigger("click")
+			expect(w.emitted("click")).toHaveLength(1)
+			expect(w.emitted("click")?.[0]?.[0]).toBeInstanceOf(MouseEvent)
+		})
+
+		test("keeps the hidden definition it is described by", () => {
+			const w = mountAction()
+			const id = w.get('[data-testid="rename"]').attributes("aria-describedby")
+			expect(document.getElementById(id as string)?.textContent).toBe(GLOSSARY["name-for-this-app"].definition)
+		})
+
+		test("carries the class that pads its hit area to 24px (the size is a browser check)", () => {
+			expect(mountAction().get('[data-testid="rename"]').classes()).toEqual([STYLE.action])
+		})
+
+		test("inside the real Tooltip, neither Enter nor Space has its default cancelled", () => {
+			const button = mountAction().get('[data-testid="rename"]').element
+			for (const key of ["Enter", " "]) {
+				const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+				button.dispatchEvent(event)
+				expect(event.defaultPrevented).toBe(false)
+			}
+		})
+
+		test("without it the term stays the span", () => {
+			const w = mountTerm()
+			expect(w.find("button").exists()).toBe(false)
+			expect(w.get('[data-testid="term"]').classes()).toEqual([STYLE.term])
+		})
+	})
 })

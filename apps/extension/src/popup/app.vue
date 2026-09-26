@@ -12,6 +12,7 @@ import { resolveBootSession } from "./boot-session"
 import { decideLockLanding, decideUnreachableLanding } from "./lock-landing"
 import { reconcileLockedBoot } from "./reconcile-locked-boot"
 import { applyBootOutcome } from "./apply-boot-outcome"
+import { applyRootFlags } from "./root-flags"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
@@ -54,12 +55,9 @@ import LogoIcon from "@/assets/logo.svg?raw"
 const route = useRoute()
 const router = useRouter()
 
-/** Set data-has-nav on <html> so pages can use var(--nav-clearance) for bottom padding */
 watch(
-	() => route.meta.showBottomNav,
-	(showBottomNav) => {
-		root.setAttribute("data-has-nav", showBottomNav ? "true" : "false")
-	},
+	() => route.meta,
+	(meta) => applyRootFlags(root, meta),
 	{ immediate: true },
 )
 

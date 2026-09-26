@@ -1,5 +1,5 @@
-import { describe, expect, test, vi } from "vitest"
-import { mount } from "@vue/test-utils"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
 import AccountSelectRow from "./AccountSelectRow.vue"
 
 vi.mock("@/components/ui/utils.js", () => ({
@@ -10,6 +10,8 @@ vi.mock("@/wallet/utils/caip", () => ({
 	formatCaipAccount: (chainId: number, address: string) => `aztec:${chainId}:${address}`,
 }))
 
+enableAutoUnmount(afterEach)
+
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Text: { template: "<span><slot /></span>" },
@@ -17,117 +19,163 @@ const STUBS = {
 	Tooltip: { template: "<div><slot /></div>" },
 }
 
-const baseAccount = { address: "0x1234567890abcdef", name: "Alpha", chainId: 1 }
+// Wire-shaped: 0x + 64 hex, below the field modulus.
+const baseAccount = { address: `0x${"0a".repeat(32)}`, name: "Alpha", chainId: 1 }
 
 const factory = (props: Record<string, unknown> = {}) =>
 	mount(AccountSelectRow, {
 		props: { account: baseAccount, selected: false, ...props },
+		attachTo: document.body,
 		global: { stubs: STUBS },
 	})
 
+type Row = ReturnType<typeof factory>
+const root = (w: Row) => w.get('[data-testid="cap-account-item"]')
+const target = (w: Row) => w.get("[data-row-target]")
+const rename = (w: Row) => w.find('[data-testid="cap-account-rename-btn"]')
+const field = (w: Row) => w.find('[data-testid="cap-account-alias-input"]')
+
 describe("AccountSelectRow", () => {
-	test("preserves the canonical testids + data attributes", () => {
+	test("keeps the canonical testid and data attributes on the root", () => {
 		const w = factory()
-		const row = w.find('[data-testid="cap-account-item"]')
-		expect(row.attributes("data-account-id")).toBe("0x1234567890abcdef")
-		expect(row.attributes("data-account-name")).toBe("Alpha")
+		expect(root(w).attributes("data-account-id")).toBe(baseAccount.address)
+		expect(root(w).attributes("data-account-name")).toBe("Alpha")
 	})
 
-	test("exposes data-selected when selected so e2e helpers can be idempotent", () => {
-		const unselected = factory({ selected: false })
-		expect(unselected.find('[data-testid="cap-account-item"]').attributes("data-selected")).toBeUndefined()
-		const selected = factory({ selected: true })
-		expect(selected.find('[data-testid="cap-account-item"]').attributes("data-selected")).toBe("true")
+	test("marks the selection on the root, so e2e helpers can be idempotent", () => {
+		expect(root(factory({ selected: false })).attributes("data-selected")).toBeUndefined()
+		expect(root(factory({ selected: true })).attributes("data-selected")).toBe("true")
 	})
 
-	test("renders the truncated address", () => {
-		const w = factory()
-		expect(w.text()).toContain("0x1234...cdef")
-	})
-
-	test("renders the uppercased chain label", () => {
+	test("shows the name, the uppercased chain and the trimmed address", () => {
 		const w = factory({ account: { ...baseAccount, chainId: 7 } })
+		expect(w.text()).toContain("Alpha")
 		expect(w.text()).toContain("CHAIN-7")
+		expect(w.text()).toContain("0x0a0a...0a0a")
 	})
 
-	test("alias block hidden when not selected", () => {
+	test("selects through its target: a click toggles, and aria-pressed follows the selection", async () => {
+		const w = factory()
+		expect(target(w).attributes("aria-pressed")).toBe("false")
+		await target(w).trigger("click")
+		expect(w.emitted("toggle")).toHaveLength(1)
+		expect(target(factory({ selected: true })).attributes("aria-pressed")).toBe("true")
+	})
+
+	test("Enter and Space are the target's own: a native button, and nothing cancels either key", () => {
+		const w = factory()
+		const button = target(w).element as HTMLButtonElement
+		expect(button.tagName).toBe("BUTTON")
+		expect(button.type).toBe("button")
+		expect(button.hasAttribute("tabindex")).toBe(false)
+		for (const key of ["Enter", " "]) {
+			const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+			button.dispatchEvent(event)
+			expect(event.defaultPrevented).toBe(false)
+		}
+	})
+
+	test("the target is named by the account's name", () => {
+		const w = factory()
+		expect(document.getElementById(target(w).attributes("aria-labelledby") as string)?.textContent).toBe("Alpha")
+	})
+
+	test("no control sits inside another", async () => {
+		const w = factory({ selected: true })
+		await rename(w).trigger("click")
+		expect(root(w).attributes("role")).toBeUndefined()
+		expect(root(w).attributes("tabindex")).toBeUndefined()
+		expect(target(w).element.children).toHaveLength(0)
+		expect(w.findAll("button button, button input, [role='button'] button, [role='button'] input")).toHaveLength(0)
+	})
+
+	test("a selected row shows the rename link; the field comes only once it is pressed, prefilled and focused", async () => {
+		const w = factory({ selected: true })
+		expect(rename(w).text()).toBe("Rename for this app")
+		expect(field(w).exists()).toBe(false)
+		await rename(w).trigger("click")
+		await flushPromises()
+		expect(rename(w).exists()).toBe(false)
+		expect((field(w).element as HTMLInputElement).value).toBe("Alpha")
+		expect(document.activeElement).toBe(field(w).element)
+		expect(w.get(`label[for="${field(w).attributes("id")}"]`).text()).toBe("Name for this app")
+	})
+
+	test("pressing the link, then clicking in the field, leaves the selection as it was", async () => {
+		const w = factory({ selected: true })
+		await rename(w).trigger("click")
+		await field(w).trigger("click")
+		expect(w.emitted("toggle")).toBeUndefined()
+	})
+
+	test("an unselected row has neither the link nor the field", () => {
 		const w = factory({ selected: false })
-		expect(w.find('[data-testid="cap-account-alias-input"]').exists()).toBe(false)
+		expect(rename(w).exists()).toBe(false)
+		expect(field(w).exists()).toBe(false)
 	})
 
-	test("alias block visible when selected", () => {
-		const w = factory({ selected: true })
-		expect(w.find('[data-testid="cap-account-alias-input"]').exists()).toBe(true)
-	})
-
-	test("the alias ⓘ's tooltip centres on the ⓘ", () => {
-		const w = factory({ selected: true })
-		expect(w.get('[data-name="info"]').element.parentElement?.getAttribute("position")).toBe("center")
-	})
-
-	test("alias input defaults to account name", () => {
-		const w = factory({ selected: true })
-		expect(w.find('[data-testid="cap-account-alias-input"]').attributes("value")).toBe("Alpha")
-	})
-
-	test("alias input uses the alias prop when provided", () => {
+	test("the field shows the alias the parent holds, and typing sends the account's caip with the value", async () => {
 		const w = factory({ selected: true, alias: "Custom" })
-		expect(w.find('[data-testid="cap-account-alias-input"]').attributes("value")).toBe("Custom")
+		await rename(w).trigger("click")
+		expect((field(w).element as HTMLInputElement).value).toBe("Custom")
+		await field(w).setValue("MyAlias")
+		expect(w.emitted("updateAlias")).toEqual([[`aztec:1:${baseAccount.address}`, "MyAlias"]])
 	})
 
-	test("clicking the row emits 'toggle'", async () => {
-		const w = factory()
-		await w.find('[data-testid="cap-account-item"]').trigger("click")
-		expect(w.emitted("toggle")).toHaveLength(1)
-	})
-
-	test("Enter key on the row emits 'toggle'", async () => {
-		const w = factory()
-		await w.find('[data-testid="cap-account-item"]').trigger("keydown.enter")
-		expect(w.emitted("toggle")).toHaveLength(1)
-	})
-
-	test("typing in the alias input emits updateAlias(caip, value)", async () => {
+	test("once pressed, the field stays open, emptied or deselected and selected again", async () => {
 		const w = factory({ selected: true })
-		await w.find('[data-testid="cap-account-alias-input"]').setValue("MyAlias")
-		const evt = w.emitted("updateAlias")?.[0]
-		expect(evt?.[0]).toBe("aztec:1:0x1234567890abcdef")
-		expect(evt?.[1]).toBe("MyAlias")
+		await rename(w).trigger("click")
+		await field(w).setValue("")
+		expect(field(w).exists()).toBe(true)
+		await w.setProps({ selected: false })
+		expect(field(w).exists()).toBe(false)
+		await w.setProps({ selected: true })
+		expect(field(w).exists()).toBe(true)
+		expect(rename(w).exists()).toBe(false)
 	})
 
-	test("disabled=true blocks interactions visually (row_disabled class)", () => {
+	test("no Alias label and no ⓘ", async () => {
+		const w = factory({ selected: true })
+		await rename(w).trigger("click")
+		expect(w.text()).not.toContain("Alias")
+		expect(w.find('[data-name="info"]').exists()).toBe(false)
+	})
+
+	test("a disabled row: its target out of the Tab order and aria-disabled, a click ignored, the row dimmed", async () => {
 		const w = factory({ disabled: true })
-		const cls = w.find('[data-testid="cap-account-item"]').attributes("class") || ""
-		expect(cls).toContain("row_disabled")
-	})
-
-	test("Space on the row emits 'toggle'", async () => {
-		const w = factory()
-		await w.find('[data-testid="cap-account-item"]').trigger("keydown.space")
-		expect(w.emitted("toggle")).toHaveLength(1)
-	})
-
-	test("disabled=true also blocks keyboard toggles", async () => {
-		const w = factory({ disabled: true })
-		const row = w.find('[data-testid="cap-account-item"]')
-		await row.trigger("keydown.enter")
-		await row.trigger("keydown.space")
+		expect(target(w).attributes("tabindex")).toBe("-1")
+		expect(target(w).attributes("aria-disabled")).toBe("true")
+		expect(root(w).attributes("class")).toContain("row_disabled")
+		await target(w).trigger("click")
 		expect(w.emitted("toggle")).toBeUndefined()
-		expect(row.attributes("tabindex")).toBe("-1")
 	})
 
-	test("locked row: marked granted, out of the tab order, ignores click / Enter / Space, hides the alias input", async () => {
+	test("a selected, disabled row: its link aria-disabled and out of the Tab order, and pressing it opens no field", async () => {
+		const enabled = rename(factory({ selected: true }))
+		expect(enabled.attributes("aria-disabled")).toBeUndefined()
+		expect(enabled.attributes("tabindex")).toBeUndefined()
+		const w = factory({ selected: true, disabled: true })
+		expect(rename(w).attributes("aria-disabled")).toBe("true")
+		expect(rename(w).attributes("tabindex")).toBe("-1")
+		// A native button, so Enter on it is this click.
+		expect((rename(w).element as HTMLButtonElement).type).toBe("button")
+		await rename(w).trigger("click")
+		await flushPromises()
+		expect(field(w).exists()).toBe(false)
+		expect(rename(w).exists()).toBe(true)
+	})
+
+	test("a locked row: granted and selected, its target out of the Tab order and aria-disabled, no link, SHARED", async () => {
 		const w = factory({ selected: true, locked: true })
-		const row = w.find('[data-testid="cap-account-item"]')
-		expect(row.attributes("data-granted")).toBe("true")
-		expect(row.attributes("data-selected")).toBe("true")
-		expect(row.attributes("aria-disabled")).toBe("true")
-		expect(row.attributes("tabindex")).toBe("-1")
-		await row.trigger("click")
-		await row.trigger("keydown.enter")
-		await row.trigger("keydown.space")
+		expect(root(w).attributes("data-granted")).toBe("true")
+		expect(root(w).attributes("data-selected")).toBe("true")
+		expect(target(w).attributes("tabindex")).toBe("-1")
+		expect(target(w).attributes("aria-disabled")).toBe("true")
+		expect(target(w).attributes("aria-pressed")).toBe("true")
+		await target(w).trigger("click")
 		expect(w.emitted("toggle")).toBeUndefined()
-		expect(w.find('[data-testid="cap-account-alias-input"]').exists()).toBe(false)
+		expect(rename(w).exists()).toBe(false)
+		expect(field(w).exists()).toBe(false)
 		expect(w.text()).toContain("SHARED")
 	})
 })

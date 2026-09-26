@@ -42,6 +42,7 @@ A classic window handle and a BiDi browsing-context id are the same string in Fi
 | The popup's `window.close()` is **honoured** on a tab no script opened (Chrome ignores it). | The launch fixture's scratch page dies under it on a fresh profile. | `openScratchPage` settles a fresh profile through the onboarding page instead. |
 | Content-script **match patterns count as host permissions**. The wallet's content script matches every site. | `tabs.onUpdated` delivers `changeInfo.url` for ordinary origins, which Chrome withholds. | Not absorbed — it is real product behaviour. `network/session-tabNavigate.test.ts` pins both sides. |
 | Keys typed over BiDi dispatch an element's listeners **with no microtask checkpoint between them**. | Code that writes reactive state in one `input` listener and re-reads it in the next sees the old value. | Fixed in the product (`AmountCard`'s handler reads the input's own value and writes the model once). Treat a Firefox-only typing failure as this until shown otherwise. |
+| Puppeteer's BiDi keyboard (puppeteer-core 25.8.0) translates key names through its own table, and **`"Space"` is not in it**. | `keyboard.press("Space")` throws `Unknown key: "Space"`; Chrome's CDP layout knows the name, so the same spec passes there. | Specs press the character itself, `keyboard.press(" ")`, which CDP maps to the `Space` code, so one spelling serves both browsers. |
 
 ## Artifact mode (the release and nightly smokes)
 
