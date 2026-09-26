@@ -299,3 +299,10 @@ drawing's:
 It accepted the footer and U6 as the arc's scope keeps them, and the dividers and Firefox's
 chevrons as deviations for the owner, not signed off; the parity page lists both as such. The loop
 closes at three rounds.
+
+## The parity page
+
+Published at https://claude.ai/artifact/WBSu4JhW9ztuiMMczM8N3f.
+It places every capture beside its drawing in both browsers, with the second reader's defects,
+the reason each stays, and the questions for the owner. P10 and batch 5's row take their check
+marks with it; the Firefox canary row stays open for CI.
