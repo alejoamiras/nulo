@@ -207,3 +207,95 @@ comments and test titles. It read the committed files and ran nothing. Its verdi
 
 Finding 1 stays deferred: codex keeps the concern, since Details can advertise an operation that
 enforcement refuses, and accepts that it goes to the program's follow-ups at the stack move.
+
+## On the stack
+
+The arc moved onto arc 5a's final tip, then with the whole stack onto `origin/dev` at `b15f5218`
+(`../../lessons/final-pass.md`). The move brought the snack change phase-9.md held for it
+(`c8d662d7`): the window's route sets `fillsWindow`, and ToastManager spans such a route's window
+as it does the JSON and logger windows, so the window's snack takes the popup's 368px. The SHAs
+above this section predate the move; each commit kept its subject.
+
+### The parity page's second reader, and the fold fix
+
+A second, independent reader compared every capture with its drawing pixel by pixel. It listed 27
+defects:
+- 2 lines were one real defect. In the opened "Already allowed" fold (A-12's `06-fold-open-A12`,
+  A-30's `06-declined-A30`), every held row's title rendered primary, (245,240,230), where the
+  drawing's are secondary, (153,145,135). The mock's `.n-perm-t` sets no colour and inherits
+  `.n-detail-panel`'s `--nulo-secondary`, while `PermissionRow`'s title hard-coded
+  `--txt-primary`. `d893ae95` gives `PermissionRow` a `granted` prop, which only the fold's group
+  passes. `color: inherit` was rejected: `base.css`'s body sets no colour, so every other context
+  would lose its primary. Each of the two new tests fails with its half of the fix removed.
+  Recaptured at `d893ae95` in both browsers, every held title is (153,145,135) and the new rows'
+  (245,240,230); row geometry is unchanged (Chrome 0, Firefox the same ±0.01px glyph offsets).
+- 14 are the footer's split, 1px left of the drawing. `DappApprovalFooter` sizes its buttons by
+  content, the mock by `flex: 1`, and this arc keeps that footer as it is.
+- 8 are the account rows' dividers, 1px higher than drawn: an `::after` on each row's bottom edge,
+  present at the program's base.
+- 3 are U6's body, which the spec keeps "as today".
+
+Its 51 "uncertain" lines are the logo's fallback glyph and 1px ink offsets; the measured boxes on
+those rows land within 0.01px.
+
+### The snacks
+
+Captured at `8e2d7eee` in both browsers:
+- A-23's copy snack. A-23 draws no snack, so the card is compared with batch 4's drawn card and
+  its rule: 16px from each side and 12px above the approval footer, as drawn. It is 368px wide in
+  the 400px window, where batch 4 draws its card in the 360px popup (328px), and 42px tall
+  against 58px, because batch 4's drawn card carries a sub line and View.
+- A-28's error snack. No Settings write fails on a real path, so the page's own error snack after
+  a failed copy stands in: 328×50 in the 360px popup, 12px above the bottom. The drawing's 400px
+  crop has 368×50, 16px above its bottom. The width is the frame's; the gap is batch 4's placement
+  for a page with neither the nav nor a bottom row (1c), listed on the parity page for the owner.
+
+### P10.2 to P10.6 at `d893ae95`
+
+Two clean detached checkouts at `d893ae95`, every e2e file at retry 0: Chrome prover on, with the
+`@requires-proverless` files run proverless, and Firefox proverless. The flake bar is `cap-window`
+and the three network files P9 changed (`cap-request-accounts`, `cap-request-basic`,
+`cap-request-rerequest`), three runs each.
+
+| Step | Chrome | Firefox |
+|---|---|---|
+| `bun run lint` | exit 0 (1 s) | not browser-bound |
+| `bun run typecheck:all` | exit 0 (39 s) | not browser-bound |
+| `bun run test:all` | exit 0 (109 s) | not browser-bound |
+| `bun run test:ci-gating` | exit 0 (33 s) | not browser-bound |
+| `bun run build` | exit 0 (8 s) | not browser-bound |
+| `bun run --cwd apps/extension build-storybook` | exit 0 (7 s) | not browser-bound |
+| Network suite, retry 0, 102 files | prover on: exit 0; files 92 passed, 3 skipped of 95; tests 132 passed, 5 skipped of 137 (3,493 s). The 7 `@requires-proverless` files, proverless: exit 0; files 7 passed of 7; tests 18 passed of 18 (853 s) | proverless: exit 0; files 99 passed, 3 skipped of 102; tests 148 passed, 7 skipped of 155 (4,364 s) |
+| Smoke (its build exit 0 / 0) | exit 0; files 38 passed, 3 skipped of 41; tests 157 passed, 7 skipped of 164 (827 s) | exit 0; files 39 passed, 2 skipped of 41; tests 153 passed, 11 skipped of 164 (1,074 s) |
+| Flake bar, run 1 | exit 0; files 4 passed of 4; tests 8 passed of 8 (146 s) | exit 0; files 4 passed of 4; tests 7 passed, 1 skipped of 8 (169 s) |
+| Flake bar, run 2 | exit 0; files 4 passed of 4; tests 8 passed of 8 (147 s) | exit 0; files 4 passed of 4; tests 7 passed, 1 skipped of 8 (171 s) |
+| Flake bar, run 3 | exit 0; files 4 passed of 4; tests 8 passed of 8 (148 s) | exit 0; files 4 passed of 4; tests 7 passed, 1 skipped of 8 (170 s) |
+| `bun run e2e:reap` | exit 0 | exit 0 |
+
+`cap-window` and `window-placement` passed in both browsers, and both execution canaries
+(`frozen-account-canary`, `passkey-execution-canary`) passed prover on inside Chrome's network
+suite. The Firefox canaries stay open until CI's `Firefox / Run / canary / real-proving` job on
+the stack top's head shows the substantive tests passed, retry 0, with Presto enforced and native
+proofs in the server log. The restack after the gate changed only `implementations-plan/`: outside
+it, the stack top's tree is `d893ae95`'s.
+
+### Codex round 3
+
+The fold fix is code after round 2's approval, so it took this loop's round 3 and the final
+pass's round 3. The first attempt failed: both resumed sessions (`01a0da5d-…`, this loop's, and
+`01a0da9a-…`, the final pass's), running at once on one roster account, stopped mid-run with
+`401 Unauthorized`, and a fresh session on the second account failed its first turn the same way.
+The cause is not established. Later, with no new login, a one-line probe answered, and the two
+sessions were resumed one at a time.
+
+This loop's session read `d893ae95`, `2f7938b3` and `c8d662d7`, and four no-change judgments: the
+footer, the dividers and U6 above, and Firefox's open chevrons, 1px left of Chrome's and the
+drawing's:
+
+> No new material findings.
+>
+> VERDICT: approve — confidence: high
+
+It accepted the footer and U6 as the arc's scope keeps them, and the dividers and Firefox's
+chevrons as deviations for the owner, not signed off; the parity page lists both as such. The loop
+closes at three rounds.
