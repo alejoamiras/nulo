@@ -57,6 +57,9 @@ export type DappSession = {
 	accountAliases?: Record<string, string>
 	capabilityGrants?: GrantedCapabilityRecord[]
 	capabilityRejections?: RejectedCapabilityRecord[]
+	/** The per-app authorizations consent. It lives on the row, never inside a capability: a stored
+	 *  capability is built from the popup's echo of the dApp's own object. */
+	authorizationsWithoutAsking?: { broad: boolean }
 	/** F-12: HMAC-SHA256 (base64) over the canonical row minus this field.
 	 *  Written on persist, verified on read; a row that fails (or lacks it) is
 	 *  dropped so a storage-tampered row can't mint grants. */
@@ -88,6 +91,7 @@ export const DappSessionSchema: z.ZodType<DappSession> = z.object({
 	accountAliases: z.record(z.string(), z.string()).optional(),
 	capabilityGrants: z.array(z.custom<GrantedCapabilityRecord>(tolerantRecord)).optional(),
 	capabilityRejections: z.array(z.custom<RejectedCapabilityRecord>(tolerantRecord)).optional(),
+	authorizationsWithoutAsking: z.object({ broad: z.boolean() }).strict().optional(),
 	// F-12: the per-row integrity tag. Written by `DappSessionMacStorage`, which
 	// wraps this store — the schema MUST carry it so the boundary codec doesn't
 	// strip the `mac` before the MAC layer can verify it (zod object-parse drops
@@ -109,6 +113,7 @@ export type Methods = {
 	deleteDappSession(sessionId: string): DappSession
 	setVerificationHash(sessionId: string, verificationHash: string): DappSession
 	setTrustedVerification(sessionId: string, trusted: boolean): DappSession
+	setAuthorizationsWithoutAsking(sessionId: string, on: boolean, shownBroad: boolean): DappSession
 	setAccountAliases(sessionId: string, aliases: Record<string, string>): DappSession
 	setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): DappSession
 	getCapabilityGrants(sessionId: string): GrantedCapabilityRecord[]

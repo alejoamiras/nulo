@@ -59,7 +59,7 @@ option stay out.
 | ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ✓ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
 | ✓ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
-| ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | b5-permissions |
+| ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
 
 A row gets ✓ only when its plan has every phase ✓, its arc loop converged, and its parity
 evidence is published (below). Order is the stack order: batch 1 changes the first-run flow that
@@ -389,6 +389,18 @@ strings" (below).
 - `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits
   (`incoming-transfer/service.ts`). Batch 4 closed the same pattern on the token add; these two
   predate it.
+- The older `createAuthWit` refusals carry request values into Error-level logs (batch 5's D-2).
+  Three refusals in `packages/wallet-bridge/src/method-scope-checkers.ts` interpolate the
+  account, the function and contract, or the consumer, and
+  `apps/extension/src/wallet/services/wallet-sdk/background.ts` logs the message at Error. The
+  fix is a fixed category at those sinks and a sentinel test, as batch 5's two new refusals
+  have. The owner, 2026-09-24: "Yes. Defer to afterwards."
+- The Revoke authwits and authwit-registry popups (`RevokeAuthwitsPopup.vue` and
+  `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
+  on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
+  `submitKey`). Once fees are set, Enter on the header's × or on a fee method sends the revoke
+  or registry transaction. Found by reading in batch 4, whose new Revoke expand button stops
+  Enter, and not reproduced; older than this program.
 
 ## Seeds
 

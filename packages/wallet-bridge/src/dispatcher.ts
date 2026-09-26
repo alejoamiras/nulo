@@ -51,6 +51,7 @@
 // Imports use relative paths because this file IS part of wallet-bridge — the
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { resolveAuthorizedSessionAccount } from "./account-resolution"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount } from "./caip"
 import type {
@@ -60,6 +61,7 @@ import type {
 	DataCapability,
 	GrantedCapabilityRecord,
 	Scope,
+	ScopePattern,
 	SimulationCapability,
 	TransactionCapability,
 } from "./capabilities"
@@ -94,11 +96,17 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
-import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
+import {
+	authorizationsEffective,
+	coversAnyContract,
+	effectiveGrants,
+	isCreateAuthWitCoveredByTxOrSimulationScope,
+	readConsent,
+} from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, ValidationError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { describeExternalId } from "./external-id"
@@ -114,10 +122,9 @@ import type {
 } from "./services-contract"
 
 /**
- * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
- * background message handler). NOT part of `SessionContext` — codex round-3
- * caught that putting hooks on the ctx would propagate them into recursive
- * batch-leg dispatches and break the batch's sequential-completion contract.
+ * Hooks the wallet-sdk background message handler hands the dispatcher, kept
+ * off `SessionContext` because the ctx reaches recursive batch-leg dispatches,
+ * where hooks would break the batch's sequential-completion contract.
  *
  * Currently consumed only by the `sendTx` path (forwarded to
  * `DappInteractionService.execute` → `executionService.executeOperations`
@@ -190,12 +197,6 @@ function requestedFromOf(rawOpts: Record<string, unknown>): string | undefined {
  *  and `aztec_createAuthWit` resolves `args[0]` in its own handler. */
 const FROM_ADDRESSED_KINDS: ReadonlySet<Operation["kind"]> = new Set(["aztec_simulateTx", "aztec_profileTx"])
 
-/** Compare two `accounts` capability shapes by the fields that affect
- *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
- *  so `undefined` is treated as `false` (matches the default semantics in
- *  scope-enforcement: missing flag = no permission). The `accounts` array
- *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
- *  the comparison. */
 /** Whether every address+flag the request needs is already covered by the UNION of stored
  *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
  *  (the type-only delta silently stranded new addresses after redeploys). */
@@ -249,18 +250,37 @@ function simulationRequestCovered(existing: SimulationCapability[], requested: S
 	return true
 }
 
-function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
-	const rc = requested.privateEvents?.contracts
-	if (!rc) return existing.length > 0
-	if (rc === "*") return existing.some((e) => e.privateEvents?.contracts === "*")
-	return rc.every((addr) =>
-		existing.some((e) => {
-			const list = e.privateEvents?.contracts
+/** Which of a `data` request's fields the held grants already give; a field the request does
+ *  not ask for counts as given. */
+export function dataFieldsCovered(held: DataCapability[], requested: DataCapability): { addressBook: boolean; privateEvents: boolean } {
+	return {
+		addressBook: requested.addressBook !== true || held.some((h) => h.addressBook === true),
+		privateEvents: privateEventsCovered(held, requested.privateEvents?.contracts),
+	}
+}
+
+function privateEventsCovered(held: DataCapability[], requested: "*" | string[] | undefined): boolean {
+	if (!requested) return true
+	if (requested === "*") return held.some((h) => h.privateEvents?.contracts === "*")
+	return requested.every((addr) =>
+		held.some((h) => {
+			const list = h.privateEvents?.contracts
 			return list === "*" || (Array.isArray(list) && list.some((x) => String(x) === String(addr)))
 		}),
 	)
 }
 
+function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
+	const covered = dataFieldsCovered(existing, requested)
+	return covered.addressBook && covered.privateEvents
+}
+
+/** Compare two `accounts` capability shapes by the fields that affect
+ *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
+ *  so `undefined` is treated as `false` (matches the default semantics in
+ *  scope-enforcement: missing flag = no permission). The `accounts` array
+ *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
+ *  the comparison. */
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
@@ -283,9 +303,135 @@ function isKnownCapabilityType(type: string): type is Capability["type"] {
 	return Object.hasOwn(KNOWN_CAPABILITY_TYPES, type)
 }
 
-/** Grants of one capability type, narrowed to that variant. The single typed cast
- *  lives here instead of the `existing.capability as XCapability` casts scattered
- *  across the coverage branches. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function knownTypeOf(cap: unknown): Capability["type"] | undefined {
+	return isRecord(cap) && typeof cap.type === "string" && isKnownCapabilityType(cap.type) ? cap.type : undefined
+}
+
+const FIELD_ADDRESS = /^0x[0-9a-fA-F]{64}$/
+
+/** Kept in the case sent: coverage compares addresses as strings. */
+function isFieldAddress(value: unknown): value is string {
+	return typeof value === "string" && FIELD_ADDRESS.test(value) && BigInt(value) < Fr.MODULUS
+}
+
+function malformed(): never {
+	throw new Error("malformed capability")
+}
+
+function flagOf(cap: Record<string, unknown>, key: string): Record<string, boolean> {
+	const value = cap[key]
+	if (value === undefined) return {}
+	if (typeof value !== "boolean") malformed()
+	return { [key]: value }
+}
+
+function patternOf(pattern: unknown): ScopePattern {
+	if (!isRecord(pattern)) malformed()
+	const { contract, function: fn } = pattern
+	if (!(contract === "*" || isFieldAddress(contract)) || typeof fn !== "string" || fn === "") malformed()
+	return { contract, function: fn }
+}
+
+function scopeOf(scope: unknown): Scope {
+	if (scope === "*") return "*"
+	if (!Array.isArray(scope)) malformed()
+	return scope.map(patternOf)
+}
+
+function scopeHolderOf(holder: unknown): { scope: Scope } {
+	if (!isRecord(holder)) malformed()
+	return { scope: scopeOf(holder.scope) }
+}
+
+function addressListOf(list: unknown): "*" | string[] {
+	if (list === "*") return "*"
+	if (!Array.isArray(list) || !list.every(isFieldAddress)) malformed()
+	return [...list]
+}
+
+function accountListOf(list: unknown): Record<string, unknown>[] {
+	if (!Array.isArray(list)) malformed()
+	return list.map((entry) => {
+		if (!isRecord(entry) || typeof entry.item !== "string") malformed()
+		return { ...(typeof entry.alias === "string" ? { alias: entry.alias } : {}), item: entry.item }
+	})
+}
+
+function optional<T>(cap: Record<string, unknown>, key: string, project: (value: unknown) => T): Record<string, T> {
+	return cap[key] === undefined ? {} : { [key]: project(cap[key]) }
+}
+
+function projectData(cap: Record<string, unknown>): Record<string, unknown> {
+	const addressBook = flagOf(cap, "addressBook")
+	const privateEvents = optional(cap, "privateEvents", (holder) => {
+		if (!isRecord(holder)) malformed()
+		return { contracts: addressListOf(holder.contracts) }
+	})
+	// Asking for neither would open a window with no data row and record a rejection nobody chose;
+	// an empty contract list asks for no private events.
+	const events = privateEvents.privateEvents?.contracts
+	const asksEvents = events === "*" || (events !== undefined && events.length > 0)
+	if (addressBook.addressBook !== true && !asksEvents) malformed()
+	return { type: "data", ...addressBook, ...privateEvents }
+}
+
+/** Copies only the fields the window, the predicates and the checkers read, validated and kept
+ *  wire-shaped so the row MAC signs exactly what enforcement reads. */
+const CAPABILITY_PROJECTORS: Record<Capability["type"], (cap: Record<string, unknown>) => Record<string, unknown>> = {
+	accounts: (cap) => ({
+		type: "accounts",
+		...flagOf(cap, "canGet"),
+		...flagOf(cap, "canCreateAuthWit"),
+		...optional(cap, "accounts", accountListOf),
+	}),
+	contracts: (cap) => ({
+		type: "contracts",
+		contracts: addressListOf(cap.contracts),
+		...flagOf(cap, "canRegister"),
+		...flagOf(cap, "canGetMetadata"),
+	}),
+	contractClasses: (cap) => ({ type: "contractClasses", classes: addressListOf(cap.classes), ...flagOf(cap, "canGetMetadata") }),
+	simulation: (cap) => ({
+		type: "simulation",
+		...optional(cap, "transactions", scopeHolderOf),
+		...optional(cap, "utilities", scopeHolderOf),
+	}),
+	transaction: (cap) => ({ type: "transaction", scope: scopeOf(cap.scope) }),
+	data: projectData,
+}
+
+/** Validates a known capability and copies only its known fields; unknown types pass untouched.
+ *  Every failure, a throw on a hostile value included, becomes one error naming only the type, so
+ *  no request value reaches a log line. */
+export function projectKnownCapability(cap: unknown): unknown {
+	const type = knownTypeOf(cap)
+	if (type === undefined) return cap
+	try {
+		return CAPABILITY_PROJECTORS[type](cap as Record<string, unknown>)
+	} catch {
+		throw new ValidationError(`Malformed ${type} capability`, { capabilityType: type })
+	}
+}
+
+/** A known type named twice is refused: the grant would keep only one of them, so what the
+ *  window shows and what is granted could differ. */
+function projectRequestedCapabilities(caps: readonly unknown[]): Record<string, unknown>[] {
+	const seen = new Set<string>()
+	return caps.map((cap) => {
+		const projected = projectKnownCapability(cap)
+		const type = knownTypeOf(projected)
+		if (type !== undefined && seen.has(type)) {
+			throw new ValidationError(`Duplicate ${type} capability`, { capabilityType: type })
+		}
+		if (type !== undefined) seen.add(type)
+		return projected as Record<string, unknown>
+	})
+}
+
 /** The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
  *  hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
  *  the set carries BOTH representations. Without this, every fresh session failed
@@ -307,10 +453,9 @@ type CapabilityPlan = {
 	existingGrants: GrantedCapabilityRecord[]
 	grantedTypes: Set<string>
 	rejectedTypes: Set<string>
-	/** Capabilities not yet granted OR previously rejected (re-request). */
+	/** Capabilities the stored grants do not cover, plus rejected types whose coverage cannot be
+	 *  read from their fields. */
 	delta: Record<string, unknown>[]
-	/** Delta items that are re-requests (previously rejected). */
-	reRequested: string[]
 	/** Existing grants shown to the popup — re-requested types are not "existing". */
 	existingCaps: Capability[]
 	/** The session's stored accounts, CAIP-10 and raw hex alike (`sessionAccountsOf`). */
@@ -319,7 +464,7 @@ type CapabilityPlan = {
 	availableAccounts?: Array<{ address: string; chainId: number }>
 	/** Set when the popup's picker opens for a session that already holds an accounts grant: the
 	 *  held rows are locked, and the decision only ever ADDS membership — with equal flags the
-	 *  stored grant is never replaced (the popup's echo could otherwise drop the authwit rider). */
+	 *  stored grant is never replaced (the popup's echo could otherwise drop `canCreateAuthWit`). */
 	accountsWidening?: { granted: string[]; membershipOnly: boolean }
 }
 
@@ -330,9 +475,8 @@ export function ungrantedAccounts(profileAddresses: readonly string[], sessionAd
 }
 
 /** Widening classification for a session that already holds an accounts grant. Membership-only
- *  (flags equal) with something to add joins the delta; a re-prompt after a declined widening
- *  with nothing left to add would be a dead end (every row locked, nothing approvable) and is
- *  answered from the stored grant instead; a field-diff keeps the replacement path. */
+ *  (flags equal) is covered, so it joins the delta only with an account left to add; a field-diff
+ *  is already in the delta and keeps the replacement path. */
 function planAccountsWidening(
 	plan: CapabilityPlan,
 	requested: AccountsCapability,
@@ -344,11 +488,13 @@ function planAccountsWidening(
 	const membershipOnly = accountsCapsEqual(stored, requested)
 	const inDelta = plan.delta.some((cap) => cap.type === "accounts")
 	if (membershipOnly && ungranted.length > 0 && !inDelta) plan.delta.push(requested as unknown as Record<string, unknown>)
-	if (membershipOnly && ungranted.length === 0 && inDelta) {
-		plan.delta = plan.delta.filter((cap) => cap.type !== "accounts")
-		plan.reRequested = plan.reRequested.filter((type) => type !== "accounts")
-	}
 	if (plan.delta.some((cap) => cap.type === "accounts")) plan.accountsWidening = { granted: [...held], membershipOnly }
+}
+
+/** Delta types with a stored rejection, read once the accounts widening is planned, so a type that
+ *  left the delta carries no badge. */
+function reRequestedTypes(plan: CapabilityPlan): string[] {
+	return plan.delta.map((cap) => cap.type as string).filter((type) => plan.rejectedTypes.has(type))
 }
 
 function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[], dappSession: IDappSessionRef): CapabilityPlan {
@@ -357,32 +503,23 @@ function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[]
 	const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
 	const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
 
-	// For `accounts` specifically, compare full shape — `canGet` /
-	// `canCreateAuthWit` — not just type. Without this, a dApp granted
-	// `{canGet:true, canCreateAuthWit:false}` could later request
-	// `{canCreateAuthWit:true}` and the type-only filter would return empty,
-	// silently authorising the upgrade. The breadth fix for other cap types
-	// is filed as `wallet-sdk-capability-field-diff`.
+	// Unknown wire types keep the type-only rule: they flow through to the popup and render
+	// default-off, so they are never dropped or coerced. Known types are projected by now and
+	// checked field-aware, so a flag upgrade on a held type still opens the window.
 	const delta = requestedCapabilities.filter((cap) => {
 		const type = cap.type as string
-		if (rejectedTypes.has(type)) return true
-		// Unknown wire types keep the type-only default: they flow through to the
-		// popup and render default-off — do NOT drop or coerce them. Known types are
-		// trusted as their `Capability` variant (the same trust the removed per-branch
-		// `as unknown as XCapability` casts encoded) and checked field-aware via
-		// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
-		// grant, transaction REPLACES; scope checkers union across grants downstream.)
-		if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
+		if (!isKnownCapabilityType(type)) return rejectedTypes.has(type) || !grantedTypes.has(type)
+		// A declined widening left the held grant in force, so a request inside it needs no window;
+		// not for `contractClasses`, whose coverage is type-only.
+		if (type === "contractClasses" && rejectedTypes.has(type)) return true
 		return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
 	})
-	const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
 	const existingCaps = existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)).map((g) => g.capability)
 	return {
 		existingGrants,
 		grantedTypes,
 		rejectedTypes,
 		delta,
-		reRequested,
 		existingCaps,
 		sessionAccounts: sessionAccountsOf(dappSession),
 	}
@@ -396,6 +533,7 @@ type CapabilityDecisionInput = {
 	approvedTypes: string[]
 	rejectedTypes: string[]
 	requiresGrant?: string[]
+	authorizations?: { broad: boolean } | null
 }
 
 /** Folds the popup's answer into the ONE atomic decision the session row takes. */
@@ -425,10 +563,38 @@ function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan
 		// clearing their rejections would erase a concurrent unrelated rejection).
 		approvedTypes: [...deltaApprovedTypes],
 		rejectedTypes: rejectedDeltaTypes,
-		// The addition was consented against the grant the popup showed; revoked meanwhile, the
-		// writer refuses instead of adding accounts to a session that no longer holds it.
-		...(plan.accountsWidening !== undefined && deltaApprovedTypes.has("accounts") ? { requiresGrant: ["accounts"] } : {}),
+		...requiredGrants(result, plan, deltaApprovedTypes),
+		...consentDecision(result, plan, newGrants),
 	}
+}
+
+/** An added account and a consent are both given against the accounts grant the popup showed;
+ *  revoked meanwhile, the writer refuses instead of writing to a session that no longer holds it. */
+function requiredGrants(
+	result: CapabilityResult,
+	plan: CapabilityPlan,
+	deltaApprovedTypes: Set<string>,
+): Pick<CapabilityDecisionInput, "requiresGrant"> {
+	const widening = plan.accountsWidening !== undefined && deltaApprovedTypes.has("accounts")
+	const consentOnHeldAccounts = result.authorizationsWithoutAsking === true && !plan.delta.some((cap) => cap.type === "accounts")
+	return widening || consentOnHeldAccounts ? { requiresGrant: ["accounts"] } : {}
+}
+
+/** The window's switch, read strictly since the popup's result arrives unvalidated: `true` stores a
+ *  consent whose `broad` comes from the snapshot's grants as this decision leaves them, never from
+ *  the popup or a later row; `false` deletes it. */
+function consentDecision(
+	result: CapabilityResult,
+	plan: CapabilityPlan,
+	grantRecords: GrantedCapabilityRecord[],
+): Pick<CapabilityDecisionInput, "authorizations"> {
+	if (result.authorizationsWithoutAsking === false) return { authorizations: null }
+	if (result.authorizationsWithoutAsking !== true) return {}
+	const after = effectiveGrants(
+		plan.existingGrants.map((g) => g.capability),
+		grantRecords.map((g) => g.capability),
+	)
+	return { authorizations: { broad: coversAnyContract(after) } }
 }
 
 /** Only accounts the picker OFFERED and the session does not already hold are added, and only
@@ -485,23 +651,26 @@ function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unk
  *  so for replaced types we take the LAST result entry of that type that differs from the
  *  stored capability (falling back to the delta's requested shape). */
 function collectNewGrants(
-	grantedResults: Record<string, unknown>[],
+	popupResults: Record<string, unknown>[],
 	plan: CapabilityPlan,
 	deltaApprovedTypes: Set<string>,
 	now: number,
 ): GrantedCapabilityRecord[] {
+	// Every cap stored from the popup's answer is projected like the manifest, so no field the page
+	// adds is stored; an echo of a held grant the decision leaves alone is not re-validated.
+	const project = (cap: Record<string, unknown>) => projectKnownCapability(cap) as Capability
 	const replacementFor = (type: string): Capability | undefined => {
 		const stored = plan.existingGrants.find((g) => g.capability.type === type)?.capability
-		const candidates = grantedResults.filter((cap) => cap.type === type)
+		const candidates = popupResults.filter((cap) => cap.type === type).map(project)
 		const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
-		return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+		return changed[changed.length - 1] ?? candidates[candidates.length - 1]
 	}
 	const newGrants: GrantedCapabilityRecord[] = []
-	for (const cap of grantedResults) {
+	for (const cap of popupResults) {
 		const type = cap.type as string
 		if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
 		if (!plan.grantedTypes.has(type as Capability["type"]) || plan.rejectedTypes.has(type)) {
-			newGrants.push({ capability: cap as Capability, grantedAt: now })
+			newGrants.push({ capability: project(cap), grantedAt: now })
 		}
 	}
 	for (const type of deltaApprovedTypes) {
@@ -511,6 +680,9 @@ function collectNewGrants(
 	return newGrants
 }
 
+/** Grants of one capability type, narrowed to that variant. The single typed cast
+ *  lives here instead of the `existing.capability as XCapability` casts scattered
+ *  across the coverage branches. */
 function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
 	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }
@@ -546,6 +718,17 @@ function isCapabilityCovered(cap: Capability, existingGrants: GrantedCapabilityR
 		}
 		case "contractClasses":
 			return grantedTypes.has("contractClasses")
+	}
+}
+
+/** The `data` answer from the stored grant, so a field left off, or a widening declined, is not
+ *  reported as granted. */
+function dataAnswer(grantedCaps: unknown[]): Record<string, unknown> {
+	const stored = grantedCaps.find((c) => (c as Record<string, unknown>).type === "data") as DataCapability | undefined
+	return {
+		type: "data",
+		addressBook: stored?.addressBook === true,
+		...(stored?.privateEvents !== undefined ? { privateEvents: stored.privateEvents } : {}),
 	}
 }
 
@@ -639,11 +822,8 @@ export class WalletSdkDispatcher {
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
-		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
-		// ONCE at dispatch entry and thread it through every internal call.
-		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
-		// calls previously gave different handlers different views of the same
-		// session (e.g. if the session was deleted mid-dispatch).
+		// The dApp session is read ONCE here and threaded through every internal call, so every
+		// check one message runs, the consent and the scopes included, sees the same row.
 		// Anchored to ctx.profileId (the session's establishment-stamped
 		// profile, guard-verified upstream): a profile switch landing mid-await
 		// must not let this lookup resolve the NEW profile's row.
@@ -804,7 +984,7 @@ export class WalletSdkDispatcher {
 	 * Scoped to session accounts only and uses per-app aliases.
 	 * WalletSchema expects: Array<{ alias: string, item: AztecAddress }>
 	 *
-	 * Contract rows (see plan-v3 §3):
+	 * Contract rows:
 	 *  - Session not found → throws plain "No dApp session found" Error (unchanged
 	 *    so dApps relying on the session-expired diagnostic see it intact).
 	 *  - Session has ≥1 account → fast path, returns them.
@@ -970,11 +1150,11 @@ export class WalletSdkDispatcher {
 	}
 
 	/**
-	 * Handle createAuthWit: resolve the signer from args[0] (not the session default),
-	 * then route by scope coverage. A CallIntent covered by a granted tx/sim scope is
-	 * within authority the dApp already holds → sign silently. An uncovered call, or any
-	 * IntentInnerHash (whose inner hash is fully attacker-chosen), → confirmation popup.
-	 * No sendTx FIFO hooks: the background's non-send safety-net releases the baton.
+	 * Handle createAuthWit: resolve the signer from args[0] (not the session default), then
+	 * route. A CallIntent covered by a granted tx/sim scope signs silently only while the app's
+	 * authorizations consent is effective; every other intent, and any IntentInnerHash (whose
+	 * inner hash is fully attacker-chosen), opens the confirmation popup. No sendTx FIFO hooks:
+	 * the background's non-send safety-net releases the baton.
 	 */
 	private async handleCreateAuthWit(
 		args: unknown[],
@@ -987,7 +1167,15 @@ export class WalletSdkDispatcher {
 		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
 
-		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+		// Both read the dispatch-entry snapshot: a Settings change applies from the next message, so
+		// a call already past dispatch entry keeps the consent it entered with.
+		if (
+			isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants) &&
+			authorizationsEffective(
+				dappSession.authorizationsWithoutAsking,
+				grants.map((g) => g.capability),
+			)
+		) {
 			// A silently-signed authwit runs under the session's admission fence, like a send:
 			// createAuthWit derives key material for the resolved account, so a lock, switch,
 			// re-unlock or same-id re-import parked before the sign must fail closed. The wire
@@ -1121,7 +1309,7 @@ export class WalletSdkDispatcher {
 	/**
 	 * Handle requestCapabilities with 3-phase approach:
 	 * 1. Check stored grants → compute delta (new/changed types)
-	 *    - Previously rejected types are included in delta (re-request)
+	 *    - A previously rejected type rejoins the delta unless the held grant covers it
 	 * 2. Early return if delta is empty (all already granted)
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
@@ -1133,7 +1321,7 @@ export class WalletSdkDispatcher {
 	): Promise<unknown> {
 		this.requireSession(dappSession, ctx)
 
-		const requestedCapabilities = (manifest?.capabilities ?? []) as Record<string, unknown>[]
+		const requestedCapabilities = projectRequestedCapabilities(manifest?.capabilities ?? [])
 		if (requestedCapabilities.length === 0) {
 			return {
 				version: "1.0" as const,
@@ -1164,29 +1352,7 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		// Phase 3: Show capability popup for delta. If `accounts` type is in the
-		// delta, load available accounts for the popup.
-		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
-			? await this.loadAvailableAccountsForPopup(ctx)
-			: undefined
-		plan.availableAccounts = availableAccounts
-
-		let result: CapabilityResult
-		try {
-			result = await this.dappInteractionService.requestCapabilities({
-				sessionId: dappSession.id,
-				manifest,
-				delta: plan.delta,
-				existingGrants: plan.existingCaps,
-				reRequested: plan.reRequested,
-				availableAccounts,
-				grantedAccounts: plan.accountsWidening?.granted,
-				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
-			})
-		} catch (err) {
-			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
-			throw err
-		}
+		const result = await this.askCapabilities(plan, { ...manifest, capabilities: requestedCapabilities }, ctx, dappSession)
 
 		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
@@ -1206,6 +1372,38 @@ export class WalletSdkDispatcher {
 			version: "1.0" as const,
 			granted,
 			wallet: { name: "Nulo", version: __VERSION__ },
+		}
+	}
+
+	/** Opens the capability window for the plan's delta; a close or reject records every delta type
+	 *  as rejected. */
+	private async askCapabilities(
+		plan: CapabilityPlan,
+		manifest: CapabilityManifest,
+		ctx: SessionContext,
+		dappSession: IDappSessionRef,
+	): Promise<CapabilityResult> {
+		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
+			? await this.loadAvailableAccountsForPopup(ctx)
+			: undefined
+		plan.availableAccounts = availableAccounts
+		const consent = readConsent(dappSession.authorizationsWithoutAsking)
+		try {
+			return await this.dappInteractionService.requestCapabilities({
+				sessionId: dappSession.id,
+				manifest,
+				delta: plan.delta,
+				existingGrants: plan.existingCaps,
+				heldGrants: plan.existingGrants.map((g) => g.capability),
+				...(consent !== undefined ? { authorizationsWithoutAsking: consent } : {}),
+				reRequested: reRequestedTypes(plan),
+				availableAccounts,
+				grantedAccounts: plan.accountsWidening?.granted,
+				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
+			})
+		} catch (err) {
+			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
+			throw err
 		}
 	}
 
@@ -1280,7 +1478,8 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef,
 	): Promise<Record<string, unknown>[]> {
 		const result: Record<string, unknown>[] = []
-		// Use requested caps as the template to preserve the dApp's original fields
+		// The answer follows the request's order; accounts and data values come from the stored
+		// grant, since the person may have granted less than was asked.
 		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
 
 		for (const cap of requestedCaps) {
@@ -1316,6 +1515,8 @@ export class WalletSdkDispatcher {
 					canCreateAuthWit: storedAccounts?.canCreateAuthWit ?? false,
 					accounts: grantedAccounts,
 				})
+			} else if (cap.type === "data") {
+				result.push(dataAnswer(grantedCaps))
 			} else {
 				result.push(cap)
 			}
@@ -1368,8 +1569,8 @@ export class WalletSdkDispatcher {
 			// reaching enforceCapability without the required grant type.
 			this.logDebug(`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 			// CapabilityNotGrantedError is the public contract — dApps substring-
-			// match on the error code and message. The plain `Error` form was a
-			// pre-Phase-1 mistake; F-003's removal of `getAccounts` from
+			// match on the error code and message. The plain `Error` form was an
+			// earlier mistake; F-003's removal of `getAccounts` from
 			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
 			// which has an existing CapabilityNotGrantedError-pinned test.
 			throw new CapabilityNotGrantedError(requiredType)
@@ -1391,7 +1592,8 @@ export class WalletSdkDispatcher {
 		ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): Promise<Operation> {
-		// Phase 0.5: dappSession threaded through from dispatch() entry.
+		// `dappSession` is the one lookup dispatch() made at entry; a second lookup here could
+		// see another session.
 		if (NETWORK_ONLY_KINDS.has(kind)) {
 			const network = await this.resolveNetwork(ctx)
 			return this.buildNetworkOperation(kind, args, network.id)

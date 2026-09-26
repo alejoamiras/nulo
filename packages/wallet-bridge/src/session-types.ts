@@ -64,4 +64,5 @@ export interface IDappSessionRef {
 	readonly accountAliases?: Record<string, string>
 	readonly capabilityGrants?: GrantedCapabilityRecord[]
 	readonly capabilityRejections?: RejectedCapabilityRecord[]
+	readonly authorizationsWithoutAsking?: unknown
 }

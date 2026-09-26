@@ -65,6 +65,7 @@ declare module 'vue' {
     OnboardingProfileNameField: typeof import('./../onboarding/components/OnboardingProfileNameField.vue')['default']
     OnboardingSkipLink: typeof import('./../onboarding/components/OnboardingSkipLink.vue')['default']
     PasskeyCeremonyDialog: typeof import('./../components/passkey/PasskeyCeremonyDialog.vue')['default']
+    PermissionRow: typeof import('./../components/composite/capabilities/PermissionRow.vue')['default']
     Popover: typeof import('@nulo/design')['Popover']
     Popup: typeof import('./../components/Popup/Popup.vue')['default']
     PopupCard: typeof import('./../components/Popup/PopupCard.vue')['default']

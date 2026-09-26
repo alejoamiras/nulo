@@ -15,12 +15,22 @@
  * test warrants. `chrome.*` is stubbed by tests/vitest.setup.ts.
  */
 
-import type { ILogger } from "@/wallet/logger"
-import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
+import { LoggerStore, type ILogger } from "@/wallet/logger"
+import { ServiceCollection } from "@/wallet/base"
+import { ConfigStore } from "@/wallet/config"
+import { AccountService } from "@/wallet/services/account/service"
+import { AccessLevel, DappSessionService } from "@/wallet/services/dapp-session/service"
+import { ExecutionService } from "@/wallet/services/execution/service"
+import { NetworkService } from "@/wallet/services/network/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { ProfileService } from "@/wallet/services/profile/service"
+import { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, TermsAcceptanceRequiredError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { DappInteractionService } from "./service"
-import type { DappInteraction, ExecutionHooks } from "./spec"
+import type { DappInteraction, ExecutionHooks, OperationRequest } from "./spec"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -549,5 +559,119 @@ describe("DappInteractionService when the Terms acceptance lapses after the requ
 
 		await expect(internals.silentInteraction(payload, { queuedJournalId: "journal-2" })).rejects.toThrow("node unreachable")
 		expect(transitionIfStage).not.toHaveBeenCalled()
+	})
+})
+
+describe("DappInteractionService — a confirmation window never falls back to signing", () => {
+	const ADDRESS = `0x${"0a".repeat(32)}`
+	const ACCOUNT = `aztec:1:${ADDRESS}`
+	const SESSION = {
+		id: "s1",
+		profileId: "p1",
+		chainId: "1",
+		dappMetadata: { name: "dapp.example", url: "https://dapp.example" },
+		permissions: [{ methods: [] }],
+		accounts: [ACCOUNT],
+		confirmationLevel: AccessLevel.Transactions,
+		expiry: Number.MAX_SAFE_INTEGER,
+	}
+	const authwit = {
+		kind: "aztec_createAuthWit",
+		account: ACCOUNT,
+		messageHashOrIntent: { consumer: `0x${"07".repeat(32)}`, innerHash: `0x${"01".repeat(32)}` },
+	} as unknown as OperationRequest
+	const stub = (name: string, methods: Record<string, unknown>) => ({ name, dependencies: [], async start() {}, ...methods }) as never
+	type Outcome = { settled: boolean; ok?: unknown; err?: unknown }
+
+	/** The real interaction path: `execute` opens a window through a real WindowManager on a fake
+	 *  browser, and the only way to a signature is an approval the service accepts. */
+	async function windowHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const clock = new MockClock()
+		const logger = new LoggerStore(new ConfigStore())
+		const dapp = new DappInteractionService(logger, new WindowManager(api.windows, clock, logger))
+		const executeOperations = vi.fn(async () => [{ status: "ok", result: "0xsigned" }])
+		const collection = new ServiceCollection()
+		collection.add(
+			stub(ProfileService.name, {
+				getActiveProfile: async () => ({ id: "p1" }),
+				refreshSession: async () => {},
+				captureExecutionFence: async () => ({ profileId: "p1", epoch: 0, session: 1 }),
+			}),
+		)
+		collection.add(stub(NetworkService.name, { getNetworks: async () => [{ id: "net-1", chainId: 1 }] }))
+		collection.add(stub(AccountService.name, { getAccount: async () => ({ address: ADDRESS }) }))
+		collection.add(stub(DappSessionService.name, { tryGetDappSession: async () => SESSION }))
+		collection.add(stub(ExecutionService.name, { executeOperations }))
+		collection.add(stub(OperationJournalService.name, { onOperationUpdated: new EventHandler() }))
+		collection.add(dapp)
+		await collection.start()
+		const creates = vi.spyOn(api.windows, "create")
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+
+		const open = async () => {
+			const outcome: Outcome = { settled: false }
+			dapp.execute({ sessionId: SESSION.id, operations: [authwit] }).then(
+				(ok) => Object.assign(outcome, { settled: true, ok }),
+				(err) => Object.assign(outcome, { settled: true, err }),
+			)
+			await expect.poll(() => creates.mock.results.length).toBeGreaterThan(0)
+			const created = (await creates.mock.results.at(-1)?.value) as { id: number }
+			const windowId = created.id
+			const id = [...storage.keys()].at(-1) as string
+			creates.mockClear()
+			return { outcome, windowId, id }
+		}
+		const closeByUser = (windowId: number) => (api.windows as unknown as { closeByUser: (id: number) => void }).closeByUser(windowId)
+		return { dapp, clock, executeOperations, storage, open, closeByUser }
+	}
+
+	test("a window closed before approval rejects the call and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.closeByUser(window.windowId)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		expect(window.outcome.err).toBeDefined()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+		expect(h.storage.size).toBe(0)
+	})
+
+	test("a window left unanswered times out, rejects the call and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.clock.advance(10 * 60 * 1000)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		expect(window.outcome.err).toBeDefined()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+		expect(h.storage.size).toBe(0)
+	})
+
+	test("an approval arriving after the window closed is refused and nothing signs", async () => {
+		const h = await windowHarness()
+		const window = await h.open()
+		h.closeByUser(window.windowId)
+		await expect.poll(() => window.outcome.settled).toBe(true)
+		await expect(h.dapp.approveInteraction(window.id, [{}])).rejects.toThrow("Invalid id")
+		await flush()
+		expect(h.executeOperations).not.toHaveBeenCalled()
+	})
+
+	test("two windows for one row: approving one signs only it, the other stays pending until its own close", async () => {
+		const h = await windowHarness()
+		const first = await h.open()
+		const second = await h.open()
+		await h.dapp.approveInteraction(first.id, [{}])
+		await expect.poll(() => first.outcome.settled).toBe(true)
+		expect(first.outcome.ok).toEqual([{ status: "ok", result: "0xsigned" }])
+		expect(h.executeOperations).toHaveBeenCalledTimes(1)
+		await flush()
+		expect(second.outcome.settled).toBe(false)
+		expect(h.storage.has(second.id)).toBe(true)
+
+		h.closeByUser(second.windowId)
+		await expect.poll(() => second.outcome.settled).toBe(true)
+		expect(second.outcome.err).toBeDefined()
+		expect(h.executeOperations).toHaveBeenCalledTimes(1)
 	})
 })

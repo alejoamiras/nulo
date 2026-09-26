@@ -1,6 +1,7 @@
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { CapabilityNotGrantedError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, ValidationError } from "@nulo/extension-messaging/errors"
+import { coversAnyContract, readConsent } from "@nulo/wallet-bridge"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
@@ -16,6 +17,7 @@ import {
 	DAPP_SESSION_SERVICE_NAME,
 	type DappMetadata,
 	type DappPermissions,
+	type AccountsCapability,
 	type CapabilityDecision,
 	type DappSession,
 	type GrantedCapabilityRecord,
@@ -28,6 +30,31 @@ import {
 
 export * from "./spec"
 
+function holdsCanCreateAuthWit(session: DappSession): boolean {
+	return (session.capabilityGrants ?? []).some(
+		(g) => g.capability.type === "accounts" && (g.capability as AccountsCapability).canCreateAuthWit === true,
+	)
+}
+
+/** The consent goes with `canCreateAuthWit`, so a later re-grant starts from asking; every grant
+ *  writer applies it after writing. */
+function dropConsentWithoutAuthWit(session: DappSession): void {
+	if (!holdsCanCreateAuthWit(session)) session.authorizationsWithoutAsking = undefined
+}
+
+/** An object sets the consent, `null` deletes it, `undefined` keeps it; anything unreadable is
+ *  refused, since the schema would hide the row it was written to. */
+function consentAfter(
+	current: DappSession["authorizationsWithoutAsking"],
+	decided: CapabilityDecision["authorizations"],
+): DappSession["authorizationsWithoutAsking"] {
+	if (decided === undefined) return current
+	if (decided === null) return undefined
+	const consent = readConsent(decided)
+	if (consent === undefined) throw new ValidationError("Malformed authorizations consent")
+	return consent
+}
+
 export class DappSessionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getDappSessions",
@@ -37,6 +64,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		"deleteDappSession",
 		"setVerificationHash",
 		"setTrustedVerification",
+		"setAuthorizationsWithoutAsking",
 		"setAccountAliases",
 		"setCapabilityGrants",
 		"getCapabilityGrants",
@@ -250,6 +278,21 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		})
 	}
 
+	/** The Settings switch. On needs `canCreateAuthWit` and is broad only when the row the person
+	 *  switched (`shownBroad`) and the grants under the lock both reach any contract, so a widening
+	 *  that lands first leaves a narrow On narrow, which asks. Off always succeeds. It takes the
+	 *  decision lock, so of a Settings write and a window decision the later one wins. */
+	public async setAuthorizationsWithoutAsking(sessionId: string, on: boolean, shownBroad: boolean): Promise<DappSession> {
+		if (typeof on !== "boolean" || typeof shownBroad !== "boolean") {
+			throw new ValidationError("setAuthorizationsWithoutAsking takes two booleans")
+		}
+		return await this.patchSession(sessionId, (session) => {
+			if (on && !holdsCanCreateAuthWit(session)) throw new CapabilityNotGrantedError("accounts")
+			const grants = (session.capabilityGrants ?? []).map((g) => g.capability)
+			session.authorizationsWithoutAsking = on ? { broad: shownBroad && coversAnyContract(grants) } : undefined
+		})
+	}
+
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
 		return await this.patchSession(sessionId, (session) => {
 			session.accountAliases = { ...session.accountAliases, ...aliases }
@@ -259,6 +302,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
 		return await this.patchSession(sessionId, (session) => {
 			session.capabilityGrants = grants
+			dropConsentWithoutAuthWit(session)
 		})
 	}
 
@@ -281,22 +325,18 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	/**
-	 * Apply a capability decision atomically (B-14). The dispatcher used to push
-	 * precomputed whole-row arrays across FOUR separately-locked writes
-	 * (updateDappSession → setAccountAliases → setCapabilityGrants →
-	 * setCapabilityRejections), so a concurrent revoke could throw mid-sequence
-	 * (discarding the approval + a cryptic error) and two concurrent approvals both
-	 * snapshotted the pre-write row, the later clobbering the earlier. This merges
-	 * the DELTAS against the LATEST row under ONE lock: accounts UNION, aliases
-	 * merge, grants keep-latest-minus-REPLACED + new records (a rejected/denied
-	 * widening PRESERVES its older grant), and rejections preserve unrelated types
-	 * (an approval clears its type's rejection).
+	 * Apply a capability decision atomically. The DELTAS merge against the LATEST row under ONE
+	 * lock, so a concurrent revoke cannot leave a partial write and a concurrent approval cannot be
+	 * clobbered: accounts UNION, aliases merge, grants keep-latest-minus-REPLACED + new records (a
+	 * rejected/denied widening PRESERVES its older grant), rejections preserve unrelated types (an
+	 * approval clears its type's rejection), and the consent is set, deleted or kept as the decision
+	 * says, then deleted when the resulting accounts grant lacks `canCreateAuthWit`.
 	 * A missing row rejects cleanly with no partial write.
 	 *
-	 * Concurrent SAME-type approvals are last-completion-wins (an accepted deviation
-	 * — two popups approving the same capability type for one session simultaneously
-	 * is not a real flow); DIFFERENT-type concurrent approvals both survive because
-	 * the merge reads the latest row.
+	 * Two tabs of one origin share this row, so two windows can decide at once: concurrent
+	 * SAME-type approvals are last-completion-wins, and DIFFERENT-type ones both survive because the
+	 * merge reads the latest row. A narrow consent landing after another window's widening to any
+	 * contract reads as asking, since the read-time rule checks the scopes it sits beside.
 	 */
 	public async applyCapabilityDecision(sessionId: string, decision: CapabilityDecision): Promise<DappSession> {
 		return await this.lock.withLock(async () => {
@@ -309,6 +349,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			const held = new Set((session.capabilityGrants ?? []).map((g) => g.capability.type))
 			const revoked = (decision.requiresGrant ?? []).find((type) => !held.has(type as never))
 			if (revoked !== undefined) throw new CapabilityNotGrantedError(revoked)
+			const consent = consentAfter(session.authorizationsWithoutAsking, decision.authorizations)
 
 			if (decision.addAccounts.length > 0) {
 				session.accounts = [...new Set([...(session.accounts ?? []), ...decision.addAccounts])]
@@ -333,6 +374,8 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				...(session.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
 				...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: now })),
 			]
+			session.authorizationsWithoutAsking = consent
+			dropConsentWithoutAuthWit(session)
 
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
