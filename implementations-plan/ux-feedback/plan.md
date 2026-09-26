@@ -312,6 +312,14 @@ the stack top, asking for seams between batches, duplication across them, and dr
 spec, with the rules below; loop until clean. Then every row of [Local gates](#local-gates) on
 the stack top, smoke and network on both browsers, the full network suite (no file filter).
 
+**Record** ([lessons/final-pass.md](lessons/final-pass.md)). Round 1 raised two minors: the
+comment fix landed on arc 5a, and the account row's ring went to the owner. The stack then moved
+onto `origin/dev` at `b15f5218`. Round 2: "no new material findings", "VERDICT: approve —
+confidence: high". Round 3, on arc 5b's fold fix `d893ae95`: "no new material findings",
+"VERDICT: approve — confidence: high". At `d893ae95`, every Local gates row exited 0,
+with smoke and the full network suite on both browsers; the Firefox canaries wait for CI on the
+stack top's head.
+
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
 - *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions,
@@ -422,6 +430,10 @@ strings" (below).
 - The popup's Terms sheet (`apps/extension/src/components/LegalAcceptanceSheet.vue`) sits at
   z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden
   behind it. Observed in batch 4, not changed.
+- A failed send made from the wallet's own Send page reads as the app's fault on its journal page:
+  `categoricalLabel` gives the `transfer` error kind the `dapp_execute` label, "Reported by app",
+  "The connected app reported an error." (`apps/extension/src/utils/journal-state.ts:217-219`).
+  Older than this program; batch 4's Details now opens that page from the snack.
 
 ## Seeds
 
