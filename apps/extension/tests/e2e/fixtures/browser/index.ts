@@ -47,6 +47,11 @@ export interface PxeHostState {
 	visibility: string[]
 }
 
+/** A tab or window `waitForNewTab` found. */
+export interface OpenedTab {
+	close(): Promise<void>
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -98,6 +103,13 @@ export interface BrowserDriver {
 	 * call this with nothing focus-dependent (a WebAuthn ceremony, a file pick) still pending.
 	 */
 	waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void>
+	/**
+	 * Run `open`, then resolve with the tab or window it opened, or reject once `timeout` ms pass after
+	 * it without one. Nothing else may open a tab or window meanwhile: being new is what identifies it.
+	 * For a tab the browser opens by itself, such as a modified click's, which Firefox's BiDi can leave
+	 * unannounced for good, so `targets()` never lists it.
+	 */
+	waitForNewTab(browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab>
 	/**
 	 * Answer every request the browser makes to `fromOrigin` — whichever of the extension's
 	 * contexts issues it — without touching the network. Resolves once no request can escape.
@@ -194,6 +206,8 @@ export const waitForTarget = (browser: Browser, predicate: (target: Target) => b
 	driver.waitForTarget(browser, predicate, timeout)
 export const waitForOpenedUrl = (browser: Browser, url: string, timeout: number): Promise<void> =>
 	driver.waitForOpenedUrl(browser, url, timeout)
+export const waitForNewTab = (browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab> =>
+	driver.waitForNewTab(browser, open, timeout)
 export const interceptRpc = (
 	browser: Browser,
 	extensionId: string,

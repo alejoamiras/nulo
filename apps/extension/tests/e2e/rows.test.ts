@@ -4,7 +4,7 @@
 import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { seedsForChain } from "@/wallet/services/token/default-tokens"
-import { prepareKeys, waitForTarget } from "./fixtures/browser"
+import { prepareKeys, waitForNewTab, waitForTarget } from "./fixtures/browser"
 import { type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	addContact,
@@ -332,13 +332,20 @@ test("a contact row: its edit action is a 24px box whose real press stays on Con
 	expect(await probe(page)).toMatchObject({ pushes: 0 })
 	await closeTopPopup(page, "edit-contact-submit")
 
-	const before = new Set(registeredExtension.browser.targets())
 	const point = await centreOf(page, row)
 	await armLinkClickProbe(page)
-	await page.keyboard.down("Control")
-	await page.mouse.click(point.x, point.y)
-	await page.keyboard.up("Control")
-	const target = await waitForTarget(registeredExtension.browser, (t) => t.type() === "page" && !before.has(t), 10_000)
+	const tab = await waitForNewTab(
+		registeredExtension.browser,
+		async () => {
+			await page.keyboard.down("Control")
+			try {
+				await page.mouse.click(point.x, point.y)
+			} finally {
+				await page.keyboard.up("Control")
+			}
+		},
+		10_000,
+	)
 	try {
 		// The new tab's own URL is no witness to where it opened: the wallet's cold boot routes it on at
 		// once, and Firefox reports the tab only as about:blank. What opened it is the browser's default
@@ -347,7 +354,7 @@ test("a contact row: its edit action is a 24px box whose real press stays on Con
 		expect(await page.evaluate(() => (window as unknown as Probe).__linkClick)).toEqual({ modified: true, href, prevented: false })
 		expect(await hash(page)).toBe("#/popup/settings/contacts")
 	} finally {
-		await (await target.asPage()).close().catch(() => undefined)
+		await tab.close()
 	}
 
 	expect(registeredExtension.pageErrors).toEqual([])

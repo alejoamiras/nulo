@@ -202,6 +202,12 @@ export const chromeDriver: BrowserDriver = {
 	waitForOpenedUrl: async (browser, url, timeout) => {
 		await browser.waitForTarget((target) => target.type() === "page" && target.url() === url, { timeout })
 	},
+	waitForNewTab: async (browser, open, timeout) => {
+		const before = new Set(browser.targets())
+		await open()
+		const target = await browser.waitForTarget((t) => t.type() === "page" && !before.has(t), { timeout })
+		return { close: async () => (await target.asPage()).close() }
+	},
 	interceptRpc: (browser, extensionId, fromOrigin, mode) => cdpInterceptRpc(browser, `${SCHEME}${extensionId}/`, fromOrigin, mode),
 	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
 	prepareClick: async () => {},
