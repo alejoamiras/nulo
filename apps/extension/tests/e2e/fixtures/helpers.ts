@@ -1,6 +1,6 @@
 import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
-import type { Page } from "puppeteer"
+import type { ElementHandle, Page } from "puppeteer"
 import { defaultProfileName } from "@/utils/profile-name"
 import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
@@ -1361,19 +1361,34 @@ export async function getSelectedFeeMethod(page: Page): Promise<string | null> {
 	})
 }
 
-// ── Toast ──────────────────────────────────────────────────────────────
+// ── Snackbar ───────────────────────────────────────────────────────────
 
-/** Wait for a toast notification containing the given text. Toasts auto-dismiss in ~2s.
- *  Uses textContent + case-insensitive compare because the toast applies
- *  text-transform: uppercase via CSS, which `innerText` reflects but
- *  `textContent` does not — matching by textContent keeps the assertion
- *  readable (`"Contact is added"` not `"CONTACT IS ADDED"`). */
-export async function waitForToast(page: Page, text: string, timeout = 5_000): Promise<void> {
-	await page.waitForFunction(
-		(t: string) => (document.body.textContent ?? "").toLowerCase().includes(t.toLowerCase()),
+/** Wait for the snack whose title or sub contains `text` (case-insensitive: the title is uppercased
+ *  by CSS, not in the DOM), optionally of one `kind`, and return it. A success closes itself after
+ *  6 s; an error stays until closed. */
+export async function waitForToast(
+	page: Page,
+	text: string,
+	timeout = 5_000,
+	opts: { kind?: "success" | "error" } = {},
+): Promise<ElementHandle<Element>> {
+	const handle = await page.waitForFunction(
+		(t: string, kind: string | null) => {
+			for (const card of document.querySelectorAll('[data-testid="snackbar"]')) {
+				if (kind && card.getAttribute("data-kind") !== kind) continue
+				const title = card.querySelector('[data-testid="snackbar-title"]')?.textContent ?? ""
+				const sub = card.querySelector('[data-testid="snackbar-sub"]')?.textContent ?? ""
+				if (`${title} ${sub}`.toLowerCase().includes(t.toLowerCase())) return card
+			}
+			return null
+		},
 		{ timeout, polling: 200 },
 		text,
+		opts.kind ?? null,
 	)
+	const element = handle.asElement()
+	if (!element) throw new Error(`the snack containing "${text}" left between the wait and the read`)
+	return element
 }
 
 // ── Popup chain helpers ──────────────────────────────────────────────────
@@ -1892,10 +1907,9 @@ export async function waitForProfilePurged(
 		if (!Object.values(last).some(Boolean)) return
 		await new Promise((r) => setTimeout(r, 500))
 	}
-	// The "Couldn't delete profile" rejection toast auto-dismisses in ~2s, so it
-	// cannot be sampled at timeout; the persisting tombstone+row combination IS the
-	// rejected-or-wedged signature. Session presence distinguishes "delete never
-	// started (still logged in, nothing changed)" from "mid-purge wedge".
+	// The persisting tombstone+row combination IS the rejected-or-wedged signature.
+	// Session presence distinguishes "delete never started (still logged in,
+	// nothing changed)" from "mid-purge wedge".
 	const sessionPresent = await page
 		.evaluate(async () => {
 			const r = await chrome.storage.session.get("nulo:core:session")

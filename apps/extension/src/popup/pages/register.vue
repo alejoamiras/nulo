@@ -7,6 +7,9 @@
 </route>
 
 <script setup>
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Utils */
 import { openLegalDocument } from "@/utils/legal-links"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
@@ -61,7 +64,7 @@ onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 		</Flex>
 
 		<!-- Terms footer -->
-		<p :class="$style.terms">
+		<p v-snack-footer :class="$style.terms">
 			<span @click="openLegalDocument('terms')" :class="$style.link" data-testid="legal-register-terms">Terms of Use</span>
 			·
 			<span @click="openLegalDocument('privacy')" :class="$style.link" data-testid="legal-register-privacy">Privacy Policy</span>

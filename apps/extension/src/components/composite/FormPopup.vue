@@ -1,4 +1,7 @@
 <script setup>
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 const emit = defineEmits(["onClose", "submit"])
 
 defineProps({
@@ -34,7 +37,7 @@ defineProps({
 			<Flex wide direction="column" :gap="bodyGap" :class="$style.wrapper">
 				<slot />
 
-				<Flex direction="column" gap="10">
+				<Flex v-snack-footer direction="column" gap="10">
 					<slot name="aboveSubmit" />
 
 					<Button

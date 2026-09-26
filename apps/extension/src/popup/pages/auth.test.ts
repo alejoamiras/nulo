@@ -39,7 +39,6 @@ vi.mock("@/utils/core", () => ({
 }))
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 2_000, LONG: 5_000 },
 }))
 vi.mock("@/composables/usePasskeyCeremony", () => ({
 	usePasskeyCeremony: () => ({ request: { value: null }, runCeremony: vi.fn(), onResolve: vi.fn(), onReject: vi.fn() }),
@@ -210,8 +209,7 @@ describe("auth.vue — bounded activation wait (N-08)", () => {
 			await submitUnlock(wrapper)
 			await vi.advanceTimersByTimeAsync(30_001) // isLogined never flips
 			expect(openToastMock).toHaveBeenCalledWith(
-				expect.objectContaining({ label: expect.stringContaining("timed out") }),
-				expect.anything(),
+				expect.objectContaining({ kind: "error", label: expect.stringContaining("timed out") }),
 			)
 			// Latch released: a second submit reaches the service again.
 			await submitUnlock(wrapper)

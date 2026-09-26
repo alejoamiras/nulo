@@ -7,6 +7,7 @@
 import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 /** Utils */
@@ -44,9 +45,7 @@ async function completeImport(profile: unknown) {
 		},
 		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
 	})
-	openToast(
-		outcome === "active" ? { label: "Profile imported", icon: "check-circle" } : { label: "Profile imported. Unlock to continue." },
-	)
+	openToast({ kind: "success", label: outcome === "active" ? "Profile imported" : "Profile imported. Unlock to continue." })
 	router.push("/onboarding/learn")
 }
 
@@ -181,7 +180,7 @@ onBeforeUnmount(() => {
 			@passwordInput="handlePasswordInput"
 		/>
 
-		<Flex v-if="selectedImportOption" direction="column" gap="10" :class="$style.ctas">
+		<Flex v-if="selectedImportOption" v-snack-footer direction="column" gap="10" :class="$style.ctas">
 			<template v-if="selectedImportOption === 'full_backup'">
 				<Button
 					v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"

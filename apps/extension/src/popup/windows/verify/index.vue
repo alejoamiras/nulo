@@ -6,6 +6,9 @@ import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
 import { onMounted, onUnmounted } from "vue"
 import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
 
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
@@ -206,7 +209,7 @@ onUnmounted(() => {
 		</Flex>
 
 		<!-- Footer: trust toggle + OK -->
-		<Flex direction="column" gap="12" :class="$style.footer">
+		<Flex v-snack-footer direction="column" gap="12" :class="$style.footer">
 			<Flex align="center" justify="between" gap="12" wide>
 				<Flex direction="column" gap="4">
 					<Text size="13" weight="600" color="primary">Always trust</Text>

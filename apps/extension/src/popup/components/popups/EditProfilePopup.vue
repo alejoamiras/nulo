@@ -5,7 +5,8 @@ import { FieldWarning } from "@nulo/design"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
-import { TOAST_DURATION, useToast } from "@/composables/toast"
+import { vSnackFooter } from "@/composables/snackInset"
+import { useToast } from "@/composables/toast"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
@@ -84,12 +85,12 @@ const handleUpdateProfile = async () => {
 		appStore.profile = await profileService.changeProfileName(appStore.profile.id, nameTerm.value)
 		emit("onClose")
 
-		openToast({ label: "Profile is updated" })
+		openToast({ kind: "success", label: "Profile is updated" })
 	} catch {
 		// The rejection previously vanished with zero user feedback — the sole
 		// silent outlier in the popup family; the family's standard error toast
 		// handles it, and the finally still releases the latch.
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 	} finally {
 		isProfileUpdateInProgress.value = false
 	}
@@ -157,7 +158,7 @@ usePopupEntity(() => props.show, {
 					</template>
 				</Input>
 
-				<Flex direction="column" gap="12">
+				<Flex v-snack-footer direction="column" gap="12">
 					<Button
 						@click="handleUpdateProfile"
 						wide

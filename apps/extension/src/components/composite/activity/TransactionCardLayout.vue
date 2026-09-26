@@ -1,54 +1,18 @@
 <script setup lang="ts">
-import { Comment, type PropType } from "vue"
+import { Comment, type PropType, ref, useId, useSlots } from "vue"
 import type { JobStage, ProveBackend } from "@nulo/wallet-core/jobs"
+import RowTarget from "@/components/ui/RowTarget.vue"
 /**
- * Shared presentational layout for activity cards. Both
- * `TransactionAwaitingCard` (in-flight, TaskService / journal-driven) and
- * `TransactionCard` (settled, transaction-history-driven) compose this so
- * field positions stay byte-identical across the lifecycle. Field-position
- * drift between in-flight and settled was the user-flagged regression for
- * dApp txs (see plan-v4 Branch 4).
+ * The one layout every activity card composes, so field positions stay identical across the
+ * lifecycle: [activity icon + badge] [title (+ trailing) / secondary] [amount column], with an
+ * optional `#actions` corner. It owns the row's interactivity: with `to` the row is a link, with
+ * `opens` a button whose press emits `activate`, otherwise it is inert.
  *
- * The layout is intentionally narrow:
- *   [activity_icon + badge] [title (+ trailing slot) / secondary slot] [amount column]
- *
- * Slots:
- *   - badge: top-right corner indicator on the activity icon (spinner, check,
- *     close, etc.). Wrapped here in a unified shell so its absolute positioning
- *     and bg padding are consistent across phases.
- *   - title-trailing: anything that should sit inline beside the title (e.g.
- *     external-link icon on settled cards).
- *   - secondary: the second line. Free-form so callers can drop chips, hash
- *     slices, status text — whatever the phase needs. Caller is responsible
- *     for rendering only when there's content; the wrapper Flex always exists
- *     for vertical-rhythm parity.
- *   - actions: top-right corner of the card (NOT the activity-icon corner; that's
- *     the `badge` slot). Used by awaiting + terminal cards for Cancel / Retry
- *     icon buttons. Absolute-positioned via `.actions`; the wrapper becomes
- *     `position: relative` whenever this slot is used. May visually overlap
- *     the top of the amount column on UI transfer cards — acceptable trade-off
- *     given the 3-row visual budget.
- *
- * Props:
- *   - title: required, the canonical line-1 string. Stays put across phases.
- *   - icon: main activity icon (Custom Icon name).
- *   - amount, amountSymbol: optional right column.
- *   - testId: passes through to the root for e2e selectors.
- *   - txAmountDisplay / txTransferTypeLabel / txStatus / txHash: optional
- *     pass-through props that bind as `data-tx-*` attributes on the root.
- *     Settled `TransactionCard` fills these so e2e tests can synchronize
- *     on the user-visible card state (the amount text, the transfer-type
- *     chip label, the status icon, the hash slice — all things the user
- *     sees). Awaiting / terminal cards leave them blank; Vue omits
- *     `null`/`undefined` data-attribute bindings.
- *   - stage: optional journal FSM stage (pending / queued / simulating /
- *     proving / submitting / succeeded / failed / cancelled). Binds as
- *     `data-stage` on the root. The awaiting card threads its `stage` prop
- *     here so e2e tests can wait for the wallet's in-flight tx to reach a
- *     specific stage — fast-path alternative to waiting on the dApp's
- *     full sendTx promise. Settled cards leave it null.
+ * `txAmountDisplay` / `txTransferTypeLabel` / `txStatus` / `txHash` bind as `data-tx-*` on the
+ * root and `stage` / `backend` as `data-stage` / `data-backend`, the facts e2e waits on; Vue omits
+ * a null binding.
  */
-defineProps({
+const props = defineProps({
 	title: { type: String, required: true },
 	icon: { type: String, required: true },
 	iconRotate: { type: [String, Number], default: 0 },
@@ -64,23 +28,28 @@ defineProps({
 	stage: { type: String as PropType<JobStage | null>, default: null },
 	/** Where a `proving` op's proof runs, once known. Binds as `data-backend`. */
 	backend: { type: String as PropType<ProveBackend | null>, default: null },
-	/** Number of 16px icon buttons in `#actions`; sizes the right-side reservation (see `.wrapper_two_actions`). */
+	/** Number of 24px buttons in `#actions`; sizes the right-side reservation. */
 	actionCount: { type: Number, default: 1 },
+	/** The route the row opens. */
+	to: { type: String, default: undefined },
+	/** The row opens something that is not a route: a press emits `activate`. */
+	opens: { type: Boolean, default: false },
+	/** The row is a receipt arriving now: it slides in and glows. */
+	arriving: { type: Boolean, default: false },
 })
 
+const emit = defineEmits(["activate"])
+
+const titleId = useId()
+const target = ref<{ activate: () => void } | null>(null)
+
+function onRootClick() {
+	if (props.opens) emit("activate")
+}
+
 /**
- * `$slots.actions` is truthy whenever a parent declares `<template #actions>`
- * — even when the template renders zero real VNodes (e.g. `<Btn v-if="false"/>`
- * inside, which compiles to a comment VNode). The wrapper-padding + absolute
- * container should only kick in when the slot actually paints something.
- *
- * MUST NOT use `computed()` here: slot vnodes are NOT reactive deps, and the
- * slots proxy doesn't always re-trigger on declared/undeclared transitions.
- * A computed evaluates once and caches a wrong answer if `cancellable` was
- * false at first paint and flipped true on a later parent render (regression
- * shipped in the first cut of this fix — see git blame). Calling a regular
- * method from the template re-evaluates every parent render, which is exactly
- * what we want.
+ * Slot presence does not prove rendered content: `<template #actions><Btn v-if="false"/></template>`
+ * yields a comment VNode. A method, not a `computed`: slot VNodes are not reactive dependencies.
  */
 const slots = useSlots()
 function hasActionsContent() {
@@ -111,10 +80,20 @@ function hasActionsContent() {
 		:data-tx-hash="txHash"
 		:data-stage="stage"
 		:data-backend="backend"
-		:class="[$style.wrapper, hasActionsContent() && $style.wrapper_has_actions, hasActionsContent() && actionCount > 1 && $style.wrapper_two_actions]"
+		:data-arriving="arriving ? 'true' : undefined"
+		:class="[
+			$style.wrapper,
+			(to || opens) && $style.interactive,
+			arriving && [$style['n-row-in'], $style['n-row-glow']],
+			hasActionsContent() && $style.wrapper_has_actions,
+			hasActionsContent() && actionCount > 1 && $style.wrapper_two_actions,
+		]"
+		@click="onRootClick"
 	>
+		<RowTarget v-if="to || opens" ref="target" :to="to" :labelledby="titleId" />
+
 		<Flex align="center" gap="16" :class="$style.left_content">
-			<Flex align="center" justify="center" :class="$style.activity_icon">
+			<Flex align="center" justify="center" :class="$style.activity_icon" data-testid="activity-icon">
 				<Icon :name="icon" :rotate="iconRotate" size="18" color="secondary" />
 				<div v-if="$slots.badge" :class="$style.badge">
 					<slot name="badge" />
@@ -123,7 +102,7 @@ function hasActionsContent() {
 
 			<Flex direction="column" gap="4" :class="$style.text">
 				<Flex align="center" gap="6">
-					<span :class="$style.title">{{ title }}</span>
+					<span :id="titleId" :class="$style.title">{{ title }}</span>
 					<slot name="title-trailing" />
 				</Flex>
 				<Flex v-if="$slots.secondary" align="center" gap="6" :class="$style.secondary_row">
@@ -133,9 +112,18 @@ function hasActionsContent() {
 		</Flex>
 
 		<Flex v-if="amount" direction="column" align="end" gap="2" :class="$style.amount_col">
-			<span :class="$style.amount">{{ amount }}</span>
+			<span :class="[$style.amount, arriving && $style['n-amt']]">{{ amount }}</span>
 			<span v-if="amountSymbol" :class="$style.amount_symbol">{{ amountSymbol }}</span>
-			<span v-if="amountFiat" data-testid="activity-fiat" title="At today's price" :class="$style.amount_fiat">{{ amountFiat }}</span>
+			<!-- Raised above the target so its title shows; `.stop` so a press opens the row once. -->
+			<span
+				v-if="amountFiat"
+				data-testid="activity-fiat"
+				title="At today's price"
+				:class="[$style.amount_fiat, (to || opens) && $style.raised]"
+				@click.stop="target?.activate()"
+			>
+				{{ amountFiat }}
+			</span>
 		</Flex>
 
 		<div v-if="hasActionsContent()" :class="$style.actions">
@@ -146,48 +134,62 @@ function hasActionsContent() {
 
 <style module>
 .wrapper {
-	padding: 6px 0;
 	position: relative;
+	margin: 0 -8px;
+	padding: 6px 8px;
 }
 
-/**
- * Reserve 20px on the right when the actions slot is filled so the
- * absolute-positioned X doesn't overlap the amount column (16px X +
- * 4px breathing room). User-tuned: anything larger pushed the amount
- * column off-balance against the title row.
- *
- * The transfer-direction chip used to sit in the secondary row and
- * fought this reservation for space; it now lives in `#title-trailing`
- * (next to the title), so the secondary row has plenty of width for
- * subtitle + originLabel even with the X inside the card.
- */
+.interactive {
+	cursor: pointer;
+	transition: background 0.15s var(--bezier);
+
+	&:hover,
+	&:has(> [data-row-target]:focus-visible) {
+		background: var(--nulo-surface-low);
+	}
+
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
+	}
+
+	&:active {
+		background: var(--nulo-surface-high);
+	}
+}
+
+/* One 24px action plus 4px of air, inside the 8px side padding. */
 .wrapper_has_actions {
-	padding-right: 20px;
-}
-
-/* Two 16px buttons: 32px + the same 4px breathing room. */
-.wrapper_two_actions {
 	padding-right: 36px;
 }
 
-/* `top: 6px` puts the X visually just below the card's top edge — anchored
- * to the corner but not jammed into it. Tuned manually against a real
- * in-flight card. */
+.wrapper_two_actions {
+	padding-right: 60px;
+}
+
 .actions {
 	position: absolute;
 	top: 6px;
-	right: 0;
+	right: 8px;
+	z-index: 1;
 	display: flex;
 	align-items: center;
+}
+
+.raised {
+	position: relative;
+	z-index: 1;
 }
 
 .left_content {
 	min-width: 0;
 }
 
+/* Positioned for the badge, so it paints above the row's target: it must let the pointer through. */
 .activity_icon {
 	position: relative;
 	flex-shrink: 0;
+	pointer-events: none;
 
 	width: 40px;
 	height: 40px;
@@ -248,5 +250,64 @@ function hasActionsContent() {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-outline);
+}
+
+.n-row-in {
+	animation: n-row-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.n-row-glow {
+	animation: n-row-glow 2.4s ease-out 0.2s both;
+}
+
+.n-row-in.n-row-glow {
+	animation:
+		n-row-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+		n-row-glow 2.4s ease-out 0.2s both;
+}
+
+/* Calm: the glow alone, in place. "Disable animations" reads as reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+	.n-row-in.n-row-glow {
+		animation: n-row-glow 2.4s ease-out both;
+	}
+}
+
+:global(.noanimations) .n-row-in.n-row-glow {
+	animation: n-row-glow 2.4s ease-out both;
+}
+
+.n-amt {
+	animation: n-amt 2.6s ease-out both;
+}
+
+@keyframes n-row-in {
+	from {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes n-row-glow {
+	0% {
+		background: color-mix(in srgb, var(--green), transparent 84%);
+	}
+	100% {
+		background: transparent;
+	}
+}
+
+@keyframes n-amt {
+	0%,
+	70% {
+		color: var(--green);
+	}
+	100% {
+		color: var(--txt-primary);
+	}
 }
 </style>

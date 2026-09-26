@@ -1,15 +1,11 @@
+import type { ToastOptions } from "@/composables/toast"
 import { stripWireControl } from "@/wallet/services/dapp-session/capability-meta"
 
-type ToastFn = (toast: { label: string; icon: string }, duration?: number) => void
+type ToastFn = (toast: ToastOptions) => void
 
-/** One toast's full shape — success and failure each carry their own, because
- *  the migrated sites use genuinely different icon/duration combinations per
- *  outcome (e.g. failure warning/3s at the header vs alert/2s on the received
- *  page) and none of them may drift. */
+/** One outcome's snack text; the kind follows the outcome. */
 export interface CopyToastSpec {
 	label: string
-	icon?: string
-	duration?: number
 }
 
 /**
@@ -35,10 +31,10 @@ export async function copyToClipboard(
 	try {
 		await window.navigator.clipboard.writeText(opts.sanitize ? stripWireControl(text) : text)
 	} catch {
-		openToast({ label: opts.failure.label, icon: opts.failure.icon ?? "warning" }, opts.failure.duration)
+		openToast({ kind: "error", label: opts.failure.label })
 		return false
 	}
-	openToast({ label: opts.success.label, icon: opts.success.icon ?? "copy" }, opts.success.duration)
+	openToast({ kind: "success", label: opts.success.label })
 	return true
 }
 
@@ -47,7 +43,7 @@ export async function copyToClipboard(
 export function copyWithToast(text: string, openToast: ToastFn, successLabel: string, opts: { sanitize?: boolean } = {}): Promise<boolean> {
 	return copyToClipboard(text, openToast, {
 		success: { label: successLabel },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		failure: { label: "Couldn't copy" },
 		sanitize: opts.sanitize,
 	})
 }

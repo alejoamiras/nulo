@@ -128,8 +128,7 @@ describe("SelectProfilePopup — scope-switch guard (B-09)", () => {
 		expect(H.setLastActiveProfileIdMock).not.toHaveBeenCalled()
 		expect(w.emitted("onClose")).toBeUndefined()
 		expect(H.openToastMock).toHaveBeenCalledWith(
-			expect.objectContaining({ label: "Finish or cancel your pending transaction first" }),
-			3_000,
+			expect.objectContaining({ kind: "error", label: "Finish or cancel your pending transaction first" }),
 		)
 	})
 })

@@ -21,6 +21,7 @@ const authwitsServiceMock = {
 }
 
 const openToastMock = vi.fn()
+const popupOpenMock = vi.fn()
 const preselected = { preselectedAuthwits: [] as { id: string; content: string }[] }
 
 vi.mock("@/wallet/services/auth-registry/client", () => ({
@@ -50,13 +51,12 @@ vi.mock("@/stores/popup.store", () => ({
 	usePopupStore: () => ({
 		popups: { revoke_authwits: { order: 1 } },
 		len: 1,
-		open: vi.fn(),
+		open: popupOpenMock,
 	}),
 }))
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 const STUBS = {
@@ -83,6 +83,7 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 }
 
+import { RowAction } from "@nulo/design"
 import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
 
 // Track every mounted wrapper so afterEach can tear down via show=false,
@@ -91,12 +92,13 @@ import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
 // stale onKeydown closure makes pressEnter() fire the old handler.
 const wrappers: ReturnType<typeof mount>[] = []
 
-async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id: "aw-1", content: "c1" }]) {
+async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id: "aw-1", content: "c1" }], attached = false) {
 	preselected.preselectedAuthwits = authwits
 	authwitsServiceMock.getRegistryEnabled.mockResolvedValueOnce(true)
 	const w = mount(RevokeAuthwitsPopup, {
 		props: { show: false },
-		global: { stubs: STUBS },
+		global: { stubs: STUBS, components: { RowAction } },
+		...(attached ? { attachTo: document.body } : {}),
 	})
 	wrappers.push(w)
 	await w.setProps({ show: true })
@@ -106,6 +108,20 @@ async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id:
 
 function pressEnter() {
 	document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+}
+
+/** Presses `key` on a focused button as a browser does: Enter clicks it on keydown and Space on
+ *  keyup, each only when no handler cancelled the key. Returns whether each key event went through. */
+function pressOn(el: HTMLElement, key: "Enter" | " "): boolean[] {
+	el.focus()
+	const down = el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))
+	if (key === "Enter") {
+		if (down) el.click()
+		return [down]
+	}
+	const up = el.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }))
+	if (down && up) el.click()
+	return [down, up]
 }
 
 async function setAllFees(w: ReturnType<typeof mount>) {
@@ -118,6 +134,7 @@ beforeEach(() => {
 	authwitsServiceMock.revokeAuthwits.mockReset().mockResolvedValue(undefined)
 	authwitsServiceMock.disconnect.mockReset()
 	openToastMock.mockReset()
+	popupOpenMock.mockReset()
 	preselected.preselectedAuthwits = []
 })
 
@@ -128,6 +145,26 @@ afterEach(async () => {
 		w.unmount()
 	}
 	wrappers.length = 0
+})
+
+describe("RevokeAuthwitsPopup — the content button", () => {
+	test.each(["Enter", " "] as const)(
+		"a named button: %j on it opens the content once and revokes nothing, though a revoke is ready",
+		async (key) => {
+			const w = await mountAndOpen([{ id: "aw-1", content: "c1" }], true)
+			await setAllFees(w)
+			const view = w.get('[data-testid="revoke-authwits-view-content"]')
+			expect(view.element.tagName).toBe("BUTTON")
+			expect(view.attributes("aria-label")).toBe("View authwits content")
+
+			expect(pressOn(view.element as HTMLElement, key)).not.toContain(false)
+			await flushPromises()
+			expect(popupOpenMock).toHaveBeenCalledTimes(1)
+			expect(popupOpenMock).toHaveBeenCalledWith("data_viewer")
+			expect(preselected).toMatchObject({ viewerData: ["c1"] })
+			expect(authwitsServiceMock.revokeAuthwits).not.toHaveBeenCalled()
+		},
+	)
 })
 
 describe("RevokeAuthwitsPopup — Enter-key gate", () => {
@@ -178,8 +215,8 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 	test("(REGRESSION-PIN) Enter is a no-op when isErrorOccurred (error.value set)", async () => {
 		// Pre-fix the Enter predicate ignored isErrorOccurred even though the
 		// Revoke button template gate includes it. Pin the !isErrorOccurred.value gate.
-		// Drive error.value via fetchRegistryStatus catch — avoids the TOAST_DURATION
-		// auto-import call site that triggers if we error inside handleRevokeAuthwits.
+		// Drive error.value via fetchRegistryStatus catch — avoids the toast call site
+		// that fires if we error inside handleRevokeAuthwits.
 		preselected.preselectedAuthwits = [{ id: "aw-1", content: "c1" }]
 		authwitsServiceMock.getRegistryEnabled.mockRejectedValueOnce(new Error("PXE down"))
 		const w = mount(RevokeAuthwitsPopup, {

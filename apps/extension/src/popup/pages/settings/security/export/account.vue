@@ -138,7 +138,7 @@ const handleCreate = async () => {
 			isWrongPassword.value = true
 		} else {
 			console.error("[export/account] create failed:", error)
-			openToast({ label: "Failed to create the file", icon: "warning" }, 4_000)
+			openToast({ kind: "error", label: "Failed to create the file" })
 		}
 	} finally {
 		if (gen === generation) isBusy.value = false
@@ -164,7 +164,7 @@ const handleProtect = async () => {
 		password.value = null
 	} catch (error) {
 		if (gen !== generation) return
-		openToast({ label: "Failed to protect the file", icon: "warning" }, 4_000)
+		openToast({ kind: "error", label: "Failed to protect the file" })
 	} finally {
 		if (gen === generation) isBusy.value = false
 	}
@@ -186,11 +186,11 @@ const handleDownload = async () => {
 	try {
 		await downloadFile({ data: payload.value, filename: fileName.value })
 		if (gen !== generation) return
-		openToast({ label: "Account file downloaded", icon: "download" }, 2_000)
+		openToast({ kind: "success", label: "Account file downloaded" })
 	} catch (err) {
 		if (gen !== generation) return
 		console.error("Download failed:", err?.message || err)
-		openToast({ label: "Failed to download the file", icon: "warning" }, 4_000)
+		openToast({ kind: "error", label: "Failed to download the file" })
 	} finally {
 		if (gen === generation) isDownloading.value = false
 	}

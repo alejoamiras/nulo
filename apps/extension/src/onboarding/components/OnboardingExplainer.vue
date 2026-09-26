@@ -1,4 +1,7 @@
 <script setup>
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 defineProps({
 	step: { type: Number, required: true },
 	titleMain: { type: String, required: true },
@@ -31,7 +34,7 @@ const emit = defineEmits(["continue", "skip"])
 			</article>
 		</div>
 
-		<Flex direction="column" align="center" gap="12" :class="$style.actions">
+		<Flex v-snack-footer direction="column" align="center" gap="12" :class="$style.actions">
 			<Button variant="cta" size="large" :data-testid="continueTestid" @click="emit('continue')">
 				Continue
 			</Button>

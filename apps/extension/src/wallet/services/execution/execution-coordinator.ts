@@ -123,7 +123,7 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	/** Journal binding. Success-path stages only — failure transitions
 	 *  stay in the caller's catch (per-path failure shaping is preserved
 	 *  divergent by design). */
-	markJournal: (patch: ProveAndSendJournalPatch) => Promise<void>
+	markJournal: (patch: ProveAndSendJournalPatch) => Promise<unknown>
 	/** Offchain-output extraction hook. Runs BETWEEN prove and `toTx()` —
 	 *  the only point where `provedTx` is reachable. dApp paths use it;
 	 *  transfer paths omit it. */

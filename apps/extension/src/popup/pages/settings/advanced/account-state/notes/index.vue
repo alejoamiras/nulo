@@ -8,6 +8,7 @@
 
 <script setup>
 /** Components */
+import RowTarget from "@/components/ui/RowTarget.vue"
 
 /** Utils */
 import { NoteServiceClient } from "@/wallet/services/note/client"
@@ -110,7 +111,7 @@ const filteredDisplayNotes = computed(() => {
 })
 
 const fetchNotes = async (isRefetching) => {
-	if (isRefetching) openToast({ label: "Fetching notes again", icon: "zap" })
+	if (isRefetching) openToast({ kind: "success", label: "Fetching notes again" })
 	isFetchingNotes.value = true
 	error.value = undefined
 
@@ -172,6 +173,8 @@ const handleOpenNote = (display) => {
 	popupStore.open("data_viewer")
 }
 
+const rowIdBase = useId()
+
 /** Long hex values (addresses, hashes, preimages) should wrap with
  *  overflow-wrap: anywhere instead of ellipsis-truncate — users need
  *  to glance-verify the head and tail, not just the head. Numeric
@@ -213,14 +216,16 @@ onBeforeUnmount(() => {
 
 		<Flex v-else-if="filteredDisplayNotes.length" direction="column" gap="8">
 			<div
-				v-for="display in filteredDisplayNotes"
+				v-for="(display, i) in filteredDisplayNotes"
 				:key="display.key"
 				@click="handleOpenNote(display)"
 				:class="[$style.card, display.renderError && $style.card_error]"
 				:style="{ borderLeftColor: display.borderColor }"
 			>
+				<RowTarget :labelledby="`${rowIdBase}-${i}`" />
+
 				<div :class="$style.header">
-					<span :class="$style.type">
+					<span :id="`${rowIdBase}-${i}`" :class="$style.type">
 						{{ display.type }}<span v-if="display.contractName" :class="$style.contract_name"> · {{ display.contractName }}</span>
 					</span>
 					<span v-if="display.contractTrim" :class="$style.contract">{{ display.contractTrim }}</span>
@@ -254,6 +259,7 @@ onBeforeUnmount(() => {
 
 <style module>
 .card {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
@@ -271,9 +277,15 @@ onBeforeUnmount(() => {
 
 	transition: all 0.2s var(--bezier);
 
-	&:hover {
+	&:hover,
+	&:has(> [data-row-target]:focus-visible) {
 		background: var(--nulo-surface-low);
 		border-color: var(--nulo-outline);
+	}
+
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
 	}
 
 	&:active {

@@ -1,5 +1,6 @@
 <script setup>
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -46,7 +47,7 @@ const isConfirmed = computed(() => {
 
 async function handlePasskeyConfirmation() {
 	if (isPasskeyConfirmed.value) {
-		openToast({ label: "The operation is already confirmed", icon: "info" })
+		openToast({ kind: "success", label: "The operation is already confirmed" })
 		return
 	}
 
@@ -133,7 +134,7 @@ watch(
 					</Button>
 				</Flex>
 
-				<Flex gap="12">
+				<Flex v-snack-footer gap="12">
 					<Button
 						v-if="!isSingle"
 						@click="emit('onClose')"

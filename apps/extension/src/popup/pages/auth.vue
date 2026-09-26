@@ -13,7 +13,8 @@ import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vu
 
 /** Composables */
 import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
-import { TOAST_DURATION, useToast } from "@/composables/toast"
+import { vSnackFooter } from "@/composables/snackInset"
+import { useToast } from "@/composables/toast"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 
 /** Utils */
@@ -130,7 +131,7 @@ const handleUnlockError = (error, activeProfileId) => {
 		// live and a "try again" toast would race a successful
 		// navigation. Otherwise the wait genuinely expired: say so.
 		if (appStore.isLogined && appStore.profile?.id !== activeProfileId) return
-		openToast({ label: "Unlock timed out — please try again", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Unlock timed out — please try again" })
 		return
 	}
 	if (error instanceof BootstrapFailedError) {
@@ -303,7 +304,7 @@ watch(
 			</form>
 		</Flex>
 
-		<Flex justify="center" :class="$style.footer">
+		<Flex v-snack-footer justify="center" :class="$style.footer">
 			<Tooltip side="top" position="center" textAlign="center" maxWidth="220px">
 				<button
 					@click="popupStore.open('forgot_password')"

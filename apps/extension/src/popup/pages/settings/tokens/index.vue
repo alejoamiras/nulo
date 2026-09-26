@@ -56,7 +56,7 @@ const handleDelete = (target) => {
 	cacheStore.confirm.description = "Removing a token only affects the display in the interface and it does not affect the token balance"
 	cacheStore.confirm.callback = async () => {
 		await tokenService.deleteToken(target.id)
-		openToast({ label: "Token successfully deleted" })
+		openToast({ kind: "success", label: "Token successfully deleted" })
 	}
 
 	popupStore.open("confirm")
@@ -90,14 +90,9 @@ onBeforeUnmount(() => {
 				<template #right>
 					<Flex align="center" gap="8">
 						<Tooltip v-if="appStore.networks.length > 1" position="end" delay="350">
-							<Icon
-								@click.stop="handleDelete(token)"
-								name="close-circle"
-								size="14"
-								color="tertiary"
-								data-testid="token-delete"
-								:class="$style.icon_btn"
-							/>
+							<RowAction label="Delete token" data-testid="token-delete" @click="handleDelete(token)">
+								<Icon name="close-circle" size="14" color="tertiary" />
+							</RowAction>
 
 							<template #content> Delete token </template>
 						</Tooltip>
@@ -114,15 +109,3 @@ onBeforeUnmount(() => {
 	</SettingsPageShell>
 </template>
 
-<style module>
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-}
-
-</style>

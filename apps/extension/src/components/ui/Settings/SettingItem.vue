@@ -1,4 +1,12 @@
 <script setup>
+import { h, mergeProps, useCssModule, withKeys, withModifiers } from "vue"
+import { RouterLink } from "vue-router"
+import RowTarget from "@/components/ui/RowTarget.vue"
+
+defineOptions({ inheritAttrs: false })
+
+const $style = useCssModule()
+
 const props = defineProps({
 	size: {
 		type: String,
@@ -38,17 +46,57 @@ const props = defineProps({
 		default: false,
 	},
 })
+
+const attrs = useAttrs()
+const titleId = useId()
+
+/** `disabled` decides first: a disabled row is inert whatever `to` or `@click` it carries. */
+const mode = computed(() => {
+	if (props.disabled) return "inert"
+	if (props.to) return props.external ? "external" : "link"
+	if (attrs.onClick) return "click"
+	return "inert"
+})
+
+const rootClass = computed(() => [
+	$style.wrapper,
+	$style[props.size],
+	mode.value !== "inert" && $style.interactive,
+	props.raw && $style.raw,
+	props.disabled && $style.disabled,
+])
+
+/** An anchor has no native Space action; a bare Space presses it, and a modified one scrolls. */
+const pressOnSpace = withKeys(
+	withModifiers((e) => e.currentTarget.click(), ["exact", "prevent"]),
+	["space"],
+)
+
+/** The row root by mode, written once around the same body. */
+const Root = (_, { slots }) => {
+	const body = slots.default?.()
+	const shared = mergeProps(mode.value === "inert" ? { ...attrs, onClick: undefined } : attrs, { class: rootClass.value })
+	if (mode.value === "link") {
+		return h(
+			RouterLink,
+			{ to: props.to, custom: true },
+			{
+				default: ({ href, navigate }) =>
+					h("a", mergeProps(shared, { href, onClick: navigate, onKeydown: withKeys(navigate, ["space"]) }), body),
+			},
+		)
+	}
+	if (mode.value === "external") {
+		return h("a", mergeProps(shared, { href: props.to, target: "_blank", rel: "noopener noreferrer", onKeydown: pressOnSpace }), body)
+	}
+	return h("div", shared, body)
+}
 </script>
 
 <template>
-	<component
-		:is="(to && !external && 'router-link') || (to && external && 'a') || 'div'"
-		:to="!disabled && to && !external ? to : ''"
-		:href="external ? to : null"
-		:target="external ? '_blank' : null"
-		:class="[$style.wrapper, $style[size], raw && $style.raw, disabled && $style.disabled]"
-		:tabindex="disabled ? -1 : 0"
-	>
+	<Root>
+		<RowTarget v-if="mode === 'click'" :labelledby="titleId" />
+
 		<Flex wide align="center" justify="between" gap="16">
 			<Flex align="center" gap="14" wide>
 				<div v-if="icon || materialIcon || $slots.dot || $slots.icon" :class="$style.icon_wrapper">
@@ -80,7 +128,7 @@ const props = defineProps({
 				<!-- Labels: Title & Description -->
 				<Flex direction="column" gap="4" wide>
 					<Flex align="center" gap="6">
-						<Text size="14" weight="500" color="primary" :class="[$style.title, $slots.titleSuffix && $style.titleWithSuffix]"> {{ title }} </Text>
+						<Text :id="titleId" size="14" weight="500" color="primary" :class="[$style.title, $slots.titleSuffix && $style.titleWithSuffix]"> {{ title }} </Text>
 						<slot name="titleSuffix" />
 					</Flex>
 					<Text v-if="description || $slots.description" size="12" weight="500" color="tertiary" :class="$style.description">
@@ -101,7 +149,7 @@ const props = defineProps({
 				</slot>
 			</Flex>
 		</Flex>
-	</component>
+	</Root>
 </template>
 
 <style module>
@@ -111,26 +159,10 @@ const props = defineProps({
 	display: flex;
 	align-items: center;
 
-	cursor: pointer;
 	background: transparent;
 	text-decoration: none;
 
 	padding: 16px 20px;
-
-	transition: background 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-high);
-	}
-
-	&:active {
-		background: var(--nulo-surface-highest);
-	}
-
-	&:focus-visible {
-		background: var(--nulo-surface-high);
-		outline: none;
-	}
 
 	&.disabled {
 		pointer-events: none;
@@ -167,8 +199,28 @@ const props = defineProps({
 	}
 
 	&.raw {
-		cursor: default;
 		background: var(--nulo-surface-low);
+	}
+}
+
+.interactive {
+	cursor: pointer;
+	transition: background 0.2s var(--bezier);
+
+	&:hover,
+	&:focus-visible,
+	&:has(> [data-row-target]:focus-visible) {
+		background: var(--nulo-surface-high);
+	}
+
+	&:focus-visible,
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
+	}
+
+	&:active {
+		background: var(--nulo-surface-highest);
 	}
 }
 
@@ -187,7 +239,7 @@ const props = defineProps({
 	transition: color 0.2s var(--bezier);
 }
 
-.wrapper:hover .material_icon {
+.interactive:hover .material_icon {
 	color: var(--nulo-accent);
 }
 
@@ -202,7 +254,7 @@ const props = defineProps({
 	transition: color 0.2s var(--bezier);
 }
 
-.wrapper:hover .chevron_icon {
+.interactive:hover .chevron_icon {
 	color: var(--nulo-accent);
 }
 

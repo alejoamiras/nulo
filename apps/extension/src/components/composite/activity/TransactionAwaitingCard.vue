@@ -4,18 +4,6 @@
  * field positions stay byte-identical with `TransactionCard` (the settled
  * phase). The only visible difference between phases is the badge slot
  * (spinner here vs. status icon there) and the secondary-row content.
- *
- * Phase 2 follow-up: optional Cancel surface. When `cancellable: true` AND
- * `jobId` is non-null, renders a small `close` icon button at the top-right
- * of the card and emits `cancel` on click. Parent (RecentActivityView) wires
- * the emit to `ExecutionService.cancelJob(jobId)`. The button is hidden when
- * `stage === "submitting"` because the FSM forbids `submitting → cancelled`
- * at that point — removing the affordance is structurally honest (better than
- * a silent no-op click).
- *
- * The card itself carries no ARIA role: it contains focusable buttons, and a
- * button role may not. The whole-card click is a pointer convenience only; the
- * `focus` button is the accessible control.
  */
 import { computed, type PropType } from "vue"
 import type { JobStage, ProveBackend } from "@nulo/wallet-core/jobs"
@@ -41,8 +29,7 @@ const props = defineProps({
 	 *  e.g. dApp ops we don't synthesize a transfer type for. The parent
 	 *  resolves it via `formatTransferType(op.transferType)`. */
 	transferTypeLabel: { type: String, default: null },
-	/** Phase 2 follow-up: enable the Cancel button. Renders only when
-	 *  `cancellable && jobId && stage !== "submitting"`. */
+	/** Enable the Cancel button. Renders only when `cancellable && jobId && stage !== "submitting"`. */
 	cancellable: { type: Boolean, default: false },
 	/** Journal id to cancel. Emitted with the `cancel` event so multi-card
 	 *  render paths (RecentActivityView with N concurrent in-flight ops)
@@ -64,14 +51,11 @@ const emit = defineEmits(["cancel", "focus"])
 /** `queued` is the only stage at which an approval popup can exist. */
 const focusable = computed(() => Boolean(props.jobId) && props.stage === "queued")
 const showCancel = computed(() => props.cancellable && Boolean(props.jobId) && props.stage !== "submitting")
-
-function onCardClick() {
-	if (focusable.value) emit("focus", props.jobId)
-}
 </script>
 
 <template>
-	<div :class="[$style.card, focusable && $style.focusable]" :title="focusable ? 'Show the approval window' : undefined" @click="onCardClick">
+	<!-- The hover title sits on an ancestor of the row's target, so it shows over the whole row. -->
+	<div :class="$style.card" :title="focusable ? 'Show the approval window' : undefined">
 		<TransactionCardLayout
 			:title="title"
 			:icon="icon"
@@ -79,8 +63,10 @@ function onCardClick() {
 			:amountSymbol="amountSymbol"
 			:stage="stage"
 			:backend="backend"
+			:opens="focusable"
 			:actionCount="(focusable ? 1 : 0) + (showCancel ? 1 : 0)"
 			testId="tx-awaiting-card"
+			@activate="emit('focus', jobId)"
 		>
 			<template #badge>
 				<Spinner size="10" color="--nulo-accent" />
@@ -126,11 +112,6 @@ function onCardClick() {
 	display: contents;
 }
 
-.focusable {
-	display: block;
-	cursor: pointer;
-}
-
 /* Subtitle takes whatever horizontal room it can after the chip; truncates
  * with ellipsis when the chip pushes back. min-width: 0 + flex: 0 1 auto
  * let it shrink below its intrinsic width inside the Flex parent. */
@@ -170,15 +151,11 @@ function onCardClick() {
 	padding: 1px 4px;
 }
 
-/* User-tuned: 16px wide is below W3C's 24x24 touch-target minimum on the
- * width axis. The wallet is a desktop popup (cursor-precision input, not
- * touch), and the button stays 28px tall — the clickable area is 16x28,
- * still a clean rectangular hit zone. */
 .action_btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 16px;
+	width: 24px;
 	height: 28px;
 	padding: 0;
 	background: transparent;

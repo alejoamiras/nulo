@@ -130,7 +130,7 @@ describe("token page — Pin to Home", () => {
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
 		expect(storage.data[pinnedTokensKey("p1")]).toEqual({ "7": [addr(1)] })
-		expect(H.openToast).toHaveBeenCalledWith({ label: "Pinned to Home" })
+		expect(H.openToast).toHaveBeenCalledWith({ kind: "success", label: "Pinned to Home" })
 		await nextTick()
 		expect(pinItem(wrapper).text()).toContain("Unpin from Home")
 		expect(pinItem(wrapper).attributes("data-pinned")).toBe("true")
@@ -143,7 +143,7 @@ describe("token page — Pin to Home", () => {
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
 		expect(storage.data[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2)] })
-		expect(H.openToast).toHaveBeenCalledWith({ label: "Unpinned from Home" })
+		expect(H.openToast).toHaveBeenCalledWith({ kind: "success", label: "Unpinned from Home" })
 	})
 
 	test("a fourth pin opens the single-action Home is full popup naming the pinned symbols", async () => {

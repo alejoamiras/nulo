@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { IncomingPublicEventRecord } from "./spec"
 import { publicRecordId } from "./spec"
@@ -78,5 +78,68 @@ describe("IncomingTransferRepository — clearProfile / clearChain fan-out (code
 
 		expect((await repo.listRecords()).map((r) => r.networkId)).toEqual(["n2"])
 		expect((await repo.listTrust()).map((t) => t.networkId)).toEqual(["n2"])
+	})
+})
+
+describe("IncomingTransferRepository — arrival floors and rows", () => {
+	const freshRepo = () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		return { api, repo: new IncomingTransferRepository(api) }
+	}
+
+	test("a fence that turns false while setTrust reads the stored row writes nothing", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const repo = new IncomingTransferRepository(api)
+		const read = repo.getTrust.bind(repo)
+		let owned = true
+		vi.spyOn(repo, "getTrust").mockImplementationOnce(async (...args) => {
+			const out = await read(...args)
+			owned = false
+			return out
+		})
+
+		expect(await repo.setTrust("p1", "n1", "0xtok", "trusted", () => owned)).toBeUndefined()
+		expect(await read("p1", "n1", "0xtok")).toBeUndefined()
+	})
+
+	test("a trust state change keeps the stored arrival floor and its pending mark", async () => {
+		const { repo } = freshRepo()
+		await repo.setArrivalFloor(await repo.setTrust("p1", "n1", "0xtok", "trusted"), { arrivalFloor: 200, pending: true })
+
+		await repo.setTrust("p1", "n1", "0xtok", "unknown")
+		expect(await repo.getTrust("p1", "n1", "0xtok")).toMatchObject({ state: "unknown", arrivalFloor: 200, arrivalFloorPending: true })
+		await repo.setTrust("p1", "n1", "0xtok", "pending")
+		expect(await repo.getTrust("p1", "n1", "0xtok")).toMatchObject({ state: "pending", arrivalFloor: 200, arrivalFloorPending: true })
+
+		const stored = await repo.getTrust("p1", "n1", "0xtok")
+		if (!stored) throw new Error("trust row missing")
+		await repo.setArrivalFloor(stored, { arrivalFloor: 250, pending: false })
+		const cleared = await repo.getTrust("p1", "n1", "0xtok")
+		expect(cleared).toMatchObject({ state: "pending", arrivalFloor: 250 })
+		expect(cleared?.arrivalFloorPending).toBeUndefined()
+	})
+
+	test("an arrival row that fails to parse reads as missing", async () => {
+		const { api, repo } = freshRepo()
+		await api.storage.local.set({ "nulo:core:incoming-arrivals@p1|n1|0xacct": JSON.stringify({ sinceBlock: -1, played: [] }) })
+		expect(await repo.getArrivalRow("p1", "n1", "0xacct")).toBeUndefined()
+	})
+
+	test("clearChain and clearProfile delete only their scope's arrival rows", async () => {
+		const { repo } = freshRepo()
+		const row = { sinceBlock: 1, played: [] }
+		await repo.setArrivalRow("p1", "n1", "0xa", row)
+		await repo.setArrivalRow("p1", "n2", "0xa", row)
+		await repo.setArrivalRow("p11", "n1", "0xa", row)
+
+		await repo.clearChain("p1", "n1")
+		expect(await repo.getArrivalRow("p1", "n1", "0xa")).toBeUndefined()
+		expect(await repo.getArrivalRow("p1", "n2", "0xa")).toEqual(row)
+
+		await repo.clearProfile("p1")
+		expect(await repo.getArrivalRow("p1", "n2", "0xa")).toBeUndefined()
+		expect(await repo.getArrivalRow("p11", "n1", "0xa")).toEqual(row)
 	})
 })

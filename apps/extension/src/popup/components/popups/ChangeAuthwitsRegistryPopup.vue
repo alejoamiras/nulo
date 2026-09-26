@@ -8,6 +8,7 @@ import { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/clien
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
 import { usePopupEntity } from "@/composables/usePopupEntity"
@@ -61,13 +62,13 @@ async function handleChangeRegistry() {
 
 		await authwitsService.setRegistryEnabled(appStore.network.id, appStore.account.address, !isRegistryEnabled.value, feeSettings.value)
 
-		openToast({ label: "Account authwit registry is changed" })
+		openToast({ kind: "success", label: "Account authwit registry is changed" })
 	} catch (err) {
 		// User-initiated cancel: terminal card in RecentActivityView says
 		// "Cancelled" — suppress the failure toast + error.value.
 		if (classifyCancellableRejection(err) !== "silent") {
 			error.value = err
-			openToast({ label: "Failed to change registry status", icon: "warning" }, TOAST_DURATION.LONG)
+			openToast({ kind: "error", label: "Failed to change registry status" })
 		}
 	} finally {
 		// Handler-owned latch release — closure via the hide watcher still
@@ -124,7 +125,7 @@ usePopupEntity(
 					v-model="feeSettings"
 				/>
 
-				<Flex align="center" direction="column" gap="12">
+				<Flex v-snack-footer align="center" direction="column" gap="12">
 					<Button
 						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"

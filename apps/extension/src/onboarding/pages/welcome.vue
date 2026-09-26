@@ -3,6 +3,9 @@
 </route>
 
 <script setup lang="ts">
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 const router = useRouter()
 </script>
 
@@ -19,7 +22,7 @@ const router = useRouter()
 			</Text>
 		</Flex>
 
-		<Flex direction="column" gap="8" :class="$style.actions">
+		<Flex v-snack-footer direction="column" gap="8" :class="$style.actions">
 			<Button
 				variant="primary"
 				size="large"

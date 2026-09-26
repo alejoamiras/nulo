@@ -19,7 +19,7 @@ import { describe, expect, test, vi } from "vitest"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection } from "@nulo/wallet-core/base"
 import { defineRpcMethods } from "../core/rpc-methods"
-import { UserRejectedError } from "../errors"
+import { JournaledRejection, UserRejectedError } from "../errors"
 import { MessageType } from "../messages"
 import { wrapParams } from "../utils"
 import { connectServiceClient, silentLogger } from "../testing/transport-harness"
@@ -31,13 +31,14 @@ type Methods = {
 	echo: (msg: string) => string
 	walletFail: () => never
 	plainFail: () => never
+	journaledFail: () => never
 }
 type Events = {
 	ping: { n: number }
 }
 
 class TestService extends Service<Methods, Events> {
-	protected readonly rpcMethods = defineRpcMethods<Methods>()("echo", "walletFail", "plainFail")
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("echo", "walletFail", "plainFail", "journaledFail")
 
 	public ping = new EventHandler<{ n: number }>()
 
@@ -55,6 +56,10 @@ class TestService extends Service<Methods, Events> {
 
 	public plainFail(): never {
 		throw new Error("plain boom")
+	}
+
+	public journaledFail(): never {
+		throw new JournaledRejection(new UserRejectedError("user said no"), "0123456789abcdef")
 	}
 
 	public emitPing(n: number): void {
@@ -187,6 +192,20 @@ describe("error path", () => {
 		const resp = lastResponse(client)
 		expect(resp.content.error).toBe("plain boom")
 		expect(resp.content.errorPayload).toBeUndefined()
+	})
+
+	test("a JournaledRejection replies with its error's fields and the record's id beside them", async () => {
+		new TestService()
+		const client = connectServiceClient(SERVICE)
+		client.sendToService(request(1, "journaledFail", []))
+		await flush()
+
+		expect(lastResponse(client).content).toEqual({
+			requestId: 1,
+			error: "user said no",
+			errorPayload: { code: "USER_REJECTED", message: "user said no", details: undefined },
+			journalId: "0123456789abcdef",
+		})
 	})
 })
 

@@ -22,7 +22,11 @@ vi.mock("@/wallet/services/price/client", () => ({
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
-	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
+	// `custom` hands the slot its href and navigate, as the real RouterLink does.
+	RouterLink: {
+		template: '<slot v-if="custom" :href="to" :navigate="() => {}" /><a v-else :href="to"><slot /></a>',
+		props: { to: [String, Object], custom: Boolean },
+	},
 	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
 	MaterialIcon: { template: '<span data-testid="stub-micon" :data-name="name" />', props: ["name", "size", "color"] },
 	Tooltip: { template: "<span><slot /></span>", props: ["side", "position", "delay"] },

@@ -540,6 +540,23 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 }
 
 /**
+ * A rejection that names the journal record its operation settled as failed. The thrower vouches
+ * for the pairing, so only the code that created the record builds one, with the id it was given.
+ * The response carries `error` exactly as it would alone, with `journalId` beside it.
+ */
+export class JournaledRejection {
+	public readonly error: unknown
+	public readonly journalId: string
+
+	public constructor(error: unknown, journalId: string) {
+		this.error = error
+		this.journalId = journalId
+	}
+}
+
+const journalIds = new WeakMap<Error, string>()
+
+/**
  * Reconstruct the client-side error from a response envelope's content.
  *
  * A structured `errorPayload` is rebuilt into its typed `WalletError` subclass
@@ -548,8 +565,16 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
  * offscreen (sendMessage) transport clients — the structural param keeps this
  * decoupled from each client's `ResponseContentLike`.
  */
-export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string }): Error {
-	return content.errorPayload
+export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string; journalId?: unknown }): Error {
+	const error = content.errorPayload
 		? walletErrorFromPayload(content.errorPayload as WalletErrorPayload)
 		: new Error(content.error ?? "Unknown error")
+	if (typeof content.journalId === "string") journalIds.set(error, content.journalId)
+	return error
+}
+
+/** The journal record a response named beside this rejection, or null. Only the response's own
+ *  `journalId` sets it; nothing on the error, its details included, can. */
+export function journalIdOf(error: unknown): string | null {
+	return error instanceof Error ? (journalIds.get(error) ?? null) : null
 }

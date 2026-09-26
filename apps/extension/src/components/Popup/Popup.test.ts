@@ -1,12 +1,13 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { nextTick, ref } from "vue"
+import { defineComponent, h, nextTick, ref } from "vue"
 
 type Options = Record<string, unknown>
 type FakeTrap = {
 	active: boolean
 	activate: () => void
 	deactivate: (options?: Options) => void
+	containers: Element | Element[]
 	options: Options
 	/** What was focused when the trap was created — what a real trap would record as the return target. */
 	focusedAtCreate: Element | null
@@ -14,9 +15,10 @@ type FakeTrap = {
 
 const traps: FakeTrap[] = []
 vi.mock("focus-trap", () => ({
-	createFocusTrap: vi.fn((_el: Element, options: Options) => {
+	createFocusTrap: vi.fn((containers: Element | Element[], options: Options) => {
 		const trap: FakeTrap = {
 			active: false,
+			containers,
 			options,
 			focusedAtCreate: document.activeElement,
 			activate: vi.fn(() => {
@@ -32,6 +34,7 @@ vi.mock("focus-trap", () => ({
 }))
 vi.mock("@/utils/core", () => ({ managers: { profile: { refreshSession: vi.fn() } } }))
 
+import { useSnackInset } from "@/composables/snackInset"
 import Popup from "./Popup.vue"
 
 /** `Popup` reads the trap container off `Flex`'s exposed `wrapper`; the stub exposes its root the same way. */
@@ -56,7 +59,7 @@ const settle = async () => {
 	await flushPromises()
 }
 
-/** Registry popups mount closed and are toggled open; the watcher is not immediate, so the harness does the same. */
+/** Registry popups mount closed and are toggled open; the harness does the same. */
 const openPopup = async (props: Record<string, unknown> = {}) => {
 	const w = mountPopup(props)
 	await w.setProps({ show: true })
@@ -73,14 +76,24 @@ describe("Popup", () => {
 		document.body.innerHTML = ""
 	})
 
-	test("shown: one trap is created after the tick and activated on the wrapper", async () => {
+	test("shown: one trap is created after the tick and activated on the wrapper, its one container without a `#toast` anchor", async () => {
 		const w = mountPopup()
 		await w.setProps({ show: true })
 		expect(traps).toHaveLength(0)
 		await settle()
 		expect(traps).toHaveLength(1)
 		expect(traps[0]?.active).toBe(true)
-		expect(traps[0]?.options.fallbackFocus).toBe(document.querySelector('[data-testid="inside"]')?.parentElement)
+		const wrapper = document.querySelector('[data-testid="inside"]')?.parentElement
+		expect(traps[0]?.containers).toBe(wrapper)
+		expect(traps[0]?.options.fallbackFocus).toBe(wrapper)
+		w.unmount()
+	})
+
+	test("with a `#toast` anchor the trap takes it as its second container, after the wrapper", async () => {
+		document.body.insertAdjacentHTML("beforeend", '<div id="toast"></div>')
+		const w = await openPopup()
+		const wrapper = document.querySelector('[data-testid="inside"]')?.parentElement
+		expect(traps[0]?.containers).toEqual([wrapper, document.getElementById("toast")])
 		w.unmount()
 	})
 
@@ -152,6 +165,28 @@ describe("Popup", () => {
 		w.unmount()
 	})
 
+	test("created already shown: one trap after the tick, on the wrapper, returning focus to what was focused at creation even if a child focuses its own input first", async () => {
+		document.body.insertAdjacentHTML("beforeend", '<button id="opener">open</button>')
+		const opener = document.querySelector<HTMLElement>("#opener")
+		opener?.focus()
+		const w = mountPopup({ show: true })
+		void nextTick(() => document.querySelector<HTMLElement>('[data-testid="inside"]')?.focus())
+		expect(traps).toHaveLength(0)
+		await settle()
+		expect(traps).toHaveLength(1)
+		expect(traps[0]?.active).toBe(true)
+		expect(traps[0]?.containers).toBe(document.querySelector('[data-testid="inside"]')?.parentElement)
+		expect(traps[0]?.options.setReturnFocus).toBe(opener)
+		w.unmount()
+	})
+
+	test("created already shown and unmounted before the tick: no trap is created", async () => {
+		const w = mountPopup({ show: true })
+		w.unmount()
+		await settle()
+		expect(traps).toHaveLength(0)
+	})
+
 	test("initialFocus is handed to the trap; off by default", async () => {
 		const a = await openPopup()
 		expect(traps[0]?.options.initialFocus).toBe(false)
@@ -159,5 +194,28 @@ describe("Popup", () => {
 		const b = await openPopup({ initialFocus: "#title" })
 		expect(traps[1]?.options.initialFocus).toBe("#title")
 		b.unmount()
+	})
+
+	test("an open popup covers the nav: the snack drops from the nav's 76px to 12px and goes back when it closes", async () => {
+		let inset = { value: -1 }
+		const host = mount(
+			defineComponent({
+				setup() {
+					inset = useSnackInset(() => 76)
+					return () => h("div")
+				},
+			}),
+		)
+		const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+		const w = await openPopup()
+		await frame()
+		expect(inset.value).toBe(12)
+
+		await w.setProps({ show: false })
+		await settle()
+		await frame()
+		expect(inset.value).toBe(76)
+		w.unmount()
+		host.unmount()
 	})
 })

@@ -8,6 +8,7 @@ import { AuthRegistryServiceClient, MAX_REVOKES_PER_TX } from "@/wallet/services
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
 import { usePopupEntity } from "@/composables/usePopupEntity"
@@ -91,13 +92,10 @@ async function handleRevokeAuthwits() {
 		// failure summary toasts. The terminal card communicates the state.
 		emit("onClose")
 	} else if (errors.length) {
-		openToast(
-			{ label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)`, icon: "warning" },
-			TOAST_DURATION.LONG,
-		)
+		openToast({ kind: "error", label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)` })
 		error.value = errors.join(", ")
 	} else {
-		openToast({ label: "Authwit(s) successfully revoked" })
+		openToast({ kind: "success", label: "Authwit(s) successfully revoked" })
 		emit("onClose")
 	}
 }
@@ -204,7 +202,15 @@ usePopupEntity(
 								<Text v-if="ch.count > 1" size="12" color="tertiary"> {{ `(${ch.count})` }} </Text>
 							</Flex>
 							<Tooltip position="end">
-								<Icon @click="showChunkContent(ch)" name="expand" size="16" color="tertiary" :class="$style.fullscreen_icon" />
+								<!-- The sheet revokes on any Enter that reaches the document; here Enter only opens the content. -->
+								<RowAction
+									label="View authwits content"
+									data-testid="revoke-authwits-view-content"
+									@click="showChunkContent(ch)"
+									@keydown.enter.stop
+								>
+									<Icon name="expand" size="16" color="tertiary" />
+								</RowAction>
 
 								<template #content>
 									<Text size="12" color="secondary">View authwits content</Text>
@@ -251,7 +257,7 @@ usePopupEntity(
 
 				</template>
 
-				<Flex align="center" direction="column" gap="12">
+				<Flex v-snack-footer align="center" direction="column" gap="12">
 					<Button
 						data-testid="revoke-authwits-submit"
 						@click="handleRevokeAuthwits"
@@ -294,13 +300,6 @@ usePopupEntity(
 
 	.header {
 		padding: 12px;
-	}
-
-	.fullscreen_icon {
-		cursor: pointer;
-		&:hover {
-			fill: var(--txt-primary);
-		}
 	}
 }
 

@@ -16,7 +16,20 @@
 
 import { describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { RpcConnectError, RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "../errors"
+import { buildErrorResponseContent } from "../core/error-response"
+import {
+	JobCancelledError,
+	JournaledRejection,
+	journalIdOf,
+	OperationNotRecordedError,
+	RpcConnectError,
+	RpcDisconnectedError,
+	RpcTimeoutError,
+	TermsAcceptanceRequiredError,
+	UserRejectedError,
+	ValidationError,
+	WalletError,
+} from "../errors"
 import { MessageType, type ResponseMessage } from "../messages"
 import { capturePortMessage, emitPortDisconnect, emitPortMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
 import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "./client"
@@ -336,6 +349,54 @@ describe("error deserialization", () => {
 			expect(err).toBeInstanceOf(Error)
 			expect(err).not.toBeInstanceOf(WalletError)
 		}
+	})
+})
+
+describe("a failure's journal record", () => {
+	const ID = "0123456789abcdef"
+
+	/** What the client rejects with once the service has answered with `content`. */
+	async function rejectionFor(content: Record<string, unknown>): Promise<unknown> {
+		const client = newClient()
+		await client.connect()
+		const promise = client.fail()
+		emitPortMessage(SERVICE, {
+			type: MessageType.Response,
+			content: { requestId: lastRequestId(), ...content },
+		} as ResponseMessage<TestMethods>)
+		return promise.catch((error: unknown) => error)
+	}
+
+	/** Class, message and own enumerable fields; `stack` is left out, as each rebuild has its own. */
+	const shape = (error: unknown) => ({ proto: Object.getPrototypeOf(error), ...(error as object), message: (error as Error).message })
+
+	test.each([
+		["a plain Error", () => new Error("plain boom")],
+		["a WalletError with details", () => new ValidationError("bad input", { field: "amount" })],
+		["a Terms refusal", () => new TermsAcceptanceRequiredError()],
+		["a refusal before any record", () => new OperationNotRecordedError()],
+		["a cancel", () => new JobCancelledError("cancelled", { jobId: "j1" })],
+		["a thrown string", () => "flat"],
+	])("%s rejects the same with a record named beside it, and only then names one", async (_name, make) => {
+		const alone = await rejectionFor({ ...buildErrorResponseContent(make()) })
+		const journaled = await rejectionFor({ ...buildErrorResponseContent(new JournaledRejection(make(), ID)) })
+
+		expect(shape(journaled)).toEqual(shape(alone))
+		expect(journalIdOf(alone)).toBeNull()
+		expect(journalIdOf(journaled)).toBe(ID)
+	})
+
+	test("nothing but the response's own string names a record: not the details, not the error, not a number", async () => {
+		const inDetails = await rejectionFor({
+			error: "bad",
+			errorPayload: { code: "VALIDATION", message: "bad", details: { journalId: ID } },
+		})
+		const notString = await rejectionFor({ error: "boom", journalId: 42 })
+
+		expect(inDetails).toBeInstanceOf(ValidationError)
+		expect(journalIdOf(inDetails)).toBeNull()
+		expect(journalIdOf(notString)).toBeNull()
+		expect(journalIdOf(Object.assign(new Error("sdk"), { journalId: ID }))).toBeNull()
 	})
 })
 

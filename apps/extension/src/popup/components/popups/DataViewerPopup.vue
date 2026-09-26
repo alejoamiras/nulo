@@ -1,5 +1,8 @@
 <!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
+/** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
+
 /** Store */
 import { usePopupStore } from "@/stores/popup.store.ts"
 import { useCacheStore } from "@/stores/cache.store.ts"
@@ -33,7 +36,7 @@ watch(
 			<Flex wide align="center" direction="column" gap="24" :class="$style.wrapper">
 				<JsonViewer :data="data" />
 
-				<Button @click="emit('onClose')" variant="primary_outline" size="medium" wide>Close</Button>
+				<Button v-snack-footer @click="emit('onClose')" variant="primary_outline" size="medium" wide>Close</Button>
 			</Flex>
 		</PopupCard>
 	</Popup>

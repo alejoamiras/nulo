@@ -123,7 +123,7 @@ const handleConfirmImport = async () => {
 		appStore.accounts.push(account)
 		await storageLocalSet({ "nulo:ui:activeAccount": account.address })
 		if (isStale()) return
-		openToast({ label: "Account imported", icon: "check-circle" }, 2_000)
+		openToast({ kind: "success", label: "Account imported" })
 		// History-aware return (the SubPageHeader back arrow is history-first): a push would leave
 		// this page one Back away from the account list it just finished with.
 		if (window.history.length > 1) router.back()
@@ -185,8 +185,6 @@ const collapsingLabel = "Import Account"
 				<ItemsContainer flat>
 					<SettingItem
 						@click="handlePickFile"
-						@keydown.enter.prevent="handlePickFile"
-						@keydown.space.prevent="handlePickFile"
 						title="Choose an account file"
 						:description="fileName || 'Select a .json or .txt file'"
 						icon="key"

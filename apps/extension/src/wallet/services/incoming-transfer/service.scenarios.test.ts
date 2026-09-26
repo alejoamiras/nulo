@@ -38,6 +38,7 @@ import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRec
 import { TaskStatus } from "@/wallet/services/task/spec"
 import type { PublicEventReader } from "./public-event-indexer"
 import { SCAN_EPISODES_KEY } from "./scan-episodes"
+import { type ArrivalRow, isArrivalEligible } from "./arrival-state"
 import type { ScanOutcome } from "./scan-health"
 import type {
 	PublicScanTips,
@@ -53,9 +54,14 @@ const records = new Map<string, IncomingTransferRecord>()
 const trust = new Map<string, IncomingTrustRecord>()
 const cursors = new Map<string, unknown>()
 const outbox = new Map<string, unknown>()
+const arrivals = new Map<string, ArrivalRow>()
 
 function trustKey(profileId: string, networkId: string, contract: string): string {
 	return `${profileId}|${networkId}|${contract}`
+}
+
+function dropKeys(map: Map<string, unknown>, prefix: string): void {
+	for (const key of map.keys()) if (key.startsWith(prefix)) map.delete(key)
 }
 
 vi.mock("./repository", () => ({
@@ -83,15 +89,35 @@ vi.mock("./repository", () => ({
 				listByContract: async (p: string, n: string, c: string) =>
 					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.contract === c),
 				getTrust: async (p: string, n: string, c: string) => trust.get(trustKey(p, n, c)),
-				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState) => {
+				// Keeps the stored floor fields, as the real repository does.
+				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState, fence?: () => boolean) => {
+					if (fence && !fence()) return undefined
+					const { arrivalFloor, arrivalFloorPending } = trust.get(trustKey(p, n, c)) ?? {}
 					const rec: IncomingTrustRecord = { profileId: p, networkId: n, contract: c, state, updatedAt: 0 }
+					if (arrivalFloor !== undefined) rec.arrivalFloor = arrivalFloor
+					if (arrivalFloorPending) rec.arrivalFloorPending = true
 					trust.set(trustKey(p, n, c), rec)
 					return rec
 				},
+				setArrivalFloor: async (stored: IncomingTrustRecord, floor: { arrivalFloor: number | undefined; pending: boolean }) => {
+					const { profileId, networkId, contract, state, updatedAt } = stored
+					const rec: IncomingTrustRecord = { profileId, networkId, contract, state, updatedAt }
+					if (floor.arrivalFloor !== undefined) rec.arrivalFloor = floor.arrivalFloor
+					if (floor.pending) rec.arrivalFloorPending = true
+					trust.set(trustKey(profileId, networkId, contract), rec)
+				},
 				listTrust: async () => [...trust.values()],
+				getArrivalRow: async (p: string, n: string, a: string) => arrivals.get(`${p}|${n}|${a}`),
+				setArrivalRow: async (p: string, n: string, a: string, row: ArrivalRow) => {
+					arrivals.set(`${p}|${n}|${a}`, row)
+				},
+				deleteArrivalRow: async (p: string, n: string, a: string) => {
+					arrivals.delete(`${p}|${n}|${a}`)
+				},
 				clearProfile: async (p: string) => {
 					for (const [k, v] of records) if (v.profileId === p) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p) trust.delete(k)
+					dropKeys(arrivals, `${p}|`)
 				},
 				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 30 — clearing a chain atomically covers records, trust, cursors and outbox under one scope predicate
 				clearChain: async (p: string, n: string) => {
@@ -99,6 +125,7 @@ vi.mock("./repository", () => ({
 					for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)
 					for (const key of cursors.keys()) if (key.startsWith(`${p}|${n}|`)) cursors.delete(key)
 					for (const key of outbox.keys()) if (key.startsWith(`${p}|${n}|`)) outbox.delete(key)
+					dropKeys(arrivals, `${p}|${n}|`)
 				},
 				// Public-event cursors (D3/D6).
 				getCursor: async (p: string, n: string, c: string) => cursors.get(`${p}|${n}|${c}`),
@@ -140,6 +167,7 @@ function makeProfileStub(activeProfile: { id: string } | null = { id: "p1" }) {
 		onActiveProfileChanged: eh<void>(),
 		onProfileDeleted: eh<{ id: string }>(),
 		getActiveProfile: vi.fn().mockResolvedValue(activeProfile),
+		getProfiles: vi.fn().mockResolvedValue(activeProfile ? [activeProfile] : []),
 		async start() {},
 	}
 }
@@ -201,6 +229,9 @@ function makeAccountStub(accounts: { profileId: string; chainId: number; address
 		onAccountDeleted: eh<{ profileId: string; chainId: number; address: string }>(),
 		getAccounts: vi.fn().mockImplementation(async (_p: string, chainId: number) => {
 			return accounts.filter((a) => a.chainId === chainId)
+		}),
+		getAccount: vi.fn().mockImplementation(async (p: string, chainId: number, address: string) => {
+			return accounts.find((a) => a.profileId === p && a.chainId === chainId && a.address === address)
 		}),
 		async start() {},
 	}
@@ -385,6 +416,7 @@ beforeEach(() => {
 	trust.clear()
 	cursors.clear()
 	outbox.clear()
+	arrivals.clear()
 })
 
 /** Build a valid note-kind record with the `id` ALWAYS derived from the final
@@ -2612,6 +2644,7 @@ function makePublicReader(init?: { tips?: Partial<PublicScanTips>; classStatus?:
 			state.classCalls++
 			return state.classStatus
 		},
+		getLatestBlockNumber: async () => 0,
 	}
 	return { reader, state }
 }
@@ -4651,5 +4684,433 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 			await poll(service)
 		}
 		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+})
+
+// ── Arrivals ─────────────────────────────────────────────────────────────
+
+function deferred<T>() {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>((r) => {
+		resolve = r
+	})
+	return { promise, resolve }
+}
+
+/** A chain tip the test steers: each read takes the next queued answer (a number, an Error, or a
+ *  promise the test settles), then the standing one. */
+function steeredTip(standing: number | Error) {
+	const { reader } = makePublicReader()
+	const tip = { standing, queue: [] as Array<number | Error | Promise<number>>, calls: 0 }
+	reader.getLatestBlockNumber = async () => {
+		tip.calls++
+		const value = await (tip.queue.shift() ?? tip.standing)
+		if (value instanceof Error) throw value
+		return value
+	}
+	return { reader, tip }
+}
+
+type ArrivalInternals = {
+	onTokenAdded: (token: unknown) => Promise<void>
+	onAccountAdded: (account: { chainId: number; address: string }) => Promise<void>
+	onAccountDeleted: (account: { profileId: string; chainId: number; address: string }) => Promise<void>
+	repo: {
+		getTrust: (p: string, n: string, c: string) => Promise<IncomingTrustRecord | undefined>
+		setTrust: (...args: unknown[]) => Promise<IncomingTrustRecord | undefined>
+		getArrivalRow: (p: string, n: string, a: string) => Promise<ArrivalRow | undefined>
+		getRecord: (id: string) => Promise<IncomingTransferRecord | undefined>
+		setCursor: (...args: unknown[]) => Promise<void>
+	}
+}
+const internals = (service: unknown) => service as ArrivalInternals
+
+async function bootArrivals(tipValue: number | Error, stubs: Parameters<typeof bootService>[0] = {}) {
+	const { reader, tip } = steeredTip(tipValue)
+	const fixture = await bootService({
+		network: makeNetworkStub([
+			{ id: "n1", chainId: 1 },
+			{ id: "n2", chainId: 1 },
+		]),
+		account: makeAccountStub([
+			{ profileId: "p1", chainId: 1, address: "0xa" },
+			{ profileId: "p1", chainId: 1, address: "0xb" },
+		]),
+		token: makeTokenStub([tokenA]),
+		publicReader: reader,
+		...stubs,
+	})
+	await flushPromises()
+	return { ...fixture, tip }
+}
+
+function seedTrust(contract: string, over: Partial<IncomingTrustRecord> = {}) {
+	trust.set(trustKey("p1", "n1", contract), { profileId: "p1", networkId: "n1", contract, state: "trusted", updatedAt: 0, ...over })
+}
+
+/** A receipt in `block` for `account`, on tokenA unless `contract` says otherwise. */
+function receipt(n: number, block: number, over: Partial<IncomingNoteRecord> = {}) {
+	return seedNote({ siloedNullifier: validNullifier(1_000 + n), contract: tokenA.contract, l2BlockNumber: block, ...over })
+}
+
+const tokenAdd = (token: typeof tokenB) => ({ ...token, name: `${token.symbol} Token` })
+
+describe("IncomingTransferService — arrival state", () => {
+	test("a missing row is baselined to the tip, so a receipt in the tip's block is history", async () => {
+		const { service } = await bootArrivals(120)
+		const state = await service.getArrivalState("p1", "n1", "0xa")
+
+		expect(arrivals.get("p1|n1|0xa")).toEqual({ sinceBlock: 120, played: [] })
+		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 120 }), state)).toBe(false)
+		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 121 }), state)).toBe(true)
+	})
+
+	test("a stored row and a stored floor stay above a lower tip; only the pending floor moves", async () => {
+		const { service, tip } = await bootArrivals(50)
+		arrivals.set("p1|n1|0xa", { sinceBlock: 300, played: [] })
+		seedTrust(tokenA.contract, { arrivalFloor: 400 })
+		seedTrust(tokenB.contract, { arrivalFloor: 20, arrivalFloorPending: true })
+
+		const state = await service.getArrivalState("p1", "n1", "0xa")
+
+		expect(tip.calls).toBe(1)
+		expect(state).toMatchObject({ sinceBlock: 300, floors: { [tokenA.contract]: 400, [tokenB.contract]: 50 } })
+		expect(arrivals.get("p1|n1|0xa")?.sinceBlock).toBe(300)
+	})
+
+	test("an account floor raised by eviction stays when the tip later reads lower", async () => {
+		const { service, tip } = await bootArrivals(0)
+		arrivals.set("p1|n1|0xa", { sinceBlock: 300, played: [] })
+		const ids = Array.from({ length: 501 }, (_, i) => receipt(i, 301 + i, { contract: "0xtokenC" }).id)
+		await service.claimArrivals("p1", "n1", "0xa", ids.slice(0, 500))
+		await service.claimArrivals("p1", "n1", "0xa", ids.slice(500))
+		expect(arrivals.get("p1|n1|0xa")?.sinceBlock).toBe(301)
+
+		seedTrust(tokenA.contract, { arrivalFloorPending: true })
+		tip.standing = 50
+		expect((await service.getArrivalState("p1", "n1", "0xa")).sinceBlock).toBe(301)
+	})
+
+	test("a row with no pending floor reads no tip", async () => {
+		const { service, tip } = await bootArrivals(50)
+		arrivals.set("p1|n1|0xa", { sinceBlock: 10, played: [] })
+		seedTrust(tokenA.contract, { arrivalFloor: 5 })
+
+		await service.getArrivalState("p1", "n1", "0xa")
+		expect(tip.calls).toBe(0)
+	})
+
+	test("a failed tip read answers sinceBlock null and writes nothing", async () => {
+		const { service } = await bootArrivals(new Error("node down"))
+		expect((await service.getArrivalState("p1", "n1", "0xa")).sinceBlock).toBeNull()
+		expect(arrivals.size).toBe(0)
+	})
+
+	test.each([
+		["the profile is tombstoned", (f: Awaited<ReturnType<typeof bootArrivals>>) => f.profile.getProfiles.mockResolvedValue([])],
+		["the network is gone", (f: Awaited<ReturnType<typeof bootArrivals>>) => f.network.getNetworksRaw.mockResolvedValue([])],
+		["the account is gone", (f: Awaited<ReturnType<typeof bootArrivals>>) => f.account.getAccount.mockResolvedValue(undefined)],
+	])("nothing is baselined when %s", async (_name, remove) => {
+		const fixture = await bootArrivals(120)
+		remove(fixture)
+		expect((await fixture.service.getArrivalState("p1", "n1", "0xa")).sinceBlock).toBeNull()
+		expect(arrivals.size).toBe(0)
+	})
+})
+
+describe("IncomingTransferService — arrival floors", () => {
+	test("a token floor written at N + 1 after a read that saw N stays N + 1", async () => {
+		const { service, tip, token } = await bootArrivals(100)
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		await service.getArrivalState("p1", "n1", "0xa")
+		tip.standing = 101
+		await internals(service).onTokenAdded(tokenAdd(tokenB))
+		tip.standing = 102
+
+		expect((await service.getArrivalState("p1", "n1", "0xa")).floors[tokenB.contract]).toBe(101)
+	})
+
+	test("an add that read N and enters after an Allow that read N + k keeps N + k", async () => {
+		const { service, tip } = await bootArrivals(0)
+		seedTrust(tokenA.contract, { state: "pending" })
+		receipt(1, 5, { hidden: true })
+		const addTip = deferred<number>()
+		tip.queue.push(addTip.promise)
+
+		const add = internals(service).onTokenAdded(tokenAdd(tokenA))
+		await flushPromises()
+		tip.standing = 130
+		expect(await service.setTrustAllow("p1", "n1", tokenA.contract)).toBe(true)
+		addTip.resolve(100)
+		await add
+
+		const row = trust.get(trustKey("p1", "n1", tokenA.contract))
+		expect(row?.arrivalFloor).toBe(130)
+		expect(row?.arrivalFloorPending).toBeUndefined()
+	})
+
+	test("a token deleted while its add reads the tip gets neither trust nor a floor back", async () => {
+		const { service, tip, token } = await bootArrivals(0)
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		const addTip = deferred<number>()
+		tip.queue.push(addTip.promise)
+
+		const add = internals(service).onTokenAdded(tokenAdd(tokenB))
+		await flushPromises()
+		token.getTokensRaw.mockResolvedValue([tokenA])
+		await token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+		await flushPromises()
+		addTip.resolve(100)
+		await add
+
+		expect(trust.get(trustKey("p1", "n1", tokenB.contract))).toBeUndefined()
+	})
+
+	test("a floor kept through a failed tip read resolves to the higher of its number and the tip", async () => {
+		const { service, tip } = await bootArrivals(new Error("node down"))
+		arrivals.set("p1|n1|0xa", { sinceBlock: 0, played: [] })
+		seedTrust(tokenA.contract, { arrivalFloor: 200 })
+		await internals(service).onTokenAdded(tokenAdd(tokenA))
+		expect((await service.getArrivalState("p1", "n1", "0xa")).floors[tokenA.contract]).toBe("pending")
+
+		tip.standing = 150
+		const state = await service.getArrivalState("p1", "n1", "0xa")
+
+		expect(state.floors[tokenA.contract]).toBe(200)
+		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 180 }), state)).toBe(false)
+	})
+
+	test("a pending floor with no number resolves to the tip", async () => {
+		const { service, tip, token } = await bootArrivals(new Error("node down"))
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		arrivals.set("p1|n1|0xa", { sinceBlock: 0, played: [] })
+		await internals(service).onTokenAdded(tokenAdd(tokenB))
+		tip.standing = 150
+		expect((await service.getArrivalState("p1", "n1", "0xa")).floors[tokenB.contract]).toBe(150)
+	})
+
+	test("a numeric write that lands while a resolution waits for its tip is not overwritten", async () => {
+		const { service, tip } = await bootArrivals(0)
+		arrivals.set("p1|n1|0xa", { sinceBlock: 0, played: [] })
+		seedTrust(tokenA.contract, { arrivalFloor: 100, arrivalFloorPending: true })
+		const resolutionTip = deferred<number>()
+		tip.queue.push(resolutionTip.promise)
+
+		const read = service.getArrivalState("p1", "n1", "0xa")
+		await flushPromises()
+		tip.standing = 300
+		await service.setTrustAllow("p1", "n1", tokenA.contract)
+		resolutionTip.resolve(500)
+
+		expect((await read).floors[tokenA.contract]).toBe(300)
+	})
+
+	test("adding a token floors its history before the scan commits it", async () => {
+		const noteSvc = makeNoteStub({ [tokenB.contract]: [note({ contract: tokenB.contract, l2BlockNumber: 50 })] })
+		const { service, token } = await bootArrivals(60, { note: noteSvc })
+		arrivals.set("p1|n1|0xa", { sinceBlock: 10, played: [] })
+		token.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+
+		await internals(service).onTokenAdded(tokenAdd(tokenB))
+		await flushPromises()
+
+		const history = [...records.values()].filter(
+			(r) => r.contract === tokenB.contract && r.networkId === "n1" && r.accountAddress === "0xa",
+		)
+		expect(history.length).toBeGreaterThan(0)
+		const state = await service.getArrivalState("p1", "n1", "0xa")
+		expect(history.filter((r) => isArrivalEligible(r, state))).toEqual([])
+	})
+
+	test("adding an account floors its history before its cursors reset", async () => {
+		const { service } = await bootArrivals(70)
+		const atReset: Array<ArrivalRow | undefined> = []
+		vi.spyOn(internals(service).repo, "setCursor").mockImplementation(async () => {
+			atReset.push(arrivals.get("p1|n1|0xnew"))
+		})
+
+		await internals(service).onAccountAdded({ chainId: 1, address: "0xnew" })
+
+		expect(atReset[0]).toEqual({ sinceBlock: 70, played: [] })
+	})
+
+	test("Allow floors the receipts it un-hides on every account; a later receipt plays on both", async () => {
+		const { service } = await bootArrivals(44)
+		arrivals.set("p1|n1|0xa", { sinceBlock: 10, played: [] })
+		arrivals.set("p1|n1|0xb", { sinceBlock: 10, played: [] })
+		seedTrust(tokenA.contract, { state: "pending" })
+		const onA = receipt(1, 40, { hidden: true })
+		const onB = receipt(2, 45, { hidden: true, accountAddress: "0xb", owner: "0xb" })
+
+		expect(await service.setTrustAllow("p1", "n1", tokenA.contract)).toBe(true)
+
+		const stateA = await service.getArrivalState("p1", "n1", "0xa")
+		const stateB = await service.getArrivalState("p1", "n1", "0xb")
+		expect(isArrivalEligible(onA, stateA)).toBe(false)
+		expect(isArrivalEligible(onB, stateB)).toBe(false)
+		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 46 }), stateA)).toBe(true)
+		expect(isArrivalEligible(noteRecord({ contract: tokenA.contract, l2BlockNumber: 46, accountAddress: "0xb" }), stateB)).toBe(true)
+	})
+})
+
+/** Holds the `nth` call of `obj[method]` until `release`: a read computes its answer first, so the
+ *  held caller resumes with what it saw; a write is held before it runs. */
+function holdCall(obj: object, method: string, nth: number, when: "after" | "before") {
+	const target = obj as Record<string, (...args: unknown[]) => Promise<unknown>>
+	const current = target[method]
+	const real = vi.isMockFunction(current)
+		? (current.getMockImplementation() as (...args: unknown[]) => Promise<unknown>)
+		: current.bind(obj)
+	const spy = vi.isMockFunction(current) ? current : vi.spyOn(target, method)
+	let calls = 0
+	let release!: () => void
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	const held = { reached: false }
+	spy.mockImplementation(async (...args: unknown[]) => {
+		if (++calls !== nth) return real(...args)
+		held.reached = true
+		if (when === "before") {
+			await gate
+			return real(...args)
+		}
+		const out = await real(...args)
+		await gate
+		return out
+	})
+	return { release: () => release(), held }
+}
+
+type Booted = Awaited<ReturnType<typeof bootArrivals>>
+
+describe("IncomingTransferService — a token add displaced by the watchdog while its token is deleted", () => {
+	test.each([
+		["the section's trust read", (f: Booted) => holdCall(internals(f.service).repo, "getTrust", 1, "after")],
+		["the registration's network read", (f: Booted) => holdCall(f.network, "getNetwork", 1, "after")],
+		["the registration's token read", (f: Booted) => holdCall(f.token, "getTokensRaw", 1, "after")],
+		["the trust write's own read", (f: Booted) => holdCall(internals(f.service).repo, "setTrust", 1, "before")],
+		["the floor's trust read", (f: Booted) => holdCall(internals(f.service).repo, "getTrust", 2, "after")],
+	])("a pause at %s writes neither trust nor a floor after the delete", async (_name, pause) => {
+		const fixture = await bootArrivals(100)
+		let registered = [tokenA, tokenB]
+		fixture.token.getTokensRaw.mockImplementation(async () => registered)
+		const { release, held } = pause(fixture)
+		vi.useFakeTimers()
+		try {
+			const add = internals(fixture.service).onTokenAdded(tokenAdd(tokenB))
+			await vi.advanceTimersByTimeAsync(0)
+			expect(held.reached).toBe(true)
+
+			registered = [tokenA]
+			void fixture.token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			release()
+			await add
+			await vi.advanceTimersByTimeAsync(0)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		const row = trust.get(trustKey("p1", "n1", tokenB.contract))
+		expect(row?.state).not.toBe("trusted")
+		expect(row?.arrivalFloor).toBeUndefined()
+		expect(row?.arrivalFloorPending).toBeUndefined()
+	})
+})
+
+describe("IncomingTransferService — claimArrivals", () => {
+	test("claims an eligible receipt once", async () => {
+		const { service } = await bootArrivals(10)
+		await service.getArrivalState("p1", "n1", "0xa")
+		const r = receipt(1, 11)
+
+		expect(await service.claimArrivals("p1", "n1", "0xa", [r.id])).toEqual([r.id])
+		expect(await service.claimArrivals("p1", "n1", "0xa", [r.id])).toEqual([])
+	})
+
+	test("ignores another profile's, network's and account's ids, played ids and unknown ids", async () => {
+		const { service } = await bootArrivals(10)
+		await service.getArrivalState("p1", "n1", "0xa")
+		const mine = receipt(1, 11)
+		const played = receipt(2, 12)
+		await service.claimArrivals("p1", "n1", "0xa", [played.id])
+		const foreign = [
+			receipt(3, 11, { accountAddress: "0xb", owner: "0xb" }).id,
+			receipt(4, 11, { networkId: "n2" }).id,
+			receipt(5, 11, { profileId: "p2" }).id,
+		]
+
+		expect(await service.claimArrivals("p1", "n1", "0xa", [...foreign, played.id, "note:p1|n1|0xunknown", mine.id])).toEqual([mine.id])
+	})
+
+	test("a claim that captured its epoch before a profile clear writes nothing", async () => {
+		const { service } = await bootArrivals(10)
+		await service.getArrivalState("p1", "n1", "0xa")
+		await service.getArrivalState("p1", "n1", "0xb")
+		const onA = receipt(1, 11)
+		const onB = receipt(2, 11, { accountAddress: "0xb", owner: "0xb" })
+		const repo = internals(service).repo
+		const hold = deferred<void>()
+		const realGet = repo.getArrivalRow.bind(repo)
+		vi.spyOn(repo, "getArrivalRow").mockImplementationOnce(async (...args) => {
+			await hold.promise
+			return realGet(...args)
+		})
+
+		const holder = service.claimArrivals("p1", "n1", "0xb", [onB.id])
+		await flushPromises()
+		const clear = service.clearProfile("p1")
+		const claim = service.claimArrivals("p1", "n1", "0xa", [onA.id])
+		hold.resolve()
+		await Promise.all([holder, clear])
+
+		expect(await claim).toEqual([])
+		expect(arrivals.has("p1|n1|0xa")).toBe(false)
+	})
+
+	test("a claim the watchdog displaced writes nothing after it resumes", async () => {
+		const { service } = await bootArrivals(10)
+		await service.getArrivalState("p1", "n1", "0xa")
+		const first = receipt(1, 11)
+		const second = receipt(2, 12)
+		const repo = internals(service).repo
+		const parked = deferred<void>()
+		const realGetRecord = repo.getRecord.bind(repo)
+		vi.spyOn(repo, "getRecord").mockImplementation(async (id) => {
+			if (id === first.id) await parked.promise
+			return realGetRecord(id)
+		})
+		vi.useFakeTimers()
+		try {
+			const displaced = service.claimArrivals("p1", "n1", "0xa", [first.id])
+			await vi.advanceTimersByTimeAsync(0)
+			const successor = service.claimArrivals("p1", "n1", "0xa", [second.id])
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			expect(await successor).toEqual([second.id])
+
+			parked.resolve()
+			expect(await displaced).toEqual([])
+			expect(arrivals.get("p1|n1|0xa")?.played.map(([id]) => id)).toEqual([second.id])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe("IncomingTransferService — arrival purges", () => {
+	test("an account purge, clearChain and clearProfile delete only their scope's rows", async () => {
+		const { service } = await bootArrivals(10)
+		const row = { sinceBlock: 1, played: [] }
+		for (const key of ["p1|n1|0xa", "p1|n1|0xb", "p1|n2|0xa", "p1|n2|0xb", "p2|n1|0xa"]) arrivals.set(key, row)
+
+		await internals(service).onAccountDeleted({ profileId: "p1", chainId: 1, address: "0xa" })
+		expect([...arrivals.keys()].sort()).toEqual(["p1|n1|0xb", "p1|n2|0xb", "p2|n1|0xa"])
+
+		await service.clearChain("p1", "n1")
+		expect([...arrivals.keys()].sort()).toEqual(["p1|n2|0xb", "p2|n1|0xa"])
+
+		await service.clearProfile("p1")
+		expect([...arrivals.keys()]).toEqual(["p2|n1|0xa"])
 	})
 })

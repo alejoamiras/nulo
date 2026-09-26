@@ -34,7 +34,6 @@ vi.mock("@/stores/popup.store", () => ({
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 // ── Stubs ────────────────────────────────────────────────────────────
@@ -146,7 +145,7 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 
 		expect(contactServiceMock.addContact).toHaveBeenCalledWith("Alice", VALID_ADDRESS)
 		expect(w.emitted("onClose")).toBeTruthy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Contact is added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Contact is added" })
 	})
 
 	test("saves the address canonicalized to lowercase", async () => {
@@ -173,7 +172,7 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 		await flushPromises()
 
 		expect(w.emitted("onClose")).toBeFalsy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Something went wrong", icon: "warning" }, expect.anything())
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "error", label: "Something went wrong" })
 	})
 
 	test("duplicate name or address disables submit", async () => {

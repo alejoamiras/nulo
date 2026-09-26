@@ -1,26 +1,18 @@
 <script setup>
 /**
- * Incoming-receive card for the activity feed. Renders when an
- * `IncomingTransferService` record (a decrypted note from a trusted
- * fungible-token contract) appears on the user's account.
+ * Received card for the activity feed: one `IncomingTransferService` record, whether a decrypted
+ * note or a public receipt from a trusted fungible-token contract.
  *
- * Wraps `TransactionCardLayout` so field positions stay byte-identical
- * with the outgoing `TransactionCard`, the in-flight `TransactionAwaiting-
- * Card`, and the `TransactionTerminalCard`. Visual difference:
- *   - Activity-row icon = `download` (down-pointing arrow, the closest
- *     "incoming" semantic in the `@nulo/design` icon set).
- *   - Status badge = green `check-circle` (mirrors the settled card's
- *     success state in incoming-positive coloring).
- *   - Title row carries a "Received" chip to distinguish from outgoing-
- *     transfer cards that show the privacy-direction chip.
- *
- * Amount displays with a "+" prefix so the user can scan the feed and
- * tell incoming from outgoing without reading direction.
+ * Wraps `TransactionCardLayout` so field positions stay byte-identical with the outgoing
+ * `TransactionCard`, the in-flight `TransactionAwaitingCard` and the `TransactionTerminalCard`.
+ * The badge is a green `check-circle`, the title row carries the receipt's kind chip, and the
+ * amount carries a "+" so the feed scans without reading direction.
  */
 
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
 import { balanceFormatted } from "@/utils/amount.js"
+import { isValidDecimals } from "@/utils/token-amount"
 
 const props = defineProps({
 	/** Token symbol — the card's title row. */
@@ -36,10 +28,15 @@ const props = defineProps({
 	/** Receiver-honest kind label ("Received privately" / "Public → Public" /
 	 *  "Private → Public" / "Minted"), derived from the resolved type (D5-D). */
 	receivedLabel: { type: String, default: "Received" },
+	/** The route the row opens. */
+	to: { type: String, default: undefined },
+	/** The receipt is arriving now: the row slides in and glows. */
+	arriving: { type: Boolean, default: false },
 })
 
+/** `decimals` comes from a contract-fed storage row; an invalid one leaves the amount column out. */
 const formattedAmount = computed(() => {
-	if (!props.amountRaw) return null
+	if (!props.amountRaw || !isValidDecimals(props.tokenDecimals)) return null
 	return balanceFormatted(props.amountRaw, props.tokenDecimals, 8).value
 })
 
@@ -57,6 +54,8 @@ const hashSlice = computed(() => {
 		:amount="formattedAmount ? `+${formattedAmount}` : null"
 		:amountSymbol="tokenSymbol"
 		:amountFiat="amountFiat"
+		:to="to"
+		:arriving="arriving"
 		testId="tx-incoming-card"
 	>
 		<template #badge>

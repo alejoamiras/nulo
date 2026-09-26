@@ -12,8 +12,6 @@ import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
-
-const router = useRouter()
 </script>
 
 <template>
@@ -37,7 +35,7 @@ const router = useRouter()
 		<ItemsContainer title="Security">
 			<SettingItem to="/popup/settings/security/export" title="Backup profile" icon="key-square" chevron data-testid="backup-link-btn" />
 			<SettingItem
-				@click="router.push('/popup/settings/security/change-password')"
+				to="/popup/settings/security/change-password"
 				title="Change password"
 				icon="profile-password"
 				:disabled="appStore.profile?.type === 'passkey'"
@@ -48,7 +46,7 @@ const router = useRouter()
 
 		<ItemsContainer>
 			<SettingItem
-				@click="router.push('/popup/settings/security/reset')"
+				to="/popup/settings/security/reset"
 				title="Delete profile"
 				icon="trash"
 				iconBgColor="red"

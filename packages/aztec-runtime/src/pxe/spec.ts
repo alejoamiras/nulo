@@ -98,6 +98,9 @@ export type Methods = {
 	getPublicTokenTransferEvents(network: NetworkInfo, contract: string, args: PublicTransferFetchArgs): PublicTransferPage
 	/** Resolve the checkpointed (index bound) + finalized (D6 rewind floor) tips in one probe. */
 	getPublicScanTips(network: NetworkInfo): PublicScanTips
+	/** The latest proposed block number. Ahead of the scan tips: a note the PXE already synced can
+	 *  sit in a block the checkpointed tip has not reached. */
+	getLatestBlockNumber(network: NetworkInfo): number
 	/**
 	 * Node-direct contract-class gate (D2): is `contract`'s CURRENT class (at the finalized anchor)
 	 * the bundled aztec-standards Token? `unresolved` = transient (fail closed, do not cache);

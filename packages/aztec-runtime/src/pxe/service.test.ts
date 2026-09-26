@@ -354,3 +354,29 @@ describe("PxeService op-failure log classification", () => {
 		expect(errorCalls(calls).length).toBeGreaterThan(0)
 	})
 })
+
+describe("PxeService.getLatestBlockNumber", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: { onMessage: { addListener: () => {}, removeListener: () => {} }, sendMessage: () => Promise.resolve() },
+		})
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	test("serves the node's untagged block number", async () => {
+		const tags: unknown[] = []
+		const factory: PxeFactory = {
+			createChainRuntime: async (n) => {
+				const node = {
+					getBlockNumber: async (...args: unknown[]) => {
+						tags.push(...args)
+						return 4242
+					},
+				} as unknown as AztecNode
+				return new ChainRuntime(n.chainId, node, {} as PXE, n.rpcUrl)
+			},
+		}
+		await expect(makeService(factory).getLatestBlockNumber(network)).resolves.toBe(4242)
+		expect(tags).toEqual([])
+	})
+})

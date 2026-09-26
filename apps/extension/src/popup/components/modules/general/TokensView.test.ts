@@ -404,7 +404,9 @@ describe("TokensView — Home order and cap", () => {
 				token: { ...namedRow(3, "DECIMALS").token, chainId: MAINNET, decimals: 500 },
 			},
 		])
-		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { TokenCard: false } } })
+		// The card renders its row inside RouterLink's `custom` slot, which a shallow stub leaves empty.
+		const RouterLink = { template: '<slot :href="to" :navigate="() => {}" />', props: { to: [String, Object], custom: Boolean } }
+		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { TokenCard: false, RouterLink } } })
 		await flushPromises()
 
 		const cards = wrapper.findAll('[data-testid="tokens-card"]')

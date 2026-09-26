@@ -1,4 +1,6 @@
-type ToastFn = (toast: { label: string; icon: string }, duration?: number) => void
+import type { ToastOptions } from "@/composables/toast"
+
+type ToastFn = (toast: ToastOptions) => void
 
 const CLIPBOARD_CLEAR_MS = 60_000
 const COPIED_FLASH_MS = 2_500
@@ -45,8 +47,8 @@ export function useSecretClipboardCopy(opts: { toastLabel: string; openToast: To
 		// The toast is the only outcome-dependent piece: honest, never a false
 		// "copied" (the one authorized behavior change of the dedup arc).
 		write
-			.then(() => opts.openToast({ label: opts.toastLabel, icon: "copy" }))
-			.catch(() => opts.openToast({ label: "Couldn't copy", icon: "warning" }, 3_000))
+			.then(() => opts.openToast({ kind: "success", label: opts.toastLabel }))
+			.catch(() => opts.openToast({ kind: "error", label: "Couldn't copy" }))
 	}
 
 	return { isCopied, copySecret }

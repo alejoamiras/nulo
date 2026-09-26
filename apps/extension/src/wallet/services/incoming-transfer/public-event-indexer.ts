@@ -27,6 +27,8 @@ export interface PublicEventReader {
 	fetchTransferPage(networkId: string, contract: string, args: PublicTransferFetchArgs): Promise<PublicTransferPage>
 	getScanTips(networkId: string): Promise<PublicScanTips>
 	getTokenClassStatus(networkId: string, contract: string, checkpointHash: string): Promise<PublicTokenClassStatus>
+	/** The latest proposed block, which the arrival floors are taken from. */
+	getLatestBlockNumber(networkId: string): Promise<number>
 }
 
 /** The accumulated result of a bounded, multi-page forward scan. */

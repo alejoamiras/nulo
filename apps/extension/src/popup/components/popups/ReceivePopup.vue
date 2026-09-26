@@ -4,6 +4,7 @@
 import { generate } from "lean-qr"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast.js"
 const { openToast } = useToast()
 
@@ -75,7 +76,7 @@ watch(
 					</Flex>
 				</Flex>
 
-				<Button @click="popupStore.close('receive')" wide variant="primary_outline" size="medium"> Close </Button>
+				<Button v-snack-footer @click="popupStore.close('receive')" wide variant="primary_outline" size="medium" data-testid="receive-close"> Close </Button>
 			</Flex>
 		</PopupCard>
 	</Popup>

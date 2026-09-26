@@ -205,6 +205,8 @@ export const chromeDriver: BrowserDriver = {
 	interceptRpc: (browser, extensionId, fromOrigin, mode) => cdpInterceptRpc(browser, `${SCHEME}${extensionId}/`, fromOrigin, mode),
 	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
 	prepareClick: async () => {},
+	// Chrome runs a key's default action on the page the key is sent to, focused or not.
+	prepareKeys: async () => {},
 	pickFile: async (page, open, filePath) => {
 		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), open()])
 		await chooser.accept([filePath])

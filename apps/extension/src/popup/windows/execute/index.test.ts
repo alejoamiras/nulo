@@ -152,7 +152,6 @@ const previewOperationAuthwitsMock = vi.fn(async () => undefined)
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: vi.fn() }),
-	TOAST_DURATION: { SHORT: 2000, LONG: 5000 },
 }))
 
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks

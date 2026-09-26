@@ -358,6 +358,12 @@ export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> impl
 		return await PublicScanTipsSchema.parseAsync(result)
 	}
 
+	/** The latest proposed block number; a value that is not a non-negative safe integer throws. */
+	public async getLatestBlockNumber(network: NetworkInfo): Promise<number> {
+		const result = await this.request("getLatestBlockNumber", network)
+		return await z.number().int().nonnegative().parseAsync(result)
+	}
+
 	/** Node-direct class gate (D2): whether `contract` is the bundled Token at the finalized anchor. */
 	public async getPublicTokenClassStatus(
 		network: NetworkInfo,

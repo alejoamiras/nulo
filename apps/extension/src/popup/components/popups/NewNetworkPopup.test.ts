@@ -29,7 +29,6 @@ vi.mock("@/utils/guarded-network-activation", () => ({
 }))
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 vi.mock("@/stores/app.store", () => ({
 	useAppStore: () => ({ networks: [], hasInFlightSend: false }),
@@ -132,8 +131,7 @@ describe("NewNetworkPopup — full-lifetime submit latch", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(openToastMock).toHaveBeenCalledWith(
-			expect.objectContaining({ label: expect.stringContaining("already exists") }),
-			expect.anything(),
+			expect.objectContaining({ kind: "error", label: expect.stringContaining("already exists") }),
 		)
 		// The finally released the latch — the form is submittable again.
 		expect(w.find("[data-submit-disabled]").attributes("data-submit-disabled")).toBe("false")

@@ -186,7 +186,7 @@ describe("NewEndpointPopup — Enter-submit wiring (usePopupEntity)", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(w.emitted("onClose")).toBeTruthy()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Endpoint added" })
+		expect(openToastMock).toHaveBeenCalledWith({ kind: "success", label: "Endpoint added" })
 		await dispose(w)
 	})
 })

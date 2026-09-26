@@ -23,6 +23,7 @@
  */
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -76,8 +77,8 @@ async function handleCopy() {
 	const value = contractFull.value
 	if (!value) return
 	await copyToClipboard(value, openToast, {
-		success: { label: "Contract address copied", duration: 1_500 },
-		failure: { label: "Couldn't copy address", icon: "warning" },
+		success: { label: "Contract address copied" },
+		failure: { label: "Couldn't copy address" },
 	})
 }
 
@@ -102,7 +103,7 @@ function payloadKey() {
 }
 
 /** The label and the key are captured before the await: the active prompt can change mid-RPC. */
-async function decide(action, successLabel, successIcon) {
+async function decide(action, successLabel) {
 	if (isSubmitting.value) return
 	isSubmitting.value = true
 	const myGen = ++submitGeneration
@@ -112,16 +113,16 @@ async function decide(action, successLabel, successIcon) {
 		// between the Pending emit and the click); undefined: the closure wasn't bound. Only explicit true
 		// earns the success toast, so a boundary that drops the return value can't mislead the user.
 		const ok = await action?.()
-		if (ok === true) openToast({ label: successLabel, icon: successIcon })
+		if (ok === true) openToast({ kind: "success", label: successLabel })
 	} catch {
-		openToast({ label: "Couldn't update trust state", icon: "warning" })
+		openToast({ kind: "error", label: "Couldn't update trust state" })
 	} finally {
 		if (submitGeneration === myGen) isSubmitting.value = false
 	}
 	if (payloadKey() === key) emit("onClose")
 }
-const handleAllow = () => decide(cacheStore.incomingTrust.allow, `Now showing receives for ${tokenSymbol.value}`, "check")
-const handleReject = () => decide(cacheStore.incomingTrust.reject, `Hiding receives from ${tokenSymbol.value}`, "info")
+const handleAllow = () => decide(cacheStore.incomingTrust.allow, `Now showing receives for ${tokenSymbol.value}`)
+const handleReject = () => decide(cacheStore.incomingTrust.reject, `Hiding receives from ${tokenSymbol.value}`)
 
 // Initial focus on the expand toggle so a keyboard-only user lands on
 // the verification surface first — they should be reading the contract
@@ -203,7 +204,7 @@ watch(
 					A contract you don't recognize could be a scam token with a familiar-looking symbol. Verify the contract address before allowing.
 				</Text>
 
-				<Flex gap="12">
+				<Flex v-snack-footer gap="12">
 					<Button
 						@click="handleReject"
 						:disabled="isSubmitting"

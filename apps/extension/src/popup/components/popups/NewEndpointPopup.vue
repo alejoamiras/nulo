@@ -49,7 +49,7 @@ const handleCreate = async () => {
 		await managers.network.addEndpoint(network.value.id, labelTerm.value || undefined, urlTerm.value)
 		appStore.networks = await managers.network.getNetworks()
 		emit("onClose")
-		openToast({ label: "Endpoint added" })
+		openToast({ kind: "success", label: "Endpoint added" })
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {

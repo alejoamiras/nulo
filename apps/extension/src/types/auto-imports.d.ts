@@ -9,6 +9,9 @@
 export {}
 declare global {
   const ACTIVITY_FEED_KINDS: typeof import('../utils/journal-state').ACTIVITY_FEED_KINDS
+  const ADDED_COALESCE: typeof import('../utils/coalesce').ADDED_COALESCE
+  const ARRIVALS_KEY: typeof import('../composables/useArrivals').ARRIVALS_KEY
+  const ARRIVAL_WINDOW_MS: typeof import('../composables/useArrivals').ARRIVAL_WINDOW_MS
   const AccessLevel: typeof import('../utils/confirmation-policies').AccessLevel
   const AssemblyAbortedError: typeof import('../utils/full-backup-helpers').AssemblyAbortedError
   const BootstrapFailedError: typeof import('../composables/unlockWait').BootstrapFailedError
@@ -43,12 +46,13 @@ declare global {
   const PINNED_TOKENS_MAX_CHAINS: typeof import('../composables/usePinnedTokens').PINNED_TOKENS_MAX_CHAINS
   const REVIEW_ARM_MS: typeof import('../composables/useSendReview').REVIEW_ARM_MS
   const SEED_STATUS_RETRY_MS: typeof import('../composables/useSeedStatus').SEED_STATUS_RETRY_MS
+  const SNACK_GAP: typeof import('../composables/snackInset').SNACK_GAP
   const STALLED_MIN_DISPLAY_MS: typeof import('../composables/useIncomingSyncHealth').STALLED_MIN_DISPLAY_MS
+  const SUCCESS_TOAST_MS: typeof import('../composables/toast.js').SUCCESS_TOAST_MS
   const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const THIRD_PARTY_NOTICES_FILE: typeof import('../utils/legal-links').THIRD_PARTY_NOTICES_FILE
-  const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const TRANSFER_LABELS: typeof import('../utils/token-transfer-vocabulary').TRANSFER_LABELS
   const TRANSFER_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').TRANSFER_SIGNATURES
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
@@ -56,6 +60,8 @@ declare global {
   const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
   const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
   const approvedSendsInFlight: typeof import('../utils/in-flight-send').approvedSendsInFlight
+  const arrivalAmount: typeof import('../composables/useArrivals').arrivalAmount
+  const arrivalChipLabel: typeof import('../composables/useArrivals').arrivalChipLabel
   const assembleFullBackup: typeof import('../utils/full-backup-helpers').assembleFullBackup
   const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
   const awaitProfileActivation: typeof import('../composables/unlockWait').awaitProfileActivation
@@ -72,6 +78,7 @@ declare global {
   const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
   const classifyRow: typeof import('../utils/token-order').classifyRow
+  const coalesce: typeof import('../utils/coalesce').coalesce
   const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
   const comma: typeof import('../utils/amount').comma
   const compareTokenRows: typeof import('../utils/token-order').compareTokenRows
@@ -106,6 +113,7 @@ declare global {
   const formatFeeJuice: typeof import('../utils/fee-estimation').formatFeeJuice
   const formatGas: typeof import('../utils/fee-estimation').formatGas
   const formatGasBalance: typeof import('../utils/fee-estimation').formatGasBalance
+  const formatSnackAmount: typeof import('../utils/snack-amount').formatSnackAmount
   const formatTransferType: typeof import('../utils/tx-enrichment').formatTransferType
   const getAccount: typeof import('../utils/core').getAccount
   const getCallCountLabel: typeof import('../utils/tx-enrichment').getCallCountLabel
@@ -238,6 +246,7 @@ declare global {
   const shallowRef: typeof import('vue').shallowRef
   const shouldShowLegalSheet: typeof import('../utils/legal-sheet').shouldShowLegalSheet
   const smallFieldDecimal: typeof import('../utils/transfer-intent').smallFieldDecimal
+  const snackInset: typeof import('../composables/snackInset').snackInset
   const stageSubtitle: typeof import('../utils/card-subtitle').stageSubtitle
   const storageLocalGet: typeof import('../utils/storage').storageLocalGet
   const storageLocalRemove: typeof import('../utils/storage').storageLocalRemove
@@ -258,6 +267,7 @@ declare global {
   const usdThresholdToMicro: typeof import('../utils/incoming-dust').usdThresholdToMicro
   const useActivityStore: typeof import('../stores/activity.store').useActivityStore
   const useAppStore: typeof import('../stores/app.store').useAppStore
+  const useArrivals: typeof import('../composables/useArrivals').useArrivals
   const useAttrs: typeof import('vue').useAttrs
   const useAuthRegistryStatus: typeof import('../composables/useAuthRegistryStatus').useAuthRegistryStatus
   const useBalancesStore: typeof import('../stores/balances.store').useBalancesStore
@@ -302,11 +312,14 @@ declare global {
   const useSeedStatus: typeof import('../composables/useSeedStatus').useSeedStatus
   const useSendReview: typeof import('../composables/useSendReview').useSendReview
   const useSlots: typeof import('vue').useSlots
+  const useSnackInset: typeof import('../composables/snackInset').useSnackInset
   const useSyncedRef: typeof import('../composables/syncedRef.js').useSyncedRef
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
   const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
+  const vSnackFooter: typeof import('../composables/snackInset').vSnackFooter
+  const vSnackSheet: typeof import('../composables/snackInset').vSnackSheet
   const validateAndMigrateBackup: typeof import('../composables/useFullBackupImport').validateAndMigrateBackup
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const walletChainId: typeof import('../utils/chain-ids').walletChainId
@@ -337,8 +350,14 @@ declare global {
   export type { RunFence } from '../composables/runFence'
   import('../composables/runFence')
   // @ts-ignore
+  export type { FooterBox } from '../composables/snackInset'
+  import('../composables/snackInset')
+  // @ts-ignore
   export type { UnlockTimeoutError, BootstrapFailedError, ProfileActivationWithFailureSubject } from '../composables/unlockWait'
   import('../composables/unlockWait')
+  // @ts-ignore
+  export type { ArrivalToken, ArrivalChip, ArrivalsServiceLike, UseArrivalsOptions, Arrivals } from '../composables/useArrivals'
+  import('../composables/useArrivals')
   // @ts-ignore
   export type { DappWindowError, UseDappApprovalWindowOptions, UseDappApprovalWindowResult } from '../composables/useDappApprovalWindow'
   import('../composables/useDappApprovalWindow')
@@ -364,7 +383,7 @@ declare global {
   export type { IncomingSyncScope, UseIncomingSyncHealthDeps, UseIncomingSyncHealth } from '../composables/useIncomingSyncHealth'
   import('../composables/useIncomingSyncHealth')
   // @ts-ignore
-  export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
+  export type { IncomingScope, IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
   import('../composables/useIncomingTransfers')
   // @ts-ignore
   export type { LegalViewStatus } from '../composables/useLegalAcceptance'
@@ -491,6 +510,9 @@ declare module 'vue' {
   interface GlobalComponents {}
   interface ComponentCustomProperties {
     readonly ACTIVITY_FEED_KINDS: UnwrapRef<typeof import('../utils/journal-state')['ACTIVITY_FEED_KINDS']>
+    readonly ADDED_COALESCE: UnwrapRef<typeof import('../utils/coalesce')['ADDED_COALESCE']>
+    readonly ARRIVALS_KEY: UnwrapRef<typeof import('../composables/useArrivals')['ARRIVALS_KEY']>
+    readonly ARRIVAL_WINDOW_MS: UnwrapRef<typeof import('../composables/useArrivals')['ARRIVAL_WINDOW_MS']>
     readonly AccessLevel: UnwrapRef<typeof import('../utils/confirmation-policies')['AccessLevel']>
     readonly AssemblyAbortedError: UnwrapRef<typeof import('../utils/full-backup-helpers')['AssemblyAbortedError']>
     readonly BootstrapFailedError: UnwrapRef<typeof import('../composables/unlockWait')['BootstrapFailedError']>
@@ -525,12 +547,13 @@ declare module 'vue' {
     readonly PINNED_TOKENS_MAX_CHAINS: UnwrapRef<typeof import('../composables/usePinnedTokens')['PINNED_TOKENS_MAX_CHAINS']>
     readonly REVIEW_ARM_MS: UnwrapRef<typeof import('../composables/useSendReview')['REVIEW_ARM_MS']>
     readonly SEED_STATUS_RETRY_MS: UnwrapRef<typeof import('../composables/useSeedStatus')['SEED_STATUS_RETRY_MS']>
+    readonly SNACK_GAP: UnwrapRef<typeof import('../composables/snackInset')['SNACK_GAP']>
     readonly STALLED_MIN_DISPLAY_MS: UnwrapRef<typeof import('../composables/useIncomingSyncHealth')['STALLED_MIN_DISPLAY_MS']>
+    readonly SUCCESS_TOAST_MS: UnwrapRef<typeof import('../composables/toast.js')['SUCCESS_TOAST_MS']>
     readonly TESTNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_L1_CHAIN_ID']>
     readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly THIRD_PARTY_NOTICES_FILE: UnwrapRef<typeof import('../utils/legal-links')['THIRD_PARTY_NOTICES_FILE']>
-    readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly TRANSFER_LABELS: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_LABELS']>
     readonly TRANSFER_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_SIGNATURES']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>
@@ -538,6 +561,8 @@ declare module 'vue' {
     readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
     readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>
     readonly approvedSendsInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['approvedSendsInFlight']>
+    readonly arrivalAmount: UnwrapRef<typeof import('../composables/useArrivals')['arrivalAmount']>
+    readonly arrivalChipLabel: UnwrapRef<typeof import('../composables/useArrivals')['arrivalChipLabel']>
     readonly assembleFullBackup: UnwrapRef<typeof import('../utils/full-backup-helpers')['assembleFullBackup']>
     readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
     readonly awaitProfileActivation: UnwrapRef<typeof import('../composables/unlockWait')['awaitProfileActivation']>
@@ -554,6 +579,7 @@ declare module 'vue' {
     readonly categoricalLabel: UnwrapRef<typeof import('../utils/journal-state')['categoricalLabel']>
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>
     readonly classifyRow: UnwrapRef<typeof import('../utils/token-order')['classifyRow']>
+    readonly coalesce: UnwrapRef<typeof import('../utils/coalesce')['coalesce']>
     readonly collectRestoreErrors: UnwrapRef<typeof import('../utils/full-backup-helpers')['collectRestoreErrors']>
     readonly comma: UnwrapRef<typeof import('../utils/amount')['comma']>
     readonly compareTokenRows: UnwrapRef<typeof import('../utils/token-order')['compareTokenRows']>
@@ -588,6 +614,7 @@ declare module 'vue' {
     readonly formatFeeJuice: UnwrapRef<typeof import('../utils/fee-estimation')['formatFeeJuice']>
     readonly formatGas: UnwrapRef<typeof import('../utils/fee-estimation')['formatGas']>
     readonly formatGasBalance: UnwrapRef<typeof import('../utils/fee-estimation')['formatGasBalance']>
+    readonly formatSnackAmount: UnwrapRef<typeof import('../utils/snack-amount')['formatSnackAmount']>
     readonly formatTransferType: UnwrapRef<typeof import('../utils/tx-enrichment')['formatTransferType']>
     readonly getAccount: UnwrapRef<typeof import('../utils/core')['getAccount']>
     readonly getCallCountLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getCallCountLabel']>
@@ -718,6 +745,7 @@ declare module 'vue' {
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>
     readonly shouldShowLegalSheet: UnwrapRef<typeof import('../utils/legal-sheet')['shouldShowLegalSheet']>
     readonly smallFieldDecimal: UnwrapRef<typeof import('../utils/transfer-intent')['smallFieldDecimal']>
+    readonly snackInset: UnwrapRef<typeof import('../composables/snackInset')['snackInset']>
     readonly stageSubtitle: UnwrapRef<typeof import('../utils/card-subtitle')['stageSubtitle']>
     readonly storageLocalGet: UnwrapRef<typeof import('../utils/storage')['storageLocalGet']>
     readonly storageLocalRemove: UnwrapRef<typeof import('../utils/storage')['storageLocalRemove']>
@@ -738,6 +766,7 @@ declare module 'vue' {
     readonly usdThresholdToMicro: UnwrapRef<typeof import('../utils/incoming-dust')['usdThresholdToMicro']>
     readonly useActivityStore: UnwrapRef<typeof import('../stores/activity.store')['useActivityStore']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
+    readonly useArrivals: UnwrapRef<typeof import('../composables/useArrivals')['useArrivals']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
     readonly useAuthRegistryStatus: UnwrapRef<typeof import('../composables/useAuthRegistryStatus')['useAuthRegistryStatus']>
     readonly useBalancesStore: UnwrapRef<typeof import('../stores/balances.store')['useBalancesStore']>
@@ -782,11 +811,14 @@ declare module 'vue' {
     readonly useSeedStatus: UnwrapRef<typeof import('../composables/useSeedStatus')['useSeedStatus']>
     readonly useSendReview: UnwrapRef<typeof import('../composables/useSendReview')['useSendReview']>
     readonly useSlots: UnwrapRef<typeof import('vue')['useSlots']>
+    readonly useSnackInset: UnwrapRef<typeof import('../composables/snackInset')['useSnackInset']>
     readonly useSyncedRef: UnwrapRef<typeof import('../composables/syncedRef.js')['useSyncedRef']>
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
     readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
+    readonly vSnackFooter: UnwrapRef<typeof import('../composables/snackInset')['vSnackFooter']>
+    readonly vSnackSheet: UnwrapRef<typeof import('../composables/snackInset')['vSnackSheet']>
     readonly validateAndMigrateBackup: UnwrapRef<typeof import('../composables/useFullBackupImport')['validateAndMigrateBackup']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly walletChainId: UnwrapRef<typeof import('../utils/chain-ids')['walletChainId']>

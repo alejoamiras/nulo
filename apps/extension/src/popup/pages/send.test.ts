@@ -12,6 +12,7 @@ import { nextTick, reactive } from "vue"
 
 const ACCOUNT = "0xacct"
 const DESTINATION = `0x${"b".repeat(64)}`
+const HASH = `0x${"e".repeat(64)}`
 const TOKEN = {
 	id: 7,
 	contract: `0x${"c".repeat(64)}`,
@@ -32,10 +33,11 @@ const mocks = vi.hoisted(() => ({
 	executionDisconnect: vi.fn(),
 	getTokens: vi.fn(),
 	getTokenBalances: vi.fn(),
-	getContacts: vi.fn(async () => []),
+	getContacts: vi.fn(async (): Promise<unknown[]> => []),
 	openToast: vi.fn(),
 	routerBack: vi.fn(),
 	routerReplace: vi.fn(),
+	routerPush: vi.fn(),
 	legalStatus: vi.fn(async () => "current"),
 }))
 
@@ -104,12 +106,11 @@ vi.mock("@/utils/core", () => ({
 }))
 vi.mock("@/composables/toast.js", () => ({
 	useToast: () => ({ openToast: mocks.openToast }),
-	TOAST_DURATION: { DEFAULT: 2000, LONG: 4000 },
 }))
 const route = reactive({ name: "popup-send", path: "/popup/send", query: {} as Record<string, string>, meta: {} })
 vi.mock("vue-router", () => ({
 	useRoute: () => route,
-	useRouter: () => ({ back: mocks.routerBack, replace: mocks.routerReplace }),
+	useRouter: () => ({ back: mocks.routerBack, replace: mocks.routerReplace, push: mocks.routerPush }),
 	RouterLink: { template: "<a><slot /></a>" },
 }))
 
@@ -228,16 +229,16 @@ const awaitingIds = (store: ReturnType<typeof useAppStore>) => store.awaitingTra
 
 /** A transfer the test settles by hand. */
 function pendingTransfer() {
-	let resolve: () => void = () => {}
+	let resolve: (hash: string) => void = () => {}
 	let reject: (err: unknown) => void = () => {}
 	mocks.executeTransfer.mockImplementation(
 		() =>
-			new Promise<void>((res, rej) => {
+			new Promise<string>((res, rej) => {
 				resolve = res
 				reject = rej
 			}),
 	)
-	return { resolve: () => resolve(), reject: (err: unknown) => reject(err) }
+	return { resolve: (hash = HASH) => resolve(hash), reject: (err: unknown) => reject(err) }
 }
 
 beforeEach(() => {
@@ -294,18 +295,41 @@ describe("send page — the submit tail", () => {
 		w.unmount()
 	})
 
-	test("resolved: the success toast; the awaiting row stays for the journal to replace", async () => {
+	test("resolved: the success snack names the send and its View opens the transaction; the awaiting row stays for the journal to replace", async () => {
 		const { w, appStore } = await mountSend()
 		await fillForm(w)
 		const transfer = pendingTransfer()
 		await submit(w).trigger("click")
 		transfer.resolve()
 		await flushPromises()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: "Transaction submitted", icon: "check-circle" })
+		expect(mocks.openToast).toHaveBeenCalledWith({
+			kind: "success",
+			label: "Transaction submitted",
+			sub: "1.5 TST to 0xbbbb…bbbb",
+			action: { label: "View", onSelect: expect.any(Function) },
+		})
+		mocks.openToast.mock.calls[0]?.[0].action.onSelect()
+		expect(mocks.routerPush).toHaveBeenCalledWith(`/popup/tx/${HASH}`)
 		expect(awaitingIds(appStore)).toHaveLength(1)
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
 		w.unmount()
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
+	})
+
+	test.each([
+		["a lock", (store: ReturnType<typeof useAppStore>) => (store.isLogined = false)],
+		["a scope change", (store: ReturnType<typeof useAppStore>) => store.scopeEpoch++],
+	])("%s while the transfer is in flight: the result opens no snack; the port still closes", async (_name, change) => {
+		const { w, appStore } = await mountSend()
+		await fillForm(w)
+		const transfer = pendingTransfer()
+		await submit(w).trigger("click")
+		change(appStore)
+		transfer.resolve()
+		await flushPromises()
+		expect(mocks.openToast).not.toHaveBeenCalled()
+		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
+		w.unmount()
 	})
 
 	test("rejected: exactly this awaiting row is removed and the failure toast is red", async () => {
@@ -318,7 +342,7 @@ describe("send page — the submit tail", () => {
 		transfer.reject(new Error("boom"))
 		await flushPromises()
 		expect(awaitingIds(appStore)).toEqual(["other"])
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: TRANSFER_FAILED_COPY, icon: "warning", color: "red" }, 4000)
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: "Send failed", sub: TRANSFER_FAILED_COPY })
 		expect(console.error).toHaveBeenCalledWith("[send] executeTransfer failed:", expect.any(Error))
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
 		w.unmount()
@@ -331,7 +355,7 @@ describe("send page — the submit tail", () => {
 		await submit(w).trigger("click")
 		transfer.reject(new TermsAcceptanceRequiredError())
 		await flushPromises()
-		expect(mocks.openToast).toHaveBeenCalledWith({ label: TRANSFER_TERMS_COPY, icon: "warning", color: "red" }, 4000)
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: "Send failed", sub: TRANSFER_TERMS_COPY })
 		expect(console.debug).toHaveBeenCalledWith("[send] executeTransfer refused:", expect.any(TermsAcceptanceRequiredError))
 		expect(console.error).not.toHaveBeenCalledWith("[send] executeTransfer failed:", expect.anything())
 		w.unmount()
@@ -650,6 +674,59 @@ describe("send page — the sheet on the popup stack", () => {
 		expect((w.get('[data-testid="stub-recipient"]').element as HTMLInputElement).value).toBe(DESTINATION)
 		expect(strip(w).attributes("data-to")).toBe("public")
 		expect(submit(w).attributes("data-action")).toBe("review")
+		w.unmount()
+	})
+})
+
+describe("send page — the contact in the URL", () => {
+	const ALICE = { id: "c-alice", name: "Alice", address: `0x${"a".repeat(64)}`, abbr: "AL" }
+	const recipient = (w: W) => w.findComponent(STUBS.RecipientField)
+	afterEach(() => {
+		route.query = {}
+	})
+
+	test("?contact=<id> of one of the profile's contacts preselects it, with no store involved", async () => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: ALICE.id }
+		const { w, cacheStore } = await mountSend()
+		expect(recipient(w).props("selectedContact")).toEqual(ALICE)
+		expect(recipient(w).props("searchTerm")).toBe(ALICE.address)
+		expect("preselectedContactToSend" in cacheStore).toBe(false)
+		w.unmount()
+	})
+
+	test.each([
+		["an unknown id", "c-nobody"],
+		["another profile's id", "c-bob"],
+	])("%s selects nothing", async (_name, id) => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: id }
+		const { w } = await mountSend()
+		expect(recipient(w).props("selectedContact")).toBeUndefined()
+		expect(recipient(w).props("searchTerm")).toBe("")
+		w.unmount()
+	})
+
+	test("a cold tab: the contacts arrive once the identity settles after mount, and the id still preselects", async () => {
+		mocks.getContacts.mockResolvedValue([ALICE])
+		route.query = { contact: ALICE.id }
+		installChromeStorage()
+		const pinia = createTestingPinia({ stubActions: false })
+		const appStore = useAppStore(pinia)
+		appStore.isLogined = true
+		const w = mount(Send, {
+			attachTo: document.body,
+			global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+		})
+		await flushPromises()
+		expect(recipient(w).props("selectedContact")).toBeUndefined()
+
+		appStore.profile = { id: "p1" } as never
+		appStore.network = { id: "n1", chainId: TOKEN.chainId } as never
+		appStore.account = { address: ACCOUNT } as never
+		await flushPromises()
+		expect(recipient(w).props("selectedContact")).toEqual(ALICE)
+		expect(recipient(w).props("searchTerm")).toBe(ALICE.address)
 		w.unmount()
 	})
 })

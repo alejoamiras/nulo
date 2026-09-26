@@ -55,6 +55,7 @@ function makeReader(responses: Array<PublicTransferPage | Error>) {
 		},
 		getScanTips: async () => ({ checkpointedBlockNumber: 100, checkpointedBlockHash: "0xcp", finalizedBlockNumber: 50 }),
 		getTokenClassStatus: async () => "standard",
+		getLatestBlockNumber: async () => 100,
 	}
 	return { reader, fetchArgs }
 }
