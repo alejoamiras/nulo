@@ -2009,7 +2009,7 @@ times per browser at retry 0, the one spec that drives the approval footer under
 error; `bun run e2e:reap` after each e2e run. Then the parity captures for the new states, outside
 the repo.
 
-### P7 · Arc gate on the final source
+### P7 · Arc gate on the final source ✓
 
 The driver's. It reruns P6's gate on the stack's final source; its network list keeps
 `network/window-placement.test.ts`, three runs per browser at retry 0.
