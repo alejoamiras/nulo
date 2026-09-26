@@ -241,9 +241,32 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 	return PULL_REQUEST_EVENTS.has(env.GITHUB_EVENT_NAME ?? "") ? "enforce" : "report"
 }
 
-/** `reportOnly` holds every mode to a report. */
-export function verdict(findings: readonly Finding[], env: Env, reportOnly: boolean): "pass" | "fail" {
-	return findings.length > 0 && !reportOnly && mode(env) === "enforce" ? "fail" : "pass"
+/**
+ * Rules whose findings fail an enforcing run. The others only report: `path-token` still has code
+ * mentions of untracked files to repoint, and the index and archive rules have no active set until
+ * the archive split.
+ */
+export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
+	"tracked-artifact",
+	"hygiene-files",
+	"nested-ignore",
+	"document-type",
+	"link-untracked",
+	"link-missing",
+	"link-opaque",
+	"permalink-shape",
+	"permalink-base",
+	"permalink-ancestry",
+	"curated-budget",
+	"local-path",
+])
+
+export function isEnforced(f: Finding): boolean {
+	return ENFORCED.has(f.rule)
+}
+
+export function verdict(findings: readonly Finding[], env: Env): "pass" | "fail" {
+	return findings.some(isEnforced) && mode(env) === "enforce" ? "fail" : "pass"
 }
 
 export function lineOf(src: string, needles: readonly string[], fallback = 1): number {
@@ -270,7 +293,7 @@ export function writeSummary(findings: readonly Finding[], env: Env = process.en
 	if (!path) return false
 	const counts = Object.entries(countByRule(findings)).filter(([, n]) => n > 0)
 	const lines = [
-		`### Plan tree gate (${mode(env)}): ${findings.length} finding(s)`,
+		`### Plan tree gate (${mode(env)}): ${findings.length} finding(s), ${findings.filter(isEnforced).length} enforced`,
 		"",
 		...counts.map(([rule, n]) => `- \`${rule}\`: ${n}`),
 		"",

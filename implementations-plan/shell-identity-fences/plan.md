@@ -1,6 +1,6 @@
 # shell-identity-fences — batch 6 of audit-448-remediation (rev 4, gate-approved)
 
-Fixes **N-05 (Major)**, **N-08 (Major, split verdict)**, **N-23 (Low)**, **N-22 (Minor)** and executes the **owner-authorized N-09 REMOVAL**. Spec: runbook batch 6; recon: [recon.md](./recon.md); audits: [audit-codex.md](./audit-codex.md) + [audit-fable.md](./audit-fable.md) (round 1: codex REJECT ×6, fable APPROVE-WITH-CHANGES ×8 — all folded below). Base: dev `2665af59`. Tier: **mid**.
+Fixes **N-05 (Major)**, **N-08 (Major, split verdict)**, **N-23 (Low)**, **N-22 (Minor)** and executes the **owner-authorized N-09 REMOVAL**. Spec: runbook batch 6; recon: [recon.md](./recon.md); audits: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/shell-identity-fences/audit-codex.md) + [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/shell-identity-fences/audit-fable.md) (round 1: codex REJECT ×6, fable APPROVE-WITH-CHANGES ×8 — all folded below). Base: dev `2665af59`. Tier: **mid**.
 
 ## Architecture & Implementation (rev 2)
 

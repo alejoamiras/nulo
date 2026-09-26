@@ -1,6 +1,6 @@
 # tools-rename — `apps/faucet` → `apps/tools`, Faucet tab → Drip
 
-**Tier:** `light` · **Worktree:** `tools-rename` (branch `worktree-tools-rename`) · **Base:** `dev` @ `eca082ca` (re-based onto post-`faucet-cluster` `dev` before Phase 1) · **Recon:** [recon.md](recon.md) · **Audit:** [audit-codex.md](audit-codex.md) (round 1 `reject` → v2 folded every finding → round 2 `conditional approve`, conditions folded → v3, this file) · **eli5_mode:** Artifact · **Budget:** recon 2 agents (done), `/code-review low` per arc, codex loop ≤3 rounds.
+**Tier:** `light` · **Worktree:** `tools-rename` (branch `worktree-tools-rename`) · **Base:** `dev` @ `eca082ca` (re-based onto post-`faucet-cluster` `dev` before Phase 1) · **Recon:** [recon.md](recon.md) · **Audit:** [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/tools-rename/audit-codex.md) (round 1 `reject` → v2 folded every finding → round 2 `conditional approve`, conditions folded → v3, this file) · **eli5_mode:** Artifact · **Budget:** recon 2 agents (done), `/code-review low` per arc, codex loop ≤3 rounds.
 
 ## Goal
 

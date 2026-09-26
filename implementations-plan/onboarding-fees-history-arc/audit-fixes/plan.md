@@ -2,7 +2,7 @@
 
 Date: 2026-06-03 (revised post pre-impl audit)
 Parent arc: [`../plan.md`](../plan.md) (onboarding + fees + history, 19 commits, gates green, 3 codex audits returned Reject).
-Audit trail: [`audit-codex.md`](./audit-codex.md) (v1 verdict: Approve-with-changes), [`audit-opus.md`](./audit-opus.md) (v1 verdict: Approve-with-changes). Both converged on: `stuck_queued` missing from P2 whitelist, P3 double-fetch hazard, P7 dedup-key needs full triple, P4 toggle-replay belongs popup-side, P1 sanitize scope cleanup. All folded inline below.
+Audit trail: [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex.md) (v1 verdict: Approve-with-changes), [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-opus.md) (v1 verdict: Approve-with-changes). Both converged on: `stuck_queued` missing from P2 whitelist, P3 double-fetch hazard, P7 dedup-key needs full triple, P4 toggle-replay belongs popup-side, P1 sanitize scope cleanup. All folded inline below.
 Branch: continues `feat/onboarding-fees-history-arc` — fixes squash into the same PR.
 Quality calibration: **Production**.
 Scope discipline: ONE PR (continues the existing arc), 9 phase commits, risk-ascending.

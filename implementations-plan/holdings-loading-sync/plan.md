@@ -15,7 +15,7 @@ the scan's block-lag indicator with an outcome-based health signal. Wallet-only:
 `apps/tools/**` or `packages/bridge-core/**`.
 
 Mockups (design canvas): https://claude.ai/artifact/M6mJ7P1ePepCZF2NpaJn1q
-Recon: [recon.md](recon.md) · Audits: [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md)
+Recon: [recon.md](recon.md) · Audits: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/holdings-loading-sync/audit-codex.md), [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/holdings-loading-sync/audit-fable.md)
 
 ## UI impact (owner sign-off required by CLAUDE.md — recorded)
 

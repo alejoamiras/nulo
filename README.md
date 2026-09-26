@@ -10,7 +10,7 @@
 > - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
 > - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.
 >
-> If you are looking for a production Aztec wallet, this is not it — come back later, or follow [`implementations-plan/`](./implementations-plan/README.md) to track readiness.
+> If you are looking for a production Aztec wallet, this is not it — come back later, or follow [`implementations-plan/index.md`](./implementations-plan/index.md) to track readiness.
 
 A self-custody wallet for the [Aztec network](https://aztec.network), packaged as a Chrome and Firefox extension. Nulo runs the Aztec [Private Execution Environment](https://docs.aztec.network/aztec/protocol/circuits/pxe) locally so transactions are simulated and signed on the user's machine; no node operator sees the contents.
 
@@ -24,7 +24,7 @@ The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and use
 - dApp surface: discover, connect, capability bundles, sendTx, simulateTx, registerContract, getPrivateEvents.
 - Local testing: a playground dApp and parallel-safe e2e suite per worktree.
 
-What's still in flight is tracked in [`implementations-plan/`](./implementations-plan/README.md).
+What's still in flight is tracked in [`implementations-plan/index.md`](./implementations-plan/index.md).
 
 ## Quick start
 
@@ -57,7 +57,7 @@ The package layer hierarchy (`wallet-core` → … → `extension`) is enforced 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, test taxonomy.
 - Each `packages/<name>/README.md` — purpose, file map, scripts, testing, key invariants.
 - [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner.
-- [`implementations-plan/README.md`](./implementations-plan/README.md) — what the planning archive is, when to add to it, the milestone-vocabulary key.
+- [`implementations-plan/README.md`](./implementations-plan/README.md) — the planning standard: what a plan commits and what stays local, how a plan closes, the milestone-vocabulary key.
 - [`CLAUDE.md`](./CLAUDE.md) — operating rules for AI assistants working in this repo (layer model, SFC ordering, cleanup order, comment style).
 
 ## Build & dev

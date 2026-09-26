@@ -3,7 +3,7 @@
 Handoff for the implementing session (VPS or fresh local). Read this + [`plan.md`](plan.md) FIRST.
 This captures the non-obvious lessons from planning so you don't re-derive or re-break them.
 The plan went through a Claude "fable" audit + **6 codex passes** (all in
-[`audit-codex.md`](audit-codex.md) / [`audit-fable.md`](audit-fable.md)); the *why* behind every
+[`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-codex.md) / [`audit-fable.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-fable.md)); the *why* behind every
 design choice is the 22-entry Decision Ledger in `plan.md`. If a choice looks wrong, read the
 ledger row before "fixing" it — it was probably already litigated.
 
@@ -156,7 +156,7 @@ name specific scenario tests so a green suite alone can't fake it. Log each phas
 
 ## Companion docs
 - [`plan.md`](plan.md) — full plan, Security + Assumptions, per-phase gates, 22-entry Decision Ledger, Seeds.
-- [`audit-codex.md`](audit-codex.md) — all 6 codex passes verbatim + dispositions.
-- [`audit-fable.md`](audit-fable.md) — the fable audit (F1–F14).
-- [`eli5.html`](eli5.html) — plain-language overview + the /goal + /loop seeds.
+- [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-codex.md) — all 6 codex passes verbatim + dispositions.
+- [`audit-fable.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-fable.md) — the fable audit (F1–F14).
+- [`eli5.html`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/eli5.html) — plain-language overview + the /goal + /loop seeds.
 - `lessons/phase-N.md` — fill during implementation.

@@ -3,7 +3,7 @@
 - **Status**: **APPROVED by owner 2026-08-07** (rev 3.2; codex `approve` on rev 3.1; Asks 1–3 accepted per recommendations, Ask 4 resolved → 120 s TTL) — implementation may begin at Phase 0
 - **Tier**: `/blueprint mid` (rubric: blast radius HIGH — every tx's fee sizing; novelty LOW; irreversibility LOW; migration NONE; external coupling LOW — pinned 5.0.1; security MEDIUM — authwit derivation is an authorization surface)
 - **eli5_mode**: artifact
-- **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](audit-codex.md) (r1: reject — both blockers verified and folded in) · [audit-fable.md](audit-fable.md) (r1: conditional approve — all 4 conditions folded in)
+- **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fee-estimation-speedup/audit-codex.md) (r1: reject — both blockers verified and folded in) · [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fee-estimation-speedup/audit-fable.md) (r1: conditional approve — all 4 conditions folded in)
 
 ## Revision 2 — what changed and why
 
@@ -206,9 +206,9 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 
 ## Audit verdicts
 
-- **Codex (round 1, fresh, xhigh)**: `reject` — 2 blocking findings, both main-agent-verified and adopted (Sponsored-only collapse; fold deferred/safety-fixed). [audit-codex.md](audit-codex.md)
-- **Fable (round 1, fresh Plan agent)**: `conditional approve` — all 4 conditions adopted (F-1 via deferral+charter; F-2 table corrected + decoupled; F-3/F-4 pinned in-plan; F-5 via envelope). Advisories F-6–F-11 adopted. [audit-fable.md](audit-fable.md)
-- **Codex (final fresh-context pass on rev 2 + ledger)**: `reject` — 5 High (handoff race, fast-path custom-limits behavior change, FPC-identity binding, fingerprint completeness, cancellation caps) + 1 Medium (extractor contract impossible as written) + 1 Low (address-derivation misstatement). ALL adopted into revision 3 (ledger #11–14 + edits throughout). [audit-codex.md](audit-codex.md)
+- **Codex (round 1, fresh, xhigh)**: `reject` — 2 blocking findings, both main-agent-verified and adopted (Sponsored-only collapse; fold deferred/safety-fixed). [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fee-estimation-speedup/audit-codex.md)
+- **Fable (round 1, fresh Plan agent)**: `conditional approve` — all 4 conditions adopted (F-1 via deferral+charter; F-2 table corrected + decoupled; F-3/F-4 pinned in-plan; F-5 via envelope). Advisories F-6–F-11 adopted. [audit-fable.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fee-estimation-speedup/audit-fable.md)
+- **Codex (final fresh-context pass on rev 2 + ledger)**: `reject` — 5 High (handoff race, fast-path custom-limits behavior change, FPC-identity binding, fingerprint completeness, cancellation caps) + 1 Medium (extractor contract impossible as written) + 1 Low (address-derivation misstatement). ALL adopted into revision 3 (ledger #11–14 + edits throughout). [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/fee-estimation-speedup/audit-codex.md)
 - **Codex (re-verdict on revisions 3/3.1, resumed session)**: rev 3 → `reject` (one residual: cap admission not enforceable — cancel-oldest doesn't free non-preemptible capacity); rev 3.1 (atomic admission + coalesce-on-settle + job-count invariant test) → **`approve`** — "No remaining blocking contradiction or incomplete adoption found."
 
 ## ELI5 companion

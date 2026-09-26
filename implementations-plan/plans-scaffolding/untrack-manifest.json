@@ -1,0 +1,3397 @@
+[
+	{
+		"path": "implementations-plan/A11/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7c71d6f7e3c9ce289ff2ef4429d3e1bb694dd5bc"
+	},
+	{
+		"path": "implementations-plan/M2/2/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "aa2b1f34fd9311f428014ab2a401708f53293a5d"
+	},
+	{
+		"path": "implementations-plan/M2/2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "78140bd527477813baae676a363199085242c23c"
+	},
+	{
+		"path": "implementations-plan/M2/2/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "433d07203b2131fabbbd4b8222f566c20d6ef2a3"
+	},
+	{
+		"path": "implementations-plan/M2/3/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b0f96ad5c1fffacd5196070b8c966740308f5a28"
+	},
+	{
+		"path": "implementations-plan/M2/3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "28a1df76de4df453ac67ee025d47abad581cea30"
+	},
+	{
+		"path": "implementations-plan/M2/3/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8fdb06855b1a0546300d398813b41174a65bffb3"
+	},
+	{
+		"path": "implementations-plan/M2/3/d/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "cd6ebee950b4b68690ce940c688b0724992fef61"
+	},
+	{
+		"path": "implementations-plan/M2/4/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "992982290a1fd18cd8f60c9074e2de11f4203d97"
+	},
+	{
+		"path": "implementations-plan/M2/4/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c0f1b5bc273bbdca1650178e983db2fb014a484d"
+	},
+	{
+		"path": "implementations-plan/M2/4/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "591f94762fbd5b86963fb98e5bbb1853d1c5b25d"
+	},
+	{
+		"path": "implementations-plan/M3/0/plan-0.6-phase2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "85ac607bfc7b298ca6f6b632a539d77e73dd09ea"
+	},
+	{
+		"path": "implementations-plan/M3/7/audit-findings.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "59b1e3c58301d9c9a7d6da486829b3c19af1ff9e"
+	},
+	{
+		"path": "implementations-plan/M3/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "668622713c05d2abd90c5b56039d4bf5e6d4b948"
+	},
+	{
+		"path": "implementations-plan/M3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "78971aa1b38298d23f6bccdf7070e10169eb51a7"
+	},
+	{
+		"path": "implementations-plan/M3/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3d1f47aedb6c3819d800f76425cf6b460ec6f877"
+	},
+	{
+		"path": "implementations-plan/M4/1/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7d579d922ffdcda1609d8f8badc5ff912d6fac27"
+	},
+	{
+		"path": "implementations-plan/M4/1/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "76a7acb0066a5ec76bb11a6a9917cefd5c0211f9"
+	},
+	{
+		"path": "implementations-plan/M4/1/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "60d9011a19581b2fbd60539f6e08859158f39bb5"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/audit-agent-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8df970dec684f0e7c6faf810c0441210d3a093c6"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/audit-codex-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e159ee7e3de1cfe5a9b13748325eb67418a5e8d5"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "09e19e551eee21d64ba9dda1166a089a60e9b001"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "84021868c7e9e1de44d2aec748cf82e2711f3c58"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "152235c05cca0f271dc80f9c0311911dd2bf7fda"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/plan-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "843021e0e064664862099e83cfdf6ca66bc8029a"
+	},
+	{
+		"path": "implementations-plan/M4/10-network-rework/plan-v4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fccf79cbb3a664bdab3701630bf0ba59b3933fa2"
+	},
+	{
+		"path": "implementations-plan/M4/10/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1d4b13846dfc17baf76a5f9d37d8646eb2398738"
+	},
+	{
+		"path": "implementations-plan/M4/10/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4d798ada0b61fe4b291c615b6c5a29d17ea420b7"
+	},
+	{
+		"path": "implementations-plan/M4/10/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e2adf8982818ed071d8fc056e143c4330e54a617"
+	},
+	{
+		"path": "implementations-plan/M4/2/audit-agent-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9557baf761f3cd8d939191ce8ee931475c4e7bc5"
+	},
+	{
+		"path": "implementations-plan/M4/2/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "360389943ca4b55506efc686dc4d47afbde70059"
+	},
+	{
+		"path": "implementations-plan/M4/2/audit-codex-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f066ead51df3ff5a8d6ba1c1fd19778c7e0ff6b0"
+	},
+	{
+		"path": "implementations-plan/M4/2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2019ae807a25db26fc46e9d10438434957e3f1b3"
+	},
+	{
+		"path": "implementations-plan/M4/2/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "cb9bd716b0256c73922c8bb5105a168b1d6bac1c"
+	},
+	{
+		"path": "implementations-plan/M4/2/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "866b404400612eeb9ba1da2e988c7a726c16652a"
+	},
+	{
+		"path": "implementations-plan/M4/2/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "42683385586f61a32a6a925fb9136f658c4a51ba"
+	},
+	{
+		"path": "implementations-plan/M4/2/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "98aae20befb4bc2d55a4d1dba67de972d0f7a10e"
+	},
+	{
+		"path": "implementations-plan/M4/3/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "33e177fb4c3689230184c83e35a0d0fb64c37ac8"
+	},
+	{
+		"path": "implementations-plan/M4/3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c1b1d5af2bc58879aebfa09b708e2569a010ed9d"
+	},
+	{
+		"path": "implementations-plan/M4/3/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7e06fd5171496409ba435cf6a296214ee90f0b86"
+	},
+	{
+		"path": "implementations-plan/M4/4/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9a52e274c32309a79d7cbf2b98f4c7f92f538fc3"
+	},
+	{
+		"path": "implementations-plan/M4/4/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7860393886b586af2717e783c88c074f538f3b5d"
+	},
+	{
+		"path": "implementations-plan/M4/4/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a764292a174ccf73405acc655fe04b2b34bb247f"
+	},
+	{
+		"path": "implementations-plan/M4/5/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "006e888c0cdb5967cbf39d653a3f9dfc7831b941"
+	},
+	{
+		"path": "implementations-plan/M4/5/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "091055c4519f2fb89f721c1d1d61d3972e36861a"
+	},
+	{
+		"path": "implementations-plan/M4/5/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "79bc64a6e98ae4be1c12ea8b434962fd8f39027c"
+	},
+	{
+		"path": "implementations-plan/M4/6/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bc51b9321eb68e8b7381056ee5574234b73e1274"
+	},
+	{
+		"path": "implementations-plan/M4/6/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d45d4c89ae6cdb282c55bdcc14559617418ad401"
+	},
+	{
+		"path": "implementations-plan/M4/6/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "14067b95e1cfb92581b90d59729554a4c2c86446"
+	},
+	{
+		"path": "implementations-plan/M4/7/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "22c35f53ff0d3a833b6e2bcbc8c5b7867a1fb599"
+	},
+	{
+		"path": "implementations-plan/M4/7/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "160e7c46d05544a3d263cb8957b4bccd816356e7"
+	},
+	{
+		"path": "implementations-plan/M4/7/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5bc3ca426d48f43f8d4dd6bf742243c373f26b06"
+	},
+	{
+		"path": "implementations-plan/M4/8/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "965aa709ae529ee0b8c8eaa2d1644a3f573d458a"
+	},
+	{
+		"path": "implementations-plan/M4/8/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "43c9b81ccc1c61ea121f57a3bbded8185a934600"
+	},
+	{
+		"path": "implementations-plan/M4/8/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a94fa3b2434ecdf274f132a39b13c9cce05e6fdc"
+	},
+	{
+		"path": "implementations-plan/M4/9/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e82deaeb216b4258c3c0d868fdd5d9edd25cc307"
+	},
+	{
+		"path": "implementations-plan/M4/9/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0bc56f1e6ddd6c52d4abbc5f84e963802378a0f8"
+	},
+	{
+		"path": "implementations-plan/M4/9/audit-diff.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d37372d0f8120278fa3f04a9293165650e63f155"
+	},
+	{
+		"path": "implementations-plan/M6/audit-codex-round3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ba5c37f2add9648959460d309885907356887806"
+	},
+	{
+		"path": "implementations-plan/M6/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2aedbdc6ed6aa79169aef74223ebb211b2b26aca"
+	},
+	{
+		"path": "implementations-plan/M6/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c4ad5972000364f4713fbf6a15e2d173b15c6b8e"
+	},
+	{
+		"path": "implementations-plan/M6/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9ee3aa22433b74340e21a94b926148c3921d7215"
+	},
+	{
+		"path": "implementations-plan/accelerator-server-ci/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9bffa658c39fd903c90cefa760cb9e9d9a404f22"
+	},
+	{
+		"path": "implementations-plan/accelerator-server-ci/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "98745cfbbd0960c5da5bd3d95888338aefd4d2d5"
+	},
+	{
+		"path": "implementations-plan/accelerator-server-ci/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3a61efa75c61e8148d546a2b11b2047ea11457c3"
+	},
+	{
+		"path": "implementations-plan/accelerator-server-ci/plan-codex-draft.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7d915d3dbb65f2773e964bbcf9b03f715d51bdeb"
+	},
+	{
+		"path": "implementations-plan/accelerator-server-ci/plan-opus-draft.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bef36ae7dbd73ca2f450524ad190aecdfc35c1d9"
+	},
+	{
+		"path": "implementations-plan/account-artifact-freeze/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b2a023948e99d7e491160a5981862cb1102db4ae"
+	},
+	{
+		"path": "implementations-plan/account-artifact-freeze/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "47f294d17ffe7a357ed6632e47406797ec3e7695"
+	},
+	{
+		"path": "implementations-plan/account-artifact-freeze/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4d3be786cb868b9809fac02bd661ede73b19eb7b"
+	},
+	{
+		"path": "implementations-plan/account-balance-orphans/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9a9187237b621e36b4efe363c8a407f943d8653e"
+	},
+	{
+		"path": "implementations-plan/account-balance-orphans/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6fcdd483aa3490d2f71e57c18f993e6d381f566e"
+	},
+	{
+		"path": "implementations-plan/account-balance-orphans/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4cc49b445dfe9fdb08d5928d80ebd4d13e083c0f"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/audit-codex-round1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8c6690eaf78d615db06f50daec088d3869d8aa18"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/audit-codex-round2-ultra.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "da823011e991963cb6973343b71ead1c7e8075d1"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/audit-codex-round2-verify.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8c95dd49c0ab8104e299f28966302a2870c15def"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/audit-fable-round1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3584c3d33d34d3087730c390118df677cfd9d1fc"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1cfcf9c745300d16b9e7f188d9f055bf0db5dedc"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/audit-codex-p1a-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7b9b397543982a0ba37d8b3b1b2a68ed1f8c7ea0"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/audit-codex-p1a-r3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "697fe9812a9bf7f0543d4bb6cb19b4f8604e0dde"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/audit-codex-p1a-r4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3025fd8c1e107aff814beb97c921a23429e5ba96"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/audit-codex-p1a-r5.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "522af3d554c988ca5a5bae946faf16e0de70c2e0"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/audit-codex-p1a.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6f9ca8479e66ca150efaadd913f7892024aa824f"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e93eedb0142c9d0dd86fa0af8545fa5a11cb62d9"
+	},
+	{
+		"path": "implementations-plan/account-profile-siloing/research/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "08aba964f6256bb96bd4fe78eafbabd11bea88a9"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "992f7942ff9696b6ba1cd39fd436baf62a9e7775"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b70a062d65e69a24231864d5b24d84431a5f050e"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bbff27dcd55a41e1da142d356eb6b55c23277af2"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "66aa56efec7c24b0b7a4cdc1a27ee50ce68f5b46"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/plan-draft-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f27954e05652b9ae56a780766a9bac2ec32ae198"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/plan-draft-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "835b2548bbb1b868493039dc59a9d4af9f6aba6e"
+	},
+	{
+		"path": "implementations-plan/account-switch-isolation/plan-draft-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "24b27b3b35e0c8925e94ca68f7ed3900365e00c1"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-codex-contradiction.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "20a92e4129f748680f908c02584d43656e5c4a43"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f01c2b1727401a43923c8afab1a9c09d01c6f1f5"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-codex-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e2860bc618448310a84d8306c6061cd3603d4daa"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-codex-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "50be7bdba986c3bc52c82e6b170ab05ae5bfd133"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2f7cb92e5f9c11ac83710a9a3e0b54e12c014578"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "217885b278d6466ce58ab97288449a246d5d538a"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/drafts/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "75428aa9d381d8704daee14da1e024b9e20c085e"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/drafts/plan-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3fcf83c501e47b49d20db7bf2a72bb3bec2f024e"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/drafts/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e3a00116010bacf617b3950f0d487e8919379af8"
+	},
+	{
+		"path": "implementations-plan/any-erc20-bridge/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1517d83a8fa9846da5591cb9afda77e3a85a9e15"
+	},
+	{
+		"path": "implementations-plan/approval-scope-follow/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "31b0232d26434b4a395023970287d023dc944612"
+	},
+	{
+		"path": "implementations-plan/approval-scope-follow/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "34e33c1b6862b4a4c3343e7ebfd60f370a89ec01"
+	},
+	{
+		"path": "implementations-plan/authwit-lifecycle-and-execution-followups/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "051d08d56efc3d3da089a7ad8e2369a608f9f14f"
+	},
+	{
+		"path": "implementations-plan/authwit-lifecycle-and-execution-followups/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "85452e7291eccba66e1ab54240cec5c320eb106d"
+	},
+	{
+		"path": "implementations-plan/authwit-lifecycle-and-execution-followups/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "45029a3c3f902f661dcc2b9d0b8815f1ee111e3e"
+	},
+	{
+		"path": "implementations-plan/authwit-lifecycle-and-execution-followups/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "adc8355bb09993117b34e6ed916aaa8e51b64a84"
+	},
+	{
+		"path": "implementations-plan/aztec-4.2.0-bump/audit-codex-patch-removal.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a4971ac3eef2bd0605ce81680c3e261a60976e10"
+	},
+	{
+		"path": "implementations-plan/aztec-4.2.0-bump/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a289cf735c60cefaab711375a4253c41fd8f6789"
+	},
+	{
+		"path": "implementations-plan/aztec-4.2.0-bump/audit-plan-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "65e5a4361141f19c1e3eabc5687bcd790d0491db"
+	},
+	{
+		"path": "implementations-plan/aztec-4.2.0-bump/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b0123d5673bb7c3c0794dff211a79eaaef0f925a"
+	},
+	{
+		"path": "implementations-plan/aztec-4.2.0-bump/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f4a6b2bd1a17790de2ee676f953d34a18790cb6d"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0-rc2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ca2ac91f2f1c5e10863c67ee889a7aef9677e8a1"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0-rc2/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d8d780686709f9a6a5108f4e3c2b305e0aec06af"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0-rc2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6a7fd2b016deccd1bb2e355a8052a7bf18205337"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0-upgrade/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ac99e060a445786acd3649d1647bb198403e3c8f"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.0-stable/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a26efc067ee8702153c79267c8313c88630c57c0"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.0-stable/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e1abcdbe9fbbf4d9ca453d701288d840484c49c9"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.0-stable/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4e017bd14f7cb534c97d1de8b5e1ec1112d5833b"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.0-stable/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a357f81cc447e79b863a7af03df70b57bc47767a"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.1-line/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "22a248451592121a0b067ed4d7fd98cdce67141a"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.1-line/audit-codex-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6471f8b3878b68b27611deda7b6fde67f3b1a5ba"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.1-line/audit-fable-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "35064d847e7648f0cbfd0c04b5a68fe3f9275a02"
+	},
+	{
+		"path": "implementations-plan/aztec-5.0.1-line/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "67b7e5e132f1b5f22c7dd8120dd98c9559a85f7d"
+	},
+	{
+		"path": "implementations-plan/aztec-5.2.0-js-line/audit-codex-slice-cap.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4d931bcc32f76c7fa660dffb5d89d6d9ecf64f8f"
+	},
+	{
+		"path": "implementations-plan/aztec-5.2.0-js-line/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1bf4ee9aac3c6b3aa48cc7690490e3b0c304680c"
+	},
+	{
+		"path": "implementations-plan/aztec-5.2.0-js-line/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "42c4a73a4c61f9fd76bd7e80965ecdf1e9db8745"
+	},
+	{
+		"path": "implementations-plan/aztec-5.2.0-js-line/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "37344604bb8abd184b5d6738feb2ada796d869a2"
+	},
+	{
+		"path": "implementations-plan/backup-log-hygiene/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "98098f3617ebcac3526cb94eb7194d902311e34f"
+	},
+	{
+		"path": "implementations-plan/backup-log-hygiene/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9a89b8ee6a538ff4c2d2ec6ce28cfb824a278dc0"
+	},
+	{
+		"path": "implementations-plan/backup-log-hygiene/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "eb85fd979edaa89f6e241e99fe1736d6a69195c5"
+	},
+	{
+		"path": "implementations-plan/backup-restore-corruption-fix/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "52ef0aeb79d08e6678d00ca9e9f7d5e7ea188f23"
+	},
+	{
+		"path": "implementations-plan/backup-restore-corruption-fix/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c3869856105f54445260b195aa39becd0b24d5b8"
+	},
+	{
+		"path": "implementations-plan/backup-restore-corruption-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "36beadf1571311724305647849288ea0dd5c92e4"
+	},
+	{
+		"path": "implementations-plan/backup-restore-residuals/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8f7e77d759d90e429753962250dac7fb0121e979"
+	},
+	{
+		"path": "implementations-plan/backup-restore-residuals/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "195dba84c1326931f2ae5625f63d0f9b03c8c1e0"
+	},
+	{
+		"path": "implementations-plan/backup-restore-residuals/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "07ee812e24aa94fd598e50b245380ec6fd58d828"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/audit-codex-approve-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f32e61d11e384b6c1a5a76738b5bdaabc7f955ab"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/audit-codex-final-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dc763d5950aee3d5808d4bb31639ea32431971eb"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ed1bcdd20163dda577290667e24f7b03059d023b"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "733bf3f0dfa5b581ec53455c7ebdf992ea85d2fa"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4c54141b866d8a045c664d63bb3ae0471a323e27"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c4dddf713240be34167a02a6483cc24ca6454f93"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/plan-leg-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "997e8bc877b594282f058970e68aac95ecc0e853"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/plan-leg-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "324a728b748a29cd033a2fba4eefdb38b34b8c00"
+	},
+	{
+		"path": "implementations-plan/backup-restore-security-hardening/plan-leg-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2ccb762f124d7538b1eb9b193ef9f6793dd1bf32"
+	},
+	{
+		"path": "implementations-plan/balance-fpc-cache/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8a678be86e85b97576947624baa1554726923a43"
+	},
+	{
+		"path": "implementations-plan/balance-fpc-cache/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ebba65fac2b23378962b3fe45505e8852be1e9cd"
+	},
+	{
+		"path": "implementations-plan/balance-fpc-cache/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1c46793b7bad7a8ca91ac921877387a981a0ee7d"
+	},
+	{
+		"path": "implementations-plan/balance-row-reconciliation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d87b2e63536e6901e96514da5c7a9303ba239924"
+	},
+	{
+		"path": "implementations-plan/balance-row-reconciliation/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5ec8bd6d089f1a8393622b57683eea1afb8c8c91"
+	},
+	{
+		"path": "implementations-plan/bb-wasm-hardening/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "86dd678a86aa3db7b79f435f400ce7828a90fb28"
+	},
+	{
+		"path": "implementations-plan/bb-wasm-hardening/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ddcd48a4e2ba79a117175f00c9bdc00233de58e9"
+	},
+	{
+		"path": "implementations-plan/bootstrap-route-decouple/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "60cf5ffcfd05da511b4614cb7ab38a7d7552709b"
+	},
+	{
+		"path": "implementations-plan/bootstrap-route-decouple/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c237ee06f3044051739d9b1defe5d7af7aad98c8"
+	},
+	{
+		"path": "implementations-plan/bootstrap-route-decouple/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5c2b72e4c22e47ee14791cf654ee1a6bbd66e3ba"
+	},
+	{
+		"path": "implementations-plan/bridge-permit2-recipient-commitment/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e888aaec030c581ceefd97ad69ed0c7481a0d621"
+	},
+	{
+		"path": "implementations-plan/bridge-permit2-recipient-commitment/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1667fd6d7d1935486216eaffe954cc2f245c11cd"
+	},
+	{
+		"path": "implementations-plan/bridge-permit2-recipient-commitment/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8a6de9cc6bcf71e16fc251b187389d33223f6b8e"
+	},
+	{
+		"path": "implementations-plan/bug-fixes-batch-1/audit-codex-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "17bc12c15371013587e6c6d7397a6da734a579e0"
+	},
+	{
+		"path": "implementations-plan/bug-fixes-batch-1/audit-codex-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "05fc71a5bbd02920410aa02c1d8dff07782e59cf"
+	},
+	{
+		"path": "implementations-plan/bug-fixes-batch-1/audit-opus-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "34f252c557bb3b8de58117ff1542b64697aa2f9b"
+	},
+	{
+		"path": "implementations-plan/bun-1.4-bump/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "30fd65a2fc14c595c5ecfe1cad4223064a7745f9"
+	},
+	{
+		"path": "implementations-plan/bun-1.4-bump/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d194d678d7a4ac67ceb1611c0cf69697ce456428"
+	},
+	{
+		"path": "implementations-plan/bundle-fpc-nft/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "021ac111c3af3d6dd68af82d6f93d4d6226f5266"
+	},
+	{
+		"path": "implementations-plan/bundle-fpc-nft/audit-plan-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "abb240196d674561033722fda71a6d62e3c4824e"
+	},
+	{
+		"path": "implementations-plan/bundle-fpc-nft/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e5c347241f978284987055b33c1d44853ca8de11"
+	},
+	{
+		"path": "implementations-plan/bundle-fpc-nft/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dc4a263870c72863e22adede2cb7970334b7e877"
+	},
+	{
+		"path": "implementations-plan/capabilities-popup-quality/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4ae0cda0a00425de01108f7a73c80c41bad9bc65"
+	},
+	{
+		"path": "implementations-plan/capabilities-popup-quality/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d08753f346c7f13180267e4760f5c7ed2cc3bbb6"
+	},
+	{
+		"path": "implementations-plan/capabilities-popup-quality/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5631852baec4943a4c4d8a2c79ec32cd88d78114"
+	},
+	{
+		"path": "implementations-plan/capabilities-popup-quality/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8558c7e9d6fc56fbc8da39985719a9f603eb2347"
+	},
+	{
+		"path": "implementations-plan/capabilities-popup-quality/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "34fb52fa4004e7762ed6dee707201f25bd64ba00"
+	},
+	{
+		"path": "implementations-plan/capture-await-write-sweep/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "70d91d92ced729ed8fc791e321fc2043e7ab836d"
+	},
+	{
+		"path": "implementations-plan/chrome-store-launch/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4a91faf1143c48a2f81b8300c67b9f3adf279702"
+	},
+	{
+		"path": "implementations-plan/chrome-store-launch/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "204b48e47c0c32131bac7c4dce298ce78cabdc71"
+	},
+	{
+		"path": "implementations-plan/ci-cd/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "18e28fdc22d6fc7460725024c69c5f6e0db2aae4"
+	},
+	{
+		"path": "implementations-plan/ci-cd/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b97c49177f504b038fe2d02553082e784c2f1105"
+	},
+	{
+		"path": "implementations-plan/ci-cd/audit-prompt.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3e55c3bf11686ccdbcdf6e2736876c2b9851f2f8"
+	},
+	{
+		"path": "implementations-plan/ci-cd/audit-smoke-gating.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1bf6879736ed907fcc528b2531c5cb6cd52186de"
+	},
+	{
+		"path": "implementations-plan/composition-test-rollout/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "cddf50ca1ad0f6237883308054db7721bcfb2e40"
+	},
+	{
+		"path": "implementations-plan/composition-test-rollout/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2a8bfaef36d6176b441bdae0b9d52c539003656b"
+	},
+	{
+		"path": "implementations-plan/composition-test-rollout/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "aa1de69efb0841eac783cd5c7a8fb9210e819d47"
+	},
+	{
+		"path": "implementations-plan/connect-chain-mismatch/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3bccdfb08608c58ec0726e83619ec929ec2f1df6"
+	},
+	{
+		"path": "implementations-plan/connect-chain-mismatch/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e73158828d4380cf71161660ddeab1e4766e0bcd"
+	},
+	{
+		"path": "implementations-plan/contacts-export-uxr/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "15e397c54da1624d580c5af243d542cce40a7cb5"
+	},
+	{
+		"path": "implementations-plan/contacts-export-uxr/audit-plan-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "df1d0b2d3e4cfb803669256212e94a3d11df00aa"
+	},
+	{
+		"path": "implementations-plan/contacts-export-uxr/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fff50a15e56c6934e9e6094119724e9d96f861ae"
+	},
+	{
+		"path": "implementations-plan/contacts-export-uxr/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "16817421823cbb6946147497f0ae01ed9c43db3e"
+	},
+	{
+		"path": "implementations-plan/contacts-rename-export-senders/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "72e59e2ca6fad807f7b5ca7173eb4725ca199c7d"
+	},
+	{
+		"path": "implementations-plan/contacts-rename-export-senders/audit-plan-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "45ddd318b22fd91939743632fea10e5a2ed0a1f5"
+	},
+	{
+		"path": "implementations-plan/contacts-rename-export-senders/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "764c51f4bb124fcb999a8bfc7f16b5e55e8a1834"
+	},
+	{
+		"path": "implementations-plan/contacts-rename-export-senders/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "73885e9194d4e8e3ac65d80db93b7a36a8eeb409"
+	},
+	{
+		"path": "implementations-plan/contacts-sender-decouple/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ac6ed6a6d10bb0beb17d44af25249cc1e3ef4e21"
+	},
+	{
+		"path": "implementations-plan/contacts-sender-decouple/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0302e6b95f4726e64515b783a9d94f1abaab9308"
+	},
+	{
+		"path": "implementations-plan/contacts-sender-decouple/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2f227259c7962801742b080f67aa110d3cb2539f"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-closeout.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "511a34e84d0ba85d36eb55059b07ac22d804cb1e"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-post-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d6618d880d8e14c52af3ff78b804926f173a0854"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4312cfbe2e1ac3a8d58f866886dde47b4f6f4a62"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "684c078cfb10cd864a0d8eb8b0ebd1c4a6adfaa7"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4e35a019aeaffafc0466eb7d14a5040b797ba4a8"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-5.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "71df69cb3692629c802ed169cc4dc04df54d50ae"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-6.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5c33f36978e27dd5a241a62eaaa3ee360bead5d7"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-codex-round-7.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4ec997f0734c498166e03e90d65c528950b91980"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/audit-opus-post-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fc05d93e5c5f2bedf6e30746f28f3e6e47cdeafa"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v1/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7e76cff6c345584076d24c9dfcf9ef3d5e84426c"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2882b9ab20b2402a35d32539176c88f528249c03"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v2/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2f512b79aeae119ee5d8ffc334b1614c49d70fa0"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b360a97fbdcda74df8157e061dcb747e541aebd7"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v3/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "47d0b3a26be6129fcf80b1ffa742e9928ac8a5aa"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v3/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "716228f19fe620179c8a85a02f83016d3216ada7"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d3b1fd913c830ecc0f1ccfa7de7f0f3e04ef6c5e"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v3/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4a508cf8875a8f30eb1f6e583a3556947b0bd7eb"
+	},
+	{
+		"path": "implementations-plan/dapp-interaction-lock-fix-v3/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "23fb5b226a1925a2424b8e1f62a0ebb700777cda"
+	},
+	{
+		"path": "implementations-plan/dapp-popup-cancel-focus/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "012239d0a48e719df707e66e6e0f138cc2a35a33"
+	},
+	{
+		"path": "implementations-plan/dapp-popup-cancel-focus/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ecf53d90216eac2c0fdbd86adec7cf8115fdb0d1"
+	},
+	{
+		"path": "implementations-plan/dapp-profile-binding/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "87d5741074abbe5f1edfc456f54a56539a0981be"
+	},
+	{
+		"path": "implementations-plan/dapp-profile-binding/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "46cfd246ec30844af3094291df71b518a1dba16f"
+	},
+	{
+		"path": "implementations-plan/dapp-profile-binding/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ca66bb6ac22f51803db98c44fbc2ec20f2258dac"
+	},
+	{
+		"path": "implementations-plan/dedup-bridge-conductors/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d4525ca353853598b160ad438aeea8232d0e0f08"
+	},
+	{
+		"path": "implementations-plan/dedup-clipboard/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "75ea30bc3807b2c59343785abc0d9138a8bd11bf"
+	},
+	{
+		"path": "implementations-plan/dedup-clipboard/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "800e0abf055c87cfcf71a3aac65aedd5c26e6133"
+	},
+	{
+		"path": "implementations-plan/dedup-design/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "30d867c707e2c270a5f582e834359428b552c080"
+	},
+	{
+		"path": "implementations-plan/dedup-fee-estimation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ae95c98f9feadd79a98a0fba8cc07f9a4ac31f7b"
+	},
+	{
+		"path": "implementations-plan/dedup-fee-estimation/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "38a45d43e9b3738d96f71040e5643047c1ac8580"
+	},
+	{
+		"path": "implementations-plan/dedup-messaging-primitives/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fec11f9ec75a89ef4daf6031f7699a93ef7f3068"
+	},
+	{
+		"path": "implementations-plan/dedup-p3-service-wrappers/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c4c90fe72ff4e76256d1bd6a1d214a76fa5ef42d"
+	},
+	{
+		"path": "implementations-plan/dedup-p5-vue-components/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7117b4af604a716fe82e0e410f50bbe1a3d0bf08"
+	},
+	{
+		"path": "implementations-plan/dedup-p5-vue-components/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e3a005e51bbe54dbebf73f0968976fe237a7a309"
+	},
+	{
+		"path": "implementations-plan/dedup-p5-vue-components/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3764f11e86a57519b6457135724f35963c128609"
+	},
+	{
+		"path": "implementations-plan/dedup-pxe-memo/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1e946ec3958f44dfed7dc1169d6a129fd149910e"
+	},
+	{
+		"path": "implementations-plan/dedup-ui-structure/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c7ab217bb5ba0417d45998954dc82f762158cc5a"
+	},
+	{
+		"path": "implementations-plan/dedup-withlock/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "779874e319b033e0317cab4409ab9a4afc54ee5b"
+	},
+	{
+		"path": "implementations-plan/dedup-withlock/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1b4c910d646e46573f9954433077258b1820d61d"
+	},
+	{
+		"path": "implementations-plan/deflake-round-3/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3140fc4574671361522e8cdd1c6747bbc9465386"
+	},
+	{
+		"path": "implementations-plan/deflake-round-3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "425fd5cbf5bf03ab904647ef0a2d6aca7830f675"
+	},
+	{
+		"path": "implementations-plan/deflake-round-3/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e99c09cd99553de9100658f531e4868cc12fc053"
+	},
+	{
+		"path": "implementations-plan/deflake-round-4/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4aee98d929e4f194d10fc4c3bb5015ea6e067508"
+	},
+	{
+		"path": "implementations-plan/deflake-round-4/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "de30a2bcf6f4f3017784121b3f1333a2048c5d72"
+	},
+	{
+		"path": "implementations-plan/deflake-round-4/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "69c74fb9ec00b31941e2c46df8041a0273c5e53b"
+	},
+	{
+		"path": "implementations-plan/dependency-hardening/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "37af7108d63a88d538f68de1e48a63c552f6028f"
+	},
+	{
+		"path": "implementations-plan/dependency-refresh/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "15feab1d119b06948d022c62a01c4c9a154a60ae"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6c0ad3d5b74ac475a4cd36aa5b31afe5481b6810"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "58b048ca905aad2fefcdb1306b1a41bdc6f4aa5b"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3f87b311c8abb1a7264ab73d2eacef8ea2241486"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0b9ee451a1a926d454f917e29f6d2abcc61a2b64"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "75ec0aed78c0191ac45ff2d56c39b2aad37c6668"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9061fe3437a84ee4f51c8c9afe4db0951d1f0271"
+	},
+	{
+		"path": "implementations-plan/deprecate-simulate-views/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6dd468cf2a84eb8b5620059fed980f6af716baf5"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization-round-2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ef5e01652c0d104294b6e1fe4abb89ef14fff439"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization-round-2/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a8749e2d0862a793a3b676762da0de4459a951e9"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization-round-2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "51232f9a7e96e1afec1d9c9305dd6f64669dc528"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization-round-3/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "faba5a40c3013506440ad539dc0be310d0b7d042"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization-round-3/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0eea92a02c0e13f056f244653ccde78f8e39ea9a"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "88a7931acc031a77e3ff749c2dbc1436852bb9f8"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2c1716b082fa7220cd7fc71b2a2921440ee008a9"
+	},
+	{
+		"path": "implementations-plan/design-system-externalization/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "057191ed5076b0c75e1b613f801e1a8c1e8d664d"
+	},
+	{
+		"path": "implementations-plan/docs-improvement/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e7345e62cd32650f8f037c95c75d0e77684a97aa"
+	},
+	{
+		"path": "implementations-plan/docs-improvement/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "22828a8530650413062cc4b3718f59f5d49c1f14"
+	},
+	{
+		"path": "implementations-plan/docs-improvement/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2db5fd0f4e28a3a974b5c9f105f0e2a0a6042571"
+	},
+	{
+		"path": "implementations-plan/docs-improvement/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6dbcc56bc7d28df7e09da07f99ece0d3d3a984bb"
+	},
+	{
+		"path": "implementations-plan/e2e-deflake/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "acaf57c15546ebca802c88107bb07cad74c34e03"
+	},
+	{
+		"path": "implementations-plan/e2e-deflake/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "de4aa597579ece8b8ba254790aae56c98a8caa2f"
+	},
+	{
+		"path": "implementations-plan/e2e-deflake/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d0d6a4dcf65edec20aea3f1ef5d21c1a58539bab"
+	},
+	{
+		"path": "implementations-plan/e2e-determinism/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2ef25e588be2414f2028152295a6dcd7fa195e09"
+	},
+	{
+		"path": "implementations-plan/e2e-determinism/plan-consolidated.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f35ac6dcaa7c23b545dfd92efdfdfbc3e9c7c26d"
+	},
+	{
+		"path": "implementations-plan/e2e-determinism/plan-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "66e452b6b02245203445112a2c0112f85e784261"
+	},
+	{
+		"path": "implementations-plan/e2e-determinism/plan-primary.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9bf28490b787f235ec839a706c08b92139c53694"
+	},
+	{
+		"path": "implementations-plan/e2e-full-network-recovery/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fc3f23cc538bb6ca08c1fbcf58dd51a834e75af0"
+	},
+	{
+		"path": "implementations-plan/e2e-full-network-recovery/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9b639716f806dd9d07a5ce80c473e32d82de12df"
+	},
+	{
+		"path": "implementations-plan/e2e-full-network-recovery/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ec2e11d4c6e6d3ceb9bca5b7bc0b1df73afdf568"
+	},
+	{
+		"path": "implementations-plan/e2e-full-network-recovery/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "354cfb7a3b5710e2240f867eb9cdd522c6631f60"
+	},
+	{
+		"path": "implementations-plan/e2e-network-recovery/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3c53df43cae7e37d71d4abe3a456998042759bd4"
+	},
+	{
+		"path": "implementations-plan/e2e-network-recovery/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a89da124f010c5f54ad658b4612f314449c2cb99"
+	},
+	{
+		"path": "implementations-plan/e2e-network-recovery/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6cea81f89546acda05cc9010ef74315485f0a0e7"
+	},
+	{
+		"path": "implementations-plan/e2e-network-recovery/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4d53ffe3d49e7bfabeff8fde267d871434abfb75"
+	},
+	{
+		"path": "implementations-plan/e2e-proverless-stub/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e1fe480aab11e7240473a13ed2b075e614d2ac2b"
+	},
+	{
+		"path": "implementations-plan/e2e-proverless-stub/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4f55842b5454dae7eb6c11aeab4dfe63530481f1"
+	},
+	{
+		"path": "implementations-plan/e2e-skill-refresh/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "29df35abf1322eeabf8a24f1ae966f75dc18f797"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex-final-pass.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bc1a35830f4f666b4e0edcd17b3362b5dd6a8ba8"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex-phase1a.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5fbfa75a20441943344cf6d6eb5ff1c1ba01a21d"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex-prior.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9e9e6057848b882f7cc1de1e00b9f80308049c26"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex-prompt.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7a0bc484c0aee7c2fd3ca6446ad17140d7931299"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex-v2-2026-05-26.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d4b1c5ba0d70c1fb98dddff3b6c40392aab1f5b2"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9e9e6057848b882f7cc1de1e00b9f80308049c26"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/audit-opus-v2-2026-05-26.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "73ca9ed8122bb823b06f3d5b3b811ef27cd1fb17"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d14e67a37d4f9eab9d48828eb378495ae7e0e58d"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/plan-consolidated.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a7ec5d2191d04688b39ab74820faf2a7cdcee95b"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/plan-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "06b49ffdf211b462a9aadf5ca3551aa245461dd5"
+	},
+	{
+		"path": "implementations-plan/e2e-stabilization/plan-primary.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "94d5e6689eb5b6269cd796112dc7aeef16c847c5"
+	},
+	{
+		"path": "implementations-plan/embedded-fpc-firsttx-cosmetic/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8216bb3c56320a98866098962410877dab9f92a7"
+	},
+	{
+		"path": "implementations-plan/embedded-fpc-firsttx-cosmetic/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fda180db8d29f181586689ad87da2c21407e2775"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fed40c6990ac6c7ff796a96c4337304726438028"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "13af9fd3e831ee3f456cdc6d7662e233e2a92cae"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/drafts/audit-codex-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "84a8ccf1a67316ccbff8e9afc72e393b0b4c3b7a"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/drafts/audit-fable-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "13af9fd3e831ee3f456cdc6d7662e233e2a92cae"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/drafts/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "17a1a4c12738bb8b60b741a93388abc26d7ae8ae"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/drafts/plan-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f94bc5a5b37a64a419f2818ce91f251e1dabea05"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/drafts/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fae4d7805e05743c3f9855a661579b5408f33ec9"
+	},
+	{
+		"path": "implementations-plan/execution-decomposition/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3ae19f6791dea875e8d73e85e764715fe4d9c4de"
+	},
+	{
+		"path": "implementations-plan/execution-pxe-injection-spike/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "94f5c3daf7af910f57c79d571afba6742cfa702c"
+	},
+	{
+		"path": "implementations-plan/execution-pxe-injection-spike/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c082517e6d0add2f57dc972c8615685a1d0f6709"
+	},
+	{
+		"path": "implementations-plan/export-integrity/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7fb33c0f77bfb3b9e293ce83177c413d65d5bd8c"
+	},
+	{
+		"path": "implementations-plan/export-integrity/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2675c43067566241029230e7e80ca284d33fc52c"
+	},
+	{
+		"path": "implementations-plan/export-integrity/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a778151143e19177ade62813a9c0de523caf5516"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/audit-codex-final-2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4dc52283068d7918f04262090b1e9164f5d16475"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b1d99c335a0e7224b0d943d7781c8464c823feae"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "66e21010c177538f59544dfac1f687ae8c4a442e"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "14f9fded7c2df79e40085c2d9eacd672d33b0e5e"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "432ff167b161ca086ecc50d89634a0e45665ba8d"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "131bd55f389921c063fb6b0f0e61665c253875d8"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a38a51cd235c027605dfd9755f25aab9dd58e6cc"
+	},
+	{
+		"path": "implementations-plan/fast-path-internal-views/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "feb7faf61df8e29ede963cadfbe4352b3418a966"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "60e949a82d15a03f718fc781bedeb3f55186d79c"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e27a44606dca4e1474ba3c3d8995d77aa8ec23f1"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "065c4895c84015dcd28fba91a92c47b3790de993"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3639de1eb6cb435986a5aca32016305900eb6608"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f65283290a661f6e09b55664bb58cc9ccb23d4ec"
+	},
+	{
+		"path": "implementations-plan/faucet-add-token/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d04d548a6850e7b173c08b60b4c073a3969820d2"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ad2773b08aba3db202ec31b016637cd6671c1648"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "69ec126b1982999eb7294bf5212d3ee821ea417a"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/audit-opus-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e89393560048a78bfa1ae85e92bba918e6c66cbc"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b0059562fcb73079b0ba8ba909210ffd48114267"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7d86b2d369c399ddf1c902a8356d100060e8d29c"
+	},
+	{
+		"path": "implementations-plan/faucet-bridge/plan-frontend.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8d4a8b14af41ff5fb09ad976581fd377a469e01b"
+	},
+	{
+		"path": "implementations-plan/fee-estimation-speedup/audit-codex-final-response.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0558440698d78e7e91d24a9f8a90c9b52e039abc"
+	},
+	{
+		"path": "implementations-plan/fee-estimation-speedup/audit-codex-r1-response.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a477984e50d57f9860dd97883c95dc27458c9ba8"
+	},
+	{
+		"path": "implementations-plan/fee-estimation-speedup/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "577fa0e63b109e354806345d0a2ff2a70adff214"
+	},
+	{
+		"path": "implementations-plan/fee-estimation-speedup/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b6a7a5635a4b812f35a171ff926b72ba1552845b"
+	},
+	{
+		"path": "implementations-plan/fee-estimation-speedup/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7f2959ef4fe6b6a3a641eaeb0d82f75c78c8ed2a"
+	},
+	{
+		"path": "implementations-plan/firefox-arc-closeout/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3e96c934f94c43cbfbfd018c6aea3d1e2a42a8e2"
+	},
+	{
+		"path": "implementations-plan/firefox-arc-closeout/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b420f858584d7f589652d9e82549803e35002a68"
+	},
+	{
+		"path": "implementations-plan/firefox-arc-closeout/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a74514936e5b5ef442c6f805431b1671f355120e"
+	},
+	{
+		"path": "implementations-plan/firefox-first-class-spike/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "42f105766e660c7bc26b4ca1476c7181dcfe1b1c"
+	},
+	{
+		"path": "implementations-plan/firefox-first-class-spike/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "33de15b1650c31e93d1da15e7102db455aedd808"
+	},
+	{
+		"path": "implementations-plan/firefox-first-class-spike/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0b3205fa7863774d27f43c112f1e9a271000009e"
+	},
+	{
+		"path": "implementations-plan/first-account-token-seeding/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0b3e9518ba4e012af3cb4eb050271612efff12ba"
+	},
+	{
+		"path": "implementations-plan/first-account-token-seeding/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "90819f524b765703de4ca10a3253e2b3b6d6e015"
+	},
+	{
+		"path": "implementations-plan/fix-execution-journal/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e89928e7a83efbc28269c85f6fa2da8f07475814"
+	},
+	{
+		"path": "implementations-plan/fix-execution-journal/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f9612d71c42c80e757e2fcbf98128d487af8155e"
+	},
+	{
+		"path": "implementations-plan/fix-session-profile/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "77c8dc71f905c011510ec9df33cea26cc3cae517"
+	},
+	{
+		"path": "implementations-plan/fix-session-profile/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "66e103909ec098da18864fa97ce83c12a99d60e2"
+	},
+	{
+		"path": "implementations-plan/frontend-ux-fixes/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "60e9f77e3075e052ee76552589f6f780495c1bc5"
+	},
+	{
+		"path": "implementations-plan/frontend-ux-fixes/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5e29ffe71d1396316bd4bde8f07dc6e7f15a0e4e"
+	},
+	{
+		"path": "implementations-plan/frontend-ux-fixes/audit-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2e80fb5f1800e7be209092eb80436a674503ff13"
+	},
+	{
+		"path": "implementations-plan/frontend-ux-fixes/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a8891bc438642fc5386e06af725db0913fe2667b"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b1-mechanical/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "59f1b465528339fc93bc67dc1318d664afb88c76"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b1-mechanical/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "244af5ad213989b91bb5b2fbcf59c58f491878f7"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b2-backup-passkey/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "64798e0bc425a03beb039e7e59898a2f4c1f23fe"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b2-backup-passkey/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fe83b57584f8e67b0b7386ea7796eb540725e0f0"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b3-isolation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5ad295531cd53b72633955c98c72b066c6ed33af"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b3-isolation/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c5cb9e814dca3d730692f85be8dfb3d0429672ca"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b3-isolation/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ff2f616a42a792c9a67c92d8b5b2162a4a80cc2e"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b4-approval/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "244ef5f9017b156d81e1593490e78da69f68f15a"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b4-approval/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "70011711b133cf07c090aa2d29a3b4361df03408"
+	},
+	{
+		"path": "implementations-plan/harden-2026-09-remediation/b4-approval/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "06fead2be58c7e578c0db775cd2001d849ba0dc4"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "892bddeb3461a637e47c7068ba09a6a24d184982"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3c6bec92cf5087d19793dfd4927800a1426d7845"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5ee9e98a37765b0554e3c3c2b7a3dab2b38d6505"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a7801a86e672ff3649d99a06932382ad2bda6ca3"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/audit-gpt56sol.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f22488fd72ff7a29c1c523f3ad27869a83795579"
+	},
+	{
+		"path": "implementations-plan/harden-findings-remediation/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "040e9b4a997867a4d3911a0d7afab07e274bccde"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9e40e23c6ac01063e9fe292fe02b12ca72181888"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9fa5b0198f8cf231d47ec215b4e3c54a7cb59b89"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e664394878558725656793f43dc02344422c3ca7"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/findings/Q-06/plan-leg-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4a4bba5a0bda1b9511f438fbcd684a19d4acdb40"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/findings/Q-12/plan-leg-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b7c53f4906eab6aeb66e2a1b77d1d5f564f1cb76"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/findings/Q-13/audit-codex-contradiction.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ac76be7e3f32c9cc64add81aa378ec31711dfbe6"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/findings/Q-13/plan-leg-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4efa8f4c2b5b93209f0409a2295e79cdb5f3c19c"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/findings/Q-13/plan-leg-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a78945ddf4a5992fe1b206decb3adcb907c1863c"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/round-2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "707fb117114c44ecba81c18002e6b492fe77a780"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/round-2/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7634fa903cf85a7fd99b65c4e6e6827cba8c38a6"
+	},
+	{
+		"path": "implementations-plan/harden-quality-arc/round-2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4f77f32a6fbc634fced0e52b659da16ad879adeb"
+	},
+	{
+		"path": "implementations-plan/holdings-loading-sync/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7c30365d011b787172034b4a068981e8d0314434"
+	},
+	{
+		"path": "implementations-plan/holdings-loading-sync/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8ec4f0f87129bf1aec8665783d55486a151c1368"
+	},
+	{
+		"path": "implementations-plan/holdings-loading-sync/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0f79d7ab858137515b8ffc141b074b3557cb98e0"
+	},
+	{
+		"path": "implementations-plan/home-holdings-pin/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "568b7940bc73b8869fcc5c62c3bb7862e84f16b9"
+	},
+	{
+		"path": "implementations-plan/home-holdings-pin/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7f5f960d4a392cabeb30baa2ff1317255cea4a96"
+	},
+	{
+		"path": "implementations-plan/home-holdings-pin/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d9a0d963078e41ae0b3e57a88f3874fe23bbf073"
+	},
+	{
+		"path": "implementations-plan/home-refresh/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c026ff60763eef87f6ac4021a284f454fbd1fafa"
+	},
+	{
+		"path": "implementations-plan/home-refresh/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4c888293c381401d53a0f2b28a52c12fa74152e2"
+	},
+	{
+		"path": "implementations-plan/import-stage-deadlines/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "33bde331508d5b51125b9de48aead810a19c8771"
+	},
+	{
+		"path": "implementations-plan/import-stage-deadlines/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ba2e08b8e3abbe581f33ac3092489f20a3d30771"
+	},
+	{
+		"path": "implementations-plan/import-stage-deadlines/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3ae9ca32c88acc6437cb2e7143895cac039839ed"
+	},
+	{
+		"path": "implementations-plan/incoming-public-transfers/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fb3ed984952b7eaef4146a71a3d6986a7247e7cb"
+	},
+	{
+		"path": "implementations-plan/incoming-public-transfers/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c6599dea03f010d92819a0b6c31ca6b219146a5d"
+	},
+	{
+		"path": "implementations-plan/incoming-public-transfers/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d6d8ea7c2c8ec983fde137a3894c5a41fc71d24c"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0723e4907a7b17739972ddc99843f66f90bedb78"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "387675a1119188b8a721037aeb5e144d248280d3"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "16b3c84431251c92e361f00f44996637b2efd8ea"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e4b7bf30615d08ea916abd791ea685adadafd79b"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-response-round1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a38a8c02f013938ad27b10ed2a0074b03cd25cc9"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/audit-response-round2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a25877c2fd1bf997e1a44d3c04bcbc754a556dde"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5fef811d020ada42b85847a03222fbcfd7a827c4"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7131a58f3c5ed1a21f921bc2ba0cb1ae51c3a9bd"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6642bdca0f2dc3a0d09e09a450be609c678e55a4"
+	},
+	{
+		"path": "implementations-plan/incoming-trust-state-machine-refactor/plan-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "aafb01716d94a26a1b57234cc62954aebaa14a2d"
+	},
+	{
+		"path": "implementations-plan/isolated-linker-store/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "18c516c8e9d06e10a595a4cea1284e0a57951522"
+	},
+	{
+		"path": "implementations-plan/isolated-linker-store/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fc2e19566af858d3d8e3c091e85b5180547fc8af"
+	},
+	{
+		"path": "implementations-plan/journal-reaper/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "23e51f937fad8850a22091bcdff08d8e4948cf9c"
+	},
+	{
+		"path": "implementations-plan/journal-stage-restructure/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ab3b76a42d4589c7c1a05c0ac3ae05a86982ad04"
+	},
+	{
+		"path": "implementations-plan/journal-stage-restructure/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e01b3c1fbe36b1a300e7c2640482c29a093f757a"
+	},
+	{
+		"path": "implementations-plan/journal-stage-restructure/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "374114ac3ae4331960e346f46ea999bdec8b5300"
+	},
+	{
+		"path": "implementations-plan/journal-stage-restructure/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bff92ef9ff9c37ca4bac41b7b6cfe2c6a2a09dd9"
+	},
+	{
+		"path": "implementations-plan/key-model-v2-hardening/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "964dc10e16563800e0804c37e21cc11a2b34eec5"
+	},
+	{
+		"path": "implementations-plan/key-model-v2-hardening/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "529808f280d3d5636e786fe21d3b6dca6bb2c9cb"
+	},
+	{
+		"path": "implementations-plan/key-model-v2-hardening/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "54f78dbe86d8a96714dae47f227844c28e92e89c"
+	},
+	{
+		"path": "implementations-plan/key-model-v2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d11ff95f908dd28c23092c3d75dec98337aa056a"
+	},
+	{
+		"path": "implementations-plan/key-model-v2/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4618c99ac1ae24bdc3fa74b59296af7de98625e7"
+	},
+	{
+		"path": "implementations-plan/key-model-v2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3d28342d7181d08d4fbb80d25b43d95b56f6c5f1"
+	},
+	{
+		"path": "implementations-plan/legal-terms/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6b0c0af9b515dc45a03f06666fa5a99f422deb19"
+	},
+	{
+		"path": "implementations-plan/legal-terms/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "18d6dbc5276c28165fcd9c7ba755fbf548816ad7"
+	},
+	{
+		"path": "implementations-plan/light-theme-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8d5ae24798c10c441698e796d79957e6ebabc77a"
+	},
+	{
+		"path": "implementations-plan/lock-ownership/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b08d9d6fc102d506996a5ed25d8cb0d537bf6e19"
+	},
+	{
+		"path": "implementations-plan/lock-ownership/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c49f9d2bb2d58d11cb730a5d0bc0919a328902c5"
+	},
+	{
+		"path": "implementations-plan/lock-ownership/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dcdfaa7c82ed82c7a228744f2f3b0c5232e9dd20"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "eaba30807fa5b87a5fb84d7f8c37995c21ebd2b2"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b19197b535304eda7eb6d82f941a0c5c29ff4051"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7207edbd7e3515604c98921d2e70ac7561aaa21a"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f6c20dea00aa7977a0e11721748d9c5948e05910"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r5.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8c5bbcf19a9a73e80459734486cee374c15af583"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r6.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8da3d16aeeaca249ff5b7a55dcd8922d321d9b37"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r7.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dfc9aafdcc18e5a677ee2e99a8bd8e4f2312e7b7"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r8.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "216fa7bd3732f9f8890bcafe8763e2f19e0da739"
+	},
+	{
+		"path": "implementations-plan/mac-identity-binding/audit-codex-r9.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9cdfa6e804113340139b7d48a9522616714d7424"
+	},
+	{
+		"path": "implementations-plan/method-metadata-registry/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e2ea67f7be966e9cffa5dc7c4b8ebb1b43830caa"
+	},
+	{
+		"path": "implementations-plan/method-metadata-registry/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f83fdc8bf21ad7bec2ac700c7800644489dc3196"
+	},
+	{
+		"path": "implementations-plan/method-metadata-registry/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1b5166dee2719ed96988fbc01ff6a8013c55e372"
+	},
+	{
+		"path": "implementations-plan/migration-lifecycle/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "41b752f72f0c4dd5d9aea5f26a802712656f29e2"
+	},
+	{
+		"path": "implementations-plan/migration-lifecycle/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f2efa2229f8db35856c1be04819a3e5cc7bf7a94"
+	},
+	{
+		"path": "implementations-plan/migration-lifecycle/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f1e3bf3ff1f94d4e7cf16abf01f7cd5ab74b5ba8"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/_briefing.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c417e2eb11593d2a2dacc6d65431475f824e9dc2"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/_plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a17ac68c8e93e42f740bdb322601a1d7e37580f1"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/_plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3a0bbe602454420c31d6c1999f244de371bd5f07"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f7dfba9a4ccf2db3a5c1444f099247fda99baa19"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "be1d674a53bd9b7dbf7ec65ea90924e6ce909e53"
+	},
+	{
+		"path": "implementations-plan/monorepo-restructure/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2bf3fbdd6c194d4883cfe76957736aed98a15a03"
+	},
+	{
+		"path": "implementations-plan/network-e2e-required/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a45978720fd399ae5462088d1a9e7feed04370f2"
+	},
+	{
+		"path": "implementations-plan/network-e2e-unquarantine/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7c321a2630821ad1032e01be759d9bd3ed775a22"
+	},
+	{
+		"path": "implementations-plan/network-e2e-unquarantine/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "93c91a4cc72788999a8506605829ea9da0d34e84"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-final-merge.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "40fb22821bc4032e88378a4ea5a3053d4bdea886"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-fix-review.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "092b4e1066abae5a339b41cab518f5a2762f33d6"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-register-token.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a8a2ae8972b759bfcd226561ed8794bafa4945a5"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-rootcause-8.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d8992eae948c17af8ef1d1d944d61f6e6f1b2c11"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-rootcause.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2d419ea2afce4fe22183295024e071c7997e023b"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex-shard-vs-serial.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "611e6feafa1189fc27b225271c791d2541f9c51d"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "312ba8226c1c0924558dfa724ac7eafa8f963a8b"
+	},
+	{
+		"path": "implementations-plan/network-followups/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "13bc2adbc592b7b5e6786900af19c5b3bf2d1bdd"
+	},
+	{
+		"path": "implementations-plan/network-followups/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3e8f333fcbfd1d5ae2bfff250b63d5d101c63f41"
+	},
+	{
+		"path": "implementations-plan/network-followups/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d4b122bcac3b193ab2bd52f6e62bb8e5406149bd"
+	},
+	{
+		"path": "implementations-plan/network-test-triage/audit-codex-prompt.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "feefc689a53728de9b58cafc3c84740a3efed6f6"
+	},
+	{
+		"path": "implementations-plan/network-test-triage/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f3350e0f4c2b981ccc064acf5574e3c9d1b9e208"
+	},
+	{
+		"path": "implementations-plan/network-test-triage/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "07ac42a86e536c5eda71802f7803d0d3e25ede8e"
+	},
+	{
+		"path": "implementations-plan/network-test-triage/plan-reconciled.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e613029509d382120e0c8cb8331eaa9ebf42de98"
+	},
+	{
+		"path": "implementations-plan/network-test-triage/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b67486dc304855f8cb53355e47d27f8d2d54b02d"
+	},
+	{
+		"path": "implementations-plan/on-camera-landing/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4b8c9edc70e5247c9b6eeeeb08657677ca6f5ef8"
+	},
+	{
+		"path": "implementations-plan/on-camera-landing/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2cce81e3e58a3612b6786a5ed52c0bd88548d313"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-codex-followup-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2dbe3359394c37c62361c9e23d412ad32368f2a4"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-codex-spawn-1-f4f1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c45c2fbb57dc28a815f3fdf9dc208acec0b877cc"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-codex-spawn-2-f3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a69c99a4e12f90d929000961b47c8aab8f416bba"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-codex-spawn-3-f2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "10d9a447289e96ea94ef1badb2e0cad7fc4fbac5"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3395ac74fa0859c155f7c0ed4220dd852af8b467"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-final-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e8771323adbf87e30ae8a445a6f8791ea544845b"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8b080ec126f2f450e76bca7e8810c8c01465b08d"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-post-impl-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f970b1f523c6444b02e7da4c5c98d8fc8b4c13b9"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-post-impl-fixups.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "06ecccb95037ee4484716c32d9bd5d9b502435b4"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-post-impl-fixups2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1850ea94fcb85b7dec487eaa1361833f8d173ade"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex-post-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "74891d606d3ed59d34f337809c4c60fcf037b710"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "907c4f9f7b464b9a830e5155566aa80d47839417"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "543f93c2aa2c11b947638dad691e01a727bd6791"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0892f01c1a06941c0ecf1f14b4fbc428a6b69f0d"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8a422f7ba427d2173956ef5897efcbb59a2c5a7e"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/plan-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1aaf8acc5a88f68ec2c78dafc5835446737d6bfa"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "71d7c8feabc031fdc8745838407632beaf673bd7"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex-path2-post-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8d19168c9b29fd53b3561d0d7eef0d3898b57d48"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex-post-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "303f02e01093e2263a56742e7760d14f85a3d745"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0d347f4821a7f1d8a80029cac6dd6cc98e52f891"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6746145e699ec85ed69dcb92e8c39eb479e15b12"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-fixes/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f33b833b4676c008fa5e0b60ef681cad526a1b68"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8d1078fdbff32c1713a754a89f77c4dfe4ac583d"
+	},
+	{
+		"path": "implementations-plan/onboarding-fees-history-arc/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8097d5780e3496331c3f2b033ea4d9fb4234a965"
+	},
+	{
+		"path": "implementations-plan/onboarding-tab/audit-codex-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "713011b37544ce3dbe200754646a970958a1b001"
+	},
+	{
+		"path": "implementations-plan/onboarding-tab/audit-codex-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1c4d31bdd63586157ff318263fb2b2239c4d3f1c"
+	},
+	{
+		"path": "implementations-plan/onboarding-tab/audit-opus-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "30d8bf0c774cfadae7e4a59cb7c5cb15d391407b"
+	},
+	{
+		"path": "implementations-plan/onboarding-width-unification/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "82a3eb6a534dd1155c1b14066c04153dd801faf0"
+	},
+	{
+		"path": "implementations-plan/onboarding-width-unification/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4e69d8019678457530e614f2aff6e19acd497873"
+	},
+	{
+		"path": "implementations-plan/onboarding-width-unification/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3deed459f27929b4b37dfe65048a00bac0dc2ddd"
+	},
+	{
+		"path": "implementations-plan/owned-client-teardown/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "503b3aaf9b9facc22fa4bea64ea580be440bcb7f"
+	},
+	{
+		"path": "implementations-plan/owned-client-teardown/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "66bec1283437cc93b81df4c1923fc3601febc64d"
+	},
+	{
+		"path": "implementations-plan/owned-client-teardown/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "79594491e52c364126562601e5412f73f99667f5"
+	},
+	{
+		"path": "implementations-plan/parallel-e2e-isolation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "df1263b9c79205d75c3a8cbfab5fb1990f5aa0f2"
+	},
+	{
+		"path": "implementations-plan/parallel-e2e-isolation/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9243f335d244cef037cd362758f15e4ba8af63e3"
+	},
+	{
+		"path": "implementations-plan/passkey-display-name/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b5e14d10f1dca79d740178e7862cb454cac984f2"
+	},
+	{
+		"path": "implementations-plan/paths-filter-negation-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ab73154e0b0d58a5a50e424de17102e46f989956"
+	},
+	{
+		"path": "implementations-plan/phase-2-followup-affordances-v4/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d6c4abb27353a24871e5c43d65d915f4067249a4"
+	},
+	{
+		"path": "implementations-plan/phase-2-followup-card-affordances/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9d2a4e5e65c62eb10188e806bc982af7dc506a19"
+	},
+	{
+		"path": "implementations-plan/phase-2-plus/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1a4a20619928b48307e2ae3440ced690c6c238c7"
+	},
+	{
+		"path": "implementations-plan/phase-2-plus/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3890ac559e8987be586984fb6b3eaa37d5eecac2"
+	},
+	{
+		"path": "implementations-plan/phase-2-plus/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3800db87e2e477a9804e324bf6c3c27073bfaf9b"
+	},
+	{
+		"path": "implementations-plan/phase-2-plus/plan-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5d00277444fea97ddc73cdc17681b3be06aad533"
+	},
+	{
+		"path": "implementations-plan/phase-2-plus/plan-v4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f571d66767697e70e12cec9ec7ccfa0c3810abb1"
+	},
+	{
+		"path": "implementations-plan/popup-entity-consolidation/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "36611a045fd0f77c70c228d22ab64990b3402572"
+	},
+	{
+		"path": "implementations-plan/popup-escape-closes/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f86052faae2f8516998fbebe363739693fb4dd1b"
+	},
+	{
+		"path": "implementations-plan/popup-submit-reentrancy/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "010ed4c219e82aed48a8e6d3126932830dfcfc3b"
+	},
+	{
+		"path": "implementations-plan/port-client-connect/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "982c2a9c1e72afcfd7990b43b20b98c3339c3dc5"
+	},
+	{
+		"path": "implementations-plan/port-client-connect/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9696ea3ef5e497c2668504adc4d451174f772c76"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/audit-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "693c10bc9c57074bb4cf75b8e7ad34ff3706db82"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/audit-codex-fee-reuse.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7757f22fb75baae524a32c63a2078c08f4a92378"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/audit-codex-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e7fdc2ef746403379362ffb419a9da7ed65baa3b"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b31a91cc0b61c3a8b8034f9b495a99055ba646c5"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0993081da216806d354cfd0e2ed1a1591476dbd7"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a73de6ec5b5ab133391fa8b1d2de8d6aa5cc24a4"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/plan-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3c88d18629dd9e2c303c02c9b2391d6851d22841"
+	},
+	{
+		"path": "implementations-plan/pre-a11-ux-cleanup/plan-v4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6ea0579b09995b6bb0c0fc1cda8decba7915bab7"
+	},
+	{
+		"path": "implementations-plan/prerelease-rollout/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7b99efbb74e7caf88a75c672aac4c8e824ae30e1"
+	},
+	{
+		"path": "implementations-plan/prerelease-rollout/audit-codex-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "972b8b331c63a47366000ae3e80ac5ea568c7996"
+	},
+	{
+		"path": "implementations-plan/prerelease-rollout/audit-codex-v2-greenlight.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "288bcae1deca77f6b227d51c72cd5d705a94c6a5"
+	},
+	{
+		"path": "implementations-plan/presto-migration/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0a6781d0ef7a1f361cfd04e2b7494812add08ee5"
+	},
+	{
+		"path": "implementations-plan/presto-migration/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2f54ba2fe2fc22be4097ff417740d3a50bbd7fda"
+	},
+	{
+		"path": "implementations-plan/presto-migration/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c09f5f60f8e3d7a509bcf0dfa59463c8fd1a75a6"
+	},
+	{
+		"path": "implementations-plan/private-fuel-fee-fix/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fab4472372993c9b8b8faddfc72d9bab127b0210"
+	},
+	{
+		"path": "implementations-plan/private-fuel-fee-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ca18030473fd0e119c0c72fa8e357d7118912cc1"
+	},
+	{
+		"path": "implementations-plan/private-fuel/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "259ce306d720e54bacd2c244005cb744101b4778"
+	},
+	{
+		"path": "implementations-plan/private-fuel/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "acad9976ddb6b8bcbee2f268b8a683ebdd20a06d"
+	},
+	{
+		"path": "implementations-plan/private-fuel/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5b635a8f2ace2a75952a6f7458ec043096ab2e11"
+	},
+	{
+		"path": "implementations-plan/profile-fenced-execution/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2e6f6d68608c8d3259b8f771cab3f28c532baf45"
+	},
+	{
+		"path": "implementations-plan/profile-fenced-execution/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e12241808e120f32d0281c845bfd7325dc382378"
+	},
+	{
+		"path": "implementations-plan/profile-flow-dedup-q2/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8a1e2b0a326cbe6a231e8acff812bae7b9ce62f6"
+	},
+	{
+		"path": "implementations-plan/profile-flow-dedup-q2/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0a0e6cee144a93e0508cc0dde2babfae22a95aa9"
+	},
+	{
+		"path": "implementations-plan/profile-flow-dedup-q2/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3ed3ad537ed2893f1caf50bf2d1094589b5b6fc3"
+	},
+	{
+		"path": "implementations-plan/profile-flow-dedup-q2/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "132166df4c4942be133e3b9e7e12a0d6bbfe08d9"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f70e0aad486ee13ad14b7df69aa17cdce7136a0c"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/audit-codex-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a99c820e33e14ff5262f491a65ee893c544913a1"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "412a7666e7b379495ee013a11eda96f840169f90"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "960df30287f9a1cfcc4170ec6b7f333efbbe10ae"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "721e7c65e07f3c63efae69f0993c660922cc47e7"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dd66973c557721f03dc3c805c7b1bae73d231b01"
+	},
+	{
+		"path": "implementations-plan/profile-name-parity/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0251b3c00203260c744e23bd2f8dcf95ad51ec9d"
+	},
+	{
+		"path": "implementations-plan/profile-service-dedup/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "54a48ab509990cc394a63b0602ffc5a07bcaa711"
+	},
+	{
+		"path": "implementations-plan/profile-service-dedup/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ba90a218513546de3a72fa5ec04c640f2c12c50e"
+	},
+	{
+		"path": "implementations-plan/proverless-network-stabilization/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "400411632a59acc55e906c23d6731150078fc796"
+	},
+	{
+		"path": "implementations-plan/proverless-network-stabilization/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1b74c2d3bdda45d979bcff8dc86e4cc0a976d47f"
+	},
+	{
+		"path": "implementations-plan/proverless-network-stabilization/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "216d019e5ace10603062af6c1461fcc60e0c651b"
+	},
+	{
+		"path": "implementations-plan/pxe-timer-throttling/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2e10240153d05883ce650b63a814825f40d58f2d"
+	},
+	{
+		"path": "implementations-plan/pxe-timer-throttling/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3bf5c8437063913c32998c666582ee2b11911bcb"
+	},
+	{
+		"path": "implementations-plan/q3-transport-unification/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9f8a4a56c5d4c5891cac4aa1b9138fec7d0f5eb6"
+	},
+	{
+		"path": "implementations-plan/q3-transport-unification/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "488de241d99dce4f9aef1818caaeab4e0cfb0ef0"
+	},
+	{
+		"path": "implementations-plan/q3-transport-unification/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "5c8c0256184ac98d959541c49ea33cec3ac6cded"
+	},
+	{
+		"path": "implementations-plan/qa-feedback-batch-1/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fa373c5996df8d1e3217bd826e10f0f1b8ced4a3"
+	},
+	{
+		"path": "implementations-plan/quality-arc-deferred/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0d2142cf57a90c21d8068e59e21c24c577b93532"
+	},
+	{
+		"path": "implementations-plan/quality-dedup-quick-wins/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9667e26ffd8bf6cace1270c5b896bb2f6176a47f"
+	},
+	{
+		"path": "implementations-plan/quality-dedup-quick-wins/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "987a68deaabbad3e1bfd513b85b13d3145795d93"
+	},
+	{
+		"path": "implementations-plan/quality-dedup-quick-wins/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "529effe1c120471bd11b6c0145c801651cc7edf5"
+	},
+	{
+		"path": "implementations-plan/refresh-balances-disconnect/audit-codex-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9889c78bd12f28fb9cd7abb09bba7698cbbab48a"
+	},
+	{
+		"path": "implementations-plan/refresh-balances-disconnect/audit-codex-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3499fe188143ec06a20c1f450bef5857c6727ab2"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/audit-codex-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4dcdd87b56d0610f3625311eca1e2bcda44d33c1"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9c3d1e9ed87cac6c2d2077bc020b4d27d729045e"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/audit-plan-agent-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6a0527ecbee675f90111d700e2f892af8a2a4652"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/audit-plan-agent.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "df1c28d92672cc7945a20307f20cf3d23c014e63"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/plan-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "127ec2c270827327c951c9ac88e84617c3abcd49"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fd38356b5720f7a894af57777153253b1caea9e1"
+	},
+	{
+		"path": "implementations-plan/registry-stealth-notes/plan-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4ed32060b1a9f8bef6d7cf0c777fa9df71832c28"
+	},
+	{
+		"path": "implementations-plan/release-dev-to-main/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ccb298499ee79ce3751886b22ade1d3371f539e1"
+	},
+	{
+		"path": "implementations-plan/release-dev-to-main/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7ba6da294c9f287931e721a8211ce2fb119b288b"
+	},
+	{
+		"path": "implementations-plan/release-dev-to-main/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "990d1d8997207658fae4a4c7c4335ea8801717b6"
+	},
+	{
+		"path": "implementations-plan/release-dx-hardening/audit-codex-postimpl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "94d1184eb070fb73d94cdaaac6faafdb5c55ea3b"
+	},
+	{
+		"path": "implementations-plan/release-dx-hardening/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "92b355a844b534497cf1fa2917c3a9a0e253fcf8"
+	},
+	{
+		"path": "implementations-plan/release-dx-hardening/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f6da82d20001fdb7bb4b9bf717cdfde1ba3c1c5e"
+	},
+	{
+		"path": "implementations-plan/release-dx-hardening/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "09aa5ae1142ddc268e8c250dcc23eb2bac31ae21"
+	},
+	{
+		"path": "implementations-plan/release-pipeline-hardening/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dee859b9579fca17ad6b651d9ceddc3ee71ef0c5"
+	},
+	{
+		"path": "implementations-plan/release-pipeline-hardening/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f90036e9c447ccb707709ad2bd2f3cab8ad4859d"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-impl-greenlight.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f7319406c5f8ded7b807282ebe6cfe5ef66d6c52"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-impl-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9a57d1e4b65b8f89939efb9a6c1975ea3c95aa77"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-impl-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e50caa1befda48ba71a53c40a782c839e7d380be"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f227c653557d013bac7483fec374fecc83effd1f"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "291fd49c8d3669946430e60e3b8ce9dc5c4abd9e"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-v21.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7a4c60737bbfb5c8b72fb13c1a4c9afb9b121316"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-codex-v22-greenlight.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c2ca740dd77efc6354bf3f566ff784e2dc3a9ac3"
+	},
+	{
+		"path": "implementations-plan/release-please-rollout/audit-opus-v1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7d3cb1211223cad89226f481f4e839f142d5ac0a"
+	},
+	{
+		"path": "implementations-plan/release-prerelease-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9597ce03b8e0d2fc991e02faa3bc626f20ad7ef0"
+	},
+	{
+		"path": "implementations-plan/required-check-mismatch/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d55036ad6e7e295fb6e3545bbdd3b40d22e6bc0f"
+	},
+	{
+		"path": "implementations-plan/restart-lock-truth/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "94ebfd98f69ef4883a91d8176c6d8e53e677d6fd"
+	},
+	{
+		"path": "implementations-plan/runtime-edges/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fda00aeb75a772a3460a0e99799d016087c67a48"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bd8a12be164c06d52715d65096df50ff8b22f7e2"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d66d0cfae222e26aa6b868991c199583c3730cc9"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "098978217798be3b2df95ddeb442cd88e986c736"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fbcbe7612785d74ee6c38771b5724308b0adc143"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "eae88dc001c0728f628b79e1b22d933bd86b4cc8"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c97fb95de12647ed0f8fc70287bd953bd53fb0d5"
+	},
+	{
+		"path": "implementations-plan/security-audit-remediation/plan-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3b0a856da144343a80003d6669498e38a8036a44"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/audit-codex-final-2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "14c95eecfa9c3a29880102343d2cbc3be748892f"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/audit-codex-final-3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a16eefb40dc94199bbf28ece4ebff36ec026f19b"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b3b82ce638492c4428d86875440f13205e27b37d"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8896ab18e0a220235a33a56000aff07752ce4a39"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "064b5c227144b6222d393454b388a334b6b2ecf2"
+	},
+	{
+		"path": "implementations-plan/self-pay-setup-fix/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a4b96e68b041f3f7d6dc1b1dc0158de6aace819e"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-closure-r7.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1ccaed91b6c0bbb75b949d685bc9913ff0ffd2be"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-closure.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "299afc8edc688ad9f476c8338fce017d85030fb6"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-final-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "79478cf40479fb985225a2ff541128f60f0a51c8"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-final-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "de93b2349dd3ed7684d96ccdeee5bf7b1dfb7fbd"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-final-r3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dfcb88b8923c7693861a7789ac6486ec72e91a79"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-final-r4.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ee9b56697ac024ebd0da75a1f4dd96c4099dcbb2"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex-impl.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6cda0db9ab53f0ab707652a00ad8e4b300460059"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "27cdbe413698ef63f755a84a35e7c1a0daf7b345"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1ad9cd255b1ebc551d89c3f77912fe3d98d99290"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "740dfe68da7297cf58e3e97bf20fbd471143bf1c"
+	},
+	{
+		"path": "implementations-plan/send-fee-privacy-notice/plan-outline-b.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0578aed65de1daabff7e5d03a01e6d68f141dcdc"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/audit-codex-final-r1.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "92625a2ed9c43fc503fa52b792164de29c8628d5"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/audit-codex-final-r2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "74a45af22a8c065ae980a1f4b2187c7ec165e801"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ef45ec9e4ec8e513ad15cd9ca20e009522bb1d0f"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3cc3e13328e3f5248c7573e911ae7cf2dde76a67"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8c253ae7428800c14b130dba5370eae70c571a69"
+	},
+	{
+		"path": "implementations-plan/send-publish-ledger/plan-outline-b.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d9a81eda34403001083d2231b6610080ec23ce6f"
+	},
+	{
+		"path": "implementations-plan/service-fences/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "fb7527f75206d2f3e782b468c6bdabbd40c07767"
+	},
+	{
+		"path": "implementations-plan/shell-identity-fences/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8f358be26f64564ae0593fef1526348daa701335"
+	},
+	{
+		"path": "implementations-plan/shell-identity-fences/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "91dc3fbc8bcf8ceef290bdd54912f1330154c468"
+	},
+	{
+		"path": "implementations-plan/shell-identity-fences/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9865c0c01d10898d9912eafa6d4e8e62821a1426"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/audit-codex-final-response.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "393611bd56204d8cd4ce70f65f135d2485cdd227"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/audit-codex-r1-response.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "751e62046a04d167def0d6930480aef996f8eb29"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/audit-codex-rev3-response.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9b795a629d28f735b18f325b4e3e15ce3e556e14"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b6b6693128cbbefdb24df5ccaa3d0163b2dbc82b"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a0c0f3f66b8f35f202a011edf38adb4d795d0a0a"
+	},
+	{
+		"path": "implementations-plan/single-sim-estimates/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "55a37cb7bea1382dfa66508b7db433c419fe840d"
+	},
+	{
+		"path": "implementations-plan/stable-release-0.24.0/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "56f996cc5212e686f2d3c3a8f26f555f74cd760f"
+	},
+	{
+		"path": "implementations-plan/stable-release-0.26.0/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "da88e3f2c0e1f22b4eba455d2d86a48244aa5afd"
+	},
+	{
+		"path": "implementations-plan/stable-release-0.26.0/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "62a34616f75ebfadea025ec4b4abb892dc9568df"
+	},
+	{
+		"path": "implementations-plan/stable-release-0.27.0/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9e126878bc6230b9b9a8d5923be133b06522a795"
+	},
+	{
+		"path": "implementations-plan/stable-release-0.27.0/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e211fadf253fa13ac3930a33aed4b2d3cbc2589b"
+	},
+	{
+		"path": "implementations-plan/storage-migration-backup/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2aed24f503198b6bafb9cc3b8d0aaab3e77dd35d"
+	},
+	{
+		"path": "implementations-plan/storage-migration-backup/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e5a7e95c9888add858b1f6ee195662203e9f57de"
+	},
+	{
+		"path": "implementations-plan/storage-migration-backup/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f5176df7cc59898269d6f7838d5318c174b5dec5"
+	},
+	{
+		"path": "implementations-plan/storage-migration-backup/plan-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "4ec1b3a82593a8dcf8a83f7d478ff9eb4a74b14f"
+	},
+	{
+		"path": "implementations-plan/storage-migration-backup/plan-main.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d8bd5afbb0888cfae6a4d70b1bc7555ff6caea86"
+	},
+	{
+		"path": "implementations-plan/storage-migration-framework/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "e71e2c0ecabfdb6ea9713d56b9e01f0ae829b021"
+	},
+	{
+		"path": "implementations-plan/storage-migration-framework/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "70b8fb7400c349c8e5db00def33675e618f8fd10"
+	},
+	{
+		"path": "implementations-plan/storage-migration-framework/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "270bd13c62937b4faf9f58b084c5ec0962c490d4"
+	},
+	{
+		"path": "implementations-plan/swap-fuel/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "c9baf12e4f95538d9edd4c70db41390ccb7d2a89"
+	},
+	{
+		"path": "implementations-plan/swap-fuel/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "031bbeb196964329cbba736177f673e5fde01b58"
+	},
+	{
+		"path": "implementations-plan/swap-fuel/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "504488a46cdca748ecc22e0d804a439ffab4b2a9"
+	},
+	{
+		"path": "implementations-plan/third-party-notices/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "dd79356bed1511be307badccbdf788b1313c29b3"
+	},
+	{
+		"path": "implementations-plan/token-identity/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "41e2ff785934cfc9cc73f811f1a1b8eade6afd1a"
+	},
+	{
+		"path": "implementations-plan/token-identity/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9cc7289515c14b8deb2842f6951e14fb7ce2be8b"
+	},
+	{
+		"path": "implementations-plan/token-identity/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9ffaebcbd74aef261a966d944feeb3b915da2a4a"
+	},
+	{
+		"path": "implementations-plan/token-prices/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8c9803b5ee771180179a1fcbd6be5e2bc7cfad56"
+	},
+	{
+		"path": "implementations-plan/token-prices/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "61eba01b347c6ebdf826f70ef735c5026b98cd95"
+	},
+	{
+		"path": "implementations-plan/token-prices/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "1f4f4343cf1737d8c2b08d15d8dc38143be75048"
+	},
+	{
+		"path": "implementations-plan/tools-extraction/.gitignore",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ff68d6a252424d067725e1a7013411e29fd23e79"
+	},
+	{
+		"path": "implementations-plan/tools-readiness/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "a07e20fa3222d26e34e51bd717c057beec1e1d7d"
+	},
+	{
+		"path": "implementations-plan/tools-rename/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "472b00898d411385da9b209b4b6fb1e8a0cc37ec"
+	},
+	{
+		"path": "implementations-plan/tools-rename/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "2ac4278ca332a08977f6feb8733fd00d9226922c"
+	},
+	{
+		"path": "implementations-plan/tools-self-testing/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "38c1ed7ebbfc9d8b1c6fb569801f6e6d81bddece"
+	},
+	{
+		"path": "implementations-plan/tools-self-testing/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "07977c894252a2ccfaf9b07b35ab980051545f9d"
+	},
+	{
+		"path": "implementations-plan/tools-self-testing/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "33ac34c93ce3ca3a9136bc8a6ec7d5ec1f91175d"
+	},
+	{
+		"path": "implementations-plan/v3-followups/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "ef368595005c68f3b241939de36296a61e62718c"
+	},
+	{
+		"path": "implementations-plan/v3-followups/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "7b01f03229cc5c4d0f0d9a4b65afeb94f1be1547"
+	},
+	{
+		"path": "implementations-plan/vitest-on-bun/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "eea567e5c8e141546ae865aa050331a046e84092"
+	},
+	{
+		"path": "implementations-plan/vitest-on-bun/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f0ed30d79d5ff8d7a00dd147ab46531419033f15"
+	},
+	{
+		"path": "implementations-plan/vitest-on-bun/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "3457efd6a8d06ae86e9d2db61bb30f88b04f0b6b"
+	},
+	{
+		"path": "implementations-plan/vitest-vite8-dedupe/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "78c2822fcac9ffd1bae64d9d0412fafe592fe34f"
+	},
+	{
+		"path": "implementations-plan/vue-router-renovate/plan-mine.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b016ada64cc8ccaf578aa3b84700108f568f0a0e"
+	},
+	{
+		"path": "implementations-plan/vue-router-renovate/plan-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "bd0d1535d853af27267dc88ae2b4368f5d434930"
+	},
+	{
+		"path": "implementations-plan/wallet-error-resilience/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "d44183e09e5b8d7334c6e5a80c89019b5e54ab08"
+	},
+	{
+		"path": "implementations-plan/wallet-error-resilience/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "97dd13d7454c1d1ca3563d154a94fe4e7053372c"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-codex-final-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8f83f26625cdd5aaf1085f37fe0a6f3887607ada"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-codex-final.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "80105a6ca3afd01e6c6c7883ba97ca287ebf4016"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-codex-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "9af2006ec04a39191b18d125891a01f756259a42"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "6ab6d1fd3512c255b72204a32cd2ca57a5e64a0b"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-opus-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "232dd663d2e714c1c4a539361e4e543d1e863306"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/audit-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "53565b764d1d5fbacb1fdadd582b69546612cd50"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b5e85a6aed8ee89cd8b1263ee0db3191f92ea06b"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/plan-v2.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "f12a58f033f4b2f13cd5e4e11d50c1e3d8454062"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/plan-v3.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "94f292628fb8f7922689358ffb7ee81601116bf7"
+	},
+	{
+		"path": "implementations-plan/wallet-sdk-implicit-account-grant/plan.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "93f868abf7a1da046e5340d00cba6bd44a9b6214"
+	},
+	{
+		"path": "implementations-plan/wallet-ux-fixes/audit-codex.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "879f75082c54a8658a4f5881e4fb01b6ee40f24e"
+	},
+	{
+		"path": "implementations-plan/wallet-ux-fixes/audit-fable.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "8f1a6e33af0a5c09fca9c28974795fd1b78b931d"
+	},
+	{
+		"path": "implementations-plan/wallet-ux-fixes/eli5.html",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "0bfcf1dd5c1c0d30b7ffe8a51204758aca5a854b"
+	},
+	{
+		"path": "implementations-plan/zod-puppeteer/plan-mine.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "b65dc3c44994239a34529c201fd5091f7a6b55f4"
+	},
+	{
+		"path": "implementations-plan/zod-puppeteer/plan-opus.md",
+		"sha": "9f11de70b13933be2d54c3eb79622b1ff2719aba",
+		"blob": "aee4c67f09088c7b1b5a3b3a800cbbcf14af2da1"
+	}
+]

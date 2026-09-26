@@ -330,7 +330,7 @@ is not part of this plan and is not run.
 
 Light tier: one foreign-reviewer audit (Codex, GPT-6 Astra, `high`), full packet (adversarial, assumption
 attack, implementation critique), then one resume of the same session on the revision. Transcripts:
-[`audit-codex.md`](./audit-codex.md).
+[`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/pxe-timer-throttling/audit-codex.md).
 
 | Round | Verdict |
 |---|---|

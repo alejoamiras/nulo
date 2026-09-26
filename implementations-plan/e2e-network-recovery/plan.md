@@ -1,180 +1,191 @@
-# E2E Network Suite Recovery — Plan v1
+# E2E Network Suite Recovery — Plan v2 (post-audit)
 
-Restore `bun run e2e:agent` to a state where the **Network e2e / Status** CI check meaningfully validates production paths, instead of pass-by-skip. Tier A protocol (large, cross-cutting, infrastructure + tests).
+Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/plan.md).
 
-## 0. Context
+Supersedes [plan.md (v1)](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/plan.md). Tier A. Consolidates [audit-codex.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/audit-codex.md) + [audit-opus.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/e2e-network-recovery/audit-opus.md) + the **prior phase-0 investigation** at [`implementations-plan/network-test-triage/`](../network-test-triage/) which already root-caused the dominant failure cluster.
 
-### What's broken
+## What changed from v1
 
-Since at least the open-source initial import (`5ee8ec1`, 2026-05-19), `bun run e2e:agent` has been silently pass-by-skip on every PR and local run. The failure path:
+| Section | v1 said | v2 says | Source |
+|---|---|---|---|
+| Triage model | 5 buckets (A wiring / B timing / C fixture / D real bug / E patch-induced) | **Implement the prior phase-0 fix surface directly.** Existing triage already root-caused the dominant cluster. New work batches by *mechanism*, not test. | Codex critique #1; opus critique #1 |
+| Quarantine unit | per-test (30min budget) | **per-mechanism 90min root-cause budget**, batch-fix or batch-quarantine the cluster together | Opus critique #2 |
+| Product code changes | "no rewriting product code to make tests pass" | **In-scope when ≥3 quarantined tests would unlock**; precedent: `background/client.ts:77-83` (RPC-abort-on-disconnect) from prior audit | Codex critique #5; opus critique #4 |
+| Skip semantics | `describe.skipIf(...)` | **`test.skip("reason")`** for honest vitest counts. Track retried-passes as separate state. | Opus critique #5 |
+| Setup failure mode | Implicit | **Add Phase 0.5: fail-loud `global-setup.ts`** so silent-skip can never regress again | Codex critique #3; opus critique #3 |
+| Validation gates | `audit:vue` after every group | `audit:vue` at checkpoints; isolated per-file vitest during triage | Codex critique #5 |
+| Bucket E (patch-induced) | Phase 5 | **Moved to P0** — gate, not late phase | Codex critique #2 |
 
-1. `tests/e2e/global-setup.ts:402-411` calls `deployContractsAndProvide` → `createTestWallet` → `createSponsoredFeeOptions` → `deployTestToken`.
-2. Inside `createSponsoredFeeOptions`, the SDK runs `WASMSimulator.executeUserCircuit` → calls `WASMSimulator.init()`.
-3. `init()` does `await Promise.all([initAbi(), initACVM()])` where `initAbi`/`initACVM` are defaults from `@aztec/noir-noirc_abi` and `@aztec/noir-acvm_js`.
-4. Vite's ESM resolver picks the `module: "./web/<name>.js"` entry over the `main: "./nodejs/<name>.js"` entry. The web bundle's default is `__wbg_init`, an async function that loads WASM via `fetch(new URL("...wasm", import.meta.url))` — a `file:` URL.
-5. **Node's undici fetch hardcodes `case 'file:': return makeNetworkError("not implemented... yet...")`** (`undici@7.25.0/lib/web/fetch/index.js:956`). Init throws.
-6. `deployContractsAndProvide`'s outer catch (line 426) provides `aztecTestConfig: undefined`. Every test in `tests/e2e/network/*.test.ts` gates on `describe.skipIf(!config)` → all 61 tests skip.
-7. Vitest reports exit code 0 with `45 skipped / 61 skipped`. CI's `Network e2e / Status` check shows green ✓.
+## 0. Context (unchanged, recap for completeness)
 
-### Status of the patch
+Commit `418ece9` strips `module` field from `@aztec/noir-noirc_abi@4.2.0` + `@aztec/noir-acvm_js@4.2.0` via `bun patch`. Without this, Vite's ESM resolver picked the web bundle whose `__wbg_init` called `fetch(file://...)` → Node's undici returns `makeNetworkError("not implemented... yet...")` → `WASMSimulator.init` throws → `global-setup`'s `deployContractsAndProvide` caught silently → `aztecTestConfig: undefined` → all 61 tests `describe.skipIf(!config)` skipped → exit 0 → CI showed pass-by-skip the entire post-OSS history.
 
-**Commit 1 of this branch** (`418ece9 fix(infra): patch @aztec/noir-*_js to drop browser module entry`) strips the `module` field from both packages via `bun patch`. With only `main` available, Vite falls back to the Node CJS bundle (no callable default export) → `typeof initAbi === "function"` evaluates false → `init()` no-ops as designed for Node. The CJS bundle pre-loads the WASM at module-top-level via `require("fs").readFileSync(__dirname + …)`, so `wasm` is populated and `executeUserCircuit` works.
+After commit 1, tests **actually run**. Baseline: `41 failed / 4 skipped / 53 tests failed / 8 skipped`. Recovery starts here.
 
-After commit 1, baseline `e2e:agent` shows:
+## 1. Goals (unchanged)
 
-```
-[e2e-setup] Test contracts deployed: { ... }
-Test Files  41 failed | 4 skipped (45)
-Tests       53 failed | 8 skipped (61)
-```
+- `bun run e2e:agent` exits 0 with zero unexpected failures.
+- `Network e2e / Status` CI check goes from pass-by-skip to **real run** OR **explicit, tracked quarantine**.
+- Net test count (passing + intentionally skipped + quarantined with `test.skip("reason")`) = 61.
+- Smoke e2e (`bun run test:e2e`) continues to pass.
+- `bun run audit:vue` continues to pass.
 
-Tests now run for real. **53 of 61 fail** — the previously-skipped tests are unmasked.
+## 2. Non-goals (slightly revised per critiques)
 
-### What this plan covers
+- No new tests.
+- No infra rewrite EXCEPT the fail-loud setup change in P0.5.
+- Product code changes ARE in scope when justified (≥3 quarantined unlocks). Default lean: test-side first; product-side when the root cause is on the product side AND fix is well-scoped.
+- No PXE-guard serialization refactor (deferred per prior audit; not the blocker).
+- No LMDB workaround (sporadic per prior audit; rerun-on-failure).
+- No dependency bumps, no Cloudflare flake work, no orthogonal infra.
 
-Triaging the 53 unmasked failures and restoring a green or explicitly-quarantined `e2e:agent`. The failures themselves are not part of the patch unlock — they're a backlog that has accumulated while the suite was silent.
+## 3. The fix surface (from prior phase-0 + audits)
 
-## 1. Goals
+Phase 0 of the prior `network-test-triage` work identified **one unifying root cause**: `switchToLocalNetwork` doesn't wait for popup account state to populate. This cascades through:
 
-- `bun run e2e:agent` exits 0 with **zero unexpected failures**. Quarantined tests must have an explicit `describe.skipIf(...)` or `test.skip(...)` with a one-line reason comment referencing the underlying issue.
-- The `Network e2e / Status` CI check goes from pass-by-skip to **either green-with-real-runs OR explicit-quarantine-with-tracked-issues**. No more silent skip-everything.
-- Net test count (passing + intentionally skipped + quarantined) must equal 61. **No tests deleted** unless duplicates of the same scenario.
-- Smoke e2e (`bun run test:e2e`) continues to pass — no regression from this work.
-- `bun run audit:vue` continues to pass — no regression in lint/typecheck/build.
+- **Cluster A** (~11 tests): `NewTokenPopup.handleAddToken` reads `appStore.account.address` while `account` is `undefined` → swallowed catch → toast never fires → 60s helper timeout
+- **Cluster B** (~3 tests): `feeJuiceImported` fixture's 30s `waitForFunction` on `nulo:ui:activeAccount` never settles
+- **Cluster D** (~1 test): contact-row renders but sender chip depends on active-network senders list which depends on `account` being set
+- **Cluster E** (~1 test, plausibly): `dappConnectedExtension` likely same root
 
-## 2. Non-goals
+Plus **one secondary product bug**: `background/client.ts:69-87`'s `disconnect()` rejects pending RPCs, killing fire-and-forget side effects when popups close mid-RPC. Not the blocker but real.
 
-- **Not adding new tests.** This is a recovery, not a feature.
-- **Not refactoring the test infrastructure** (global-setup, fixtures, lockfile mechanism). If a fixture has a bug that's triggering multiple test failures, fix the fixture — but don't redesign it.
-- **Not rewriting product code to make tests pass.** If a test was written for a now-removed API, prefer updating the test to match current behavior. If the test exposes a real product bug, document and either fix minimally OR quarantine the test with the bug tracked.
-- **Not investigating "what flipped 24h ago" further.** The patch from commit 1 makes the behavior deterministic regardless of cache state. Root cause investigation of why the resolver flipped is a separate, lower-priority spike.
-- **Not addressing the Cloudflare Pages landing-deploy flake** (orthogonal infra issue, surfaces on every PR).
-- **No new dependencies, no version bumps.** This stays within the current lockfile.
+### Prescribed fixes (drawn from prior phase-0 + verified by codex/opus)
 
-## 3. Method — triage + fix + quarantine
+Numbered as `F<n>` for traceability in commit subjects.
 
-After commit 1 (patches), every subsequent commit covers one bucket of fixes. Branch stays on `fix/e2e-network-suite-recovery`.
+**Wallet fixes** (`packages/extension/src/...`)
 
-### Bucket A — Test wiring rot
+- **F1** — `popup/app.vue:131-150` network watcher: call `ensureDefaultAccount` after re-fetching accounts when `appStore.accounts.length === 0`. Guarded against the initAccount race per the existing comment.
+- **F2** — `popup/components/popups/NewTokenPopup.vue` `handleAddToken`: guard `appStore.account?.address`; if missing, set inline error + return. Plus disable submit when `!appStore.account`.
+- **F3** — `popup/components/popups/NewContactPopup.vue` `handleAddContact`: same guard pattern as F2 for the addSender branch.
+- **F4** — `popup/components/popups/EditContactPopup.vue` `handleUpdateContact`: same guard pattern.
+- **F5** — `packages/extension-messaging/src/background/client.ts:69-87`: change `disconnect()` to NOT reject pending requests; let them resolve naturally via the existing `onMessage` handler. (Crosses package boundary — a flag for codex to verify the disconnect contract isn't load-bearing elsewhere.)
 
-Tests that reference a renamed selector, removed testid, changed API shape, or moved file. **Smallest, safest fixes.** Each commit addresses one or two related files.
+**Test-helper fixes** (`packages/extension/tests/e2e/fixtures/`)
 
-Signals to look for: assertion mismatches (`expected "A" got "B"`), `waitForSelector` timeouts on a testid that no longer exists in production code, imports from a renamed module.
+- **F6** — `extension.ts` `switchToLocalNetwork`: after click + closeStuckPopup, wait for `nulo:ui:activeAccount` to be populated (existing pattern at lines 489-518 already does similar; extend if needed).
+- **F7** — `extension.ts` `addContact` helper: when `registerAsSender: true`, ALSO wait for the sender chip on the row (stronger signal than just the row).
+- **F8** — `extension.ts` `closeStuckPopup`: best-effort wait for `accountStateService` / `contactService` to have no pending requests. **Skip if F5 lands cleanly** — F5 makes disconnect non-cancelling so this becomes redundant.
 
-### Bucket B — Timing / flakiness
+**Tight-timeout bumps** (narrow, per-file)
 
-Tests whose flow now takes longer or shorter than the original timeout assumed. Bumping the `timeout:` per test, or replacing `await sleep(N)` with `waitForFunction` polling. Conservative timeout bumps only — never disable retries or skip flake-detection.
+- **F9** — `tests/e2e/network/contacts-sender.test.ts` test 1 chip wait: 10s → 30s.
+- **F10** — `tests/e2e/network/data-registerSender.test.ts` `waitForPgResult`: verify 30s vs latency in baseline; bump to 60s if needed.
 
-### Bucket C — Setup / fixture issues
+### Phase 0.5 — Fail-loud `global-setup`
 
-Tests that depend on shared state (test profile, network, contract addresses) that's no longer being set up correctly. Most likely: the per-test `freshExtensionPerTest` fixture, or the shared `registerProfile` / `importProfile` path. Fix in `tests/e2e/fixtures/extension.ts` if the root cause is shared.
+Currently `global-setup.ts:426-428` catches deploy failure and provides `aztecTestConfig: undefined`. Combined with `describe.skipIf(!config)`, this is the silent-pass-by-skip mechanism that hid the whole suite for weeks.
 
-### Bucket D — Real product bugs
+Change: when `deployContractsAndProvide` fails, write a sentinel marker that ALL tests will read in their `beforeAll` and throw a loud error. Or: set `aztecTestConfig: { __setupFailed: true }` and have tests assert against it. Result: future deploy failures fail loudly with N×"setup failed" instead of N×skipped.
 
-Tests that fail because the production code no longer does what the test asserts. **Two paths**:
-- **Minimal fix** at the production code level if the bug is small and well-scoped (e.g., a string changed, an event payload renamed). Touch only the file with the bug.
-- **Quarantine** with `describe.skipIf(!process.env.E2E_RUN_KNOWN_BROKEN)` or `test.skip` + a comment line referencing an issue to file. **Acceptable end state for the recovery PR**, especially if the fix would touch wallet-core / aztec-runtime layers that need a separate dedicated PR.
-
-### Bucket E — Newly-broken-by-the-patch
-
-Failures that are **caused by** commit 1's patch (rare). If the Node CJS bundle behaves differently than the web bundle in some edge case, we may see new failures specifically from that code path. **Highest-priority bucket** — must investigate before quarantining. If we can't fix, the patch itself may need adjustment (e.g., adding a runtime shim).
+Implementation note: keep the existing `describe.skipIf(!config)` for legit skip cases (e.g. when network sandbox isn't available locally), but distinguish "setup never tried" from "setup tried and failed".
 
 ## 4. Phase plan
 
-Each phase ends with a checkpoint commit. **No phase merges without `bun run audit:vue` green + smoke e2e still passing.**
+### P0 — Patch already landed (commit `418ece9`)
+✓ Done. Patches commit-1.
 
-**P0 — Failure capture + triage (this is happening NOW in parallel with planning)**
-1. Full `e2e:agent` run with output captured to `/tmp/e2e-baseline-<pid>.log`. Started before this plan; results feed Phase 1.
-2. Parse the log into a categorized list — per file: did each test in the file pass / fail / skip; what was the error message; what's the most likely bucket (A/B/C/D/E).
-3. Output: `implementations-plan/e2e-network-recovery/triage.md` — table with one row per failing test.
-4. **Soft budget**: 60 minutes of triage. If categorization is impossible without running individual tests, sample 5-10 tests by category.
+### P0.5 — Fail-loud setup change
+- Edit `tests/e2e/global-setup.ts:426-428` to provide `{ __setupFailed: true, error: msg }` instead of `undefined`.
+- Edit a small fixture or shared helper that ALL network tests use to surface the failure as a loud assertion.
+- Commit: `fix(e2e): fail loud when network global-setup deploy fails`
+- Validation: run a single network test file in isolation; confirm if setup is fine it passes through; force a setup failure (temporary edit) and confirm tests fail loud instead of skip.
 
-**P1 — Bucket A (test wiring rot)**
-- Read each failing test in the bucket, identify the broken selector / import / API.
-- Update the test minimally (no behavior changes).
-- After each file, run that file in isolation: `bun run --cwd packages/extension vitest run --config vitest.e2e.network.config.ts tests/e2e/network/<file>.test.ts`.
-- Commit per logical group (e.g., "fix(e2e): update transfer test selectors to match current Send page").
+### P1 — Run focused baseline + verify cluster hypothesis
+- `bun run e2e:agent` (full run). Capture to `/tmp/e2e-baseline-v2-$$.log`.
+- Compare failure list against prior phase-0 cluster mapping. If failures cluster around the 4 hypothesized mechanisms (token-add, fee-juice-import, contact-sender-chip, dapp-registerSender), prior analysis stands → proceed to fixes.
+- If failures are mostly OUTSIDE these clusters (e.g., new failures from passes that have regressed since prior phase-0), revisit cluster mapping.
+- Output: `triage.md` table (failure-mode → cluster → fix-ID).
 
-**P2 — Bucket B (timing/flakiness)**
-- Identify timeout patterns. Look for `waitForSelector(..., timeout: 5_000)` → bump to 10-15s if the operation is network-bound.
-- Replace `await sleep(N)` with `await page.waitForFunction(() => …, { timeout: N })`.
-- Commit per logical group.
+### P2 — Wallet fixes (F1, F2, F3, F4)
+- Each fix per its own commit OR batched if same file.
+- After F1+F2 (the most-broadly-applicable pair), run **representative cluster A test** (e.g. `transfers.test.ts`) in isolation: `bun run --cwd packages/extension vitest run --config vitest.e2e.network.config.ts tests/e2e/network/transfers.test.ts`.
+- After F3+F4, run **cluster D test** (`contacts-sender.test.ts`).
+- Smoke e2e re-run after this batch: `bun run test:e2e` — gate against regression.
 
-**P3 — Bucket C (fixture issues)**
-- Read `tests/e2e/fixtures/extension.ts`, identify shared fixtures that need updating.
-- Update fixtures, then run a sample test from each affected file.
-- Commit: "fix(e2e): update shared fixtures for current registration / import flow".
+### P3 — Background client RPC fix (F5)
+- Modify `disconnect()` to not reject pending.
+- This crosses package boundary (`@nulo/extension-messaging` consumed by `@nulo/extension`).
+- Validation: run cluster C tests; confirm closeStuckPopup-during-RPC no longer kills the request.
+- **Bun run test** (full): make sure no unit/component test depends on the cancellation behavior.
 
-**P4 — Bucket D (real product bugs)**
-- For each, decide: minimal fix OR quarantine.
-- If quarantine: add `describe.skipIf(...)` with a comment and a tracking entry in `implementations-plan/e2e-network-recovery/quarantine.md`.
-- If minimal fix: touch only the file with the bug, run the affected test, run smoke e2e to verify no regression.
-- Commit per bug.
+### P4 — Test-helper fixes (F6, F7, F8?)
+- F6 (`switchToLocalNetwork` wait): if F1 landed cleanly, this may be a no-op (since the wallet-side fix obviates the need). But still useful for defensive timing.
+- F7 (`addContact` chip wait): stronger signal.
+- F8 (`closeStuckPopup` await pending): skip if F5 landed cleanly (made redundant).
 
-**P5 — Bucket E (patch-induced failures)**
-- For any failure that is *new* compared to a hypothetical "no-patch but no-WASM-init-issue" world, treat as critical.
-- Fix the patch (e.g., bun patch the Node CJS bundle to handle ESM context) or roll back if unfixable.
+### P5 — Tight timeout bumps (F9, F10)
+- Last because they're surgical and only help once root causes are addressed.
 
-**P6 — Final validation**
-- `bun run audit:vue` — must exit 0.
-- `bun run e2e:agent` — must exit 0 (with quarantine list documented).
-- `bun run test:e2e` (smoke) — must exit 0 (no regression).
-- `bun run typecheck:all` — must exit 0.
-- Final commit: "fix(e2e): close out network-suite recovery + document quarantine".
+### P6 — Full e2e:agent re-run
+- Capture full output. Compare to baseline:
+  - **Pass count**: target ≥ smoke-suite-equivalent ratio (~50/61). If less, more triage needed.
+  - **Quarantined**: must have `test.skip("reason: <one line>")` with a link to a follow-up issue/path.
+- Document remaining failures in `quarantine.md`.
 
-**P7 — Push branch, open draft PR (no merge per user)**
+### P7 — Final validation
+- `bun run audit:vue` (typecheck → test → lint → build).
+- `bun run test:e2e` (smoke).
+- `bun run e2e:agent` (network).
+- All three must exit 0.
+
+### P8 — Push branch, NO MERGE
 - Push.
-- Open as draft PR titled `fix(e2e): restore network suite — patches + triage of 53 unmasked failures`.
-- Body summarizes commits + lists quarantined tests with tracking notes.
-- **Do not merge.**
+- Open draft PR titled `fix(e2e): restore network suite — patches + targeted fixes + helper hardening`.
+- Body summarizes commit list + quarantine list with rationale.
+- **Do NOT merge** (user explicit directive while AFK).
 
 ## 5. Implementation constraints
 
-- **No commit signing** for this branch (user-authorized). Use `git -c commit.gpgsign=false commit ...`.
-- **Conservative on product code changes.** Default to fixing the test rather than the code. If a real product bug is found, scope the fix tightly.
-- **Each commit is independently reviewable.** No omnibus "fix all the things" commit.
-- **`audit:vue` after every group of commits.** Don't let lint debt accumulate.
-- **3-failure stop rule**: if any single fix attempt fails 3 times, stop, log to `lessons/phase-N.md`, and move to the next bucket. Come back to the stuck one only if time permits at the end.
-- **Lessons logging**: per protocol, every meaningful attempt goes in `implementations-plan/e2e-network-recovery/lessons/phase-N.md`.
+- **Commit signing disabled** (user-authorized via `git -c commit.gpgsign=false commit ...`).
+- **Conservative on cross-package changes**: F5 touches `extension-messaging`. Verify carefully that no other consumer relies on the reject-on-disconnect behavior.
+- **Each commit independently reviewable**. No omnibus commit.
+- **3-failure stop rule per fix**: if a fix attempt fails 3 times, log to `lessons/phase-N.md`, move on. Revisit at end if time.
+- **Lessons logging**: `lessons/<phase>-<topic>.md` per protocol.
+- **No new dependencies, no version bumps**.
 
 ## 6. Security & adversarial considerations
 
-Per CLAUDE.md security mindset, even a test-recovery PR can introduce risk:
+- **F5 changes RPC client contract**: cancellation-on-disconnect IS a real semantic. If a caller depends on it (e.g., to abort an in-flight transaction signing on user-cancel), this change is a regression. **Mitigation**: grep for callers that rely on disconnect-as-cancel before changing. If found, make F5 opt-in via param instead of unconditional.
+- **F1 changes wallet auto-account-creation triggers**: extending `ensureDefaultAccount` to fire from the network watcher could create an account on a network where the user didn't intend. **Mitigation**: only fire when `appStore.accounts.length === 0` AND the network is the LOCAL_NETWORK fixture (gated). For mainnet/testnet networks, do NOT auto-create.
+- **F2/F3/F4 guards prevent silent failures**: defensive coding. Low risk.
+- **Patches in repo**: `patches/@aztec%2F*` are content-addressable + version-pinned. On next `@aztec` bump, patches need re-evaluation (will likely fail to apply). Plan: when 4.3.x lands, re-apply patches or verify upstream packaging fixed.
+- **Fail-loud setup**: removes a safety net (silent skip on infra failure). Trade-off: real failures get attention vs. CI being noisier on local-dev when setup is flaky. Mitigation: keep `describe.skipIf(!config)` for legit case (no sandbox); only fail-loud when deploy was *attempted* and failed.
 
-- **Patches against published packages**: `bun patch` modifies dependencies on disk. Bun re-applies on every install. Risk: a future `@aztec/*` version bump that removes the relevant code paths could silently bypass the patch (since the patch targets line offsets). Mitigation: patch text is minimal (one-line `-` removal of `module` field), so it should apply cleanly across `4.2.0` and `4.2.x` patch versions. Re-verify on the next `@aztec` bump.
-- **Test fixtures with hardcoded test secrets**: not new; the test wallet uses well-known seed phrases. Make sure none leak into production code paths. Audit any fixture changes for accidental imports outside `tests/`.
-- **Skipping tests that were exposing real bugs**: Bucket D quarantines must be reviewed individually. Each quarantine = a documented known-bad state. The risk is that a future regression on the same code path silently lands because the test is skipped. Mitigation: every quarantine entry must have a tracking marker (file + issue placeholder) so it's discoverable.
-- **The patch itself is supply-chain visible**: it lives in `patches/`, committed to git. Reviewers can see exactly what we modified. ✓
-- **No new dependencies**: zero supply-chain surface added.
+## 7. Trade-offs
 
-Adversarial question: what could go wrong? A malicious actor could potentially craft a Node-side e2e exploit if the patched CJS path has different sandbox semantics than the original web ESM path. Unlikely (same WASM, same code paths), but if e2e tests load arbitrary user-controlled WASM (they don't, but check), the patch could matter. Verified: e2e tests use only `@aztec/*`-shipped circuits, not user input.
+- **Wallet-side fixes vs test-side fixes**: prior phase-0 strongly recommends wallet-side. Test-side is fallback.
+- **Per-mechanism vs per-test commits**: per-mechanism wins for review-ability. Per-test risks 50 commits.
+- **Final-codex-pass requirement vs implementation velocity**: user is AFK; protocol says final pass; deferring final pass risks shipping broken plan. **Decision: ONE final codex pass on plan v2 (this doc), then implement without further gates.**
 
-## 7. Open assumptions to verify in P0
+## 8. Rollout
 
-- The 53 failures cluster into the 4-5 buckets above. **If the distribution is very different (e.g., 50/53 are real product bugs), the plan needs re-cutting.** The codex+opus parallel reviews should flag this.
-- The patch from commit 1 doesn't cause new failures beyond unmasking existing ones. Verified by comparing pre-patch test list (45 skipped) to post-patch (53 failed + 4 skipped + 4 unaccounted) — the deltas should add up.
-- Smoke e2e remains green after this work. **Re-run smoke after every 5-10 commits.**
-- The "Network e2e / Status" CI check on the resulting PR will go red (since some tests really fail now). User is AFK; this is expected. PR body documents the situation.
+Single branch `fix/e2e-network-suite-recovery`. Multiple commits per phase. Draft PR at end. NO merge (user AFK directive).
 
-## 8. Trade-offs
+## 9. Audit history
 
-- **Quarantine vs fix**: quarantining is fast but leaves real coverage gaps. Fixing is thorough but consumes session time. Default lean: quarantine if the underlying issue would take >30min to fix; otherwise fix.
-- **Per-file commits vs grouped commits**: per-file = max reviewability but lots of commits. Grouped = easier mental model but harder to bisect. Default: group commits by bucket + theme (e.g., "fix(e2e): bucket B timing fixes batch 1").
-- **Patching product code vs test code**: lean test-side unless the bug is small and clear at the product layer.
+| Version | Date | Codex | Opus | Status |
+|---|---|---|---|---|
+| v1 | 2026-05-21 | Critique: 5 buckets symptom-shaped; missed prior art; reword non-goals; fail-loud setup; 30min quarantine too aggressive | Critique: missing buckets F/G; per-mechanism budget; phase 0.5 fail-loud; carve out product fixes; test.skip not skipIf | Both: deltas required |
+| v2 | 2026-05-22 | (pending — final pass) | (incorporated) | Awaiting final codex pass |
 
-## 9. Rollout
+## 10. Files to touch (concrete list, from F1-F10)
 
-Single branch `fix/e2e-network-suite-recovery`, multiple commits, ends in a draft PR (per user: no merge during their AFK).
-
-## 10. Audit history
-
-| Version | Date | Status | Notes |
+| Fix | File | Lines (approx) | Type |
 |---|---|---|---|
-| v1 | 2026-05-21 | draft, pending codex + opus parallel review | This document |
-| v2 | (pending) | (pending) | post-consolidation |
+| F1 | `packages/extension/src/popup/app.vue` | 131-150 | wallet |
+| F2 | `packages/extension/src/popup/components/popups/NewTokenPopup.vue` | handleAddToken | wallet |
+| F3 | `packages/extension/src/popup/components/popups/NewContactPopup.vue` | handleAddContact | wallet |
+| F4 | `packages/extension/src/popup/components/popups/EditContactPopup.vue` | handleUpdateContact | wallet |
+| F5 | `packages/extension-messaging/src/background/client.ts` | 69-87 | wallet (cross-package) |
+| F6 | `packages/extension/tests/e2e/fixtures/extension.ts` | switchToLocalNetwork | test-helper |
+| F7 | `packages/extension/tests/e2e/fixtures/extension.ts` | addContact | test-helper |
+| F8 | `packages/extension/tests/e2e/fixtures/extension.ts` | closeStuckPopup | test-helper (skip if F5) |
+| F9 | `packages/extension/tests/e2e/network/contacts-sender.test.ts` | test 1 chip wait | test |
+| F10 | `packages/extension/tests/e2e/network/data-registerSender.test.ts` | waitForPgResult | test |
+| P0.5 | `packages/extension/tests/e2e/global-setup.ts` | 426-428 + fixture/helper | test-infra |
 
-## 11. Index entry to add at end of session
+## 11. Next step
 
-```
-- [e2e-network-recovery](e2e-network-recovery/plan-v2.md) — completed/quarantine-list — restored e2e:agent from pass-by-skip; N tests fixed, M quarantined
-```
+Send this plan v2 to codex for final critical pass. After codex's reply, implement directly without further user gate (user is AFK; explicit directive: "go solo").

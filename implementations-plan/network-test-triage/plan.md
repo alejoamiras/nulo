@@ -1,251 +1,140 @@
-# Network test triage — plan
+# Network test triage — RECONCILED plan (post-audit)
 
-## Scope
+Earlier revisions: [plan.md](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/network-test-triage/plan.md).
 
-Network suite (`bun run e2e:agent`) is currently **46 / 66 passing**. Goal of this triage: take each of the 18 remaining failures and determine **before any code changes** which of the following it is:
+This supersedes `plan.md` after both audits (`audit-codex.md` xhigh, `audit-opus.md` opus 4.7).
 
-- **(a) test finds a real wallet/playground bug** — assertion is correct, code is wrong
-- **(b) badly implemented test** — assertion or timing is wrong, app behaves correctly
-- **(c) test is stale** — app behavior changed (intentionally) and the test wasn't updated
-- **(d) niche** — flake / infra / aztec sandbox issue / something orthogonal
+## What both audits agreed on
 
-The output of this plan is a **bucketed action list** per cluster, not fixes. Fixes happen in follow-up PRs once we agree on the categorization.
+1. **The original plan's categorization arithmetic is correct** (18 = 11 + 3 + 2 + 1 + 1 split, all file paths verified).
+2. **Cluster C's user-side "keep OLD is intentional" claim is wrong.** The wallet code at `EditContactPopup.vue:185-194,199-230,250-255` explicitly intends to migrate. Codex specifically searched for any current code/comment saying "keep old senders intentionally" and found none — the only contrary evidence is a superseded planning note at `pre-a11-ux-cleanup/plan-v1.md:152`.
+3. **Cluster A's stated A1/A2 hypotheses are insufficient.** The actual hot path is `addToken → fetchTokenMetadata → 3 sequential simulate(...) calls` (`token/service.ts:122-123, 402-434`), not just `parseTokenInterface`.
+4. **The plan's anti-scope discipline is right** (no retry-wrappers, no test-infra changes).
 
-This plan was sent to two independent audit agents (codex `xhigh` + opus 4.7 general-purpose). Their notes live in `audit-codex.md` and `audit-opus.md` alongside this file. Final decisions reconcile both audits before any implementation.
+## What the audits forced me to revise
 
-## Materials reviewed (verified, not inferred)
+### Revision 1 — Cluster A's actual mechanism
 
-- `packages/extension/tests/e2e/network/transfers.test.ts` — 8 tests, all use file-scoped `tokenReadyExtension`
-- `packages/extension/tests/e2e/network/fee-methods.test.ts` — 5 tests; 2 use `tokenReadyExtension`, 3 use `feeJuiceImportedExtension`
-- `packages/extension/tests/e2e/network/token-management.test.ts` — 1 test, `tokenReadyExtension`
-- `packages/extension/tests/e2e/network/contacts-sender.test.ts` — 4 tests, `localNetworkExtension`
-- `packages/extension/tests/e2e/network/data-registerSender.test.ts` — 1 test, `dappConnectedExtension`
-- `packages/extension/tests/e2e/fixtures/extension.ts:285-558` — fixture bodies for `tokenReadyExtension` / `feeJuiceReadyExtension` / `feeJuiceImportedExtension`
-- `packages/extension/tests/e2e/fixtures/helpers.ts:197-362` — `addContact`, `closeStuckPopup`, `importToken`
-- `packages/extension/tests/e2e/fixtures/playground.ts:1-100` — `waitForPgResult`, `callExpectingNoPopup`, `snapshotResultSeq`
-- `packages/extension/src/popup/components/popups/NewTokenPopup.vue` — wallet-side import flow
-- `packages/extension/src/popup/components/popups/EditContactPopup.vue` — wallet-side edit flow + `applySenderDelta`
-- `packages/extension/src/wallet/services/token/service.ts:280-400` — `parseTokenInterface`
-- `packages/extension/src/wallet/services/token/utils.ts` — `isTokenComplete`
-- `packages/extension/src/wallet/services/contact/service.ts` — pure storage, no PXE awareness
-- `packages/wallet-bridge/src/dispatcher.ts:616-635` — playground `aztec_registerSender` dispatch
+Original plan's A1 ("`parseTokenInterface` >60s") and A2 ("`isComplete:false` short-circuit") are **both real but neither is the dominant hypothesis**.
 
-## Failure inventory: 18 tests → 5 root-cause clusters
+**Codex's correction:** `importToken()` does NOT wait for parsing before click — parsing starts only inside `handleAddToken()` after submit (`helpers.ts:342-357`, `NewTokenPopup.vue:58-66`). The toast fires only after BOTH `parseTokenInterface()` AND `addToken()` complete (with `addToken` doing 3 metadata `simulate()` calls).
 
-```
-Cluster                                              Victim tests   Root cause type
-─────────────────────────────────────────────────────────────────────────────────
-A. tokenReadyExtension fixture: importToken           11/18  →  ?fixture-cascade
-   • transfers.test.ts: 8
-   • fee-methods.test.ts: 2 (sponsored)
-   • token-management.test.ts: 1
-B. feeJuiceImportedExtension fixture: setup/import     3/18  →  ?fixture-cascade
-   • fee-methods.test.ts: 3 (public/private FJ + gas balance)
-C. contacts-sender: edit migrates sender                2/18  →  candidate (a) real bug
-   • test 3 "edit address with sender ON migrates"
-   • test 4 "edit address + flip sender OFF drops both"
-D. contacts-sender: sender-chip 10s timeout             1/18  →  candidate (b) tight timeout
-   • test 1 "delete-confirm exposes unregister-sender toggle"
-E. data-registerSender: 15s waitForPgResult timeout     1/18  →  candidate (b) tight timeout
-   • test 1 "silent path adds sender to PXE"
-─────────────────────────────────────────────────────────────────────────────────
-                                                       18/18
-```
+**Opus's correction (A3):** Both `parseTokenInterface` and `addToken` go through `withPxeRead`/`withPxeWrite` (`packages/aztec-runtime/src/pxe/service.ts:314-345`), which serializes ALL PXE access. Under cold-PXE conditions in the e2e fixture, the queue accumulates and ONE click can produce a multi-step PXE sequence that exceeds the 60s helper budget.
 
-**Critical finding from the read-through, contradicting our prior assumption:**
+**Codex also flagged a missed RPC layer:** popup→SW client RPC has its OWN 60s timeout (`extension-messaging/background/client.ts:18,149-168`). If the SW is busy in PXE work past 60s, the popup-side RPC bails with `Client request timed out` *before* the toast can fire — looks like a wallet hang to the test.
 
-We previously said (STATUS.md, in conversation) that contacts-sender tests 3+4 are *over-spec'd because the wallet's "keep old sender" behavior is intentional*. **This is wrong.** The wallet code at `EditContactPopup.vue:199-230` (`applySenderDelta`) explicitly intends to **migrate** when the address changes:
+**Reclassification:**
 
-> Truth table 1 1 1 → add(new), delete(old) — "migrate registration old → new"
+| Original | New |
+|---|---|
+| A1: `parseTokenInterface > 60s` | **A1**: `parseTokenInterface` slow on cold PXE — still possible |
+| A2: `isComplete:false` short-circuit | **A2**: `isComplete:false` — but only plausible as **artifact-resolution bug** (codex), since the deployed token IS standard `TokenContract` |
+| — | **A3**: PXE-guard serialization stall in `addToken` (3 simulates) — opus's strongest candidate |
+| — | **A4**: 60s popup→SW RPC timeout fires before SW finishes (codex) |
 
-The function is documented, named, and tested for the migration case. Tests 3+4 assert exactly this behavior. So the candidate category is **(a) real bug or race** — either `accountStateService.deleteSender` actually fails at runtime (PXE issue) or the test reads `getSenders` before the deletion has propagated. Cluster C must be re-investigated, not re-spec'd.
+A's category remains **(a) wallet bug** but the surface is broader than I originally claimed.
 
-## Per-cluster analysis
+### Revision 2 — Cluster B is NOT a clean separate cluster
 
-### Cluster A — `tokenReadyExtension` cascade (11 victims)
+Codex was right: the 3 FJ tests still traverse `importToken()` at `extension.ts:538` after Phase 1. So when `setupPreFundedAccount` (Phase 1) succeeds, the FJ tests are simply more cascade victims of Cluster A. The LMDB error is a **sporadic orthogonal precondition** in the script-side fixture, not a deterministic class of failures.
 
-**What the fixture does** (extension.ts:285-349):
+**Reclassification:** Cluster B becomes "**LMDB sporadic + A-cascade-on-Phase-2**". Effectively merges into A for any deterministic count. LMDB stays **(d) sandbox-side**.
 
-1. Launches a fresh extension + registers a profile
-2. Switches to Local Network
-3. Reads the popup account address
-4. Script-side: mints 1000 test tokens to the popup account using `createSponsoredFeeOptions`
-5. Calls `importToken(page, aztecConfig.tokenAddress)` to import the token via the popup UI
-6. Polls `refreshBalances` for up to 30 × 5s = 150s for "1,000" to appear
+### Revision 3 — Cluster D is NOT a tight-timeout (b)
 
-**Where tests fail (per STATUS.md observation):** the call to `importToken()` at step 5 times out at 60s on `waitForToast(page, "New token has been added", 60_000)`.
-
-**Why the toast might not fire** (read of `NewTokenPopup.vue:58-90` + `parseTokenInterface`):
+Codex strongly disagreed. Mechanism:
 
 ```
-handleAddToken:
-  parsingResult = await tokenService.parseTokenInterface(...)
-  if (!parsingResult.isComplete) {
-    error.value = "Couldn't auto-detect this token's interface. ..."
-    return    ← NO TOAST FIRED
+addContact():
+  click submit
+  wait for contact-row to appear  ← short, ~ms
+  closeStuckPopup()                ← FORCE-CLOSES popup mid-RPC
+  
+NewContactPopup's submit handler:
+  await contactService.addContact(...)        ← finishes before row appears
+  if (registerAsSender) {
+    await accountStateService.addSender(...)  ← STILL IN FLIGHT when popup closes
   }
-  newToken = await tokenService.addToken(...)
-  tokenBalances = await tokenBalanceService.getTokenBalances(...)
-  openToast({ label: "New token has been added" })
+  emit('onClose')
+  
+Popup unmount:
+  watch(() => props.show, ...) → contactService.disconnect() + accountStateService.disconnect()
+  ↑ This DISCONNECTS the in-flight addSender's RPC client.
+  Background/client.ts:77-83 rejects pending requests on disconnect.
 ```
 
-Two distinct failure modes are folded into "60s timeout":
+**So D is a wallet/helper interaction bug**, not a 10s budget issue. The test waits for the chip to appear (because addSender fires the `onSenderAdded` event when it eventually resolves), but if `closeStuckPopup` aborted `addSender` mid-flight, the chip never appears regardless of timeout.
 
-A1. **`parseTokenInterface` is slow** (>60s end-to-end). PXE introspection: `getContractInstance` + `getContractArtifact` + `registerContract` on a fresh PXE that has just synced blocks. Plausible if PXE block sync stalls.
+**Reclassification:** D moves from **(b)** to **(a)** *and* **(b)** simultaneously — wallet has a real bug (rejecting in-flight RPCs on disconnect is wrong for fire-and-forget side effects), AND the test/helper has a bug (calling `closeStuckPopup` before the side effect is durable).
 
-A2. **`isComplete: false` short-circuit**. `isTokenComplete` (utils.ts:18-27) requires ALL 9 candidate fns: name, symbol, decimals, balanceOfPrivate/Public, transferPrivate/Public, transferPublicToPrivate, transferPrivateToPublic. If artifact discovery returns *any* candidate as null/empty, the popup shows the "Couldn't auto-detect..." error and never toasts. The helper sees no toast, times out at 60s.
+### Revision 4 — Cluster C's mechanism narrows
 
-The fixture's mint step at #4 *also* uses the same token address via the script-side `createTestWallet` PXE; if that PXE is fine but the *popup-side offscreen PXE* sees a different artifact, A2 is plausible.
+Both audits killed C2 (cached `getSenders`): no cache layer exists in `account-state/service.ts:52-62`. C3 (cross-test leak) is unlikely because the contacts-sender file uses distinct file-private addresses per test (lines 14-19 of the test file).
 
-**Categorization (tentative, needs runtime confirmation):**
+The dominant mechanism is now **C4 (codex + opus): `closeStuckPopup` aborts `applySenderDelta` mid-flight**. Same root as D. Test 2 of contacts-sender PASSES — opus pointed out this is signal: the OFF branch (no `addressChanged`) doesn't have a race with closeStuckPopup. The `addressChanged` branch DOES, because it issues TWO PXE writes (add-then-delete) and `closeStuckPopup` can fire between them.
 
-- If A1 → **(a)** PXE perf bug or contract-introspection inefficiency in the wallet
-- If A2 → **(a)** isTokenComplete false-negative — wallet bug
-- If both fail intermittently → still **(a)**, but a worse, racier wallet bug
+**Reclassification:** C remains **(a)** (wallet code intends migrate; bug is real), but the mechanism is the same RPC-abort-on-disconnect issue as D. Fixing the disconnect-cancels-pending-requests behavior in `background/client.ts:77-83` likely fixes BOTH C and D.
 
-**(d) is unlikely** because the cascade is reproducible (per STATUS, 11 of 11 victims fail).
+### Revision 5 — Cluster E timeout I misquoted
 
-**(b)/(c) are unlikely** because the helper closely mirrors what a user does (open dropdown → import → enter address → click import → wait for toast).
+Codex caught I said "15s waitForPgResult timeout" in the plan. The actual default is **30s** (`playground.ts:67`); STATUS.md misled me. The real timeout stack is 30s playground wait, 60s popup→SW RPC, 90s offscreen RPC. So "bump from 15s" is based on a bad read.
 
-**Investigation step (Phase 0):** instrument `importToken()` to capture, on timeout: (i) the popup's `error` text, (ii) whether `[data-testid="import-token-button"]` is in loading state, (iii) the value of `parsingResult.isComplete` if reachable via console intercept. **Without this signal we can't distinguish A1 from A2.** Cost: ~30 minutes; output: a single test run reveals the actual code path.
+**Reclassification:** E remains **(b)/(a) split**, but the diagnostic is "is registerSender taking >30s end-to-end OR is the SW RPC timing out at 60s?".
 
-### Cluster B — `feeJuiceImportedExtension` cascade (3 victims)
-
-**What the fixture does** (extension.ts:426-558):
-
-1. Phase 1 (script-side): `setupPreFundedAccount(wallet, node, feePayer)` — derives a master, brings a Schnorr account on-chain, then bridges + claims FeeJuice (both public + private) and mints 1000 test tokens.
-2. Phase 2 (popup-side): launches fresh extension, imports the master via `importPlain`, switches to Local Network, asserts gas-balance card shows non-zero pub + priv FJ, and finally calls `importToken()` (same as Cluster A).
-
-**Where tests fail (per STATUS.md):** the LMDB error `mdb_txn_begin: 22 - Invalid argument` originates in `setupPreFundedAccount` (script-side `EmbeddedWallet`). This is *not* the same as Cluster A — it's the script-side PXE blowing up before the extension even launches.
-
-**Categorization:**
-
-- LMDB error → **(d) niche / aztec sandbox** (not wallet code; script-side `EmbeddedWallet` hits a corrupted aztec data dir under repeat use).
-- The downstream `importToken()` failure (if Phase 1 succeeds) would look like Cluster A.
-
-**Investigation step (Phase 0):** rerun the FJ tests with a clean aztec data-dir each time and see if the LMDB error reproduces deterministically. If yes, file aztec-side; if no, it's a flake. Cost: ~10 minutes.
-
-### Cluster C — contacts-sender edit/migrate (2 victims)
-
-Two tests at `contacts-sender.test.ts:125-225`:
-
-**Test 3** (`edit contact address with sender ON migrates the sender registration`): adds a contact with sender ON → edits the address → asserts the sender chip stays on the renamed contact (NEW address registered) AND that re-adding the OLD address as a fresh contact shows no sender chip (OLD unregistered).
-
-**Test 4** (`edit contact address + flip sender OFF drops both`): same shape but ALSO flips sender OFF in the edit popup → asserts both NEW and OLD have no sender chip.
-
-**Wallet code intent** (`EditContactPopup.vue:199-230`, with truth table at :185-194):
+## Reconciled categorization table
 
 ```
-applySenderDelta(oldAddress, newAddress):
-  shouldAddNew    = desiredIsSender && (addressChanged || !initialIsSender)
-  shouldDeleteOld = initialIsSender && (addressChanged || !desiredIsSender)
-  try:
-    if shouldAddNew:    accountStateService.addSender(networkId, newAddress)
-    if shouldDeleteOld: accountStateService.deleteSender(networkId, oldAddress)
-    return true
-  catch err:
-    desiredIsSender.value = initialIsSender.value
-    return false
+Cluster   Victims  Original  Reconciled                        Mechanism
+─────────────────────────────────────────────────────────────────────────────────────────────
+A         11/18    (a)       (a) wallet perf/RPC               PXE-guard serialization on
+                                                                addToken's 3 simulates,
+                                                                potentially also 60s popup-SW
+                                                                RPC timeout
+B (FJ)    3/18     (d)       (a)+(d) hybrid                    Mostly cascade of A on Phase 2
+                                                                importToken; LMDB is sporadic
+                                                                orthogonal precondition
+C         2/18     (a)       (a) wallet RPC-cancellation bug   closeStuckPopup disconnects
+                                                                accountStateService while
+                                                                deleteSender is in-flight
+D         1/18     (b)       (a)+(b) wallet+helper             Same disconnect-mid-RPC as C;
+                                                                addContact's closeStuckPopup
+                                                                kills addSender before chip
+                                                                renders
+E         1/18     (b)       (b)/(a)                           registerSender end-to-end
+                                                                latency vs 30s playground
+                                                                wait OR 60s popup→SW RPC
+─────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
-Tests assert what the function *intends* to do. So **(c) test stale vs app** is ruled out — the wallet behavior the test asserts IS the intended behavior.
+**Of 18 failures, ~13 share TWO underlying root causes:**
 
-**Why might it fail at runtime?** Three plausible mechanisms:
+- **R1: PXE-guard serialization** in the offscreen PXE service (affects A's 11, possibly D, possibly E)
+- **R2: Service-client disconnect cancels pending RPCs** (affects C's 2, D's 1)
 
-C1. `accountStateService.deleteSender` throws (PXE removeSender not implemented or misbehaving) → the `try` block aborts, the function returns false, the toast says "sender migration incomplete", BUT a partial mutation (addSender succeeded) has happened. The test then sees the OLD address still registered.
+If both roots are addressed, 14 of 18 likely pass without test-side changes.
 
-C2. `deleteSender` succeeds but returns before PXE's getSenders read reflects the deletion. The test re-reads via `addContact` which on open calls `getSenders` → still has OLD → renders the sender chip on the freshly-added OLD-address contact.
+## Reconciled Phase 0 (combined opus + codex feedback)
 
-C3. The script-side fixture or the e2e setup has registered OLD as a sender via *another* path (e.g., the sandbox-deployed accounts, or a prior test in the file leaked state).
+Three runs, ~50 min:
 
-**Categorization:** **(a) real wallet behavior bug**, mechanism is one of C1/C2/C3.
-
-**Investigation step (Phase 0):** add `console.log` to `applySenderDelta` to capture which branches fire + whether `deleteSender` resolved or threw. Add `await accountStateService.getSenders(networkId)` immediately before AND after the delta to log the actual state. Run test 3 in isolation. **If C1 → wallet bug in `removeSender`. If C2 → consistency bug in `getSenders` cache. If C3 → cross-test leak.** Cost: 30-45 min; reveals which mechanism is real.
-
-### Cluster D — contacts-sender chip 10s timeout (1 victim)
-
-Test 1 (`delete-confirm exposes unregister-sender toggle for a registered-sender contact and unregisters on submit`):
-
-```
-await addContact(page, "SenderContact", ADDR_SENDER, { registerAsSender: true })
-await page.waitForSelector(
-  '[data-testid="contact-row"][data-contact-name="SenderContact"] [data-testid="contact-sender-chip"]',
-  { visible: true, timeout: 10_000 },
-)
-```
-
-**What the test asserts:** sender registration is async; the chip on the row should appear within 10s of `addContact` completing (which has its own internal wait for the contact row, but NOT for the chip).
-
-**Why it might time out:** `accountStateService.addSender` is a PXE call (registers a sender on the active network's PXE database). Under e2e load, PXE writes can take >10s. The contact row renders immediately (storage write); the chip lights up later when the active-network sender list refreshes.
-
-**Categorization:**
-
-- If the chip eventually appears (just after the 10s mark) → **(b) bad timeout** — bump to 30-60s.
-- If the chip never appears → **(a) real bug** in sender registration UI subscription.
-
-**Investigation step (Phase 0):** bump the timeout to 60s *temporarily* and rerun — if it passes, it's (b). Cost: 5 min.
-
-### Cluster E — data-registerSender 15s timeout (1 victim)
-
-```
-const result = await callExpectingNoPopup(dappConnectedExtension, page, "registerSender", async () => {
-  await clickByTestId(page, "pg-btn-registerSender")
-})
-expect(["ok", "error"]).toContain(result.status)
-```
-
-The assertion is permissive (accepts `ok` or `error`). The failure is in `callExpectingNoPopup` itself, which awaits `waitForPgResult` with 15s timeout (per STATUS notes). `aztec_registerSender` dispatches through wallet-bridge → wallet → PXE.
-
-**Categorization:**
-
-- If the dispatch eventually returns ok/error within 30s → **(b) bad timeout**.
-- If it never returns → **(a) wallet-bridge bug or PXE hang**.
-
-**Investigation step (Phase 0):** bump waitForPgResult to 60s in this test only, rerun. If it passes, (b). Cost: 5 min.
-
-## Phase 0: cheap diagnostics first
-
-Before any "real" implementation work, run a single-test diagnostics pass that resolves the categorization for every cluster:
-
-| Cluster | Diagnostic | Expected duration | Output we want |
+| Run | Tests | Probes | Time |
 |---|---|---|---|
-| A | Add log/eval probe inside `importToken` helper to capture popup error text + button state at timeout. Run `transfers.test.ts > "balance shows minted tokens"` in isolation. | 15 min | A1 (slow) vs A2 (isComplete:false) vs neither |
-| B | Run `fee-methods.test.ts > "transfer with public Fee Juice"` with `rm -rf /tmp/nulo-aztec-*` between runs. 3 attempts. | 10 min | LMDB deterministic vs flake |
-| C | Add console.log in `applySenderDelta` for branch trace; add `getSenders` probe pre+post. Run test 3 isolated. | 30 min | C1 / C2 / C3 mechanism |
-| D | Bump chip timeout to 60s in test 1 only. Rerun isolated. | 5 min | (b) vs (a) |
-| E | Bump waitForPgResult to 60s in this test only. Rerun isolated. | 5 min | (b) vs (a) |
+| 1 | Single vitest invocation containing `transfers > "balance shows minted tokens"` (A) + `contacts-sender > "delete-confirm exposes unregister-sender toggle"` (D) + `data-registerSender > "silent path adds sender to PXE"` (E). | Probe inside `withPxeRead`/`withPxeWrite` (`aztec-runtime/src/pxe/service.ts:314-345`) logging queue-depth + per-call latency. Probe inside `extension-messaging/background/client.ts:149-168` logging RPC latency + abort reason. | ~25 min |
+| 2 | `fee-methods > "transfer with public Fee Juice"` × 3 reruns with `rm -rf /tmp/nulo-aztec-*` between runs | LMDB determinism check. If 0/3 fail, B is a flake; if 3/3 fail, B is deterministic; otherwise it's spurious. | ~10 min |
+| 3 | `contacts-sender > "edit contact address with sender ON migrates"` (test 3) | Console.log inside `applySenderDelta` for branch trace + `await accountStateService.getSenders(networkId)` pre + post + `onSenderDeleted` fire-or-not. ALSO instrument `closeStuckPopup` to log when it disconnects each service client. | ~15 min |
 
-**Total Phase 0 cost: ~65 min.** After Phase 0, every test has a confirmed category and we can decide what to fix.
+After Phase 0 we have one coherent dataset for R1 (PXE serialization) across A/D/E and one targeted dataset for R2 (RPC abort) on C/D.
 
-Phase 0 is intentionally **non-destructive** and **non-merging** — diagnostic logs land on a temp branch and get reverted before any real fix PR.
+## Open questions for the user (now narrower than before)
 
-## Open questions for the user (decisions needed before Phase 1)
+1. **Confirm Cluster C re-categorization.** Both audits independently agree the wallet code intends to migrate; codex specifically searched for any current "keep old is intentional" comment and found none. Your earlier instinct was based on the symptom; the audits show the wallet was meant to do what the test asserts. **OK to treat as a real bug?**
 
-1. **Cluster A categorization stance** — if Phase 0 confirms `parseTokenInterface` is slow (>60s) on a fresh extension, do you want me to investigate the wallet's PXE introspection (likely 4-8 hr task), or is it fair to keep bumping the e2e timeout while we work around it? Wallet performance under fresh PXE is a real product concern, not just a test concern.
+2. **Fix vs. test-skip on C and D.** Both clusters share R2 (disconnect-cancels-pending-RPCs). Two valid responses: (i) FIX the wallet — change `background/client.ts:77-83` to NOT reject pending requests on disconnect, and instead let them resolve, (ii) FIX the helper — `closeStuckPopup` should await pending RPCs before disconnecting. **Which is more correct?** I lean (ii) because (i) leaves SW with orphaned listeners after popup close, but (i) is what most "fire and forget" UI patterns expect. Audits split implicitly.
 
-2. **Cluster B categorization stance** — if LMDB is deterministic, is filing this aztec-side enough, or do you want a workaround in `setupPreFundedAccount` (e.g., retry-with-fresh-data-dir)?
+3. **PXE-guard serialization scope.** Cluster A's R1 is real product perf concern, not just an e2e thing. Investigating it is a multi-day rabbit hole (mostly @nulo/aztec-runtime). Two options: (a) sink time now to fix the perf, (b) bump the e2e timeouts AND file an internal task for the perf later. **Which?**
 
-3. **Cluster C categorization stance** — once we know whether C1/C2/C3, do you still believe the "keep OLD sender" behavior is intentional (despite the wallet code clearly intending to migrate)? If yes, the test is **(c)** and we re-spec; if no, **(a)** and we fix the wallet. The audit agents are explicitly asked to challenge this.
+4. **Cluster B framing.** Codex says B isn't a separate deterministic cluster; opus says it is. The truth is "sometimes LMDB blows up sporadically; the rest of the time those tests are A-cascade victims". **Treat B as a noise gate (rerun on failure) or do a real investigation?**
 
-4. **Phase 1 scope** — once Phase 0 categorizes everything, do you want a single "fix-all-network-flakes" PR or one PR per cluster? Smaller PRs are easier to review but increase merge churn.
+5. **Phase 0 sequencing.** Run 1 needs the new `withPxeRead`/`withPxeWrite` instrumentation + the `client.ts` RPC instrumentation to be added BEFORE running. That's ~30 min of code (revertible). **Approve this?**
 
-5. **Phase 1 priority** — if not all clusters are fixable this sprint, which take priority? My instinct: A > C > D > E > B (A blocks the most tests; B is sandbox-side and less under our control).
-
-## Anti-scope (what this plan does NOT do)
-
-- No new test infrastructure (no fileParallelism changes, no fixture redesign).
-- No build/CI changes.
-- No edits to passing tests.
-- No "while we're at it" refactors of helpers — only diagnostics added in Phase 0 and reverted before Phase 1.
-- No retry-on-flake wrappers — they hide real bugs (codex was right about this in audit-codex.md from the parallel-isolation work).
-
-## Audit checklist for both reviewers
-
-I'm asking codex (xhigh) and opus 4.7 to **independently re-do the analysis above**, not just rubber-stamp it. Specifically:
-
-1. Verify my categorization for each cluster against the actual files cited.
-2. Challenge the contacts-sender re-categorization (C is the highest-risk re-spec).
-3. Find any test I missed or miscategorized.
-4. Suggest a faster Phase 0 — specifically, can the diagnostic probes be combined into fewer runs?
-5. Find better hypotheses for Cluster A (importToken slowness) — is there a known PXE perf footgun we're missing?
-6. Surface anything in `extension.ts:285-558` (fixture body) that I glossed over and that could be the actual culprit.
+6. **Fix PR strategy.** Once Phase 0 is in: one big PR ("fix flakes") vs. one PR per root cause (R1 + R2 + LMDB) vs. one PR per cluster (A/B/C/D/E)?

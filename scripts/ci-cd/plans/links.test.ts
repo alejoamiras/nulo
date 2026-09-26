@@ -287,6 +287,42 @@ describe("link-opaque", () => {
 		const repo = makeRepo({ "docs/eli5.html": html })
 		expect(findings(repo, "link-opaque").map((f) => f.line)).toEqual([1, 2, 3, 4, 5, 6, 6])
 	})
+
+	test("a construct is judged by its decoded value, and a CSS escape the gate does not decode is a finding", () => {
+		const html = [
+			'<meta http-equiv="ref&#114;esh" content="0;url=../gone/a.md">',
+			'<div style="background: u&#114;l(../gone/b.png)">d</div>',
+			"<style>a { background: u\\72l(../gone/c.png) }</style>",
+			'<p style="background: u\\72l(x.png)">p</p>',
+			'<svg><rect fill="url&lpar;#g)"/></svg>',
+			"<svg><style>a { fill: u&#114;l(../gone/d.png) }</style></svg>",
+			'<style>b::after { content: "\\2014" } /* \\72 */</style><p style="color: red">q</p>',
+		].join("\n")
+		const repo = makeRepo({ "implementations-plan/p/status.html": html })
+		expect(findings(repo, "link-opaque").map((f) => f.line)).toEqual([1, 3, 4, 5])
+		expect(findings(repo, "link-missing").map((f) => `${f.line} ${f.detail}`)).toEqual([
+			"2 ../gone/b.png → implementations-plan/gone/b.png is not in the git index",
+			"6 ../gone/d.png → implementations-plan/gone/d.png is not in the git index",
+		])
+	})
+
+	test("a CR or form feed ends a CSS string as a newline does, so the escape behind it is still read", () => {
+		const hidden = (end: string) => `"x${end};background:u\\72l(../gone/a.png);/*"`
+		const repo = makeRepo({
+			"implementations-plan/p/attr.html": [
+				`<div style='content:${hidden("&#13;")}'>x</div>`,
+				`<div style='content:${hidden("&#12;")}'>x</div>`,
+			].join("\n"),
+			"implementations-plan/p/cr.html": `<style>b { content: ${hidden("\r")} }</style>\n`,
+			"implementations-plan/p/ff.html": `<style>b { content: ${hidden("\f")} }</style>\n`,
+		})
+		expect(findings(repo, "link-opaque").map((f) => `${f.file.slice("implementations-plan/".length)}:${f.line}`)).toEqual([
+			"p/attr.html:1",
+			"p/attr.html:2",
+			"p/cr.html:1",
+			"p/ff.html:1",
+		])
+	})
 })
 
 describe("path-token", () => {

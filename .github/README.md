@@ -1,6 +1,6 @@
 # `.github/` — CI configuration
 
-This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan + audits live in [`../implementations-plan/ci-cd/`](../implementations-plan/ci-cd/).
+This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan lives in [`../implementations-plan/ci-cd/`](../implementations-plan/ci-cd/) and links its audits by permalink.
 
 ## Status check matrix
 

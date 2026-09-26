@@ -11,7 +11,7 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 - [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
 - [`apps/extension/tests/e2e/FIREFOX.md`](./apps/extension/tests/e2e/FIREFOX.md) — how the e2e suite drives Firefox, every behaviour that differs from Chrome and where the suite absorbs it, and the rule that a browser difference lives on `BrowserDriver`. Read before touching `tests/e2e/fixtures/browser/` or debugging a Firefox-only failure.
 - [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
-- [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
+- [`implementations-plan/README.md`](./implementations-plan/README.md) — the planning standard: what a plan commits and what stays local, how a plan closes, the portable rules, the milestone-vocabulary key. Read [`implementations-plan/lessons.md`](./implementations-plan/lessons.md) before starting a task.
 
 ## The wallet repo — the bridge moved to `alejoamiras/unleashed`
 
@@ -40,7 +40,7 @@ Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth
 | How CLAUDE.md itself is maintained | [`update-docs`](./.claude/skills/update-docs/) |
 | The **release** process — cut/unstick/publish/deploy/sync, a new failure mode | _no skill yet → the `### Release runbook` below is its home; extract it when it's worth it_ |
 
-**Three-way routing for anything you learn:** a *rule/policy* → here; a *durable domain procedure/technique* → the owning skill above; a *plan-specific debugging log* → `implementations-plan/<plan>/lessons/`. Re-check this table when you add or rename a skill.
+**Routing for anything you learn:** a *rule/policy* → here; a *durable domain procedure/technique* → the owning skill above; a *cross-task gotcha* → [`implementations-plan/lessons.md`](./implementations-plan/lessons.md), one line linking its evidence; an *open follow-up* → [`implementations-plan/follow-ups.md`](./implementations-plan/follow-ups.md); a *plan-specific debugging log* → `implementations-plan/<plan>/lessons/`. Re-check this table when you add or rename a skill.
 
 ## Working in this repo
 
@@ -454,7 +454,7 @@ openToast({ label: "Message", icon: "copy" }, 2_000)
 - **Default: no comment.** Identifiers carry intent. If removing a comment wouldn't confuse a future reader, don't write it.
 - **Add a comment when removing it would surprise a reader** — a hidden constraint, a subtle invariant, a workaround for a specific bug, behavior dictated by an external spec.
 - **Comments explain WHY/INVARIANT, not WHAT.** "Re-derive the passhash here because the session was closed during restore" — yes. "This is the password hash." — no.
-- **No milestone, plan, PR, phase, or stage tags.** Not `M4.10`, `A11.1`, `pre-A11`, `phase 4b`, `PR-2`, `Stage D`. The repo's milestone history is in [`implementations-plan/`](./implementations-plan/README.md); inline code talks about live behavior, not history.
+- **No milestone, plan, PR, phase, or stage tags.** Not `M4.10`, `A11.1`, `pre-A11`, `phase 4b`, `PR-2`, `Stage D`. The milestone key is in [`implementations-plan/README.md`](./implementations-plan/README.md), and the plans that used it are closed history; inline code talks about live behavior, not history.
   - **Exception** — `AUDIT [A-Z]\d+` markers stay. They mark security-relevant decisions and pair with concrete tests.
   - **Exception** — `phase N` documentation that describes live runtime behavior (`packages/wallet-core/src/base/`, service startup phases) stays. The ban is on milestone vocabulary, not on the word "phase".
 - **Live cross-references are OK** only when the target is load-bearing for behavior:
@@ -468,11 +468,15 @@ openToast({ label: "Message", icon: "copy" }, 2_000)
 
 ## Implementation plans
 
-Plans + audit transcripts under [`implementations-plan/`](./implementations-plan/README.md) are committed artifacts. They get read by future contributors and future Claude sessions that have no idea who you are or where you cloned the repo. A few rules:
+Plans under [`implementations-plan/`](./implementations-plan/README.md) are committed artifacts. They get read by future contributors and future agent sessions that have no idea who you are or where you cloned the repo. That README is the standard (layout, closing a plan, the portable rules); these rules bind every session:
 
-- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`apps/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
-- **No machine-specific paths in general.** Temp-file paths (system scratch dirs, macOS folder containers, Linux tmpdirs) belong in transient terminal output, never in committed planning docs. Quote the conversation context instead ("the codex review transcript saved at this session's CODEX_DIR") or paste the response inline.
-- **The same rule applies to file links in audit reports.** When recording a codex / opus audit, rewrite paths to repo-relative before committing — e.g. `[plan.md](implementations-plan/<topic>/plan.md)` rather than an absolute path that includes a username segment.
+- **Verdicts inline, transcripts local.** `plan.md` records each audit's verdict and every accepted and rejected finding with its reason. Audit transcripts (`audit-*.md`), competing drafts and revisions (`plan-*.md`), scratch briefs (`_*.md`) and `eli5.html` are gitignored by `implementations-plan/.gitignore`; a plan is revised in place, never re-cut as `plan-v2.md`.
+- **Uncommitted means disposable.** A worktree's transcripts are deleted with it, so whatever is worth keeping goes into `plan.md` before the work closes. No committed file links an uncommitted one: a link to a file that left the tree is a permalink, `https://github.com/alejoamiras/nulo/blob/<full sha>/<path>`, at a SHA listed in `scripts/ci-cd/plans/permalink-bases.json` and reachable from `dev`.
+- **Closing a plan.** In its delivery PR: an `## Outcome` block directly after the front matter (Date, Status, Shipped, Open items, and a line retiring its `/goal` and `/loop` seeds); its generalizable gotchas promoted to `implementations-plan/lessons.md`; its open items moved to `implementations-plan/follow-ups.md` or an issue. The directory moves to `archive/` only after that PR merges, because a running `/loop` still reads the live path. An archived plan is evidence, never instructions.
+- **The curated layer has a budget.** `lessons.md` stays ≤ 8 KiB, one line per entry, each linking its evidence; a promotion deduplicates, retires what it supersedes, and dates anything tied to a tool version. `follow-ups.md` loses an entry when it resolves.
+- **The gate.** `bun scripts/ci-cd/plans/check.ts`, inside `test:ci-gating` and so `quality-status`, fails a PR or a local run on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing plan file, a URL construct it cannot judge, a permalink outside the allowlist or off `dev`, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. On push, nightly and release it only reports.
+- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file or status doc. Use repo-relative paths (`apps/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
+- **No machine-specific paths in general.** Temp-file paths (system scratch dirs, macOS folder containers, Linux tmpdirs) belong in transient terminal output, never in committed planning docs. When recording an audit's findings in `plan.md`, rewrite its paths repo-relative.
 - **OK to reference outside repos by name when load-bearing.** E.g. "the Rabby reference implementation" or "the Presto native app". Don't include the clone path on your machine.
 
 ## Quality gates — local and CI
@@ -690,4 +694,4 @@ The manual procedures above remain the permanent fallback regardless of switch s
 - Not the architecture overview — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 - Not the per-package surface — see each `packages/<name>/README.md`.
 - Not the e2e infrastructure doc — see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md).
-- Not the planning archive — see [`implementations-plan/README.md`](./implementations-plan/README.md).
+- Not the planning standard or the plans themselves — see [`implementations-plan/README.md`](./implementations-plan/README.md).

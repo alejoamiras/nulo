@@ -16,7 +16,7 @@ output, 55 tests) and then ran its Codex loop to seven engagements against a cap
 merged arcs A and B, parked #630 and asked for a split. Read [`recon.md`](recon.md) first.
 
 **This is revision 3, the slim one.** Revision 1 was rejected by Codex
-([`audit-codex.md`](audit-codex.md)); revision 2 accepted every point in full and grew a final-zip
+([`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/third-party-notices/audit-codex.md)); revision 2 accepted every point in full and grew a final-zip
 reconciliation pass, nested-licence discovery, an MPL rule and evidence dossiers for the contents
 of upstream's prebuilt wasm. The owner's read of that, 2026-09-20: *"im a bit scared we might be
 mega-overdoing it and adding too much complexity just for third party license, but ill trust you"*.

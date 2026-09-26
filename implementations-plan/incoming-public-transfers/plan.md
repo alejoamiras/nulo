@@ -12,8 +12,8 @@ storage, migration LOW, external coupling MODERATE one new node API already in o
 security MODERATE dusting/spam — but spans `aztec-runtime` + extension services + UI, so
 `light` is out).
 **Companion docs**: [`implementation.md`](implementation.md) (START HERE to implement — state +
-every verified lesson + rejected paths) · [`audit-codex.md`](audit-codex.md) (6 codex passes) ·
-[`audit-fable.md`](audit-fable.md) (fable audit) · [`eli5.html`](eli5.html) (plain-language +
+every verified lesson + rejected paths) · [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-codex.md) (6 codex passes) ·
+[`audit-fable.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/audit-fable.md) (fable audit) · [`eli5.html`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/incoming-public-transfers/eli5.html) (plain-language +
 seeds) · `lessons/phase-N.md` (filled during implementation).
 **Baseline**: rebases onto current `origin/dev` (past `68a856a`) to pick up the `price` service
 (PR #309, "live usd prices") that D8 consumes. The worktree was cut at `68a856a`; implementation
