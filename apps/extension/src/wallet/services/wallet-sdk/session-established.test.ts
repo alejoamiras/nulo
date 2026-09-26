@@ -10,6 +10,7 @@
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@/wallet/logger"
+import type { WindowBounds } from "@nulo/wallet-core/ports"
 import { PENDING_VERIFICATION_STALE_MS, type PendingVerificationEntry } from "./pending-verification"
 import { type SessionEstablishedDeps, handleSessionEstablished } from "./session-established"
 import { VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
@@ -46,12 +47,22 @@ function reserved(id = "sess-1"): { gate: VerifyAdmissionGate; reservation: Wind
 	return { gate, reservation: reservation! }
 }
 
+/** The browser window the verify window anchors on: its top-right corner is (1380, 40). */
+const ANCHOR = { left: 100, top: 40, width: 1280, height: 720 }
+
 function makeDeps(over: Partial<SessionEstablishedDeps> = {}) {
 	const terminate = vi.fn()
 	const stamp = vi.fn()
 	const create = vi.fn().mockResolvedValue({ id: 99 })
 	const remove = vi.fn().mockResolvedValue(undefined)
+	const getLastFocused = vi.fn<() => Promise<WindowBounds | undefined>>().mockResolvedValue(ANCHOR)
 	const { gate, reservation } = reserved()
+	let live = true
+	/** Ends the harness session the way the transport does: liveness and the gate together. */
+	const endSession = () => {
+		live = false
+		gate.onSessionGone("sess-1")
+	}
 	const deps: SessionEstablishedDeps = {
 		dappSessionService: {
 			tryGetDappSessionByOriginAndChain: vi.fn().mockResolvedValue({ id: "dapp-1", profileId: "prof-A", trustedVerification: false }),
@@ -60,13 +71,13 @@ function makeDeps(over: Partial<SessionEstablishedDeps> = {}) {
 		terminateSession: terminate,
 		pendingVerification: new Map<string, PendingVerificationEntry>(),
 		stampSessionProfile: stamp,
-		isSessionLive: () => true,
-		windows: { create, remove },
+		isSessionLive: () => live,
+		windows: { create, remove, getLastFocused },
 		reservations: gate,
 		logger: noopLogger,
 		...over,
 	}
-	return { deps, terminate, stamp, create, remove, gate, reservation }
+	return { deps, terminate, stamp, create, remove, getLastFocused, gate, reservation, endSession }
 }
 
 /** A fresh marker for the harness session, approved under `profileId`. */
@@ -122,11 +133,11 @@ describe("handleSessionEstablished — B-06 / B-13 pins", () => {
 
 describe("handleSessionEstablished — verify-window reservation", () => {
 	test("opens against the held reservation and keeps the slot until that window is removed", async () => {
-		const { deps, gate, reservation } = makeDeps()
+		const { deps, gate, reservation, endSession } = makeDeps()
 		expect(await handleSessionEstablished(makeSession(), deps)).toBe(true)
 		expect(reservation.status).toBe("opened")
 		expect(gate.windowsHeld(ORIGIN)).toBe(1)
-		gate.onSessionGone("sess-1")
+		endSession()
 		expect(gate.windowsHeld(ORIGIN)).toBe(1)
 		gate.windowRemoved(99)
 		expect(gate.windowsHeld(ORIGIN)).toBe(0)
@@ -153,9 +164,13 @@ describe("handleSessionEstablished — verify-window reservation", () => {
 		expect(terminate).toHaveBeenCalledWith("sess-1")
 	})
 
-	test("a termination during creation closes the window that arrives and admits no replacement early", async () => {
-		const { deps, create, remove, gate, terminate } = makeDeps()
+	test.each([
+		{ attempt: "creation", refusals: 0 },
+		{ attempt: "the retried creation", refusals: 1 },
+	])("a termination during $attempt closes the window that arrives and admits no replacement early", async ({ refusals }) => {
+		const { deps, create, remove, gate, terminate, endSession } = makeDeps()
 		let resolveCreate!: (w: { id: number }) => void
+		for (let i = 0; i < refusals; i++) create.mockRejectedValueOnce(new Error("Invalid value for bounds"))
 		create.mockReturnValueOnce(new Promise<{ id: number }>((r) => (resolveCreate = r)))
 		// A second handshake for the origin takes the last slot; a third must wait.
 		let third: WindowReservation | undefined
@@ -172,8 +187,8 @@ describe("handleSessionEstablished — verify-window reservation", () => {
 			() => {},
 		)
 		const establishing = handleSessionEstablished(makeSession(), deps)
-		await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1))
-		gate.onSessionGone("sess-1")
+		await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1 + refusals))
+		endSession()
 		expect(third).toBeUndefined()
 		expect(gate.windowsHeld(ORIGIN)).toBe(2)
 		resolveCreate({ id: 42 })
@@ -187,6 +202,98 @@ describe("handleSessionEstablished — verify-window reservation", () => {
 		gate.windowRemoved(42)
 		expect(third).toBeDefined()
 		expect(gate.windowsHeld(ORIGIN)).toBe(2)
+	})
+})
+
+/** Every text a log call carries, error messages and causes included. */
+function logText(calls: unknown[][]): string {
+	const text = (v: unknown): string => (v instanceof Error ? `${v.name} ${v.message} ${text(v.cause)}` : String(JSON.stringify(v) ?? v))
+	return calls.flat().map(text).join("\n")
+}
+
+describe("handleSessionEstablished — verify-window placement", () => {
+	test("opens at the anchor's top-right corner, no taller than the anchor", async () => {
+		const { deps, create } = makeDeps()
+		expect(await handleSessionEstablished(makeSession(), deps)).toBe(true)
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(create.mock.calls[0][0]).toMatchObject({ type: "popup", left: 980, top: 40, width: 400, height: 720 })
+	})
+
+	test("a refused position is retried with the size only, under the one claim, and the session stays live", async () => {
+		const { deps, create, terminate, gate, reservation } = makeDeps()
+		const markInFlight = vi.spyOn(reservation, "markInFlight")
+		const creationFailed = vi.spyOn(reservation, "creationFailed")
+		create.mockRejectedValueOnce(new Error("Invalid value for bounds"))
+		expect(await handleSessionEstablished(makeSession(), deps)).toBe(true)
+		const [[placed], [sizeOnly]] = create.mock.calls
+		expect(placed).toMatchObject({ left: 980, top: 40 })
+		expect(sizeOnly).toEqual({ type: "popup", url: placed.url, width: 400, height: 720 })
+		expect(markInFlight).toHaveBeenCalledTimes(1)
+		expect(creationFailed).not.toHaveBeenCalled()
+		expect(terminate).not.toHaveBeenCalled()
+		expect(reservation.status).toBe("opened")
+		expect(gate.windowsHeld(ORIGIN)).toBe(1)
+	})
+
+	test("two refusals terminate with a constant error, and no browser message reaches a log line", async () => {
+		const calls: unknown[][] = []
+		const logger = { log: (...args: unknown[]) => calls.push(args) } as unknown as ILogger
+		const { deps, create, terminate, gate, reservation } = makeDeps({ logger })
+		const creationFailed = vi.spyOn(reservation, "creationFailed")
+		const sentinels = ["moz-extension://5e471ce1-0000-4000-8000-000000000000", "SENTINELHASH", "req-5e471ce1"]
+		const refusal = (n: number) =>
+			new Error(
+				`refusal ${n}: ${sentinels[0]}/src/popup/index.html#/windows/verify?verificationHash=${sentinels[1]} (request ${sentinels[2]})`,
+			)
+		create.mockRejectedValueOnce(refusal(1)).mockRejectedValueOnce(refusal(2))
+		expect(await handleSessionEstablished(makeSession({ verificationHash: sentinels[1] }), deps)).toBe(false)
+		expect(create).toHaveBeenCalledTimes(2)
+		expect(terminate).toHaveBeenCalledWith("sess-1")
+		expect(creationFailed).toHaveBeenCalledTimes(1)
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+		const thrown = calls.flat().filter((a) => a instanceof Error)
+		expect(thrown).toEqual([new Error("verify window could not be opened")])
+		const logged = logText(calls)
+		for (const s of sentinels) expect(logged).not.toContain(s)
+	})
+
+	test("a session ended while the anchor is read opens no window and its unstarted slot is reclaimed", async () => {
+		const { deps, create, getLastFocused, gate, reservation, endSession } = makeDeps()
+		let resolveAnchor!: (b: WindowBounds) => void
+		getLastFocused.mockReturnValueOnce(new Promise<WindowBounds>((r) => (resolveAnchor = r)))
+		const establishing = handleSessionEstablished(makeSession(), deps)
+		await vi.waitFor(() => expect(getLastFocused).toHaveBeenCalledTimes(1))
+		expect(reservation.status).toBe("unstarted")
+		endSession()
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+		resolveAnchor(ANCHOR)
+		expect(await establishing).toBe(false)
+		expect(create).not.toHaveBeenCalled()
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+	})
+
+	test("a session ended before the first refusal gets no second create, and the slot frees when it lands", async () => {
+		const { deps, create, gate, endSession } = makeDeps()
+		let rejectCreate!: (e: Error) => void
+		create.mockReturnValueOnce(new Promise((_, reject) => (rejectCreate = reject)))
+		const establishing = handleSessionEstablished(makeSession(), deps)
+		await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+		endSession()
+		expect(gate.windowsHeld(ORIGIN)).toBe(1)
+		rejectCreate(new Error("Invalid value for bounds"))
+		expect(await establishing).toBe(false)
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+	})
+
+	test("a window without an id fails closed after one positioned create, with no retry", async () => {
+		const { deps, create, terminate, gate } = makeDeps()
+		create.mockResolvedValueOnce({ id: undefined })
+		expect(await handleSessionEstablished(makeSession(), deps)).toBe(false)
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(create.mock.calls[0][0]).toMatchObject({ left: 980, top: 40 })
+		expect(terminate).toHaveBeenCalledWith("sess-1")
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
 	})
 })
 

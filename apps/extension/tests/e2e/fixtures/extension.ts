@@ -65,11 +65,13 @@ function isPrestoProbeNoise(msg: ConsoleMessage): boolean {
  *
  *  `legal` is the Terms-acceptance state the launch starts from. A fresh profile defaults to
  *  `current`, so a spec that is not about the gate never meets it; a reused profile defaults to
- *  `keep`, so whatever the previous launch left is what the relaunch boots over. */
+ *  `keep`, so whatever the previous launch left is what the relaunch boots over.
+ *
+ *  `fixedWindowSize: false` launches without the driver's fixed window size (`LaunchOptions`). */
 export async function launchExtension(
-	opts: { userDataDir?: string; waitForLiveness?: boolean; legal?: LegalSeed } = {},
+	opts: { userDataDir?: string; waitForLiveness?: boolean; legal?: LegalSeed; fixedWindowSize?: boolean } = {},
 ): Promise<ExtensionContext> {
-	const { userDataDir, waitForLiveness = true } = opts
+	const { userDataDir, waitForLiveness = true, fixedWindowSize } = opts
 	const extensionPath = inject("extensionPath")
 	// Read before Chrome writes the profile: `onInstalled` fires with reason "install" — the only
 	// reason that opens the first-run tab — exactly when the profile has never held the extension.
@@ -78,7 +80,7 @@ export async function launchExtension(
 
 	// HEADLESS=0 flips to windowed mode for local debugging.
 	const headless: boolean = process.env.HEADLESS !== "0"
-	const { browser, close } = await launchBrowser({ extensionPath, userDataDir, headless })
+	const { browser, close } = await launchBrowser({ extensionPath, userDataDir, headless, fixedWindowSize })
 
 	try {
 		const extensionId = await settleLaunchedExtension(browser, {
@@ -1467,7 +1469,7 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 export const pickFileByTestId = (page: Page, testId: string, filePath: string): Promise<void> =>
 	pickFile(page, () => clickByTestId(page, testId), filePath)
 
-function isTargetDetachError(err: unknown): boolean {
+export function isTargetDetachError(err: unknown): boolean {
 	const messages: string[] = []
 	let current: unknown = err
 	let depth = 0

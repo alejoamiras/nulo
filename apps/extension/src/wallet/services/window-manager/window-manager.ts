@@ -13,20 +13,61 @@
 
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import { randomIdNotIn } from "@/wallet/services/id-allocators"
-import type { ClockPort, TimerHandle, WindowBounds, WindowPort } from "@nulo/wallet-core/ports"
+import type { ClockPort, CreatedWindow, CreateWindowOptions, TimerHandle, WindowBounds, WindowPort } from "@nulo/wallet-core/ports"
 import type { Unsubscribe } from "@nulo/wallet-core/ports"
-import { deferred, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { deferred } from "@nulo/wallet-core/utils"
+
+function completeBounds(anchor: WindowBounds | undefined): Required<WindowBounds> | undefined {
+	if (!anchor) return undefined
+	const { left, top, width, height } = anchor
+	if ([left, top, width, height].some((n) => typeof n !== "number")) return undefined
+	return anchor as Required<WindowBounds>
+}
 
 /** Center a `width`×`height` window on `anchor`. Signed arithmetic: a display
  *  left of or above the primary has negative coordinates, so never clamp.
  *  `{}` (let Chrome pick) when the anchor or any of its bounds is missing. */
 export function centerOn(anchor: WindowBounds | undefined, width: number, height: number): { left?: number; top?: number } {
-	if (!anchor) return {}
-	const { left, top, width: anchorWidth, height: anchorHeight } = anchor
-	if ([left, top, anchorWidth, anchorHeight].some((n) => typeof n !== "number")) return {}
+	const bounds = completeBounds(anchor)
+	if (!bounds) return {}
 	return {
-		left: Math.round((left as number) + ((anchorWidth as number) - width) / 2),
-		top: Math.round((top as number) + ((anchorHeight as number) - height) / 2),
+		left: Math.round(bounds.left + (bounds.width - width) / 2),
+		top: Math.round(bounds.top + (bounds.height - height) / 2),
+	}
+}
+
+/** A `width`-wide window flush with `anchor`'s right edge and top, no taller than the anchor.
+ *  Signed coordinates, never clamped: a display left of or above the primary is negative. A
+ *  missing or partial anchor yields no position and the requested height, so the browser picks. */
+export function topRightOf(
+	anchor: WindowBounds | undefined,
+	width: number,
+	height: number,
+): { left?: number; top?: number; height: number } {
+	const bounds = completeBounds(anchor)
+	if (!bounds) return { height }
+	return { left: bounds.left + bounds.width - width, top: bounds.top, height: Math.min(height, bounds.height) }
+}
+
+/** `create`, retried once with `left` and `top` removed when the browser refuses a position and
+ *  `stillWanted()` still holds. A size-only create, a refusal once `stillWanted()` is false, and a
+ *  second refusal all reject with the browser's error, which callers must not log or surface: it
+ *  can carry the window's URL. */
+export async function createPlaced(
+	windows: Pick<WindowPort, "create">,
+	options: CreateWindowOptions,
+	stillWanted: () => boolean,
+	logger: ILogger,
+	source: string,
+): Promise<CreatedWindow> {
+	try {
+		return await windows.create(options)
+	} catch (err) {
+		const { left, top, ...sizeOnly } = options
+		if ((left === undefined && top === undefined) || !stillWanted()) throw err
+		const created = await windows.create(sizeOnly)
+		logger.log(source, LogLevel.Debug, "window position refused; opened with the size only")
+		return created
 	}
 }
 
@@ -37,6 +78,8 @@ export type OpenAndAwaitOpts = {
 	timeoutMs: number
 	/** Tag used in logs only — NOT for dedup or routing. */
 	kind: string
+	/** `top-right` retries a refused position with the size only; `center` creates once. */
+	placement: "center" | "top-right"
 }
 
 export type AwaitedWindow<T> = {
@@ -90,13 +133,7 @@ export class WindowManager {
 			.then((anchor) => {
 				// A timeout or cancel during the bounds lookup must prevent creation.
 				if (this.handles.get(handleId) !== handle) return undefined
-				return this.windows.create({
-					type: "popup",
-					url: opts.url,
-					width: opts.width,
-					height: opts.height,
-					...centerOn(anchor, opts.width, opts.height),
-				})
+				return this.createWindow(opts, anchor, () => this.handles.get(handleId) === handle)
 			})
 			.then((created) => {
 				if (created === undefined) return
@@ -105,7 +142,7 @@ export class WindowManager {
 				// create. And a handle lost mid-create (timeout settled first) leaves
 				// a window nothing owns — close it, or a stray popup lingers.
 				if (this.handles.get(handleId) !== handle) {
-					if (created.id !== undefined) void this.windows.remove(created.id)
+					if (created.id !== undefined) this.windows.remove(created.id).catch(() => undefined)
 					return
 				}
 
@@ -126,16 +163,17 @@ export class WindowManager {
 
 				if (this.handles.get(handleId) !== handle) {
 					unsub()
-					void this.windows.remove(created.id)
+					this.windows.remove(created.id).catch(() => undefined)
 					return
 				}
 
 				handle.unsubOnRemoved = unsub
 			})
-			.catch((err: unknown) => {
-				const msg = errorMessageFromUnknown(err)
-				this.logger.log("window-manager", LogLevel.Error, `[${opts.kind}/${handleId}] window.create threw: ${msg}`)
-				this._settle(handleId, undefined, msg)
+			.catch(() => {
+				// The browser's error is dropped: it can carry the window URL, which holds request ids.
+				if (this.handles.get(handleId) !== handle) return
+				this.logger.log("window-manager", LogLevel.Error, `[${opts.kind}/${handleId}] window could not be opened`)
+				this._settle(handleId, undefined, "Failed to open window.")
 			})
 
 		return { handleId, promise }
@@ -176,6 +214,13 @@ export class WindowManager {
 		const handle = this.handles.get(handleId)
 		if (!handle || handle.settled) return
 		this.stopWatching(handle)
+	}
+
+	private createWindow(opts: OpenAndAwaitOpts, anchor: WindowBounds | undefined, stillWanted: () => boolean): Promise<CreatedWindow> {
+		const options = { type: "popup" as const, url: opts.url, width: opts.width, height: opts.height }
+		if (opts.placement === "center") return this.windows.create({ ...options, ...centerOn(anchor, opts.width, opts.height) })
+		const placed = { ...options, ...topRightOf(anchor, opts.width, opts.height) }
+		return createPlaced(this.windows, placed, stillWanted, this.logger, "window-manager")
 	}
 
 	private stopWatching(handle: Handle<unknown>): void {

@@ -7,6 +7,7 @@ import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { WindowPort } from "@nulo/wallet-core/ports"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
+import { createPlaced, topRightOf } from "../window-manager/window-manager"
 import { isPendingVerificationStale, type PendingVerificationEntry } from "./pending-verification"
 import type { WindowReservation } from "./verify-admission"
 import { describeExternalId } from "@nulo/wallet-bridge"
@@ -40,7 +41,7 @@ export interface SessionEstablishedDeps {
 	 *  the dispatch guard and the switch-teardown listener consume this. */
 	stampSessionProfile: (sessionId: string, profileId: string) => void
 	/** The port the verify window is created on; its `onRemoved` is what frees the slot. */
-	windows: Pick<WindowPort, "create" | "remove">
+	windows: Pick<WindowPort, "create" | "remove" | "getLastFocused">
 	/** The verify-window slot admission reserved for this session id, if the handshake needed one. */
 	reservations: { reservation(sessionId: string): WindowReservation | undefined }
 	logger: ILogger
@@ -182,23 +183,32 @@ async function openVerifyWindow(
 	reservation: WindowReservation,
 	deps: SessionEstablishedDeps,
 ): Promise<void> {
-	// Claim the slot for exactly one creation: a reservation released or already spent while this
+	const anchor = await deps.windows.getLastFocused()
+	// Claim the slot for exactly one window: a reservation released or already spent while this
 	// handler awaited must not open a second window against the same slot.
 	if (!reservation.markInFlight()) throw new Error("verify window slot was not claimable")
 	let windowId: number | undefined
 	try {
-		const win = await deps.windows.create({
-			type: "popup",
-			url: chrome.runtime.getURL(
-				`src/popup/index.html#/windows/verify?sessionId=${dappSessionId}&verificationHash=${encodeURIComponent(session.verificationHash)}&isReconnect=${!isNewConnection}`,
-			),
-			height: 800,
-			width: 400,
-		})
+		// Hold the reservation across both attempts; release only after the terminal failure or the
+		// window's removal.
+		const win = await createPlaced(
+			deps.windows,
+			{
+				type: "popup",
+				url: chrome.runtime.getURL(
+					`src/popup/index.html#/windows/verify?sessionId=${dappSessionId}&verificationHash=${encodeURIComponent(session.verificationHash)}&isReconnect=${!isNewConnection}`,
+				),
+				width: 400,
+				...topRightOf(anchor, 400, 800),
+			},
+			() => deps.isSessionLive(session.sessionId),
+			deps.logger,
+			"wallet-sdk-bg",
+		)
 		windowId = win?.id
-	} catch (err) {
+	} catch {
 		reservation.creationFailed()
-		throw err
+		throw new Error("verify window could not be opened")
 	}
 	if (windowId === undefined) {
 		reservation.creationFailed()

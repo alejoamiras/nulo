@@ -36,3 +36,17 @@ describe("PasskeyService PATH-B window budget (N-21)", () => {
 	// discriminator — it observes the value the WindowManager actually
 	// receives, so a hard-coded regression at the call site reds too.)
 })
+
+describe("PasskeyService window placement", () => {
+	test("the passkey window is not a dApp window: it stays centered", async () => {
+		const openAndAwait = vi.fn((_opts: unknown) => ({ handleId: "h1", promise: Promise.resolve({ kind: "credential" }) }))
+		const service = new PasskeyService(noopLogger, { openAndAwait } as unknown as WindowManager)
+		vi.spyOn(chrome.runtime, "getURL").mockReturnValue("chrome-extension://x/passkey.html")
+
+		await service.createKey("uh-1", "Profile")
+
+		expect(openAndAwait).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "passkey", width: 500, height: 800, placement: "center" }),
+		)
+	})
+})
