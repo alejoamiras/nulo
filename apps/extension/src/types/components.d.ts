@@ -30,6 +30,7 @@ declare module 'vue' {
     DappIdentityBlock: typeof import('./../components/composite/DappIdentityBlock.vue')['default']
     DappStatusStrip: typeof import('./../components/composite/DappStatusStrip.vue')['default']
     Divider: typeof import('./../components/Divider.vue')['default']
+    DottedTerm: typeof import('./../components/composite/DottedTerm.vue')['default']
     DropdownDivider: typeof import('./../components/ui/Dropdown/DropdownDivider.vue')['default']
     DropdownItem: typeof import('./../components/ui/Dropdown/DropdownItem.vue')['default']
     DropdownRoot: typeof import('./../components/ui/Dropdown/DropdownRoot.vue')['default']

@@ -20,6 +20,8 @@ declare global {
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const FIRST_PROFILE_NAME: typeof import('../utils/profile-name').FIRST_PROFILE_NAME
   const FileTooLargeError: typeof import('../utils/files').FileTooLargeError
+  const GLOSSARY: typeof import('../utils/glossary').GLOSSARY
+  const GLOSSARY_SECTIONS: typeof import('../utils/glossary').GLOSSARY_SECTIONS
   const HOME_TOKEN_ROWS: typeof import('../utils/token-order').HOME_TOKEN_ROWS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS
@@ -440,6 +442,9 @@ declare global {
   export type { AssemblyAbortedError, BackupFileType, BackupSelection, ProcessBackupResult, BackupSource, AssembledBackup } from '../utils/full-backup-helpers'
   import('../utils/full-backup-helpers')
   // @ts-ignore
+  export type { GlossaryEntry, GlossaryKey } from '../utils/glossary'
+  import('../utils/glossary')
+  // @ts-ignore
   export type { NetworkActivationResult } from '../utils/guarded-network-activation'
   import('../utils/guarded-network-activation')
   // @ts-ignore
@@ -497,6 +502,8 @@ declare module 'vue' {
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly FIRST_PROFILE_NAME: UnwrapRef<typeof import('../utils/profile-name')['FIRST_PROFILE_NAME']>
     readonly FileTooLargeError: UnwrapRef<typeof import('../utils/files')['FileTooLargeError']>
+    readonly GLOSSARY: UnwrapRef<typeof import('../utils/glossary')['GLOSSARY']>
+    readonly GLOSSARY_SECTIONS: UnwrapRef<typeof import('../utils/glossary')['GLOSSARY_SECTIONS']>
     readonly HOME_TOKEN_ROWS: UnwrapRef<typeof import('../utils/token-order')['HOME_TOKEN_ROWS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
     readonly IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS']>

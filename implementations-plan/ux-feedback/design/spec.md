@@ -273,8 +273,8 @@ owns each builds the owner's pick. The recommended option is what gets drawn fir
 | U5 | Permission window | Rename clicked | Today's alias field appears in place, prefilled |
 | U6 | Authorization window (Off = ask) | The existing confirmation window, in the new vocabulary | Title "Authorization", the "Authorizes:" block as today |
 | U7 | Settings → Connected apps → app | Permission names and the new authorizations switch after connecting | The window's row titles, with the authorizations switch editable there |
-| U8 | dApp identity block | The suspicious-hostname warning as visible text | One orange line under the host, today's sentence |
-| U9 | Import | The recovery-phrase note as visible text | One line under the field, today's sentence |
+| U8 | dApp identity block | The suspicious-hostname warning as visible text | One orange line under the host, today's sentence with its dash made a full stop (owner, 2026-09-25) |
+| U9 | Import | The recovery-phrase note as visible text | One line between the label and the field, today's sentence with its dash made a full stop (owner, 2026-09-25) |
 | U10 | Permission window | Cancelled / error overlays | Unchanged |
 | U11 | Onboarding import | First-run import (recovery phrase, backup) still shows the name field | Same as create: no field, profile "Main" |
 | U12 | Send review sheet, fee menu tag | They share the strip's marks | The same padlock and globe, so the vocabulary stays one |

@@ -167,6 +167,14 @@ onBeforeUnmount(() => {
 					:data-status="prestoState.kind"
 				/>
 				<SettingItem
+					to="/popup/settings/glossary"
+					title="Glossary"
+					description="What Nulo's words mean"
+					materialIcon="menu_book"
+					chevron
+					data-testid="setting-nav-glossary"
+				/>
+				<SettingItem
 					to="/popup/settings/advanced"
 					title="Advanced"
 					description="Developer, account state, explorer"

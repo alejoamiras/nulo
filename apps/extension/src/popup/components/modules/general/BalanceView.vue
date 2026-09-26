@@ -44,6 +44,9 @@ const props = defineProps({
 	},
 })
 
+const PRIVATE_BALANCE_LABEL = "Private balance: only you can see it"
+const PUBLIC_BALANCE_LABEL = "Public balance: anyone can see it"
+
 const tokenBalances = ref([])
 
 const tokenToDisplay = computed(() => props.tokenBalance?.token)
@@ -286,18 +289,27 @@ onBeforeUnmount(() => {
 				priced assets only
 			</div>
 
-			<!-- Glyphs-only: the lock/globe pair IS the vocabulary (same as the token rows) — no
-			     PRIVATE/PUBLIC words doubling it (owner call, post-approval). -->
+			<!-- Glyphs only: the padlock and globe are the token rows' vocabulary, so no word doubles them. -->
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
-				<span :class="$style.breakdown_item" aria-label="Private balance">
-					<span :class="$style.breakdown_private"><Icon name="lock" size="12" /></span>
-					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
-				</span>
+				<Tooltip textAlign="left" delay="300">
+					<span :class="$style.breakdown_item">
+						<span :class="$style.breakdown_private"><Icon name="lock" size="12" :aria-label="PRIVATE_BALANCE_LABEL" /></span>
+						<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+					</span>
+					<template #content>
+						<span :class="$style.label_text">{{ PRIVATE_BALANCE_LABEL }}</span>
+					</template>
+				</Tooltip>
 				<span :class="$style.breakdown_divider">|</span>
-				<span :class="$style.breakdown_item" aria-label="Public balance">
-					<span :class="$style.breakdown_public"><Icon name="globe" size="12" /></span>
-					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
-				</span>
+				<Tooltip textAlign="left" delay="300">
+					<span :class="$style.breakdown_item">
+						<span :class="$style.breakdown_public"><Icon name="globe" size="12" :aria-label="PUBLIC_BALANCE_LABEL" /></span>
+						<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+					</span>
+					<template #content>
+						<span :class="$style.label_text">{{ PUBLIC_BALANCE_LABEL }}</span>
+					</template>
+				</Tooltip>
 			</Flex>
 		</section>
 
@@ -394,6 +406,12 @@ onBeforeUnmount(() => {
 
 .breakdown_divider {
 	color: var(--nulo-outline);
+}
+
+.label_text {
+	display: block;
+	line-height: 1.2;
+	color: var(--nulo-secondary);
 }
 
 .actions {
