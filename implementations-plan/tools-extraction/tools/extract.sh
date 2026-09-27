@@ -79,5 +79,12 @@ git -C "$repo" add -A
 printf 'chore: bootstrap the unleashed workspace\n\nRoot configuration copied from alejoamiras/nulo@%s by\nimplementations-plan/tools-extraction/tools/bootstrap/.\n' "$sha" >"$report/bootstrap-message.txt"
 git -C "$repo" commit --quiet -F "$report/bootstrap-message.txt"
 
+# unleashed carries no derived code, so no blob or message in its history names nulo's upstream.
+upstream='azguard|bb strategy'
+if git -C "$repo" log --format=%B | grep -qiE "$upstream" ||
+  git -C "$repo" grep -qiE "$upstream" $(git -C "$repo" rev-list HEAD) --; then
+  die "the history names nulo's upstream"
+fi
+
 python3 "$here/audit.py" "$repo" "$report" "$here/audit-allowlist.txt"
 echo "extract: done — $repo ($(git -C "$repo" rev-list --count HEAD) commits); report in $report"

@@ -12,7 +12,6 @@ const [freeze, repo] = process.argv.slice(2)
 if (!freeze || !repo) throw new Error("usage: bun bootstrap/build.ts <freeze-dir> <repo>")
 
 const VERBATIM = [
-	"LICENSE",
 	".editorconfig",
 	".gitattributes",
 	".commitlintrc.json",
@@ -157,11 +156,12 @@ function biome() {
 	if (formatted.exitCode !== 0) throw new Error("biome format biome.json failed")
 }
 
-function notice() {
-	const text = read("NOTICE")
-	if (!text.startsWith("Nulo\n")) throw new Error("NOTICE: expected the product line 'Nulo'")
-	if (!text.includes("derived from Azguard Wallet")) throw new Error("NOTICE: the Azguard attribution is missing")
-	write("NOTICE", `unleashed\n${text.slice("Nulo\n".length)}`)
+/** unleashed carries no derived code, so it keeps neither the upstream line in LICENSE nor NOTICE. */
+function license() {
+	const lines = read("LICENSE").split("\n")
+	const upstream = lines.filter((line) => /^ {3}Portions Copyright .*; see NOTICE\.$/.test(line))
+	if (upstream.length !== 1) throw new Error(`LICENSE: expected one upstream "Portions" line, found ${upstream.length}`)
+	write("LICENSE", lines.filter((line) => line !== upstream[0]).join("\n"))
 }
 
 function security() {
@@ -191,6 +191,6 @@ packageJson()
 tsconfig()
 gitignore()
 biome()
-notice()
+license()
 security()
 setupAztec()
