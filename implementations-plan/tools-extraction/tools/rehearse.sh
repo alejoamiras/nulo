@@ -128,7 +128,7 @@ phase_tools() {
 forge_prep() {
   (
     cd "$repo/contracts/bridge/evm"
-    [ -d lib/forge-std ] || forge install \
+    [ -d lib/forge-std ] || forge install --no-git \
       foundry-rs/forge-std@bf647bd6046f2f7da30d0c2bf435e5c76a780c1b \
       OpenZeppelin/openzeppelin-contracts@cab19933c33c2ad1d4c7a84864a3601dddfd16f3 \
       Uniswap/v4-core@e50237c43811bd9b526eff40f26772152a42daba

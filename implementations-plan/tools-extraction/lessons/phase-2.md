@@ -242,3 +242,38 @@ Closed: 8 (within the stated limit; codex re-ran the ancestry check at the freez
 - Re-run with both fixes: run4's history audit and run3's workspace audit pass, and the negative control still surfaces every planted item.
 
 The loop's cap is three rounds, and round 3 was not clean. So instead of a fourth review round, codex ran one verification-only pass, scoped to A and B. Verdict: A closed, B closed, "ready to merge: yes" (high confidence within that scope).
+
+## N2-publish (2026-09-26)
+
+The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,resolve-asset,wallet-sdk-schema-patch}@0.1.0` as `latest` with SLSA v1 provenance, and each registry tarball equals its approved digest. `npm audit signatures`, run on a scratch npm install of the three (a bare Bun tree has no npm lockfile and passes vacuously), reports 4 verified registry signatures and 4 verified attestations.
+
+## U0 (2026-09-26, re-extracted 2026-09-27)
+
+- The audited candidate went to the empty repository on the owner's go, one ref: `main`.
+- 2026-09-27, owner decision: unleashed ships no code derived from nulo's upstream, so neither its LICENSE nor its history names it. The recipe changed accordingly:
+  - the bootstrap writes LICENSE without the upstream line, and writes no NOTICE;
+  - the filter drops one plan note and rewrites one commit message;
+  - `extract.sh` fails if any blob or message still names the upstream.
+- Re-extracted at the freeze, the new history matches the pushed one commit for commit: 136 each, and each commit's tree differs only in the three scrubbed paths. Identities and dates are equal except the new bootstrap commit's. filter-repo rewrote two abbreviated hashes in messages, as it did the first time.
+- Force-pushed with a lease on the previous tip, at the owner's choice. `main` is `286ebab` (tree `d0204e7b`). The superseded commits stay fetchable by SHA until GitHub collects them.
+
+## B1 (2026-09-27): the workspace commit series
+
+- **Design package.** Written for unleashed rather than carried. Some files in nulo's `packages/design` derive from nulo's upstream, so `base.css`, `Flex`, `Icon`, `Spinner` and `Button` are rewritten from what the tools app uses:
+  - 23 tokens;
+  - `Flex` at 9 call sites;
+  - one icon glyph;
+  - `Button` in two variants and three sizes.
+
+  The typed token module, the utility classes and the icon set are dropped: the app uses none of them. A line-overlap audit of the whole tree against the upstream at the fork point finds 0.36%, all boilerplate. The file-header check alone would have missed two derived files: one because JSON has no comment syntax, the other because it never got the header.
+- **Neutral palette.** It lives in `base.css` itself, so there is no override layer. `themeMap` now matches a selector only as a whole entry of a selector list (codex found the old suffix match could pass while matching nothing).
+- **Packages.** The three packages are installed from npm at exact `0.1.0`:
+  - provenance and digests are verified before the install;
+  - a temporary min-age exclude is used and never committed;
+  - the frozen install passes without it;
+  - bun.lock's integrity equals the approved tarballs.
+- **Visible copy.** The app calls itself "unleashed". The Nulo wallet keeps its name where the app offers it.
+- **Codex round 1:** conditional approve, no protocol regression. The five findings on the brand guard and the two pin tests are all adopted; the palette-layer finding became moot.
+- **`forge install` stages submodules.** In a git checkout, the pinned `forge install` adds `.gitmodules` and three gitlinks to the index; a commit that stages everything would ship them. `rehearse.sh` now passes `--no-git`.
+- **`git grep` skips untracked files,** so a baseline generated before new files are added misses them. The staged run is the one that catches them.
+
