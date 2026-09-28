@@ -58,7 +58,6 @@ vi.mock("@/stores/popup.store", () => ({
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({
 		openToast: openToastMock,
-		TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 	}),
 }))
 vi.mock("@/utils/amount.js", () => ({
@@ -184,7 +183,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalledExactlyOnceWith(contractAddress)
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Contract address copied" }), expect.any(Number))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "success", label: "Contract address copied" }))
 	})
 
 	test("copy failure: clipboard throws → warning toast fires + no crash", async () => {
@@ -198,7 +197,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }), undefined)
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 
 	test("state reset on close: open → expand → close → reopen reads collapsed", async () => {
@@ -301,7 +300,7 @@ describe("IncomingTrustPopup — one decision path for allow and reject", () => 
 		const w = await mountShown()
 		await clickReject(w)
 		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Hiding receives from TST", icon: "info" }))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "success", label: "Hiding receives from TST" }))
 		expect(w.emitted("onClose")?.length).toBe(1)
 		await clickReject(w)
 		expect(rejectMock).toHaveBeenCalledTimes(2)
@@ -326,7 +325,7 @@ describe("IncomingTrustPopup — one decision path for allow and reject", () => 
 		const w = await mountShown()
 		await clickReject(w)
 		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Couldn't update trust state", icon: "warning" }))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", label: "Couldn't update trust state" }))
 		expect(w.emitted("onClose")?.length).toBe(1)
 		await clickReject(w)
 		expect(rejectMock).toHaveBeenCalledTimes(2)

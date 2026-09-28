@@ -12,8 +12,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 let deletedHandler: ((tb: unknown) => void) | undefined
 let addedHandler: ((tb: unknown) => void) | undefined
+let updatedHandler: ((tb: unknown) => void) | undefined
+let configHandler: ((prop: { key: string; value: unknown }) => void) | undefined
 let connectedHandler: (() => void) | undefined
-const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 // tok-1 is price-mapped (mainnet cUSD); tok-2 is deliberately unmapped.
@@ -54,7 +55,12 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 				}),
 				remove: vi.fn(),
 			},
-			onTokenBalanceUpdated: noopEvent,
+			onTokenBalanceUpdated: {
+				add: vi.fn((fn: (tb: unknown) => void) => {
+					updatedHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			onTokenBalanceDeleted: {
 				add: vi.fn((fn: (tb: unknown) => void) => {
 					deletedHandler = fn
@@ -73,7 +79,12 @@ vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onUpdate: { add: vi.fn(), remove: vi.fn() },
+			onUpdate: {
+				add: vi.fn((fn: (prop: { key: string; value: unknown }) => void) => {
+					configHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			getValue: vi.fn().mockImplementation(async () => mockShowFiat),
 		}
 	}),
@@ -174,6 +185,8 @@ afterEach(() => {
 	vi.clearAllMocks()
 	deletedHandler = undefined
 	addedHandler = undefined
+	updatedHandler = undefined
+	configHandler = undefined
 	connectedHandler = undefined
 	mockQuotes = {}
 	mockShowFiat = true
@@ -540,5 +553,179 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
 
 		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(true)
+	})
+})
+
+describe("BalanceView — an arrival on Home", () => {
+	type Wrapper = Awaited<ReturnType<typeof mountView>>["wrapper"]
+	const USD_1 = () => ({ "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } })
+	const LARGE = 98_765_432_109_876n * 10n ** 6n
+	const row = (privateRaw: bigint) => ({ ...SEED[0], privateBalance: privateRaw.toString(), publicBalance: "0" })
+	const status = (w: Wrapper) => w.find('[data-testid="balance-arrival-status"]')
+	const chip = (w: Wrapper) => w.find('[data-testid="balance-arrival-chip"]')
+	const hero = (w: Wrapper) => w.find('[data-testid="balance-amount"]').text()
+	let reducedMotion = false
+	/** The hero's text for `rows` with no arrival: the aggregate's own string. */
+	async function ownString(rows: unknown[]) {
+		seedRows = rows as typeof SEED
+		const { wrapper } = await mountView()
+		const text = hero(wrapper)
+		wrapper.unmount()
+		return text
+	}
+	/** Home with the pre-rise value on screen for a minute. */
+	async function settledHome(privateRaw = LARGE) {
+		seedRows = [row(privateRaw)] as typeof SEED
+		const view = await mountView()
+		await vi.advanceTimersByTimeAsync(60_000)
+		return view
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "requestAnimationFrame", "cancelAnimationFrame"] })
+		mockQuotes = USD_1()
+		reducedMotion = false
+		window.matchMedia = vi.fn(() => ({ matches: reducedMotion })) as unknown as typeof window.matchMedia
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+		document.documentElement.classList.remove("noanimations")
+		Reflect.deleteProperty(window, "matchMedia")
+	})
+
+	test("the status node exists and is empty before any arrival; each arrival's chip lands inside that same node", async () => {
+		const { wrapper } = await mountView()
+		const node = status(wrapper).element
+		expect(status(wrapper).text()).toBe("")
+		expect(chip(wrapper).exists()).toBe(false)
+
+		await wrapper.setProps({ arrival: { id: "r1", label: "+5 AAA" } })
+		expect(status(wrapper).element).toBe(node)
+		expect(status(wrapper).find('[data-testid="balance-arrival-chip"]').text()).toBe("+5 AAA")
+		const first = chip(wrapper).element
+
+		await wrapper.setProps({ arrival: { id: "r2", label: "+7 AAA" } })
+		expect(status(wrapper).element).toBe(node)
+		expect(wrapper.findAll('[data-testid="balance-arrival-chip"]')).toHaveLength(1)
+		expect(chip(wrapper).element).not.toBe(first)
+		expect(chip(wrapper).text()).toBe("+7 AAA")
+	})
+
+	test("an arrival with no label (invalid decimals) shows no chip; nor does the token hero or a hidden fiat hero", async () => {
+		const unformattable = await mountView({ arrival: { id: "r1", label: null } })
+		expect(chip(unformattable.wrapper).exists()).toBe(false)
+
+		const tokenPage = await mountView({ tokenBalance: SEED[0], arrival: { id: "r1", label: "+5 AAA" } })
+		expect(chip(tokenPage.wrapper).exists()).toBe(false)
+
+		mockShowFiat = false
+		const fiatOff = await mountView({ arrival: { id: "r1", label: "+5 AAA" } })
+		expect(chip(fiatOff.wrapper).exists()).toBe(false)
+		expect(status(fiatOff.wrapper).exists()).toBe(true)
+	})
+
+	test("a rise 3 s after the arrival counts from the value shown a minute before, and ends on the aggregate's own string", async () => {
+		const risen = LARGE + 1_234_567n * 10n ** 6n
+		const [before, after] = [await ownString([row(LARGE)]), await ownString([row(risen)])]
+		const { wrapper } = await settledHome()
+		expect(hero(wrapper)).toBe(before)
+
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1,234,567 AAA" } })
+		await vi.advanceTimersByTimeAsync(3_000)
+		updatedHandler?.(row(risen))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(before)
+
+		await vi.advanceTimersByTimeAsync(300)
+		expect([before, after]).not.toContain(hero(wrapper))
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(hero(wrapper)).toBe(after)
+	})
+
+	test("a rise 11 s after the arrival, or a fall, lands at once", async () => {
+		// Each mount replaces the captured handlers, so the expected strings are read first.
+		const [up, down] = [await ownString([row(LARGE + 10n ** 6n)]), await ownString([row(LARGE - 10n ** 6n)])]
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		await vi.advanceTimersByTimeAsync(11_000)
+		updatedHandler?.(row(LARGE + 10n ** 6n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(up)
+
+		await wrapper.setProps({ arrival: { id: "r2", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE - 10n ** 6n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(down)
+	})
+
+	test("a scope switch cancels a running count; the new scope's figures, and its rise, owe the old arrival nothing", async () => {
+		const [switched, risen] = [await ownString([row(LARGE * 2n)]), await ownString([row(LARGE * 3n)])]
+		const { wrapper, appStore } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(100)
+
+		const other = (raw: bigint) => ({ ...row(raw), account: "0xother" })
+		fetchRows = async () => [other(LARGE * 2n)] as typeof SEED
+		appStore.account = { address: "0xother" } as never
+		await flushPromises()
+		expect(hero(wrapper)).toBe(switched)
+
+		updatedHandler?.(other(LARGE * 3n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(risen)
+	})
+
+	test("with fiat off nothing counts: turning it back on shows the aggregate's own string at once", async () => {
+		const [risen, shown] = [await ownString([row(LARGE + 10n ** 12n)]), await ownString([row(LARGE + 2n * 10n ** 12n)])]
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: false })
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: true })
+		await flushPromises()
+		expect(hero(wrapper)).toBe(risen)
+
+		configHandler?.({ key: "showFiatValues", value: false })
+		await flushPromises()
+		await wrapper.setProps({ arrival: { id: "r2", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 2n * 10n ** 12n))
+		await flushPromises()
+		configHandler?.({ key: "showFiatValues", value: true })
+		await flushPromises()
+		expect(hero(wrapper)).toBe(shown)
+	})
+
+	test.each([
+		["reduced motion", () => (reducedMotion = true)],
+		["Disable animations", () => document.documentElement.classList.add("noanimations")],
+	])("under %s the hero shows the final value with no frame, and the chip runs the calm animation", async (_, calm) => {
+		calm()
+		const { wrapper } = await settledHome()
+		const frame = vi.spyOn(globalThis, "requestAnimationFrame")
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe(await ownString([row(LARGE + 10n ** 12n)]))
+		expect(frame).not.toHaveBeenCalled()
+		expect(
+			chip(wrapper)
+				.classes()
+				.some((c) => c.includes("arrival_chip_calm")),
+		).toBe(true)
+	})
+
+	test("unmounting mid-count cancels the frame", async () => {
+		const { wrapper } = await settledHome()
+		await wrapper.setProps({ arrival: { id: "r1", label: "+1 AAA" } })
+		updatedHandler?.(row(LARGE + 10n ** 12n))
+		await flushPromises()
+		const cancel = vi.spyOn(globalThis, "cancelAnimationFrame")
+		wrapper.unmount()
+		expect(cancel).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
 	})
 })

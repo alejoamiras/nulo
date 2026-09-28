@@ -10,6 +10,7 @@
 <script setup>
 /** Components */
 import { Dropdown } from "@/components/ui/Dropdown"
+import RowTarget from "@/components/ui/RowTarget.vue"
 
 /** Utils */
 import { defaultConfig as makeDefaultConfig } from "@/wallet/config"
@@ -29,9 +30,7 @@ const cacheStore = useCacheStore()
 const configService = new ConfigServiceClient()
 configService.onUpdate.add(onSettingUpdate)
 
-/** Developer-only: open the logs window (previously accessible via the
- *  hamburger MenuPopup, now relocated here as part of the menu removal). */
-const handleOpenLogs = async () => {
+const openLogs = async () => {
 	if (appStore.loggerWindowId) {
 		try {
 			const win = await chrome.windows.get(appStore.loggerWindowId)
@@ -53,7 +52,18 @@ const handleOpenLogs = async () => {
 	cacheStore.failureLog = null
 }
 
+// The window's id is known only once windows.create resolves, so a press in that gap joins the
+// open in flight instead of opening a second window.
+let pendingOpen = null
+const handleOpenLogs = () => {
+	pendingOpen ??= openLogs().finally(() => {
+		pendingOpen = null
+	})
+	return pendingOpen
+}
+
 const isLoading = ref(true)
+const logsTitleId = useId()
 
 const defaultConfig = makeDefaultConfig()
 const isDeveloperModeEnabled = ref(defaultConfig.developerMode)
@@ -103,7 +113,7 @@ async function updateSetting(key, value) {
 		await configService.setValue(key, value)
 		applySetting(key, value)
 	} catch (err) {
-		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update setting" })
 	}
 }
 
@@ -119,7 +129,7 @@ async function applySetting(key, value) {
 			break
 
 		case "defaultExplorer":
-			openToast({ label: "Default explorer updated", icon: "info" }, TOAST_DURATION.SHORT)
+			openToast({ kind: "success", label: "Default explorer updated" })
 			break
 
 		default:
@@ -172,18 +182,13 @@ onBeforeUnmount(() => {
 			</template>
 
 			<!-- Logs (developer mode only) -->
-			<div
-				v-if="isDeveloperModeEnabled"
-				@click="handleOpenLogs"
-				:class="$style.logs_link"
-				role="button"
-				tabindex="0"
-				@keydown.enter="handleOpenLogs"
-			>
+			<div v-if="isDeveloperModeEnabled" @click="handleOpenLogs" :class="$style.logs_row" data-testid="settings-logs-row">
+				<RowTarget :labelledby="logsTitleId" data-testid="settings-logs-open" />
+
 				<Flex justify="between" align="center">
 					<Flex direction="column" gap="6">
 						<Flex align="center" gap="8">
-							<Text size="13" weight="600" color="primary">Logs</Text>
+							<Text :id="logsTitleId" size="13" weight="600" color="primary">Logs</Text>
 							<div
 								v-if="cacheStore.failureLog?.color"
 								:class="$style.failure_dot"
@@ -270,14 +275,22 @@ onBeforeUnmount(() => {
 	}
 }
 
-.logs_link {
-	cursor: pointer;
-	outline: none;
+/* The box reaches 8px past the text so the ring clears it; the fade stays off the ring. */
+.logs_row {
+	position: relative;
+	margin: -6px -8px;
+	padding: 6px 8px;
 
 	transition: opacity 0.2s var(--bezier);
 
 	&:hover {
 		opacity: 0.8;
+	}
+
+	&:has(> [data-row-target]:focus-visible) {
+		opacity: 1;
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
 	}
 }
 

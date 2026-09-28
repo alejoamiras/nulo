@@ -345,13 +345,13 @@ const onFpcUpdated = (fpc) => {
 }
 const onFpcDeleted = (fpc) => {
 	if (props.originPrivacy !== null) {
-		if (effectiveMethod.value?.fpc?.id === fpc.id) openToast({ label: "Selected FPC was deleted" })
+		if (effectiveMethod.value?.fpc?.id === fpc.id) openToast({ kind: "success", label: "Selected FPC was deleted" })
 		fpcEdits.set(fpc.id, null)
 		return
 	}
 	if (selectedMethod.value?.fpc?.id === fpc.id) {
 		selectedMethod.value = undefined
-		openToast({ label: "Selected FPC was deleted" })
+		openToast({ kind: "success", label: "Selected FPC was deleted" })
 	}
 }
 

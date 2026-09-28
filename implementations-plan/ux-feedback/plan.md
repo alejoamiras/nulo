@@ -58,7 +58,7 @@ option stay out.
 | ✓ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
 | ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ✓ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
-| ☐ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | b4-snackbar-rows-arrivals |
+| ✓ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
 | ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | b5-permissions |
 
 A row gets ✓ only when its plan has every phase ✓, its arc loop converged, and its parity
@@ -269,6 +269,26 @@ reaching one of those surfaces reads the picks first; if the owner has not picke
 recommended option and lists the surface under **sign-off pending** in its PR body. The owner's
 pick always wins, even after the PR is open.
 
+### The owner's answers (2026-09-25)
+
+The picks store refuses reads from the account now in use, even with the page shared, so the
+owner answered in chat, and the message is the record: "1. okei, shared it. Regarding 2: on
+(3)... Go with recommended. Regarding 5: Sounds good. Regarding 6: Recommended. And on "T" looks
+good. But please, drop the usage of "em dashes"." Read against the page's "Round five at a
+glance":
+
+| Page group | Spec | Batch | Answer |
+|---|---|---|---|
+| 3 · the fee menu before its balances arrive, the spoken sub-cent fee, a fee contract added by hand | U14, U15, U16 | 1 | signed off, as recommended |
+| 5 · first-run import | U11 | 1 | signed off |
+| 6 · asking for more, several accounts, banners, every row, rename, the authorization window, Settings | U1–U7, and the A-* addendum the page groups under item 6 ("the recommended option on each") | 5 | signed off, as recommended |
+| T · the hostname warning and the recovery-phrase note as text | U8, U9 | 3 | signed off; each em dash made a full stop (arc 3; proposal version 10 draws it) |
+| 8 · the review sheet and the fee tag, the strip when Nulo can't tell who pays | U12, U13 | 1 | signed off, option (a) on each, in a later message: "for U12: (a) for U13: (a)" |
+
+U10 has no picker ("Unchanged"). Copy rule from the same message: no em dash joins two clauses
+in user-visible text this program adds; the empty-value glyph "—" stays where a drawing shows it
+(U14, U16). Each PR body quotes the message for its surfaces.
+
 ## Delivery
 
 - **Stack**: arc 1 is adopted at program setup, then `gh stack add <branch>` at each arc boundary,
@@ -328,7 +348,18 @@ Batch 1's parity answers (chat, 2026-09-24): the fee card's app-set row and embe
 fee line adds dollars ("Add dollars"); a hand-added fee contract there reads "Fee · —" with no
 payer ("Align with U16 (Recommended)").
 
+Round 5 (chat, 2026-09-25): items 3, 5, 6 and T signed off, then item 8 ("for U12: (a) for
+U13: (a)"), and no em dash joining two clauses in new copy; the quotes and the mapping are in
+§ The owner's answers. The older strings that do: "separate follow-up for those 45 older
+strings" (below).
+
 ## Follow-ups (not this program)
+
+- About 45 older user-visible strings join two clauses with an em dash: toasts ("Couldn't
+  estimate fee — retry."), the migration barrier, journal, fee and account-state messages. The
+  owner's call: "separate follow-up for those 45 older strings", one PR after this stack. Find
+  them with a scan of `apps/extension/src` for " — " outside comments, logs and thrown errors;
+  the empty-value glyph "—" stays, and each string's pinning test changes with it.
 
 - 4B, one connect window that turns into the emoji check after Allow: its own blueprint (it
   touches the verify path); round 1's "A + B" drawing is its design.
@@ -351,6 +382,13 @@ payer ("Align with U16 (Recommended)").
   - Test-side fix: keep only the sandbox's account-state slice in the backup the test edits.
   - Owner questions: whether preloaded contracts should be skipped like protocol ones, and
     whether an import should wait on public networks at all.
+- The incoming row's 8-character amount drops whole-number digits (`utils/amount.ts:111-113`). A
+  visible change, so the owner decides it.
+- `nulo:ui:pinnedTokens@<profileId>` outlives the profile's deletion: the reset page removes only
+  the two fee-payment keys (`settings/security/reset.vue:85-87`), the deletion coordinator none.
+- `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits
+  (`incoming-transfer/service.ts`). Batch 4 closed the same pattern on the token add; these two
+  predate it.
 
 ## Seeds
 

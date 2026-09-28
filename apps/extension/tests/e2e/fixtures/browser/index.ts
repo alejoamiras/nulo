@@ -47,6 +47,11 @@ export interface PxeHostState {
 	visibility: string[]
 }
 
+/** A tab or window `waitForNewTab` found. */
+export interface OpenedTab {
+	close(): Promise<void>
+}
+
 export interface BrowserDriver {
 	readonly kind: BrowserKind
 	/** Extension URL scheme, trailing `//` included. */
@@ -99,6 +104,13 @@ export interface BrowserDriver {
 	 */
 	waitForOpenedUrl(browser: Browser, url: string, timeout: number): Promise<void>
 	/**
+	 * Run `open`, then resolve with the tab or window it opened, or reject once `timeout` ms pass after
+	 * it without one. Nothing else may open a tab or window meanwhile: being new is what identifies it.
+	 * For a tab the browser opens by itself, such as a modified click's, which Firefox's BiDi can leave
+	 * unannounced for good, so `targets()` never lists it.
+	 */
+	waitForNewTab(browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab>
+	/**
 	 * Answer every request the browser makes to `fromOrigin` — whichever of the extension's
 	 * contexts issues it — without touching the network. Resolves once no request can escape.
 	 */
@@ -108,6 +120,14 @@ export interface BrowserDriver {
 	 * person's click — neither focuses the window nor, on every browser, counts as a user gesture.
 	 */
 	prepareClick(page: Page): Promise<void>
+	/**
+	 * Runs before keys pressed at `page` once the wallet has opened a window from it, after that
+	 * window shows its page, and resolves once `page` has focus. Headless Firefox focuses every window
+	 * the wallet opens, and a key sent to a page whose window lost focus reaches its focused element
+	 * with no default action: Space on a button fires keydown and keyup but no click. A person goes
+	 * back to the popup before pressing it.
+	 */
+	prepareKeys(page: Page): Promise<void>
 	/** Answer the file picker that `open` asks for with `filePath`. `open` is a scripted click. */
 	pickFile(page: Page, open: () => Promise<void>, filePath: string): Promise<void>
 	/** A PRF-capable virtual authenticator. `anchorPage` matters where one is scoped to a page. */
@@ -186,6 +206,8 @@ export const waitForTarget = (browser: Browser, predicate: (target: Target) => b
 	driver.waitForTarget(browser, predicate, timeout)
 export const waitForOpenedUrl = (browser: Browser, url: string, timeout: number): Promise<void> =>
 	driver.waitForOpenedUrl(browser, url, timeout)
+export const waitForNewTab = (browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab> =>
+	driver.waitForNewTab(browser, open, timeout)
 export const interceptRpc = (
 	browser: Browser,
 	extensionId: string,
@@ -195,6 +217,7 @@ export const interceptRpc = (
 export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
 	driver.openScratchPage(browser, extensionId, opts)
 export const prepareClick = (page: Page): Promise<void> => driver.prepareClick(page)
+export const prepareKeys = (page: Page): Promise<void> => driver.prepareKeys(page)
 export const pickFile = (page: Page, open: () => Promise<void>, filePath: string): Promise<void> => driver.pickFile(page, open, filePath)
 export const virtualAuthenticator = (browser: Browser, anchorPage: Page): Promise<VirtualAuthenticator> =>
 	driver.virtualAuthenticator(browser, anchorPage)

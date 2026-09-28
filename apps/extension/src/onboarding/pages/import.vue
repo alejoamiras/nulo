@@ -7,6 +7,7 @@
 import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 /** Utils */
@@ -32,21 +33,18 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 // bootstraps the freshly activated profile itself — its "wait for active" IS the
 // direct bootstrap. If that bootstrap doesn't activate (an MV3 worker restart
 // mid-import, so the session couldn't be confirmed), the recovery re-reads the
-// active profile and bootstraps again, matching the popup path. Onboarding routes
-// to /onboarding/learn regardless (that screen gates on unlock); only the toast
-// copy reflects the outcome.
+// active profile and bootstraps again, matching the popup path. Either way onboarding
+// moves on with no success snack, unlike the popup's import: no later onboarding page
+// needs the session, and a profile left locked meets the popup's unlock screen.
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	const outcome = await completeImportWithRecovery({
+	await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
 		},
 		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
 	})
-	openToast(
-		outcome === "active" ? { label: "Profile imported", icon: "check-circle" } : { label: "Profile imported. Unlock to continue." },
-	)
 	router.push("/onboarding/learn")
 }
 
@@ -181,7 +179,7 @@ onBeforeUnmount(() => {
 			@passwordInput="handlePasswordInput"
 		/>
 
-		<Flex v-if="selectedImportOption" direction="column" gap="10" :class="$style.ctas">
+		<Flex v-if="selectedImportOption" v-snack-footer direction="column" gap="10" :class="$style.ctas">
 			<template v-if="selectedImportOption === 'full_backup'">
 				<Button
 					v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"

@@ -202,9 +202,17 @@ export const chromeDriver: BrowserDriver = {
 	waitForOpenedUrl: async (browser, url, timeout) => {
 		await browser.waitForTarget((target) => target.type() === "page" && target.url() === url, { timeout })
 	},
+	waitForNewTab: async (browser, open, timeout) => {
+		const before = new Set(browser.targets())
+		await open()
+		const target = await browser.waitForTarget((t) => t.type() === "page" && !before.has(t), { timeout })
+		return { close: async () => (await target.asPage()).close() }
+	},
 	interceptRpc: (browser, extensionId, fromOrigin, mode) => cdpInterceptRpc(browser, `${SCHEME}${extensionId}/`, fromOrigin, mode),
 	// Chrome treats evaluated script as a user gesture and has no focused-window precondition.
 	prepareClick: async () => {},
+	// Chrome runs a key's default action on the page the key is sent to, focused or not.
+	prepareKeys: async () => {},
 	pickFile: async (page, open, filePath) => {
 		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), open()])
 		await chooser.accept([filePath])

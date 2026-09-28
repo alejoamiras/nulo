@@ -4,7 +4,6 @@ import type { Network } from "@/wallet/services/network/client"
 const openToastMock = vi.fn()
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
-	TOAST_DURATION: { SHORT: 1500, DEFAULT: 2000, LONG: 4000 },
 }))
 
 const appStoreState = {
@@ -87,8 +86,7 @@ describe("composables/useNetworkActivation", () => {
 		await expect(activate(net("new"))).resolves.toBe("unconfirmed")
 		expect(read).toHaveBeenCalledTimes(1)
 		expect(appStoreState.network?.id).toBe("old")
-		expect(openToastMock.mock.calls[0]?.[0]).toMatchObject({ icon: "warning", color: "red" })
-		expect(openToastMock.mock.calls[0]?.[1]).toBe(4000)
+		expect(openToastMock.mock.calls[0]?.[0]).toMatchObject({ kind: "error" })
 	})
 
 	test("a failed persist AND a failed read keep the admitted target and still report unconfirmed", async () => {

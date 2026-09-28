@@ -4,6 +4,7 @@
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -52,7 +53,7 @@ const tokenService = new TokenServiceClient()
 tokenService.onTokenDeleted.add(onTokenDeleted)
 function onTokenDeleted(token) {
 	if (token.id === cacheStore.activeTokenIdx) {
-		openToast({ label: "Token has been deleted" })
+		openToast({ kind: "success", label: "Token has been deleted" })
 
 		emit("onClose")
 	}
@@ -152,7 +153,7 @@ watch(
 					</template>
 				</Flex>
 
-				<Button @click="emit('onClose')" wide variant="primary_outline" size="medium"> Close </Button>
+				<Button v-snack-footer @click="emit('onClose')" wide variant="primary_outline" size="medium"> Close </Button>
 			</Flex>
 		</PopupCard>
 	</Popup>

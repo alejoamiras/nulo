@@ -59,6 +59,7 @@ watch(
 )
 
 const handleCopyAddress = (address) => {
+	if (copiedAddress.value === address) return
 	copiedAddress.value = address
 
 	void copyWithToast(address, openToast, "Sender's address is copied")
@@ -77,7 +78,7 @@ const handleDelete = (sender) => {
 	cacheStore.confirm.callback = async () => {
 		await accountStateClientService.deleteSender(appStore.network.id, sender)
 
-		openToast({ label: "Sender successfully deleted" })
+		openToast({ kind: "success", label: "Sender successfully deleted" })
 	}
 
 	popupStore.open("confirm")
@@ -109,33 +110,22 @@ onBeforeUnmount(() => {
 
 				<Flex align="center" gap="8">
 					<Tooltip position="end" delay="350">
-						<Icon
-							v-if="copiedAddress !== sender"
-							@click.stop="handleCopyAddress(sender)"
-							name="copy"
-							size="14"
-							color="tertiary"
-							:class="$style.icon_btn"
-						/>
-						<Icon
-							v-else-if="copiedAddress === sender"
-							name="check-circle"
-							size="14"
-							color="green"
-							:style="{ transition: 'all 0.2s ease' }"
-						/>
+						<!-- Inline styles keep the check's own look through the action's pointer and hover fill. -->
+						<RowAction
+							label="Copy address"
+							:style="copiedAddress === sender ? { cursor: 'default' } : undefined"
+							@click="handleCopyAddress(sender)"
+						>
+							<Icon v-if="copiedAddress !== sender" name="copy" size="14" color="tertiary" />
+							<Icon v-else name="check-circle" size="14" color="green" :style="{ transition: 'all 0.2s ease', fill: 'var(--green)' }" />
+						</RowAction>
 
 						<template #content> Copy address </template>
 					</Tooltip>
 					<Tooltip position="end" delay="350">
-						<Icon
-							@click.stop="handleDelete(sender)"
-							name="close-circle"
-							size="14"
-							color="tertiary"
-							:class="$style.icon_btn"
-							data-testid="sender-delete"
-						/>
+						<RowAction label="Delete sender" data-testid="sender-delete" @click="handleDelete(sender)">
+							<Icon name="close-circle" size="14" color="tertiary" />
+						</RowAction>
 
 						<template #content> Delete sender </template>
 					</Tooltip>
@@ -161,26 +151,5 @@ onBeforeUnmount(() => {
 	border: 1px solid var(--nulo-border);
 
 	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border-color: var(--nulo-outline);
-		span {
-			color: var(--txt-primary);
-			cursor: pointer;
-		}
-	}
 }
-
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-}
-
 </style>

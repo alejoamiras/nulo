@@ -7,6 +7,7 @@
 import { expect, inject } from "vitest"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
 import { importTokenAndWaitForBalance, selectSendToken } from "../fixtures/helpers"
+import { openSend } from "../fixtures/send-page"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -27,8 +28,8 @@ test.skipIf(!hasConfig)(
 		await waitForHash(page, "#/popup/general")
 		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
 
-		await clickByTestId(page, "actions-send")
-		await page.waitForSelector('[data-testid="send-token-trigger"]', { visible: true, timeout: 15_000 })
+		// Until the page's token loads, the trigger opens the import popup; openSend waits for the token.
+		await openSend(page)
 
 		// Two tokens: no search box, both rows listed, the current token marked selected.
 		await clickByTestId(page, "send-token-trigger")

@@ -31,7 +31,7 @@ const isFetchingContracts = ref(false)
 const error = ref()
 const isErrorOccurred = computed(() => !!error.value)
 const fetchContracts = async (isRefetching) => {
-	if (isRefetching) openToast({ label: "Fetching contracts again", icon: "zap" })
+	if (isRefetching) openToast({ kind: "success", label: "Fetching contracts again" })
 	isFetchingContracts.value = true
 
 	try {
@@ -93,25 +93,9 @@ onBeforeUnmount(() => {
 <style module>
 .card {
 	border-radius: 0;
-	cursor: pointer;
 	border: 1px solid var(--nulo-border);
 
 	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border-color: var(--nulo-outline);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
 }
 
 </style>

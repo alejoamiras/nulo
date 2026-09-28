@@ -16,6 +16,7 @@ import { isValidDecimals, parseRawBalance, safeFiatOf } from "@/utils/token-amou
 import { aggregateFiat } from "@/utils/token-aggregate"
 import { forChain } from "@/utils/token-order"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
+import { createBalanceCount } from "./balance-count"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"
@@ -41,6 +42,11 @@ const props = defineProps({
 	seedReady: {
 		type: Boolean,
 		default: true,
+	},
+	/** Home's newest arrival, `{ id, label }`; a null label (an unformattable amount) shows no chip. */
+	arrival: {
+		type: Object,
+		default: null,
 	},
 })
 
@@ -108,6 +114,23 @@ const aggregate = computed(() => aggregateFiat(tokenBalances.value, fiatOf))
  *  the "priced assets only" caption owns the honesty, never an em-dash. */
 const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
 const isAggregatePartial = computed(() => aggregate.value.partial)
+
+/** The hero's figure while it counts toward the aggregate; null shows the aggregate's own string. */
+const countMicro = ref(null)
+const heroFiatDisplay = computed(() => (countMicro.value === null ? aggregateFiatDisplay.value : prices.formatUsdMicro(countMicro.value)))
+const balanceCount = createBalanceCount({
+	now: () => Date.now(),
+	frame: (step) => requestAnimationFrame(step),
+	cancelFrame: (id) => cancelAnimationFrame(id),
+	show: (micro) => {
+		countMicro.value = micro
+	},
+})
+const isCalm = () =>
+	window.matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.classList.contains("noanimations")
+/** Home's arrival chip: none on the token hero, and none while the fiat hero is hidden. */
+const chip = computed(() => (!tokenToDisplay.value && showFiatValues.value && props.arrival?.label ? props.arrival : null))
+const chipCalm = ref(false)
 
 const handleCopy = (value, label) => {
 	void copyWithToast(value, openToast, `${label} is copied`)
@@ -231,6 +254,7 @@ async function fetchTokenBalances(isTimedRetry = false) {
 function enterScope() {
 	tokenBalances.value = []
 	balancesState.value = "loading"
+	balanceCount.reset({ scope: true })
 	restartCap()
 	return fetchTokenBalances()
 }
@@ -242,11 +266,26 @@ watch(
 		await enterScope()
 	},
 )
+// Only a figure the hero displays is recorded: loading, unknown and fiat off count nothing.
+watch(
+	() => (!tokenToDisplay.value && showFiatValues.value && !heroPending.value && isTotalKnown.value ? aggregate.value.micro : null),
+	(micro) => (micro === null ? balanceCount.reset() : balanceCount.observe(micro)),
+	{ immediate: true },
+)
+watch(
+	() => props.arrival?.id,
+	(id) => {
+		if (!id) return
+		chipCalm.value = isCalm()
+		balanceCount.arrive(chipCalm.value)
+	},
+)
 onMounted(async () => {
 	await enterScope()
 })
 onBeforeUnmount(() => {
 	fetchGeneration++
+	balanceCount.stop()
 	clearTimeout(capTimer)
 	clearTimeout(retryTimer)
 	tokenBalanceService.onConnected.remove(onReconnected)
@@ -261,21 +300,34 @@ onBeforeUnmount(() => {
 	<Flex direction="column" :class="$style.wrapper">
 		<!-- Balance section -->
 		<section :class="$style.balance_section">
-			<div
-				v-if="tokenToDisplay || showFiatValues"
-				@click="handleTokenBalanceClick"
-				data-testid="balance-amount"
-				:aria-busy="(!tokenToDisplay && heroPending) || undefined"
-				:class="$style.balance_amount"
-			>
-				<template v-if="tokenToDisplay">
-					{{ totalTokenBalance.value }}
-					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
-				</template>
-				<Skeleton v-else-if="heroPending" :width="150" :height="40" data-testid="balance-hero-loading" :class="$style.hero_skeleton" />
-				<template v-else-if="isTotalKnown">{{ aggregateFiatDisplay }}</template>
-				<!-- The balance list could not be read at all: unknown, which is not zero. -->
-				<span v-else data-testid="balance-hero-unknown">—</span>
+			<div :class="$style.hero_wrap">
+				<div
+					v-if="tokenToDisplay || showFiatValues"
+					@click="handleTokenBalanceClick"
+					data-testid="balance-amount"
+					:aria-busy="(!tokenToDisplay && heroPending) || undefined"
+					:class="$style.balance_amount"
+				>
+					<template v-if="tokenToDisplay">
+						{{ totalTokenBalance.value }}
+						<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
+					</template>
+					<Skeleton v-else-if="heroPending" :width="150" :height="40" data-testid="balance-hero-loading" :class="$style.hero_skeleton" />
+					<template v-else-if="isTotalKnown">{{ heroFiatDisplay }}</template>
+					<!-- The balance list could not be read at all: unknown, which is not zero. -->
+					<span v-else data-testid="balance-hero-unknown">—</span>
+				</div>
+				<!-- Mounted before any arrival, so a chip's text lands in a live region that already exists. -->
+				<span role="status" data-testid="balance-arrival-status">
+					<span
+						v-if="chip"
+						:key="chip.id"
+						data-testid="balance-arrival-chip"
+						:class="[$style.arrival_chip, chipCalm && $style.arrival_chip_calm]"
+					>
+						{{ chip.label }}
+					</span>
+				</span>
 			</div>
 
 			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
@@ -350,6 +402,72 @@ onBeforeUnmount(() => {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	max-width: 100%;
+	min-width: 0;
+}
+
+/* The arrival chip rises above the hero; the hero keeps its own clipping. */
+.hero_wrap {
+	position: relative;
+	display: inline-flex;
+	max-width: 100%;
+}
+
+.arrival_chip {
+	position: absolute;
+	left: 50%;
+	top: -18px;
+	transform: translateX(-50%);
+	max-width: 312px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 3px 8px;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--green);
+	background: color-mix(in srgb, var(--green), transparent 88%);
+	border: 1px solid color-mix(in srgb, var(--green), transparent 55%);
+	opacity: 0;
+	pointer-events: none;
+	animation: n-plus 2.6s ease-out forwards;
+}
+
+.arrival_chip_calm {
+	animation: n-plus-calm 2.6s ease-out forwards;
+}
+
+@keyframes n-plus {
+	0% {
+		opacity: 0;
+		transform: translate(-50%, 6px);
+	}
+	12% {
+		opacity: 1;
+		transform: translate(-50%, 0);
+	}
+	78% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(-50%, -4px);
+	}
+}
+
+@keyframes n-plus-calm {
+	0% {
+		opacity: 0;
+	}
+	10% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
 }
 
 .balance_symbol {

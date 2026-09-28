@@ -28,6 +28,8 @@ const props = defineProps({
 	tx: {
 		type: Object,
 	},
+	/** The route the row opens. */
+	to: { type: String, default: undefined },
 })
 
 const call = computed(() => getPrimaryCall(props.tx.calls))
@@ -154,69 +156,52 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<div :class="$style.row">
-		<TransactionCardLayout
-			:title="title"
-			:icon="icon"
-			:amount="amountStr"
-			:amountSymbol="displayAmountSymbol"
-			:amountFiat="amountFiat"
-			testId="tx-card"
-			:txAmountDisplay="amountStr"
-			:txTransferTypeLabel="transferTypeLabel"
-			:txStatus="txStatusAttr"
-			:txHash="props.tx.hash"
-		>
-			<template #badge>
-				<Icon :name="statusIcon" size="12" :color="statusColor" :class="$style.status_icon" />
-			</template>
+	<TransactionCardLayout
+		:title="title"
+		:icon="icon"
+		:amount="amountStr"
+		:amountSymbol="displayAmountSymbol"
+		:amountFiat="amountFiat"
+		:to="to"
+		testId="tx-card"
+		:txAmountDisplay="amountStr"
+		:txTransferTypeLabel="transferTypeLabel"
+		:txStatus="txStatusAttr"
+		:txHash="props.tx.hash"
+	>
+		<template #badge>
+			<Icon :name="statusIcon" size="12" :color="statusColor" :class="$style.status_icon" />
+		</template>
 
-			<template v-if="transferTypeLabel || originLabel" #title-trailing>
-				<!-- Chip stays in the title row across the lifecycle so it
-				     doesn't visually jump when the tx confirms. The dot is a
-				     subtle visual separator so "USDC" and "Private → Public"
-				     don't read as one continuous string.
-				     For the settled card the two labels are INDEPENDENT (not
-				     mutually exclusive like on the journal-driven awaiting /
-				     terminal cards): `transferTypeLabel` is derived from the
-				     call shape and `originLabel` from `tx.origin`. A
-				     dApp-initiated transfer sets both — render both so the
-				     dApp identity isn't silently dropped. -->
-				<span :class="$style.title_sep">·</span>
-				<span v-if="transferTypeLabel" :class="$style.chip">{{ transferTypeLabel }}</span>
-				<span v-if="originLabel" :class="$style.chip">{{ originLabel }}</span>
-			</template>
+		<template v-if="transferTypeLabel || originLabel" #title-trailing>
+			<!-- Chip stays in the title row across the lifecycle so it
+			     doesn't visually jump when the tx confirms. The dot is a
+			     subtle visual separator so "USDC" and "Private → Public"
+			     don't read as one continuous string.
+			     For the settled card the two labels are INDEPENDENT (not
+			     mutually exclusive like on the journal-driven awaiting /
+			     terminal cards): `transferTypeLabel` is derived from the
+			     call shape and `originLabel` from `tx.origin`. A
+			     dApp-initiated transfer sets both — render both so the
+			     dApp identity isn't silently dropped. -->
+			<span :class="$style.title_sep">·</span>
+			<span v-if="transferTypeLabel" :class="$style.chip">{{ transferTypeLabel }}</span>
+			<span v-if="originLabel" :class="$style.chip">{{ originLabel }}</span>
+		</template>
 
-			<template #secondary>
-				<span v-if="hashSlice && explorerUrl" :class="$style.hash_group">
-					<span :class="$style.hash">{{ hashSlice }}</span>
-					<a
-						:href="explorerUrl"
-						target="_blank"
-						rel="noopener noreferrer"
-						@click.stop
-						:class="$style.explorer_link"
-						aria-label="Open in block explorer"
-					>
-						<Icon name="external-link" size="10" color="tertiary" />
-					</a>
-				</span>
-				<span v-else-if="hashSlice" :class="$style.hash">{{ hashSlice }}</span>
-			</template>
-		</TransactionCardLayout>
-	</div>
+		<template #secondary>
+			<span v-if="hashSlice && explorerUrl" :class="$style.hash_group">
+				<span :class="$style.hash">{{ hashSlice }}</span>
+				<RowAction :href="explorerUrl" label="Open in block explorer" :class="$style.explorer">
+					<Icon name="external-link" size="10" color="tertiary" />
+				</RowAction>
+			</span>
+			<span v-else-if="hashSlice" :class="$style.hash">{{ hashSlice }}</span>
+		</template>
+	</TransactionCardLayout>
 </template>
 
 <style module>
-.row {
-	cursor: pointer;
-	transition: background 0.2s var(--bezier);
-
-	&:hover {
-		background: color-mix(in srgb, var(--nulo-surface-low) 50%, transparent);
-	}
-}
-
 .status_icon {
 	/* Inherits the absolute-positioned badge wrapper from TransactionCardLayout */
 }
@@ -256,15 +241,8 @@ onBeforeUnmount(() => {
 	padding: 1px 4px;
 }
 
-.explorer_link {
-	display: flex;
-	align-items: center;
-	text-decoration: none;
-
-	transition: opacity 0.2s var(--bezier);
-
-	&:hover {
-		opacity: 0.7;
-	}
+/* The 24px box overhangs the 14px secondary row and the 10px glyph, so the row keeps its rhythm. */
+.explorer {
+	margin: -5px -7px;
 }
 </style>

@@ -1,6 +1,7 @@
 <!-- Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0. -->
 <script setup>
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 
 /** Utils */
@@ -53,7 +54,7 @@ const handleSelectProfile = async (profile) => {
 			appStore.profile = profile
 		})
 		if (!switched) {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 			return
 		}
 		await setLastActiveProfileId(profile.id)
@@ -139,7 +140,7 @@ watch(
 						</SettingItem>
 					</ItemsContainer>
 
-					<Flex wide direction="column" gap="8">
+					<Flex v-snack-footer wide direction="column" gap="8">
 						<Button @click="handleCreateProfile" wide variant="primary" size="large" data-testid="select-profile-new-btn">
 							New profile
 						</Button>

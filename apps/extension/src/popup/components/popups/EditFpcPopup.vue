@@ -121,7 +121,7 @@ const handleUpdateFpc = async () => {
 			await fpcService.updateFpc(cacheStore.fpcToEditIdx, nameTerm.value)
 		}
 		emit("onClose")
-		openToast({ label: "FPC is updated" })
+		openToast({ kind: "success", label: "FPC is updated" })
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		processingError.value = {
@@ -146,7 +146,7 @@ const onFpcUpdated = (fpc) => {
 const onFpcDeleted = (fpc) => {
 	if (fpc.id === fpcToEdit.value?.id) {
 		emit("onClose")
-		openToast({ label: "FPC was deleted" })
+		openToast({ kind: "success", label: "FPC was deleted" })
 		return
 	}
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)

@@ -31,6 +31,7 @@ import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMat
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
+import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
 
@@ -238,11 +239,12 @@ const journalOps = ref([])
  *  (hidden=false only); the merge below adds them to recentActivityRows. */
 // Parent owns the client lifecycle (connect/disconnect in onMounted/
 // onBeforeUnmount below); useIncomingTransfers wires the listeners + the
-// `incomingTransfersVisible` toggle reload. Shared verbatim with activity.vue.
+// `incomingTransfersVisible` toggle reload.
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
 const incomingPriceService = new PriceServiceClient()
 const incomingPrices = usePrices(incomingPriceService)
+const arrivals = inject(ARRIVALS_KEY, undefined)
 const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTransfers({
 	incomingTransferService,
 	configService,
@@ -251,6 +253,9 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
+	// Rows are assigned under the state that judges them; the token page's never play, so its reads
+	// wait for none.
+	afterRead: arrivals && ((scope) => (props.token ? Promise.resolve() : arrivals.load(scope))),
 })
 /** Account mode only: whether the active network's incoming scan has stalled. Same client as the
  *  receipts above — the parent owns its connect/disconnect. */
@@ -266,16 +271,9 @@ function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
 	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
 }
-function handleSelectIncoming(inc) {
-	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
-	router.push(`/popup/received/${inc.id}`)
-}
-
-/** Phase 2 follow-up: execution-service client for Cancel surface.
- *  Disconnected in onBeforeUnmount alongside the others. */
 const executionService = new ExecutionServiceClient()
 
-/** Phase 2 follow-up: cancel handler for the awaiting card's `@cancel` emit.
+/** Cancel handler for the awaiting card's `@cancel` emit.
  *  Built from a pure module so the wire is unit-testable without mounting
  *  the full Vue component. The card emits `cancel(jobId)`; the handler
  *  cancels exactly that record. With multiple in-flight cards on screen
@@ -690,16 +688,6 @@ function onExecutingTaskDeleted(task) {
 	}
 }
 
-const handleSelectTx = (tx) => {
-	router.push(`/popup/tx/${tx.hash}`)
-}
-
-// Terminal journal rows (cancelled / interrupted / failed pre-broadcast)
-// have no chain tx hash. Route to the dedicated journal detail page.
-const handleSelectTerminal = (op) => {
-	router.push(`/popup/journal/${op.id}`)
-}
-
 /** Snapshot the active account's in-flight executingTask from TaskService.
  *  Shared by mount and the account-switch reset watcher. Captured-account guard:
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
@@ -767,6 +755,16 @@ watch(
 watch(
 	() => `${props.token ? "token" : "account"}|${appStore.profile?.id ?? ""}|${appStore.network?.id ?? ""}`,
 	() => void syncHealth.refresh(),
+)
+
+// After the render that showed them: only rows that rendered are claimed, so one the row budget
+// left out plays where it is first shown. The token page's rows never play.
+watch(
+	recentActivityRows,
+	(rows) => {
+		if (!props.token) arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc))
+	},
+	{ flush: "post" },
 )
 
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
@@ -887,16 +885,17 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectIncoming(row.inc)"
+					:to="`/popup/received/${row.inc.id}`"
+					:arriving="!token && (arrivals?.isArriving(row.inc) ?? false)"
 				/>
 				<TransactionTerminalCard
 					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
-					@click="handleSelectTerminal(row.op)"
+					:to="`/popup/journal/${row.op.id}`"
 				/>
 			</template>
 		</div>

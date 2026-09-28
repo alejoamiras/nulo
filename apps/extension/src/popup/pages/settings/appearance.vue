@@ -98,7 +98,7 @@ async function updateDustThreshold(event) {
 		// both to the last saved value.
 		dustThreshold.value = prev
 		el.value = prev
-		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update setting" })
 	}
 }
 
@@ -110,7 +110,7 @@ async function updateSetting(key, value) {
 		await configService.setValue(key, value)
 		applySetting(key, value)
 	} catch (err) {
-		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update setting" })
 	}
 }
 

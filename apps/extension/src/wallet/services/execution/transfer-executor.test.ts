@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, JournaledRejection, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
 import type { TransferRequest } from "./operation-planner"
@@ -207,7 +207,7 @@ describe("TransferExecutor.execute", () => {
 	test("build failure: journal → failed with normalized error, task.fail, controller cleanup", async () => {
 		const boom = new Error("estimate blew up")
 		const { executor, deps, task } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
-		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow("estimate blew up")
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(boom, "j1"))
 
 		expect(deps.transitionJournal).toHaveBeenCalledWith(
 			"j1",
@@ -216,6 +216,47 @@ describe("TransferExecutor.execute", () => {
 		)
 		expect(task.fail).toHaveBeenCalledWith(boom)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+
+	test("a failure the record could not take is thrown alone, naming no record", async () => {
+		const boom = new Error("estimate blew up")
+		const { executor, deps } = makeHarness({
+			buildAndEstimate: vi.fn(async () => Promise.reject(boom)),
+			transitionJournal: vi.fn(async (_id: string, progress: { stage: string }) => {
+				if (progress.stage === "failed") throw new Error("storage down")
+				return {}
+			}) as never,
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBe(boom)
+		expect(deps.logError).toHaveBeenCalledWith("Failed to update journal operation", expect.any(Error))
+	})
+
+	test("two identical sends failing in reverse order each name their own record; one refused before its record names none", async () => {
+		let created = 0
+		const builds: Array<(error: Error) => void> = []
+		const createJournalOperation = vi.fn(async (input) => ({ id: `j${++created}`, ...input }) as never)
+		const { executor } = makeHarness({
+			createJournalOperation,
+			buildAndEstimate: vi.fn(
+				() =>
+					new Promise<never>((_resolve, reject) => {
+						builds.push(reject)
+					}),
+			),
+		})
+		const first = executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+		const second = executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+		await vi.waitFor(() => expect(builds).toHaveLength(2))
+		createJournalOperation.mockRejectedValueOnce(new Error("journal write failed"))
+		const refused = await executor.execute(makeReq(), undefined, FENCE).catch((error: unknown) => error)
+
+		const secondError = new Error("the second send fails first")
+		builds[1]?.(secondError)
+		expect(await second).toStrictEqual(new JournaledRejection(secondError, "j2"))
+		const firstError = new Error("the first send fails last")
+		builds[0]?.(firstError)
+		expect(await first).toStrictEqual(new JournaledRejection(firstError, "j1"))
+		expect(refused).toBeInstanceOf(OperationNotRecordedError)
 	})
 
 	test("cancel before pipeline: JobCancelledError surfaces, NO failed transition, task.cancel fires", async () => {
@@ -276,7 +317,9 @@ describe("TransferExecutor: the authorizing session", () => {
 			lane: { registerInFlight: vi.fn(() => ({ live: false })), deleteController: vi.fn() },
 			estimateReuse: { tryConsume: vi.fn(async () => snapshot()), stash: vi.fn() } as never,
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(deps.estimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
@@ -307,7 +350,9 @@ describe("TransferExecutor: the authorizing session", () => {
 				return {} as never
 			}),
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(isFenceLive).toHaveBeenCalledWith(fence)
 		expect(proveAndSend).not.toHaveBeenCalled()
@@ -323,7 +368,9 @@ describe("TransferExecutor: the authorizing session", () => {
 				stash: vi.fn(),
 			} as never,
 		})
-		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toStrictEqual(
+			new JournaledRejection(expect.any(SessionEndedError), "j1"),
+		)
 
 		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()

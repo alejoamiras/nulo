@@ -210,6 +210,10 @@ describe("popup: declining never locks a person out", () => {
 				expect(Object.keys(JSON.parse(body) as object).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)
 
+				// The download's success snack sits over the footer of a page without the nav for 6 s, held
+				// while the pointer rests on it, and the next step presses that footer with a real pointer.
+				await page.mouse.move(180, 40)
+				await page.waitForFunction(() => !document.querySelector('[data-testid="snackbar"]'), { timeout: 10_000, polling: 100 })
 				const backup = await downloadFullBackup(page, TEST_PASSWORD)
 				expect(Object.keys(backup).length).toBeGreaterThan(0)
 				expect(await isSheetPresent(page)).toBe(false)

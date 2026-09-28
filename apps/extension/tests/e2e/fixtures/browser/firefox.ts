@@ -8,7 +8,7 @@ import { reservePort } from "../../../../scripts/e2e/resolve-ports"
 import { type BiDiAttachment, attachPuppeteerOverBiDi } from "./bidi-attach"
 import { LOCATE_BACKGROUND_PAGE, evaluateViaFrameScript } from "./firefox-frame-script"
 import { observeAndRefuse } from "./firefox-rpc-intercept"
-import type { BrowserDriver, LaunchOptions, LaunchedBrowser, PxeHostState, VirtualAuthenticator } from "./index"
+import type { BrowserDriver, LaunchOptions, LaunchedBrowser, OpenedTab, PxeHostState, VirtualAuthenticator } from "./index"
 import {
 	LAUNCH_ENV,
 	type LaunchOwnership,
@@ -353,6 +353,28 @@ async function openScratchPage(browser: Browser, extensionId: string, { freshPro
  */
 const prepareClick = (page: Page): Promise<void> => page.bringToFront().catch(() => {})
 
+const KEYS_FOCUS_BUDGET_MS = 5_000
+const KEYS_FOCUS_ATTEMPT_MS = 500
+
+/**
+ * Firefox raises a window it opens once more as it starts loading that window's page, which undoes
+ * a bringToFront made in between; so `page` is brought forward again until it reports focus.
+ */
+async function prepareKeys(page: Page): Promise<void> {
+	const deadline = Date.now() + KEYS_FOCUS_BUDGET_MS
+	while (Date.now() < deadline) {
+		await page.bringToFront()
+		const focused = await page
+			.waitForFunction(() => document.hasFocus(), { timeout: KEYS_FOCUS_ATTEMPT_MS, polling: 50 })
+			.then(
+				() => true,
+				() => false,
+			)
+		if (focused) return
+	}
+	throw new Error(`prepareKeys: the page did not take focus within ${KEYS_FOCUS_BUDGET_MS / 1000}s`)
+}
+
 const BACKGROUND_NOT_RUNNING = "the background page is not running"
 
 /** Evaluates `body` (a function body; `content` is the background window) in the background page. */
@@ -568,6 +590,47 @@ async function waitForOpenedUrl(browser: Browser, url: string, timeout: number):
 }
 
 /**
+ * The classic handle list, not `targets()`: BiDi announces a tab through its first browsing context
+ * only, and sends nothing when that context is replaced before BiDi has seen its document, which a
+ * link's tab can be.
+ */
+async function waitForNewTab(browser: Browser, open: () => Promise<void>, timeout: number): Promise<OpenedTab> {
+	const session = classicSessionFor(browser)
+	const before = new Set(await session.listWindows())
+	await open()
+	const deadline = Date.now() + timeout
+	while (Date.now() < deadline) {
+		const handle = (await session.listWindows()).find((listed) => !before.has(listed))
+		if (handle) return { close: () => closeTab(session, handle) }
+		await pause(100)
+	}
+	throw new Error(`waitForNewTab: no new tab or window after ${timeout}ms`)
+}
+
+/** By handle, from Firefox's own scope: a classic close would switch to the tab first, which selects it. */
+async function closeTab(session: WebDriverSession, handle: string): Promise<void> {
+	const outcome = await session.chromeScript<string>(
+		`const [id, done] = arguments;
+		try {
+			const { NavigableManager } = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs");
+			const browser = NavigableManager.getBrowserById(id);
+			if (!browser) return done("gone");
+			const tabs = browser.getTabBrowser();
+			tabs.removeTab(tabs.getTabForBrowser(browser));
+			done("removing");
+		} catch (err) { done("error: " + err); }`,
+		[handle],
+	)
+	if (outcome !== "removing" && outcome !== "gone") throw new Error(`closeTab: ${outcome}`)
+	// `removeTab` can return with the tab still open: a refused unload, or a last tab's window closing.
+	const deadline = Date.now() + 5_000
+	while ((await session.listWindows()).includes(handle)) {
+		if (Date.now() >= deadline) throw new Error(`closeTab: ${handle} is still open 5s after removeTab`)
+		await pause(100)
+	}
+}
+
+/**
  * A window that closes itself — every approval window does — is never reported over BiDi, so
  * Puppeteer would keep it in `targets()` and keep its page "open" for good. The classic handle
  * list is Firefox's own account of which windows exist; a context seen there and then missing from
@@ -635,8 +698,10 @@ export const firefoxDriver: BrowserDriver = {
 	openScratchPage,
 	waitForTarget,
 	waitForOpenedUrl,
+	waitForNewTab,
 	interceptRpc: (browser, _extensionId, fromOrigin, mode) => observeAndRefuse(classicSessionFor(browser), fromOrigin, mode),
 	prepareClick,
+	prepareKeys,
 	pickFile,
 	virtualAuthenticator,
 	holdNextCredentialGet,

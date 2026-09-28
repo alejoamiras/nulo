@@ -19,6 +19,7 @@ import SendTypesCard from "@/components/composite/send/SendTypesCard.vue"
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -41,6 +42,7 @@ import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
 import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 import { usePrices } from "@/composables/usePrices"
+import { vSnackFooter } from "@/composables/snackInset"
 import { useSendReview } from "@/composables/useSendReview"
 import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
@@ -102,7 +104,7 @@ function onTokenDeleted(token) {
 		return
 	}
 
-	openToast({ label: "The last token has just been deleted" })
+	openToast({ kind: "success", label: "The last token has just been deleted" })
 
 	leaveSend()
 }
@@ -335,7 +337,7 @@ const {
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
-		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Couldn't estimate fee — retry." })
 	},
 })
 const isSending = ref(false)
@@ -404,6 +406,9 @@ function snapshotTransfer() {
 		feeSettings: feeSettings.value,
 		precomputedEstimateId,
 		contract: activeToken.value.contract,
+		symbol: activeToken.value.symbol,
+		decimals: activeToken.value.decimals,
+		epoch: appStore.scopeEpoch,
 	}
 }
 
@@ -411,6 +416,18 @@ const submitDeps = {
 	executeTransfer: (...args) => executionService.executeTransfer(...args),
 	awaiting: { add: appStore.addAwaitingTransaction, remove: appStore.removeAwaitingTransaction },
 	openToast,
+	isCurrent: (epoch) => appStore.isLogined && appStore.scopeEpoch === epoch,
+	viewTransaction: (hash) => router.push(`/popup/tx/${hash}`),
+	// A failure lands after the page has left, so the read opens and closes its own port.
+	readJournal: async (id) => {
+		const journal = new OperationJournalServiceClient()
+		try {
+			return await journal.getOperation(id)
+		} finally {
+			journal.disconnect()
+		}
+	},
+	viewJournal: (id) => router.push(`/popup/journal/${id}`),
 	onSettled: () => {
 		submitInFlight = false
 		disconnectExecution()
@@ -471,6 +488,21 @@ watch(
 	{ deep: true },
 )
 
+// The contact travels in the URL so a row opened in a new tab preselects it too. Applied after each
+// contacts load rather than at mount: a cold tab's identity settles after the page is up, and the
+// first load finds no contacts. Consumed once it matches; an id that is not one of this profile's
+// contacts selects nothing.
+let queryContactApplied = false
+function applyQueryContact() {
+	if (queryContactApplied || selectedContact.value || searchTerm.value) return
+	const id = typeof route.query.contact === "string" ? route.query.contact : null
+	const preselected = id === null ? undefined : contacts.value.find((c) => String(c.id) === id)
+	if (!preselected) return
+	queryContactApplied = true
+	selectedContact.value = preselected
+	searchTerm.value = preselected.address
+}
+
 // P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
 // contacts) whenever the active appStore triple changes. Sequence
 // counter guards against stale-resolve races. Post-impl audit High #2:
@@ -498,6 +530,7 @@ async function refetchIdentityScopedState() {
 	tokens.value = t
 	tokenBalances.value = tb
 	contacts.value = c
+	applyQueryContact()
 
 	// Reset activeTokenIdx if the prior selection isn't in the new token
 	// set (e.g. profile switch). Without this, `activeToken` computed
@@ -537,11 +570,6 @@ onMounted(async () => {
 		initReceiverType()
 	}
 
-	if (cacheStore.preselectedContactToSend) {
-		selectedContact.value = cacheStore.preselectedContactToSend
-		searchTerm.value = cacheStore.preselectedContactToSend.address
-	}
-
 	if (!tokens.value.length) {
 		awaitingNewToken.value = true
 	}
@@ -574,7 +602,6 @@ onBeforeUnmount(() => {
 	awaitingNewToken.value = false
 
 	cacheStore.preselectedBalanceType = "private"
-	cacheStore.preselectedContactToSend = null
 })
 </script>
 
@@ -656,7 +683,7 @@ onBeforeUnmount(() => {
 				</div>
 			</Flex>
 
-			<Flex direction="column" gap="10" :class="$style.bottom">
+			<Flex v-snack-footer direction="column" gap="10" :class="$style.bottom" data-testid="send-footer">
 				<PublishStrip v-if="!isBlockedTransfer" :facts="facts" @open="openReview" />
 				<Button
 					v-if="needsFeeJuice"

@@ -262,9 +262,7 @@ describe("export/full.vue — error boundary", () => {
 		tokenClient.backup.mockRejectedValue(new Error("slice boom"))
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(() =>
-			expect(openToast).toHaveBeenCalledWith({ label: "Failed to create the backup", icon: "warning" }, expect.anything()),
-		)
+		await vi.waitFor(() => expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Failed to create the backup" }))
 		// Recoverable: the create CTA is rendered again (status reset to "").
 		await vi.waitFor(() => expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(true))
 		// Every constructed client torn down. The account mock is shared by the
@@ -287,10 +285,9 @@ describe("export/full.vue — error boundary", () => {
 		configClient.backup.mockResolvedValue(["x".repeat(MAX_BACKUP_FILE_BYTES + 2048)])
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(
-			() => expect(openToast).toHaveBeenCalledWith({ label: "Backup is too large to create", icon: "warning" }, expect.anything()),
-			{ timeout: 30_000 },
-		)
+		await vi.waitFor(() => expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Backup is too large to create" }), {
+			timeout: 30_000,
+		})
 		await vi.waitFor(() => expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(true))
 		expect(wrapper.find("[data-testid='download-backup-btn']").exists()).toBe(false)
 	}, 45_000)

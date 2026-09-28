@@ -1,4 +1,6 @@
 <script setup>
+import RowTarget from "@/components/ui/RowTarget.vue"
+
 /**
  * Single authwit card. Renders the kind-specific kv_grid (call /
  * encoded_call / intent / message_hash) and exposes click events for
@@ -9,21 +11,21 @@ const props = defineProps({
 })
 
 const emit = defineEmits(["open", "revoke"])
+
+const titleId = useId()
 </script>
 
 <template>
 	<div @click="emit('open', authwit)" :class="$style.card">
+		<RowTarget :labelledby="titleId" />
+
 		<div :class="$style.header">
-			<span :class="$style.type">{{ authwit.kindName ?? "Custom Authwit" }}</span>
+			<span :id="titleId" :class="$style.type">{{ authwit.kindName ?? "Custom Authwit" }}</span>
 
 			<Tooltip position="end">
-				<Icon
-					@click.stop="emit('revoke', authwit)"
-					name="close-circle"
-					color="secondary"
-					size="16"
-					:class="$style.revoke"
-				/>
+				<RowAction label="Revoke authwit" :class="$style.revoke" @click="emit('revoke', authwit)">
+					<Icon name="close-circle" color="secondary" size="16" />
+				</RowAction>
 				<template #content>Revoke authwit</template>
 			</Tooltip>
 		</div>
@@ -61,6 +63,7 @@ const emit = defineEmits(["open", "revoke"])
 
 <style module>
 .card {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
@@ -73,13 +76,20 @@ const emit = defineEmits(["open", "revoke"])
 
 	transition: all 0.2s var(--bezier);
 
-	&:hover {
+	&:hover,
+	&:has(> [data-row-target]:focus-visible) {
 		background: var(--nulo-surface-low);
 		border-color: var(--nulo-outline);
+	}
 
-		& .revoke {
-			opacity: 1;
-		}
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
+	}
+
+	&:hover .revoke,
+	&:focus-within .revoke {
+		opacity: 1;
 	}
 
 	&:active {
@@ -114,10 +124,6 @@ const emit = defineEmits(["open", "revoke"])
 	opacity: 0;
 
 	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
 }
 
 .kv_grid {

@@ -10,6 +10,7 @@ import { BANNER_EVENTS, clearDismissal } from "@alejoamiras/presto-banners"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Composables */
+import { vSnackFooter } from "@/composables/snackInset"
 import { usePrestoCheck } from "@/composables/usePrestoCheck"
 
 /** Utils */
@@ -112,7 +113,7 @@ onBeforeUnmount(() => {
 		</Text>
 
 		<!-- A Continue-sized slot, so Skip sits where Continue would and the page never jumps. -->
-		<div :class="$style.ctaSlot">
+		<div v-snack-footer="canContinue || !isProbing" :class="$style.ctaSlot">
 			<Button v-if="canContinue" variant="cta" size="large" data-testid="onboarding-presto-continue" @click="goNext">
 				Continue
 			</Button>

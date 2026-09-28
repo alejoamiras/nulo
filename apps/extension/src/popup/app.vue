@@ -16,10 +16,16 @@ import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
 import { runFencedBootstrap } from "@/popup/profile-bootstrap"
+import { createScopeEpochHandlers } from "@/popup/scope-epoch"
+import { createLockedState, watchLockStart } from "@/popup/locked-state"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Composables */
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { ARRIVALS_KEY, useArrivals } from "@/composables/useArrivals"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -27,7 +33,14 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
-const { openToast } = useToast()
+const { openToast, closeToast, toast } = useToast()
+const { onScopeChanged, onLocked } = createScopeEpochHandlers({
+	bumpEpoch: () => {
+		appStore.scopeEpoch++
+	},
+	toast,
+	closeToast,
+})
 
 /** Update theme */
 const root = document.querySelector("html")
@@ -52,6 +65,34 @@ watch(
 
 const configService = new ConfigServiceClient()
 configService.onUpdate.add(applySetting)
+
+const arrivalsIncoming = new IncomingTransferServiceClient()
+const arrivalsTokens = new TokenServiceClient()
+const arrivalsPrices = new PriceServiceClient()
+// Opened before the coordinator listens, so only a reconnect reads through `onConnected`.
+void arrivalsIncoming.connect()
+void arrivalsPrices.connect()
+const arrivals = useArrivals({
+	incomingTransferService: arrivalsIncoming,
+	configService,
+	priceService: arrivalsPrices,
+	scope: () =>
+		appStore.isLogined && appStore.profile?.id && appStore.network?.id && appStore.account?.address
+			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
+			: undefined,
+	epoch: () => appStore.scopeEpoch,
+	routeName: () => route.name,
+	lookupToken: async (record) => {
+		if (record.tokenId === undefined) return undefined
+		const { symbol, decimals } = await arrivalsTokens.getToken(record.tokenId)
+		return { symbol, decimals }
+	},
+	accountName: () => appStore.account?.name ?? "",
+	openToast,
+	openReceipt: (id) => router.push(`/popup/received/${id}`),
+})
+const { seeded: arrivalsSeeded } = arrivals
+provide(ARRIVALS_KEY, arrivals)
 
 const intervalId = ref(null)
 
@@ -127,6 +168,27 @@ watch(
 	}),
 )
 
+// `flush: "sync"`: a send settling in the next microtask must already see the new epoch.
+watch([() => appStore.profile?.id, () => appStore.network?.id, () => appStore.account?.address], onScopeChanged, { flush: "sync" })
+watchLockStart(() => appStore.isLogined, onLocked)
+
+/** The popup's locked state, entered from the lock event and from a boot-time session check
+ *  that finds no session under an authenticated page (a worker restart). */
+const lockedState = createLockedState({
+	closePopups: () => popupStore.closeAll(),
+	onLocked,
+	markLocked: () => {
+		appStore.isLogined = false
+	},
+	clearActivity: () => appStore.clearActivity(),
+	resetInFlight: () => appStore.resetInFlight(),
+	cachedProfiles: () => appStore.profiles,
+	setProfiles: (profiles) => {
+		appStore.profiles = profiles
+	},
+	route: (path) => router.push(path),
+})
+
 /** Sequence token for profile events. Handlers await service round-trips, and under load a
  *  stale LOCK event can resume after its own unlock has already re-activated the profile — its
  *  routing side effects would eject an active session to the auth screen (observed as e2e
@@ -152,37 +214,14 @@ const onActiveProfileChanged = async (profile) => {
 				appStore.bootstrapFailure = record
 			},
 			shouldToast: () => !appStore.isLogined || appStore.profile?.id === profile.id,
-			toast: () => openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG),
+			toast: () => openToast({ kind: "error", label: "Something went wrong" }),
 		})
 		return
 	}
-	// Lock cleanup must survive a failed lookup: a transport rejection here (SW churn at the
-	// exact moment of a lock) must not leave the popup rendered as authenticated over a closed
-	// session. The list only picks auth vs register — the cached one is good enough for that.
-	let profiles = appStore.profiles
-	try {
-		profiles = await managers.profile.getProfiles()
-	} catch {
-		// Cached list stands in; the cleanup below runs regardless.
-	}
-	if (seq !== profileEventSeq) return
-	enterLockedState(profiles)
-}
-
-/** The popup's locked state, entered from the lock event and from a boot-time session check
- *  that finds no session under an authenticated page (a worker restart). */
-const enterLockedState = (profiles) => {
-	popupStore.closeAll()
-	appStore.isLogined = false
-	// Every cached scope goes with the lock, so no profile's activity outlives
-	// it in memory. Switching profiles runs through lock/unlock, which means a
-	// switch deliberately starts cold rather than repainting from cache.
-	appStore.clearActivity()
-	// The lock cancels the running sends, but the cancel events do not reach
-	// this popup; left in place, the rows would refuse every pick on the lock screen.
-	appStore.resetInFlight()
-	appStore.profiles = profiles
-	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
+	await lockedState.onLockEvent(
+		() => managers.profile.getProfiles(),
+		() => seq === profileEventSeq,
+	)
 }
 
 /** The profile unlocked in RECOVERY MODE: its imported-keys DEK (or the envelope MAC over it)
@@ -191,7 +230,7 @@ const enterLockedState = (profiles) => {
  *  service deliberately does NOT block the profile (export must stay reachable); this toast and the
  *  Home banner (`ProfileInfo.recoveryMode`) are the signals. */
 const onImportedKeysDegraded = () => {
-	openToast({ label: "Wallet keys need recovery — export a backup and restore it", icon: "warning" }, TOAST_DURATION.LONG)
+	openToast({ kind: "error", label: "Wallet keys need recovery — export a backup and restore it" })
 }
 
 /** How the boot-time session check ended when it could NOT decide: "unreachable" (the service
@@ -243,7 +282,7 @@ const lockLandingActions = {
 	},
 	lock: (result) => {
 		appStore.isSessionChecked = true
-		enterLockedState(result.profiles)
+		lockedState.enter(result.profiles)
 	},
 	settle: () => {
 		appStore.isSessionChecked = true
@@ -398,17 +437,26 @@ watch(
 onBeforeUnmount(() => {
 	clearInterval(intervalId.value)
 	configService.disconnect()
+	arrivalsIncoming.disconnect()
+	arrivalsTokens.disconnect()
+	arrivalsPrices.disconnect()
+	arrivals.dispose()
 })
 </script>
 
 <template>
-	<Flex wide direction="column" :class="$style.wrapper" :data-boot-outcome="bootOutcome || undefined">
+	<Flex
+		wide
+		direction="column"
+		:class="$style.wrapper"
+		:data-boot-outcome="bootOutcome || undefined"
+		:data-arrivals-seeded="arrivalsSeeded ? 'true' : undefined"
+	>
 		<!-- Popup Teleport -->
 		<div id="popup" />
 		<div id="tooltip" />
 		<div id="dropdown" />
 		<div id="popover" />
-		<div id="toast" />
 
 		<div>
 			<PopupManager />
@@ -440,6 +488,8 @@ onBeforeUnmount(() => {
 		</RouterView>
 
 		<Navigation v-if="$route.meta.showBottomNav" />
+
+		<div id="toast" />
 	</Flex>
 </template>
 
@@ -447,7 +497,13 @@ onBeforeUnmount(() => {
 .wrapper {
 	position: relative;
 
-	overflow: hidden;
+	/* Clip, not hidden: focus and scrollIntoView scroll a hidden box, so content a pixel past the
+	   popup's edge would shift the whole frame by it, with no way to scroll it back. A clip box is
+	   no scroll container, so as a flex item its minimum size would follow its content without the
+	   zero minimums hidden implied, and one unbreakable line could set its width. */
+	overflow: clip;
+	min-width: 0;
+	min-height: 0;
 }
 
 .retry {

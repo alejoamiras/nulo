@@ -14,6 +14,7 @@
 import type { Preview } from "@storybook/vue3-vite"
 import { setup } from "@storybook/vue3-vite"
 import { createPinia } from "pinia"
+import { createMemoryHistory, createRouter } from "vue-router"
 
 // (1) Global CSS — same imports as src/popup/index.ts:30-31
 import "@nulo/design/base.css"
@@ -63,6 +64,8 @@ function ensureChromeStub() {
 // per Vue app instance via the framework's setup() hook.
 setup((app) => {
 	app.use(createPinia())
+	// Rows render their links through RouterLink, which needs an installed router; every route is a blank page.
+	app.use(createRouter({ history: createMemoryHistory(), routes: [{ path: "/:pathMatch(.*)*", component: { render: () => null } }] }))
 	ensureTeleportRoots()
 	ensureChromeStub()
 })

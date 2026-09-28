@@ -75,6 +75,8 @@ declare module 'vue' {
     RecipientCard: typeof import('./../components/composite/send/RecipientCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    RowAction: typeof import('@nulo/design')['RowAction']
+    RowTarget: typeof import('./../components/ui/RowTarget.vue')['default']
     ScopeAddress: typeof import('./../components/ScopeAddress.vue')['default']
     ScopeClassId: typeof import('./../components/ScopeClassId.vue')['default']
     ScopePatternList: typeof import('./../components/composite/capabilities/ScopePatternList.vue')['default']

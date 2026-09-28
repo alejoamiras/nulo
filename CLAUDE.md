@@ -224,7 +224,7 @@ the same commit. Names ending in `secretKey` are covered by suffix in both.
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.
 
-**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`apps/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
+**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`apps/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the four host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root, `RowTarget` → RouterLink) keep a thin LOCAL extension component; the first three wrap the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
 
 ```
 [L0] design tokens     @nulo/design (token-contract.ts → generated tokens.ts + base.css + fonts).
@@ -233,11 +233,12 @@ Six layers, low → high. A layer can import only from layers below it. Enforced
 [L1] core primitives   @nulo/design/core: Flex, Icon, MaterialIcon, Text. No chrome.*.
 
 [L2] ui primitives     @nulo/design/ui — ALL migrated: Badge, Banner, BrutalistTitle, Button,
-                       Checkbox, Input, LoadingState, Popover, SectionLabel, Spinner, SubPageHeaderBase,
-                       Toggle, Tooltip, ToastManagerBase (+ Card/Tag/Toast: dead exports that only
-                       the tools app rendered).
-                       The 3 host-coupled ones keep a thin LOCAL extension wrapper in src/components/ui/
-                       (Button, SubPageHeader, ToastManager) rendering the package base.
+                       Checkbox, Input, LoadingState, Popover, RowAction, SectionLabel, Spinner,
+                       SubPageHeaderBase, Toggle, Tooltip, ToastManagerBase (+ Card/Tag/Toast: dead
+                       exports that only the tools app rendered).
+                       The 4 host-coupled ones live LOCALLY in src/components/ui/: Button,
+                       SubPageHeader, ToastManager (thin wrappers rendering the package base) and
+                       RowTarget (a row's link or button, stretched under its nested controls).
                        Cannot import service clients, stores, or @/utils/core.
 
 [L3] composites        src/components/composite/

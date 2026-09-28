@@ -27,6 +27,7 @@ export const NULO_DESIGN_COMPONENTS = new Set([
 	// round 2 — P6 Input
 	"Input",
 	"Skeleton",
+	"RowAction",
 ])
 
 export function nuloDesignResolver(): ComponentResolver {

@@ -55,9 +55,9 @@ async function updateSessionTtl(value) {
 		await configService.setValue("sessionTtl", value)
 		sessionTtl.value = value
 		await profileService.refreshSession()
-		openToast({ label: "Auto-lock timeout updated", icon: "info" }, TOAST_DURATION.SHORT)
+		openToast({ kind: "success", label: "Auto-lock timeout updated" })
 	} catch (err) {
-		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update setting" })
 	}
 }
 
@@ -86,9 +86,9 @@ function onStrictToggle(next) {
 			try {
 				await configService.setValue("strictSecurityMode", false)
 				strictSecurityMode.value = false
-				openToast({ label: "Strict security mode disabled", icon: "info" }, TOAST_DURATION.SHORT)
+				openToast({ kind: "success", label: "Strict security mode disabled" })
 			} catch (err) {
-				openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Failed to update setting" })
 			}
 		}
 		popupStore.open("confirm")
@@ -99,9 +99,9 @@ function onStrictToggle(next) {
 			try {
 				await configService.setValue("strictSecurityMode", true)
 				strictSecurityMode.value = true
-				openToast({ label: "Strict security mode enabled", icon: "info" }, TOAST_DURATION.SHORT)
+				openToast({ kind: "success", label: "Strict security mode enabled" })
 			} catch (err) {
-				openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Failed to update setting" })
 			}
 		})()
 	}

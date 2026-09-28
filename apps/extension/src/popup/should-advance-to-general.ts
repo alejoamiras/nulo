@@ -1,6 +1,6 @@
 /** Pre-auth entry routes — the only screens `loadProfile` may auto-advance to
  *  `/popup/general` FROM once a profile is active. */
-const AUTH_ENTRY_ROUTES = ["popup-register", "popup-auth"] as const
+export const AUTH_ENTRY_ROUTES = ["popup-register", "popup-auth"] as const
 
 /**
  * Whether `loadProfile` should push to `/popup/general` after bootstrapping the

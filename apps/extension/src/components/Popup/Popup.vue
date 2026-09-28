@@ -2,6 +2,9 @@
 /** Vendor */
 import * as focusTrap from "focus-trap"
 
+/** Composables */
+import { vSnackSheet } from "@/composables/snackInset"
+
 /** Utils */
 import { managers } from "@/utils/core"
 
@@ -43,6 +46,13 @@ const releaseTrap = (options) => {
 	trap = undefined
 }
 
+/** The snack's controls follow the popup's in the Tab cycle: `#toast` is a second container, read
+ *  again on every Tab, so a snack that opens later is reachable. Storybook has no such anchor. */
+const trapContainers = (container) => {
+	const toast = document.getElementById("toast")
+	return toast ? [container, toast] : container
+}
+
 const activate = async () => {
 	const _ = managers.profile?.refreshSession()
 	const token = ++activation
@@ -55,7 +65,7 @@ const activate = async () => {
 	if (token !== activation || !mounted || !props.show || !container) return
 
 	releaseTrap({ returnFocus: false })
-	trap = focusTrap.createFocusTrap(container, {
+	trap = focusTrap.createFocusTrap(trapContainers(container), {
 		initialFocus: props.initialFocus,
 		allowOutsideClick: true,
 		fallbackFocus: container,
@@ -71,10 +81,13 @@ const deactivate = async () => {
 	releaseTrap()
 }
 
+// `immediate`: a popup created already shown (its caller renders it behind a `v-if` on its data)
+// never sees `show` change, and without this it would open with no trap, no Escape and no return
+// focus. The first run reads the opener before any child's mounted hook can focus its own input.
 watch(
 	() => props.show,
 	() => (props.show ? activate() : deactivate()),
-	{ flush: "post" },
+	{ flush: "post", immediate: true },
 )
 
 onBeforeUnmount(() => {
@@ -91,18 +104,16 @@ onBeforeUnmount(() => {
 	<Transition name="slide" appear>
 		<template v-if="show">
 			<teleport to="#popup">
+				<!-- tabindex -1: the trap's fallback when a popup has no tabbable control. -->
 				<Flex
 					ref="popupEl"
+					v-snack-sheet="displaceIdx"
 					direction="column"
 					:class="$style.wrapper"
 					:style="{ zIndex: (displaceIdx + 1) * 100 * 5 }"
+					tabindex="-1"
 				>
 					<div @click="emit('onClose')" :class="$style.close_area" />
-
-					<!-- Need to refactor !!! -->
-					<button style="position: absolute; opacity: 0; pointer-events: none;" aria-hidden="true" tabindex="0">
-						focus trap dummy
-					</button>
 
 					<slot />
 				</Flex>

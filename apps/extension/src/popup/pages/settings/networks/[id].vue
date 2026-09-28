@@ -64,7 +64,7 @@ const handleSetActive = async () => {
 	// means the profile changed while this waited and nobody is left to toast at.
 	const result = await activateNetwork(target)
 	if (result !== "activated") return
-	openToast({ label: "Active network updated", icon: "check-circle" })
+	openToast({ kind: "success", label: "Active network updated" })
 }
 
 const handleAddEndpoint = () => {
@@ -85,9 +85,9 @@ const handleSetPrimary = async (endpoint) => {
 	try {
 		await managers.network.setPrimaryEndpoint(network.value.id, endpoint.id)
 		await refreshNetworks()
-		openToast({ label: "Primary endpoint updated" })
+		openToast({ kind: "success", label: "Primary endpoint updated" })
 	} catch {
-		openToast({ label: "Failed to update primary endpoint", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Failed to update primary endpoint" })
 	}
 }
 
@@ -104,15 +104,15 @@ const handleDeleteEndpoint = (endpoint) => {
 		try {
 			await managers.network.deleteEndpoint(network.value.id, endpoint.id)
 			await refreshNetworks()
-			openToast({ label: "Endpoint deleted" })
+			openToast({ kind: "success", label: "Endpoint deleted" })
 		} catch (err) {
 			const msg = errorMessageFromUnknown(err)
 			if (msg.includes("PRIMARY_ENDPOINT")) {
-				openToast({ label: "Make another endpoint primary first.", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Make another endpoint primary first." })
 			} else if (msg.includes("LAST_ENDPOINT")) {
-				openToast({ label: "Last endpoint — delete the chain instead.", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Last endpoint — delete the chain instead." })
 			} else {
-				openToast({ label: "Failed to delete endpoint", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Failed to delete endpoint" })
 			}
 		}
 	}
@@ -130,14 +130,14 @@ const handleDeleteNetwork = () => {
 		const target = network.value
 		try {
 			await appStore.removeNetwork(target)
-			openToast({ label: "Chain deleted" })
+			openToast({ kind: "success", label: "Chain deleted" })
 			router.replace("/popup/settings/networks")
 		} catch (err) {
 			const msg = errorMessageFromUnknown(err)
 			if (msg.startsWith("ACTIVE_NETWORK")) {
-				openToast({ label: "Switch to another chain before deleting this one.", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Switch to another chain before deleting this one." })
 			} else {
-				openToast({ label: "Failed to delete chain", icon: "warning" }, TOAST_DURATION.LONG)
+				openToast({ kind: "error", label: "Failed to delete chain" })
 			}
 		}
 	}
@@ -208,14 +208,9 @@ watch(network, (n) => {
 					<template #right>
 						<Flex align="center" gap="8">
 							<Tooltip position="end" delay="350">
-								<Icon
-									@click.stop="handleEditEndpoint(endpoint)"
-									name="edit"
-									size="14"
-									color="tertiary"
-									:class="$style.icon_btn"
-									data-testid="endpoint-edit-btn"
-								/>
+								<RowAction label="Edit endpoint" data-testid="endpoint-edit-btn" @click="handleEditEndpoint(endpoint)">
+									<Icon name="edit" size="14" color="tertiary" />
+								</RowAction>
 								<template #content>Edit endpoint</template>
 							</Tooltip>
 							<Tooltip
@@ -223,14 +218,9 @@ watch(network, (n) => {
 								delay="350"
 								v-if="network.primaryEndpointId !== endpoint.id && network.endpoints.length > 1"
 							>
-								<Icon
-									@click.stop="handleDeleteEndpoint(endpoint)"
-									name="close-circle"
-									size="14"
-									color="tertiary"
-									:class="$style.icon_btn"
-									data-testid="endpoint-delete-btn"
-								/>
+								<RowAction label="Delete endpoint" data-testid="endpoint-delete-btn" @click="handleDeleteEndpoint(endpoint)">
+									<Icon name="close-circle" size="14" color="tertiary" />
+								</RowAction>
 								<template #content>Delete endpoint</template>
 							</Tooltip>
 						</Flex>
@@ -267,13 +257,3 @@ watch(network, (n) => {
 		</Flex>
 	</SettingsPageShell>
 </template>
-
-<style module>
-.icon_btn {
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-}
-</style>

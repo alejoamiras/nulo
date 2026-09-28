@@ -1,4 +1,4 @@
-import { TOAST_DURATION, useToast } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useAppStore } from "@/stores/app.store"
 import { activateNetworkGuarded, type NetworkActivationResult } from "@/utils/guarded-network-activation"
 import type { Network } from "@/wallet/services/network/client"
@@ -22,17 +22,14 @@ export function useNetworkActivation(options: UseNetworkActivationOptions) {
 		// The network is part of the scope a send builds against, and switching it reloads accounts
 		// and reselects one — so it moves the signing scope just like an account switch.
 		if (appStore.hasInFlightSend) {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 			return "blocked"
 		}
 		const result = await activateNetworkGuarded(appStore, options.persist, options.read, target)
 		if (result === "blocked") {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		} else if (result === "unconfirmed") {
-			openToast(
-				{ label: "Couldn't confirm the network switch — reopen the popup to verify", icon: "warning", color: "red" },
-				TOAST_DURATION.LONG,
-			)
+			openToast({ kind: "error", label: "Couldn't confirm the network switch — reopen the popup to verify" })
 		}
 		// "stale" — the profile changed while this activation waited; the view that asked is gone.
 		return result

@@ -185,7 +185,7 @@ describe("export/full.vue — passkey acquisition + wrong-password pins", () => 
 		const wrapper = mountPage("passkey")
 		await wrapper.find("[data-testid='agree-continue-btn']").trigger("click")
 		await flushPromises()
-		expect(openToast).toHaveBeenCalledWith({ label: "Failed to authenticate by passkey", icon: "warning" }, expect.anything())
+		expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Failed to authenticate by passkey" })
 		expect(routerGo).toHaveBeenCalledWith(-1)
 		expect(exportPasskeyBackupMaterial).not.toHaveBeenCalled()
 	})

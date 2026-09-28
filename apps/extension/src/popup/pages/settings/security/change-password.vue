@@ -66,7 +66,7 @@ const handleChangePassword = async () => {
 	isLoading.value = true
 	try {
 		await profileService.changeProfilePassword(appStore.profile.id, currentPassword.value, newPassword.value)
-		openToast({ label: "Profile password changed" })
+		openToast({ kind: "success", label: "Profile password changed" })
 		router.back()
 	} catch (err) {
 		if (err instanceof Error && err.message === "Invalid profile old password") {

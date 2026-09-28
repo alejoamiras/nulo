@@ -1,7 +1,7 @@
 <script setup>
 import { FieldWarning } from "@nulo/design"
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
 /** Store */
@@ -74,7 +74,7 @@ const handleUpdateNetwork = async () => {
 	try {
 		await appStore.renameNetwork(cacheStore.networkToEditIdx, nameTerm.value)
 	} catch {
-		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		openToast({ kind: "error", label: "Something went wrong" })
 		return
 	} finally {
 		isNetworkUpdateInProgress.value = false
@@ -82,7 +82,7 @@ const handleUpdateNetwork = async () => {
 
 	emit("onClose")
 
-	openToast({ label: "Network is updated" })
+	openToast({ kind: "success", label: "Network is updated" })
 }
 
 usePopupEntity(() => props.show, {

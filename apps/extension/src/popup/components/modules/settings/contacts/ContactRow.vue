@@ -1,82 +1,58 @@
 <script setup>
+import RowTarget from "@/components/ui/RowTarget.vue"
 import { trimAddress } from "@/utils/string"
 
 /**
- * Single contact entry in the address-book list. Owns the avatar, name,
- * address (trimmed) + sender chip, and the three action icons (copy,
- * edit, delete). Click on the body fires `select`; each action emits
- * its own event so the parent can dispatch confirms / popup sequences.
+ * Single contact entry in the address-book list: a link to Send with this contact selected, with
+ * the avatar, name, address (trimmed) + sender chip, and the three actions (copy, edit, delete),
+ * each emitting its own event so the parent can dispatch confirms / popup sequences.
  */
 const props = defineProps({
 	contact: { type: Object, required: true },
 	isSender: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(["select", "copy", "edit", "delete"])
+const emit = defineEmits(["copy", "edit", "delete"])
+
+const titleId = useId()
+const target = ref(null)
 </script>
 
 <template>
-	<div
-		role="button"
-		tabindex="0"
-		@click="emit('select', contact)"
-		@keydown.enter="emit('select', contact)"
-		:class="$style.row"
-		data-testid="contact-row"
-		:data-contact-name="contact.name"
-	>
+	<div :class="$style.row" data-testid="contact-row" :data-contact-name="contact.name">
+		<RowTarget ref="target" :to="`/popup/send?contact=${encodeURIComponent(contact.id)}`" :labelledby="titleId" />
+
 		<Flex align="center" gap="12" wide>
 			<div :class="$style.avatar">
 				<span :class="$style.avatar_text">{{ contact.abbr }}</span>
 			</div>
 
 			<Flex direction="column" gap="2" wide :class="$style.row_text">
-				<span :class="$style.row_name">{{ contact.name }}</span>
+				<span :id="titleId" :class="$style.row_name">{{ contact.name }}</span>
 				<Flex align="center" gap="6">
 					<span :class="$style.row_address">{{ trimAddress(contact.address) }}</span>
+					<!-- Raised above the target so its title shows; `.stop` so a press opens the row once. -->
 					<span
 						v-if="isSender"
 						:class="$style.sender_chip"
 						title="Registered as sender"
 						aria-label="Registered as private-transfer sender"
 						data-testid="contact-sender-chip"
+						@click.stop="target?.activate()"
 					>S</span>
 				</Flex>
 			</Flex>
 
 			<Flex align="center" gap="8" :class="$style.actions">
-				<span
-					role="button"
-					tabindex="0"
-					@click.stop="emit('copy', contact)"
-					@keydown.enter.stop="emit('copy', contact)"
-					:class="$style.action"
-					aria-label="Copy address"
-				>
+				<RowAction label="Copy address" @click="emit('copy', contact)">
 					<Icon name="copy" size="14" color="tertiary" />
-				</span>
-				<span
-					role="button"
-					tabindex="0"
-					data-testid="contact-edit"
-					@click.stop="emit('edit', contact)"
-					@keydown.enter.stop="emit('edit', contact)"
-					:class="$style.action"
-					aria-label="Edit contact"
-				>
+				</RowAction>
+				<RowAction label="Edit contact" data-testid="contact-edit" @click="emit('edit', contact)">
 					<Icon name="edit" size="14" color="tertiary" />
-				</span>
-				<span
-					role="button"
-					tabindex="0"
-					data-testid="contact-delete"
-					@click.stop="emit('delete', contact)"
-					@keydown.enter.stop="emit('delete', contact)"
-					:class="[$style.action, $style.action_danger]"
-					aria-label="Delete contact"
-				>
+				</RowAction>
+				<RowAction label="Delete contact" data-testid="contact-delete" @click="emit('delete', contact)">
 					<Icon name="close-circle" size="14" color="tertiary" />
-				</span>
+				</RowAction>
 			</Flex>
 		</Flex>
 	</div>
@@ -88,20 +64,21 @@ const emit = defineEmits(["select", "copy", "edit", "delete"])
 	padding: 12px 16px;
 	cursor: pointer;
 	background: transparent;
-	outline: none;
 
 	transition: background 0.2s var(--bezier);
 
-	&:hover {
+	&:hover,
+	&:has(> [data-row-target]:focus-visible) {
 		background: var(--nulo-surface-high);
+	}
+
+	&:has(> [data-row-target]:focus-visible) {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: -2px;
 	}
 
 	&:active {
 		background: var(--nulo-surface-highest);
-	}
-
-	&:focus-visible {
-		background: var(--nulo-surface-high);
 	}
 
 	&::after {
@@ -171,6 +148,8 @@ const emit = defineEmits(["select", "copy", "edit", "delete"])
 }
 
 .sender_chip {
+	position: relative;
+	z-index: 1;
 	flex-shrink: 0;
 
 	display: inline-flex;
@@ -194,33 +173,5 @@ const emit = defineEmits(["select", "copy", "edit", "delete"])
 
 .actions {
 	flex-shrink: 0;
-}
-
-.action {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-
-	width: 20px;
-	height: 20px;
-
-	cursor: pointer;
-	outline: none;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover svg {
-		fill: var(--txt-primary);
-	}
-
-	&:focus-visible {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.action_danger {
-	&:hover svg {
-		fill: var(--txt-primary);
-	}
 }
 </style>

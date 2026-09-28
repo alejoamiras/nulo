@@ -29,7 +29,7 @@ describe("copyAddressToClipboard", () => {
 
 		expect(ok).toBe(true)
 		expect(writeText).toHaveBeenCalledWith(ADDRESS)
-		expect(openToast).toHaveBeenCalledWith({ label: "Address is copied", icon: "copy" }, undefined)
+		expect(openToast).toHaveBeenCalledWith({ kind: "success", label: "Address is copied" })
 		expect(order).toEqual([`write:${ADDRESS}`, "toast"])
 	})
 
@@ -52,7 +52,7 @@ describe("copyAddressToClipboard", () => {
 
 		expect(ok).toBe(false)
 		expect(openToast).toHaveBeenCalledTimes(1)
-		expect(openToast).toHaveBeenCalledWith({ label: "Couldn't copy address", icon: "warning" }, 3_000)
+		expect(openToast).toHaveBeenCalledWith({ kind: "error", label: "Couldn't copy address" })
 	})
 
 	test("no address (locked / not yet loaded) is a silent no-op", async () => {
