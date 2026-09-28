@@ -298,12 +298,12 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
 - **B3's install.** Any manifest edit in unleashed re-gates the young `0.1.0` packages against the 7-day release age. Install under a local, uncommitted `minimumReleaseAgeExcludes`, then prove the lockfile with `bun install --frozen-lockfile --force` without it.
 - **B4's plans.** The 38 imported plans moved to `archive/`, each with an Outcome block. Their transcripts left the tree, and links to them became permalinks at unleashed's first `main`. Links into plans that stayed here became permalinks at the freeze. The relinker also normalized one HTML `src="./main.ts"` to `main.ts`; that was reverted, because a relinker must leave a link it does not move byte-for-byte alone.
 - **Brand guard, revised (ledger).** B4 kept the verbatim line baseline instead of adding a category allowlist, and made it shrink-only:
-  - `baseline:brand` refuses to record a line.
+  - `baseline:brand` refuses to record a new line; it rewrites only the lines that survive.
   - The PR lint job refuses a baseline holding a line its base's did not (`--ratchet <base>`).
   - A baseline whose counts are not positive integers is refused. A string count compared as `NaN` and hid every change.
   - The repository slug `alejoamiras/nulo` joined ALLOWED.
   - The cost, accepted: moving a file, or editing a baselined line, forces the mention out rather than carrying it.
-- **The pre-commit hook runs the working-tree `check-brand.ts` against the staged baseline.** A commit that relies on a guard change fails until the guard change itself is committed, so commit the guard first.
+- **The pre-commit hook runs the working-tree `check-brand.ts` against the staged baseline and staged files.** A guard edit therefore applies to every commit from the moment it is written, whether or not it is staged. Stage the guard with the baseline it regenerates, and commit that pair before anything else. Any commit in between is judged by the new rules against the old baseline, and fails on lines the new rules no longer need.
 - **`gh stack` with worktrees.**
   - The stack state lives in the main clone's git dir (`.git/gh-stack`), and a linked worktree does not see it.
   - `gh stack init` records the stack, then fails to check out the top branch that a worktree holds.
