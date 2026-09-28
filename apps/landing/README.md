@@ -18,7 +18,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `scripts/fetch-latest-release.ts`, `scripts/ensure-release-json.ts` | Prebuild fetch of the latest GitHub release; the no-release stub for typecheck/test. |
 | `public/` | `_headers` (CSP and caching, applied by Cloudflare), favicon, robots, sitemap. |
 | `vite.config.ts` | Vite config, including `preview.headers` from `_headers`. |
-| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. One custom domain, `nulo.sh`; no workers.dev host; previews on for non-production branches. |
+| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. `nulo.sh` is a Custom Domain attached outside the file (the build token has no zone permission); no workers.dev host; previews on for non-production branches. |
 
 ## Scripts
 

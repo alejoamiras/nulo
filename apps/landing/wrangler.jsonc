@@ -9,9 +9,10 @@
 		// they get index.html with a 200, as on Pages, never a 404.
 		"not_found_handling": "single-page-application"
 	},
-	// nulo.sh is the only production host. Branch previews stay on (Workers Builds uploads one per
-	// non-production branch); a preview is a separate version URL, never the production host.
-	"routes": [{ "pattern": "nulo.sh", "custom_domain": true }],
+	// nulo.sh is attached as a Custom Domain outside this file, on purpose: the Workers Builds token
+	// holds no zone permission, and wrangler leaves an attached domain alone while `routes` names
+	// none. Listing it here would make every build reconcile the domain and fail authorization.
+	// Branch previews stay on; a preview is a separate version URL, never the production host.
 	"workers_dev": false,
 	"preview_urls": true,
 	// Privacy Policy § 5.5 lists every request record the Developer can see; Workers Logs is not one.
