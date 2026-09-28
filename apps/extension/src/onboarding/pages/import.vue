@@ -33,19 +33,18 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 // bootstraps the freshly activated profile itself — its "wait for active" IS the
 // direct bootstrap. If that bootstrap doesn't activate (an MV3 worker restart
 // mid-import, so the session couldn't be confirmed), the recovery re-reads the
-// active profile and bootstraps again, matching the popup path. Onboarding routes
-// to /onboarding/learn regardless (that screen gates on unlock); only the toast
-// copy reflects the outcome.
+// active profile and bootstraps again, matching the popup path. Either way onboarding
+// moves on with no success snack, unlike the popup's import: no later onboarding page
+// needs the session, and a profile left locked meets the popup's unlock screen.
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	const outcome = await completeImportWithRecovery({
+	await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
 		},
 		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
 	})
-	openToast({ kind: "success", label: outcome === "active" ? "Profile imported" : "Profile imported. Unlock to continue." })
 	router.push("/onboarding/learn")
 }
 

@@ -104,6 +104,9 @@ snackbar looks weird."), i10b "A′", i11 "A", i12 "B" — unchanged.
 
 ## UI impact
 
+Every **sign-off pending** and **pending** below was settled on 2026-09-28 (§ P8): signed off as
+built, with one change, no success snack on the onboarding import.
+
 | # | Surface | Before → after (drawn values) | Shot | Sign-off |
 |---|---|---|---|---|
 | 1 | Every toast (popup, onboarding, dApp windows) | top 12px, centered, 2px outline, one nowrap uppercase label, icon per call, a decorative close glyph, click anywhere closes, 1.5–4 s → bottom, 76px with the nav (`r2/i10.html:20-21`), `width: calc(100% - 32px)`, `padding: 12px 14px`, `gap: 10px`, `background: var(--nulo-surface-high)`, `border: 1px solid var(--nulo-outline)`, `box-shadow: 0 8px 24px rgba(10, 9, 8, 0.45)` (`nulo.css:193`); a title (headline 12px/700, `0.06em`, uppercase, `:195`) and an optional sub line (11px, `--nulo-secondary`, `:196`); no timer bar | `10-snackbar`, `10-round1` | i10 A′ (owner); placement without the nav: owner, 2026-09-25: 1c, and over a sheet: owner, 2026-09-25: 12a (S-1); in a window shorter than the page, 85px up before the scroll: **sign-off pending** (S-1); width in the dApp windows: owner, 2026-09-25: 11a (S-2); the onboarding width, the Chrome side panel's width and motion: **sign-off pending** (S-2, S-3) |
@@ -146,6 +149,8 @@ Motion:
   `n-plus-calm 2.6s`, `nulo.css:520-523`), and the hero does not count.
 
 ### UI asks for the owner (built as recommended, sign-off pending)
+
+Settled on 2026-09-28 (§ P8): each ask below is signed off as built.
 
 Snackbar:
 
@@ -2013,6 +2018,32 @@ the repo.
 
 The driver's. It reruns P6's gate on the stack's final source; its network list keeps
 `network/window-placement.test.ts`, three runs per browser at retry 0.
+
+### P8 · The owner's stack sign-off
+
+The owner, 2026-09-28, on the stack's sign-off page
+(<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store):
+
+> Receipt chip with fiat values off: No chip when fiat is off
+> Home's received row: Keep today's row
+
+and in the note on "Everything else", the page's list of every state this plan built as
+recommended:
+
+> "Additionally, there is a notification on the onboarding when I import an account (a toast)
+> that shouldn't go there, because it's a webpage onboarding. it's probably inherited from when
+> you do it in the wallet per se. that toast, should not pop-up on the onboarding. […]
+> Everytihng else looks good."
+
+So item 4 stays as built (a receipt with fiat values off gets no chip), item 8 keeps today's row,
+and every sign-off pending in this plan is signed off, with one change: the onboarding import no
+longer opens a success snack. `onboarding/pages/import.vue` drops it ("Profile imported", or
+"Profile imported. Unlock to continue." when the session could not be confirmed); the popup's
+import keeps its own. A profile the import leaves locked meets the popup's unlock screen, since
+nothing onboarding shows after the import needs the session. Onboarding's other snacks stay: the
+Terms page's error and the import form's "Error is copied".
+
+Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers.
 
 ## Arc boundary
 
