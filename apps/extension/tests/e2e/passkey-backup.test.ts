@@ -25,7 +25,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
+import { clickByTestId, expectNoNameField, openPopup, waitForHash, test, pickFileByTestId } from "./fixtures/extension"
 import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth, stallNextPasskeyCeremony } from "./fixtures/passkey"
 import { pressEscape } from "./helpers/pointer-probes"
@@ -45,8 +45,8 @@ async function resetWallet(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-permanent")
 	await clickByTestId(page, "reset-checkbox-undone")
 	await clickByTestId(page, "reset-checkbox-sure")
-	// Profile name is user-typed (F1) — read it from the reset page's
-	// data-profile-name attribute rather than hardcoding.
+	// Read the profile name from the reset page's data-profile-name attribute rather than
+	// hardcoding it.
 	const activeProfileName = await getActiveProfileName(page)
 	await page.evaluate((expectedName: string) => {
 		const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
@@ -81,9 +81,8 @@ async function registerPasskeyProfile(page: Page): Promise<void> {
 	})
 	await clickByTestId(page, "register-create-btn")
 
-	// F1: name is required at submit time.
-	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+	// A fresh install's first profile has no name field; it is created as "Main".
+	await expectNoNameField(page, "register-page", "register-name-input")
 
 	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "register-method-passkey")

@@ -1,0 +1,34 @@
+<div class="r2" id="i3-r2">
+	<div class="r2-head"><span class="r2-tag">Round 2</span><span class="r2-said">You picked A, without the green "Nothing", with the dollar figure, and without a second line. Below: five wordings against the four states the line has to survive, drawn at the popup's real width. Change the fee or the price and every card re-wraps and counts its own lines.</span></div>
+	<div class="facts">
+		<div>
+			<h3>What the line has to hold</h3>
+			<ul>
+				<li>Nulo prints Fee Juice with up to six decimals (<code>formatFeeJuice</code>: "3.577824 FJ") and dollars with exactly three (<code>feeToUsd</code>: "$0.215"). Without a live AZTEC quote the dollar part is dropped, not faked.</li>
+				<li>The number shown is the transaction's <i>maximum</i> fee (<code>maxFeeFormatted</code>), which is why it carries a "~".</li>
+				<li>In the popup the card's text column is 288px wide. At 12px a mono character is 7.2px, and the smaller clause is 6px per character, so the word "the" alone costs 24px.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What a second line costs</h3>
+			<ul>
+				<li>Today the row reserves its full height from the first frame, and the loading bar sits in the value's slot, so "the row never moves or grows when the number lands" (<code>FeeCostReadout.vue</code>). A line that wraps only for some fees breaks that: the card, the priority row and the Confirm button jump when the estimate arrives.</li>
+				<li>The dollar figure refreshes every three minutes and the fee moves with the network. A wording that fits with 4px to spare wraps as soon as either one gains a digit.</li>
+			</ul>
+		</div>
+	</div>
+	<div class="fx-ctl">
+		<label>Max fee in FJ<input id="fx-fj" value="3.577824" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+		<label>Dollars per FJ<input id="fx-rate" value="0.06" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+		<span class="hint">3.58 FJ is what the tools bridge budgets per testnet transaction (<code>fjPerTx</code>). The price is an example, not a quote.</span>
+	</div>
+	<div class="fx"><div class="fx-grid" id="fx-grid"></div></div>
+	<div class="recbox">
+		<div>
+			<h3>My pick: V3</h3>
+			<p>At a typical testnet fee your wording (V1) already wraps, and V2 fits with 4px to spare; one more digit in the fee, as in the last column, and V2 wraps too and the card jumps. V3 and V4 stay on one line in every state; V5 does by adding a row, which is the height you want to avoid. Between V3 and V4: a strikethrough reads as a discount on a price you'd otherwise pay, and it still leads with a number that isn't yours. V3 says what happens, in dollars. The FJ figure only disappears when you're not the one paying it, and it comes back when there's no price.</p>
+			<p class="conf">Confidence: high that the line must stay one line at every fee; moderate on V3's exact words.</p>
+		</div>
+		<div class="pick" data-pick="i3b" data-options="V1|V2|V3|V4|V5|Other"></div>
+	</div>
+</div>

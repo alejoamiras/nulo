@@ -2,6 +2,7 @@
 import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { AccountType } from "@/wallet/services/account/client"
+import { nextAccountName } from "@/utils/account-name"
 import { managers } from "@/utils/core"
 import { storageLocalSet } from "@/utils/storage"
 
@@ -99,10 +100,7 @@ usePopupEntity(() => props.show, {
 	submit: handleCreateAccount,
 	onHide: () => form.reset(),
 	onShow: async () => {
-		// Can't use account.index for naming - indexes are per account type, not global
-		let n = 1
-		while (appStore.accounts.some((a) => a.name === `Account ${n}`)) n++
-		name.value = `Account ${n}`
+		name.value = nextAccountName(appStore.accounts.map((a) => a.name))
 
 		await nextTick()
 		inputEl.value.inputEl.focus()

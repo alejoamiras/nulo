@@ -28,7 +28,14 @@ import {
 	pickFileByTestId,
 } from "./fixtures/extension"
 import { acceptConfirmPopup, closeStuckPopup, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
-import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import {
+	confirmImport,
+	exportAccountBody,
+	exportImportedAccountBody,
+	FIRST_ACCOUNT_NAME,
+	gotoAccounts,
+	previewImport,
+} from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
@@ -47,7 +54,7 @@ test("a full backup carries an imported account; restoring it (dup-confirmed) re
 			await registerProfile(donor)
 			const donorPage = await openPopup(donor)
 			await waitForHash(donorPage, "#/popup/general", 30_000)
-			foreignBody = await exportAccountBody(donorPage, "Account", false)
+			foreignBody = await exportAccountBody(donorPage, FIRST_ACCOUNT_NAME, false)
 		} finally {
 			await donor.close()
 		}

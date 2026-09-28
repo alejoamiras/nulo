@@ -102,7 +102,7 @@ export function previewForPick(
 ): FeeMethodOption | undefined {
 	const row = rowForPick(pick, methods)
 	if (row || pick?.type !== "fpc" || !pick.fpc?.id || !allowSponsored) return row
-	return { type: "fpc", title: pick.fpc.name || "Sponsored FPC", subtitle: "sponsored" }
+	return { type: "fpc", title: pick.fpc.name || "Sponsored", subtitle: "sponsored" }
 }
 
 /** A saved pick wins when its row still exists and is eligible; otherwise the default walk. */

@@ -1,0 +1,80 @@
+<section class="wrap item" id="i8" data-item="i8" aria-labelledby="i8-title">
+	<div class="item-head">
+		<span class="item-num">08</span>
+		<h2 class="item-title" id="i8-title">The privacy strip looks like a row of checkboxes</h2>
+		<div class="item-surface"><span class="chip">Send page</span><span class="chip">Review sheet</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>On the send pop-up the rectangles for representing "hidden" feel like checkboxes and it's extremely confusing.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>Above the send button, <code>PublishStrip.vue</code> shows You / To / Amount, each with a 7px square: hollow means hidden, filled means public, orange means your address leaks through the fee (<code>publish-mark.module.css</code>).</li>
+				<li>An empty square next to a word is the universal checkbox. Here the empty ones are the good news, and nothing on the strip says what it's about.</li>
+				<li>Clicking it opens the review sheet with a sentence per row; a send whose fee exposes you goes through that sheet first ("Review send").</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>No product surveyed uses hollow and filled squares for visibility. Audience selectors use a padlock for "only me" and a globe for "everyone" (Venmo, Facebook, Google Drive), which is already Nulo's own pair.</li>
+				<li>Abstract labels fail: in a study of Apple's privacy labels, 1 of 12 people understood "Data Used to Track You" and 11 of 12 understood "Data Not Linked to You" (<a href="https://arxiv.org/html/2312.03918v2">arXiv</a>).</li>
+				<li>Zcash's wallet checklist: warn at the moment an action newly exposes something (<a href="https://zcash.readthedocs.io/en/latest/rtd_pages/ux_wallet_checklist.html">checklist</a>).</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Squares: hollow = hidden, filled = public</span></div>
+			<div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-hidden"><i class="n-mark"></i><b>You</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><i class="n-mark"></i><b>To</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><i class="n-mark"></i><b>Amount</b><span class="w">HIDDEN</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Private → private, fee paid privately</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-exposed"><i class="n-mark filled"></i><b>You</b><span class="w">FEE PAYER</span></span><span class="n-pub-cell v-hidden"><i class="n-mark"></i><b>To</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><i class="n-mark"></i><b>Amount</b><span class="w">HIDDEN</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Review send</div></div></div></div><div class="cap">Private → private, fee paid from public Fee Juice</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-public"><i class="n-mark filled"></i><b>You</b><span class="w">SENDER</span></span><span class="n-pub-cell v-public"><i class="n-mark filled"></i><b>To</b><span class="w">PUBLIC</span></span><span class="n-pub-cell v-public"><i class="n-mark filled"></i><b>Amount</b><span class="w">PUBLIC</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Public → public</div></div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Show what everyone will see</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-see"><div class="n-see-head"><span>What everyone will see</span><span class="ms">chevron_right</span></div><div class="n-see-cells"><div class="n-see-cell"><span class="n-see-k">You</span><span class="n-see-v masked" aria-label="hidden">••••••</span></div><div class="n-see-cell"><span class="n-see-k">To</span><span class="n-see-v masked" aria-label="hidden">••••••</span></div><div class="n-see-cell"><span class="n-see-k">Amount</span><span class="n-see-v masked" aria-label="hidden">••••••</span></div></div></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Private → private, fee paid privately</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-see"><div class="n-see-head"><span>What everyone will see</span><span class="ms">chevron_right</span></div><div class="n-see-cells"><div class="n-see-cell"><span class="n-see-k">You</span><span class="n-see-v exposed">0x1dd7…d930</span></div><div class="n-see-cell"><span class="n-see-k">To</span><span class="n-see-v masked" aria-label="hidden">••••••</span></div><div class="n-see-cell"><span class="n-see-k">Amount</span><span class="n-see-v masked" aria-label="hidden">••••••</span></div></div></div><div class="n-btn cta">Review send</div></div></div></div><div class="cap">Private → private, fee paid from public Fee Juice</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-see"><div class="n-see-head"><span>What everyone will see</span><span class="ms">chevron_right</span></div><div class="n-see-cells"><div class="n-see-cell"><span class="n-see-k">You</span><span class="n-see-v">0x1dd7…d930</span></div><div class="n-see-cell"><span class="n-see-k">To</span><span class="n-see-v">0x8c02…41fa</span></div><div class="n-see-cell"><span class="n-see-k">Amount</span><span class="n-see-v">250 USDC</span></div></div></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Public → public</div></div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The strip gets a plain heading, "What everyone will see", and each cell shows the value an observer would get: the real address or amount when it's public, <b>••••••</b> when it isn't. Your address in orange when the fee gives it away.</li>
+					<li>No squares, no icons to decode. The masked dots borrow the password-field convention for "hidden".</li>
+					<li>A fee contract Nulo can't vouch for shows "Can't tell" instead of dots.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Unchanged: the strip opens the review sheet, and an exposing send still goes through it.</p></div>
+				<p class="cost">Effort: small to medium. One component and its vocabulary; the review sheet's rows switch to the same cells.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">Swap the squares for Nulo's lock and globe</span></div>
+			<div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-hidden"><svg class="ic"><use href="#i-lock"/></svg><b>You</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><svg class="ic"><use href="#i-lock"/></svg><b>To</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><svg class="ic"><use href="#i-lock"/></svg><b>Amount</b><span class="w">HIDDEN</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Private → private, fee paid privately</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-exposed"><svg class="ic"><use href="#i-globe"/></svg><b>You</b><span class="w">FEE PAYER</span></span><span class="n-pub-cell v-hidden"><svg class="ic"><use href="#i-lock"/></svg><b>To</b><span class="w">HIDDEN</span></span><span class="n-pub-cell v-hidden"><svg class="ic"><use href="#i-lock"/></svg><b>Amount</b><span class="w">HIDDEN</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Review send</div></div></div></div><div class="cap">Private → private, fee paid from public Fee Juice</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-pub"><span class="n-pub-cell v-public"><svg class="ic"><use href="#i-globe"/></svg><b>You</b><span class="w">SENDER</span></span><span class="n-pub-cell v-public"><svg class="ic"><use href="#i-globe"/></svg><b>To</b><span class="w">PUBLIC</span></span><span class="n-pub-cell v-public"><svg class="ic"><use href="#i-globe"/></svg><b>Amount</b><span class="w">PUBLIC</span></span><span class="n-pub-chev"><span class="ms">chevron_right</span></span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Public → public</div></div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Only the mark changes: the same padlock and globe the home screen and token rows use for private and public.</li>
+					<li>Still no heading, and the words stay as they are ("SENDER", "FEE PAYER").</li>
+				</ul></div>
+				<p class="cost">Effort: trivial.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">One sentence instead of three cells</span></div>
+			<div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-sum"><svg class="ic c-tertiary"><use href="#i-lock"/></svg><div class="n-sum-text"><span class="n-sum-t">Private send</span><span class="n-sum-s">No one else can see who sent it, who got it, or how much.</span></div><span class="ms">chevron_right</span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Private → private, fee paid privately</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-sum exposed"><svg class="ic c-orange"><use href="#i-globe"/></svg><div class="n-sum-text"><span class="n-sum-t c-orange">Private send, public fee</span><span class="n-sum-s">The fee shows your address: everyone can see this account sent something, and when.</span></div><span class="ms">chevron_right</span></div><div class="n-btn cta">Review send</div></div></div></div><div class="cap">Private → private, fee paid from public Fee Juice</div><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-bottom"><div class="n-sum"><svg class="ic c-primary"><use href="#i-globe"/></svg><div class="n-sum-text"><span class="n-sum-t">Public send</span><span class="n-sum-s">Everyone can see your address, the recipient and the amount.</span></div><span class="ms">chevron_right</span></div><div class="n-btn cta">Confirm transaction</div></div></div></div><div class="cap">Public → public</div></div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The strip becomes a single line that names the kind of send and what it reveals. The per-field breakdown lives in the review sheet.</li>
+					<li>The calmest option. You lose the at-a-glance field-by-field view.</li>
+				</ul></div>
+				<p class="cost">Effort: small. Three sentences to write and keep true.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A</h3>
+			<p>A shows the answer instead of encoding it: nobody has to learn what a mark means when the cell literally says <b>••••••</b> or <b>0x1dd7…d930</b>. The heading tells a first-time user what the strip is for, which none of the other options do as directly. B is the right fallback if you want a one-line PR. C is calm but gives up the breakdown that makes the exposed-fee case understandable.</p>
+			<p class="conf">Confidence: moderate-high.</p>
+		</div>
+		<div class="pick" data-pick="i8" data-options="A|B|C|Other"></div>
+	</div>
+</section>

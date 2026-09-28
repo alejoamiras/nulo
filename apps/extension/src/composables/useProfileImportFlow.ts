@@ -4,6 +4,7 @@ import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { useProfileNameDefault } from "@/composables/useProfileNameDefault"
 import { useProfileNameField } from "@/composables/useProfileNameField"
 import { FileTooLargeError, pickFile } from "@/utils"
 import { copyWithToast } from "@/utils/clipboard"
@@ -156,8 +157,7 @@ function useDuplicateConfirm() {
 interface ImportHandlerDeps {
 	isImporting: Ref<boolean>
 	isAllowedToImportBySeedPhrase: Ref<boolean>
-	validateName: (opts: { existingNames: string[] }) => boolean
-	trimmedName: Ref<string>
+	resolveName: () => Promise<string | null>
 	seedPhrase: Ref<string | undefined>
 	password: Ref<string>
 	allowDuplicate: Ref<boolean>
@@ -171,24 +171,17 @@ interface ImportHandlerDeps {
 /** The seed + passkey import handlers (the full-backup path lives in
  *  `useFullBackupImport`). Bodies own the in-flight latch + error routing. */
 function createImportHandlers(deps: ImportHandlerDeps) {
-	async function fetchExistingNames(): Promise<string[]> {
-		return (await managers.profile.getProfiles()).map((p) => p.name)
-	}
-
 	// In-flight latch is set BEFORE the async `getProfiles()` fetch so two rapid
 	// clicks can't both pass the pre-check before the lock is set.
 	const handleImportSeed = async () => {
 		if (!deps.isAllowedToImportBySeedPhrase.value || deps.isImporting.value) return
 		deps.isImporting.value = true
 		try {
-			const existingNames = await fetchExistingNames()
-			if (!deps.validateName({ existingNames })) {
-				deps.isImporting.value = false
-				return
-			}
+			const name = await deps.resolveName()
+			if (name === null) return
 			const profile = await deps.withDuplicateConfirm(() =>
 				managers.profile.importMnemonic(
-					deps.trimmedName.value,
+					name,
 					(deps.seedPhrase.value ?? "").split(" "),
 					deps.password.value,
 					deps.allowDuplicate.value,
@@ -208,18 +201,13 @@ function createImportHandlers(deps: ImportHandlerDeps) {
 		if (deps.isImporting.value) return
 		deps.isImporting.value = true
 		try {
-			const existingNames = await fetchExistingNames()
-			if (!deps.validateName({ existingNames })) {
-				deps.isImporting.value = false
-				return
-			}
+			const name = await deps.resolveName()
+			if (name === null) return
 			// Discovery `get` — no allowedCredentials; the user picks from their
 			// available passkeys.
 			const credData = await deps.runCeremony({ mode: "get" })
 			// The SAME credentialData is reused on the confirm-retry — no second WebAuthn ceremony.
-			const profile = await deps.withDuplicateConfirm(() =>
-				managers.profile.importPasskey(deps.trimmedName.value, credData, deps.allowDuplicate.value),
-			)
+			const profile = await deps.withDuplicateConfirm(() => managers.profile.importPasskey(name, credData, deps.allowDuplicate.value))
 			if (!profile) return
 			await deps.completeImport(profile)
 		} catch (err) {
@@ -258,9 +246,14 @@ function cappedBackupPick(fillError: (type?: string, title?: string, tooltip?: s
 	}
 }
 
+async function listProfileNames(): Promise<string[]> {
+	return (await managers.profile.getProfiles()).map((p) => p.name)
+}
+
 export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	const nameField = useProfileNameField()
 	const { profileName, trimmedName } = nameField
+	const nameDefault = useProfileNameDefault(nameField, listProfileNames)
 
 	const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
@@ -286,8 +279,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	const { handleImportSeed, handleImportPasskey } = createImportHandlers({
 		isImporting,
 		isAllowedToImportBySeedPhrase,
-		validateName: nameField.validate,
-		trimmedName,
+		resolveName: () => nameDefault.resolveName(),
 		seedPhrase,
 		password,
 		allowDuplicate,
@@ -305,7 +297,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		clearError,
 		completeImport: opts.completeImport,
 		runCeremony,
-		profileName,
+		nameDefault,
 		showErrorLog: opts.showErrorLog,
 		allowDuplicate,
 		withDuplicateConfirm,
@@ -327,6 +319,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 
 	return {
 		// name field
+		nameFieldState: nameDefault.nameFieldState,
 		profileName,
 		trimmedName,
 		nameError: nameField.nameError,
@@ -370,7 +363,7 @@ interface WireBackupImportDeps {
 	clearError: () => void
 	completeImport: UseProfileImportFlowOptions["completeImport"]
 	runCeremony: ReturnType<typeof usePasskeyCeremony>["runCeremony"]
-	profileName: Ref<string>
+	nameDefault: ReturnType<typeof useProfileNameDefault>
 	showErrorLog: UseProfileImportFlowOptions["showErrorLog"]
 	allowDuplicate: Ref<boolean>
 	withDuplicateConfirm: <T>(run: () => Promise<T>) => Promise<T | undefined>
@@ -401,18 +394,15 @@ function wireBackupImport(deps: WireBackupImportDeps) {
 		pickFile: cappedBackupPick(deps.fillError),
 		completeImport: deps.completeImport,
 		runCeremony: deps.runCeremony,
-		profileName: deps.profileName,
+		resolveProfileName: (backupName) => deps.nameDefault.resolveName(backupName),
 		showErrorLog: deps.showErrorLog,
 		allowDuplicate: deps.allowDuplicate,
 		confirmDuplicate: deps.withDuplicateConfirm,
 	})
 
-	// Guarded prefill: fill the Profile-name input from a parsed backup, but
-	// only when the user hasn't typed anything yet (protects mid-typing from a
-	// delayed parse).
-	watch(parsedBackupName, (newName) => {
-		if (newName && !deps.profileName.value.trim()) deps.profileName.value = newName
-	})
+	// The selected backup's own name prefills an untouched field; a nameless one restores the
+	// default. A name the user typed is never replaced.
+	watch(parsedBackupName, (name) => deps.nameDefault.offer(name))
 
 	return {
 		resetBackupState,

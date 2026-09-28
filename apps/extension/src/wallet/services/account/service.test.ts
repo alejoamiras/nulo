@@ -521,7 +521,7 @@ describe("AccountService.provisionDefaultAccount — unattended rule", () => {
 		await h.service.provisionDefaultAccount("p1", 1)
 		const rows = await h.service.getAccounts("p1", 1, true)
 		expect(rows).toHaveLength(1)
-		expect(rows[0]).toMatchObject({ index: 0, visible: true, type: 0, name: "Account" })
+		expect(rows[0]).toMatchObject({ index: 0, visible: true, type: 0, name: "Account 1" })
 	})
 
 	test("the resolver is asked for an unattended verification", async () => {

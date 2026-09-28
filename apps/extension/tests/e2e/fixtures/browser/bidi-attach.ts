@@ -26,7 +26,8 @@ export async function attachPuppeteerOverBiDi(capabilities: SessionCapabilities,
 	const open = new Set<string>()
 	const closed = new Set<string>()
 	const transport = await openShimmedTransport(capabilities, sessionId, (message) => trackContexts(message, open, closed))
-	const browser = await puppeteer.connect({ transport, protocol: "webDriverBiDi" })
+	// Match the 300-second submission wait: BiDi awaits the polling promise within its protocol budget.
+	const browser = await puppeteer.connect({ transport, protocol: "webDriverBiDi", protocolTimeout: 300_000 })
 	return {
 		browser,
 		openContexts: () => [...open],

@@ -3,7 +3,7 @@ import type { Restored } from "@/wallet/base"
 
 export const ACCOUNT_SERVICE_NAME = "account"
 
-export const DEFAULT_ACCOUNT_NAME = "Account"
+export const DEFAULT_ACCOUNT_NAME = "Account 1"
 
 /** EntityStorage root for account rows. Frozen:
  *  renaming detaches every existing row; the backup-migration registry pins it. */

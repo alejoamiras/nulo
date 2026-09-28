@@ -42,6 +42,7 @@ const backTo = computed(() => String(route.query.from || "/popup/register"))
 const maxPasswordLength = 128
 
 const {
+	nameFieldState,
 	profileName,
 	nameError,
 	shakeName,
@@ -94,8 +95,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<CollapsingHeroLayout heroMain="Create" heroSub="Profile" collapsingLabel="Create Profile" :backTo="backTo">
-		<div :class="$style.section_last">
+	<CollapsingHeroLayout
+		heroMain="Create"
+		heroSub="Profile"
+		collapsingLabel="Create Profile"
+		:backTo="backTo"
+		data-testid="register-page"
+		:data-name-field="nameFieldState"
+	>
+		<div v-if="nameFieldState === 'shown'" :class="$style.section_last">
 			<span :class="$style.section_label">Profile name</span>
 			<div :class="[shakeName && $style.shake]">
 				<Input

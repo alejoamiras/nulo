@@ -288,9 +288,8 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
 		timeout: 30_000,
 	})
 
-	// Profile name is required at submit time (F1: pre-create explicit
-	// naming). Without typing, validateName() short-circuits the handler.
-	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+	// A fresh install's first profile has no name field; it is created as "Main".
+	await expectNoNameField(page, "register-page", "register-name-input")
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
@@ -936,37 +935,9 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
-			await clickByTestId(page, "import-option-seed")
-
-			await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 30_000 })
-			await page.evaluate(
-				({ seed, pwd }: { seed: string; pwd: string }) => {
-					const setVal = (sel: string, v: string) => {
-						const input = document.querySelector<HTMLInputElement>(sel)
-						if (!input) throw new Error(`input not found: ${sel}`)
-						const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-						setter?.call(input, v)
-						input.dispatchEvent(new Event("input", { bubbles: true }))
-					}
-					// F2: profile name is required at submit time.
-					setVal('[data-testid="import-name-input"] input', "Imported Profile")
-					setVal('[data-testid="import-seed-input"] input', seed)
-					setVal('[data-testid="import-password-input"] input', pwd)
-					setVal('[data-testid="import-password-confirm-input"] input', pwd)
-				},
-				{ seed: prefunded.words.join(" "), pwd: TEST_PASSWORD },
-			)
-
-			await page.waitForFunction(
-				() => {
-					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-seed-submit-btn"]')
-					return btn && !btn.disabled
-				},
-				{ timeout: 5_000, polling: 100 },
-			)
-			await clickByTestId(page, "import-seed-submit-btn")
-			await waitForHash(page, "#/popup/general", 30_000)
+			// Loaded at call time: the import drivers import this module.
+			const { importSeed, POPUP_IMPORT_SHELL } = await import("../helpers/import-drivers")
+			await importSeed(page, prefunded.words.join(" "), TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
 			// Switch to Local Network — popup auto-creates a Local-chain account
 			// with the SAME address the script pre-funded.
@@ -1307,6 +1278,38 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
  *  need a tighter bound pass one explicitly. */
 export async function waitForHash(page: Page, expectedHash: string, timeout = 15_000): Promise<void> {
 	await page.waitForFunction((hash: string) => window.location.hash === hash, { timeout, polling: 200 }, expectedHash)
+}
+
+/** Waits for a profile-creating page, found by its root testid, to settle whether it shows the
+ *  Profile-name field: `hidden` for a first profile, `shown` for a later one. */
+export async function waitForNameField(page: Page, pageTestId: string, timeout = 15_000): Promise<"hidden" | "shown"> {
+	const handle = await withTimeoutMessage(
+		page.waitForFunction(
+			(id: string) => {
+				const state = document.querySelector(`[data-testid="${id}"]`)?.getAttribute("data-name-field")
+				return state === "hidden" || state === "shown" ? state : null
+			},
+			{ timeout, polling: 100 },
+			pageTestId,
+		),
+		`${pageTestId} never settled its name field`,
+	)
+	return (await handle.jsonValue()) as "hidden" | "shown"
+}
+
+/** A first profile: the page settles `hidden` and renders no name input. */
+export async function expectNoNameField(page: Page, pageTestId: string, nameInputTestId: string): Promise<void> {
+	const state = await waitForNameField(page, pageTestId)
+	if (state !== "hidden") throw new Error(`${pageTestId}: a first profile must show no name field, got "${state}"`)
+	if (await page.$(`[data-testid="${nameInputTestId}"]`)) throw new Error(`${pageTestId}: ${nameInputTestId} rendered on a first profile`)
+}
+
+/** A later profile: the page settles `shown` with the name input prefilled `expected`. */
+export async function expectNameFieldPrefill(page: Page, pageTestId: string, nameInputTestId: string, expected: string): Promise<void> {
+	const state = await waitForNameField(page, pageTestId)
+	if (state !== "shown") throw new Error(`${pageTestId}: a later profile must show the name field, got "${state}"`)
+	const value = await page.$eval(`[data-testid="${nameInputTestId}"] input`, (el) => (el as HTMLInputElement).value)
+	if (value !== expected) throw new Error(`${nameInputTestId}: expected the prefill "${expected}", got "${value}"`)
 }
 
 /** Type into an input found by placeholder.

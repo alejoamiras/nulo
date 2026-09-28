@@ -8,6 +8,7 @@ import {
 	type PayerKind,
 	type PublishFacts,
 	publishFacts,
+	UNVOUCHED_FEE_SENTENCE,
 } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
 import { FEE_JUICE_BRIDGE_URL } from "./fee-helpers"
@@ -16,6 +17,7 @@ import SendReviewSheet from "./SendReviewSheet.vue"
 const STUBS = {
 	Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false },
 	MaterialIcon: { template: "<span />" },
+	Icon: { template: '<svg data-testid="stub-glyph" :data-name="name" :data-size="size" />', props: ["name", "size"] },
 	// The popup family is stubbed to what the sheet wires into it: the stack numbers, escape, initial focus, close.
 	Popup: {
 		name: "Popup",
@@ -168,11 +170,24 @@ describe("modules/send/SendReviewSheet", () => {
 		w = mountSheet({ facts, payerKind })
 		expect(["you", "to", "amount"].map((id) => row(w as W, id).attributes("data-visibility"))).toEqual(visibilities)
 		expect(row(w, "you").attributes("data-notice-shape")).toBe(shape)
+		const GLYPH = { hidden: "lock", public: "globe", exposed: "globe", unknown: undefined }
 		for (const [i, id] of ["you", "to", "amount"].entries()) {
-			const filled = visibilities[i] === "public" || visibilities[i] === "exposed"
-			expect(row(w, id).get("i").classes().includes(mark.filled), id).toBe(filled)
+			const glyph = row(w, id).find('[data-testid="stub-glyph"]')
+			expect(glyph.exists() ? glyph.attributes("data-name") : undefined, id).toBe(GLYPH[visibilities[i]])
 			expect(row(w, id).classes()).toContain(mark[visibilities[i] as keyof typeof mark])
 		}
+	})
+
+	test("a row Nulo can't mark keeps the glyph's 10px, so its words line up with the others", () => {
+		w = mountSheet({ facts: publishFacts("private", "public", "unvouched"), payerKind: "unvouched" })
+		const you = row(w, "you")
+		expect(you.find('[data-testid="stub-glyph"]').exists()).toBe(false)
+		const gap = you.element.firstElementChild
+		expect(gap?.tagName).toBe("SPAN")
+		expect(gap?.getAttribute("aria-hidden")).toBe("true")
+		const glyph = row(w, "to").get('[data-testid="stub-glyph"]')
+		expect(glyph.attributes("data-size")).toBe("10")
+		expect(glyph.attributes("aria-hidden")).toBe("true")
 	})
 
 	test("public rows carry their sentence, hidden rows none, and the gated row its remedy link", () => {
@@ -209,12 +224,20 @@ describe("modules/send/SendReviewSheet", () => {
 		["account", "fj", PAID_BY.account],
 		["contract", "private_fpc", PAID_BY.contract],
 		["contract", "fpc", PAID_BY.sponsor],
-		["unvouched", "fpc", PAID_BY.sponsor],
 	] as const)("the fee line for payer %s / %s", (payerKind, payerType, paidBy) => {
 		w = mountSheet({ payerKind, payerType })
 		const fee = w.get('[data-testid="send-review-fee"]')
 		expect(fee.text()).toBe(`Fee · ~0.0028 FJ${paidBy}`)
 		expect(fee.attributes("data-payer")).toBe(payerKind)
+	})
+
+	test("a hand-added contract's fee is drawn as — and spoken as the card's sentence, with no payer", () => {
+		w = mountSheet({ payerKind: "unvouched", payerType: "fpc", feeText: "~0.0028 FJ ($0.004)" })
+		const fee = w.get('[data-testid="send-review-fee"]')
+		expect(fee.get('[aria-hidden="true"]').text()).toBe("—")
+		expect(fee.text()).toBe(`Fee · —${UNVOUCHED_FEE_SENTENCE}`)
+		expect(fee.find("b").exists()).toBe(false)
+		expect(fee.attributes("data-payer")).toBe("unvouched")
 	})
 
 	test("send now: enabled and emitting only when shown, sendable, ready and idle", async () => {

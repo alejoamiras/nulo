@@ -1,0 +1,137 @@
+<section class="wrap item" id="i9" data-item="i9" aria-labelledby="i9-title">
+	<div class="item-head">
+		<span class="item-num">09</span>
+		<h2 class="item-title" id="i9-title">Jargon with nothing to explain it</h2>
+		<div class="item-surface"><span class="chip">Home</span><span class="chip">Send</span><span class="chip">Approval windows</span><span class="chip">Settings</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>Overall he felt that there could be some more tooltips or ways of informing the user about stuff.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>The only place Fee Juice, Private Fee Juice and sponsored fees are explained is onboarding step 04, which people skip.</li>
+				<li>After that, terms appear bare: "Public Juice" next to "Private Fee Juice" on home (two names for the same kind of thing, <code>GasBalanceCard.vue</code>), "FJ" and "L2 gas" in fee rows, "From Origin / To Destination" on send, "PXE state" and "Any contract class" in settings and approvals. "Auth-witness" is never defined.</li>
+				<li>The tooltip primitive exists but is hover-only and mis-positioned (item 2), and very few screens use it.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What the research says</h3>
+			<ul>
+				<li>"If you have space, don't use tooltips or toggletips. Just provide clear labels" (<a href="https://inclusive-components.design/tooltips-toggletips/">Pickering</a>). Anything you need to finish the task belongs on the screen.</li>
+				<li>For the rest, a <i>toggletip</i>: a small ⓘ or ? that opens on click, tap or Enter and stays until dismissed. Unlike hover tooltips, it works on touch and with a keyboard (<a href="https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html">WCAG 1.4.13</a>).</li>
+				<li>Rule of thumb from the survey: high stakes and frequent → say it inline; high stakes and rare → toggletip; long explanations → a glossary page.</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Bare terms</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-gas" style="border-top:0;margin-top:14px"><div class="n-gas-col"><span class="n-gas-label">Public Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div>
+					<div class="n-send-top" style="margin-top:14px">
+						<div class="n-sec last">
+							<div class="n-types">
+								<div class="n-types-col"><span class="n-types-sub">From Origin</span><div class="n-toggle"><span class="on">Private</span><span>Public</span></div></div>
+								<div class="n-types-col"><span class="n-types-sub">To Destination</span><div class="n-toggle"><span class="on">Private</span><span>Public</span></div></div>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="cap">Home gas row · send page types</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">Toggletips, all from one glossary</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="position:relative;padding-bottom:150px">
+					<div class="n-gas" style="border-top:0;margin-top:14px"><div class="n-gas-col"><span class="n-gas-label">Public Fee Juice <span class="n-qbtn open" id="i9-trig">?</span></span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice <span class="n-qbtn">?</span></span><span class="n-gas-amt">0.42 FJ</span></div></div>
+					<div class="n-tip toggletip" data-tip-for="i9-trig" data-tip-mode="clamp" data-tip-max="280"><div class="n-tip-text"><div class="n-tip-title">Fee Juice</div>Aztec's fee token: every transaction pays its fee in it, and it can't be sent to anyone. Paying from Private Fee Juice keeps your address out of the fee.<br><span class="n-tip-more">Learn more ›</span></div></div>
+				</div></div>
+				<div class="cap">Clicked open · stays until you click away or press Esc</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>One <code>glossary.ts</code> holds every definition; a small <b>?</b> next to a term opens it. The same text shows up everywhere the term does, so copy can't drift.</li>
+					<li>Built on the fixed tooltip primitive (item 2): click, tap and Enter open it, Esc closes it, and it stays inside the window.</li>
+					<li>Also fixes the naming: "Public Juice" becomes "Public Fee Juice", to pair with "Private Fee Juice".</li>
+				</ul></div>
+				<div><h4>Draft glossary</h4>
+					<dl class="gloss">
+						<dt>Fee Juice (FJ)</dt><dd>Aztec's fee token. Every transaction pays its fee in it. It can't be sent to other people.</dd>
+						<dt>Public / Private Fee Juice</dt><dd>Two separate balances. Paying from Private Fee Juice keeps your address out of the fee; paying from public names your account on the chain.</dd>
+						<dt>Sponsored</dt><dd>Someone else, usually the app, pays the fee. Test networks only.</dd>
+						<dt>Private / Public</dt><dd>Private keeps that side of a transfer hidden. Public puts it on the chain for anyone to read.</dd>
+						<dt>Auth-witness</dt><dd>A signature that lets a contract do one specific thing for your account, such as move a token during an app's transaction.</dd>
+						<dt>Simulation</dt><dd>A dry run on this device that shows what a transaction would do, without sending it.</dd>
+						<dt>PXE</dt><dd>The part of Nulo that keeps your private data and builds your transactions, on this device.</dd>
+						<dt>Fee contract</dt><dd>A contract that pays the network fee for you and takes payment another way.</dd>
+					</dl>
+				</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">Say it on the screen where it matters</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-send-top" style="margin-top:14px">
+						<div class="n-sec last">
+							<div class="n-types">
+								<div class="n-types-col"><span class="n-types-sub">From</span><div class="n-toggle"><span class="on">Private</span><span>Public</span></div></div>
+								<div class="n-types-col"><span class="n-types-sub">To</span><div class="n-toggle"><span class="on">Private</span><span>Public</span></div></div>
+							</div>
+							<span class="n-helpline">Private keeps that side hidden. Public puts it on the chain for anyone to read.</span>
+						</div>
+						<div class="n-sec last" style="padding-top:4px">
+							<div class="n-fee-card" style="gap:6px">
+								<div class="n-fee-top"><span class="n-fee-label">Fee</span><span class="n-sec-meta">~0.0024 FJ</span></div>
+								<span class="n-helpline">Paid in Fee Juice, Aztec's fee token.</span>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="cap">Send page · one line per high-stakes choice</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>A helper line only where a wrong guess costs something: send types, the fee, and the first time a fee method is picked. Nowhere else.</li>
+					<li>"From Origin / To Destination" become "From / To".</li>
+				</ul></div>
+				<p class="cost">Effort: small. Copy plus a line of layout per spot.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">A glossary page</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-subhdr"><span class="ms" style="font-size:20px">arrow_back</span><span class="n-subhdr-title">Glossary</span><span></span></div>
+					<div class="n-sheet" style="border-top:0">
+						<div class="n-srow"><div class="n-srow-t"><span class="n-srow-name">Fee Juice</span><span class="n-srow-addr" style="font-family:var(--font-body);font-size:11px">Aztec's fee token. Every transaction pays its fee in it.</span></div><span class="ms">chevron_right</span></div>
+						<div class="n-srow"><div class="n-srow-t"><span class="n-srow-name">Private Fee Juice</span><span class="n-srow-addr" style="font-family:var(--font-body);font-size:11px">Pays fees without showing your address.</span></div><span class="ms">chevron_right</span></div>
+						<div class="n-srow"><div class="n-srow-t"><span class="n-srow-name">Auth-witness</span><span class="n-srow-addr" style="font-family:var(--font-body);font-size:11px">Lets a contract do one thing for your account.</span></div><span class="ms">chevron_right</span></div>
+					</div>
+				</div></div>
+				<div class="cap">Settings → Help → Glossary</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Every term on one page, linked from each toggletip's "Learn more" and from onboarding step 04.</li>
+					<li>Nobody goes looking for a glossary on their own, so it only works as the target of A.</li>
+				</ul></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A + B, C later</h3>
+			<p>B covers the choices that matter every time you send. A covers the rest without cluttering screens, and one glossary keeps the wording consistent across home, send and approvals. C is cheap once A exists, since the page is just the glossary rendered.</p>
+			<p class="conf">Confidence: moderate-high. The glossary copy is a first draft for you to edit.</p>
+		</div>
+		<div class="pick" data-pick="i9" data-options="A + B|A + B + C|A only|B only|Other"></div>
+	</div>
+</section>

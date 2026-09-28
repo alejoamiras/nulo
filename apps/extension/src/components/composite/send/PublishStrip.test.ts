@@ -4,12 +4,18 @@ import { NO_FACTS, type PublishFacts, publishFacts, stripAriaLabel } from "./pub
 import mark from "./publish-mark.module.css"
 import PublishStrip from "./PublishStrip.vue"
 
-const STUBS = { MaterialIcon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] } }
+const STUBS = {
+	MaterialIcon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
+	Icon: { template: '<svg data-testid="stub-glyph" :data-name="name" :data-size="size" />', props: ["name", "size"] },
+}
 
 const mountStrip = (facts: PublishFacts) => mount(PublishStrip, { props: { facts }, global: { stubs: STUBS } })
 const strip = (w: ReturnType<typeof mountStrip>) => w.get('[data-testid="send-publish-strip"]')
 const cell = (w: ReturnType<typeof mountStrip>, attr: string) => w.get(`[data-cell="${attr}"]`)
-const markOf = (w: ReturnType<typeof mountStrip>, attr: string) => cell(w, attr).get("i").classes()
+const glyphOf = (w: ReturnType<typeof mountStrip>, attr: string) => {
+	const glyph = cell(w, attr).find('[data-testid="stub-glyph"]')
+	return glyph.exists() ? glyph.attributes("data-name") : null
+}
 
 describe("composite/send/PublishStrip", () => {
 	test("is one button carrying the three visibilities as data attributes", () => {
@@ -20,22 +26,31 @@ describe("composite/send/PublishStrip", () => {
 		expect([el.attributes("data-you"), el.attributes("data-to"), el.attributes("data-amount")]).toEqual(["exposed", "public", "public"])
 	})
 
-	test.each<[string, PublishFacts, string, boolean, string]>([
-		["you hidden", publishFacts("private", "private", "contract"), "you", false, "HIDDEN"],
-		["you public", publishFacts("public", "private", null), "you", true, "SENDER"],
-		["you exposed", publishFacts("private", "private", "account"), "you", true, "FEE PAYER"],
-		["you unknown", publishFacts("private", "private", null), "you", false, "—"],
-		["to hidden", publishFacts("public", "private", null), "to", false, "HIDDEN"],
-		["to public", publishFacts("private", "public", "contract"), "to", true, "PUBLIC"],
-		["amount hidden", publishFacts("private", "private", "contract"), "amount", false, "HIDDEN"],
-		["amount public", publishFacts("public", "private", "contract"), "amount", true, "PUBLIC"],
-	])("%s: mark, tone and word", (_name, facts, attr, filled, word) => {
+	test.each<[string, PublishFacts, string, string | null, string]>([
+		["you hidden", publishFacts("private", "private", "contract"), "you", "lock", "HIDDEN"],
+		["you public", publishFacts("public", "private", null), "you", "globe", "SENDER"],
+		["you exposed", publishFacts("private", "private", "account"), "you", "globe", "FEE PAYER"],
+		["you unknown", publishFacts("private", "private", null), "you", null, "—"],
+		["to hidden", publishFacts("public", "private", null), "to", "lock", "HIDDEN"],
+		["to public", publishFacts("private", "public", "contract"), "to", "globe", "PUBLIC"],
+		["amount hidden", publishFacts("private", "private", "contract"), "amount", "lock", "HIDDEN"],
+		["amount public", publishFacts("public", "private", "contract"), "amount", "globe", "PUBLIC"],
+	])("%s: glyph, tone and word", (_name, facts, attr, glyph, word) => {
 		const w = mountStrip(facts)
 		const visibility = attr === "you" ? facts.you : attr === "to" ? facts.recipient : facts.amount
 		expect(cell(w, attr).classes()).toContain(mark[visibility])
-		expect(markOf(w, attr)).toContain(mark.mark)
-		expect(markOf(w, attr).includes(mark.filled)).toBe(filled)
+		expect(glyphOf(w, attr)).toBe(glyph)
 		expect(cell(w, attr).get("span").text()).toBe(word)
+	})
+
+	test("a glyph is decoration at 10px: the words and the label carry the meaning", () => {
+		const w = mountStrip(publishFacts("private", "public", "contract"))
+		const glyphs = w.findAll('[data-testid="stub-glyph"]')
+		expect(glyphs).toHaveLength(3)
+		for (const glyph of glyphs) {
+			expect(glyph.attributes("data-size")).toBe("10")
+			expect(glyph.attributes("aria-hidden")).toBe("true")
+		}
 	})
 
 	test("the cells keep their order and labels", () => {
@@ -66,9 +81,10 @@ describe("composite/send/PublishStrip", () => {
 		expect(cell(w, "you").get("span").text()).toBe("FEE PAYER")
 	})
 
-	test("with nothing to send every cell is hollow and the you cell reads —", () => {
+	test("with nothing to send the you cell draws no glyph and reads —; nothing reads public", () => {
 		const w = mountStrip(NO_FACTS)
-		expect(w.findAll("[data-cell] i").filter((i) => i.classes().includes(mark.filled))).toHaveLength(0)
+		expect(glyphOf(w, "you")).toBeNull()
 		expect(cell(w, "you").get("span").text()).toBe("—")
+		expect([glyphOf(w, "to"), glyphOf(w, "amount")]).toEqual(["lock", "lock"])
 	})
 })

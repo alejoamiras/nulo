@@ -216,7 +216,7 @@ describe("previewForPick", () => {
 	test("a sponsor pick with no row yet is drawn from its label, and carries nothing to pay with", () => {
 		const preview = previewForPick({ type: "fpc", fpc: { id: "spon", name: "My sponsor" } }, loading, true)
 		expect(preview).toEqual({ type: "fpc", title: "My sponsor", subtitle: "sponsored" })
-		expect(previewForPick({ type: "fpc", fpc: { id: "spon" } }, loading, true)?.title).toBe("Sponsored FPC")
+		expect(previewForPick({ type: "fpc", fpc: { id: "spon" } }, loading, true)?.title).toBe("Sponsored")
 	})
 
 	test("nothing where sponsors are not offered, or for no pick", () => {

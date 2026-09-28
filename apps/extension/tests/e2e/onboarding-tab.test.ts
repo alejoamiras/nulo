@@ -1,7 +1,16 @@
 import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
 import { extensionUrl, gotoExtensionPage, newPage, waitForTarget } from "./fixtures/browser"
-import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import {
+	withTimeoutMessage,
+	clickByTestId,
+	expectNoNameField,
+	openOnboarding,
+	replaceInputValue,
+	test,
+	waitForHash,
+} from "./fixtures/extension"
+import { readProfileNames } from "./fixtures/helpers"
 import {
 	interceptHealth,
 	PRESTO_DETAILED_HEALTH,
@@ -11,7 +20,6 @@ import {
 } from "./fixtures/presto"
 
 const TEST_PASSWORD = "OnboardingTest_!23"
-const TEST_PROFILE_NAME = "Onboarding Test"
 
 async function gotoPrestoStep(page: Page): Promise<void> {
 	await page.evaluate(() => {
@@ -50,8 +58,8 @@ describe("onboarding tab", () => {
 		await clickByTestId(page, "onboarding-welcome-create")
 		await waitForHash(page, "#/onboarding/create", 10_000)
 
-		// Fill the name + password fields
-		await replaceInputValue(page, '[data-testid="onboarding-name-input"]', TEST_PROFILE_NAME)
+		// A first run asks only how to unlock: no name field.
+		await expectNoNameField(page, "onboarding-create-page", "onboarding-name-input")
 		await replaceInputValue(page, '[data-testid="onboarding-password-input"]', TEST_PASSWORD)
 		await replaceInputValue(page, '[data-testid="onboarding-password-confirm"]', TEST_PASSWORD)
 
@@ -59,6 +67,7 @@ describe("onboarding tab", () => {
 
 		// Wait for the bootstrap to finish + route to /learn
 		await waitForHash(page, "#/onboarding/learn", 30_000)
+		expect(await readProfileNames(page)).toEqual(["Main"])
 
 		// Continue from learn routes into the fee-juice explainer step. Skip on
 		// learn routes straight to /presto — covered by the dedicated skip test below.

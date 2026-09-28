@@ -430,7 +430,8 @@ function makeOpts(o: MakeOpts = {}) {
 	const clearError = vi.fn()
 	const pickFile = vi.fn()
 	const completeImport = vi.fn()
-	return { password, repeatedPassword, fillError, clearError, pickFile, completeImport }
+	const resolveProfileName = vi.fn(async (backupName: string | null): Promise<string | null> => backupName ?? "Main")
+	return { password, repeatedPassword, fillError, clearError, pickFile, completeImport, resolveProfileName }
 }
 
 // ── Setup ───────────────────────────────────────────────────────────────────
@@ -1502,9 +1503,25 @@ describe("useFullBackupImport — passkey backup", () => {
 	})
 })
 
-// ── Typed-name override (F3) ─────────────────────────────────────────────────
+// ── The restored profile's name ─────────────────────────────────────────────
 
-describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", () => {
+describe("useFullBackupImport — parsedBackupName + the resolved profile name", () => {
+	function mockCleanRestore() {
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Restored", type: "password" })
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+	}
+
+	async function namedBackup(name: unknown) {
+		return buildBackup({
+			data: {
+				profile: { id: "src-profile-id", name, type: "password" },
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
+				token: [],
+			},
+		})
+	}
+
 	it("parsedBackupName is null until a backup is parsed", () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
@@ -1512,14 +1529,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 	})
 
 	it("pickBackupFile surfaces the embedded profile name from a plain backup", async () => {
-		const backupBody = await buildBackup({
-			data: {
-				profile: { id: "src-profile-id", name: "Vault A", type: "password" },
-				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
-				token: [],
-			},
-		})
-		const file = new File([JSON.stringify(backupBody)], "backup.json", { type: "application/json" })
+		const file = new File([JSON.stringify(await namedBackup("Vault A"))], "backup.json", { type: "application/json" })
 		const opts = makeOpts()
 		opts.pickFile.mockResolvedValue(file)
 		const c = useFullBackupImport(opts)
@@ -1531,74 +1541,100 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 		expect(c.selectedBackup.value?.profileType).toBe("password")
 	})
 
-	it("restoreBackup passes the backup-embedded name when profileName opt is absent (regression pin)", async () => {
-		const opts = makeOpts() // no profileName
+	it("restores under the resolver's answer, asked with the backup's sanitized name, without mutating the backup", async () => {
+		const opts = makeOpts()
+		opts.resolveProfileName.mockResolvedValue("Acme")
 		const c = useFullBackupImport(opts)
-		const backup = await buildBackup({
-			data: {
-				profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
-				token: [],
-			},
-		})
+		const backup = await namedBackup("From‮Backup")
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-
-		profileClient.restore.mockResolvedValue({ id: "new-id", name: "FromBackup", type: "password" })
-		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		mockCleanRestore()
 
 		await c.restoreBackup()
 
-		expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "FromBackup" })
+		expect(opts.resolveProfileName).toHaveBeenCalledExactlyOnceWith("FromBackup")
+		expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "Acme" })
+		expect((backup.data as { profile: { name: string } }).profile.name).toBe("From‮Backup")
 	})
 
-	it("restoreBackup uses the trimmed profileName override when non-empty; falls back to backup name otherwise", async () => {
-		// Sub-case 1: explicit override wins.
+	it("a null answer stops quietly before anything is restored; a rejected one fails the import", async () => {
+		const opts = makeOpts()
+		opts.resolveProfileName.mockResolvedValueOnce(null)
+		const c = useFullBackupImport(opts)
+		c.selectedBackup.value = { name: "x.json", backup: await namedBackup("Named"), type: "plain", profileType: "password" }
+		mockCleanRestore()
+
+		await c.restoreBackup()
+		expect(profileClient.restore).not.toHaveBeenCalled()
+		expect(c.restoreStatus.value).toBe("")
+		expect(opts.fillError).not.toHaveBeenCalled()
+
+		opts.resolveProfileName.mockRejectedValueOnce(new Error("worker gone"))
+		await c.restoreBackup()
+		expect(profileClient.restore).not.toHaveBeenCalled()
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", "worker gone")
+	})
+
+	it.each([
+		["whitespace only", "   "],
+		["spaces around a bidi override", "  ‮  "],
+		["control characters only", "\u0000\u0007​"],
+	])("a %s name never reaches restore raw (plain and encrypted)", async (_label, hostile) => {
+		// Plain.
 		{
-			const opts = { ...makeOpts(), profileName: ref("Acme") }
+			const opts = makeOpts()
 			const c = useFullBackupImport(opts)
-			const backup = await buildBackup({
-				data: {
-					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
-					token: [],
-				},
-			})
-			c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-
-			profileClient.restore.mockResolvedValue({ id: "new-id", name: "Acme", type: "password" })
-			networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-			accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
-
+			const body = await namedBackup(hostile)
+			opts.pickFile.mockResolvedValue(new File([JSON.stringify(body)], "b.json", { type: "application/json" }))
+			await c.pickBackupFile()
+			expect(c.parsedBackupName.value).toBeNull()
+			// A pick clears the new-password fields; fill them as the user would.
+			opts.password.value = "pass1234"
+			opts.repeatedPassword.value = "pass1234"
+			mockCleanRestore()
 			await c.restoreBackup()
-
-			expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "Acme" })
-			// Confirm we spread-cloned: the backup's embedded profile is untouched.
-			expect((backup.data as { profile: { name: string } }).profile.name).toBe("FromBackup")
+			expect(opts.resolveProfileName).toHaveBeenCalledExactlyOnceWith(null)
+			expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "Main" })
 		}
-
-		// Sub-case 2: whitespace-only override falls back to backup name.
-		profileClient.restore.mockReset().mockResolvedValue({ id: "new-id", name: "FromBackup", type: "password" })
-		networkClient.seedDefaultsForProfile
-			.mockReset()
-			.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockReset().mockResolvedValue([{ address: "0xaaaa" }])
+		// Encrypted: the name only exists after decrypt.
+		profileClient.restore.mockReset()
 		{
-			const opts = { ...makeOpts(), profileName: ref("   ") }
+			const opts = makeOpts()
 			const c = useFullBackupImport(opts)
-			const backup = await buildBackup({
-				data: {
-					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
-					token: [],
-				},
-			})
-			c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-
+			const key = await EncryptionKey.fromPasshash(await EncryptionKey.getPasshash("pass1234"))
+			const plain = new TextEncoder().encode(JSON.stringify(await namedBackup(hostile)))
+			const sealed = btoa(String.fromCharCode(...(await key.encrypt(plain))))
+			c.selectedBackup.value = { name: "b.txt", backup: sealed, type: "encrypted", profileType: null }
+			c.decryptionPassword.value = "pass1234"
+			await c.decryptBackup()
+			expect(c.selectedBackup.value?.profileType).toBe("password")
+			expect(c.parsedBackupName.value).toBeNull()
+			mockCleanRestore()
 			await c.restoreBackup()
-
-			expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "FromBackup" })
+			expect(opts.resolveProfileName).toHaveBeenCalledExactlyOnceWith(null)
+			expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "Main" })
 		}
+	})
+
+	it("the duplicate-phrase retry restores under the same resolved name, asked once", async () => {
+		const opts = {
+			...makeOpts(),
+			// Confirms the warning: the first run is refused, the retry goes through.
+			confirmDuplicate: async <T>(run: () => Promise<T>) => {
+				await run().catch(() => undefined)
+				return run()
+			},
+		}
+		opts.resolveProfileName.mockResolvedValue("Profile 3")
+		const c = useFullBackupImport(opts)
+		c.selectedBackup.value = { name: "x.json", backup: await namedBackup("Named"), type: "plain", profileType: "password" }
+		mockCleanRestore()
+		profileClient.restore.mockRejectedValueOnce(new Error("duplicate phrase"))
+
+		await c.restoreBackup()
+
+		expect(opts.resolveProfileName).toHaveBeenCalledOnce()
+		expect(profileClient.restore).toHaveBeenCalledTimes(2)
+		expect(profileClient.restore.mock.calls.map((call) => (call[0] as { name: string }).name)).toEqual(["Profile 3", "Profile 3"])
 	})
 })
 

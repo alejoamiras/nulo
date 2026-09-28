@@ -28,7 +28,7 @@ defineProps({
 		<Text size="12" weight="600" color="secondary">Available</Text>
 		<span v-if="isLoading" :class="$style.skeleton" />
 		<Text v-else size="12" weight="600" color="primary">
-			{{ feeJuiceBalanceFormatted ?? '—' }} Fee Juice
+			{{ feeJuiceBalanceFormatted ?? '—' }} FJ
 		</Text>
 	</Flex>
 

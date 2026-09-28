@@ -323,9 +323,10 @@ onBeforeUnmount(() => {
 				@click="handleLockWallet"
 				data-testid="header-lock"
 				aria-label="Lock wallet"
-				:class="$style.icon_button"
+				:class="$style.lock_chip"
 			>
-				<MaterialIcon name="lock" :size="20" color="primary" />
+				<MaterialIcon name="lock" :size="15" color="primary" />
+				<span :class="$style.lock_label">Lock</span>
 			</button>
 
 		</Flex>
@@ -491,27 +492,38 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.icon_button {
-	display: flex;
+/* Drawn as the network chip beside it: same border, type and hover. */
+.lock_chip {
+	display: inline-flex;
 	align-items: center;
-	justify-content: center;
+	gap: 5px;
+	flex-shrink: 0;
 
-	width: 36px;
-	height: 36px;
+	height: 26px;
+	padding: 0 9px 0 7px;
 
 	background: transparent;
-	border: none;
+	border: 1px solid var(--nulo-border);
 	cursor: pointer;
 
 	transition: background 0.2s var(--bezier);
 
 	&:hover {
-		background: var(--nulo-surface-high);
+		background: var(--nulo-surface-low);
 	}
 
 	&:active {
 		opacity: 0.8;
 	}
+}
+
+.lock_label {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
 }
 
 .status_dot {

@@ -1,0 +1,93 @@
+<title>Nulo Feedback Round 1</title>
+<style>
+/*@PAGE_CSS@*/
+/*@NULO_CSS@*/
+</style>
+<!--@SPRITE@-->
+
+<nav class="rail" aria-label="Items">
+	<div class="wrap rail-in">
+		<span class="rail-name">Rounds 1–5</span>
+		<div class="rail-chips" id="rail-chips"></div>
+		<span class="rail-count" id="rail-count">0 / 13 settled</span>
+	</div>
+</nav>
+
+<main>
+	<header class="wrap hero">
+		<div>
+			<h1 class="bt"><span class="m">Feedback</span><span class="s">Round five</span></h1>
+			<div class="hero-bar"></div>
+		</div>
+		<div>
+			<p class="lede">Every item is decided. Round five draws the states no round drew and the build still needs: seven on item 6, the two warnings the tooltip map moves out of tooltips, first-run import, the review sheet with the fee tag, the strip when Nulo can't tell who pays, and three fee states: the menu before its balances arrive, what a screen reader says for a sub-cent fee, and a fee contract you added by hand. Each is drawn the way I'd build it, with a picker. Until you pick, the build uses the drawn option and its PR marks that surface "sign-off pending".</p>
+			<p class="lede">Items 3, 5, 6, 8 and the tooltip map open with their round-5 block; earlier rounds fold underneath, newest first. Picks save to this page, as before.</p>
+			<div class="controls">
+				<span class="ctl-label" id="wt-label">Wallet theme</span>
+				<div class="seg" role="group" aria-labelledby="wt-label">
+					<button type="button" data-wallet-theme="dark" aria-pressed="true">Dark</button>
+					<button type="button" data-wallet-theme="light" aria-pressed="false">Light</button>
+				</div>
+				<button type="button" class="btn ghost" id="copy-picks">Copy picks as text</button>
+				<span class="store-note" id="store-note">Loading saved picks…</span>
+			</div>
+		</div>
+	</header>
+
+	<section class="wrap r2sum" aria-labelledby="r2sum-title">
+		<p class="eyebrow" id="r2sum-title">Round five at a glance</p>
+		<div class="r2grid">
+			<div class="r2card"><h3>Decided in round four · 3</h3><ul>
+				<li><a href="#i6">6</a> The authorizations row: B</li>
+				<li><a href="#i6">6</a> Off means ask</li>
+				<li><a href="#i6">6</a> Unknown permissions start Off</li>
+			</ul></div>
+			<div class="r2card r3sum-open"><h3>Open · 15 picks on drawn states</h3><ul>
+				<li><a href="#i6-r5">6</a> Asking for more, several accounts, network banners, every row, rename, the authorization window, Settings · 7</li>
+				<li><a href="#tips-r5">T</a> The hostname warning and the recovery-phrase note as text · 2</li>
+				<li><a href="#i3-r5">3</a> The fee menu before its balances arrive, the spoken sub-cent fee, and a fee contract added by hand · 3</li>
+				<li><a href="#i5-r5">5</a> First-run import · 1</li>
+				<li><a href="#i8-r5">8</a> The review sheet and the fee tag, and the strip when Nulo can't tell who pays · 2</li>
+			</ul></div>
+			<div class="r2card"><h3>Unchanged · 1</h3><ul>
+				<li><a href="#i6-r5">6</a> The window's cancelled and error overlays stay as they are</li>
+			</ul></div>
+		</div>
+	</section>
+
+	<section class="wrap ledger-sec" aria-labelledby="ledger-title">
+		<p class="eyebrow" id="ledger-title">All thirteen</p>
+		<div class="scroll-x">
+			<table class="ledger">
+				<thead>
+					<tr><th>#</th><th>Item</th><th>Status</th><th>What testers hit</th><th>Options</th><th>My pick</th><th>Your pick</th></tr>
+				</thead>
+				<tbody id="ledger-body"></tbody>
+			</table>
+		</div>
+	</section>
+
+<!--@PARTS@-->
+
+	<footer class="wrap foot">
+		<h2>How it gets built</h2>
+		<ol>
+			<li>Six stacked PRs, in this order: first run and wording (1, 3, 5, 7, 8); window placement (4A); tooltips and glossary (2, 9, T); snackbar, rows and arrivals (10, 11, 12); then permissions (6) in two parts, the authorization confirm and the window.</li>
+			<li>I read your round-5 picks back from this page. A pick that differs from the drawn option goes into the PR that owns that surface before it opens.</li>
+			<li>Every PR that changes what you see comes with screenshots of the built extension beside these drawings, in its own artifact, so you can compare them side by side.</li>
+		</ol>
+		<h2 style="margin-top:28px">Follow-ups, outside this arc</h2>
+		<ol>
+			<li><b>One connect window</b> (item 4, option B): Allow and the emoji check in the same window. You want it; it reworks the verify path, so it gets its own plan with round 1's "A + B" drawing as its design.</li>
+			<li><b>Testnet's default "Test USDC"</b> points at <code>0x1c81…e9ae</code>, which the tools bridge no longer lists. A mirror fix for the <code>aztec-update</code> skill, noticed while drawing item 6.</li>
+		</ol>
+		<p class="srcs" id="sources"></p>
+	</footer>
+</main>
+
+<script>
+/*@JS@*/
+</script>
+<style>
+/*@FONTS@*/
+</style>

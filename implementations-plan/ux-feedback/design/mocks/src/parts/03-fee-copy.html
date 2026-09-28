@@ -1,0 +1,168 @@
+<section class="wrap item" id="i3" data-item="i3" aria-labelledby="i3-title">
+	<div class="item-head">
+		<span class="item-num">03</span>
+		<h2 class="item-title" id="i3-title">"Fee source" and "Sponsored Fee Juice"</h2>
+		<div class="item-surface"><span class="chip">Send screen</span><span class="chip">dApp transaction window</span><span class="chip">Home fee balances</span></div>
+	</div>
+	<blockquote class="quote"><cite>Tester, via your note</cite>"What the fudge is sponsored fee juice? And why is it called 'Fee source'?" — I think we can just put "Fee" (on the send pop-up at least; I don't recall what the transaction pop-up said, but "fee source" is too explicit). And saying it's "Sponsored", no need of "Sponsored fee juice".</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>The dropdown label is "Fee Source" (<code>FeeMethodSelector.vue</code>). Its value is the fee method's <i>name</i>, and the sponsor is literally named "Sponsored Fee Juice" (<code>SPONSORED_FPC_DEFAULT_NAME</code>, <code>wallet/services/fpc/service.ts:45</code>). The public method is just "Fee Juice".</li>
+				<li>The dApp transaction window embeds the same card (<code>OperationCard.vue:298</code>), so one change fixes both. That card's other two states already say "Pay fee with" (locked by the app, or embedded) — three names for one idea.</li>
+				<li>While sponsored, the card still shows "Estimated network fee ~0.0024 FJ", which reads as a cost you pay.</li>
+				<li>Home shows "Public Juice" next to "Private Fee Juice" (<code>GasBalanceCard.vue:161,170</code>); the method row mixes "Fee Juice" and "FJ".</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>Mainstream wallets say "Network fee" and use the gas token only as the unit (MetaMask, Coinbase, Phantom).</li>
+				<li>Account-abstraction stacks don't label sponsorship at all; the fee simply shows as free — "your users just see your product working" (<a href="https://docs.pimlico.io/references/paymaster/verifying-paymaster/faqs">Pimlico</a>).</li>
+				<li>Starknet's Ready exposes the fee-token choice (STRK vs ETH) only on a second screen, opt-in (<a href="https://www.ready.co/learn/how-to-use-strk-as-fee-token">Ready</a>).</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Send screen, Testnet, sponsor selected</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-send-top">
+						<div class="n-sec"><span class="n-sec-label">Transaction amount</span><div class="n-amount"><span class="n-amount-num">25.00</span><span class="n-amount-max">MAX</span></div></div>
+						<div class="n-sec last">
+							<div class="n-fee">
+								<div class="n-fee-card"><div class="n-fee-top"><span class="n-fee-label">Fee Source</span></div><div class="n-fee-trigger"><span class="n-fee-value">Sponsored Fee Juice</span><span class="ms">expand_more</span></div></div>
+								<div class="n-fee-row"><span class="n-fee-label">Estimated Network Fee</span><span class="n-fee-mono">~0.0024 FJ <small>($0.01)</small></span></div>
+								<div class="n-fee-row"><span class="n-fee-label">Priority</span><div class="n-prio"><span class="on">Normal</span><span>Fast</span><span>Urgent</span></div></div>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="padding:8px 24px 12px">
+					<div class="n-menu">
+						<div class="n-menu-item"><span>Fee Juice</span><span class="meta">public</span></div>
+						<div class="n-menu-item"><span>Private Fee Juice</span><span class="meta">private</span></div>
+						<div class="n-menu-item sel"><span>Sponsored Fee Juice</span><span class="meta">sponsored</span></div>
+					</div>
+				</div></div>
+				<div class="cap">Card closed, then its menu open · example values</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">"Fee" + "Sponsored", and say what you pay</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-send-top">
+						<div class="n-sec"><span class="n-sec-label">Transaction amount</span><div class="n-amount"><span class="n-amount-num">25.00</span><span class="n-amount-max">MAX</span></div></div>
+						<div class="n-sec last">
+							<div class="n-fee">
+								<div class="n-fee-card"><div class="n-fee-top"><span class="n-fee-label">Fee</span></div><div class="n-fee-trigger"><span class="n-fee-value">Sponsored</span><span class="ms">expand_more</span></div></div>
+								<div class="n-fee-row"><span class="n-fee-label">You pay</span><span class="n-fee-mono"><span class="n-fee-free">Nothing</span> <small>· the sponsor covers ~0.0024 FJ</small></span></div>
+								<div class="n-fee-row"><span class="n-fee-label">Priority</span><div class="n-prio"><span class="on">Normal</span><span>Fast</span><span>Urgent</span></div></div>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="padding:8px 24px 12px">
+					<div class="n-menu">
+						<div class="n-menu-item"><span>Public Fee Juice</span><span class="meta">1.20 FJ</span></div>
+						<div class="n-menu-item"><span>Private Fee Juice</span><span class="meta">0.42 FJ</span></div>
+						<div class="n-menu-item sel"><span>Sponsored</span><span class="meta">free</span></div>
+					</div>
+				</div></div>
+				<div class="cap">Paying yourself, "You pay" reads ~0.0024 FJ ($0.01)</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Label "Fee Source" → "Fee". Sponsor name "Sponsored Fee Juice" → "Sponsored"; "Fee Juice" → "Public Fee Juice" so the pair reads symmetric.</li>
+					<li>"Estimated network fee" → "You pay", and it says <b>Nothing</b> when sponsored.</li>
+					<li>The menu's right column shows what each option can spend (your balance, or "free") instead of repeating public/private.</li>
+					<li>Same words on Home ("Public Fee Juice") and "FJ" everywhere as the unit.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Unchanged. The dApp window gets the same card for free.</p></div>
+				<p class="cost">Effort: copy in 4 files + the seeded FPC name. No migration (pre-production).</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">"Pay fee with", explained in the menu</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-send-top">
+						<div class="n-sec"><span class="n-sec-label">Transaction amount</span><div class="n-amount"><span class="n-amount-num">25.00</span><span class="n-amount-max">MAX</span></div></div>
+						<div class="n-sec last">
+							<div class="n-fee">
+								<div class="n-fee-card"><div class="n-fee-top"><span class="n-fee-label">Pay fee with</span></div><div class="n-fee-trigger"><span class="n-fee-value">Sponsor · free</span><span class="ms">expand_more</span></div></div>
+								<div class="n-fee-row"><span class="n-fee-label">You pay</span><span class="n-fee-mono"><span class="n-fee-free">Nothing</span> <small>· the sponsor covers ~0.0024 FJ</small></span></div>
+								<div class="n-fee-row"><span class="n-fee-label">Priority</span><div class="n-prio"><span class="on">Normal</span><span>Fast</span><span>Urgent</span></div></div>
+							</div>
+						</div>
+					</div>
+				</div></div>
+				<div class="fit"><div class="nulo n-crop" theme="dark" style="padding:8px 24px 12px">
+					<div class="n-menu">
+						<div class="n-menu-item two"><div class="l1"><span>Public Fee Juice</span><span class="meta">1.20 FJ</span></div><span class="l2">Paid in public. Shows your address.</span></div>
+						<div class="n-menu-item two"><div class="l1"><span>Private Fee Juice</span><span class="meta">0.42 FJ</span></div><span class="l2">Paid privately. Keeps your address hidden.</span></div>
+						<div class="n-menu-item two sel"><div class="l1"><span>Sponsor</span><span class="meta">free</span></div><span class="l2">Someone else pays the fee. Test networks only.</span></div>
+					</div>
+				</div></div>
+				<div class="cap">The menu teaches the trade-off in one line each</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Everything in A, but the label becomes "Pay fee with" — the phrase the locked and embedded states already use, so the send screen and dApp windows share one phrase.</li>
+					<li>Each menu option gets a one-line consequence, including the privacy one people otherwise learn from the orange "Names your address" tag.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Unchanged.</p></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">One fee line; details in a sheet</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-send-top">
+						<div class="n-sec"><span class="n-sec-label">Transaction amount</span><div class="n-amount"><span class="n-amount-num">25.00</span><span class="n-amount-max">MAX</span></div></div>
+						<div class="n-sec last">
+							<div class="n-fee"><div class="n-fee-row h" style="border-top:0;padding:12px"><span class="n-fee-label">Fee</span><span style="display:flex;align-items:center;gap:6px"><span class="n-fee-free">Free</span><span class="n-fee-mono"><small>sponsored · normal</small></span><span class="ms" style="font-size:16px;color:var(--nulo-secondary)">chevron_right</span></span></div></div>
+						</div>
+					</div>
+				</div></div>
+				<div class="fit"><div class="nulo n-crop" theme="dark">
+					<div class="n-subhdr" style="border-top:1px solid var(--nulo-border)"><span></span><span class="n-subhdr-title">Fee</span><span class="ms" style="font-size:20px;justify-self:end">close</span></div>
+					<div style="padding:0 24px 16px;display:flex;flex-direction:column;gap:12px">
+						<div class="n-menu" style="border-width:1px">
+							<div class="n-menu-item two"><div class="l1"><span>Public Fee Juice</span><span class="meta">1.20 FJ</span></div><span class="l2">Paid in public. Shows your address.</span></div>
+							<div class="n-menu-item two"><div class="l1"><span>Private Fee Juice</span><span class="meta">0.42 FJ</span></div><span class="l2">Paid privately. Keeps your address hidden.</span></div>
+							<div class="n-menu-item two sel"><div class="l1"><span>Sponsor</span><span class="meta">free</span></div><span class="l2">Someone else pays the fee. Test networks only.</span></div>
+						</div>
+						<div style="display:flex;flex-direction:column;gap:8px"><span class="n-fee-label">Priority</span><div class="n-prio"><span class="on">Normal</span><span>Fast</span><span>Urgent</span></div></div>
+						<div class="n-sec-row"><span class="n-fee-label">Network fee</span><span class="n-fee-mono">~0.0024 FJ <small>($0.01)</small></span></div>
+					</div>
+				</div></div>
+				<div class="cap">The send screen keeps one row; tapping it opens the sheet</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The fee card shrinks to one line: what you pay, how, and the speed. Everything else moves into a sheet.</li>
+					<li>The send screen loses two rows, which makes room for item 8's privacy line.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Tap the fee row → sheet; pick a method or priority → sheet closes and the row updates.</p></div>
+				<p class="cost">Effort: a new sheet plus restructuring FeeSettingsCard's layout in both hosts.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A</h3>
+			<p>Your version, plus the thing it misses: with a sponsor, the card still quotes a fee, which is the bigger source of "what is this?". A is copy-only and fixes both hosts at once. Take B if you'd rather have one phrase ("Pay fee with") across send and dApp windows. C is the calmest screen but the most work; worth it only if item 8 needs the space.</p>
+			<p class="conf">Confidence: moderate — A vs B is taste; the "You pay: Nothing" line is the part I'd defend.</p>
+		</div>
+		<div class="pick" data-pick="i3" data-options="A|B|C|Other"></div>
+	</div>
+</section>

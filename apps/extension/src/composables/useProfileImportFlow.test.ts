@@ -1,4 +1,5 @@
 import { effectScope } from "vue"
+import { flushPromises } from "@vue/test-utils"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { DuplicateWalletError, UserRejectedError } from "@nulo/extension-messaging/errors"
@@ -12,7 +13,10 @@ vi.mock("@/utils/core", () => {
 	return { managers: { profile: profileMock } }
 })
 
+vi.mock("@/utils", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/utils")>()), pickFile: vi.fn() }))
+
 import { managers } from "@/utils/core"
+import { pickFile } from "@/utils"
 import { useProfileImportFlow, type UseProfileImportFlowOptions } from "./useProfileImportFlow"
 
 const profileApi = managers.profile as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -82,9 +86,46 @@ describe("useProfileImportFlow", () => {
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 	})
 
-	test("empty name blocks the import and resets the latch", async () => {
+	test("a first-run seed import shows no name field and is named Main", async () => {
+		const { flow } = makeFlow()
+		await flushPromises()
+		expect(flow.nameFieldState.value).toBe("hidden")
+		flow.password.value = "password123"
+		flow.repeatedPassword.value = "password123"
+		flow.seedPhrase.value = SEED_24
+		await flow.handleImportSeed()
+		expect(profileApi.importMnemonic).toHaveBeenCalledWith("Main", SEED_24.split(" "), "password123", false)
+	})
+
+	test("a selected backup's name prefills an untouched field: named → nameless → named", async () => {
+		profileApi.getProfiles.mockResolvedValue([{ name: "Main" }])
+		const { flow } = makeFlow()
+		await flushPromises()
+		const pick = pickFile as unknown as ReturnType<typeof vi.fn>
+		const backupFile = (profile: Record<string, unknown>) =>
+			new File([JSON.stringify({ data: { profile: { type: "password", ...profile } } })], "b.json", { type: "application/json" })
+
+		pick.mockResolvedValueOnce(backupFile({ name: "Alpha" }))
+		await flow.pickBackupFile()
+		await flushPromises()
+		expect(flow.profileName.value).toBe("Alpha")
+
+		pick.mockResolvedValueOnce(backupFile({}))
+		await flow.pickBackupFile()
+		await flushPromises()
+		expect(flow.profileName.value).toBe("Profile 2")
+
+		pick.mockResolvedValueOnce(backupFile({ name: "Beta" }))
+		await flow.pickBackupFile()
+		await flushPromises()
+		expect(flow.profileName.value).toBe("Beta")
+	})
+
+	test("a cleared name blocks the import and resets the latch", async () => {
+		profileApi.getProfiles.mockResolvedValue([{ name: "Main" }])
 		const { flow, opts } = makeFlow()
-		// profileName left empty -> validate fails at submit time
+		await flushPromises()
+		flow.profileName.value = ""
 		flow.password.value = "password123"
 		flow.repeatedPassword.value = "password123"
 		flow.seedPhrase.value = SEED_24

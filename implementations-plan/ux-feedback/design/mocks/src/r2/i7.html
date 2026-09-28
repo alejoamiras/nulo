@@ -1,0 +1,34 @@
+<div class="r2" id="i7-r2">
+	<div class="r2-head"><span class="r2-tag">Round 2</span><span class="r2-said">You picked A but aren't sold. Three ways to label it, same header, same screen. The difference that matters is whether the padlock stays.</span></div>
+	<div class="facts">
+		<div>
+			<h3>Why the glyph is the question</h3>
+			<ul>
+				<li>On Home the padlock already means "private" twice (balance split, token rows), and item 8's pick puts three more on the send screen's strip.</li>
+				<li>A label fixes "is this a button?". It doesn't stop the same glyph from meaning two things on one screen; only dropping it does.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>MetaMask, Phantom and 1Password all lock from a text item ("Lock", "Lock Wallet", "Lock 1Password"), not from a padlock alone (round 1's survey).</li>
+			</ul>
+		</div>
+	</div>
+	<div class="opts">
+		<div class="opt" data-opt="A1"><div class="opt-head"><span class="opt-key">A1</span><span class="opt-name">Padlock + "Lock", bordered (round 1)</span></div><div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-home-bal"><span class="n-bal-amount">1,514.10</span><span class="n-bal-fiat">USDC · $1,514.10</span><div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div></div><div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Fee Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div><div style="height:18px"></div></div></div><div class="cap">Chip matches the network chip</div></div>
+			<div class="notes"><div><ul><li>Most recognizable as "lock", but it's the padlock again, next to the private padlocks.</li></ul></div></div></div>
+		<div class="opt" data-opt="A2"><div class="opt-head"><span class="opt-key">A2</span><span class="opt-name">"Lock" only, bordered</span><span class="opt-rec">Recommended</span></div><div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockchip text"><span>Lock</span></div></div></div><div class="n-home-bal"><span class="n-bal-amount">1,514.10</span><span class="n-bal-fiat">USDC · $1,514.10</span><div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div></div><div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Fee Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div><div style="height:18px"></div></div></div><div class="cap">No padlock in the header at all</div></div>
+			<div class="notes"><div><ul><li>The padlock means one thing everywhere: private. The word says what the button does.</li><li>Risk: two bordered chips side by side could read as two statuses. The hover state and pointer carry "button"; worth checking with a tester.</li></ul></div></div></div>
+		<div class="opt" data-opt="A3"><div class="opt-head"><span class="opt-key">A3</span><span class="opt-name">Padlock + "Lock", no border</span></div><div class="stage"><div class="fit"><div class="nulo n-crop" theme="dark"><div class="n-hdr"><div class="n-acct"><div class="n-avatar">A1</div><div class="n-acct-col"><span class="n-acct-name">Account 1</span><span class="n-acct-addr">0x1dd7...d930</span></div></div><div class="n-hdr-right"><div class="n-net"><span class="n-net-label">Testnet</span><span class="n-dot"></span></div><div class="n-lockbtn"><span class="ms">lock</span><span>Lock</span></div></div></div><div class="n-home-bal"><span class="n-bal-amount">1,514.10</span><span class="n-bal-fiat">USDC · $1,514.10</span><div class="n-split"><span><svg class="ic c-primary"><use href="#i-lock"/></svg>1,204.10</span><span><svg class="ic"><use href="#i-globe"/></svg>310.00</span></div></div><div class="n-gas"><div class="n-gas-col"><span class="n-gas-label">Public Fee Juice</span><span class="n-gas-amt">1.20 FJ</span></div><div class="n-gas-col r"><span class="n-gas-label">Private Fee Juice</span><span class="n-gas-amt">0.42 FJ</span></div></div><div style="height:18px"></div></div></div><div class="cap">Quietest; reads like a text link</div></div>
+			<div class="notes"><div><ul><li>Lightest, and no second chip beside the network one. Keeps the double meaning of the padlock.</li></ul></div></div></div>
+	</div>
+	<div class="recbox">
+		<div>
+			<h3>My pick: A2</h3>
+			<p>If the complaint is "the lock looks like the privacy lock", the fix is to stop using the privacy lock for it. A1 and A3 answer "is it a button?" and leave the collision in place, which gets worse once the send strip carries padlocks too. Same testid and aria-label in all three; one click locks, as today.</p>
+			<p class="conf">Confidence: moderate. A2 vs A1 is the call; A3 is the fallback if the second chip looks busy in the real header.</p>
+		</div>
+		<div class="pick" data-pick="i7b" data-options="A1|A2|A3|Other"></div>
+	</div>
+</div>

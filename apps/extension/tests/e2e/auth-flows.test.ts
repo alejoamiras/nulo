@@ -1,6 +1,6 @@
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
+import { test, openPopup, waitForHash, clickByTestId, expectNameFieldPrefill, replaceInputValue } from "./fixtures/extension"
 import { lockWallet, openForgotPasswordFromAuth } from "./fixtures/helpers"
 
 test("wrong password surfaces error-text and lets the user retry", async ({ registeredExtension }) => {
@@ -73,7 +73,8 @@ test("SelectProfile from auth lists the active profile", async ({ registeredExte
 	const firstId = await rows[0].evaluate((el) => el.getAttribute("data-profile-id"))
 	const firstName = await rows[0].evaluate((el) => el.getAttribute("data-profile-name"))
 	expect(firstId).toBeTruthy()
-	expect(firstName).toBeTruthy()
+	// The first profile had no name field and was created as "Main".
+	expect(firstName).toBe("Main")
 
 	expect(registeredExtensionPerTest.consoleErrors).toEqual([])
 	expect(registeredExtensionPerTest.pageErrors).toEqual([])
@@ -95,6 +96,8 @@ test("SelectProfile new-btn routes to /popup/profile/new", async ({ registeredEx
 	await clickByTestId(page2, "select-profile-new-btn")
 
 	await page2.waitForFunction(() => window.location.hash.includes("/popup/profile/new"), { timeout: 5_000 })
+	// A later profile keeps the name field, prefilled "Profile 2".
+	await expectNameFieldPrefill(page2, "register-page", "register-name-input", "Profile 2")
 
 	expect(registeredExtensionPerTest.pageErrors).toEqual([])
 	await page2.close()

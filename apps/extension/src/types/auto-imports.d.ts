@@ -18,6 +18,7 @@ declare global {
   const EnsureSuperseded: typeof import('../stores/balances.store').EnsureSuperseded
   const FEE_JUICE_DECIMALS: typeof import('../utils/fee-estimation').FEE_JUICE_DECIMALS
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
+  const FIRST_PROFILE_NAME: typeof import('../utils/profile-name').FIRST_PROFILE_NAME
   const FileTooLargeError: typeof import('../utils/files').FileTooLargeError
   const HOME_TOKEN_ROWS: typeof import('../utils/token-order').HOME_TOKEN_ROWS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
@@ -85,6 +86,7 @@ declare global {
   const customRef: typeof import('vue').customRef
   const debounce: typeof import('../utils/general').debounce
   const decompressData: typeof import('../utils/files').decompressData
+  const defaultProfileName: typeof import('../utils/profile-name').defaultProfileName
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
   const detailRowsFor: typeof import('../utils/presto-ui-state').detailRowsFor
@@ -154,9 +156,11 @@ declare global {
   const matchesQuery: typeof import('../utils/token-search').matchesQuery
   const migrationIdle: typeof import('../utils/storage').migrationIdle
   const newPasswordHint: typeof import('../utils/password').newPasswordHint
+  const nextAccountName: typeof import('../utils/account-name').nextAccountName
   const nextTick: typeof import('vue').nextTick
   const normalizeAllIds: typeof import('../utils/full-backup-helpers').normalizeAllIds
   const normalizeAmount: typeof import('../utils/amount').normalizeAmount
+  const normalizeProfileName: typeof import('../utils/profile-name').normalizeProfileName
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeRouteLeave: typeof import('vue-router').onBeforeRouteLeave
@@ -287,6 +291,7 @@ declare global {
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
   const useProfileCreateFlow: typeof import('../composables/useProfileCreateFlow').useProfileCreateFlow
   const useProfileImportFlow: typeof import('../composables/useProfileImportFlow').useProfileImportFlow
+  const useProfileNameDefault: typeof import('../composables/useProfileNameDefault').useProfileNameDefault
   const useProfileNameField: typeof import('../composables/useProfileNameField').useProfileNameField
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
@@ -380,6 +385,9 @@ declare global {
   // @ts-ignore
   export type { UseProfileImportFlowOptions } from '../composables/useProfileImportFlow'
   import('../composables/useProfileImportFlow')
+  // @ts-ignore
+  export type { NameFieldState } from '../composables/useProfileNameDefault'
+  import('../composables/useProfileNameDefault')
   // @ts-ignore
   export type { ProfileNameFieldOptions, ValidateOptions, ProfileNameField } from '../composables/useProfileNameField'
   import('../composables/useProfileNameField')
@@ -487,6 +495,7 @@ declare module 'vue' {
     readonly EnsureSuperseded: UnwrapRef<typeof import('../stores/balances.store')['EnsureSuperseded']>
     readonly FEE_JUICE_DECIMALS: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_DECIMALS']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
+    readonly FIRST_PROFILE_NAME: UnwrapRef<typeof import('../utils/profile-name')['FIRST_PROFILE_NAME']>
     readonly FileTooLargeError: UnwrapRef<typeof import('../utils/files')['FileTooLargeError']>
     readonly HOME_TOKEN_ROWS: UnwrapRef<typeof import('../utils/token-order')['HOME_TOKEN_ROWS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
@@ -554,6 +563,7 @@ declare module 'vue' {
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
     readonly debounce: UnwrapRef<typeof import('../utils/general')['debounce']>
     readonly decompressData: UnwrapRef<typeof import('../utils/files')['decompressData']>
+    readonly defaultProfileName: UnwrapRef<typeof import('../utils/profile-name')['defaultProfileName']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
     readonly detailRowsFor: UnwrapRef<typeof import('../utils/presto-ui-state')['detailRowsFor']>
@@ -623,9 +633,11 @@ declare module 'vue' {
     readonly matchesQuery: UnwrapRef<typeof import('../utils/token-search')['matchesQuery']>
     readonly migrationIdle: UnwrapRef<typeof import('../utils/storage')['migrationIdle']>
     readonly newPasswordHint: UnwrapRef<typeof import('../utils/password')['newPasswordHint']>
+    readonly nextAccountName: UnwrapRef<typeof import('../utils/account-name')['nextAccountName']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAllIds: UnwrapRef<typeof import('../utils/full-backup-helpers')['normalizeAllIds']>
     readonly normalizeAmount: UnwrapRef<typeof import('../utils/amount')['normalizeAmount']>
+    readonly normalizeProfileName: UnwrapRef<typeof import('../utils/profile-name')['normalizeProfileName']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
     readonly onBeforeRouteLeave: UnwrapRef<typeof import('vue-router')['onBeforeRouteLeave']>
@@ -754,6 +766,7 @@ declare module 'vue' {
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
     readonly useProfileCreateFlow: UnwrapRef<typeof import('../composables/useProfileCreateFlow')['useProfileCreateFlow']>
     readonly useProfileImportFlow: UnwrapRef<typeof import('../composables/useProfileImportFlow')['useProfileImportFlow']>
+    readonly useProfileNameDefault: UnwrapRef<typeof import('../composables/useProfileNameDefault')['useProfileNameDefault']>
     readonly useProfileNameField: UnwrapRef<typeof import('../composables/useProfileNameField')['useProfileNameField']>
     readonly useRoute: UnwrapRef<typeof import('vue-router')['useRoute']>
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>

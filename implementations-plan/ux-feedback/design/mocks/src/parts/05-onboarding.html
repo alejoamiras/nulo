@@ -1,0 +1,159 @@
+<section class="wrap item" id="i5" data-item="i5" aria-labelledby="i5-title">
+	<div class="item-head">
+		<span class="item-num">05</span>
+		<h2 class="item-title" id="i5-title">Naming a profile before anyone knows what one is</h2>
+		<div class="item-surface"><span class="chip">Onboarding · step 02 Setup</span></div>
+	</div>
+	<blockquote class="quote"><cite>Your note</cite>The requirement of setting a Profile Name on the onboarding "was too much". Feels like we can make it optional, or hidden under a toggle under "Advanced" or something with a default name. So the user just feels that it's setting up either passkeys or password, and doesn't have to stop and think why the F there are profiles.</blockquote>
+	<div class="facts">
+		<div>
+			<h3>What the code does</h3>
+			<ul>
+				<li>The first field on <code>onboarding/pages/create.vue</code> is a required "Profile name" (<code>OnboardingProfileNameField.vue</code>, placeholder "My Profile", max 32). It's checked on submit: empty shakes the field. Nothing on the page says what a profile is.</li>
+				<li>A profile is one recovery phrase with its own password or passkey and its own accounts. Most people will only ever have one.</li>
+				<li>The popup's "new profile" page shares the same flow (<code>useProfileCreateFlow</code>), so the name rule can differ per shell: optional at first run, asked when you add a second.</li>
+			</ul>
+		</div>
+		<div>
+			<h3>What others do</h3>
+			<ul>
+				<li>No product surveyed names the container at creation. Chrome starts at "Person 1", 1Password's default vault is "Personal", Bitwarden's is "My Vault", and Phantom never shows the recovery-phrase level until you import a second one (<a href="https://help.phantom.com/hc/en-us/articles/45465816962579-About-wallets-accounts-and-addresses-in-Phantom">Phantom</a>).</li>
+				<li>Pre-fill the most common value when you can know it in advance — <a href="https://www.nngroup.com/articles/the-power-of-defaults/">NN/g on defaults</a>. Field count, not step count, drives form cost (<a href="https://baymard.com/blog/checkout-flow-average-form-fields">Baymard</a>).</li>
+				<li>First-run concepts are expensive: only 43% of wallet users in a CHI '25 study could pick out a seed phrase (<a href="https://dl.acm.org/doi/10.1145/3706598.3713209">Of Secrets and Seedphrases</a>).</li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="opts">
+		<div class="opt current">
+			<div class="opt-head"><span class="opt-key">Current</span><span class="opt-name">Name first, then how to unlock</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-tab" theme="dark">
+					<span class="n-back"><span class="ms">arrow_back</span>Back</span>
+					<div class="n-steps">
+						<div class="n-step past"><span class="n-step-num">01</span><span class="n-step-bar"></span><span class="n-step-label">Terms</span></div>
+						<div class="n-step active"><span class="n-step-num">02</span><span class="n-step-bar"></span><span class="n-step-label">Setup</span></div>
+						<div class="n-step"><span class="n-step-num">03</span><span class="n-step-bar"></span><span class="n-step-label">Aztec</span></div>
+						<div class="n-step"><span class="n-step-num">04</span><span class="n-step-bar"></span><span class="n-step-label">Fees</span></div>
+						<div class="n-step"><span class="n-step-num">05</span><span class="n-step-bar"></span><span class="n-step-label">Speed</span></div>
+						<div class="n-step"><span class="n-step-num">06</span><span class="n-step-bar"></span><span class="n-step-label">Done</span></div>
+					</div>
+					<div class="n-hero"><div class="n-bt"><span class="m">Create</span><span class="s">Profile</span></div><div class="n-hero-bar"></div></div>
+					<div class="n-form">
+						<div class="n-field"><span class="n-flabel">Profile name</span><div class="n-onb-input focus"><span class="ph">My Profile</span></div></div>
+						<div class="n-field" style="gap:12px"><span class="n-flabel">Authentication method</span><div class="n-tabs"><span class="on">Password</span><span>Passkey</span></div></div>
+						<div class="n-field"><span class="n-flabel">Password</span><div class="n-onb-input"><span class="ph">Strong password</span></div></div>
+						<div class="n-field"><span class="n-flabel">Confirm password</span><div class="n-onb-input"><span class="ph">Repeat password</span></div></div>
+						<div class="n-btn cta disabled">Create profile</div>
+					</div>
+				</div></div>
+				<div class="cap">Onboarding tab, cropped to 520px</div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="A">
+			<div class="opt-head"><span class="opt-key">A</span><span class="opt-name">No name field; it's just "how do you unlock"</span><span class="opt-rec">Recommended</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-tab" theme="dark">
+					<span class="n-back"><span class="ms">arrow_back</span>Back</span>
+					<div class="n-steps">
+						<div class="n-step past"><span class="n-step-num">01</span><span class="n-step-bar"></span><span class="n-step-label">Terms</span></div>
+						<div class="n-step active"><span class="n-step-num">02</span><span class="n-step-bar"></span><span class="n-step-label">Setup</span></div>
+						<div class="n-step"><span class="n-step-num">03</span><span class="n-step-bar"></span><span class="n-step-label">Aztec</span></div>
+						<div class="n-step"><span class="n-step-num">04</span><span class="n-step-bar"></span><span class="n-step-label">Fees</span></div>
+						<div class="n-step"><span class="n-step-num">05</span><span class="n-step-bar"></span><span class="n-step-label">Speed</span></div>
+						<div class="n-step"><span class="n-step-num">06</span><span class="n-step-bar"></span><span class="n-step-label">Done</span></div>
+					</div>
+					<div class="n-hero"><div class="n-bt"><span class="m">Create</span><span class="s">Wallet</span></div><div class="n-hero-bar"></div></div>
+					<div class="n-form">
+						<div class="n-field" style="gap:12px"><span class="n-flabel">How you'll unlock Nulo</span><div class="n-tabs"><span class="on">Password</span><span>Passkey</span></div></div>
+						<div class="n-field"><span class="n-flabel">Password</span><div class="n-onb-input focus"><span class="ph">Strong password</span></div></div>
+						<div class="n-field"><span class="n-flabel">Confirm password</span><div class="n-onb-input"><span class="ph">Repeat password</span></div></div>
+						<div class="n-btn cta disabled">Create wallet</div>
+					</div>
+				</div></div>
+				<div class="cap">The profile is created as "Main" behind the scenes</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>The name field leaves the first-run page. The profile is named <b>Main</b> and can be renamed in Settings → Profiles.</li>
+					<li>Hero "Create / Profile" → "Create / Wallet"; the method label becomes "How you'll unlock Nulo"; CTA "Create wallet" / "Create with passkey".</li>
+					<li>Adding a second profile later (popup) keeps the name field, prefilled "Profile 2" — by then the word has been met.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>One fewer field; focus starts on the password (or the passkey button).</p></div>
+				<p class="cost">Effort: small. <code>useProfileCreateFlow</code> takes a default name when the shell hides the field.</p>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="B">
+			<div class="opt-head"><span class="opt-key">B</span><span class="opt-name">Name tucked under "Advanced"</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-tab" theme="dark">
+					<span class="n-back"><span class="ms">arrow_back</span>Back</span>
+					<div class="n-steps">
+						<div class="n-step past"><span class="n-step-num">01</span><span class="n-step-bar"></span><span class="n-step-label">Terms</span></div>
+						<div class="n-step active"><span class="n-step-num">02</span><span class="n-step-bar"></span><span class="n-step-label">Setup</span></div>
+						<div class="n-step"><span class="n-step-num">03</span><span class="n-step-bar"></span><span class="n-step-label">Aztec</span></div>
+						<div class="n-step"><span class="n-step-num">04</span><span class="n-step-bar"></span><span class="n-step-label">Fees</span></div>
+						<div class="n-step"><span class="n-step-num">05</span><span class="n-step-bar"></span><span class="n-step-label">Speed</span></div>
+						<div class="n-step"><span class="n-step-num">06</span><span class="n-step-bar"></span><span class="n-step-label">Done</span></div>
+					</div>
+					<div class="n-hero"><div class="n-bt"><span class="m">Create</span><span class="s">Wallet</span></div><div class="n-hero-bar"></div></div>
+					<div class="n-form">
+						<div class="n-field" style="gap:12px"><span class="n-flabel">How you'll unlock Nulo</span><div class="n-tabs"><span class="on">Password</span><span>Passkey</span></div></div>
+						<div class="n-field"><span class="n-flabel">Password</span><div class="n-onb-input focus"><span class="ph">Strong password</span></div></div>
+						<div class="n-field"><span class="n-flabel">Confirm password</span><div class="n-onb-input"><span class="ph">Repeat password</span></div></div>
+						<div class="n-adv"><span class="n-adv-k"><span class="ms">chevron_right</span>Advanced</span><span class="n-adv-v">Profile name: Main</span></div>
+						<div class="n-btn cta disabled">Create wallet</div>
+					</div>
+				</div></div>
+				<div class="cap">Collapsed by default; opening it reveals the name field</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul>
+					<li>Same as A, plus a collapsed "Advanced" row that shows the default and opens the field.</li>
+				</ul></div>
+				<div><h4>Clicks</h4><p>Advanced → the row expands into the name input (prefilled "Main"). Nothing else changes.</p></div>
+			</div>
+		</div>
+
+		<div class="opt" data-opt="C">
+			<div class="opt-head"><span class="opt-key">C</span><span class="opt-name">Keep the field, make it optional and prefilled</span></div>
+			<div class="stage">
+				<div class="fit"><div class="nulo n-tab" theme="dark">
+					<span class="n-back"><span class="ms">arrow_back</span>Back</span>
+					<div class="n-steps">
+						<div class="n-step past"><span class="n-step-num">01</span><span class="n-step-bar"></span><span class="n-step-label">Terms</span></div>
+						<div class="n-step active"><span class="n-step-num">02</span><span class="n-step-bar"></span><span class="n-step-label">Setup</span></div>
+						<div class="n-step"><span class="n-step-num">03</span><span class="n-step-bar"></span><span class="n-step-label">Aztec</span></div>
+						<div class="n-step"><span class="n-step-num">04</span><span class="n-step-bar"></span><span class="n-step-label">Fees</span></div>
+						<div class="n-step"><span class="n-step-num">05</span><span class="n-step-bar"></span><span class="n-step-label">Speed</span></div>
+						<div class="n-step"><span class="n-step-num">06</span><span class="n-step-bar"></span><span class="n-step-label">Done</span></div>
+					</div>
+					<div class="n-hero"><div class="n-bt"><span class="m">Create</span><span class="s">Profile</span></div><div class="n-hero-bar"></div></div>
+					<div class="n-form">
+						<div class="n-field"><span class="n-flabel">Profile name <em>· optional</em></span><div class="n-onb-input"><span>Main</span></div><span class="n-help">Rename it anytime in Settings.</span></div>
+						<div class="n-field" style="gap:12px"><span class="n-flabel">Authentication method</span><div class="n-tabs"><span class="on">Password</span><span>Passkey</span></div></div>
+						<div class="n-field"><span class="n-flabel">Password</span><div class="n-onb-input focus"><span class="ph">Strong password</span></div></div>
+						<div class="n-field"><span class="n-flabel">Confirm password</span><div class="n-onb-input"><span class="ph">Repeat password</span></div></div>
+						<div class="n-btn cta disabled">Create profile</div>
+					</div>
+				</div></div>
+				<div class="cap">Smallest change; the question is still asked</div>
+			</div>
+			<div class="notes">
+				<div><h4>What changes</h4><ul><li>The field is prefilled and no longer blocks submit. The word "profile" still greets a first-time user.</li></ul></div>
+				<div><h4>Clicks</h4><p>Focus starts on the password; the name can be ignored.</p></div>
+			</div>
+		</div>
+	</div>
+
+	<div class="recbox">
+		<div>
+			<h3>My pick: A, default name "Main"</h3>
+			<p>Every precedent defers the container until you create a second one, and that's exactly the complaint. "Main" rather than "Profile 1" because it doesn't re-teach the word people stumbled on, and it still implies there could be others. B is fine if you want power users to see the name up front, but it keeps a concept on the page that 99% of first runs don't need.</p>
+			<p class="conf">Confidence: high on removing the field; moderate on "Main".</p>
+		</div>
+		<div class="pick" data-pick="i5" data-options="A|B|C|Other"></div>
+	</div>
+</section>
