@@ -557,7 +557,8 @@ before the next.
 
    After both fixes the file passed 8 of 8 runs on Firefox and 4 of 4 on Chrome at retry 0.
 
-The rerun on the fix tip ran every e2e file at retry 0, each run followed by `bun run e2e:reap`.
+The rerun on the fix tip ran the network files at retry 0 and smoke at its config's two retries,
+each run followed by `bun run e2e:reap`.
 `037b6c6c` adds only this log's round 2 and 3 records to `d62e34fa`, and `a98dbdf9` differs from
 `d62e34fa` only in comments and a network file:
 

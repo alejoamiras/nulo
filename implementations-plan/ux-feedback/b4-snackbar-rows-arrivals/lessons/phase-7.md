@@ -3,9 +3,10 @@
 P6's gate, rerun on arc 4 as the stack carries it: `4c20a006`, on `origin/dev` at `b15f5218`.
 Its code is P6's tip, `037b6c6c`, merged with dev's five commits: the arc's tree equals
 `git merge-tree --write-tree origin/dev` of its tip before the move, and every commit's range-diff
-is `=`. Each browser ran in its own clean detached checkout, every e2e file at retry 0, each run
-followed by `bun run e2e:reap`. The network list is the arc's two added files plus
-`network/window-placement.test.ts` three times.
+is `=`. Each browser ran in its own clean detached checkout, each run followed by
+`bun run e2e:reap`: the network files at retry 0, and smoke at its config's two retries, which no
+test used. The network list is the arc's two added files plus `network/window-placement.test.ts`
+three times.
 
 | Step | Chrome | Firefox |
 |---|---|---|

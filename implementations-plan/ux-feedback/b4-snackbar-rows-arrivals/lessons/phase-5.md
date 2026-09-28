@@ -222,7 +222,8 @@ Beside them is the sign-off pending list: S-1 to S-16, K-1, R-1 to R-7, A-1′ a
 
 ## The gate
 
-Every P5 command ran at retry 0 on `b6aa6e4d`, the arc's tip before the restack; the reader check
+Every P5 command ran on `b6aa6e4d`, the arc's tip before the restack, the network files and the
+flake bars at retry 0 and the full smoke suites at their config's two retries; the reader check
 ran on the restacked `d818b293`. The restack put arc 3's copy fix (`e1504b97`) and its record
 (`3e664578`) under this arc, so `b6aa6e4d` became `e13071ea`. That fix changes two sentences no
 e2e spec reads (`dapp-hostname-warning`, `import-seed-note`), their two unit tests and the
