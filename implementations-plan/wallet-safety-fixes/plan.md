@@ -864,7 +864,7 @@ Gate:
 - `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 - Layers: typecheck, lint, unit.
 
-### P3 · A trust write lands only in its session and incarnation (A3)
+### P3 · A trust write lands only in its session and incarnation (A3) ✓
 
 1. Red, `service.scenarios.test.ts`. The profile stub gains `captureExecutionFence`,
    `isFenceLive` and `getDeletionState` over a real `ProfileDeletionState` and a session serial,

@@ -30,6 +30,7 @@ import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed, findSeed } from "./default-
 import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
 	type Token,
+	type TokenAdded,
 	type TokenInfo,
 	type TokenDeleted,
 	type SeedScope,
@@ -88,7 +89,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	)
 	public static name = TOKEN_SERVICE_NAME
 
-	public readonly onTokenAdded = new EventHandler<TokenInfo>()
+	public readonly onTokenAdded = new EventHandler<TokenAdded>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 	public readonly onSeedStatusChanged = new EventHandler<SeedScope>()
@@ -428,7 +429,14 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 						await this.tokens.delete(`${token.id}`)
 						throw new Error("network deleted")
 					}
-					this.emit("onTokenAdded", getTokenInfo(token))
+					// The lock's watchdog can release this section while that check
+					// awaits, letting a deletion and a same-id restore both run: the
+					// add's handlers would then act for the successor incarnation.
+					if (!this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) {
+						await this.tokens.delete(`${token.id}`)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
+					this.emit("onTokenAdded", { ...getTokenInfo(token), profileId: token.profileId })
 				}
 				const result = getTokenInfo(token)
 				// Codex's success-boundary call: succeeded means "token added to

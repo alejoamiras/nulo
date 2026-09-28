@@ -480,4 +480,39 @@ describe("TokenService.addToken — creation fences", () => {
 		expect(await tokenRowCount(api)).toBe(0)
 		expect(emitted).toHaveLength(0)
 	})
+
+	test("an add the watchdog released in its last network check emits nothing after a same-id restore", async () => {
+		// The token lock's watchdog admits the profile's purge while the add is parked, so a deletion
+		// and a same-id restore can both complete before it resumes.
+		const { tokenService, api, deletionState, networkLive } = await makeHarness()
+		const emitted: unknown[] = []
+		tokenService.onTokenAdded.add((t) => emitted.push(t))
+		const networks = (tokenService as unknown as { networks: { isNetworkLive: (id: string) => Promise<boolean> } }).networks
+		const lastCheck = _deferred<void>()
+		let checks = 0
+		networks.isNetworkLive = async () => {
+			checks += 1
+			if (checks === 2) await lastCheck.promise
+			return networkLive.value
+		}
+		vi.useFakeTimers()
+		try {
+			const run = tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" }).catch((error: unknown) => error)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(checks).toBe(2)
+
+			const successor = tokenService.restore([])
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			await successor
+			deletionState.beginDeletion("p1")
+			deletionState.release("p1")
+			lastCheck.resolve()
+
+			expect(await run).toEqual(expect.objectContaining({ message: expect.stringMatching(/deleted/) }))
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(await tokenRowCount(api)).toBe(0)
+		expect(emitted).toHaveLength(0)
+	})
 })
