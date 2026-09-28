@@ -2050,7 +2050,10 @@ Gate: the program's Local gates on the stack top, smoke and network e2e on both 
 Passed on the stack top ([lessons](lessons/phase-8.md)). On `df1849a2`, every Local gates row
 exited 0 but Firefox's network suite, where `send-picker` failed. The whole Firefox network
 suite then exited 0 on `9900de28`, in three shards covering its 102 files once each, and
-`9900de28`'s code outside `implementations-plan/` is `df1849a2`'s.
+`9900de28`'s code outside `implementations-plan/` is `df1849a2`'s. After the push, CI found two
+more things, both fixed on this arc: the smoke job's 20-minute limit, now 30, and
+`send-picker`'s Firefox timeout, which fits a race in the test; the test now waits for the Send
+page's token ([lessons](lessons/phase-8.md)).
 
 ## Arc boundary
 

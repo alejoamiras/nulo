@@ -64,3 +64,49 @@ its cleanup two seconds past the limit. On #702, 40 of 41 files had passed.
   rerun, a per-browser input or sharding: "Raising the job timeout to 30 minutes legitimately
   adjusts execution capacity. It preserves assertions, coverage, retries and failure
   propagation."
+
+## `send-picker`'s race
+
+CI's Firefox network shard 2/5 on #702 (run 36446684616, on `b210769d`) failed `send-picker`
+as the earlier sightings did: no ALT row within 15 s of the click on the Send page's token
+trigger (`send-picker.test.ts:35`). A probe then reproduced a race in the test's wait that fits
+this failure and the earlier ones. No failed run recorded which popup opened: CI's failure
+artifacts hold the services' logs, not the page.
+
+- **Cause.** The Send page draws its token trigger (`SelectTokenCard.vue`) before its tokens
+  load. Until they do, the card reads "No available tokens" and "Import token", and a click opens
+  the import popup instead of the picker. The test clicked the trigger as soon as it was
+  visible, so a token load slower than the test's next step sends the click to the import popup,
+  and no picker row ever appears. The other network tests that drive the Send page wait for
+  `send-from-type` before they act, and the page draws it only once its token has loaded.
+- **Evidence.** A throwaway spec, never committed, set up as the test does, then opened Send
+  again and again. On alternate mounts it clicked the trigger the moment it was drawn or the way
+  the test does, and recorded when the trigger and the token's symbol were drawn, in ms from just
+  before the click on Send, and what the click opened (the table below).
+- **Fix.** The test opens Send through `openSend` (`fixtures/send-page.ts`), which waits for
+  `send-from-type`. Nothing else in the test or the fixtures changes. The `e2e-testing` skill's
+  flake ledger has the fingerprint as row 37.
+- **Retries.** The file-scoped `tokenReadyExtension` keeps the wallet between attempts, so once
+  an attempt has imported ALT, each retry imports another. The nightly's first retry failed on
+  the rows, `['ALT', 'ALT', 'TST']`, and its second, with four rows, on the search box, which the
+  picker shows above three. Not changed here.
+- **The card.** A person who taps the card in that window gets the import popup too. What the
+  card shows while it loads is a UI decision for the owner; nothing here changes it.
+- **Flake bar.** On `cf8118a1`, the stack top with the fix and before these records, three
+  consecutive retry-0 runs a browser: Chrome prover on, exit 0 each (118 s, 122 s, 137 s);
+  Firefox proverless, exit 0 each (131 s, 135 s, 155 s), at load averages up to 165.
+- **Review.** The codex session at high (`01a0e7ab-…`, its eleventh round): "Material findings:
+  no." It found no path where `send-from-type` is drawn while the card still takes its empty
+  branch, and raised three minors, all taken: the retries fail on the rows first and on the
+  search box only at four rows; only an attempt that has imported ALT spoils the next; and the
+  probe shows a race consistent with the sightings, not which popup each of them opened.
+
+| Probe | Clicked when drawn | Clicked as the test does | Trigger without its token |
+|---|---|---|---|
+| Firefox, stack top (`c387fbce`) | import popup, 10 of 10 | picker, 10 of 10; the token drawn 11 ms or more before the click | 67 to 120 ms |
+| Chrome, stack top (`0071773e`) | import popup, 6 of 6 | picker, 6 of 6; the token drawn 3 ms or more before the click | 12 to 20 ms |
+| Firefox, `dev` (`e476e919`) | import popup, 10 of 10 | picker, 9 of 10; once the import popup, the click at 205 ms and the token at 278 ms | 52 to 206 ms |
+| Chrome, `dev` (`e476e919`) | import popup, 6 of 6 | picker, 6 of 6; the token drawn 3 ms or more before the click | 13 to 26 ms |
+
+`c387fbce` and `0071773e` differ only in CI files and docs. The race predates this stack; one run
+of each on a shared host does not show whether the stack changes its odds.
