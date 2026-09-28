@@ -173,10 +173,13 @@ async function waitForHashPrefix(page: Page, prefix: string): Promise<void> {
 	await page.waitForFunction((p: string) => window.location.hash.startsWith(p), { timeout: 10_000, polling: 50 }, prefix)
 }
 
-async function goBackTo(page: Page, expected: string): Promise<void> {
+/** Home's token card settles after the activity row shows, and its empty state then pushes the row
+ *  down: a point measured before it lands can miss the row. */
+async function backToHome(page: Page): Promise<void> {
 	await page.evaluate(() => history.back())
-	await waitForHash(page, expected, 10_000)
+	await waitForHash(page, "#/popup/general", 10_000)
 	await page.waitForSelector(sel("tx-card"), { visible: true, timeout: 15_000 })
+	await page.waitForSelector(sel("tokens-empty-import-link"), { visible: true, timeout: 15_000 })
 }
 
 /** Records the named control each click lands in, at `window` capture, and how many clicks bubble up
@@ -273,7 +276,7 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 	expect(await probe(page)).toMatchObject({ pushes: 1 })
 	expect(await historyLength(page)).toBe(entriesBefore + 1)
 
-	await goBackTo(page, "#/popup/general")
+	await backToHome(page)
 	await tabTo(page, "tx-card")
 	await armNavigationProbe(page)
 	await page.keyboard.press(SPACE)
@@ -281,7 +284,7 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 	await page.waitForFunction(() => (window as unknown as Probe).__spacePrevented !== null, { timeout: 5_000, polling: 50 })
 	expect(await probe(page)).toEqual({ pushes: 1, scrolls: 0, spacePrevented: true })
 
-	await goBackTo(page, "#/popup/general")
+	await backToHome(page)
 	expect(await coveredAt(page, "activity-fiat")).toBeNull()
 	expect(await page.$eval(sel("activity-fiat"), (el) => el.getAttribute("title"))).toBe("At today's price")
 	await armNavigationProbe(page)
@@ -291,7 +294,7 @@ test("Home's first activity row: a Tab stop with the ring, Enter and Space each 
 
 	// The icon box is positioned for its badge, so it paints above the row's link unless it lets the
 	// pointer through: the press at its centre must land on the row.
-	await goBackTo(page, "#/popup/general")
+	await backToHome(page)
 	const onIcon = await centreOf(page, `${sel("tx-card")} ${sel("activity-icon")}`)
 	const hit = await page.evaluate(
 		({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-testid]")?.getAttribute("data-testid") ?? "nothing",

@@ -97,7 +97,8 @@ None visible. C5 adds a `data-fpc-id` attribute to each fee-menu row that has a 
 contract; it renders nothing and changes no layout, copy, order or state. The fee menu appears
 in the popup's Send page and the dApp execute window through `FeeSettingsCard.vue:763`. Its rows
 come from the wallet's own FPC records (`fee-helpers.ts:190-203`), not from dApp data, so the
-wire-shaped fixture rule does not apply. No owner sign-off is needed; no screenshot.
+wire-shaped fixture rule does not apply. No owner sign-off is needed; no screenshot. C6, the
+addendum, changes test code only.
 
 ## Architecture & Implementation
 
@@ -303,6 +304,29 @@ that (X1). One component case: two sponsors render two rows that both carry the 
 and distinct `data-fpc-id` values, and the Fee Juice row carries none. No e2e helper changes,
 since none needs a specific sponsor today.
 
+### C6 · Home's measurements wait for the settled token card (addendum)
+
+Added during the build on 2026-09-28 at the driver's request; the `ux-owner-picks` builder found
+and root-caused it.
+
+**Failure.** `rows.test.ts`, Home's first-activity-row test: `expected 'nothing' to be 'tx-card'`
+at the icon press, 1 of 164 in a full retry-0 Chrome smoke at a load average near 475. The file
+passes alone.
+
+**Mechanism.** Home's token card settles after the activity row is visible. Until its balances
+land it is its 32px header (its ghost rows wait 300 ms), and settled empty it is 139px, which
+pushes the row down 107px. The test's back helper returned once `tx-card` was visible; `centreOf`
+then read the icon's centre, and a later evaluate hit-tested that point. Balances landing in
+between put the point on the card's empty state, whose text has no testid ancestor: the
+"nothing". The fiat span's `coveredAt` and `pointerClick`, after the previous return to Home,
+read positions the same way.
+
+**Fix.** The helper, renamed `backToHome`, also waits for `tokens-empty-import-link`, which only
+the settled empty card draws (`TokensView.vue`, `isSettled && !hasAnyRow`), so every measurement
+after it reads the settled layout. No testid is added. The wait matches this file's setup, a
+registered wallet with no tokens and no seeds, and times out loudly if that setup ever shows rows.
+Test code only, so no UI impact.
+
 ### Alternatives considered
 
 - **C1: a test-only inert page behind a `VITE_NULO_E2E_*` flag.** It would be a new rollup input,
@@ -339,7 +363,7 @@ since none needs a specific sponsor today.
 | `apps/extension/tests/e2e/fixtures/extension.ts` | caller of `openScratchPage` (`:117`) | C1 |
 | `apps/extension/tests/e2e/FIREFOX.md` | row at `:43` | C1 |
 | `apps/extension/tests/e2e/onboarding-tab.test.ts` | comment at `:298-301` only | C1 |
-| `.claude/skills/e2e-testing/SKILL.md` | ledger: new rows for C1 and C4, row 37's fix cell for C2 | C1, C2, C4 |
+| `.claude/skills/e2e-testing/SKILL.md` | ledger: new rows for C1, C4 and C6, row 37's fix cell for C2 | C1, C2, C4, C6 |
 | `apps/extension/tests/e2e/network/send-picker.test.ts` | lines 7-29: file-scoped `altToken` fixture | C2 |
 | `apps/extension/tests/e2e/fixtures/helpers.ts` | only on the fallback branch: export `hasTokenRow` | C2 |
 | `apps/extension/src/wallet/services/wallet-sdk/content-message-relay.test.ts` | async `beforeEach` import; `freshRelay` reads it | C3 |
@@ -349,6 +373,7 @@ since none needs a specific sponsor today.
 | `apps/extension/tests/e2e/network/backup-migration-roundtrip.test.ts` | the filter before the re-seal; cleanup scope; the `:170` comment | C4 |
 | `apps/extension/src/popup/components/modules/send/FeeMethodSelector.vue` | `:data-fpc-id` | C5 |
 | `apps/extension/src/popup/components/modules/send/FeeMethodSelector.test.ts` | one case | C5 |
+| `apps/extension/tests/e2e/rows.test.ts` | `backToHome` waits for the settled token card | C6 |
 | `implementations-plan/e2e-reliability-fixes/` + `implementations-plan/index.md` | the plan, one index line | all |
 
 ## Security & Adversarial Considerations
@@ -786,6 +811,33 @@ Run at the final code revision (the branch head after the last code commit), one
 - Layers: lint, typecheck, unit, component, CI-gating, build, smoke e2e and full network e2e on
   both browsers. The three-run bars of P3–P5 stay the evidence for the changed e2e files; any later
   code change reruns the affected phase's bar and this phase.
+
+### P7 · C6 · Home's settled token card (addendum) ✓
+
+Added mid-build, with C6. P6 runs after it, at the final code revision.
+
+1. `rows.test.ts`: `goBackTo(page, expected)` becomes `backToHome(page)`, which also waits for
+   `tokens-empty-import-link`; its three callers change with it.
+2. A ledger row in `.claude/skills/e2e-testing/SKILL.md` § 5: the fingerprint, the mechanism, the
+   fix and the status.
+3. A probe, uncommitted, on each browser, generated from the file: Home's `getTokenBalances`
+   responses are held from just before the last return to Home. On the base file the icon is
+   measured, the hold is released, the card settles, and then the test's own hit test runs, which
+   must fail with `expected 'nothing' to be 'tx-card'`. On the fixed file the hold is released
+   1.5 s after the first request, so `backToHome` must wait it out and the hit test must find
+   `tx-card`. Results go in `lessons/phase-7.md`.
+
+Validation gate:
+- Commands:
+  - `bun run lint`;
+  - the probe, base and fix, on each browser;
+  - the flake bar: after `<smoke flags> bun run --cwd apps/extension build:<b>`, three consecutive
+    runs per browser of
+    `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run --cwd apps/extension test:e2e --retry=0 tests/e2e/rows.test.ts`;
+  - `bun run e2e:reap`.
+- Pass criteria: every command exits 0, except the base probe, which fails with the recorded
+  `'nothing'`.
+- Layers: lint, smoke e2e (both browsers), probe.
 
 ## Post-implementation (read by the implementing session)
 
