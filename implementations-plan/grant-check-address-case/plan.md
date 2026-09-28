@@ -607,7 +607,7 @@ Gate:
   kept); no complexity acceptance added (`bun run lint` runs the baseline check).
 - Layers: typecheck and lint, unit.
 
-### P3 · The Details table on the check's key
+### P3 · The Details table on the check's key ✓
 
 1. `details-table.ts`: `rowFor` keys with `fieldAddressKey(contract) ?? contract.toLowerCase()`;
    the comment at `:69-70` says the table keys valid addresses as the scope check compares them;
