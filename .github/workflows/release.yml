@@ -3,8 +3,9 @@ name: release
 # Two trigger paths:
 #  - push to main: release-please-action maintains the Release PR; on merge,
 #    it tags + creates the GitHub Release. The same workflow run then runs
-#    the publish chain (gates → build → smoke → assets → cliff notes →
-#    landing). The store uploads are opt-in workflow_dispatch inputs.
+#    the publish chain (gates → build → smoke → assets → cliff notes). The
+#    landing is a Worker that Workers Builds redeploys from pushes to main; no
+#    job here touches it. The store uploads are opt-in workflow_dispatch inputs.
 #  - workflow_dispatch: re-publish artifacts for an existing tag. Skips the
 #    release-please job. Useful when an asset upload failed mid-publish.
 on:
@@ -421,62 +422,6 @@ jobs:
           echo "DRY RUN — would have set release body to:"
           cat /tmp/release-notes.md
 
-  refresh-landing:
-    name: refresh landing (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets]
-    if: |
-      always() && !cancelled() &&
-      needs.resolve.result == 'success' &&
-      needs.attach-assets.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    environment: production
-    steps:
-      - name: Trigger Cloudflare Pages deploy
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
-            exit 1
-          fi
-          code=$(curl -sS -o /tmp/cf.out -w "%{http_code}" \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            -X POST "$DEPLOY_HOOK")
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::deploy-hook curl returned HTTP $code"
-            cat /tmp/cf.out
-            exit 1
-          fi
-          echo "deploy-hook triggered (HTTP $code)"
-
-  verify-live:
-    name: verify live deploys (advisory)
-    needs: [resolve, attach-assets, refresh-landing]
-    # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
-    # without blocking the release; open nulo.sh and re-fire the deploy
-    # (refresh-landing.yml break-glass) if it flags a stale site.
-    if: |
-      always() &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true' &&
-      needs.attach-assets.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      # The workflow's own revision, not the tag: a republished old tag must not run that tag's
-      # verifier, which may probe sites this repo no longer deploys.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup-bun
-      - name: Verify the live landing serves this release
-        env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-        run: bun scripts/release/verify-live-run.ts
-
   sync-main-to-dev:
     name: sync main → dev (post-release)
     needs: [resolve, attach-assets]
@@ -670,7 +615,6 @@ jobs:
         build-firefox,
         smoke-against-artifact,
         attach-assets,
-        refresh-landing,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -690,7 +634,6 @@ jobs:
             "${{ needs.build-firefox.result }}" \
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
-            "${{ needs.refresh-landing.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

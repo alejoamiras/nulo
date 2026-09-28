@@ -367,3 +367,14 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
   - The steps ran in order: the redirect Worker was uploaded with no routes and probed under `wrangler dev`, then both Pages domains were detached, the two CNAMEs deleted, and the Worker deployed with its custom domains. Certificates took about 3 minutes on one host and 4 on the other.
   - Live probe: `testnet.tools.nulo.sh` passed. `tools.nulo.sh` was answered by a Cloudflare Access application covering the hostname, which had kept mainnet to Foundation and Labs members. Cloudflare's edge also returns 400 for an encoded `..%2F` path before any Worker runs.
 - **Decision 26: the owner took both names dark.** The Worker's custom domains were removed, which also removed their DNS records; the Worker was deleted; `infra/tools-redirect` was removed. The fee-card and landing links that name those hosts are an owner UI follow-up.
+
+## Access, L-cut and C2 (2026-09-28)
+
+- **Access moved to unleashed mainnet.** The `tools.nulo.sh` Access application went with the dark names. A new self-hosted application gates the mainnet Worker's `workers.dev` host with the existing reusable "Only Foundation & Labs" policy (email domains `aztec.foundation`, `aztec-labs.com`). Access works on a `workers.dev` host with no zone involved. unleashed#7 documents it.
+- **L-cut ran before P1 (decision 27).**
+  - Workers Builds cannot build `main` until `main` carries `wrangler.jsonc`, so `main`'s landing was built by hand and deployed.
+  - The build calls the GitHub API and hit the anonymous rate limit. It passed with `GITHUB_TOKEN` from `gh auth token`, and a scan confirmed no token string reached `dist`.
+  - Deleting the apex CNAME and attaching the Worker's custom domain caused no downtime; `www` kept its 301.
+  - Detaching `nulo.sh` from the `nulo` Pages project was refused by the session's permission layer as a domain change. That entry is stale, not serving, and left to the owner.
+- **`routes` stays out of the landing's config.** wrangler 4.129.1 reconciles custom domains only when `routes` lists one, and the Workers Builds token (a user token, Workers-scoped) has no zone permission. So a committed domain would fail every build. A live deploy with no routes and `workers_dev: false` kept `nulo.sh` attached, turned the workers.dev host into a 404 and left previews on.
+- **C2: a Pages project with many deployments cannot be deleted directly** (error 8000076). Purge its deployments first, in batches with `?force=true`, then delete it. `nulo-tools-mainnet` needed 1,227 deletions; `nulo-tools-testnet` needed 2,815.

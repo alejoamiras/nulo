@@ -14,6 +14,13 @@ eli5: https://claude.ai/artifact/JzvsTKxyeeRw1xdof9SAEx
 parity: https://claude.ai/artifact/DR1MrepVrh8Fyy63JRyUyF
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: closed with parent ux-feedback (completed).
+- **Shipped**: #702 `a233062c`, arc 4 of the six.
+- **Open items**: none of its own; the [program plan](../plan.md)'s Outcome carries them.
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are spent and must never be pasted.
+
 # Batch 4 · Snackbar, rows, arrivals
 
 Arc 4 of the UX program's six-PR stack, on top of batch 3 (tooltips and glossary). It covers:

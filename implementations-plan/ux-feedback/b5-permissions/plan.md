@@ -17,6 +17,13 @@ parity_5a: https://claude.ai/artifact/6NjcZ54XTdEYtUgzGzQhxC
 parity_5b: https://claude.ai/artifact/WBSu4JhW9ztuiMMczM8N3f
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: closed with parent ux-feedback (completed).
+- **Shipped**: #703 `da79ac34` (arc 5a) and #704 `624117cd` (arc 5b), arcs 5 and 6 of the six.
+- **Open items**: none of its own; the [program plan](../plan.md)'s Outcome carries them.
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are spent and must never be pasted.
+
 # Batch 5 · Permissions
 
 The last two arcs of the UX program's six-PR stack, on top of batch 4 (snackbar, rows, arrivals).
