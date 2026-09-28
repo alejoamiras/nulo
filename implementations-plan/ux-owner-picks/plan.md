@@ -6,7 +6,7 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 same_family_leg: Opus 5.5 subagent
 eli5_mode: artifact
-eli5: (one ELI5 Artifact covers the program's four plans; URL filled in when published)
+eli5: https://claude.ai/artifact/AwdUMz4EYvyU2Kgoh9W9Td
 branch: feat/ux-owner-picks
 worktree: a harness-created agent worktree (its path is recorded in lessons/phase-0.md)
 follows: implementations-plan/ux-feedback/plan.md § Follow-ups (D1 to D5)
@@ -730,7 +730,7 @@ Gate:
   (logged).
 - Layers: lint, types, unit, component.
 
-### P2 · One token lookup (D2)
+### P2 · One token lookup (D2) ✓
 
 1. Failing first:
    - `activity.test.ts`: mount History with the app store's network unset, then set it: a received
