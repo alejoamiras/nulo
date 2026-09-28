@@ -65,10 +65,13 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 	},
 	{
 		chainId: CHAIN_IDS.TESTNET,
-		// Testnet "Test USDC" (faucet-minted, permissionless): the same retired bridge's L2 token.
-		contract: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae",
-		// Live-captured 2026-07-28 from the Testnet node; original == current; same
-		// aztec-standards Token class as the mainnet tokens.
+		// Testnet "Test USDC": the L2 token unleashed's testnet generation pre-creates
+		// (`bridge.tokens[0].l2Token` in its testnet manifest, deployed by its hub). A new generation
+		// moves it; the aztec-update skill's reset step re-points it.
+		contract: "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8c60299b03b790e6502",
+		// Live-captured 2026-09-28 from the Testnet node (seed-preflight + seed-preflight-metadata:
+		// "USDC", "Test USDC", 6 decimals); original == current; same aztec-standards Token class
+		// as the mainnet tokens.
 		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
 		expectedSymbol: "USDC",
 		displayName: "Test USDC",
