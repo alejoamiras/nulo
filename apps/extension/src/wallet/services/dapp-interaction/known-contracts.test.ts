@@ -19,7 +19,7 @@ describe("knownContracts", () => {
 	test("a chain's default tokens follow, by their built-in names", () => {
 		const names = (chainId: number) => knownContracts(chainId, FPCS).slice(4)
 		expect(names(CHAIN_IDS.TESTNET)).toEqual([
-			{ address: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae", name: "Test USDC" },
+			{ address: "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8c60299b03b790e6502", name: "Test USDC" },
 		])
 		expect(names(CHAIN_IDS.MAINNET).map((entry) => entry.name)).toEqual(["Clean USDC", "USD Coin"])
 	})
