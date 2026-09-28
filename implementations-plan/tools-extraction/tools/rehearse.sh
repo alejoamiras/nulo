@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
-# The local rehearsal of the unleashed import: applies the workspace changes (design package,
-# codemod, the three published packages as dependencies) to an extract.sh output on a throwaway
-# branch and runs the validation gate phase by phase. Nothing is published, pushed or deployed.
+# The local validation gate of the unleashed import, phase by phase, on an unleashed checkout at
+# <workdir>/unleashed. Nothing is published, pushed or deployed. The phases that built that checkout
+# from an extract.sh output are retired: they copied nulo's design package, which unleashed no
+# longer carries, and unleashed's own commits now do that work.
 #
-#   rehearse.sh <workdir> <tgz-dir> [phase ...]
+#   rehearse.sh <workdir> [phase ...]
 #
-# <workdir> is extract.sh's output; <tgz-dir> holds the three packed tarballs. Phases run in order,
-# each logging to <workdir>/report/rehearse-<phase>.log; name phases to resume from a failure.
+# Phases run in order, each logging to <workdir>/report/rehearse-<phase>.log; name phases to resume
+# from a failure.
 # Toolchains: Foundry from $FOUNDRY_BIN, halmos from $EXTRACTION_TOOLS, Aztec CLIs under ~/.aztec/versions.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-PHASES=(prepare preinstall install fast identity tools e2e control contracts history audit)
-PUBLISHED=(wallet-crypto resolve-asset wallet-sdk-schema-patch)
+PHASES=(preinstall fast identity tools e2e control contracts history audit)
 
 die() {
   echo "rehearse: $*" >&2
   exit 1
 }
 
-[ $# -ge 2 ] || die "usage: rehearse.sh <workdir> <tgz-dir> [phase ...]"
+[ $# -ge 1 ] || die "usage: rehearse.sh <workdir> [phase ...]"
 work=$(cd "$1" && pwd)
-tgz=$(cd "$2" && pwd)
-shift 2
+shift
 [ $# -gt 0 ] || set -- "${PHASES[@]}"
 repo=$work/unleashed
 report=$work/report
@@ -31,29 +30,6 @@ export PATH="${FOUNDRY_BIN:-$HOME/.cache/unleashed-rehearsal/foundry/bin}:${EXTR
 # The Aztec line a crate's Nargo.toml pins, as _bridge-contracts.yml resolves it.
 aztec_pin() {
   sed -n 's/.*aztec-packages\/".*tag = "v\([^"]*\)".*/\1/p' "$repo/contracts/bridge/aztec/$1/Nargo.toml" | head -1
-}
-
-phase_prepare() {
-  # Always from the audited main, so a failed prepare can simply be re-run.
-  git -C "$repo" switch -q -f main
-  git -C "$repo" clean -q -fdx
-  git -C "$repo" branch -q -D rehearsal 2>/dev/null || true
-  git -C "$repo" switch -q -c rehearsal
-  bun "$here/design.ts" "$work/freeze" "$repo"
-  git -C "$repo" add -A
-  # Relative specs keep the absolute scratch path out of manifests and the lockfile; every
-  # dependent sits two levels down (apps/tools, packages/bridge-core), and install fails otherwise.
-  mkdir -p "$work/tgz"
-  local specs=() name
-  for name in "${PUBLISHED[@]}"; do
-    cp "$tgz/alejoamiras-nulo-$name-0.1.0.tgz" "$work/tgz/"
-    specs+=("$name=file:../../../tgz/alejoamiras-nulo-$name-0.1.0.tgz")
-  done
-  bun "$here/codemod.ts" "$repo" "${specs[@]}"
-  # Seeding nulo's lockfile keeps every shared dependency at the version nulo's gates ran against.
-  cp "$work/freeze/bun.lock" "$repo/bun.lock"
-  git -C "$repo" add -A
-  git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "rehearsal: design package, codemod, tarball dependencies"
 }
 
 phase_preinstall() {
@@ -68,14 +44,6 @@ phase_preinstall() {
   ')
   git -C "$repo" check-ignore -q packages/bridge-core/.env || die "packages/bridge-core/.env is not ignored"
   git -C "$repo" check-ignore -q apps/tools/.env.local || die "apps/tools/.env.local is not ignored"
-}
-
-phase_install() {
-  # The longer specifiers push some lines past the formatter's width, so the codemod is always
-  # followed by a format.
-  (cd "$repo" && bun install && bun run format)
-  git -C "$repo" add -A
-  git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "rehearsal: lockfile, reformat"
 }
 
 phase_fast() {
@@ -239,6 +207,7 @@ phase_history() {
 phase_audit() {
   mkdir -p "$report/workspace"
   python3 "$here/audit.py" "$repo" "$report/workspace" "$here/audit-allowlist.txt" "$here/audit-allowlist-workspace.txt"
+  bash "$here/upstream-scan.sh" "$repo"
 }
 
 for phase in "$@"; do

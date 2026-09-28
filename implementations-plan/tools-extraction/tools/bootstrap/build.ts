@@ -157,11 +157,16 @@ function biome() {
 }
 
 /** unleashed carries no derived code, so it keeps neither the upstream line in LICENSE nor NOTICE. */
+const UPSTREAM_LICENSE_LINE = "   Portions Copyright 2026 BB Strategy Pte. Ltd. (Azguard Wallet); see NOTICE."
+
 function license() {
 	const lines = read("LICENSE").split("\n")
-	const upstream = lines.filter((line) => /^ {3}Portions Copyright .*; see NOTICE\.$/.test(line))
-	if (upstream.length !== 1) throw new Error(`LICENSE: expected one upstream "Portions" line, found ${upstream.length}`)
-	write("LICENSE", lines.filter((line) => line !== upstream[0]).join("\n"))
+	const found = lines.filter((line) => line === UPSTREAM_LICENSE_LINE).length
+	if (found !== 1) throw new Error(`LICENSE: expected the upstream "Portions" line once, found it ${found} times`)
+	if (lines.some((line) => /portions copyright/i.test(line) && line !== UPSTREAM_LICENSE_LINE)) {
+		throw new Error("LICENSE: carries another Portions line; review it before removing anything")
+	}
+	write("LICENSE", lines.filter((line) => line !== UPSTREAM_LICENSE_LINE).join("\n"))
 }
 
 function security() {

@@ -79,22 +79,7 @@ git -C "$repo" add -A
 printf 'chore: bootstrap the unleashed workspace\n\nRoot configuration copied from alejoamiras/nulo@%s by\nimplementations-plan/tools-extraction/tools/bootstrap/.\n' "$sha" >"$report/bootstrap-message.txt"
 git -C "$repo" commit --quiet -F "$report/bootstrap-message.txt"
 
-# No blob or message in unleashed's history may name nulo's upstream. Each scan reads
-# its whole input and exit statuses above 1 fail: a `grep -q` fed by a pipe can exit before git does.
-upstream='azguard|bb strategy'
-messages=$(git -C "$repo" log --format=%B)
-mapfile -t revs < <(git -C "$repo" rev-list HEAD)
-[ "${#revs[@]}" = "$(git -C "$repo" rev-list --count HEAD)" ] || die "could not list the history"
-names_upstream() {
-  local status=0
-  "$@" || status=$?
-  [ "$status" -le 1 ] || die "upstream scan failed ($status)"
-  [ "$status" = 0 ]
-}
-if names_upstream grep -qiE "$upstream" <<<"$messages" ||
-  names_upstream git -C "$repo" grep -qiE "$upstream" "${revs[@]}" --; then
-  die "the history names nulo's upstream"
-fi
+bash "$here/upstream-scan.sh" "$repo" || die "the history names nulo's upstream, or the scan failed"
 
 python3 "$here/audit.py" "$repo" "$report" "$here/audit-allowlist.txt"
 echo "extract: done — $repo ($(git -C "$repo" rev-list --count HEAD) commits); report in $report"
