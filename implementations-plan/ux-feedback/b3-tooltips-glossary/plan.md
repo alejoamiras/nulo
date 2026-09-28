@@ -920,6 +920,27 @@ Gate: all of the above exit 0 and the parity Artifact URL printed.
 Passed on `27704795` ([lessons](lessons/phase-4.md)); the parity page is
 <https://claude.ai/artifact/8EE5kUaqgpr1e2WeCucYqh>.
 
+### P5 · The owner's stack sign-off ✓
+
+The owner, 2026-09-28, on the stack's sign-off page
+(<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store):
+
+> Tooltip text contrast: Pass 4.5:1
+
+and in the note on "Everything else", the page's list of every state this plan built as
+recommended: "Everytihng else looks good." So U-1, U-2, U-3, U-5, U-7, U-8 and the Settings row
+are signed off as built, U-6 is moot at the stack top, and U-4 changes (§ Round-5 picks). The new
+bubbles' text, the dotted terms' definitions (`DottedTerm.vue`) and the padlock and globe labels
+(`BalanceView.vue`), is `--txt-body` in both themes: 5.05:1 dark and 4.82:1 light on the bubble,
+where the drawn `--nulo-secondary` gives 3.98:1 and 4.09:1.
+`packages/design/src/theme-contrast.test.ts` pins the pair. The 33 existing tooltips keep their
+colours. The sign-off page shows the new text in both themes.
+
+Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers.
+
+Passed on the stack top `df1849a2` ([lessons](lessons/phase-5.md)). Firefox's one red network
+file, the known `send-picker` flake, then passed three runs alone.
+
 ## Arc boundary
 
 1. The codex fix loop (below) until a round has nothing material, three rounds at most.
