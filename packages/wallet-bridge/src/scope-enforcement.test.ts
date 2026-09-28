@@ -658,7 +658,7 @@ describe("a contract in another case", () => {
 	// shorter spelling of the same value. Targets are plain strings, as the wire carries them.
 	const A = `0x${"0a1b2c3d".repeat(8)}`
 	const A_UPPER = `0x${A.slice(2).toUpperCase()}`
-	const A_MIXED = `0x${[...A.slice(2)].map((c, i) => (i % 2 === 0 ? c.toUpperCase() : c)).join("")}`
+	const A_MIXED = `0x${A.slice(2, 34).toUpperCase()}${A.slice(34)}`
 	const B = `0x${"0e1f2a3b".repeat(8)}`
 	const listed = (contract: string, fn: string) => [{ contract, function: fn }]
 	const calls = (to: string) => [{ calls: [{ to, name: "transfer" }] }]
@@ -714,6 +714,7 @@ describe("a contract in another case", () => {
 	]
 
 	test.each(methods)("%s: a listed contract passes a call to it in another case", (_name, method, grantFor, argsFor) => {
+		expect(new Set([A, A_UPPER, A_MIXED]).size).toBe(3)
 		for (const [scoped, target] of [
 			[A_UPPER, A],
 			[A, A_UPPER],
