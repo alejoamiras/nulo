@@ -838,7 +838,7 @@ Gate:
 - `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 - Layers: typecheck, lint, unit, component.
 
-### P2 · Refusals carry no request value (A2)
+### P2 · Refusals carry no request value (A2) ✓
 
 1. Sink pin first, `apps/extension/src/wallet/services/wallet-sdk/background.refusal-log.test.ts`,
    harness as `background.legal.test.ts:17-39`: `dispatch` rejects with the real error
