@@ -186,20 +186,26 @@ const STUBS = {
 
 type W = ReturnType<typeof mount>
 type Gas = { publicFeeJuice: string | null; privateFeeJuice: string | null }
-type Funding = { gas: Gas; fpcs: unknown[] }
+type Funding = { gas: Gas; fpcs: unknown[]; storage?: Record<string, unknown> }
 
 const HELD = "1000000000000000000"
 const PRIVATE_FPC = { id: "p1", type: 2, name: "Private FPC", isProtocol: true }
 const SPONSOR = { id: "s1", type: 1, name: "Sponsor", isProtocol: true }
 const HAND_ADDED = { id: "s2", type: 1, name: "Mine", isProtocol: false }
 const SEND_PICKS = UI_STORAGE_KEYS.SEND_FEE_PAYMENT_METHODS
+/** A hand-added sponsor pays only once picked: saved for both origins. */
+const HAND_ADDED_PICKED = { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s2" } }, public: { type: "fpc", fpc: { id: "s2" } } } }
 
 const FUNDING = {
 	"no gas, a sponsor": { gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"public Fee Juice only": { gas: { publicFeeJuice: HELD, privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"private Fee Juice only": { gas: { publicFeeJuice: "0", privateFeeJuice: HELD }, fpcs: [PRIVATE_FPC, SPONSOR] },
 	"both Fee Juices": { gas: { publicFeeJuice: HELD, privateFeeJuice: HELD }, fpcs: [PRIVATE_FPC, SPONSOR] },
-	"no gas, a hand-added sponsor": { gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC, HAND_ADDED] },
+	"no gas, a hand-added sponsor picked": {
+		gas: { publicFeeJuice: "0", privateFeeJuice: "0" },
+		fpcs: [PRIVATE_FPC, HAND_ADDED],
+		storage: { [SEND_PICKS]: HAND_ADDED_PICKED },
+	},
 } satisfies Record<string, Funding>
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }
@@ -212,7 +218,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 async function mountSend(funding: Funding, opts: { storage?: Record<string, unknown>; holdGas?: boolean; realTokenCard?: boolean } = {}) {
-	installChromeStorage(opts.storage ?? {})
+	installChromeStorage(opts.storage ?? funding.storage ?? {})
 	mocks.getFpcs.mockResolvedValue(funding.fpcs)
 	const gas = deferred<Gas>()
 	if (opts.holdGas) mocks.getGasBalances.mockReturnValue(gas.promise)
@@ -292,8 +298,8 @@ const SWEEP: Array<[keyof typeof FUNDING, TransferSide, Visibility, PayerKind, {
 	["private Fee Juice only", "public", "public", "contract", { kind: "fpc", fpcId: "p1" }],
 	["both Fee Juices", "private", "hidden", "contract", { kind: "fpc", fpcId: "p1" }],
 	["both Fee Juices", "public", "public", "account", { kind: "fj" }],
-	["no gas, a hand-added sponsor", "private", "unknown", "unvouched", { kind: "fpc", fpcId: "s2" }],
-	["no gas, a hand-added sponsor", "public", "public", "unvouched", { kind: "fpc", fpcId: "s2" }],
+	["no gas, a hand-added sponsor picked", "private", "unknown", "unvouched", { kind: "fpc", fpcId: "s2" }],
+	["no gas, a hand-added sponsor picked", "public", "public", "unvouched", { kind: "fpc", fpcId: "s2" }],
 ]
 const SIDE_CELLS = {
 	"private→private": { to: "hidden", amount: "hidden" },
@@ -347,8 +353,11 @@ describe("send page with the real fee card — nothing to send", () => {
 		w.unmount()
 	})
 
-	test("no gas and no sponsor: the footer asks for gas, and the strip vouches for nothing", async () => {
-		const { w } = await mountSend({ gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs: [PRIVATE_FPC] })
+	test.each([
+		["no sponsor", [PRIVATE_FPC]],
+		["only one added by hand, never picked", [PRIVATE_FPC, HAND_ADDED]],
+	])("no gas and %s: the footer asks for gas, and the strip vouches for nothing", async (_case, fpcs) => {
+		const { w } = await mountSend({ gas: { publicFeeJuice: "0", privateFeeJuice: "0" }, fpcs })
 		await fillForm(w)
 		expect(w.find('[data-testid="send-submit"]').exists()).toBe(false)
 		expect(w.get('[data-testid="send-get-fee-juice"]').text()).toBe("Get private gas")
@@ -427,8 +436,9 @@ describe("send page with the real fee card — transitions", () => {
 		w.unmount()
 	})
 
-	test("the protocol sponsor's row updated to a custom address under the same id: HIDDEN is withdrawn", async () => {
-		const { w } = await mountSend(FUNDING["no gas, a sponsor"])
+	test("the picked protocol sponsor's row updated to a custom address under the same id: HIDDEN is withdrawn", async () => {
+		const picks = { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s1", name: "Sponsor" } } } }
+		const { w } = await mountSend(FUNDING["no gas, a sponsor"], { storage: { [SEND_PICKS]: picks } })
 		await fillForm(w)
 		expect(settled(w)).toMatchObject({ you: "hidden", action: "send" })
 
@@ -438,6 +448,19 @@ describe("send page with the real fee card — transitions", () => {
 		await strip(w).trigger("click")
 		expect(w.get('[data-testid="send-review-fee"]').attributes("data-payer")).toBe("unvouched")
 		expect(w.get('[data-testid="send-review-row-you"]').text()).toContain("added by hand")
+		w.unmount()
+	})
+
+	test("the default sponsor's row updated to a custom address under the same id: it no longer pays unasked", async () => {
+		const { w } = await mountSend(FUNDING["no gas, a sponsor"])
+		await fillForm(w)
+		expect(settled(w)).toMatchObject({ you: "hidden", action: "send" })
+
+		fpcEvents.onFpcUpdated.invoke({ ...SPONSOR, isProtocol: false })
+		await nextTick()
+		expect(w.find('[data-testid="send-submit"]').exists()).toBe(false)
+		expect(w.get('[data-testid="send-get-fee-juice"]').text()).toBe("Get private gas")
+		expect(strip(w).attributes("data-you")).toBe("unknown")
 		w.unmount()
 	})
 

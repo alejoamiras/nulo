@@ -207,12 +207,18 @@ export function buildFeeMethods(
 }
 
 /** The fee menu's rows: Nulo's sponsor before hand-added ones, which keep their order. Only the menu
- *  is reordered, because the default payer is the first sponsor in `buildFeeMethods`' order. */
+ *  is reordered; the default sponsor is `defaultSponsor`'s, whatever a row's position. */
 export function menuOrder(methods: FeeMethodOption[]): FeeMethodOption[] {
 	const sponsors = methods.filter((m) => m.type === "fpc")
 	const nulo = sponsors.filter((m) => m.fpc?.isProtocol === true)
 	const handAdded = sponsors.filter((m) => m.fpc?.isProtocol !== true)
 	return [...methods.filter((m) => m.type !== "fpc"), ...nulo, ...handAdded]
+}
+
+/** The only sponsor a card picks unasked: Nulo's own, chosen by its derived identity, not by whether
+ *  it can pay. */
+export function defaultSponsor(methods: FeeMethodOption[]): FeeMethodOption | undefined {
+	return methods.find((m) => m.type === "fpc" && m.fpc?.isProtocol === true)
 }
 
 /** `undefined` (balances not known yet) and `null` (the leg's read failed) are never printed as a

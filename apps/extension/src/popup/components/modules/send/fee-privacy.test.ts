@@ -149,6 +149,27 @@ describe("resolveSendSelection — public origin", () => {
 	})
 })
 
+describe("resolveSendSelection — which sponsor the walk reaches", () => {
+	const both = (k: FeeKnowledge, pick?: Parameters<typeof resolveSendSelection>[2]) => [
+		outcome(resolveSendSelection("private", k, pick)),
+		outcome(resolveSendSelection("public", k, pick)),
+	]
+
+	test("Nulo's sponsor, even listed after one added by hand, on either origin", () => {
+		expect(both(know([PRIVATE_FPC, SPONSOR_2, SPONSOR], balances("0", "0")))).toEqual(["fpc:spon", "fpc:spon"])
+	})
+
+	test("never one added by hand: the walk ends on its next step instead", () => {
+		expect(both(know([PRIVATE_FPC, SPONSOR_2], balances("0", "0")))).toEqual(["none", "none"])
+		expect(both(know([PRIVATE_FPC, SPONSOR_2], undefined))).toEqual(["hold", "hold"])
+	})
+
+	test("a saved pick of one added by hand still wins", () => {
+		const k = know([PRIVATE_FPC, SPONSOR, SPONSOR_2], balances("0", "0"))
+		expect(both(k, { type: "fpc", fpc: { id: "spon2" } })).toEqual(["fpc:spon2", "fpc:spon2"])
+	})
+})
+
 describe("resolveSendSelection — picks", () => {
 	test("an eligible pick beats the walk, on either origin", () => {
 		const k = know([PRIVATE_FPC, SPONSOR, SPONSOR_2], balances("9", "9"))

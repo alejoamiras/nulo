@@ -126,7 +126,7 @@ beforeEach(() => {
 	stubChromeStorage()
 	mocks.getGasBalances.mockReset().mockResolvedValue(FJ(42n))
 	mocks.peekGasBalances.mockReset().mockResolvedValue(null)
-	mocks.getFpcs.mockReset().mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+	mocks.getFpcs.mockReset().mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor", isProtocol: true }])
 })
 
 afterEach(() => {

@@ -206,7 +206,7 @@ describe("TransferExecutor.execute", () => {
 
 	test("build failure: journal → failed with normalized error, task.fail, controller cleanup", async () => {
 		const boom = new Error("estimate blew up")
-		const { executor, deps, task } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
+		const { executor, deps, task, proveAndSend } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
 		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(boom, "j1"))
 
 		expect(deps.transitionJournal).toHaveBeenCalledWith(
@@ -216,6 +216,27 @@ describe("TransferExecutor.execute", () => {
 		)
 		expect(task.fail).toHaveBeenCalledWith(boom)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+		expect(proveAndSend).not.toHaveBeenCalled()
+	})
+
+	test("the node refusing an unfunded fee payer: journal → failed as a transfer, the rejection names the record", async () => {
+		// A 5.2.0 node's words: `Invalid tx: ` and its gas validator's reason.
+		const refusal = new Error("Invalid tx: Insufficient fee payer balance (required=880, available=0)")
+		const { executor, deps, proveAndSend } = makeHarness()
+		proveAndSend.mockRejectedValueOnce(refusal)
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(refusal, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith(
+			"j1",
+			{ stage: "failed" },
+			expect.objectContaining({ kind: "transfer", message: expect.stringContaining("Insufficient fee payer balance") }),
+		)
+	})
+
+	test("recording the activity failing after the send: journal → failed as a transfer", async () => {
+		const lost = new Error("activity write failed")
+		const { executor, deps } = makeHarness({ addTransaction: vi.fn(async () => Promise.reject(lost)) })
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(lost, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.objectContaining({ kind: "transfer" }))
 	})
 
 	test("a failure the record could not take is thrown alone, naming no record", async () => {

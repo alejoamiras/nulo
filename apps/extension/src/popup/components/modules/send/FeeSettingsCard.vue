@@ -15,12 +15,13 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Services */
-import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
+import { FpcServiceClient } from "@/wallet/services/fpc/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
 import {
 	buildFeeMethods,
+	defaultSponsor,
 	FEE_JUICE_BRIDGE_URL,
 	feeDisplay,
 	formatGasBalance,
@@ -442,11 +443,9 @@ const releaseSubscription = () => {
 const settledSelection = (savedRecord) => {
 	const resolved = resolveSavedSelection(savedRecord, methods.value)
 	if (resolved) return resolved
-	// Alpha (mainnet) → Private Fee Juice; every other network → Sponsored FPC (its historical default).
+	// Alpha (mainnet) → Private Fee Juice; every other network → Nulo's sponsor, else nothing.
 	const preferred =
-		props.network?.chainId === CHAIN_IDS.MAINNET
-			? methods.value.find((m) => m.type === "private_fpc")
-			: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
+		props.network?.chainId === CHAIN_IDS.MAINNET ? methods.value.find((m) => m.type === "private_fpc") : defaultSponsor(methods.value)
 	return preferred ? { ...preferred } : undefined
 }
 
