@@ -226,7 +226,7 @@ Arcs cross two repos and depend on each other's **merges** (R and U0 need N5a me
 | B0 initial import | unleashed | U0 | A5a merged; N2-publish | direct push (empty repo) |
 | B1…B4 | unleashed | B1…B4 | B0 | `gh stack`; cross-arc pass before submit |
 
-Nulo PRs squash into `dev`; titles ≤ 93 chars. Merging follows decision 22: one PR at a time, bottom of a stack first, with `gh pr merge --squash` and then `gh stack sync` — never `gh stack merge`, which lands everything below the named PR in one act.
+Nulo PRs squash into `dev`; titles ≤ 93 chars. Merging follows decision 22: one PR at a time, bottom of a stack first. A stacked PR refuses `gh pr merge`, so the owner directed (2026-09-28) `gh stack merge <pr> --squash` as each PR's CI goes green; with everything below already merged it lands that one PR, and GitHub rebases the arcs above it.
 
 ## Irreversible steps
 

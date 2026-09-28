@@ -319,3 +319,23 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
     7. Two doc summaries contradicted their own rules.
   - Round 2: approve, no remaining findings.
 - **Submitted** as alejoamiras/unleashed#1–#4 (stack #5). Before the push, `upstream-scan.py` over the docs worktree's HEAD, which reaches `main` and all four arcs: 4,698 objects and every commit message, clean.
+- **Merging the stack.**
+  - A stacked PR refuses `gh pr merge`, so § Delivery's `gh pr merge --squash` + `gh stack sync` cannot work. The owner merged #1 in the UI, then instructed "merge #2, #3 and #4 with gh stack merge --squash as each one's CI goes green". `gh stack merge <pr> --squash --yes` then lands only that PR, because everything below it has already merged.
+  - After each squash, GitHub rebases the remaining arcs onto `main` itself (committer GitHub, identical trees) and their CI re-runs. Do not rebase locally: a local rebase races it and the push is refused as stale. Reset each worktree to its remote branch instead.
+  - `main`'s protection went on after #2 merged: the three required checks (non-strict), a PR with no approval required, signed commits, no force-push or deletion, and squash-only (repo setting plus a ruleset).
+
+## N4 — redirect Worker (2026-09-28)
+
+- The Worker is named `nulo-tools-redirect`, after `nulo-passkey-rp` and `nulo-landing`, where the plan's prose says `tools-redirect`.
+- **Codex** (GPT-6 Astra, high), 3 rounds: approve with changes each time, 8 findings, all adopted.
+  - Round 1:
+    1. The README lacked the cut-over prerequisites. The old origins keep deposit journals in origin-bound `localStorage`, so in-flight deposits and fuel claims must be finished first.
+    2. It lacked a rollback and a DNS-cache caveat.
+    3. The tests passed a decoded query and a `Host`-header fallback. An exact encoded suffix and a reverse-spoof 404 now fail both mutations.
+    4. Comments: a historical preamble, and a wrong claim that a 301 is kept forever.
+  - Round 2:
+    1. Verified in wrangler 4.129.1's `cli.js`: custom domains are reconciled only when `routes` lists some, so a deploy with the routes removed releases nothing. Rollback removes the domains explicitly.
+    2. The live test's budget was too small for its sequential requests.
+    3. A fixture comment overstated the attack.
+  - Round 3: that rollback note was too broad. Reconciliation with at least one route left can detach omitted domains; only removing every route skips it.
+- The live probe (`bun run test:live`, `TOOLS_REDIRECT_LIVE=1`) is C1's verification once the domains move.
