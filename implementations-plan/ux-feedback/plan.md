@@ -12,6 +12,39 @@ design: implementations-plan/ux-feedback/design/spec.md
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: completed. Five batches shipped as six PRs on one stack.
+- **Shipped**: all six merged into `dev` on 2026-09-28 by `gh stack merge` (stack 705), one
+  squash commit each:
+  - #699 `3d02d5ce` feat(ux): first run without a name field, fee lines that say what you pay,
+    and a lock chip
+  - #700 `8a6c68ad` feat(windows): open every dapp window at the browser window's top-right, no
+    taller than it
+  - #701 `c25cc95d` feat(ux): tooltips that stay in the window, a glossary with dotted terms,
+    warnings as text
+  - #702 `a233062c` feat(ux): snackbar above the nav, one link or button per row, a receipt's
+    arrival plays once
+  - #703 `da79ac34` feat(permissions): one authorizations switch where off means ask, in the
+    window and settings
+  - #704 `624117cd` feat(permissions): redraw the permission window in four groups with a
+    details table
+- **Evidence**: the stack-top gates are in [lessons/final-pass.md](lessons/final-pass.md). Its one
+  open row, the Firefox canaries, passed on #704's head `14b68e8f`: CI run 36457493397
+  (`Firefox / Run / canary / real-proving`), four files and six tests at retry 0 with Presto
+  required, and 11 of 11 `/prove` requests proved.
+- **Deferred** by the owner, each to a later PR of its own, and not in the four follow-up plans:
+  - 4B, one connect window that turns into the emoji check after Allow. The owner's pick,
+    2026-09-23: "B (one connect window) is a follow-up arc, not this one". It touches the
+    verify path, so it needs its own blueprint.
+  - The PR that takes the em dash out of about 45 older strings. The owner, 2026-09-25:
+    "separate follow-up for those 45 older strings".
+- **Open items**: all in `implementations-plan/follow-ups.md`: the ones `ux-owner-picks`,
+  `wallet-safety-fixes`, `grant-check-address-case` and `e2e-reliability-fixes` take, the two
+  deferred items (unscheduled), and the rest, each with the owner call or the fix it waits on.
+- **Seeds retired**: the `/goal` and `/loop` seeds in this directory, the batch plans' included,
+  are spent and must never be pasted.
+
 # UX feedback program
 
 Builds every decision from the user-testing proposal (items 1–12 and the tooltip map) as five
