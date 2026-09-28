@@ -951,7 +951,7 @@ Gate:
 
 Gate: `bun run lint` exit 0; `git diff` for the file shows comment lines only.
 
-### P6 · Browser proof and the arc gate
+### P6 · Browser proof and the arc gate ✓
 
 1. C3's test in `tests/e2e/network/popup-escape-layered.test.ts`. Open the registry popup and wait
    for the live submit (`waitForSubmitLive`). Before each key, arm a `MutationObserver` in the
