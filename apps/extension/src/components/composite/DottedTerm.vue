@@ -49,9 +49,10 @@ const definition = computed(() => GLOSSARY[props.term]?.definition ?? "")
 	text-decoration-color: var(--txt-primary);
 }
 
+/* Text on the bubble must reach WCAG AA's 4.5:1 in both themes. */
 .definition {
 	display: block;
 	line-height: 1.2;
-	color: var(--nulo-secondary);
+	color: var(--txt-body);
 }
 </style>

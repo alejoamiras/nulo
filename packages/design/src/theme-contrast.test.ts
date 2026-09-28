@@ -21,6 +21,7 @@ const STABLE: Pair[] = [
 	{ fg: "--txt-primary", bg: "--card-bg", min: AA_TEXT, label: "primary text on card" },
 	{ fg: "--txt-secondary", bg: "--card-bg", min: AA_TEXT, label: "secondary text on card" },
 	{ fg: "--txt-primary", bg: "--app-bg", min: AA_TEXT, label: "primary text on app-bg" },
+	{ fg: "--txt-body", bg: "--nulo-surface-highest", min: AA_TEXT, label: "tooltip text on its bubble" },
 ]
 
 // Pairs that are genuinely contrast-RED in light today: a CORRECT light text token over a token that

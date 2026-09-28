@@ -408,10 +408,11 @@ onBeforeUnmount(() => {
 	color: var(--nulo-outline);
 }
 
+/* Text on the bubble must reach WCAG AA's 4.5:1 in both themes. */
 .label_text {
 	display: block;
 	line-height: 1.2;
-	color: var(--nulo-secondary);
+	color: var(--txt-body);
 }
 
 .actions {

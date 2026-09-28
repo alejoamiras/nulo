@@ -95,15 +95,21 @@ now in use, so the message is the record): "And on "T" looks good. But please, d
 with each sentence's em dash made a full stop. Approving the drawing also settles U9's place
 between the label and the field, and `spec.md`'s U8 and U9 rows now say so.
 
+Signed off on 2026-09-28 on the stack's sign-off page
+(<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store), the owner's own picks:
+U-4 "Pass 4.5:1", so the new bubbles' text is now `--txt-body` (§ UI asks, U-4). U-1, U-2, U-3,
+U-5, U-7, U-8 and the Settings row sat under "Everything else", whose note ends "Everytihng else
+looks good." U-6 is moot at the stack top, where batch 5 removes the ⓘ.
+
 ## UI impact
 
 | # | Surface | Before → after | Shot | Sign-off |
 |---|---|---|---|---|
-| 1 | Every `<Tooltip>` (33 in the extension, 1 in `Input.vue`) | Placed once, unclamped, text capped at 320px, 8px from its trigger, closes when the pointer leaves the trigger, Esc does nothing, fades in and out over 0.12s → 6px from its trigger as drawn, stays 8px inside the window, flips above/below, bubble at most `min(272px, window − 16px)` wide, long strings wrap, the pointer can move onto it, Esc closes it, pressing a button or link inside its trigger closes it; enters with a 2px rise over 0.12s ease-out and disappears at once, as the artifact's live tooltip does (`nulo.css:467-468`, `page.js:487`) | `02-tooltip` | i2 "A only" (owner); the motion **sign-off pending**, Ask U-7; the press closing it **sign-off pending**, Ask U-8 |
-| 8 | Capabilities window, the Alias ⓘ | bubble starts at the ⓘ's left edge (`position="start"`) → centred on the ⓘ, then kept 8px inside the window, as option A draws it (`design/mocks/src/parts/02-tooltip.html:71`, `data-tip-mode="clamp"`) | `02-tooltip` | **sign-off pending**, Ask U-6 (batch 5 removes the ⓘ) |
+| 1 | Every `<Tooltip>` (33 in the extension, 1 in `Input.vue`) | Placed once, unclamped, text capped at 320px, 8px from its trigger, closes when the pointer leaves the trigger, Esc does nothing, fades in and out over 0.12s → 6px from its trigger as drawn, stays 8px inside the window, flips above/below, bubble at most `min(272px, window − 16px)` wide, long strings wrap, the pointer can move onto it, Esc closes it, pressing a button or link inside its trigger closes it; enters with a 2px rise over 0.12s ease-out and disappears at once, as the artifact's live tooltip does (`nulo.css:467-468`, `page.js:487`) | `02-tooltip` | i2 "A only" (owner); the motion (U-7) and the press closing it (U-8) signed off (owner, 2026-09-28) |
+| 8 | Capabilities window, the Alias ⓘ | bubble starts at the ⓘ's left edge (`position="start"`) → centred on the ⓘ, then kept 8px inside the window, as option A draws it (`design/mocks/src/parts/02-tooltip.html:71`, `data-tip-mode="clamp"`) | `02-tooltip` | Ask U-6, moot at the stack top: batch 5 removes the ⓘ |
 | 2 | Home fee labels | "Public Fee Juice" / "Private Fee Juice" plain → dotted terms, Tab stops, left-aligned definitions "Paying a fee with it shows your address." / "Paying a fee with it keeps your address hidden." | `09-home-dotted` | i9 dotted, i9b shorter definitions (owner) |
-| 3 | Balance split (padlock and globe) | no tooltip → padlock "Private balance: only you can see it", globe "Public balance: anyone can see it", left-aligned; no underline, no Tab stop | `tips-icon-labels` | tips "All of it" (owner); **sign-off pending** on where: see Ask U-1 |
-| 4 | Settings → App | new row "Glossary", "What Nulo's words mean", `menu_book`, between Proving and Advanced | round 2's i9 Settings panel (not redrawn in round 3) | i9 "likes the glossary page (C)"; **sign-off pending** for the row itself |
+| 3 | Balance split (padlock and globe) | no tooltip → padlock "Private balance: only you can see it", globe "Public balance: anyone can see it", left-aligned; no underline, no Tab stop | `tips-icon-labels` | tips "All of it" (owner); where (U-1) signed off (owner, 2026-09-28); text `--txt-body` (U-4) |
+| 4 | Settings → App | new row "Glossary", "What Nulo's words mean", `menu_book`, between Proving and Advanced | round 2's i9 Settings panel (not redrawn in round 3) | i9 "likes the glossary page (C)"; the row signed off (owner, 2026-09-28) |
 | 5 | Glossary page (new) | back arrow, "Glossary", four sections, nine entries (term, definition, where it appears) | `09-glossary` | i9, i9b, i9c "Authorizations" (owner) |
 | 6 | dApp identity block (connect, permissions, execute, emoji check) | warning icon with the sentence on hover → one orange line under the host, icon first, top-aligned, today's sentence | `tips-host-U8` | round 5 U8, signed off (owner, 2026-09-25), the dash a full stop |
 | 7 | Import, recovery phrase (onboarding and popup) | ⓘ with the sentence on hover → the sentence between the label and the field, 8px from each as drawn; the ⓘ goes | `tips-phrase-U9` | round 5 U9, signed off (owner, 2026-09-25), the dash a full stop |
@@ -131,7 +137,10 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   `base.css:145`, `:154`). 24 pass bare text, which renders `--txt-primary` (10.8:1 dark).
   Recommended and built: the new tooltips as drawn, `--nulo-secondary` in both themes (the token
   `base.css` already defines for each); the 33 unchanged. Alternative: `color="secondary"`, which
-  matches the nine in both themes and passes AA in light only.
+  matches the nine in both themes and passes AA in light only. Resolved 2026-09-28: the owner
+  picked "Pass 4.5:1" for both themes, which `color="secondary"` cannot meet in dark. Built:
+  `--txt-body` (`rgba(245, 240, 230, 60%)` dark, `rgba(0, 0, 0, 58%)` light), 5.05:1 and 4.82:1
+  on the bubble, pinned in `packages/design/src/theme-contrast.test.ts`; the 33 stay unchanged.
 - **U-5 · A tooltip taller than the window.** Long error text is the likely case; a short enough
   window makes any bubble too tall. No drawing covers it. Recommended and built: it pins to the
   top 8px inset and runs past the bottom edge.
@@ -168,7 +177,8 @@ Keyboard: Home gains two Tab stops, the dotted terms (the mock gives them `tabin
   drawing and its note put it between the label and the field (`gen_r5.py:284-291`). Built as
   drawn; the spec line needs the owner's correction. Resolved 2026-09-25: the owner approved
   the drawing, and the spec's U9 row now reads "between the label and the field".
-- The Settings row (row 4), as listed above. U8 and U9 were signed off on 2026-09-25.
+- The Settings row (row 4), as listed above. U8 and U9 were signed off on 2026-09-25; the row
+  and every ask above but the moot U-6 on 2026-09-28 (§ Round-5 picks).
 
 ## Architecture & Implementation
 
