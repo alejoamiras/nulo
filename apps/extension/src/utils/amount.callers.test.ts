@@ -5,7 +5,9 @@ import { describe, expect, test } from "vitest"
 /**
  * Which amounts read compact: every capped call whose token the wallet knows, and none of the
  * calls that guess decimals 0 for an unknown token or a dApp mint, where one 18-decimal token
- * would read as >999T. Textual on purpose: a new call fails here until someone picks its kind.
+ * would read as >999T. Textual on purpose: a new call fails here until someone picks its kind, and
+ * an option other than `{ compact: true }` is refused. A parenthesis inside a string or comment
+ * within a call's arguments defeats it; review catches that.
  */
 
 const SRC = resolve(__dirname, "..")
@@ -43,10 +45,35 @@ function callArgs(text: string): string[] {
 	return args
 }
 
+/** A call's arguments, split at the commas outside any bracket. */
+function topLevelArgs(args: string): string[] {
+	const parts: string[] = []
+	let depth = 0
+	let start = 0
+	for (let i = 0; i < args.length; i++) {
+		const ch = args.charAt(i)
+		if ("([{".includes(ch)) depth++
+		else if (")]}".includes(ch)) depth--
+		else if (ch === "," && depth === 0) {
+			parts.push(args.slice(start, i).trim())
+			start = i + 1
+		}
+	}
+	parts.push(args.slice(start).trim())
+	return parts.filter((part) => part !== "")
+}
+
+/** [compact, plain]: plain has no fourth argument, compact passes exactly `{ compact: true }`. */
 function kinds(text: string): [number, number] {
-	const args = callArgs(text)
-	const compact = args.filter((a) => /\bcompact:\s*true\b/.test(a)).length
-	return [compact, args.length - compact]
+	let compact = 0
+	let plain = 0
+	for (const args of callArgs(text)) {
+		const parts = topLevelArgs(args)
+		if (parts.length <= 3) plain++
+		else if (parts.length === 4 && parts[3] === "{ compact: true }") compact++
+		else throw new Error(`unsupported option in balanceFormatted(${args})`)
+	}
+	return [compact, plain]
 }
 
 describe("balanceFormatted's callers", () => {
@@ -65,5 +92,13 @@ describe("balanceFormatted's callers", () => {
 		expect(kinds(split)).toEqual([1, 0])
 		expect(kinds("\t// `balanceFormatted(raw, decimals, length)`.\n\t * balanceFormatted(x)\n")).toEqual([0, 0])
 		expect(kinds("const a = balanceFormatted(f(x), d, 8).value\n")).toEqual([0, 1])
+	})
+
+	test.each([
+		"balanceFormatted(a, d, 8, opts)",
+		'balanceFormatted(a, d, 8, { "compact": true })',
+		"balanceFormatted(a, d, 8, { compact: false })",
+	])("an option other than { compact: true } is refused: %s", (call) => {
+		expect(() => kinds(call)).toThrow("unsupported")
 	})
 })
