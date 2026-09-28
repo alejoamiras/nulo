@@ -917,7 +917,7 @@ Gate:
 - `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 - Layers: typecheck, lint, unit.
 
-### P4 · Deletion removes profile-keyed UI keys (A4)
+### P4 · Deletion removes profile-keyed UI keys (A4) ✓
 
 1. Red, `coordinator.test.ts`, over a fake `StorageArea` seeded with `pinnedTokensKey("p1")` and
    `pinnedTokensKey("p10")`: `runFor("p1", …)` (the entry the live delete, the resume and the torn

@@ -44,6 +44,7 @@ declare global {
   const MINT_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').MINT_SIGNATURES
   const PINNED_TOKENS_MAX: typeof import('../composables/usePinnedTokens').PINNED_TOKENS_MAX
   const PINNED_TOKENS_MAX_CHAINS: typeof import('../composables/usePinnedTokens').PINNED_TOKENS_MAX_CHAINS
+  const PROFILE_UI_KEY_PREFIXES: typeof import('../utils/profile-ui-keys').PROFILE_UI_KEY_PREFIXES
   const REVIEW_ARM_MS: typeof import('../composables/useSendReview').REVIEW_ARM_MS
   const SEED_STATUS_RETRY_MS: typeof import('../composables/useSeedStatus').SEED_STATUS_RETRY_MS
   const SNACK_GAP: typeof import('../composables/snackInset').SNACK_GAP
@@ -200,7 +201,9 @@ declare global {
   const pickPrimaryIndex: typeof import('../utils/primary-method').pickPrimaryIndex
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const pinScopeOf: typeof import('../composables/usePinnedTokens').pinScopeOf
+  const pinnedTokensKey: typeof import('../utils/profile-ui-keys').pinnedTokensKey
   const preflightNetworkConnectivity: typeof import('../composables/importPreflight').preflightNetworkConnectivity
+  const profileUiKeys: typeof import('../utils/profile-ui-keys').profileUiKeys
   const projectArgument: typeof import('../utils/transfer-intent').projectArgument
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
@@ -546,6 +549,7 @@ declare module 'vue' {
     readonly MINT_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['MINT_SIGNATURES']>
     readonly PINNED_TOKENS_MAX: UnwrapRef<typeof import('../composables/usePinnedTokens')['PINNED_TOKENS_MAX']>
     readonly PINNED_TOKENS_MAX_CHAINS: UnwrapRef<typeof import('../composables/usePinnedTokens')['PINNED_TOKENS_MAX_CHAINS']>
+    readonly PROFILE_UI_KEY_PREFIXES: UnwrapRef<typeof import('../utils/profile-ui-keys')['PROFILE_UI_KEY_PREFIXES']>
     readonly REVIEW_ARM_MS: UnwrapRef<typeof import('../composables/useSendReview')['REVIEW_ARM_MS']>
     readonly SEED_STATUS_RETRY_MS: UnwrapRef<typeof import('../composables/useSeedStatus')['SEED_STATUS_RETRY_MS']>
     readonly SNACK_GAP: UnwrapRef<typeof import('../composables/snackInset')['SNACK_GAP']>
@@ -702,7 +706,9 @@ declare module 'vue' {
     readonly pickPrimaryIndex: UnwrapRef<typeof import('../utils/primary-method')['pickPrimaryIndex']>
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly pinScopeOf: UnwrapRef<typeof import('../composables/usePinnedTokens')['pinScopeOf']>
+    readonly pinnedTokensKey: UnwrapRef<typeof import('../utils/profile-ui-keys')['pinnedTokensKey']>
     readonly preflightNetworkConnectivity: UnwrapRef<typeof import('../composables/importPreflight')['preflightNetworkConnectivity']>
+    readonly profileUiKeys: UnwrapRef<typeof import('../utils/profile-ui-keys')['profileUiKeys']>
     readonly projectArgument: UnwrapRef<typeof import('../utils/transfer-intent')['projectArgument']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>

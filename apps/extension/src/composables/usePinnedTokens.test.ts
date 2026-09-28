@@ -1,12 +1,13 @@
 /**
  * Pin store over an in-memory `chrome.storage.local` with a working `onChanged`. Covers the hostile
  * read path, the cap against the known token set, scope capture, deletion cleanup on another
- * profile, serialised writes, and disposal.
+ * profile, serialised writes, a write held at the migration barrier, and disposal.
  */
+import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { nextTick, reactive } from "vue"
-import { pinnedTokensKey } from "@/popup/constants/storage-keys"
-import { PINNED_TOKENS_MAX_CHAINS, type PinScope, sanitizePinMap, usePinnedTokens } from "./usePinnedTokens"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
+import { PINNED_TOKENS_MAX_CHAINS, type PinScope, sanitizePinMap, type UsePinnedTokensDeps, usePinnedTokens } from "./usePinnedTokens"
 
 type Change = Record<string, { oldValue?: unknown; newValue?: unknown }>
 type Listener = (changes: Change, area: string) => void
@@ -68,6 +69,15 @@ function memoryStorage() {
 			data.set(key, value)
 			for (const l of [...listeners]) l({ [key]: { newValue: value } }, "local")
 		},
+		/** The boot migrator's running marker: facade calls from now on wait at the barrier. */
+		raiseMarker() {
+			data.set(SCHEMA_RUNNING_KEY, 2)
+		},
+		/** Clears the marker with the change event the barrier waits for. */
+		clearMarker() {
+			data.delete(SCHEMA_RUNNING_KEY)
+			for (const l of [...listeners]) l({ [SCHEMA_RUNNING_KEY]: { newValue: undefined } }, "local")
+		},
 	}
 }
 
@@ -98,12 +108,39 @@ const settle = async () => {
 	for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0))
 }
 
-function make() {
+function make(knownContracts: UsePinnedTokensDeps["knownContracts"] = () => known) {
 	return usePinnedTokens({
 		tokenService: { onTokenDeleted: deleted },
 		getScope: () => state.scope,
-		knownContracts: () => known,
+		knownContracts,
 	})
+}
+
+/**
+ * Pins A on p1 with its write held at the migration barrier: the pin parks in `knownContracts`,
+ * after its map read and scope check, the marker goes up, and `during` runs once the write waits.
+ */
+async function pinAcrossMigration(during: () => void) {
+	let reached = false
+	let release = () => {}
+	const pins = make(() => {
+		reached = true
+		return new Promise((resolve) => {
+			release = () => resolve(new Set([A]))
+		})
+	})
+	await pins.refresh()
+	const op = pins.pin(A)
+	await vi.waitFor(() => expect(reached).toBe(true))
+	storage.raiseMarker()
+	release()
+	// The facade's barrier listener joins the composable's once the write waits there.
+	await vi.waitFor(() => expect(storage.listeners.size).toBe(2))
+	during()
+	storage.clearMarker()
+	const result = await op
+	pins.dispose()
+	return result
 }
 
 beforeEach(() => {
@@ -271,6 +308,32 @@ describe("usePinnedTokens", () => {
 		await settle()
 		expect(storage.local.set).not.toHaveBeenCalled()
 		pins.dispose()
+	})
+
+	test("a deletion cleanup that runs after the purge removed the key writes nothing", async () => {
+		storage.data.set(pinnedTokensKey("p1"), { "7": [A] })
+		const pins = make()
+		await pins.refresh()
+		storage.data.delete(pinnedTokensKey("p1"))
+		deleted.emit({ profileId: "p1", chainId: 7, contract: A })
+		await settle()
+		expect(storage.data.has(pinnedTokensKey("p1"))).toBe(false)
+		expect(storage.local.set).not.toHaveBeenCalled()
+		pins.dispose()
+	})
+
+	test("a pin whose scope changes while its write waits for a migration writes nothing", async () => {
+		const result = await pinAcrossMigration(() => {
+			state.scope = { profileId: "p2", chainId: 7 }
+		})
+		expect(result).toBe("stale")
+		expect(storage.data.has(pinnedTokensKey("p1"))).toBe(false)
+		expect(storage.local.set).not.toHaveBeenCalled()
+	})
+
+	test("the same pin with its scope unchanged lands once the migration ends", async () => {
+		expect(await pinAcrossMigration(() => {})).toBe("pinned")
+		expect(storage.data.get(pinnedTokensKey("p1"))).toEqual({ "7": [A] })
 	})
 
 	test("a deletion missed while disconnected is pruned by the next ordinary write", async () => {
