@@ -312,13 +312,14 @@ Owner checklist additions for C1 (origin-bound state): wallet dApp approvals gra
 | Historical intents: commit-map as evidence, drift check untouched | codex (finding), driver (mitigation) | rewriting intent SHAs → falsifies custody records. |
 | Root config as a fresh commit | driver + fable | codex's root-files-in-filter → drags every unrelated nulo commit. |
 | No plan-folder hygiene migration | driver | out of scope: nulo's CLAUDE.md treats audit transcripts as committed artifacts; this plan keeps its own scratch untracked with a plan-local `.gitignore`. |
-
-**Unresolved disagreements**: none blocking. All three planners independently judged forking cheaper than publishing; the owner chose publishing twice, so the plan implements its least-bad form. First scope cut if it bites: publish only `wallet-crypto`, vendor the two trivial packages.
-| unleashed ships no code derived from nulo's upstream, and neither its LICENSE nor its history names it | owner, 2026-09-27 | keep the derived design files with their notices → the owner wants no upstream reference in unleashed. Drop the notices but keep the code → a licence breach. |
+| unleashed's repository carries no code derived from nulo's upstream, and neither its LICENSE nor its history names it | owner, 2026-09-27 | keep the derived design files with their notices → the owner wants no upstream reference in unleashed. Drop the notices but keep the code → a licence breach. |
 | U0 re-extracted without those mentions and force-pushed over the first import | owner, 2026-09-27 ("Force-push main") | a forward commit → history keeps the mentions. Delete and recreate the repository → the cleanest scrub, not chosen. |
 | The design package is written for unleashed from what the tools app uses | driver, owner-approved | carry nulo's files and layer the placeholder palette over them → still ships derived content. |
 | The app calls itself "unleashed" | owner, 2026-09-27 | "Aztec tools" as a placeholder; keeping the Nulo copy the plan first assumed. |
 | Brand guard: a verbatim line baseline, replaced by a closed allowlist in B4 | driver + codex (B1 round 1) | per-file counts → a new mention could replace an old one unseen. A category allowlist now → it would bless 524 lines, many of which later arcs remove. |
+| `EncryptionKey` stays a dependency on `@alejoamiras/nulo-wallet-crypto`, bundled into the tools site | owner, 2026-09-27 ("Keep the npm dep") | a fresh, format-compatible WebCrypto rewrite pinned by golden vectors → the driver's recommendation, not chosen. Flagged to the owner, not resolved: the bundle drops the package's NOTICE, which Apache-2.0 §4(d) likely requires the site to carry. |
+
+**Unresolved disagreements**: none blocking. All three planners independently judged forking cheaper than publishing; the owner chose publishing twice, so the plan implements its least-bad form. First scope cut if it bites: publish only `wallet-crypto`, vendor the two trivial packages.
 
 ## Enablement checklist
 
