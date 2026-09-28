@@ -167,7 +167,7 @@ runtime env var can never arm a build-time flag.
 ### CI topology
 
 - **Smoke** — `pr-extension-smoke-e2e.yml` → `_extension-smoke-e2e.yml`. Runs when the diff trips the `smoke-surface`
-  paths filter, when the PR targets `main`, on the `e2e:extension-smoke` label, or on dispatch; 20-minute job; in-job
+  paths filter, when the PR targets `main`, on the `e2e:extension-smoke` label, or on dispatch; 30-minute job; in-job
   armed build by default, or an artifact (`artifact_name` / `extension_path`) for nightly/release.
   Required check `extension-smoke-e2e-status` on both branches.
 - **Network** — `pr-extension-network-e2e.yml` → `_extension-network-e2e.yml`. Filter `extension-network`, label

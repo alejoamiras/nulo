@@ -35,7 +35,9 @@ jobs:
   smoke:
     name: Vitest + Puppeteer
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Firefox's wall time reaches ~20m on a slow runner. 30m gives headroom without masking a
+    # real hang.
+    timeout-minutes: 30
     env:
       NULO_E2E_BROWSER: ${{ inputs.browser }}
       EXTENSION_PATH: ${{ inputs.extension_path }}
