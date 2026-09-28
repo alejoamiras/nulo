@@ -227,17 +227,18 @@ This is the plan's last nulo release, run as soon as N3 and N5b are merged and t
 - the build shows success;
 - `curl -s https://nulo.sh` links `releases/tag/v<released version>`;
 - `curl -sI https://nulo.sh` has header parity with the pre-cut capture.
-**L-cut outcome (2026-09-28, pulled before P1 by decision 27).** `main`'s landing (`95eb2902`) was built by hand and deployed to `nulo-landing`. Its 11 key paths were byte-identical to what Pages served. The apex CNAME to `nulo.pages.dev` was deleted and `nulo.sh` attached to the Worker; there was no downtime, and `www` still answers 301. The follow-up commits `workers_dev: false` and deliberately no `routes`. The Workers Builds token holds no zone permission, and wrangler leaves an attached domain alone while `routes` names none. That was verified live: a deploy with no routes and `workers_dev: false` kept `nulo.sh` attached with the same bytes, turned the workers.dev host into a 404, and kept `previews_enabled: true`. Two steps were left for the owner: removing the Pages project's stale `nulo.sh` entry (the session's permission layer refused a domain change), and deleting the `nulo` project.
+**L-cut outcome (2026-09-28, pulled before P1 by decision 27).** `main`'s landing (`95eb2902`) was built by hand and deployed to `nulo-landing`. Its 11 key paths were byte-identical to what Pages served. The apex CNAME to `nulo.pages.dev` was deleted and `nulo.sh` attached to the Worker; there was no downtime, and `www` still answers 301. The follow-up commits `workers_dev: false` and deliberately no `routes`. The Workers Builds token holds no zone permission, and wrangler leaves an attached domain alone while `routes` names none. That was verified live: a deploy with no routes and `workers_dev: false` kept `nulo.sh` attached with the same bytes, turned the workers.dev host into a 404, and kept `previews_enabled: true`. The session's permission layer refused both the Pages detach and the project delete as domain changes. The stale `nulo.sh` entry has since cleared, and deleting the `nulo` project is left to the owner.
 
 ### C2 — delete · Cloudflare (**Irreversible #4**)
 No soak (decision 16): it runs as soon as its preconditions hold — C1's gate green, GATE-U's live checks still passing, `nulo.sh` served by the Worker, and no DNS record pointing at any `*.pages.dev` name. Decision 27 moved it ahead of P1, so it no longer waits for a release. Delete `nulo-tools-testnet`, `nulo-tools-mainnet`, then the `nulo` Pages project; delete secret `CLOUDFLARE_PAGES_DEPLOY_HOOK` once the follow-up PR has merged (the tools hook went at F0); that follow-up PR, which merges before P1's promote, removes `refresh-landing` (the job and its `status` needs), `refresh-landing.yml`, `verify-live`'s landing check and the runbook text naming them — with no hook, a post-release landing check could only go red; owner revokes the API token.
 **Validation gate** — `wrangler pages project list` shows none of the three; all three hostnames still answer as in C1/P1; `gh secret list` shows neither secret.
 **C2 progress (2026-09-28):**
 - `nulo-tools-mainnet` is deleted; its 1,227 deployments were purged first, because Cloudflare refuses to delete a project with many.
-- `nulo-tools-testnet` is being purged.
-- The follow-up that removes `refresh-landing`, `refresh-landing.yml` and `verify-live` is open.
+- `nulo-tools-testnet` is deleted, after 2,815 deployments were purged.
+- The follow-up that removes `refresh-landing`, `refresh-landing.yml` and `verify-live` is #711. Its own Workers Builds preview served with `workers_dev: false` (both preview URLs 200), while the production workers.dev host answers 404.
 - The old `tools` Access app is deleted. Its reusable "Only Foundation & Labs" policy now guards `unleashed-mainnet.alejo-amiras.workers.dev`.
-- Pending: the `nulo` project, after the owner clears its `nulo.sh` entry, and the deploy-hook secret, after the follow-up merges.
+- The `nulo` project no longer lists `nulo.sh` (only `nulo.pages.dev`), and no DNS record points at `*.pages.dev`.
+- Pending: the owner deletes the `nulo` project (the session's permission layer refused it as a domain change), and the agent deletes the deploy-hook secret after #711 merges.
 
 ## Delivery — arcs → PRs
 
