@@ -69,6 +69,9 @@ Then, on Firefox, proverless at retry 0:
 | The whole suite on `9900de28`, in three shards run at once | exit 0 each (2,053 s, 2,075 s and 2,170 s) |
 
 The file's one test passed in each of its three runs, at load averages of 116 to 132.
+An unsharded run of the whole suite on `9900de28`, started first, was stopped after about 11
+minutes, when the owner asked why it was not sharded; two files had passed, and it gave no
+suite result.
 Each shard ran in its own clean checkout of `9900de28`, with its own sandbox, and the load
 average read 124 to 131 as they ended. Their file lists, balanced by each file's time on
 `df1849a2`, cover the suite's 102 files once each; CI's Firefox lane splits the suite
@@ -113,9 +116,9 @@ running out during a cold dynamic import inside a test body.
   `await import("@aztec/aztec.js/wallet")` (5,084 ms).
 
 The host has 192 cores; its load average read 130 to 220 when checked during these runs.
-Of the six `test:all` runs on this stack's tops that day, two failed: the first on
-`49a42355`, which then passed a rerun at a load average of 217 and its gate chain's run, and
-the only one on `e41bde52`. Both runs on `df1849a2` passed.
+Of the six `test:all` runs on this stack's tops that day before the `9900de28` gate, two
+failed: the first on `49a42355`, which then passed a rerun at a load average of 217 and its gate
+chain's run, and the only one on `e41bde52`. Both runs on `df1849a2` passed.
 The stack changes neither test nor the modules whose imports timed out. A possible mitigation,
 not validated, is to warm each import in a `beforeAll` with its own timeout. The relay test
 resets modules before every test, so a trial must show that each test still gets a fresh
