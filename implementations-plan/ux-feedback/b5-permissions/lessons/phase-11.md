@@ -33,9 +33,8 @@ The codex session at high (`01a0e7ab-…`) read the three changes.
 
 ## The gate
 
-The stack-top gate on `df1849a2` is in
+The stack-top gate, on `df1849a2` and then Firefox's whole network suite on `9900de28`, is in
 [batch 3's P5 log](../../b3-tooltips-glossary/lessons/phase-5.md) and the program's
 [final pass](../../lessons/final-pass.md).
 `cap-window` and `cap-request-rerequest` passed in both browsers' network suites. Firefox's
-one red network file, the known `send-picker` flake, and its three passing reruns are in the
-batch 3 log.
+one red network file on `df1849a2`, `send-picker`, and its reruns are in the batch 3 log.

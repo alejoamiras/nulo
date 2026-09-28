@@ -177,9 +177,11 @@ every commit on the stack is signed. A codex session at high (`01a0e7ab-…`) re
 The gate ran on `df1849a2` in two clean detached checkouts: the network files at retry 0, Chrome
 prover on with the `@requires-proverless` files proverless and Firefox proverless, and smoke at its
 config's two retries, which no test used. Every step exited 0 on both browsers but Firefox's
-network suite, whose one red file was the known `send-picker` flake (the plan's Follow-ups); run
-alone in a third clean checkout, that file then passed three times. The table, the flake and the
-two unit tests that timed out under host load on earlier tops are in
+network suite, where one file, `send-picker`, failed (the plan's Follow-ups); run alone in a
+third clean checkout, that file then passed three times. The whole Firefox network suite then
+exited 0 on `9900de28`, the stack top with this gate's first records, in three shards whose file
+lists cover its 102 files once each; the six local rows exited 0 there too. The table, the
+failure and the two unit tests that timed out under host load on earlier tops are in
 [batch 3's P5 log](../b3-tooltips-glossary/lessons/phase-5.md).
 Both execution canaries passed prover on in Chrome's network suite; the Firefox canaries
 wait for CI's `Firefox / Run / canary / real-proving` job on the stack top's head.
@@ -193,3 +195,14 @@ the smoke flake bars ran through a scratch retry-0 config. The passages now say 
 `4c20a006`, `023ca03c`, `d893ae95`, `490ca181` and `df1849a2`, no smoke test passed on a retry: the
 repo's retry reporter (`tests/e2e/retry-error-reporter.ts`) printed nothing. The earlier gates'
 smoke logs were not checked.
+
+The same codex session then read these records. Round 5: "Material findings: **yes** — the
+records overstate completion of the required gate." They had called the gate passed while
+Firefox's full network suite had exited 1, and three passes of one file do not stand in for
+that suite. Taken: the whole suite ran again on `9900de28`, in three shards that cover its
+102 files once each, and the records give each run's result. Its minors were taken too.
+The records no longer call the failure the known flake: it is consistent with the earlier
+sightings, its mechanism unknown, and the stack's `Popup.vue` changes are not ruled out. The
+unit tests' warm import is a mitigation still to validate, since the relay test resets modules
+before every test. Batch 3's P5 table was split so its rows stay short. The round found the
+nine retry corrections scoped right.
