@@ -54,6 +54,14 @@ describe("composite/TransactionIncomingCard", () => {
 		expect(w.find(".amount").text()).toBe("+1.5")
 	})
 
+	test.each([
+		["a whole part past the row keeps every digit", 123_456_789n * 10n ** 18n, "+123.45M"],
+		["a cut that ends on the separator drops it", 9_999_999n * 10n ** 17n, "+999,999"],
+	])("%s", (_name, raw, expected) => {
+		const w = mountCard({ amountRaw: raw.toString(), tokenDecimals: 18 })
+		expect(w.find(".amount").text()).toBe(expected)
+	})
+
 	test("decimals default to 0 when unknown (raw shown as-is)", () => {
 		const w = mountCard({ amountRaw: "42", tokenDecimals: 0 })
 		expect(w.find(".amount").text()).toBe("+42")

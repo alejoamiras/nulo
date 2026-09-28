@@ -26,7 +26,7 @@ const props = defineProps({
 	/** Transaction hash that delivered the note (for hash-slice rendering). */
 	txHash: { type: String, default: null },
 	/** Receiver-honest kind label ("Received privately" / "Public → Public" /
-	 *  "Private → Public" / "Minted"), derived from the resolved type (D5-D). */
+	 *  "Private → Public" / "Minted"), derived from the resolved type. */
 	receivedLabel: { type: String, default: "Received" },
 	/** The route the row opens. */
 	to: { type: String, default: undefined },
@@ -37,7 +37,7 @@ const props = defineProps({
 /** `decimals` comes from a contract-fed storage row; an invalid one leaves the amount column out. */
 const formattedAmount = computed(() => {
 	if (!props.amountRaw || !isValidDecimals(props.tokenDecimals)) return null
-	return balanceFormatted(props.amountRaw, props.tokenDecimals, 8).value
+	return balanceFormatted(props.amountRaw, props.tokenDecimals, 8, { compact: true }).value
 })
 
 const hashSlice = computed(() => {

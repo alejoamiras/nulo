@@ -105,6 +105,18 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		expect(w.text()).toContain("example.dapp.io")
 	})
 
+	test("a dApp's mint of one 18-decimal token, as the wire carries it, never reads as >999T", () => {
+		const oneToken = `0x${(10n ** 18n).toString(16).padStart(64, "0")}`
+		const w = mountCard({
+			hash: "0xmint1",
+			status: TxStatus.Proposed,
+			calls: [{ contract: "0xtoken", method: "mint_to_public", args: [`0x${"ab".repeat(32)}`, oneToken] }],
+			origin: { type: OriginType.DAPP, name: "example.dapp.io" },
+		})
+		expect(w.find(".amount").text()).not.toBe("")
+		expect(w.text()).not.toContain(">999T")
+	})
+
 	test("`to` reaches the layout, and the explorer link is a named action opening a new tab", () => {
 		const w = mountCard(dappTransferTx, { to: "/popup/tx/0xabcd1234abcd1234" })
 		expect(w.findComponent(STUBS.TransactionCardLayout).props("to")).toBe("/popup/tx/0xabcd1234abcd1234")

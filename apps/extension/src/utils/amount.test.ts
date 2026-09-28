@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import {
 	balanceFormatted,
 	clampDecimals,
@@ -388,5 +388,89 @@ describe("amount/balanceFormatted", () => {
 
 	test("accepts string inputs", () => {
 		expect(balanceFormatted("1500000", 6).value).toMatch(/^1[.,]5$/)
+	})
+})
+
+describe("amount/balanceFormatted — compact", () => {
+	const SEPARATORS = { "en-US": [".", ","], "de-DE": [",", "."], "fr-FR": [",", "\u202f"] } as const
+	type Locale = keyof typeof SEPARATORS
+
+	/** The formatter reads the separators off `(1.1)` and `(1111)`; every other number formats as usual. */
+	const useSeparators = (locale: Locale) => {
+		const [decimal, thousands] = SEPARATORS[locale]
+		const original = Number.prototype.toLocaleString
+		vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number, ...args: []) {
+			const n = Number(this)
+			if (n === 1.1) return `1${decimal}1`
+			if (n === 1111) return `1${thousands}111`
+			return original.apply(this, args)
+		})
+	}
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	const E18 = 10n ** 18n
+	const U128_MAX = 2n ** 128n - 1n
+	const NNBSP = "\u202f"
+
+	type Row = { name: string; locale?: Locale; units: bigint; decimals: number; compact: string; today: string }
+
+	/** `today` is the plain cut every caller without the option keeps. */
+	const AT_8: Row[] = [
+		{
+			name: "whole part fits, cut on the separator",
+			units: 9_999_999n * 10n ** 17n,
+			decimals: 18,
+			compact: "999,999",
+			today: "999,999.",
+		},
+		{ name: "whole part fits exactly", units: 999_995n * E18, decimals: 18, compact: "999,995", today: "999,995" },
+		{ name: "first M", units: 1_000_000n * E18, decimals: 18, compact: "1M", today: "1,000,00" },
+		{ name: "M with a fraction", units: 1_234_567n * E18, decimals: 18, compact: "1.23M", today: "1,234,56" },
+		{ name: "the brief's amount, truncated", units: 123_456_789n * E18, decimals: 18, compact: "123.45M", today: "123,456," },
+		{ name: "at the M/B boundary, never rounded up", units: 999_995_000n * E18, decimals: 18, compact: "999.99M", today: "999,995," },
+		{ name: "top of M", units: 99_999_999_999n * 10n ** 16n, decimals: 18, compact: "999.99M", today: "999,999," },
+		{ name: "first B, decimals 0", units: 10n ** 9n, decimals: 0, compact: "1B", today: "1,000,00" },
+		{ name: "top of T", units: 10n ** 15n - 1n, decimals: 0, compact: "999.99T", today: "999,999," },
+		{ name: "past T", units: 10n ** 15n, decimals: 0, compact: ">999T", today: "1,000,00" },
+		{ name: "u128 maximum, decimals 0", units: U128_MAX, decimals: 0, compact: ">999T", today: "340,282," },
+		{ name: "u128 maximum, decimals 18", units: U128_MAX, decimals: 18, compact: ">999T", today: "340,282," },
+		{ name: "zero", units: 0n, decimals: 18, compact: "0", today: "0" },
+		{ name: "one base unit, the hint wins", units: 1n, decimals: 18, compact: "<0.000001", today: "<0.000001" },
+		{ name: "one base unit, decimals 0", units: 1n, decimals: 0, compact: "1", today: "1" },
+		{
+			name: "comma decimal, dot grouping",
+			locale: "de-DE",
+			units: 123_456_789n * E18,
+			decimals: 18,
+			compact: "123,45M",
+			today: "123.456.",
+		},
+		{
+			name: "comma decimal, narrow-space grouping",
+			locale: "fr-FR",
+			units: 123_456_789n * E18,
+			decimals: 18,
+			compact: "123,45M",
+			today: `123${NNBSP}456${NNBSP}`,
+		},
+		{
+			name: "narrow-space grouping, whole part fits",
+			locale: "fr-FR",
+			units: 9_999_999n * 10n ** 17n,
+			decimals: 18,
+			compact: `999${NNBSP}999`,
+			today: `999${NNBSP}999,`,
+		},
+	]
+
+	test.each(AT_8)("length 8, $name: $compact", ({ locale = "en-US", units, decimals, compact, today }) => {
+		useSeparators(locale)
+		const out = balanceFormatted(units, decimals, 8, { compact: true })
+		expect(out.value).toBe(compact)
+		expect(out.slashed).toBe(out.value !== balanceFormatted(units, decimals).value)
+		expect(balanceFormatted(units, decimals, 8).value).toBe(today)
 	})
 })

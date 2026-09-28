@@ -666,7 +666,7 @@ Each phase ends with its validation gate; its log is `lessons/phase-N.md`, print
 `LESSONS_FILE=implementations-plan/ux-owner-picks/lessons/phase-N.md`. The first commit adds
 `implementations-plan/ux-owner-picks/` and one line in `implementations-plan/index.md`.
 
-### P1 · Compact amounts (D1)
+### P1 · Compact amounts (D1) ✓
 
 1. Failing first, `amount.test.ts`, a `test.each` boundary table for `balanceFormatted(u, d, 8,
    { compact: true })`, en-US unless noted (the locale cases stub `Number.prototype.toLocaleString`
