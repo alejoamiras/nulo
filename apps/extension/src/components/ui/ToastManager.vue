@@ -7,14 +7,15 @@ import { ToastManagerBase } from "@nulo/design"
 import { SNACK_GAP, useSnackInset } from "@/composables/snackInset"
 
 const NAV_HEIGHT = 64
-// The dApp windows centre the 360px column in a wider window; these two fill theirs.
+// The dApp windows centre the 360px column in a wider window; these two, and a route that fills
+// its window, span the window instead.
 const FULL_WIDTH_WINDOWS = new Set(["windows-json", "windows-logger"])
 
 const route = useRoute()
 const bottomInset = useSnackInset(() => (route.meta.showBottomNav ? NAV_HEIGHT + SNACK_GAP : SNACK_GAP))
 const inColumn = computed(() => {
 	const name = typeof route.name === "string" ? route.name : ""
-	return name.startsWith("windows-") && !FULL_WIDTH_WINDOWS.has(name)
+	return name.startsWith("windows-") && !FULL_WIDTH_WINDOWS.has(name) && !route.meta.fillsWindow
 })
 </script>
 

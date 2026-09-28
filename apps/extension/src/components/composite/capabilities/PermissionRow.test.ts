@@ -57,10 +57,32 @@ describe("composite/capabilities/PermissionRow", () => {
 		expect(w.text()).toContain("Any contract")
 	})
 
+	test("a badge sits on the title line beside the title, only when given", () => {
+		expect(mountRow().find('[data-testid="cap-rerequested-badge"]').exists()).toBe(false)
+		const w = mountRow({ badge: "previously denied" })
+		const badge = w.find('[data-testid="cap-rerequested-badge"]')
+		expect(badge.text()).toBe("previously denied")
+		expect(badge.classes()).toContain(STYLE.badge)
+		expect(badge.element.parentElement?.className).toBe(STYLE.title_line)
+		expect(badge.element.parentElement?.textContent).toBe(`${AUTH.title}previously denied`)
+	})
+
+	test("the title can carry a testid", () => {
+		const w = mountRow({ titleTestid: "cap-unrecognized-badge" })
+		expect(w.find('[data-testid="cap-unrecognized-badge"]').text()).toBe(AUTH.title)
+	})
+
 	test("a flagged row carries the flagged class that turns its icon orange", () => {
 		const w = mountRow({ flagged: true })
 		expect(w.classes()).toContain(STYLE.flagged)
 		expect(mountRow().classes()).not.toContain(STYLE.flagged)
+	})
+
+	test("a granted row carries the granted class that turns its title secondary", () => {
+		const w = mountRow({ granted: true })
+		expect(w.classes()).toContain(STYLE.granted)
+		expect(w.find(`.${STYLE.title}`).text()).toBe(AUTH.title)
+		expect(mountRow().classes()).not.toContain(STYLE.granted)
 	})
 
 	test("without a switch name there is no switch and no Tab stop", () => {

@@ -14,6 +14,7 @@ arc_branches:
 design: implementations-plan/ux-feedback/design/spec.md (item 6, item 9's two permission-window terms, the tooltip map's Alias row, undrawn states U1–U7 and U10)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 parity_5a: https://claude.ai/artifact/6NjcZ54XTdEYtUgzGzQhxC
+parity_5b: https://claude.ai/artifact/WBSu4JhW9ztuiMMczM8N3f
 ---
 
 # Batch 5 · Permissions
@@ -130,16 +131,22 @@ Read 2026-09-24 from the artifact's `picks` store: no pick had been made for U1 
 - Each is built as drawn. What no drawing defines stays **sign-off pending** (§ Delivery).
 - U10 has no picker: it is "Unchanged".
 - A later pick that differs from a drawing replaces the matching step before that step starts.
+- **The stack's sign-off page, 2026-09-28** (§ P11): the window-width call answered "Only the
+  permission window at 400px", and every state this plan built as recommended signed off, with
+  one change: the window's three groups run in reverse.
 
 ## UI impact
+
+Every **sign-off pending** below was settled on 2026-09-28 (§ P11): signed off as built, with one
+change, the order of the permission window's three groups.
 
 | # | Surface | Before → after | Shot | Sign-off |
 |---|---|---|---|---|
 | 1 | Permission window, arc 5a (interim) | Every card has a tick, with a rider card "Act on your behalf" (`capability-meta.ts:41-47`) → today's window and cards, with a tick only on the authorizations, address-book, private-events and unknown cards. The authorizations card and the two data cards take their titles and lines from the U4 row list. Other cards have no tick and are granted as requested. Full list in A-1 | none (interim) | Ask A-1, signed off 2026-09-25 (§ Round-5 picks) |
-| 2 | Permission window, first connect (S1) | "is requesting permissions on X", "New permissions requested" cards, "Approve" → "wants to connect on X" and four groups: "Account to share", "Without asking, it can", "If you allow, it can", "Always asks you first". Then "Details · N contracts" (the table) and footer "Reject" / "Connect" | `06-window-S1`, `06-auth-row-B` | i6 "6 => B, Off = ask, unknown Off. That's freaking awesome." (owner) |
+| 2 | Permission window, first connect (S1) | "is requesting permissions on X", "New permissions requested" cards, "Approve" → "wants to connect on X" and four groups: "Account to share", "Always asks you first", "If you allow, it can", "Without asking, it can" (the owner's order of 2026-09-28; the drawings reverse the last three). Then "Details · N contracts" (the table) and footer "Reject" / "Connect" | `06-window-S1`, `06-auth-row-B` | i6 "6 => B, Off = ask, unknown Off. That's freaking awesome." (owner); the order, 2026-09-28 (§ P11) |
 | 3 | Permission window, nothing recognized (S2) | → the S1 layout, plus the note "Nulo doesn't recognize any of its contracts." above Details (`gen_i6.py:226`) | `06-window-S2` | i6 (owner) |
 | 4 | Permission window, broad request (S3) | → flagged rows and the "Any contract" chip on the simulation row. The authorizations row is flagged (orange icon, no chip), Off, with "You confirm each authorization first. Off because it listed any contract." (`gen_i6r4.py:88-94`). "Every transaction, on any contract". "Details · any contract" | `06-window-S3`, `06-off-means-ask` | i6 (owner). S3's round-3 authorizations row is rebuilt with B per the spec (§ Item 6, "S2 and S3 predate round 4") |
-| 5 | Permission window, asking for more (U1) | "New permissions requested" / "Already granted" → the new rows only, a folded "Already allowed · N" row, "wants more permissions on X", button "Allow" (`gen_r5.py:100-127`) | `06-more-U1` | round 5 U1A as drawn, signed off 2026-09-25 (§ Round-5 picks) |
+| 5 | Permission window, asking for more (U1) | "New permissions requested" / "Already granted" → the new rows only, a folded "Already allowed · N" row (its groups in row 2's order), "wants more permissions on X", button "Allow" (`gen_r5.py:100-127`) | `06-more-U1` | round 5 U1A as drawn, signed off 2026-09-25 (§ Round-5 picks) |
 | 6 | Several accounts (U2) | "Add/Select accounts to share" → "Accounts to share" with a count. The first "Without asking" row reads "See the addresses of the accounts you share" (`gen_r5.py:130-138`) | `06-accounts-U2` | round 5 U2, signed off 2026-09-25 (§ Round-5 picks); the label when the app already holds accounts ("Add accounts to share" today) is Ask A-31, signed off with it |
 | 7 | Network banners (U3) | the description's "Approve as is" → "Connect as is". The button "Switch wallet to X" and the rest are unchanged, in today's place (`gen_r5.py:141-150`) | `06-banners-U3` | round 5 U3, signed off 2026-09-25 (§ Round-5 picks) |
 | 8 | Private events, contract classes (U4) | one "data" card → an address-book row and a private-events row, each with its own switch. Contract classes → "Look up contract code on X" in "Without asking". The three "any contract" rows the list marks carry the "Any contract" chip (`gen_r5.py:158,160,166`). Full row list at `gen_r5.py:154-170` | `06-rows-U4`, `06-row-list-U4` | round 5 U4, signed off 2026-09-25 (§ Round-5 picks); the two new rows' flag state is Ask A-29; a data row left Off keeps what the app already held for it, Ask A-30; a re-request after a declined widening, Ask A-32; the three signed off with it |
@@ -176,7 +183,9 @@ Visible consequences of technical choices (stated in the PR body, program § Ope
   row's switch says (A-30's table);
 - after a declined widening, a request the held grant already covers opens no window and is
   answered from the held grant; today it reopens the window for the declined type (Ask A-32).
-  Contract classes keep today's behaviour, since their coverage checks only the type.
+  Contract classes keep today's behaviour, since their coverage checks only the type;
+- a `contracts` permission with neither `canRegister` nor `canGetMetadata` grants nothing, so it
+  is answered as asked with no window, and a request made only of such permissions opens none.
 
 ### UI asks for the owner (built as recommended, signed off 2026-09-25)
 
@@ -588,6 +597,16 @@ as annotated options.
   differing entry, so what the window shows and what is granted could differ. The playground
   sends one entry per type (`bundles.ts:49-123`); the tools app, which did too, has left this
   repo (#691).
+- **A `contracts` permission that grants nothing** (arc 5b; decided by codex high, session
+  `01a0d965-2e77-7b52-8c4b-9d23b3e094de`, 2026-09-25, confidence moderate). After validation, a
+  `contracts` capability with neither `canRegister` nor `canGetMetadata` true (omitted or `false`)
+  is left out of negotiation: it joins no delta, draws no row (`contractsRow` has none for it),
+  is never stored, and `enrichGrantedCapabilities` returns its projection in the answer as asked.
+  A request made only of such permissions opens no window and writes nothing; a mixed request
+  negotiates the rest, and held grants and rejections stay as they are. wallet-sdk requires
+  neither flag (`ContractsCapabilitySchema`), so refusing it would break a valid request. Unknown
+  types are not treated this way. Malformed and duplicate `contracts` entries are still refused
+  first, with the fixed text.
 - **The data split's coverage.** `dataRequestCovered` (`dispatcher.ts:252-261`) returns true for
   any existing data grant when the request lists no private-event contracts, so after "private
   events on, address book off" an address-book re-request never opens the window. It checks
@@ -1623,7 +1642,7 @@ the Firefox canary row recorded as open in `lessons/phase-5.md`.
 
 ### Arc 5b · `feat/ux-5b-permission-window`
 
-#### P6 · Groups, flags, known contracts ☐
+#### P6 · Groups, flags, known contracts ✓
 
 Re-read the `picks` store for `i6e`–`i6i` first.
 
@@ -1640,7 +1659,7 @@ Re-read the `picks` store for `i6e`–`i6i` first.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-#### P7 · Details table and the U1 fold ☐
+#### P7 · Details table and the U1 fold ✓
 
 1. `details-table.ts` + table tests: column membership per A-9 over
    `effectiveGrants(params.heldGrants, delta)`; one entry per contract; known first; "Any
@@ -1665,7 +1684,7 @@ Gate: lint, `typecheck:all`, `test:all` exit 0.
 
 Gate: lint, `typecheck:all`, `test:all`, Storybook build exit 0.
 
-#### P8 · Accounts, rename, the Alias ⓘ ☐
+#### P8 · Accounts, rename, the Alias ⓘ ✓
 
 1. `DottedTerm.vue`: the `action` variant. `DottedTerm.test.ts` cases: renders a `button`; emits
    `click`; keeps `aria-describedby`; a hit area of at least 24px (class assertion; the size is a
@@ -1688,7 +1707,7 @@ Gate: lint, `typecheck:all`, `test:all`, Storybook build exit 0.
 
 Gate: lint, `typecheck:all`, `test:all` exit 0.
 
-#### P9 · e2e for the window ☐
+#### P9 · e2e for the window ✓
 
 1. Fixtures: `approveCapabilities({ aliases })` presses `cap-account-rename-btn` before typing.
    `getCapItems` reads `data-cap-row`, and still reads `cap-rerequested-badge`.
@@ -1736,7 +1755,7 @@ Gate: lint, and the changed and new files on Chrome (prover on) and on Firefox (
 retry-0, exit 0; on Firefox the reduced-motion case reports skipped by its name, and nothing
 else skips.
 
-#### P10 · Parity and arc 5b gate ☐
+#### P10 · Parity and arc 5b gate ✓
 
 1. Parity: rebuild the mocks. Capture at 400×800, the viewport set explicitly, from the real
    window over the playground:
@@ -1756,7 +1775,8 @@ else skips.
      sample.
 2. Every Local gates row, as in P5.
 3. The whole network suite, retry-0, in each browser's gate mode as in P5, including
-   `authwit-variants`.
+   `authwit-variants` and, on both browsers, `window-placement` (batch 4 puts `v-snack-footer`
+   on `DappApprovalFooter`, which this arc keeps as it is).
 4. The execution canaries prover on, on Chrome locally; Firefox's row stays open for CI's
    canary job on the stack top's exact head, as in P5.
 5. Flake bar: `cap-window` and every e2e file changed in P9, three consecutive retry-0 runs each,
@@ -1765,6 +1785,41 @@ else skips.
 
 Gate: items 1–3, 5 and 6 and Chrome's canaries exit 0, the parity Artifact URL printed, and
 the Firefox canary row recorded as open in `lessons/phase-10.md`.
+
+#### P11 · The owner's stack sign-off ✓
+
+The owner, 2026-09-28, on the stack's sign-off page
+(<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store):
+
+> dApp window width: Only the permission window at 400px
+
+and in the note on "Everything else", the page's list of every state arcs 5a and 5b built as
+recommended:
+
+> "I think on the authorization's / permissions: Maybe I'd like first to read that the wallet
+> will always ask for my permission to submit transactions, then what it can do if I allow it,
+> and then the permissions. So inverting the current order (on a new permission pop-up). […]
+> Everytihng else looks good."
+
+So the permission window keeps its 400px and the other dApp windows their 360px column, and
+every sign-off pending in this plan is signed off, with one change: `GROUP_ORDER`
+(`permission-rows.ts`) runs "Always asks you first", "If you allow, it can", "Without asking, it
+can", below "Account to share", which stays first. The "Already allowed" fold reads the same
+list, so its groups take the same order. Settings → Connected apps keeps its layout, since the
+note names the pop-up. The spec's S1 list carries the order (`design/spec.md`, § Item 6).
+
+1. `GROUP_ORDER` reversed. The component test's group and row lists, `cap-window`'s S2 rows and
+   `cap-request-rerequest`'s rows follow it. The Tab order follows the new visual order; on
+   `transaction-listed` it is unchanged, since only the authorizations row holds stops there.
+2. Screenshots of the reordered window, first connect and asking for more, on the sign-off page.
+
+Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers, the
+network list keeping `cap-window` and `cap-request-rerequest`.
+
+Passed on the stack top ([lessons](lessons/phase-11.md)). On `df1849a2`, every Local gates row
+exited 0 but Firefox's network suite, where `send-picker` failed. The whole Firefox network
+suite then exited 0 on `9900de28`, in three shards covering its 102 files once each, and
+`9900de28`'s code outside `implementations-plan/` is `df1849a2`'s.
 
 ### Arc boundary 5b (stack top)
 
@@ -1811,14 +1866,15 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
   merge: `gh pr merge` and `gh stack merge` are always the owner's call.
 - PR bodies (at submit): summary, the UI impact table, the visible consequences of technical
   choices, the owner's quotes (i6 both rounds, i9c, tips, and round 5's "Regarding 6:
-  Recommended." of 2026-09-25, which signs off A-1 to A-32 and U1–U7 as drawn), the
-  **sign-off pending** list below, the owner's D-2 answer quoted (§ Approval; there is no
+  Recommended." of 2026-09-25, which signs off A-1 to A-32 and U1–U7 as drawn), the list below
+  and its 2026-09-28 sign-off (§ P11), the owner's D-2 answer quoted (§ Approval; there is no
   "open" status to report), the parity Artifact link, screenshots of every changed popup
   surface, test evidence.
   - **Signed off after the plan:** two or more unknown types in one request share one "Unknown
     permission" card with one switch, in the singular words of `06-interim-unknown-A1` (codex
     round 1, finding 5). Owner, 2026-09-25: "for branch 5a: (a)".
-  - **Sign-off pending**, as no drawing defines it (each built as the plan recommends):
+  - **Sign-off pending**, as no drawing defines it (each built as the plan recommends). Settled
+    on 2026-09-28 (§ P11): each is signed off as built.
     - A-2 in 5a: the authorizations card among the new cards, with no switch and the line "You
       confirm each authorization first." A-2 draws only 5b's row;
     - A-5 in 5a: on a widening to any contract, the authorizations card first among the new
@@ -1836,6 +1892,40 @@ or this scope. A UI finding goes to the owner as an ask, never decided by codex.
       lines", "Private messages its contracts sent to your accounts, like a transfer you
       received.", kept. The page asks the owner to sign the four undrawn states above off
       together.
+    - a held account the wallet no longer names: U2's sentence (codex high on the held accounts,
+      lessons/phase-6.md). One member with no wallet name, or two members of which the wallet
+      names one, read "See the addresses of the accounts you share";
+    - the address-book and unknown rows' flag (A-6) is read over the grants the app would hold
+      after Allow, so an app that already holds an any-contract scope has its later address-book
+      or unknown request flagged, although that request lists no contract;
+    - the S2 note beside an "Any contract" row: the note shows whenever Nulo knows none of the
+      listed contracts and at least one is listed, so a request with one unknown listed contract
+      and a scope on any contract shows it. No drawing has the note and the any-contract row
+      together;
+    - the 5b switches stay operable while the footer shows an error or a submit runs. 5a disabled
+      its ticks then; a disabled `Toggle` draws a lock no drawing has (A-12), and the footer's
+      button already holds the decision.
+    - Details with no contract: no fold. The window shows no 'Details' when the grants it would
+      hold reach no contract (an accounts-only connect, U4's data plus contractClasses, data
+      alone). A-10's count rule defines the words, not a zero row.
+    - an app whose session holds no row reads as a first connect: "wants to connect on X",
+      "Connect", and no "Already allowed" fold. U1 draws an app that holds five;
+    - the S2 note on a re-request sits after the "Already allowed" fold, before Details. No
+      drawing has the note and the fold together;
+    - the keyboard focus of the Details and "Already allowed" buttons: batch 4's row ring, 2px
+      `--nulo-accent` inside the edge, with the hover's colours. The drawings give them none;
+    - a row whose rename was pressed keeps its field open when it is deselected and selected
+      again, and the field still shows the name typed there. A-20 keeps the field open once
+      pressed; no drawing deselects the row after that.
+    - the permission window fills its 400px window, as drawn, while the other dApp windows keep
+      the 360px column (lessons/phase-9.md, with the owner question it leaves). The owner,
+      2026-09-28: "Only the permission window at 400px";
+    - its snack follows the popup's rule, 368px, where 11a's 328px was set for the 360px column.
+      This lands at the restack onto arc 4's snack change (lessons/phase-9.md).
+- The tooltip count (P8.3): the spec's map lists 36; U7A's signed-off Settings term makes 37
+  (lessons/phase-8.md).
+- Visible consequence (P9): Firefox: every dApp window's identity strip that shows its network
+  is 1px shorter, now the drawings' height; one without a network was already 35px.
 - The Firefox canary evidence (P5, P10) is read from CI's `Firefox / Run / canary /
   real-proving` job on each PR's exact head after the PRs open, and repeated on the stack top;
   the row stays open until it exists, and CI success is never reported as a local pass.

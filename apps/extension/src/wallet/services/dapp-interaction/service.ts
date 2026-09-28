@@ -6,6 +6,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
+import { FpcService } from "@/wallet/services/fpc/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
 import {
 	ExecutionService,
@@ -25,6 +26,7 @@ import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wal
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
+import { knownContracts } from "./known-contracts"
 import { applyFeeSelection, type OperationApprovalDelta } from "./approval-delta"
 import {
 	DAPP_INTERACTION_SERVICE_NAME,
@@ -110,6 +112,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private dappSessionService: DappSessionService = null!
 	private executionService: ExecutionService = null!
 	private operationJournal: OperationJournalService = null!
+	private fpcService: FpcService = null!
 
 	public constructor(
 		logger: ILogger,
@@ -125,6 +128,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		this.fpcService = services.get(FpcService.name)
 		// A feed cancel lands in the journal only (`cancelJob` → queued → cancelled);
 		// the open approval popup and the dApp's pending promise learn of it here.
 		this.operationJournal.onOperationUpdated.add((record) => {
@@ -385,7 +389,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
 
-		// Cancel-before-claim short-circuit (codex F2 / post-impl review):
+		// Cancel-before-claim short-circuit:
 		// If the user cancelled this sendTx while it was queued, the journal
 		// record is now at stage `cancelled`. Throw the cancelled-pipeline
 		// error directly so the popup never opens — without this, the user
@@ -411,7 +415,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	public async requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult> {
 		await this.ensureInitialized()
 		const session = await this.dappSessionService.getDappSession(params.sessionId)
-		const payload: CapabilityPayload = { params, session }
+		const chainId = Number(session.chainId)
+		const known = knownContracts(chainId, await this.fpcService.getOrComputeProtocolAddresses(chainId))
+		const payload: CapabilityPayload = { params: { ...params, knownContracts: known }, session }
 		return (await this.interaction("capabilities", payload, cancellationToken)) as CapabilityResult
 	}
 
@@ -498,9 +504,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// Silent path (self-paid sendTx, no popup): fast-forward the queued
 		// record to `pending` so the UI shows "Preparing..." immediately
 		// instead of briefly showing "Queued..." for a request that never
-		// opens a popup (opus post-impl F7).
+		// opens a popup.
 		//
-		// CRITICAL ORDERING (codex closeout F1): this fast-forward MUST stay
+		// CRITICAL ORDERING: this fast-forward MUST stay
 		// immediately before `executeOperations()`. If we hoisted it to the
 		// top of the method, a throw in `materializeRequest` /
 		// `refreshSession` / profile-check would leave the record stranded

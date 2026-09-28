@@ -114,16 +114,19 @@ and this file gets fixed.
 
 Window, top to bottom (S1):
 
+Groups 4 to 6 run in the order the owner set on 2026-09-28, the reverse of the drawings, which put
+"Without asking" first: "Maybe I'd like first to read that the wallet will always ask for my
+permission to submit transactions, then what it can do if I allow it, and then the permissions.
+So inverting the current order (on a new permission pop-up)." The "Already allowed" fold (U1)
+keeps the same order.
+
 1. Status strip as today ("Account 1 / Testnet", "NULO").
 2. Identity block: host, app name, then "wants to connect on Testnet" (was "is requesting
    permissions on …").
 3. Group "Account to share" with a count; the account row shows name, network chip, address and
    a dotted button "Rename for this app" whose tooltip is "A private name for this account
    visible only to this app." It replaces the Alias ⓘ.
-4. Group "Without asking, it can", rows with no switch:
-   - "See Account 1's address"
-   - "Run simulations and read the results", sub "Results can include your private balances."
-   - "Add contracts to your wallet"
+4. Group "Always asks you first": "Every transaction", no sub-line.
 5. Group "If you allow, it can", every switch in the window lives here and nowhere else:
    - Authorizations (icon `signature`): title "Act for you in transactions you approve"; on:
      "Nulo signs its authorizations without asking."; off: "You confirm each authorization
@@ -134,7 +137,10 @@ Window, top to bottom (S1):
    - Unknown (icon `help`, when present): "Use 1 permission Nulo doesn't recognize" (plural
      "permissions"), sub "Nulo can't tell you what it allows.", switch label "Unknown
      permission".
-6. Group "Always asks you first": "Every transaction", no sub-line.
+6. Group "Without asking, it can", rows with no switch:
+   - "See Account 1's address"
+   - "Run simulations and read the results", sub "Results can include your private balances."
+   - "Add contracts to your wallet"
 7. S2 only: note "Nulo doesn't recognize any of its contracts." (one line, not orange).
 8. "Details · 12 contracts": a table, columns "Contract", "Simulate", "Add", "Transact", check
    marks (not squares) for membership, a dash for none; sub-headers "Nulo knows" (contracts the

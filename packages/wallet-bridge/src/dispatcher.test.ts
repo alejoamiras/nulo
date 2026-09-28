@@ -25,8 +25,8 @@ import type {
 	INetworkReader,
 } from "./services-contract"
 
-/** Shared fake of the real DappSessionService.applyCapabilityDecision merge (B-14):
- *  deltas merged against the LATEST row. Returns the new row. */
+/** Shared fake of the real DappSessionService.applyCapabilityDecision merge: deltas merged
+ *  against the LATEST row. Returns the new row. */
 function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision): IDappSessionRef {
 	const held = new Set((session.capabilityGrants ?? []).map((g) => g.capability.type as string))
 	const revoked = (decision.requiresGrant ?? []).find((type) => !held.has(type))
@@ -113,11 +113,8 @@ function makeSessionWriter(initial: IDappSessionRef) {
 		},
 		applyCapabilityDecision: async (_id, decision) => {
 			session = applyDecisionTo(session, decision)
-			// Mirror the merged result onto the legacy call trackers so tests that
-			// assert the final grants/rejections keep working post-B-14. Only record a
-			// grant write when the decision actually changes grants — a pure-reject
-			// (no approvals) leaves grants untouched, matching the old flow that called
-			// setCapabilityRejections only.
+			// Mirror the merged session onto the call trackers the tests assert on. A
+			// decision that changes no grants, such as a pure reject, records no grant write.
 			if (decision.grantRecords.length > 0 || decision.replaceTypes.length > 0) {
 				calls.setGrants.push(session.capabilityGrants ?? [])
 			}
@@ -161,7 +158,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		const manifest = {
 			capabilities: [
 				{ type: "data", addressBook: true },
-				{ type: "contracts", contracts: "*" },
+				{ type: "contracts", contracts: "*", canGetMetadata: true },
 			],
 		}
 
@@ -209,7 +206,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		expect(calls.setGrants).toHaveLength(0)
 	})
 
-	test("(B-14 PIN) concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
+	test("concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
 		const { writer, calls } = makeSessionWriter(makeSession())
 		let resolveA!: () => void
 		const gateA = new Promise<void>((r) => (resolveA = r))
@@ -232,7 +229,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 			[{ capabilities: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] }],
 			ctx,
 		)
-		// A resumes and writes — under B-14 it reacquires B's committed row and merges,
+		// A resumes and writes. The merge against the latest row keeps B's committed grant,
 		// rather than clobbering it with a grant list computed from the stale snapshot.
 		resolveA()
 		await pA
@@ -241,7 +238,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		expect(finalGrants.map((g) => g.capability.type).sort()).toEqual(["data", "transaction"])
 	})
 
-	test("(B-14 PIN) approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
+	test("approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
 		// A rejection of an existing type landed concurrently (it's in the latest row).
 		const session = makeSession({
 			capabilityGrants: [
@@ -295,7 +292,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		const manifest = {
 			capabilities: [
 				{ type: "data", addressBook: true },
-				{ type: "contracts", contracts: "*" },
+				{ type: "contracts", contracts: "*", canGetMetadata: true },
 			],
 		}
 		const result = await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
@@ -488,13 +485,11 @@ function makeGetAccountsDispatcher(opts: {
 }
 
 describe("dispatcher.handleGetAccounts contract rows", () => {
-	test("no session → throws CapabilityNotGrantedError (F-006: fail-closed)", async () => {
-		// F-006: pre-fix, this returned [] from enforceCapability
-		// and the dispatcher fell through with no grants, letting network-only
-		// methods execute unchecked after the user revoked the dApp.
-		// Post-fix: enforceCapability throws CapabilityNotGrantedError when
-		// the session is missing, paired with the live-transport teardown
-		// in wallet-sdk/background.ts.
+	test("no session → throws CapabilityNotGrantedError (fail-closed)", async () => {
+		// enforceCapability throws CapabilityNotGrantedError when the session is missing,
+		// rather than returning [] and letting network-only methods run unchecked after the
+		// user revoked the dApp. The live-transport teardown in wallet-sdk/background.ts
+		// is its pair.
 		const sessionWriter: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
 			getDappSession: async () => null as unknown as IDappSessionRef,
@@ -538,9 +533,8 @@ describe("dispatcher.handleGetAccounts contract rows", () => {
 
 	test("session has 1 account + canGet=true grant → returns formatted Aliased<AztecAddress> (fast path)", async () => {
 		// CAIP account for chainId 0 on the address below.
-		// Post F-003: also requires an accounts grant with canGet=true. The
-		// legacy "accounts present without a grant" fast-path is closed; F-003's
-		// scope-enforcement now requires explicit canGet.
+		// The fast path also requires an accounts grant with canGet=true: accounts present
+		// without a grant are not returned.
 		const addr = "0x1111111111111111111111111111111111111111111111111111111111111111"
 		const caip = `aztec:0:${addr}`
 		const session = makeSession({
@@ -1448,7 +1442,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
  * it through every internal call. Pinned by counting how many times the
  * session-lookup is invoked per dispatch() call.
  */
-describe("F-006: network-only methods fail-closed on missing session", () => {
+describe("network-only methods fail-closed on missing session", () => {
 	function dispatcherNoSession(): WalletSdkDispatcher {
 		const writer: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
@@ -1491,7 +1485,7 @@ describe("F-006: network-only methods fail-closed on missing session", () => {
 		// Exempt methods don't require a session — getChainInfo is the canonical
 		// dApp probe path. The base stubExecution returns an empty object; we
 		// only assert that the throw is NOT CapabilityNotGrantedError (the
-		// fail-closed F-006 path), not that the method succeeds end-to-end.
+		// fail-closed missing-session path), not that the method succeeds end-to-end.
 		const dispatcher = dispatcherNoSession()
 		await expect(dispatcher.dispatch("getChainInfo", [], ctx)).rejects.not.toBeInstanceOf(CapabilityNotGrantedError)
 	})
@@ -2784,7 +2778,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	})
 })
 
-describe("F-08 authorization-relevant arg-shape guard", () => {
+describe("authorization-relevant arg-shape guard", () => {
 	const dispatcher = makeDispatcher(makeSessionWriter(makeSession()).writer, async () => ({}) as CapabilityResult)
 
 	test("sendTx with non-array exec.calls is rejected before authz", async () => {
@@ -2797,9 +2791,9 @@ describe("F-08 authorization-relevant arg-shape guard", () => {
 		await expect(dispatcher.dispatch("executeUtility", ["nope"], ctx)).rejects.toThrow(/Malformed executeUtility/)
 	})
 	test("createAuthWit with a missing `from` is rejected before authz", async () => {
-		// Post-merge, dev's registry `argSchema` (argsCreateAuthWit) owns this
-		// rejection and fires FIRST — so the message is the generic arg-guard one,
-		// not F-08's "Malformed". The security property (rejected pre-authz) holds.
+		// The registry's `argSchema` (argsCreateAuthWit) rejects this before the arg-shape
+		// guard runs, so the message is the generic one, not the guard's "Malformed". Either
+		// way the call is refused before authorization.
 		await expect(dispatcher.dispatch("createAuthWit", [], ctx)).rejects.toThrow(/Invalid arguments for wallet method: createAuthWit/)
 	})
 	test("registerToken with a null positional arg is rejected", async () => {
@@ -3231,5 +3225,214 @@ describe("dispatcher.requestCapabilities — accounts widening", () => {
 
 	test("ungrantedAccounts is chain-blind on case and ignores held addresses", () => {
 		expect(ungrantedAccounts([A.toUpperCase(), B], new Set([A]))).toEqual([B])
+	})
+})
+
+describe("dispatcher.requestCapabilities — the held accounts the window names", () => {
+	const A = `0x${"aa".repeat(32)}`
+	const B = `0x${"bb".repeat(32)}`
+	const C = `0x${"cc".repeat(32)}`
+	const caip = (address: string, chainId = 0) => `aztec:${chainId}:${address}`
+	const accountsGrant: Capability = { type: "accounts", canGet: true, canCreateAuthWit: true, accounts: [] }
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+	const addressBook = { capabilities: [{ type: "data", addressBook: true }] }
+	const named = (address: string, name: string, chainId = 0): IAccountRef => ({ address, name, chainId })
+
+	function harness(opts: { session: Partial<IDappSessionRef>; wallet: IAccountRef[]; onRead?: () => Promise<void> }) {
+		const reads: Array<[string, number]> = []
+		const logged: string[] = []
+		let provisions = 0
+		const account: AccountFake = {
+			getAccounts: async (profileId, chainId) => {
+				reads.push([profileId, chainId])
+				await opts.onRead?.()
+				return opts.wallet.filter((acc) => acc.chainId === chainId)
+			},
+			provisionDefaultAccount: async () => {
+				provisions++
+			},
+		}
+		const logger: ILogger = { log: (_scope, _level, ...data) => logged.push(JSON.stringify(data)) }
+		const { writer } = makeSessionWriter(
+			makeSession({ capabilityGrants: [{ capability: accountsGrant, grantedAt: 1 }], ...opts.session }),
+		)
+		const seen: { params?: CapabilityParams } = {}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async (params) => {
+				seen.params = params
+				return { granted: [] }
+			},
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, writer, logger)
+		return { dispatcher, writer, seen, reads, logged, provisions: () => provisions }
+	}
+
+	test("each member is named by the wallet, in the wallet's order, matched case-blind", async () => {
+		const wallet = [named(B, "Savings"), named(C, "Account 3"), named(A, "Account 1")]
+		const h = harness({ session: { accounts: [caip(A.toUpperCase()), caip(B)] }, wallet })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([
+			{ address: B, name: "Savings" },
+			{ address: A, name: "Account 1" },
+		])
+		expect(h.reads).toEqual([["test-profile", 0]])
+	})
+
+	test("one named member, for U1A's single account", async () => {
+		const h = harness({ session: { accounts: [caip(A)] }, wallet: [named(A, "Account 1")] })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+	})
+
+	test("a member the wallet no longer lists stays, unnamed, so two members never read as one", async () => {
+		const h = harness({ session: { accounts: [caip(A), caip(B)] }, wallet: [named(A, "Account 1")] })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }, { address: B }])
+
+		const none = harness({ session: { accounts: [caip(A)] }, wallet: [] })
+		await none.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(none.seen.params?.heldAccounts).toEqual([{ address: A }])
+	})
+
+	test("only the session's chain counts, and names come from the stamped profile's accounts", async () => {
+		const wallet = [named(A, "Account 1"), named(B, "Same address, chain 0"), named(C, "Chain 7", 7)]
+		const h = harness({ session: { accounts: [caip(A), caip(B, 7), caip(C, 7)] }, wallet })
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+		expect(h.reads).toEqual([["test-profile", 0]])
+	})
+
+	test("a per-app alias and the request's own account names never name a member", async () => {
+		const hostile = {
+			capabilities: [
+				{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts: [{ alias: "Treasury", item: A }] },
+				{ type: "data", addressBook: true },
+			],
+		}
+		const h = harness({
+			session: { accounts: [caip(A)], accountAliases: { [caip(A)]: "Renamed for this app" } } as Partial<IDappSessionRef>,
+			wallet: [named(A, "Account 1")],
+		})
+		await h.dispatcher.dispatch("requestCapabilities", [hostile], ctx)
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+	})
+
+	test("read from the dispatch snapshot: later membership and name changes reach neither the params nor the log", async () => {
+		const wallet = [named(A, "Account 1"), named(B, "Account 2")]
+		let writer: IDappSessionWriter | undefined
+		const h = harness({
+			session: { accounts: [caip(A)] },
+			wallet,
+			onRead: async () => {
+				await writer?.applyCapabilityDecision("test-session-id", {
+					addAccounts: [caip(B)],
+					aliasPatch: {},
+					grantRecords: [],
+					replaceTypes: [],
+					approvedTypes: [],
+					rejectedTypes: [],
+				})
+			},
+		})
+		writer = h.writer
+		await h.dispatcher.dispatch("requestCapabilities", [addressBook], ctx)
+		wallet[0] = named(A, "Renamed later")
+		expect(h.seen.params?.heldAccounts).toEqual([{ address: A, name: "Account 1" }])
+		expect((await h.writer.getDappSession("test-session-id")).accounts).toEqual([caip(A), caip(B)])
+		expect(h.provisions()).toBe(0)
+		expect(h.logged.filter((line) => line.includes("Account 1") || line.toLowerCase().includes(A.slice(2, 12)))).toEqual([])
+	})
+})
+
+describe("dispatcher.requestCapabilities — a contracts permission that grants nothing", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+	const listedTx = { type: "transaction", scope: [{ contract: A, function: "transfer" }] }
+	const heldContracts: Capability = { type: "contracts", contracts: [A], canRegister: true }
+
+	function harness(session: IDappSessionRef, answer: (params: CapabilityParams) => CapabilityResult = () => ({ granted: [] })) {
+		const { writer, calls } = makeSessionWriter(session)
+		const popups: CapabilityParams[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async (params) => {
+				popups.push(params)
+				return answer(params)
+			},
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, writer, noopLogger)
+		const request = async (capabilities: unknown[]) =>
+			(await dispatcher.dispatch("requestCapabilities", [{ version: "1.0", capabilities }], ctx)) as { granted: unknown[] }
+		return { dispatcher, writer, calls, popups, request }
+	}
+
+	test.each([
+		["omitted flags", { type: "contracts", contracts: [A] }],
+		["both false", { type: "contracts", contracts: "*", canRegister: false, canGetMetadata: false }],
+		["one omitted, one false", { type: "contracts", contracts: [A], canGetMetadata: false }],
+	])("%s: answered as asked, with no window and no write", async (_shape, cap) => {
+		const h = harness(makeSession())
+		const answer = await h.request([cap])
+		expect(answer.granted).toEqual([cap])
+		const { WalletCapabilitiesSchema } = await import("@aztec/aztec.js/wallet")
+		expect(WalletCapabilitiesSchema.safeParse(answer).success).toBe(true)
+		expect(h.popups).toEqual([])
+		expect(h.calls).toEqual({ setRejections: [], setGrants: [] })
+	})
+
+	test("beside a meaningful permission: only that one is negotiated and stored, the answer keeps both", async () => {
+		const noop = { type: "contracts", contracts: [A] }
+		const h = harness(makeSession(), (params) => ({ granted: params.delta }))
+		const answer = await h.request([noop, listedTx])
+		expect(h.popups.map((p) => p.delta)).toEqual([[listedTx]])
+		expect((h.popups[0].manifest as { capabilities: unknown[] }).capabilities).toEqual([listedTx])
+		expect(answer.granted).toEqual([noop, listedTx])
+		expect((await h.writer.getDappSession("test-session-id")).capabilityGrants?.map((g) => g.capability)).toEqual([listedTx])
+	})
+
+	test("a held contracts grant and a stored rejection survive it, alone and beside another approval", async () => {
+		const session = makeSession({
+			capabilityGrants: [{ capability: heldContracts, grantedAt: 1 }],
+			capabilityRejections: [{ capabilityType: "contracts", rejectedAt: 1 }],
+		})
+		const h = harness(session, (params) => ({ granted: params.delta }))
+		const noop = { type: "contracts", contracts: "*" }
+		expect((await h.request([noop])).granted).toEqual([noop])
+		await h.request([noop, listedTx])
+		const row = await h.writer.getDappSession("test-session-id")
+		expect(row.capabilityGrants?.map((g) => g.capability)).toEqual([heldContracts, listedTx])
+		expect(row.capabilityRejections?.map((r) => r.capabilityType)).toEqual(["contracts"])
+	})
+
+	test("neither registering nor reading metadata becomes authorized", async () => {
+		const h = harness(makeSession())
+		await h.request([{ type: "contracts", contracts: "*" }])
+		await expect(h.dispatcher.dispatch("getContractMetadata", [A], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		await expect(h.dispatcher.dispatch("registerContract", [{ address: { toString: () => A } }], ctx)).rejects.toBeInstanceOf(
+			CapabilityNotGrantedError,
+		)
+	})
+
+	test("a true flag still opens the window", async () => {
+		const h = harness(makeSession())
+		const metadata = { type: "contracts", contracts: [A], canGetMetadata: true }
+		await h.request([metadata])
+		expect(h.popups.map((p) => p.delta)).toEqual([[metadata]])
+	})
+
+	test("a malformed flag and a duplicate are refused before negotiation, with the fixed text", async () => {
+		const h = harness(makeSession())
+		await expect(h.request([{ type: "contracts", contracts: [A], canRegister: "no" }])).rejects.toThrow(
+			"Malformed contracts capability",
+		)
+		await expect(
+			h.request([
+				{ type: "contracts", contracts: [A] },
+				{ type: "contracts", contracts: "*" },
+			]),
+		).rejects.toThrow("Duplicate contracts capability")
+		expect(h.popups).toEqual([])
+		expect(h.calls).toEqual({ setRejections: [], setGrants: [] })
 	})
 })

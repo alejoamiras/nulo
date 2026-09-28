@@ -59,7 +59,7 @@ option stay out.
 | ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ✓ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | [b3-tooltips-glossary](b3-tooltips-glossary/plan.md) |
 | ✓ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | [b4-snackbar-rows-arrivals](b4-snackbar-rows-arrivals/plan.md) |
-| ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
+| ✓ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | [b5-permissions](b5-permissions/plan.md) |
 
 A row gets ✓ only when its plan has every phase ✓, its arc loop converged, and its parity
 evidence is published (below). Order is the stack order: batch 1 changes the first-run flow that
@@ -310,7 +310,25 @@ in user-visible text this program adds; the empty-value glyph "—" stays where 
 After batch 5's arc loops converge: a fresh codex session over the net diff from `origin/dev` to
 the stack top, asking for seams between batches, duplication across them, and drift from the
 spec, with the rules below; loop until clean. Then every row of [Local gates](#local-gates) on
-the stack top, smoke and network on both browsers, the full network suite (no file filter).
+the stack top, smoke and network on both browsers, the full network suite (no file filter: every
+file, in one run or in shards that cover it once each).
+
+**Record** ([lessons/final-pass.md](lessons/final-pass.md)). Round 1 raised two minors: the
+comment fix landed on arc 5a, and the account row's ring went to the owner. The stack then moved
+onto `origin/dev` at `b15f5218`. Round 2: "no new material findings", "VERDICT: approve —
+confidence: high". Round 3, on arc 5b's fold fix `d893ae95`: "no new material findings",
+"VERDICT: approve — confidence: high". At `d893ae95`, every Local gates row exited 0,
+with smoke and the full network suite on both browsers; the Firefox canaries wait for CI on the
+stack top's head. After the owner's sign-off (2026-09-28), a codex session read its three
+changes and arc 4's pin in four rounds, the last "No material findings or further nits. The
+previous coverage gap is closed." At `df1849a2`, the six local checks and both browsers'
+suites exited 0 except Firefox's network suite, where `send-picker` failed (Follow-ups). The whole
+Firefox network suite then exited 0 on `9900de28`, in three shards covering its 102 files
+once each, and `9900de28`'s code outside `implementations-plan/` is `df1849a2`'s. The codex
+session's fifth round, on the records, had found them calling that gate passed before this
+rerun ("the records overstate completion of the required gate"). Its sixth: "Material findings:
+**no**." `send-picker`'s failure fits a race in the test, which now waits for the Send page's
+token (Follow-ups).
 
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
@@ -352,6 +370,14 @@ Round 5 (chat, 2026-09-25): items 3, 5, 6 and T signed off, then item 8 ("for U1
 U13: (a)"), and no em dash joining two clauses in new copy; the quotes and the mapping are in
 § The owner's answers. The older strings that do: "separate follow-up for those 45 older
 strings" (below).
+
+The stack's sign-off page (2026-09-28, <https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its
+`answers` store): the fee line when the account pays, "Fine as it is"; tooltip text, "Pass
+4.5:1"; a receipt with fiat values off, "No chip when fiat is off"; Home's received row, "Keep
+today's row"; the dApp window width, "Only the permission window at 400px". Everything else is
+signed off as built ("Everytihng else looks good."), with two changes from its note: the
+permission window's groups run in reverse, and the onboarding import opens no success snack.
+Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks and § P5, b4 § P8, b5 § P11).
 
 ## Follow-ups (not this program)
 
@@ -395,12 +421,82 @@ strings" (below).
   `apps/extension/src/wallet/services/wallet-sdk/background.ts` logs the message at Error. The
   fix is a fixed category at those sinks and a sentinel test, as batch 5's two new refusals
   have. The owner, 2026-09-24: "Yes. Defer to afterwards."
+- Contract addresses in the permission window: its Details table merges them case-blind,
+  while `matchesPattern` (`packages/wallet-bridge/src/method-scope-checkers.ts:39`) compares a
+  scope's listed contract to the call by exact string. A scope listed in another case never
+  matches (it fails closed), so its Details row can show an operation the check refuses.
+  Normalising both sides changes the grant check, so it is its own PR; codex accepted the
+  deferral in batch 5b's rounds 1 and 2.
 - The Revoke authwits and authwit-registry popups (`RevokeAuthwitsPopup.vue` and
   `ChangeAuthwitsRegistryPopup.vue` in `apps/extension/src/popup/components/popups/`) confirm
   on any Enter that reaches the document (`usePopupEntity` with a bare `e.key === "Enter"`
   `submitKey`). Once fees are set, Enter on the header's × or on a fee method sends the revoke
-  or registry transaction. Found by reading in batch 4, whose new Revoke expand button stops
-  Enter, and not reproduced; older than this program.
+  or registry transaction. Found in batch 4, whose new Revoke expand button stops Enter: its
+  unit test, without the stop, revoked on Enter. Not reproduced in a browser; older than this
+  program.
+- History's received rows read "Token" and "+1,000,00" with no dollar value, where Home shows
+  the same receipts as "TST", "+1,000" and "≈ $1,000.00". Older than this program; the owner,
+  2026-09-25, on batch 4's parity page: "follow-up".
+- Layout around batch 4's surfaces that predates the program: rows 4px apart (drawn 10px),
+  Home's rows 59px tall with a third "≈ $" line (drawn 52px), the History and Settings titles
+  about 31px lower than drawn, History's date heading, Home's "Recent transactions" and "View
+  archives" (drawn "Recent activity" and "View all"), and Settings' account header. The owner,
+  2026-09-25: "(a) follow-up maybe?", so these stay until the owner schedules them.
+- The operation journal's id comment (`apps/extension/src/wallet/services/operation-journal/
+  service.ts`) says "16 bytes / 128 bits", but `nextRandomId(storage, 16)` draws 16 hex
+  characters, 64 bits, and the comment cites a review round.
+- The popup's Terms sheet (`apps/extension/src/components/LegalAcceptanceSheet.vue`) sits at
+  z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden
+  behind it. Observed in batch 4, not changed.
+- A failed send made from the wallet's own Send page reads as the app's fault on its journal page:
+  `categoricalLabel` gives the `transfer` error kind the `dapp_execute` label, "Reported by app",
+  "The connected app reported an error." (`apps/extension/src/utils/journal-state.ts:217-219`).
+  Older than this program; batch 4's Details now opens that page from the snack.
+- The launch fixture's scratch page can die on Chrome, and vitest 4.1.10's in-test retries
+  cannot recover from it. Chrome's `openScratchPage`
+  (`apps/extension/tests/e2e/fixtures/browser/chrome.ts`) loads the popup, which on a fresh
+  wallet redirects to the onboarding tab and calls `window.close()` once the worker answers its
+  first lookup, before the fixture seeds `nulo:onboarding:completed`. Chrome honours the call,
+  contrary to the driver contract's comment (`fixtures/browser/index.ts`), the Firefox driver's,
+  and the redirect test's in `onboarding-tab.test.ts`. The fix is a scratch page whose lifetime
+  no app redirect decides: an inert extension document, or an acknowledgement that the redirect
+  decision is made before the seed. Firefox's onboarding page does not guarantee that: its
+  asynchronous read of the flag can race the seed, and Firefox loads the popup on a reused
+  profile, since `freshProfile` records whether the profile directory was empty, not whether
+  onboarding finished. Separately, vitest 4.1.10 marks a test-scoped fixture initialized before
+  its setup resolves, so after a failed setup every in-test retry gets it undefined and the
+  smoke config's `retry: 2` cannot recover; a job rerun starts fresh. Check any vitest bump with
+  a fixture-retry repro. Seen as #702's Chrome smoke (run 36271135334), where the self-close is
+  the supported hypothesis and a browser disconnect is not excluded; the evidence is in this
+  program's `lessons/final-pass.md`.
+- The Send page's token card can be tapped before the page has loaded its tokens. For that
+  moment it reads "No available tokens" and "Import token", and a tap opens the import popup,
+  even in a wallet that holds tokens. A local probe measured 12 to 26 ms on Chrome and 52 to
+  206 ms on Firefox, with and without this stack. A loading state instead is a UI change for the
+  owner. `network/send-picker`'s Firefox timeouts fit that window (dev's nightly, run
+  36230567767, 2026-09-26; this stack's #702 and #703; its top's local gate on `df1849a2`), and
+  the probe reproduced the race with the test's own steps on `dev`. The test now waits for the
+  page's token; the probe and the fix are in batch 4's `lessons/phase-8.md`.
+- Once an attempt of `network/send-picker` has imported ALT, its retries cannot pass: the
+  file-scoped `tokenReadyExtension` keeps the wallet, so each imports another ALT. The nightly's
+  first retry failed on the rows, `['ALT', 'ALT', 'TST']`, and its second, at four rows, on the
+  search box.
+- Two unit tests can time out at vitest's 5 s default on a loaded host, because each makes a cold
+  dynamic import inside the timed test body.
+  - `apps/extension/src/wallet/services/wallet-sdk/content-message-relay.test.ts` imports the
+    relay in `freshRelay()`. When the first test times out, the import resolves after the next
+    test's `beforeEach` has reset `chromeListeners`. The orphaned `registerContentMessageRelay()`
+    then adds a second listener there, and that test fails too.
+  - `packages/wallet-bridge/src/method-descriptors.test.ts`'s exhaustiveness test imports
+    `@nulo/wallet-sdk-schema-patch/register`, then `@aztec/aztec.js/wallet`.
+  - Seen on this stack's tops on 2026-09-28 in 2 of the 6 `test:all` runs before the `9900de28`
+    gate, on a 192-core host whose load average read 130 to 220 when checked. The one rerun, on
+    `49a42355`, passed, and so did both runs on `df1849a2`. The stack changes neither test nor the
+    modules whose imports timed out.
+  - A possible mitigation, not validated: warm each import in a `beforeAll` with its own
+    timeout, keeping the schema patch's import first. The relay test resets modules before
+    every test, so a trial must show that each test still gets a fresh module while the
+    import inside it gets faster.
 
 ## Seeds
 

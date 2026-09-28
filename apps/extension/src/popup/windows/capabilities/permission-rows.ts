@@ -18,7 +18,24 @@ export type RowKey =
 	| "unknown"
 	| "transaction"
 
+/** The order rows take inside a group, as the row list draws them. */
+export const ROW_ORDER: readonly RowKey[] = [
+	"account-address",
+	"simulation",
+	"contracts",
+	"contract-details",
+	"contract-classes",
+	"authorizations",
+	"address-book",
+	"private-events",
+	"unknown",
+	"transaction",
+]
+
 export type RowGroup = "without-asking" | "if-you-allow" | "always-asks"
+
+/** What always asks leads, so the window's guarantee reads before what the app may do alone. */
+export const GROUP_ORDER: readonly RowGroup[] = ["always-asks", "if-you-allow", "without-asking"]
 
 export const GROUP_LABELS: Record<RowGroup, string> = {
 	"without-asking": "Without asking, it can",
@@ -43,7 +60,7 @@ export type PermissionRowEntry = {
 	chip?: string
 }
 
-export const ANY_CONTRACT_CHIP = "Any contract"
+export const ANY_CONTRACT = "Any contract"
 
 const DATA_OFF: SubSegment[] = [{ text: "Not shared. The app may ask again later." }]
 const AUTH_ON: SubSegment[] = [{ text: "Nulo signs its " }, { term: "authorizations" }, { text: " without asking." }]
@@ -63,8 +80,11 @@ export function plainText(segments: readonly SubSegment[] | undefined): string {
 	return (segments ?? []).map((segment) => ("term" in segment ? segment.term : segment.text)).join("")
 }
 
-export function accountAddressRow(accountNames: readonly string[]): PermissionRowEntry {
-	const title = accountNames.length === 1 ? `See ${accountNames[0]}'s address` : "See the addresses of the accounts you share"
+/** Names the one account the app sees by its wallet name. Several, none, or one the wallet no
+ *  longer names read the sentence that needs no name. */
+export function accountAddressRow(accounts: readonly { name?: string }[]): PermissionRowEntry {
+	const only = accounts.length === 1 ? accounts[0].name : undefined
+	const title = only ? `See ${only}'s address` : "See the addresses of the accounts you share"
 	return { key: "account-address", group: "without-asking", icon: "visibility", title, flagged: false }
 }
 
@@ -80,7 +100,7 @@ export function simulationRow(cap: SimulationCapability): PermissionRowEntry {
 		title: any ? "Run simulations on any contract" : "Run simulations and read the results",
 		subOn: PRIVATE_BALANCES,
 		flagged: any,
-		...(any ? { chip: ANY_CONTRACT_CHIP } : {}),
+		...(any ? { chip: ANY_CONTRACT } : {}),
 	}
 }
 
@@ -94,7 +114,7 @@ export function contractsRow(cap: ContractsCapability): PermissionRowEntry | und
 			icon: "add_circle",
 			title: any ? "Add any contract to your wallet" : "Add contracts to your wallet",
 			flagged: any,
-			...(any ? { chip: ANY_CONTRACT_CHIP } : {}),
+			...(any ? { chip: ANY_CONTRACT } : {}),
 		}
 	}
 	if (cap.canGetMetadata === true) {
@@ -159,7 +179,7 @@ export function privateEventsRow(contracts: "*" | readonly string[]): Permission
 		subOff: DATA_OFF,
 		switchLabel: "Share private events",
 		flagged: any,
-		...(any ? { chip: ANY_CONTRACT_CHIP } : {}),
+		...(any ? { chip: ANY_CONTRACT } : {}),
 	}
 }
 
