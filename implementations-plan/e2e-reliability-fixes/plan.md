@@ -573,7 +573,7 @@ Validation gate:
 - Pass criteria: both exit 0.
 - Layers: lint (the plans gate).
 
-### P1 · C5 · the sponsor attribute
+### P1 · C5 · the sponsor attribute ✓
 
 1. `FeeMethodSelector.vue`: `:data-fpc-id="method.fpc?.id"` on the `DropdownItem`.
 2. `FeeMethodSelector.test.ts`, one case: with the Fee Juice row, Nulo's sponsor (`fpc.id: "s1"`)

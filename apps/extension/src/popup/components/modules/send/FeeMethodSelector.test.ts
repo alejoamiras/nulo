@@ -89,6 +89,15 @@ describe("FeeMethodSelector", () => {
 		expect(rows).toEqual([expect.stringContaining("Sponsored"), expect.stringContaining("Dev sponsor")])
 	})
 
+	test("sponsor rows share the testid and differ by data-fpc-id; the Fee Juice row has none", () => {
+		const handAdded = { type: "fpc", title: "Dev sponsor", subtitle: "sponsored", spend: "—", fpc: { id: "s2" } }
+		const nulo = { ...baseMethods[2], fpc: { id: "s1", isProtocol: true } }
+		const w = factory({ methods: [baseMethods[0], handAdded, nulo] })
+		const ids = w.findAll('[data-testid="send-fee-method-sponsored"]').map((n) => n.attributes("data-fpc-id"))
+		expect(ids).toEqual(["s1", "s2"])
+		expect(w.find('[data-testid="send-fee-method-public"]').attributes()).not.toHaveProperty("data-fpc-id")
+	})
+
 	test("clicking an enabled item emits update:modelValue with that method", async () => {
 		const w = factory()
 		await w.find('[data-testid="send-fee-method-private"]').trigger("click")
