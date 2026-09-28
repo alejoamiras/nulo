@@ -6,7 +6,7 @@ Run it: `NULO_E2E_BROWSER=firefox bun run e2e:agent …` (network; builds `dist/
 
 ## The one rule
 
-**A browser difference lives on `BrowserDriver` (`fixtures/browser/index.ts`), never in a fixture or helper.** Tests may read `isFirefox` to skip a whole file (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`) or to state a real behavioural difference in an expectation. `scripts/e2e/browser-seam.test.ts` enforces the rest: no scheme literal, no direct `browser.close()` / `newPage()` / `waitForTarget()`, no browser test — `isFirefox`, `BROWSER`, `driver.kind`, `NULO_E2E_BROWSER`, however imported — in `fixtures/**` or `helpers/**`.
+**A browser difference lives on `BrowserDriver` (`fixtures/browser/index.ts`), never in a fixture or helper.** Tests may read `isFirefox` to skip a whole file (`describe.skipIf(isFirefox)(CHROME_ONLY.<reason>, …)`), to keep a test that needs a state headless Chrome cannot be driven into off Chrome (`describe.skipIf(!isFirefox)(FIREFOX_ONLY.<reason>, …)`), or to state a real behavioural difference in an expectation. `scripts/e2e/browser-seam.test.ts` enforces the rest: no scheme literal, no direct `browser.close()` / `newPage()` / `waitForTarget()`, no browser test — `isFirefox`, `BROWSER`, `driver.kind`, `NULO_E2E_BROWSER`, however imported — in `fixtures/**` or `helpers/**`.
 
 A fix that reads "on Firefox, also do X" inside a helper is a second, unlisted driver. Put X on the interface, give Chrome its (often empty) implementation, and say why in the doc comment.
 

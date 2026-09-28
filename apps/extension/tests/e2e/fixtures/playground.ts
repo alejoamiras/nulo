@@ -22,15 +22,17 @@ export const PLAYGROUND_TEST_URL = (() => {
 	}
 })()
 
-/**
- * Open a fresh playground tab on the test-mode URL (`?test=1` disables localStorage
- * persistence and the protocol log so the DOM stays minimal).
- */
+/** The test-mode page: `?test=1` disables localStorage persistence and the protocol log. Built on call,
+ *  because the smoke setup provides no `playgroundUrl` and every smoke file imports this module. */
+export function playgroundTestPage(): string {
+	return PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
+}
+
+/** Open a fresh playground tab on the test-mode page. */
 export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
 	const page = await newPage(ctx.browser)
 	patchPagePolling(page)
-	const url = PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
-	await page.goto(url, { waitUntil: "domcontentloaded" })
+	await page.goto(playgroundTestPage(), { waitUntil: "domcontentloaded" })
 	await page.waitForSelector('[data-testid="pg-status"]', { timeout: 30_000 })
 	return page
 }

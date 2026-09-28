@@ -56,7 +56,7 @@ option stay out.
 |---|---|---|---|---|---|---|
 | ✓ | 0 | Program setup | round 5 drawings, stack init | — | on arc 1 | this file ([lessons](lessons/phase-0.md)) |
 | ✓ | 1 | First run and wording | 1, 3, 5, 7, 8 | light | `feat/ux-1-first-run-wording` | [b1-first-run-wording](b1-first-run-wording/plan.md) |
-| ☐ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | b2-window-placement |
+| ✓ | 2 | Window placement | 4 (A) | light | `feat/ux-2-window-placement` | [b2-window-placement](b2-window-placement/plan.md) |
 | ☐ | 3 | Tooltips and glossary | 2, 9, T | mid | `feat/ux-3-tooltips-glossary` | b3-tooltips-glossary |
 | ☐ | 4 | Snackbar, rows, arrivals | 10, 11, 12 | mid | `feat/ux-4-snackbar-rows-arrivals` | b4-snackbar-rows-arrivals |
 | ☐ | 5 | Permissions | 6 | mid | `feat/ux-5a-authorization-confirm`, `feat/ux-5b-permission-window` | b5-permissions |
@@ -343,6 +343,14 @@ payer ("Align with U16 (Recommended)").
 - The emoji-check window's header reads "NO ACCOUNT" before an account is chosen, and "chain 0"
   rather than "Local Network" on a reconnect (batch 2's parity capture from window B). Today's
   header, unchanged by this program.
+- `network/backup-restore-integrity` waits on public networks.
+  - Its exported backup carries account-state for the Alpha and Testnet nodes, so the import
+    registers their preloaded contracts over dRPC. The budget is a fixed 30 s
+    (`importChainSync.ts:34`), so one stalled call marks every network "ran out of time" and
+    the test waits 300 s on Continue.
+  - Test-side fix: keep only the sandbox's account-state slice in the backup the test edits.
+  - Owner questions: whether preloaded contracts should be skipped like protocol ones, and
+    whether an import should wait on public networks at all.
 
 ## Seeds
 

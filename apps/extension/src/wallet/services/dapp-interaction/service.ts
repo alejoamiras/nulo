@@ -443,6 +443,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				height: 800,
 				timeoutMs: INTERACTION_TIMEOUT_MS,
 				kind: type,
+				placement: "top-right",
 			})
 
 			const interaction: DappInteraction = {

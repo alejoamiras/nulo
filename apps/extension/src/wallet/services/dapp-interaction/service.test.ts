@@ -486,6 +486,18 @@ describe("DappInteractionService.focusInteractionWindow (Queued card → bring t
 	})
 })
 
+describe("DappInteractionService window placement", () => {
+	test.each(["execute", "capabilities", "discover"])("the %s window opens at the browser window's top-right", async (kind) => {
+		const openAndAwait = vi.fn((_opts: unknown) => ({ handleId: "h1", promise: Promise.resolve({}) }))
+		const svc = new DappInteractionService(noopLogger, { openAndAwait } as unknown as WindowManager)
+		const interaction = (svc as unknown as { interaction: (type: string, payload: unknown) => Promise<unknown> }).interaction
+
+		await interaction.call(svc, kind, emptyPayload)
+
+		expect(openAndAwait).toHaveBeenCalledWith(expect.objectContaining({ kind, width: 400, height: 800, placement: "top-right" }))
+	})
+})
+
 describe("DappInteractionService when the Terms acceptance lapses after the request was admitted", () => {
 	const refuse = async () => {
 		throw new TermsAcceptanceRequiredError()

@@ -25,7 +25,7 @@ async function pxeHostState(page: Page): Promise<PxeHostState> {
 	return { count, visibility }
 }
 
-async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): Promise<LaunchedBrowser> {
+async function launch({ extensionPath, userDataDir, headless, fixedWindowSize = true }: LaunchOptions): Promise<LaunchedBrowser> {
 	// Headless `true` supports MV3 extensions — offscreen documents, the service worker,
 	// `chrome.storage` and `chrome.runtime.Port` all work.
 	const browser = await puppeteer.launch({
@@ -36,7 +36,8 @@ async function launch({ extensionPath, userDataDir, headless }: LaunchOptions): 
 			`--load-extension=${extensionPath}`,
 			"--no-sandbox",
 			"--disable-setuid-sandbox",
-			"--window-size=400,600",
+			// Headless Chrome's size flag overrides the dimensions `windows.create` asks for.
+			...(fixedWindowSize ? ["--window-size=400,600"] : []),
 			// Prevent Chrome from throttling background/offscreen tabs. Headless
 			// Chrome doesn't have a "focused" page, so without these flags the
 			// renderer backgrounds the tab and rAF gets throttled to ~1Hz —

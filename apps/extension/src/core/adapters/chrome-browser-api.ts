@@ -160,7 +160,19 @@ class ChromeRuntimeAdapter implements RuntimePort {
 	}
 }
 
+function boundsOf(win: chrome.windows.Window | undefined): WindowBounds | undefined {
+	const { left, top, width, height } = win ?? {}
+	if ([left, top, width, height].some((n) => typeof n !== "number")) return undefined
+	return { left, top, width, height }
+}
+
 class ChromeWindowsAdapter implements WindowPort {
+	/** The newest normal-window observation; `seq` orders observations by when they started. */
+	private lastNormal: { id: number; seq: number } | undefined
+	private seq = 0
+	private readonly pendingFocusLookups = new Set<Promise<void>>()
+	private trackerChecked = false
+
 	public async create(options: CreateWindowOptions): Promise<CreatedWindow> {
 		const created = await chrome.windows.create(options)
 		return { id: created?.id }
@@ -187,15 +199,49 @@ class ChromeWindowsAdapter implements WindowPort {
 
 	public async getLastFocused(): Promise<WindowBounds | undefined> {
 		try {
+			this.trackFocusOnFirefox()
+			const seq = ++this.seq
 			// `normal` only: anchoring on another approval popup would stack popups
 			// on top of each other instead of on the dApp's window.
 			const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
-			const { left, top, width, height } = win ?? {}
-			if ([left, top, width, height].some((n) => typeof n !== "number")) return undefined
-			return { left, top, width, height }
+			if (win?.type === "normal") {
+				this.recordNormal(win.id, seq)
+				return boundsOf(win)
+			}
+			// A snapshot: focus events received from here on must not extend the wait.
+			await Promise.all([...this.pendingFocusLookups])
+			if (!this.lastNormal) return undefined
+			const remembered = await chrome.windows.get(this.lastNormal.id)
+			return remembered.type === "normal" ? boundsOf(remembered) : undefined
 		} catch {
 			return undefined
 		}
+	}
+
+	/** Firefox ignores `windowTypes` and can answer with an approval popup, so the adapter tracks
+	 *  normal-window focus there itself. Added on first use and only on Firefox: Chrome keeps every
+	 *  listener a service worker adds as a wake-up, and Firefox persists only those added at startup. */
+	private trackFocusOnFirefox(): void {
+		if (this.trackerChecked) return
+		this.trackerChecked = true
+		if (typeof (chrome.runtime as { getBrowserInfo?: unknown }).getBrowserInfo !== "function") return
+		chrome.windows.onFocusChanged.addListener((windowId) => {
+			if (windowId === chrome.windows.WINDOW_ID_NONE) return
+			const seq = ++this.seq
+			const lookup = chrome.windows.get(windowId).then(
+				(win) => {
+					if (win.type === "normal") this.recordNormal(win.id, seq)
+				},
+				() => undefined,
+			)
+			this.pendingFocusLookups.add(lookup)
+			void lookup.then(() => this.pendingFocusLookups.delete(lookup))
+		})
+	}
+
+	private recordNormal(id: number | undefined, seq: number): void {
+		if (id === undefined || (this.lastNormal && this.lastNormal.seq > seq)) return
+		this.lastNormal = { id, seq }
 	}
 }
 
