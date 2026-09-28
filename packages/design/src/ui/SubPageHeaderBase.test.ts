@@ -39,7 +39,7 @@ describe("SubPageHeaderBase (router-free)", () => {
 
 	test("clicking back emits @back (no router coupling)", async () => {
 		const w = mountHeader({ title: "X" })
-		await w.find("button[aria-label='Back']").trigger("click")
+		await w.get('[data-testid="subpage-back"]').trigger("click")
 		expect(w.emitted("back")).toHaveLength(1)
 	})
 })
