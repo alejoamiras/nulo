@@ -1,3 +1,9 @@
 # Follow-ups
 
 Open follow-ups lifted out of closing plans, one entry each, or a pointer to the GitHub issue that owns it. Read when planning; delete an entry when it resolves. A plan never closes while it still owns an open follow-up.
+
+## Grants and scopes
+
+- **Account addresses in the grant check compare by exact string.** `resolveAuthorizedSessionAccount` (`packages/wallet-bridge/src/account-resolution.ts:54`, `:58`), `checkCreateAuthWit`'s accounts list (`method-scope-checkers.ts:289`), `validateAccountScopes` (`scope-enforcement.ts:37-45`), `sessionAccountsOf` (`dispatcher.ts:438-449`) and the membership filter in `projectSessionAccounts` (`dispatcher.ts:1046`) refuse an account spelled in another case: they fail closed. The dispatcher and the journal must change together (`account-resolution.ts:1-13`). From [grant-check-address-case](grant-check-address-case/plan.md), Fact 12.
+- **`fee-payer.ts` compares by exact string.** A `feePayer` that differs from `from` only by case is classified `fpc` (`packages/wallet-bridge/src/fee-payer.ts:63`), and a claim that credits the payer in another case is not recognised as one, so the payload routes `self-pay` (`isClaimAndEndSetup`, `:46-54`). The Fee Juice address has no hex letters (`:14`), so only the payer can differ. From [grant-check-address-case](grant-check-address-case/plan.md), § Security.
+- **A wildcard scope admits a call target before anything validates it as an address** (`packages/wallet-bridge/src/method-scope-checkers.ts:42`, `:55`, `:60`). What rejects a malformed target afterwards differs per method, and `isTokenRegistered` parses nothing; tightening the wildcard is a behaviour change. The per-method boundaries are the rejection-boundary table in [grant-check-address-case](grant-check-address-case/plan.md), § Non-obvious mechanics.
