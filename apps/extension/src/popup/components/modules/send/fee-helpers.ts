@@ -274,8 +274,9 @@ function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalance
 }
 
 /**
- * Destination of the "get fee juice" nudge — the tools site's fee-juice
- * bridge (Fuel). A single destination for every network for now; override
- * at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
+ * Destination of the "get fee juice" nudge: unleashed's testnet app, on every network (the owner's
+ * call; unleashed has no public mainnet bridge). It is a workers.dev host until unleashed gets its
+ * own domain. Override at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
  */
-export const FEE_JUICE_BRIDGE_URL: string = (import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://tools.nulo.sh"
+export const FEE_JUICE_BRIDGE_URL: string =
+	(import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://unleashed-testnet.alejo-amiras.workers.dev"

@@ -291,8 +291,8 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 })
 
 describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
-	test("defaults to the tools fee-juice bridge", () => {
-		expect(FEE_JUICE_BRIDGE_URL).toBe("https://tools.nulo.sh")
+	test("defaults to unleashed's testnet app", () => {
+		expect(FEE_JUICE_BRIDGE_URL).toBe("https://unleashed-testnet.alejo-amiras.workers.dev")
 	})
 })
 

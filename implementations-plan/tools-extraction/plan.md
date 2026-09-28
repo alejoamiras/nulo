@@ -11,6 +11,35 @@ repos: alejoamiras/nulo (this repo) · alejoamiras/unleashed (empty, public, pro
 
 # tools-extraction — split the bridge/tools product out of nulo
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: **delivered except P1**, which is the next ordinary `release: promote dev → main`, moved to [`follow-ups.md`](../follow-ups.md) with its gate. Nothing in it waits on unleashed or Cloudflare.
+- **nulo**:
+  - Stage 1 removal: #690, #691, #692.
+  - N2 staged packages and the recipe: #697, #706; `@alejoamiras/nulo-*` 0.1.0 published with provenance.
+  - Plan and docs follow-ups: #707, #709.
+  - N4: #708, removed again in #710 when the owner took the tools names dark (decision 26).
+  - The Pages landing hook and `verify-live` retired: #711.
+  - The dead tools links and the testnet USDC seed: #713, below.
+- **unleashed**:
+  - #1–#4: the bootstrap, CI, Workers and docs arcs; `main` is protected.
+  - #7: the mainnet host behind Access.
+  - #8: the token catalog loads a pinned, SHA-256-checked copy of Uniswap's list from jsDelivr, since `tokens.uniswap.org` now redirects; closed unleashed#6.
+- **Cloudflare**:
+  - Three Workers on Workers Builds: `nulo-landing` serves `nulo.sh` (L-cut before P1, decision 27; the config commits `workers_dev: false` and no `routes`, because the Builds token has no zone permission), plus `unleashed-testnet` and `unleashed-mainnet`.
+  - The tools names are dark.
+  - The Access app gates the unleashed mainnet host with the "Only Foundation & Labs" policy; the owner renamed the Zero Trust team to `alejo-amiras`.
+  - All three Pages projects are deleted, after purging their deployments.
+  - The `CLOUDFLARE_PAGES_DEPLOY_HOOK` secret is deleted, and the owner revoked the temporary API token.
+- **Owner UI calls after C2** (#713, quoted in its body):
+  - The landing lost its Tools links.
+  - The fee card's get-gas link opens unleashed's testnet app on every network.
+  - The testnet default USDC is unleashed's pre-created Test USDC; mainnet keeps the retired bridge's token.
+- **Dropped**:
+  - N4's redirect Worker (decision 26: dark names instead).
+  - GATE-U's Send, which the owner waived because testnet moved to v6.
+- **Seeds retired**: the `/goal` and `/loop` seeds in the ELI5 (§ Seeds) are spent; nothing to resume.
+
 Nulo becomes wallet-only (extension, playground, landing, their packages). `apps/tools`, `packages/bridge-core`, `contracts/bridge`, their CI, runbooks and plans move to `alejoamiras/unleashed` with history. Both repos leave Cloudflare Pages for Workers static assets deployed by Workers Builds.
 
 **Rule of the whole plan (removal-first, decision 23): decouple → delete from nulo → rebuild unleashed from the freeze SHA → rehearse → prove → cut over → delete from Cloudflare.** Stage 1 (A1 → A5a → A5b) makes nulo wallet-only as fast as its own gates allow; nothing in it waits on unleashed, npm or Cloudflare credentials. Git history keeps every deleted file, so Stage 2 extracts unleashed from the **freeze SHA** — the last `dev` commit that still carries the tools tree — at whatever pace the owner likes. `dev` is green at every commit. Steps without a rollback come last, each behind a named precondition and an explicit owner go.
@@ -238,7 +267,7 @@ No soak (decision 16): it runs as soon as its preconditions hold — C1's gate g
 - The follow-up that removes `refresh-landing`, `refresh-landing.yml` and `verify-live` is #711. Its own Workers Builds preview served with `workers_dev: false` (both preview URLs 200), while the production workers.dev host answers 404.
 - The old `tools` Access app is deleted. Its reusable "Only Foundation & Labs" policy now guards `unleashed-mainnet.alejo-amiras.workers.dev`.
 - The `nulo` project no longer lists `nulo.sh` (only `nulo.pages.dev`), and no DNS record points at `*.pages.dev`.
-- Pending: the owner deletes the `nulo` project (the session's permission layer refused it as a domain change), and the agent deletes the deploy-hook secret after #711 merges.
+- **Done.** The agent purged the `nulo` project's 3,008 deployments and the owner deleted the project, because the session's permission layer refused the delete as a domain change. No Pages project remains; `nulo.sh` answers 200, `www` 301, deep links 200. The deploy-hook secret was deleted after #711 merged, and the temporary token was revoked.
 
 ## Delivery — arcs → PRs
 

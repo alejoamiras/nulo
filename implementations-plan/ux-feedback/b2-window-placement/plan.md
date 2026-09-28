@@ -13,6 +13,13 @@ design: implementations-plan/ux-feedback/design/spec.md (item 4, option A)
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: closed with parent ux-feedback (completed).
+- **Shipped**: #700 `8a6c68ad`, arc 2 of the six.
+- **Open items**: none of its own; the [program plan](../plan.md)'s Outcome carries them.
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are spent and must never be pasted.
+
 # Batch 2 · Window placement
 
 Item 4, option A, of the UX program: every dApp window opens at the top-right of the browser
