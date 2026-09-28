@@ -422,6 +422,30 @@ describe("FeeSettingsCard — the default sponsor, with no saved pick", () => {
 		expect(w.find('[data-testid="fee-method-selector"]').attributes("data-active-type")).toBeUndefined()
 		w.unmount()
 	})
+
+	/** Nulo's sponsor, then its address edited in another window: the row turns custom. */
+	test.each([
+		{ saved: false, after: undefined },
+		{ saved: true, after: { paymentMethod: { kind: "fpc", fpcId: "s1" } } },
+	])("its address edited elsewhere: dropped when chosen unasked, kept when picked (saved $saved)", async ({ saved, after }) => {
+		const { FpcServiceClient } = await import("@/wallet/services/fpc/client")
+		const NULO = { id: "s1", type: 1, name: "Sponsored", isProtocol: true }
+		if (saved) storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: { type: "fpc", fpc: NULO } }
+		mocks.getFpcs.mockResolvedValue([NULO])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		const fpc = vi.mocked(FpcServiceClient).mock.results.at(-1)?.value as { onFpcUpdated: { add: ReturnType<typeof vi.fn> } }
+		const onUpdated = fpc.onFpcUpdated.add.mock.calls[0]?.[0] as (f: unknown) => void
+		onUpdated({ ...NULO, address: `0x${"ab".repeat(32)}`, isProtocol: false })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual(after)
+		w.unmount()
+	})
 })
 
 describe("FeeSettingsCard — user actions", () => {

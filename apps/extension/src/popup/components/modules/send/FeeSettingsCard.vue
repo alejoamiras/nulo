@@ -315,9 +315,13 @@ const pickForSend = (m) => {
 	)
 }
 
+/** The selection is the card's own default, not a saved or live pick. */
+let chosenUnasked = false
+
 const handleMethodPicked = (m) => {
 	if (props.originPrivacy !== null) return pickForSend(m)
 	selectedMethod.value = m
+	chosenUnasked = false
 	useEmbeddedFee.value = false
 	void persistSelection(m)
 }
@@ -339,9 +343,10 @@ const onFpcUpdated = (fpc) => {
 	// Replace the full snapshot so address-edit changes propagate to the
 	// dropdown trigger and any persisted-fee-method round-trips below.
 	// Object replacement (not deep mutation) keeps the derived computed
-	// reactive.
+	// reactive. A default holds only while its row is the protocol's: an edited address makes the
+	// row custom, and a custom FPC pays only once picked.
 	if (selectedMethod.value?.fpc?.id === fpc.id) {
-		selectedMethod.value = { ...selectedMethod.value, fpc }
+		selectedMethod.value = chosenUnasked && !fpc.isProtocol ? undefined : { ...selectedMethod.value, fpc }
 	}
 }
 const onFpcDeleted = (fpc) => {
@@ -451,8 +456,13 @@ const settledSelection = (savedRecord) => {
 
 const reconcileSelection = (savedRecord, baseline) => {
 	const userPickedDuringInit = selectedMethod.value !== baseline
-	if (props.lockedMethod) selectedMethod.value = lockedOption()
-	else if (!userPickedDuringInit) selectedMethod.value = settledSelection(savedRecord)
+	if (props.lockedMethod) {
+		selectedMethod.value = lockedOption()
+		chosenUnasked = false
+	} else if (!userPickedDuringInit) {
+		selectedMethod.value = settledSelection(savedRecord)
+		chosenUnasked = !resolveSavedSelection(savedRecord, methods.value)
+	}
 }
 
 const commitFromEntry = (scope, reqKey, saved, baseline) => {
