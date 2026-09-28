@@ -227,7 +227,10 @@ phase_history() {
     if (bad.length) { console.error("changed beyond specifiers:", bad); process.exit(1) }
     console.log(`history: ${changed.length} spec file(s) differ from main only in specifiers`)
   ')
-  git -C "$repo" log --follow --name-status --format= -- apps/tools/src/main.ts | grep -q "packages/faucet/src/main.ts" ||
+  # Captured first: under pipefail, `grep -q` exiting on its match can SIGPIPE git log into a false failure.
+  local renames
+  renames=$(git -C "$repo" log --follow --name-status --format= -- apps/tools/src/main.ts)
+  grep -q "packages/faucet/src/main.ts" <<<"$renames" ||
     die "apps/tools/src/main.ts does not follow back to packages/faucet"
   echo "history: apps/tools/src/main.ts follows back to packages/faucet"
 }
