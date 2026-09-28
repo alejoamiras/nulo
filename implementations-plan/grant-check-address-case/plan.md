@@ -505,7 +505,7 @@ window change in UI impact), and the ELI5 Artifact URL.
 Each phase ends with its validation gate; its log is `lessons/phase-N.md`, printed as
 `LESSONS_FILE=implementations-plan/grant-check-address-case/lessons/phase-N.md`.
 
-### P1 · Red first
+### P1 · Red first ✓
 
 1. Commit `implementations-plan/grant-check-address-case/` (`plan.md`, `recon.md`) and its line in
    `implementations-plan/index.md`: `- [grant-check-address-case](grant-check-address-case/plan.md) — in progress — one field-address key for every contract comparison in the grant check and the Details table`.
