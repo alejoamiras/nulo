@@ -150,3 +150,46 @@ Both execution canaries passed prover on inside Chrome's network suite, and `cap
 substantive tests passed, retry 0, with Presto enforced and native proofs in the server log. The
 commit that records this changes only `implementations-plan/`: outside it, the stack top's tree
 is `490ca181`'s.
+
+## The owner's stack sign-off
+
+The owner answered the stack's sign-off page on 2026-09-28
+(<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store): the fee line when the
+account pays, "Fine as it is"; tooltip text, "Pass 4.5:1"; a receipt with fiat values off, "No
+chip when fiat is off"; Home's received row, "Keep today's row"; the dApp window width, "Only the
+permission window at 400px". Everything else was signed off as built ("Everytihng else looks
+good."), with two changes from the note. Three changes landed, each on its own arc:
+
+- arc 3: the new tooltips' text is `--txt-body`, pinned at 4.5:1 in both themes (batch 3's P5);
+- arc 4: the onboarding import opens no success snack, and its component test pins that through
+  the real import flow (batch 4's P8);
+- arc 5b: the permission window's groups run "Always asks you first", "If you allow, it can",
+  "Without asking, it can" (batch 5's P11).
+
+Every restack replayed the commits above it patch-identically (`git range-diff`, all `=`), and
+every commit on the stack is signed. A codex session at high (`01a0e7ab-…`) read the changes:
+
+- round 1, "No material findings; three comment/documentation nits", all three taken;
+- round 2, "No material findings or further nits.";
+- round 3, on arc 4's pin, "No material findings; one minor coverage gap", taken;
+- round 4, "No material findings or further nits. The previous coverage gap is closed."
+
+The gate ran on `df1849a2` in two clean detached checkouts: the network files at retry 0, Chrome
+prover on with the `@requires-proverless` files proverless and Firefox proverless, and smoke at its
+config's two retries, which no test used. Every step exited 0 on both browsers but Firefox's
+network suite, whose one red file was the known `send-picker` flake (the plan's Follow-ups); run
+alone in a third clean checkout, that file then passed three times. The table, the flake and the
+two unit tests that timed out under host load on earlier tops are in
+[batch 3's P5 log](../b3-tooltips-glossary/lessons/phase-5.md).
+Both execution canaries passed prover on in Chrome's network suite; the Firefox canaries
+wait for CI's `Firefox / Run / canary / real-proving` job on the stack top's head.
+The commits that record this change only `implementations-plan/`: outside it, the stack top's
+tree is `df1849a2`'s.
+
+Nine passages in the gate records, from batch 2's to this file's own two above, said every e2e
+file ran at retry 0. Smoke's config pins `retry: 2` (`apps/extension/vitest.e2e.config.ts`), and
+`NULO_E2E_RETRY=0` reaches only the network config, so the full smoke suites ran at two retries;
+the smoke flake bars ran through a scratch retry-0 config. The passages now say so. In the gates on
+`4c20a006`, `023ca03c`, `d893ae95`, `490ca181` and `df1849a2`, no smoke test passed on a retry: the
+repo's retry reporter (`tests/e2e/retry-error-reporter.ts`) printed nothing. The earlier gates'
+smoke logs were not checked.

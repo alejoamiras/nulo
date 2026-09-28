@@ -1786,7 +1786,7 @@ else skips.
 Gate: items 1–3, 5 and 6 and Chrome's canaries exit 0, the parity Artifact URL printed, and
 the Firefox canary row recorded as open in `lessons/phase-10.md`.
 
-#### P11 · The owner's stack sign-off
+#### P11 · The owner's stack sign-off ✓
 
 The owner, 2026-09-28, on the stack's sign-off page
 (<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store):
@@ -1815,6 +1815,9 @@ note names the pop-up. The spec's S1 list carries the order (`design/spec.md`, �
 
 Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers, the
 network list keeping `cap-window` and `cap-request-rerequest`.
+
+Passed on the stack top `df1849a2` ([lessons](lessons/phase-11.md)). Firefox's one red network
+file, the known `send-picker` flake, then passed three runs alone.
 
 ### Arc boundary 5b (stack top)
 

@@ -318,7 +318,11 @@ onto `origin/dev` at `b15f5218`. Round 2: "no new material findings", "VERDICT: 
 confidence: high". Round 3, on arc 5b's fold fix `d893ae95`: "no new material findings",
 "VERDICT: approve — confidence: high". At `d893ae95`, every Local gates row exited 0,
 with smoke and the full network suite on both browsers; the Firefox canaries wait for CI on the
-stack top's head.
+stack top's head. After the owner's sign-off (2026-09-28), a codex session read its three
+changes and arc 4's pin in four rounds, the last "No material findings or further nits. The
+previous coverage gap is closed." At `df1849a2`, every Local gates row exited 0, with smoke
+and the full network suite on both browsers, except Firefox's network suite: its one red file,
+the known `send-picker` flake (Follow-ups), then passed three runs alone.
 
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
@@ -367,7 +371,7 @@ The stack's sign-off page (2026-09-28, <https://claude.ai/artifact/WD1NGANFrHcE7
 today's row"; the dApp window width, "Only the permission window at 400px". Everything else is
 signed off as built ("Everytihng else looks good."), with two changes from its note: the
 permission window's groups run in reverse, and the onboarding import opens no success snack.
-Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks, b4 § P8, b5 § P11).
+Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks and § P5, b4 § P8, b5 § P11).
 
 ## Follow-ups (not this program)
 
@@ -462,13 +466,27 @@ Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks, b4 § P8, b5 § P11).
 - `network/send-picker` fails on Firefox with no ALT row visible within 15 s of the click on the
   picker's trigger (`send-picker.test.ts:35`), after Home showed the ALT balance (line 28), on
   dev too: the nightly's run 36230567767 on `b15f5218` (2026-09-26), then #703's run
-  36271135463. The file-scoped `tokenReadyExtension` makes each retry deploy and import another
-  ALT into the same wallet, so a retry's errors (`['ALT', 'ALT', 'TST']`, the search box) follow
-  from the first failure. The mechanism is not known: the picker may not have opened, its
-  balance request may have failed or stalled, or its rows may have been filtered out or not
-  rendered. The background page's throttled timers (`FIREFOX.md`) are one candidate. Logging the
-  picker's request and response times, its state and the page's visibility in a failing run
-  could help tell these apart.
+  36271135463, then the stack top's local gate on `df1849a2` (2026-09-28), after which the file
+  passed three runs alone. The file-scoped `tokenReadyExtension` makes each retry deploy and
+  import another ALT into the same wallet, so a retry's errors (`['ALT', 'ALT', 'TST']`, the
+  search box) follow from the first failure. The mechanism is not known: the picker may not have
+  opened, its balance request may have failed or stalled, or its rows may have been filtered out
+  or not rendered. The background page's throttled timers (`FIREFOX.md`) are one candidate.
+  Logging the picker's request and response times, its state and the page's visibility in a
+  failing run could help tell these apart.
+- Two unit tests can time out at vitest's 5 s default on a loaded host, because each makes a cold
+  dynamic import inside the timed test body.
+  - `apps/extension/src/wallet/services/wallet-sdk/content-message-relay.test.ts` imports the
+    relay in `freshRelay()`. When the first test times out, the import resolves after the next
+    test's `beforeEach` has reset `chromeListeners`. The orphaned `registerContentMessageRelay()`
+    then adds a second listener there, and that test fails too.
+  - `packages/wallet-bridge/src/method-descriptors.test.ts`'s exhaustiveness test imports
+    `@nulo/wallet-sdk-schema-patch/register`, then `@aztec/aztec.js/wallet`.
+  - Seen on this stack's tops on 2026-09-28 in 2 of 6 `test:all` runs, on a 192-core host whose load
+    average read 130 to 220 when checked. The one rerun, on `49a42355`, passed, and so did both
+    runs on `df1849a2`. The stack changes neither test nor the modules whose imports timed out.
+  - The fix: warm each import in a `beforeAll` with its own timeout, keeping the schema patch's
+    import first.
 
 ## Seeds
 
