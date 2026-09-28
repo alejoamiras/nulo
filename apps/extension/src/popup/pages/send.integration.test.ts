@@ -152,7 +152,7 @@ const STUBS = {
 		emits: ["click"],
 		inheritAttrs: false,
 	},
-	SelectTokenCard: { template: '<div data-testid="stub-token-card" />', props: ["token"] },
+	SelectTokenCard: { template: '<div data-testid="stub-token-card" />', props: ["token", "loading"] },
 	RecipientField: {
 		template: '<input data-testid="stub-recipient" :value="searchTerm" @input="$emit(\'update:searchTerm\', $event.target.value)" />',
 		props: ["searchTerm", "selectedContact", "candidates"],
@@ -211,7 +211,7 @@ function deferred<T>(): Deferred<T> {
 	return { promise, resolve }
 }
 
-async function mountSend(funding: Funding, opts: { storage?: Record<string, unknown>; holdGas?: boolean } = {}) {
+async function mountSend(funding: Funding, opts: { storage?: Record<string, unknown>; holdGas?: boolean; realTokenCard?: boolean } = {}) {
 	installChromeStorage(opts.storage ?? {})
 	mocks.getFpcs.mockResolvedValue(funding.fpcs)
 	const gas = deferred<Gas>()
@@ -227,7 +227,11 @@ async function mountSend(funding: Funding, opts: { storage?: Record<string, unkn
 	const popupStore = usePopupStore(pinia)
 	const w = mount(Send, {
 		attachTo: document.body,
-		global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+		global: {
+			plugins: [pinia],
+			stubs: opts.realTokenCard ? { ...STUBS, SelectTokenCard: false } : STUBS,
+			mocks: { getChainName: () => "Test" },
+		},
 	})
 	await flushPromises()
 	return { w, appStore, cacheStore, popupStore, gas }
@@ -534,6 +538,23 @@ describe("send page with the real fee card — the review sheet's fee", () => {
 		expect(shown).toMatch(/^\$0\.0\d0$/)
 		await strip(w).trigger("click")
 		expect(w.get('[data-testid="send-review-fee"] span').text()).toBe(`Fee · ~1 FJ (${shown})`)
+		w.unmount()
+	})
+})
+
+describe("send page — the real token card while the tokens load", () => {
+	test("a tap during the load opens nothing; once the tokens arrive, a tap opens the picker", async () => {
+		const tokens = deferred<unknown[]>()
+		mocks.getTokens.mockReturnValueOnce(tokens.promise)
+		const { w, popupStore } = await mountSend(FUNDING["both Fee Juices"], { realTokenCard: true })
+		await w.get('[data-testid="send-token-trigger"]').trigger("click")
+		expect(popupStore.isOpened("new_token")).toBe(false)
+		expect(popupStore.isOpened("select_token")).toBe(false)
+
+		tokens.resolve([TOKEN])
+		await flushPromises()
+		await w.get('[data-testid="send-token-trigger"]').trigger("click")
+		expect(popupStore.isOpened("select_token")).toBe(true)
 		w.unmount()
 	})
 })

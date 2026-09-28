@@ -28,7 +28,7 @@ test.skipIf(!hasConfig)(
 		await waitForHash(page, "#/popup/general")
 		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
 
-		// Until the page's token loads, the trigger opens the import popup; openSend waits for the token.
+		// The trigger is inert until the page's tokens load; openSend waits for the token itself.
 		await openSend(page)
 
 		// Two tokens: no search box, both rows listed, the current token marked selected.

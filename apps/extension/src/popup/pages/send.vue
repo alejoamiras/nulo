@@ -88,9 +88,26 @@ const awaitingNewToken = ref(false)
 const tokenService = new TokenServiceClient()
 tokenService.onTokenAdded.add(onTokenAdded)
 tokenService.onTokenDeleted.add(onTokenDeleted)
-function onTokenAdded(token) {
-	tokens.value.push(token)
+let tokenAddedDuringLoad = false
+/** The event names no profile and can come from any chain, so it only prompts a re-read for the
+ *  current identity; during an identity fetch, that fetch reads the tokens again instead. */
+function onTokenAdded() {
+	if (tokensLoading.value) {
+		tokenAddedDuringLoad = true
+		return
+	}
+	reloadTokens().catch(onReadFailed)
 }
+/** Bumped by each token re-read and identity fetch; a re-read lands only if none began after it. */
+let tokenReadSeq = 0
+async function reloadTokens() {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	const myRead = ++tokenReadSeq
+	const list = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	if (myRead !== tokenReadSeq) return
+	tokens.value = list
+}
+const onReadFailed = (error) => console.debug("send page read failed", { error })
 function onTokenDeleted(token) {
 	const idx = tokens.value.findIndex((t) => t.id === token.id)
 	if (idx === -1) return
@@ -110,6 +127,8 @@ function onTokenDeleted(token) {
 }
 
 const tokens = ref([])
+/** True while the current identity's tokens are being read; the token card waits on it. */
+const tokensLoading = ref(true)
 const activeToken = computed(() => tokens.value?.find((t) => t.id === cacheStore.activeTokenIdx))
 const isBlockedTransfer = computed(() => !activeToken.value?.hasPrivateTransfers && !activeToken.value?.hasPublicTransfers)
 
@@ -128,7 +147,8 @@ const tokenBalance = computed(() => {
 	return tokenBalances.value?.find((b) => b?.token.id === cacheStore.activeTokenIdx)
 })
 const tokenBalanceByType = computed(() => {
-	if (!tokenBalance.value) return 0
+	// A balance can land before its token (an event during an identity fetch).
+	if (!tokenBalance.value || !activeToken.value) return 0
 	return selectedSendType.value === "private"
 		? tokenBalance.value.privateBalance / 10 ** activeToken.value.decimals
 		: tokenBalance.value.publicBalance / 10 ** activeToken.value.decimals
@@ -503,51 +523,61 @@ function applyQueryContact() {
 	searchTerm.value = preselected.address
 }
 
-// P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
-// contacts) whenever the active appStore triple changes. Sequence
-// counter guards against stale-resolve races. Post-impl audit High #2:
-// the activeTokenIdx is global (cacheStore) — when the new token set
-// doesn't contain the old id, reset to tokens[0] so activeToken stays
-// resolvable. Re-run the send/receiver init logic so the form state
-// matches the new active token.
+// A newer identity fetch supersedes an older one, and only the current fetch ends `tokensLoading`.
+// `activeTokenIdx` is global (cache store): a new token set without it moves it to the first token,
+// or `activeToken` resolves to nothing. The send and receiver types are then re-validated for it.
 let identityFetchSeq = 0
 async function refetchIdentityScopedState() {
 	const mySeq = ++identityFetchSeq
+	const isCurrent = () => mySeq === identityFetchSeq
+	tokenReadSeq++
 	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) {
-		if (mySeq === identityFetchSeq) {
+		if (isCurrent()) {
 			tokens.value = []
 			tokenBalances.value = []
 			contacts.value = []
+			tokensLoading.value = false
 		}
 		return
 	}
-	const [t, tb, c] = await Promise.all([
-		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
-		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
-		contactService.getContacts(),
-	])
-	if (mySeq !== identityFetchSeq) return
-	tokens.value = t
-	tokenBalances.value = tb
-	contacts.value = c
-	applyQueryContact()
-
-	// Reset activeTokenIdx if the prior selection isn't in the new token
-	// set (e.g. profile switch). Without this, `activeToken` computed
-	// returns undefined and downstream send / fee-estimation flows break.
-	if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
-		cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+	const profileId = appStore.profile.id
+	const chainId = appStore.network.chainId
+	// Cleared before the read, so a switch never shows the previous identity's token or balance.
+	tokens.value = []
+	tokenBalances.value = []
+	tokensLoading.value = true
+	tokenAddedDuringLoad = false
+	try {
+		const [first, tb, c] = await Promise.all([
+			tokenService.getTokens(profileId, chainId),
+			tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
+			contactService.getContacts(),
+		])
+		let t = first
+		while (tokenAddedDuringLoad && isCurrent()) {
+			tokenAddedDuringLoad = false
+			t = await tokenService.getTokens(profileId, chainId)
+		}
+		if (!isCurrent()) return
+		tokens.value = t
+		tokenBalances.value = tb
+		contacts.value = c
+		applyQueryContact()
+		if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
+			cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+		}
+		initSendType()
+		initReceiverType()
+	} finally {
+		if (isCurrent()) tokensLoading.value = false
 	}
-	// Re-validate the form state for the (possibly new) active token.
-	initSendType()
-	initReceiverType()
 }
 
 watch(
 	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
 	() => {
 		closeReview()
-		refetchIdentityScopedState()
+		refetchIdentityScopedState().catch(onReadFailed)
 	},
 	{ immediate: false },
 )
@@ -557,8 +587,8 @@ onMounted(async () => {
 	void legal.refresh()
 	// Route mount fetch through the shared refetch so it inherits the
 	// sequence guard AND the null-triple defense AND the
-	// activeTokenIdx-rebind logic.
-	await refetchIdentityScopedState()
+	// activeTokenIdx-rebind logic. A refused read leaves the page as an empty load does.
+	await refetchIdentityScopedState().catch(onReadFailed)
 
 	// Query-param preselect survives the unmount of tokens/[id] (which clears
 	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
@@ -638,7 +668,7 @@ onBeforeUnmount(() => {
 						<span :class="$style.section_label">Select Asset</span>
 						<span :class="$style.section_meta">Network: {{ getChainName(appStore.network?.chainId) }}</span>
 					</Flex>
-					<SelectTokenCard :token="activeToken" />
+					<SelectTokenCard :token="activeToken" :loading="tokensLoading" />
 				</div>
 
 				<!-- Section: Transaction Amount -->

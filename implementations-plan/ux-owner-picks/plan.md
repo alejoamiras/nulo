@@ -761,7 +761,7 @@ Gate:
 - Pass: all exit 0; step 1 red before step 3 (logged); C7 kept only with its logged red on `dev`.
 - Layers: lint, types, unit, component; e2e-live-network if C7 is kept.
 
-### P3 · Send's loading token card (D3)
+### P3 · Send's loading token card (D3) ✓
 
 1. `SelectTokenCard.test.ts` (new): loading ignores a click and Enter and opens no popup;
    `aria-busy`, `aria-disabled`, `tabindex="-1"` and `data-state="loading"`; `loading` with a token
