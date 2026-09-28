@@ -37,6 +37,10 @@ Nulo becomes wallet-only (extension, playground, landing, their packages). `apps
 - **No takeover risk:** no record points at `pages.dev`, so neither name can be taken over.
 - **GATE-U's Send, waived by the owner:** testnet moved to v6 under the plan, and the Ethereum side works ("let's assume it works!").
 
+**Landing cut-over decision (owner, 2026-09-28):** 27. **L-cut runs before P1.** "Can we do the cut over now even before releasing? that would be ideal." L-cut had waited for P1 only because Workers Builds cannot build `main` until `main` carries `apps/landing/wrangler.jsonc`. So the agent built `main`'s landing by hand and deployed it, and `nulo.sh` moved onto the Worker serving the same bytes Pages served.
+- **The release pipeline stops touching the landing.** C2's follow-up removes `refresh-landing` and `verify-live`, and it merges before P1's promote so the release's publish chain never fires a deleted hook.
+- **Cost:** after P1's release, `nulo.sh` shows it from the next push to `main`, or from a dashboard re-run of the production build (decision 25).
+
 ## Architecture & Implementation
 
 ### 1. Wallet decoupling (nulo)
@@ -216,10 +220,17 @@ Owner pre-step: on **both** `testnet.tools.nulo.sh` (the live bridge) and `tools
 ### P1 — the closing release: promote, publish, landing cut-over · nulo `main`
 This is the plan's last nulo release, run as soon as N3 and N5b are merged and the landing Worker is connected to Workers Builds — it does not wait for unleashed or C1 (decision 15). If the owner promotes earlier for unrelated reasons, the removal simply rides along; P1 is still the release that carries N3 and performs L-cut. The agent opens the `release: promote dev → main (…)` PR and prepares everything; every merge is the owner's. `main`'s required-check cut-over has already run (its protection lists `quality-status`, `extension-network-e2e-status`, `extension-smoke-e2e-status`, read 2026-09-24), so nothing is pending there. Merge; confirm `apps/tools`, `contracts/bridge`, `packages/bridge-core` are gone from `main`. A promote is not a publication: merging it only makes release-please open the Release PR; the publish chain runs when **that** PR merges and is unstuck (`release.yml:133-139`), and it still refreshes **Pages** through its hook — expected. **L-cut happens only after that release has fully published** (Release PR merged → assets attached → landing refreshed on Pages and showing the new version), so `VERSION` in the gate below names the release that was just cut, not an older one. Then **L-cut**, in the order § 5 gives: the owner re-runs the Worker's production build of `main` in the dashboard, and it serves correctly on its `workers.dev` host (header parity and the released version checked there) → detach `nulo.sh` from Pages, remove the conflicting record → attach `nulo.sh` to the Worker → verify → one-line follow-up PR commits `routes` + `workers_dev: false`.
 **Validation gate** — after L-cut: `VERSION=<released version> bun scripts/release/verify-live-run.ts` → landing half green (the dashboard re-run before the attach is what makes it so). (`verify-live-run.ts:89` defaults `VERSION` to `""`, and `verify-live.ts:78` then matches *any* release-tag link — N5a makes an empty `VERSION` a hard failure, since it is already editing that file.); `curl -sI https://nulo.sh` header parity with the pre-cut capture.
+**L-cut outcome (2026-09-28, pulled before P1 by decision 27).** `main`'s landing (`95eb2902`) was built by hand and deployed to `nulo-landing`. Its 11 key paths were byte-identical to what Pages served. The apex CNAME to `nulo.pages.dev` was deleted and `nulo.sh` attached to the Worker; there was no downtime, and `www` still answers 301. The follow-up commits `routes` and `workers_dev: false`. Two steps were left for the owner: removing the Pages project's stale `nulo.sh` entry (the session's permission layer refused a domain change), and deleting the `nulo` project.
 
 ### C2 — delete · Cloudflare (**Irreversible #4**)
 No soak (decision 16): it runs as soon as its preconditions hold — C1's and P1's gates green (in either order), GATE-U's live checks re-run and still passing, the release published, `nulo.sh` served by the Worker, and no DNS record pointing at any `*.pages.dev` name. Delete `nulo-tools-testnet`, `nulo-tools-mainnet`, then the `nulo` Pages project; delete secret `CLOUDFLARE_PAGES_DEPLOY_HOOK` (the tools hook went at F0); a follow-up PR removes `refresh-landing` (the job and its `status` needs), `refresh-landing.yml`, `verify-live`'s landing check and the runbook text naming them — with no hook, a post-release landing check could only go red; owner revokes the API token.
 **Validation gate** — `wrangler pages project list` shows none of the three; all three hostnames still answer as in C1/P1; `gh secret list` shows neither secret.
+**C2 progress (2026-09-28):**
+- `nulo-tools-mainnet` is deleted; its 1,227 deployments were purged first, because Cloudflare refuses to delete a project with many.
+- `nulo-tools-testnet` is being purged.
+- The follow-up that removes `refresh-landing`, `refresh-landing.yml` and `verify-live` is open.
+- The old `tools` Access app is deleted. Its reusable "Only Foundation & Labs" policy now guards `unleashed-mainnet.alejo-amiras.workers.dev`.
+- Pending: the `nulo` project, after the owner clears its `nulo.sh` entry, and the deploy-hook secret, after the follow-up merges.
 
 ## Delivery — arcs → PRs
 

@@ -9,9 +9,10 @@
 		// they get index.html with a 200, as on Pages, never a 404.
 		"not_found_handling": "single-page-application"
 	},
-	// No `routes` while Pages still holds nulo.sh: Cloudflare refuses a Custom Domain over that record,
-	// so a route-bearing config could never finish a production build. The cut-over adds the route.
-	"workers_dev": true,
+	// nulo.sh is the only production host. Branch previews stay on (Workers Builds uploads one per
+	// non-production branch); a preview is a separate version URL, never the production host.
+	"routes": [{ "pattern": "nulo.sh", "custom_domain": true }],
+	"workers_dev": false,
 	"preview_urls": true,
 	// Privacy Policy § 5.5 lists every request record the Developer can see; Workers Logs is not one.
 	"observability": { "enabled": false }

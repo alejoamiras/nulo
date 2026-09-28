@@ -18,7 +18,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 | `scripts/fetch-latest-release.ts`, `scripts/ensure-release-json.ts` | Prebuild fetch of the latest GitHub release; the no-release stub for typecheck/test. |
 | `public/` | `_headers` (CSP and caching, applied by Cloudflare), favicon, robots, sitemap. |
 | `vite.config.ts` | Vite config, including `preview.headers` from `_headers`. |
-| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. No `routes` until `nulo.sh` moves off Pages. |
+| `wrangler.jsonc` | The `nulo-landing` Worker: static assets from `dist/`, unknown paths served `index.html` (released wallets deep-link to `/forms/*`), Workers Logs off. One custom domain, `nulo.sh`; no workers.dev host; previews on for non-production branches. |
 
 ## Scripts
 
@@ -39,7 +39,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 - **Two design rules.** Copy, buttons and panels sit on solid plates; section headings sit on the grain with a dark halo. The grain runs behind every section uninterrupted.
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
-- **Independent ship.** Builds and deploys from `main` without the extension: Cloudflare Pages serves `nulo.sh` today, refreshed after each stable release by its deploy hook because `prebuild` reads the latest release. The `nulo-landing` Worker takes over at the cut-over and builds from Git pushes only (Workers Builds, no hook), so from then on a release reaches the page with the next push to `main`. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
+- **Independent ship.** Builds and deploys from `main` without the extension: the `nulo-landing` Worker serves `nulo.sh` and builds from Git pushes only (Workers Builds, no hook). `prebuild` reads the latest release, so a release reaches the page with the next push to `main`, or when the production build is re-run in the Cloudflare dashboard. CI lints, typechecks and unit-tests this package on every PR, and builds it when the PR touches it or `legal/`.
 
 ## Legal pages
 
