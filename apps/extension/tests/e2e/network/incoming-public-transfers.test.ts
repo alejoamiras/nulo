@@ -4,7 +4,8 @@
  * A second account (the token minter) delivers PUBLIC receipts to the wallet account and the
  * extension must, WITHOUT a manual refresh:
  *   1. pub→pub (`transfer_public_to_public`)  → a `tx-incoming-card` row with the "Public → Public"
- *      kind chip, AND the token's PUBLIC balance auto-updates (the D4 outbox-drain pin).
+ *      kind chip that History shows as "TST" and "+10", AND the token's PUBLIC balance auto-updates
+ *      (the D4 outbox-drain pin).
  *   2. priv→pub (`transfer_private_to_public`) → a "Private → Public" chip (`from == MAGIC`).
  *   3. pub→priv to us (`transfer_public_to_private`) → the private note arm shows "Received
  *      privately", sender redacted (D7 dropped — no public receipt, since the public leg is `to ==
@@ -32,6 +33,16 @@ async function waitForKindChip(page: Awaited<ReturnType<typeof openPopup>>, labe
 		{ timeout, polling: 1_000 },
 		label,
 	)
+}
+
+/** The incoming row whose kind chip reads `label`, as its title and amount; null while none renders. */
+function readIncomingRow(label: string): { title: string; amount: string } | null {
+	const card = [...document.querySelectorAll('[data-testid="tx-incoming-card"]')].find(
+		(c) => (c.querySelector('[data-testid="tx-incoming-kind-chip"]')?.textContent || "").trim() === label,
+	)
+	if (!card) return null
+	const text = (testId: string) => (card.querySelector(`[data-testid="${testId}"]`)?.textContent || "").trim()
+	return { title: text("activity-title"), amount: text("activity-amount") }
 }
 
 test.skipIf(!hasConfig)(
@@ -65,6 +76,12 @@ test.skipIf(!hasConfig)(
 			await transferPublicTokens(wallet, aztecConfig.tokenAddress, minter, walletAddress, 10n * D, feeOptions)
 			await waitForKindChip(page, "Public → Public")
 			console.log("✓ pub→pub receipt row + 'Public → Public' chip")
+
+			// History names the receipt's token and its amount on the local network, whose chain id is 0.
+			await expect
+				.poll(() => page.evaluate(readIncomingRow, "Public → Public"), { timeout: 60_000, interval: 500 })
+				.toEqual({ title: "TST", amount: "+10" })
+			console.log("✓ History's pub→pub row reads TST +10")
 
 			// The wallet started at 1000 public (tokenReadyExtension). D4: it auto-refreshes to 1010
 			// with NO manual refresh click — just the scheduler's scan → outbox → drain.
