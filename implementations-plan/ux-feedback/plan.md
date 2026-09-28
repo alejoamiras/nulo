@@ -327,7 +327,8 @@ Firefox network suite then exited 0 on `9900de28`, in three shards covering its 
 once each, and `9900de28`'s code outside `implementations-plan/` is `df1849a2`'s. The codex
 session's fifth round, on the records, had found them calling that gate passed before this
 rerun ("the records overstate completion of the required gate"). Its sixth: "Material findings:
-**no**."
+**no**." `send-picker`'s failure fits a race in the test, which now waits for the Send page's
+token (Follow-ups).
 
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
@@ -468,19 +469,18 @@ Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks and § P5, b4 § P8, b
   a fixture-retry repro. Seen as #702's Chrome smoke (run 36271135334), where the self-close is
   the supported hypothesis and a browser disconnect is not excluded; the evidence is in this
   program's `lessons/final-pass.md`.
-- `network/send-picker` fails on Firefox with no ALT row visible within 15 s of the click on the
-  picker's trigger (`send-picker.test.ts:35`), after Home showed the ALT balance (line 28).
-  Dev's nightly failed the same way without this stack (run 36230567767 on `b15f5218`,
-  2026-09-26); so did this stack's #703 (run 36271135463) and its top's local gate on
-  `df1849a2` (2026-09-28). There the file then passed three runs alone, and the whole suite
-  passed on `9900de28`, in three shards, with the same code outside `implementations-plan/`.
-  The stack's `Popup.vue` changes are not ruled out. The file-scoped `tokenReadyExtension`
-  makes each retry deploy and import another ALT into the same wallet, so a retry's errors
-  (`['ALT', 'ALT', 'TST']`, the search box) follow from the first failure. The mechanism is not
-  known: the picker may not have opened, its balance request may have failed or stalled, or its
-  rows may have been filtered out or not rendered. The background page's throttled timers
-  (`FIREFOX.md`) are one candidate. Logging the picker's request and response times, its state
-  and the page's visibility in a failing run could help tell these apart.
+- The Send page's token card can be tapped before the page has loaded its tokens. For that
+  moment it reads "No available tokens" and "Import token", and a tap opens the import popup,
+  even in a wallet that holds tokens. A local probe measured 12 to 26 ms on Chrome and 52 to
+  206 ms on Firefox, with and without this stack. A loading state instead is a UI change for the
+  owner. `network/send-picker`'s Firefox timeouts fit that window (dev's nightly, run
+  36230567767, 2026-09-26; this stack's #702 and #703; its top's local gate on `df1849a2`), and
+  the probe reproduced the race with the test's own steps on `dev`. The test now waits for the
+  page's token; the probe and the fix are in batch 4's `lessons/phase-8.md`.
+- Once an attempt of `network/send-picker` has imported ALT, its retries cannot pass: the
+  file-scoped `tokenReadyExtension` keeps the wallet, so each imports another ALT. The nightly's
+  first retry failed on the rows, `['ALT', 'ALT', 'TST']`, and its second, at four rows, on the
+  search box.
 - Two unit tests can time out at vitest's 5 s default on a loaded host, because each makes a cold
   dynamic import inside the timed test body.
   - `apps/extension/src/wallet/services/wallet-sdk/content-message-relay.test.ts` imports the

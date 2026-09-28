@@ -214,3 +214,13 @@ claiming a successful single-sandbox run." Its minor and two nits were taken: th
 unsharded run is recorded, the six local checks are no longer said to run on both browsers, and
 the six `test:all` runs are counted before the `9900de28` gate. The final pass's rule now says
 shards are allowed, as it suggested.
+
+## `send-picker`, reproduced
+
+CI's Firefox network suite on #702 then failed `send-picker` once more. A probe reproduced a race
+in the test that fits it and the earlier failures: the Send page's token trigger opens the import
+popup until the page's token loads, and the test clicked it after waiting only for the trigger.
+On `dev`, one of the probe's ten clicks made the test's way on Firefox landed in that window. No
+failed run recorded which popup opened. The test now waits for the token, on arc 4, where the
+probe, the fix and its review are (`../b4-snackbar-rows-arrivals/lessons/phase-8.md`). The plan's
+Follow-ups hold what the card does in that window, for the owner.
