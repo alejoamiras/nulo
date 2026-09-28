@@ -67,14 +67,25 @@ async function expectNoToggle(page: Page, what: string): Promise<void> {
 		return w.__busySeen === true
 	})
 	if (busy) {
-		await page.waitForFunction(
-			(s: string) => document.querySelector(s)?.getAttribute("aria-busy") !== "true",
-			{ timeout: 600_000, polling: 500 },
-			sel("registry-toggle-submit"),
-		)
-		await settleClosedPopup(page, "registry-toggle-submit")
+		console.log(`[popup-escape-layered] ${what} started the registry toggle; letting it finish`)
+		await waitForToggleToFinish(page)
 	}
 	expect(busy, `${what} started the registry toggle`).toBe(false)
+}
+
+/** Polls in short reads: a proving transaction outlasts the connection's protocol timeout, which
+ *  bounds a single `waitForFunction`. */
+async function waitForToggleToFinish(page: Page): Promise<void> {
+	const deadline = Date.now() + 780_000
+	while (Date.now() < deadline) {
+		const busy = await page.evaluate(
+			(s: string) => document.querySelector(s)?.getAttribute("aria-busy") === "true",
+			sel("registry-toggle-submit"),
+		)
+		if (!busy) break
+		await new Promise((resolve) => setTimeout(resolve, 2_000))
+	}
+	await settleClosedPopup(page, "registry-toggle-submit").catch(() => false)
 }
 
 type EnterRecord = { on: string | null; repeat: boolean }
