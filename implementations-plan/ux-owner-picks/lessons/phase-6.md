@@ -31,3 +31,27 @@ Each was checked against the code before it was accepted.
 4. **Nit**, `incoming-public-transfers.test.ts`: the header touched in P2 kept a plan path, a phase
    and design-item tags. Fixed in the header and one body comment; the log strings are untouched.
    Commit `a442d5aa`.
+
+## Round 2 (HEAD `e3942dde`): request changes, 2 new findings on the round 1 fix, both accepted
+
+1. **Major**, `FeeSettingsCard.vue`: outside Send the address edit cleared the selection but never
+   reached the card's FPC list, so when a failed gas read recovered, the recommit ran the default
+   over the store's stale list and re-selected the old protocol row, whose id now names the custom
+   contract. Fixed: `onFpcUpdated` records the edit in `fpcEdits` for every origin, as Send
+   already did. Red first: after the recovery the card emitted `{ kind: "fpc", fpcId: "s1" }`.
+2. **Minor**, `FeeSettingsCard.vue`: `chosenUnasked` survived an account switch, so an edit that
+   landed while the next account loaded dropped that account's saved pick, and the reconcile then
+   took the drop for a user pick. Fixed: a saved or locked prefill clears the mark. Red first: the
+   card emitted nothing where the saved pick was due.
+
+Both in commit `2d0b5e88`. Deletions outside Send are left as they were: a deleted row is never a
+default (protocol rows cannot be deleted), so the default rule does not reach them.
+
+## The merge of dev
+
+The coordinator asked for `origin/dev` (`0fa5a2cb`) to be merged after round 2: merge commit
+`9454664e`. `implementations-plan/index.md` conflicted (dev closed ux-feedback's line); dev's line
+stays with this plan's under it. The five `ux-owner-picks` entries in `follow-ups.md` § "ux-feedback:
+taken by a follow-up plan" are deleted in the merge: D1 to D5 resolve each. `fee-helpers.ts`
+merged cleanly; dev's change there is `FEE_JUICE_BRIDGE_URL`'s default, which the sponsor default
+does not read (the get-gas nudge's conditions are unchanged).
