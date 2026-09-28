@@ -30,10 +30,8 @@ import {
 } from "./method-scope-checkers"
 
 // ── Frozen snapshots ──────────────────────────────────────────────────
-// Hand-transcribed from the pre-refactor tables on `dev` (the 18-method matrix
-// in implementations-plan/method-metadata-registry/plan.md). These are the
-// contract the derivations must reproduce EXACTLY — latent quirks included.
-// Sources: capability-map.ts:18,21; dispatcher.ts:251,272,286; scope-enforcement.ts:379.
+// Written by hand, independent of the registry: the derivations must reproduce
+// them exactly, latent quirks included.
 
 const FROZEN_CAPABILITY_MAP: Record<string, string> = {
 	createAuthWit: "accounts",
