@@ -92,22 +92,22 @@ whenever it is chosen (a funding probe is a follow-up).
 
 ## UI impact
 
-Every surface below is **sign-off pending**: built with O1 on the incoming row only until the owner
-answers it and O2 to O4 as recommended, then shown to the owner on one page with its screenshots
-(Chrome and Firefox), at most about five calls and one blanket sign-off.
+Every surface below is **sign-off pending**: built with the owner's picks, O1 (a) to O4 (a)
+(§ Asks → owner), then shown to the owner on one page with its screenshots (Chrome and Firefox), at
+most about five calls and one blanket sign-off.
 
 | # | Surface | Before → after | Item |
 |---|---|---|---|
 | 1 | Incoming row (Home "Recent transactions", History) | 123,456,789 TST reads "+123,456," (the 8-character cut, en-US) → "+123.45M"; past 999 trillion whole tokens, "+>999T" (O1 text); an amount whose whole part fits is unchanged | D1, O1 |
 | 2 | Incoming row, an amount whose whole part fits but whose cut ends on a separator | "+999,999." → "+999,999" (the trim rides the same `{ compact: true }` option, so no other surface gets it) | D1 |
-| 3 | The other capped amounts whose token the wallet knows (outgoing Home rows' in-flight and awaiting amounts, terminal journal rows, the journal detail page, Home token rows, the token page split and hero, the snack) | unchanged; **only if the owner answers O1 (a)**: the compact form and the trim ("1,234." → "1,234" on Home's token-row split, "123,456." → "123,456" in the snack) | D1, O1 |
+| 3 | The other capped amounts whose token the wallet knows (outgoing Home rows' in-flight and awaiting amounts, terminal journal rows, the journal detail page, Home token rows, the token page split and hero, the snack) | the compact form and the trim, O1 (a): "1,234." → "1,234" on Home's token-row split, "123,456." → "123,456" in the snack, a whole part past the cap as K/M/B/T ("123.45M" at 8 and 10 characters, "123.4M" at 6); the snack still prints the full amount when the whole part does not fit | D1, O1 |
 | 4 | History's received rows | "Token", "+1,000,00", no dollar value (seen on batch 4's parity page) → "TST", "+1,000", "≈ $1,000.00", as Home | D2 |
 | 5 | A received row whose token is not known (Home and History) | "Token" and the raw integer cut to 8 characters → "Token" and no amount or dollar value, as terminal journal rows already do (`journal-state.ts:312-323`); a receipt whose `tokenId` went stale (token removed and re-added) now matches by contract and reads its symbol, as its detail page already does (`received/[id].vue:95-99`) | D2 |
 | 6 | History's failed-send rows after a cold open | no amount (the token map is empty) → the amount, as Home | D2 |
 | 7 | Send, token card before the tokens load (12 to 26 ms on Chrome, 52 to 206 ms on Firefox, measured in batch 4), and after a profile, network or account switch while Send is open | "No available tokens" / "Import token", a tap opens the import popup; on a switch, the previous account's token → disabled, `aria-busy`, a tap does nothing; per O2's recommendation an empty row, and after 300 ms a skeleton of the token row; on a switch the send-type and amount sections wait with it, since they need a token | D3, O2 |
 | 8 | Send, token card and the keyboard | not reachable by Tab → one Tab stop between the recipient field and the amount; Enter or Space acts as a tap; out of the Tab path while loading | D3 |
 | 9 | Default fee sponsor with no saved choice: Send, the execute window's fee card, Revoke authorizations, authwit registry | the first sponsor in storage order, so a hand-added one can win → Nulo's sponsor; where Nulo's is missing, per O4's recommendation no sponsor is chosen automatically (Send's walk goes on to its next payer or holds; the other three cards open on "Select method", as they do today on a network with no sponsor rows) | D4, O4 |
-| 10 | Journal detail page of a failed wallet send ("What happened" and "Outcome") | "Reported by app" / "The connected app reported an error." → O3's wording, recommended "Send failed" / "Your wallet couldn't finish this send. If it was submitted, it may still land." | D5, O3 |
+| 10 | Journal detail page of a failed wallet send ("What happened" and "Outcome") | "Reported by app" / "The connected app reported an error." → O3 (a) in the decision page's wording, "Send failed" / "Your wallet couldn't finish this send. If it was already submitted, it may still go through." | D5, O3 |
 
 The compact form truncates like every other amount (Ask C2), so the brief's example "123.46M"
 reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary entry is added.
@@ -117,8 +117,8 @@ reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary 
 ### D1 · Compact amounts (`apps/extension/src/utils/amount.ts`)
 
 - **Where**: `balanceFormatted` gains a fourth parameter `opts?: { compact?: boolean }`. Only
-  `TransactionIncomingCard.vue:40` passes `{ compact: true }` (O1 (b), built until O1 is answered);
-  every other caller is untouched and keeps today's cut byte for byte.
+  `TransactionIncomingCard.vue:40` passes `{ compact: true }` under O1 (b); the owner picked O1 (a),
+  which adds the eleven calls below. Every other caller keeps today's cut byte for byte.
 - **Rule**, only when `opts.compact` and `length` are set and `fullValue.length > length`, after the
   small-value hint (`:100-109`), which keeps priority, so dust still reads `<0.000001`:
   - the formatted whole part (with the locale's separators) fits in `length`: slice as today, then
@@ -134,7 +134,7 @@ reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary 
   - `whole ≥ 1000^5` → `>999T` (O1 text): the same "the true value is past what fits" hint as
     `<0.000001`.
   - At `length` 8 the K tier is never reached (`999,999` fits).
-- **O1 (a)**, if the owner picks it: `{ compact: true }` added at the eleven other known-token calls
+- **O1 (a)**, picked: `{ compact: true }` added at the eleven other known-token calls
   (recon § Every capped caller, the rows marked "known"), none at the six that guess decimals.
   `formatSnackAmount` then passes it too and gets the trim; it keeps printing the full amount when
   the whole part does not fit, since its `startsWith(whole)` test is false for the compact form.
@@ -417,7 +417,7 @@ reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary 
   switch never shows the previous account's token to act on, and a token event, which names no
   profile, can no longer put another profile's or chain's token on the page.
 - **Failure copy (D5).** The new copy blames neither the connected app nor the network, and says a
-  submitted send may still land, since a `transfer` failure can follow `sendTx`.
+  submitted send may still go through, since a `transfer` failure can follow `sendTx`.
 - **Logging.** The composable keeps Home's single `console.debug` with `{ error }`; Send's three new
   catches log the same way at `debug`; nothing new reaches `warn` or `error`.
   `log-payload-ban.test.ts` runs in `test:all`.
@@ -519,7 +519,14 @@ reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary 
   but what the node then does with it, funded or not, was not established. The plan relies only on
   the unfunded outcome. A focused run against a chain without the sponsor would settle the other.
 
-### Asks → owner (sent, answers pending; until answered, O1 builds the incoming row only and O2 to O4 are built as recommended)
+### Asks → owner (answered)
+
+Owner picks on the decision page, 2026-09-28 (confirmed in chat: "done"): O1 (a), O2 (a), O3 (a),
+O4 (a). O3 (a) is built in the page's wording, which is what the owner saw and picked: "Send
+failed" / "Your wallet couldn't finish this send. If it was already submitted, it may still go
+through." The owner then asked whether the wallet could check what happened instead of hedging:
+(a) ships here as built, and the check is the next plan after this arc (owner, 2026-09-28: "Add it
+as an immediate follow-up maybe after this arc?").
 
 - **O1 · Where the compact form applies (D1).** Built: the incoming row only. The same cut drops
   whole digits on the other capped surfaces (17 calls in 10 files, recon § Every capped caller).
@@ -796,7 +803,7 @@ Gate:
   preservation guard.
 - Layers: lint, types, unit, component.
 
-### P4 · Default sponsor and wallet-send copy (D4, D5)
+### P4 · Default sponsor and wallet-send copy (D4, D5) ✓
 
 1. Failing first:
    - `fee-helpers.test.ts` `defaultSponsor`: `[hand, nulo, hand2]` → nulo; `[hand, hand2]` →
@@ -935,7 +942,8 @@ Codex is advisory: it cannot override the owner's picks, CLAUDE.md or this scope
   - The protocol sponsor is stored without a deployment or funding check
     (`fpc/service.ts:163-173`), and the estimate cannot tell (Fact 16); a funding probe would let
     the card say so before the person waits for a proof the network then refuses.
-  - Only if O1 is (b): the compact form on the other known-token capped surfaces.
+  - Next after this arc, by the owner's call (2026-09-28): a failed send checks the network instead
+    of hedging.
 
 ## Seeds (DRAFT, finalized after approval)
 
