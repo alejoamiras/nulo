@@ -6,8 +6,9 @@
 #
 #   rehearse.sh <workdir> [phase ...]
 #
-# Phases run in order, each logging to <workdir>/report/rehearse-<phase>.log; name phases to resume
-# from a failure.
+# The checkout must be installed (`bun install`). Phases run in order, each logging to
+# <workdir>/report/rehearse-<phase>.log; name phases to resume from a failure. `history` compares
+# HEAD with $REHEARSE_BASE (default `main`, the audited import) and refuses to compare it with itself.
 # Toolchains: Foundry from $FOUNDRY_BIN, halmos from $EXTRACTION_TOOLS, Aztec CLIs under ~/.aztec/versions.
 set -euo pipefail
 
@@ -25,6 +26,9 @@ shift
 [ $# -gt 0 ] || set -- "${PHASES[@]}"
 repo=$work/unleashed
 report=$work/report
+base=${REHEARSE_BASE:-main}
+[ -d "$repo/node_modules" ] || die "$repo is not installed: run bun install there first"
+mkdir -p "$report"
 export PATH="${FOUNDRY_BIN:-$HOME/.cache/unleashed-rehearsal/foundry/bin}:${EXTRACTION_TOOLS:-$HOME/.local/share/extraction-tools/bin}:$PATH"
 
 # The Aztec line a crate's Nargo.toml pins, as _bridge-contracts.yml resolves it.
@@ -177,9 +181,11 @@ phase_contracts() {
 
 phase_history() {
   [ -z "$(git -C "$repo" status --porcelain -- apps/tools/tests)" ] || die "apps/tools/tests has uncommitted changes"
-  # The e2e specs may differ from main only in specifiers: undoing the renames and formatting both
-  # sides must give identical text, so a changed literal or statement cannot hide in a reflow.
-  (cd "$repo" && bun -e '
+  [ "$(git -C "$repo" rev-parse "$base^{commit}")" != "$(git -C "$repo" rev-parse HEAD)" ] ||
+    die "HEAD is $base itself; set REHEARSE_BASE to the import HEAD should be compared with"
+  # The e2e specs may differ from the import only in specifiers: undoing the renames and formatting
+  # both sides must give identical text, so a changed literal or statement cannot hide in a reflow.
+  (cd "$repo" && BASE=$base bun -e '
     const run = (cmd, input) => {
       const r = Bun.spawnSync(cmd, { stdin: input === undefined ? "ignore" : new Blob([input]) })
       if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")} exited ${r.exitCode}`)
@@ -190,10 +196,11 @@ phase_history() {
     const format = (file, text) =>
       formats.test(file) ? run(["node_modules/.bin/biome", "format", `--stdin-file-path=${file}`], text) : text
     const unrename = (text) => text.replaceAll("@unleashed/", "@nulo/").replaceAll("@alejoamiras/nulo-", "@nulo/")
-    const changed = run(["git", "diff", "--name-only", "main", "HEAD", "--", "apps/tools/tests"]).split("\n").filter(Boolean)
-    const bad = changed.filter((f) => format(f, run(["git", "show", `main:${f}`])) !== format(f, unrename(run(["git", "show", `HEAD:${f}`]))))
+    const base = process.env.BASE
+    const changed = run(["git", "diff", "--name-only", base, "HEAD", "--", "apps/tools/tests"]).split("\n").filter(Boolean)
+    const bad = changed.filter((f) => format(f, run(["git", "show", `${base}:${f}`])) !== format(f, unrename(run(["git", "show", `HEAD:${f}`]))))
     if (bad.length) { console.error("changed beyond specifiers:", bad); process.exit(1) }
-    console.log(`history: ${changed.length} spec file(s) differ from main only in specifiers`)
+    console.log(`history: ${changed.length} spec file(s) differ from ${base} only in specifiers`)
   ')
   # Captured first: under pipefail, `grep -q` exiting on its match can SIGPIPE git log into a false failure.
   local renames
@@ -207,7 +214,7 @@ phase_history() {
 phase_audit() {
   mkdir -p "$report/workspace"
   python3 "$here/audit.py" "$repo" "$report/workspace" "$here/audit-allowlist.txt" "$here/audit-allowlist-workspace.txt"
-  bash "$here/upstream-scan.sh" "$repo"
+  python3 "$here/upstream-scan.py" "$repo"
 }
 
 for phase in "$@"; do
@@ -215,9 +222,10 @@ for phase in "$@"; do
   echo "rehearse: $phase"
   # A function called from a condition runs with errexit off, so each phase gets its own shell.
   set +e
-  (set -e; "phase_$phase") > >(tee "$report/rehearse-$phase.log") 2>&1
-  status=$?
+  (set -e; "phase_$phase") 2>&1 | tee "$report/rehearse-$phase.log"
+  statuses=("${PIPESTATUS[@]}")
   set -e
-  [ "$status" -eq 0 ] || die "$phase failed ($status); see $report/rehearse-$phase.log"
+  [ "${statuses[1]}" -eq 0 ] || die "$phase: could not write $report/rehearse-$phase.log"
+  [ "${statuses[0]}" -eq 0 ] || die "$phase failed (${statuses[0]}); see $report/rehearse-$phase.log"
 done
 echo "rehearse: all requested phases passed"
