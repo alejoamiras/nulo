@@ -259,9 +259,12 @@ test.skipIf(!hasConfig)(
 			try {
 				await ctx2?.close()
 			} finally {
-				rmSync(profileDir, { recursive: true, force: true })
-				// The doctored file embeds the wallet's REAL (local-chain test) master-key.
-				rmSync(dirname(filePath), { recursive: true, force: true })
+				try {
+					rmSync(profileDir, { recursive: true, force: true })
+				} finally {
+					// The doctored file embeds the wallet's REAL (local-chain test) master-key.
+					rmSync(dirname(filePath), { recursive: true, force: true })
+				}
 			}
 		}
 	},
