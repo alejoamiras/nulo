@@ -6,7 +6,7 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 same_family_leg: Opus 5.5 subagent
 eli5_mode: artifact
-eli5: (one Artifact covers the program's four follow-up plans; its URL is filled in here once published)
+eli5: https://claude.ai/artifact/AwdUMz4EYvyU2Kgoh9W9Td
 branch: fix/grant-check-address-case
 worktree: a harness-created agent worktree (its path is recorded in lessons/phase-1.md)
 program: the ux-feedback follow-ups, four independent PRs off dev (this is the security-and-privacy one)
@@ -198,7 +198,7 @@ invalid values.
 | `apps/extension/src/popup/windows/capabilities/build-items.test.ts` | one case: private events held in another case add no row |
 | `apps/extension/tests/e2e/network/authwit-variants.test.ts` | `connect` takes an optional token address; a fourth test (Ask C-7) |
 | `implementations-plan/grant-check-address-case/` + `implementations-plan/index.md` | the plan's first commit |
-| `implementations-plan/follow-ups.md` | four entries (§ Follow-ups this plan records) |
+| `implementations-plan/follow-ups.md` | three entries (§ Follow-ups this plan records) |
 
 ### Non-obvious mechanics
 
@@ -625,7 +625,7 @@ Gate:
   review (Outcome 3).
 - Layers: typecheck and lint, unit, component.
 
-### P4 · The wire proof and the full gate
+### P4 · The wire proof and the full gate ✓
 
 1. The new e2e test green on Chrome and Firefox; commit it:
    `test(permissions): a scope in upper case signs a covered call intent without a window`.
