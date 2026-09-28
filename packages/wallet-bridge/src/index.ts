@@ -21,6 +21,7 @@ export * from "./dispatcher"
 export * from "./external-id"
 export * from "./fee"
 export * from "./fee-payer"
+export * from "./field-address"
 export {
 	authorizationsEffective,
 	coversAnyContract,

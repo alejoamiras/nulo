@@ -15,7 +15,8 @@ const addr = (hex: string) => ({ toString: () => hex })
 
 const ADDR_A = "0x1111111111111111111111111111111111111111111111111111111111111111"
 const ADDR_B = "0x2222222222222222222222222222222222222222222222222222222222222222"
-const CLASS_A = "0xaaaa"
+const CLASS_A = `0x${"0c".repeat(32)}`
+const CLASS_B = `0x${"0d".repeat(32)}`
 
 // ── Pass-through (no scope dimension) ─────────────────────────────────
 
@@ -228,7 +229,7 @@ describe("getContractClassMetadata", () => {
 
 	test("class ID not in list throws", () => {
 		const grants = [grant({ type: "contractClasses", classes: [CLASS_A], canGetMetadata: true })]
-		expect(() => enforceScope("getContractClassMetadata", [addr("0xbbbb")], grants)).toThrow(/Scope violation/)
+		expect(() => enforceScope("getContractClassMetadata", [addr(CLASS_B)], grants)).toThrow(/Scope violation/)
 	})
 })
 
@@ -647,5 +648,132 @@ describe("grantPublicAuthwit transaction-scope gate", () => {
 
 	test("no transaction grants → pass-through (type-level enforcement handles it)", () => {
 		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_A, "m")], [])).not.toThrow()
+	})
+})
+
+// ── A listed contract, compared by value ──────────────────────────────
+
+describe("a contract in another case", () => {
+	// Hex letters, so a case flip changes the spelling; a leading zero, so dropping it is a
+	// shorter spelling of the same value. Targets are plain strings, as the wire carries them.
+	const A = `0x${"0a1b2c3d".repeat(8)}`
+	const A_UPPER = `0x${A.slice(2).toUpperCase()}`
+	const A_MIXED = `0x${[...A.slice(2)].map((c, i) => (i % 2 === 0 ? c.toUpperCase() : c)).join("")}`
+	const B = `0x${"0e1f2a3b".repeat(8)}`
+	const listed = (contract: string, fn: string) => [{ contract, function: fn }]
+	const calls = (to: string) => [{ calls: [{ to, name: "transfer" }] }]
+
+	const methods: Array<[string, string, (contract: string) => Capability, (target: string) => unknown[]]> = [
+		["sendTx", "sendTx", (c) => ({ type: "transaction", scope: listed(c, "transfer") }), calls],
+		["simulateTx", "simulateTx", (c) => ({ type: "simulation", transactions: { scope: listed(c, "transfer") } }), calls],
+		["profileTx", "profileTx", (c) => ({ type: "simulation", transactions: { scope: listed(c, "transfer") } }), calls],
+		[
+			"executeUtility",
+			"executeUtility",
+			(c) => ({ type: "simulation", utilities: { scope: listed(c, "balance_of") } }),
+			(t) => [{ to: t, name: "balance_of" }],
+		],
+		[
+			"grantPublicAuthwit",
+			"grantPublicAuthwit",
+			(c) => ({ type: "transaction", scope: listed(c, "transfer") }),
+			(t) => [ADDR_A, { caller: ADDR_B, contract: t, method: "transfer", args: [] }],
+		],
+		[
+			"createAuthWit, call intent",
+			"createAuthWit",
+			(c) => ({ type: "transaction", scope: listed(c, "transfer") }),
+			(t) => [ADDR_A, { caller: ADDR_B, call: { to: t, name: "transfer" } }],
+		],
+		[
+			"createAuthWit, inner-hash consumer",
+			"createAuthWit",
+			(c) => ({ type: "transaction", scope: listed(c, "*") }),
+			(t) => [ADDR_A, { consumer: t, innerHash: `0x${"01".repeat(32)}` }],
+		],
+		[
+			"registerContract",
+			"registerContract",
+			(c) => ({ type: "contracts", contracts: [c], canRegister: true }),
+			(t) => [{ address: t }],
+		],
+		["getContractMetadata", "getContractMetadata", (c) => ({ type: "contracts", contracts: [c], canGetMetadata: true }), (t) => [t]],
+		["isTokenRegistered", "isTokenRegistered", (c) => ({ type: "contracts", contracts: [c], canGetMetadata: true }), (t) => [t]],
+		[
+			"getContractClassMetadata",
+			"getContractClassMetadata",
+			(c) => ({ type: "contractClasses", classes: [c], canGetMetadata: true }),
+			(t) => [t],
+		],
+		[
+			"getPrivateEvents",
+			"getPrivateEvents",
+			(c) => ({ type: "data", privateEvents: { contracts: [c] } }),
+			(t) => [{ eventName: "Transfer" }, { contractAddress: t }],
+		],
+	]
+
+	test.each(methods)("%s: a listed contract passes a call to it in another case", (_name, method, grantFor, argsFor) => {
+		for (const [scoped, target] of [
+			[A_UPPER, A],
+			[A, A_UPPER],
+			[A_MIXED, A_UPPER],
+		]) {
+			expect(() => enforceScope(method, argsFor(target), [grant(grantFor(scoped))]), `${scoped} → ${target}`).not.toThrow()
+		}
+	})
+
+	const otherValues: Array<[string, string]> = [
+		["another contract", B],
+		["no prefix", A.slice(2)],
+		["an upper-case prefix", `0X${A.slice(2)}`],
+		["a Cyrillic а for an a", A.replace("a", "а")],
+		["a fullwidth Ａ for an a", A.replace("a", "Ａ")],
+		["a character before it", `x${A}`],
+		["itself twice", `${A}${A}`],
+		["a trailing newline", `${A}\n`],
+		["its leading zero dropped", `0x${A.slice(3)}`],
+	]
+
+	test.each(methods)("%s: a listed contract refuses any other value or spelling", (_name, method, grantFor, argsFor) => {
+		for (const [what, target] of otherValues) {
+			expect(() => enforceScope(method, argsFor(target), [grant(grantFor(A))]), what).toThrow(/Scope violation/)
+		}
+	})
+
+	test("a listed value that is not an address matches nothing, itself included", () => {
+		const tx = [grant({ type: "transaction", scope: listed("0xtok", "transfer") })]
+		expect(() => enforceScope("sendTx", calls("0xtok"), tx)).toThrow(/Scope violation/)
+		const contracts = [grant({ type: "contracts", contracts: ["0xtok"], canGetMetadata: true })]
+		expect(() => enforceScope("getContractMetadata", ["0xtok"], contracts)).toThrow(/Scope violation/)
+	})
+
+	test("a call intent is covered by a scope listing its contract in another case, never without the prefix", () => {
+		const grants = [grant({ type: "transaction", scope: listed(A_UPPER, "transfer") })]
+		const intent = (to: string) => ({ caller: ADDR_B, call: { to, name: "transfer" } })
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(intent(A), grants)).toBe(true)
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(intent(A.slice(2)), grants)).toBe(false)
+	})
+})
+
+// ── Wildcard scopes read no address ───────────────────────────────────
+//
+// A wildcard returns before the target is read, so what it admits is decided by each method's
+// own parser downstream; these pin that the checkers add no validation of their own.
+
+describe("wildcard scopes", () => {
+	test("a pattern on any contract passes a sendTx target without its prefix", () => {
+		const grants = [grant({ type: "transaction", scope: [{ contract: "*", function: "transfer" }] })]
+		expect(() => enforceScope("sendTx", [{ calls: [{ to: "0a".repeat(32), name: "transfer" }] }], grants)).not.toThrow()
+	})
+
+	test("contracts on any contract pass an isTokenRegistered target that is not an address", () => {
+		const grants = [grant({ type: "contracts", contracts: "*", canGetMetadata: true })]
+		expect(() => enforceScope("isTokenRegistered", ["not-an-address"], grants)).not.toThrow()
+	})
+
+	test("private events from any contract pass a malformed contractAddress", () => {
+		const grants = [grant({ type: "data", privateEvents: { contracts: "*" } })]
+		expect(() => enforceScope("getPrivateEvents", [{}, { contractAddress: "0xnot-hex" }], grants)).not.toThrow()
 	})
 })

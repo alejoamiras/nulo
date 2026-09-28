@@ -569,7 +569,7 @@ Gate:
   every pre-existing test passes.
 - Layers: unit, component, network e2e (Chrome).
 
-### P2 · One key for every contract comparison
+### P2 · One key for every contract comparison ✓
 
 1. `field-address.ts`: move `FIELD_ADDRESS` and `isFieldAddress` from `dispatcher.ts:314-319`;
    add `fieldAddressKey` and `sameFieldAddress` with TSDoc stating the contract (the invalid-pair
