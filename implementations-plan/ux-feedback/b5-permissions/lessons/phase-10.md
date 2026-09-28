@@ -252,10 +252,10 @@ Captured at `8e2d7eee` in both browsers:
 
 ### P10.2 to P10.6 at `d893ae95`
 
-Two clean detached checkouts at `d893ae95`, every e2e file at retry 0: Chrome prover on, with the
-`@requires-proverless` files run proverless, and Firefox proverless. The flake bar is `cap-window`
-and the three network files P9 changed (`cap-request-accounts`, `cap-request-basic`,
-`cap-request-rerequest`), three runs each.
+Two clean detached checkouts at `d893ae95`: the network files at retry 0, Chrome prover on, with
+the `@requires-proverless` files run proverless, and Firefox proverless; smoke at its config's two
+retries, which no test used. The flake bar is `cap-window` and the three network files P9 changed
+(`cap-request-accounts`, `cap-request-basic`, `cap-request-rerequest`), three runs each.
 
 | Step | Chrome | Firefox |
 |---|---|---|

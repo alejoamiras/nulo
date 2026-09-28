@@ -49,10 +49,10 @@ round 3), read it and the four no-change judgments listed there:
 
 ## The stack-top gate
 
-Two clean detached checkouts at `d893ae95`, every e2e file at retry 0: Chrome prover on, with the
-`@requires-proverless` files run proverless, and Firefox proverless. The flake bar is `cap-window`
-and the three network files P9 changed (`cap-request-accounts`, `cap-request-basic`,
-`cap-request-rerequest`), three runs each.
+Two clean detached checkouts at `d893ae95`: the network files at retry 0, Chrome prover on, with
+the `@requires-proverless` files run proverless, and Firefox proverless; smoke at its config's two
+retries, which no test used. The flake bar is `cap-window` and the three network files P9 changed
+(`cap-request-accounts`, `cap-request-basic`, `cap-request-rerequest`), three runs each.
 
 | Step | Chrome | Firefox |
 |---|---|---|
@@ -128,9 +128,9 @@ findings: no". Both follow-ups are in the plan.
 
 ## The stack-top gate, on the fix
 
-Two clean detached checkouts at `490ca181`, every e2e file at retry 0: Chrome prover on, with the
-`@requires-proverless` files run proverless, and Firefox proverless. There is no flake bar here;
-the fix's own is in arc 4's lessons.
+Two clean detached checkouts at `490ca181`: the network files at retry 0, Chrome prover on, with
+the `@requires-proverless` files run proverless, and Firefox proverless; smoke at its config's two
+retries, which no test used. There is no flake bar here; the fix's own is in arc 4's lessons.
 
 | Step | Chrome | Firefox |
 |---|---|---|
