@@ -592,7 +592,7 @@ Validation gate:
   hand and recorded in the lessons).
 - Layers: lint, typecheck, component, integration.
 
-### P2 · C3 · the two unit tests
+### P2 · C3 · the two unit tests ✓
 
 1. `content-message-relay.test.ts`: the async `beforeEach` that resets, stubs and awaits the import
    with a 30 s hook budget; `freshRelay` reads the imported module and keeps registration and its

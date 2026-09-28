@@ -10,8 +10,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 type Listener = (message: unknown, sender: unknown) => undefined
 let chromeListeners: Listener[]
+let relay: typeof import("./content-message-relay")
 
-beforeEach(() => {
+// The import is loading, not behaviour, so it runs here on its own budget: under host load a cold
+// import alone can outlast a test's 5 s, and the hook's 10 s default too.
+beforeEach(async () => {
 	vi.resetModules()
 	vi.useRealTimers()
 	chromeListeners = []
@@ -20,13 +23,13 @@ beforeEach(() => {
 		...(globalThis as any).chrome,
 		runtime: { onMessage: { addListener: (fn: Listener) => chromeListeners.push(fn) } },
 	})
-})
+	relay = await import("./content-message-relay")
+}, 30_000)
 
-async function freshRelay() {
-	const mod = await import("./content-message-relay")
-	mod.registerContentMessageRelay()
+function freshRelay() {
+	relay.registerContentMessageRelay()
 	expect(chromeListeners).toHaveLength(1)
-	return { ...mod, dispatch: chromeListeners[0] }
+	return { ...relay, dispatch: chromeListeners[0] }
 }
 
 const topFrameSender = (origin = "https://dapp.example") => ({ frameId: 0, origin, tab: { id: 7, url: origin } })
@@ -39,8 +42,8 @@ const discovery = (requestId = "r1") => ({
 })
 
 describe("content-message-relay", () => {
-	test("post-attach: content messages forward synchronously; exactly once", async () => {
-		const { attachContentListener, dispatch } = await freshRelay()
+	test("post-attach: content messages forward synchronously; exactly once", () => {
+		const { attachContentListener, dispatch } = freshRelay()
 		const seen: unknown[] = []
 		attachContentListener((m) => {
 			seen.push(m)
@@ -51,8 +54,8 @@ describe("content-message-relay", () => {
 		expect(seen).toHaveLength(1)
 	})
 
-	test("pre-attach: a validated top-frame discovery buffers and flushes FIFO on attach, exactly once", async () => {
-		const { attachContentListener, dispatch } = await freshRelay()
+	test("pre-attach: a validated top-frame discovery buffers and flushes FIFO on attach, exactly once", () => {
+		const { attachContentListener, dispatch } = freshRelay()
 		dispatch(discovery("a"), topFrameSender())
 		dispatch(discovery("b"), topFrameSender("https://other.example"))
 
@@ -70,8 +73,8 @@ describe("content-message-relay", () => {
 		expect(seen2).toHaveLength(0)
 	})
 
-	test("non-content messages are never buffered and never consumed", async () => {
-		const { attachContentListener, dispatch } = await freshRelay()
+	test("non-content messages are never buffered and never consumed", () => {
+		const { attachContentListener, dispatch } = freshRelay()
 		dispatch({ type: "nulo:open-toolbar-popup" }, topFrameSender())
 		dispatch({ origin: "background", type: "x" }, topFrameSender())
 
@@ -82,8 +85,8 @@ describe("content-message-relay", () => {
 		expect(seen).toHaveLength(0)
 	})
 
-	test("pre-attach admission: subframe, malformed, and non-discovery content messages take no slot", async () => {
-		const { attachContentListener, dispatch } = await freshRelay()
+	test("pre-attach admission: subframe, malformed, and non-discovery content messages take no slot", () => {
+		const { attachContentListener, dispatch } = freshRelay()
 		dispatch(discovery("iframe"), { frameId: 3, origin: "https://evil.example", tab: { id: 7 } })
 		// Malformed per the envelope schema: sessionId must be a string when present.
 		dispatch({ origin: "content-script", type: "discovery-request", sessionId: 42 }, topFrameSender())
@@ -97,8 +100,8 @@ describe("content-message-relay", () => {
 		expect(seen).toHaveLength(0)
 	})
 
-	test("caps mirror F-04: 4 per origin, 32 global, reject-new", async () => {
-		const { attachContentListener, dispatch, CONTENT_RELAY_GLOBAL_CAP, CONTENT_RELAY_PER_ORIGIN_CAP } = await freshRelay()
+	test("caps mirror F-04: 4 per origin, 32 global, reject-new", () => {
+		const { attachContentListener, dispatch, CONTENT_RELAY_GLOBAL_CAP, CONTENT_RELAY_PER_ORIGIN_CAP } = freshRelay()
 		// Per-origin: 6 from one origin → only 4 admitted.
 		for (let i = 0; i < 6; i++) dispatch(discovery(`same-${i}`), topFrameSender("https://one.example"))
 		// Fill toward the global cap from distinct origins.
@@ -113,9 +116,9 @@ describe("content-message-relay", () => {
 		expect(seen).toHaveLength(CONTENT_RELAY_GLOBAL_CAP)
 	})
 
-	test("TTL: entries older than the residence budget are dropped at flush (the composed freshness window stays ≤ the dApp's 60s)", async () => {
+	test("TTL: entries older than the residence budget are dropped at flush (the composed freshness window stays ≤ the dApp's 60s)", () => {
 		vi.useFakeTimers()
-		const { attachContentListener, dispatch, CONTENT_RELAY_MAX_AGE_MS } = await freshRelay()
+		const { attachContentListener, dispatch, CONTENT_RELAY_MAX_AGE_MS } = freshRelay()
 		// Pin the COMPOSED boundary arithmetic, not just the local constant: the
 		// SDK re-stamps freshness at flush, so end-to-end staleness is
 		// (relay residence + the downstream 55s cutoff). The budget must keep
@@ -134,8 +137,8 @@ describe("content-message-relay", () => {
 		expect(seen.map((m) => m.requestId)).toEqual(["fresh"])
 	})
 
-	test("idempotent re-attach: the newest listener wins for live traffic", async () => {
-		const { attachContentListener, dispatch } = await freshRelay()
+	test("idempotent re-attach: the newest listener wins for live traffic", () => {
+		const { attachContentListener, dispatch } = freshRelay()
 		const first: unknown[] = []
 		const second: unknown[] = []
 		attachContentListener((m) => {

@@ -1,3 +1,5 @@
+import "@nulo/wallet-sdk-schema-patch/register"
+import { WalletSchema } from "@aztec/aztec.js/wallet"
 import { describe, test, expect } from "vitest"
 import {
 	METHOD_REGISTRY,
@@ -205,13 +207,9 @@ describe("method-descriptors — structural invariants", () => {
 // ── Exhaustiveness: silent omission is a BUILD FAILURE ─────────────────
 
 describe("method-descriptors — exhaustiveness (the silent-omission killer)", () => {
-	test("(i) every patched WalletSchema method has a descriptor, and vice versa", async () => {
-		// Import the production schema-patch side-effect FIRST (established pattern,
-		// dispatcher.test.ts:682) so the 3 Nulo-custom methods are present on
-		// WalletSchema. WITHOUT this import the custom trio would be invisible — the
-		// import order is load-bearing for the guarantee.
-		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+	test("(i) every patched WalletSchema method has a descriptor, and vice versa", () => {
+		// WalletSchema carries the three Nulo-custom methods only through the schema-patch import
+		// at the top of this file.
 		const schemaMethods = new Set(Object.keys(WalletSchema))
 		const registryMethods = new Set(Object.keys(METHOD_REGISTRY))
 
