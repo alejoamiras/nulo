@@ -336,10 +336,8 @@ const handleUseEmbedded = () => {
 }
 
 const onFpcUpdated = (fpc) => {
-	if (props.originPrivacy !== null) {
-		fpcEdits.set(fpc.id, fpc)
-		return
-	}
+	fpcEdits.set(fpc.id, fpc)
+	if (props.originPrivacy !== null) return
 	// Replace the full snapshot so address-edit changes propagate to the
 	// dropdown trigger and any persisted-fee-method round-trips below.
 	// Object replacement (not deep mutation) keeps the derived computed
@@ -545,6 +543,8 @@ const prefillSelection = (saved) => {
 	if (props.originPrivacy !== null) return
 	if (props.lockedMethod) selectedMethod.value = lockedOption()
 	else if (saved[props.account.address]) selectedMethod.value = saved[props.account.address]
+	else return
+	chosenUnasked = false
 }
 
 const runInit = async () => {

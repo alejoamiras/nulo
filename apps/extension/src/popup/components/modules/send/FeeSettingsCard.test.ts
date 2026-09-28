@@ -446,6 +446,60 @@ describe("FeeSettingsCard — the default sponsor, with no saved pick", () => {
 		expect(lastEmittedSettings(w)).toEqual(after)
 		w.unmount()
 	})
+
+	const EDITED = { id: "s1", type: 1, name: "Sponsored", address: `0x${"ab".repeat(32)}`, isProtocol: false }
+	const lastFpcHandler = async (name: "onFpcUpdated") => {
+		const { FpcServiceClient } = await import("@/wallet/services/fpc/client")
+		const fpc = vi.mocked(FpcServiceClient).mock.results.at(-1)?.value as Record<typeof name, { add: ReturnType<typeof vi.fn> }>
+		return fpc[name].add.mock.calls[0]?.[0] as (f: unknown) => void
+	}
+
+	test("a default dropped for its edited address stays dropped when a failed gas read recovers", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsored", isProtocol: true }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			;(await lastFpcHandler("onFpcUpdated"))(EDITED)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("after an account switch, the new account's saved pick follows an edit made while it loads", async () => {
+		const NULO = { id: "s1", type: 1, name: "Sponsored", isProtocol: true }
+		mocks.getFpcs.mockResolvedValue([NULO])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		storageBacking[FEE_METHOD_LS_KEY] = { "0xother": { type: "fpc", fpc: NULO } }
+		const gas = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
+		mocks.getGasBalances.mockReturnValueOnce(gas.promise)
+		await w.setProps({ account: { id: "a2", address: "0xother" } })
+		await flushPromises()
+
+		;(await lastFpcHandler("onFpcUpdated"))(EDITED)
+		gas.resolve({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		w.unmount()
+	})
 })
 
 describe("FeeSettingsCard — user actions", () => {
