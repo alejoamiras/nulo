@@ -372,7 +372,7 @@ since none needs a specific sponsor today.
   and the only `src/` edit is a template attribute.
 - **Supply chain.** No dependency added or bumped; vitest stays at 4.1.10.
 - **Least privilege, crypto, CI tokens.** Not touched.
-- **Upstream issue.** The drafted vitest issue contains only a minimal repro: no repo path, no
+- **Upstream report.** The drafted vitest comment contains only a minimal repro: no repo path, no
   host detail, nothing from the wallet.
 
 ## Assumptions
@@ -649,7 +649,8 @@ Validation gate:
      issue drafted.
 4. The upstream issue draft with a standalone repro (a test-scoped fixture whose setup throws
    once, `retry: 2`) in `lessons/phase-3.md` (X5). The repro is run once on vitest 4.1.10 to
-   confirm three attempts, the last two with the fixture undefined.
+   confirm three attempts, the last two with the fixture undefined. Built as a confirmation
+   comment instead: vitest-dev/vitest#11237 already tracks the defect, with fix PR #11238 open.
 
 Assumptions: I1, I2; X4, X5 as approved; Facts 1–8.
 
@@ -824,7 +825,7 @@ conflict is surfaced, not resolved by it.
 - Commits: conventional, lower-case, signed; one per phase at least, loop fixes separate.
 - PR body: the five items with their before/after mechanism, C1 split into "trigger fixed" and
   "runner defect open"; the probe results, flake bars and P6's per-leg counts from the lessons;
-  "No visible change" for C5; the drafted vitest issue's location; the follow-ups. Then
+  "No visible change" for C5; the drafted vitest comment's location; the follow-ups. Then
   `gh pr checks --watch`.
 - Merge order with `ux-owner-picks`: either; whichever lands second rebases (§ recon, collision
   risks).
@@ -833,8 +834,10 @@ conflict is surfaced, not resolved by it.
 
 - C4's owner questions, unchanged: whether an import should skip preloaded contracts as it skips
   protocol ones, and whether it should wait on public networks at all.
-- The vitest fixture retry defect: the owner files the drafted issue, or declines; recheck on any
-  vitest bump.
+- The vitest fixture retry defect is already reported upstream (vitest-dev/vitest#11237, fix PR
+  #11238 open), so there is no issue to file: the owner posts the confirmation comment drafted in
+  `lessons/phase-3.md`, or skips it. On the vitest release that ships the fix, recheck C2: a
+  failed file-scoped setup then re-runs on retry instead of being rethrown.
 - `holdings`, `home-cap` and `pin-to-home` share `send-picker`'s retry defect (Fact 10). The fix is
   the same file-scoped setup fixture, plus a reset of the pin and sort state each attempt changes.
 
