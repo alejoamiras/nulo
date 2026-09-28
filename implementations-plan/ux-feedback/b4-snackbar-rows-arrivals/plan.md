@@ -2047,8 +2047,10 @@ activates and one left locked, and each goes on to `/onboarding/learn` with no s
 
 Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers.
 
-Passed on the stack top `df1849a2` ([lessons](lessons/phase-8.md)). Firefox's one red network
-file, the known `send-picker` flake, then passed three runs alone.
+Passed on the stack top ([lessons](lessons/phase-8.md)). On `df1849a2`, every Local gates row
+exited 0 but Firefox's network suite, where `send-picker` failed. The whole Firefox network
+suite then exited 0 on `9900de28`, in three shards covering its 102 files once each, and
+`9900de28`'s code outside `implementations-plan/` is `df1849a2`'s.
 
 ## Arc boundary
 

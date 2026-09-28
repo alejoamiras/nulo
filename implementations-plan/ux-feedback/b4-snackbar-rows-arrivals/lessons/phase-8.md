@@ -36,7 +36,7 @@ The codex session at high (`01a0e7ab-…`) read the three changes in its first t
 
 ## The gate
 
-The stack-top gate on `df1849a2` is in
+The stack-top gate, on `df1849a2` and then Firefox's whole network suite on `9900de28`, is in
 [batch 3's P5 log](../../b3-tooltips-glossary/lessons/phase-5.md). `onboarding-import` and
-`import-paths` passed in both browsers' smoke suites. Firefox's one red network file, the known
-`send-picker` flake, and its three passing reruns are in that log.
+`import-paths` passed in both browsers' smoke suites. Firefox's one red network file on
+`df1849a2`, `send-picker`, and its reruns are in that log.
