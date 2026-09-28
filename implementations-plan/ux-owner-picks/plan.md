@@ -760,6 +760,10 @@ Gate:
    test, never by a product hook, then released; the pub→pub row's `activity-title` is the token
    symbol and its `activity-amount` is `+10`). Run it on `dev`'s code first and log the red. If it
    is not red there on three runs, delete the block and both testids and log why.
+   As built (`lessons/phase-2.md` § C7): the hold and the cold open were dropped. The block pins
+   History naming the receipt's token on the local chain, whose id 0 made `dev` red on each of three
+   runs; it is not identity-race coverage, which `activity.test.ts` carries (the cold open, the
+   network switch, the journal-read rejection).
 
 Gate:
 - Commands: lint; `typecheck:all`; from `apps/extension`,
