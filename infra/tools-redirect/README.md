@@ -29,6 +29,6 @@ Cloudflare refuses a Custom Domain over a record another project holds, and both
 
 Between steps 2 and 3 no record points at a `*.pages.dev` target; resolvers may still serve the old CNAME from cache, which is harmless while the Pages projects exist and stay claimed.
 
-**Rollback** is the same sequence reversed: comment out `routes` and redeploy (or remove the two Custom Domains in the dashboard) so the Worker releases the names and their records, add each name back as a custom domain on its Pages project, and wait for Pages to report it active — re-adding a domain that left Pages can take a while to reactivate.
+**Rollback** is the same sequence reversed, with one difference: a deploy never detaches a Custom Domain (wrangler reconciles domains only when `routes` lists some, so dropping them leaves both attached). Remove the two Custom Domains explicitly — the Worker's Domains & Routes settings, or `DELETE /accounts/{id}/workers/domains/{domain_id}` — and confirm their records are gone from the zone's DNS; then add each name back as a custom domain on its Pages project and wait for Pages to report it active, which can take a while for a domain that left Pages.
 
 Verify: `bun run test:live`, or by hand `curl -sI "https://tools.nulo.sh/a/b?c=1"` is a `302` with `location: https://unleashed-mainnet.alejo-amiras.workers.dev/a/b?c=1` and `cache-control: no-store`, and the same for `testnet.tools.nulo.sh` and the testnet origin.

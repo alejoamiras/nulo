@@ -5,7 +5,7 @@ export const EXPECTED: Readonly<Record<string, string>> = {
 	"testnet.tools.nulo.sh": "https://unleashed-testnet.alejo-amiras.workers.dev",
 }
 
-// Paths that turn a naive `new URL(path, origin)` or string concatenation into another origin.
+// Authority-confusion and header-injection regression inputs.
 export const HOSTILE_PATHS = [
 	"//evil.example/x",
 	"/\\evil.example",

@@ -5,37 +5,37 @@ import { ENCODED_SUFFIX, EXPECTED, HOSTILE_PATHS } from "./expected"
 // requests, so only this sees what Cloudflare's ingress actually hands it. Gated on
 // TOOLS_REDIRECT_LIVE=1 — it needs the network and the cut-over done.
 const REQUEST_MS = 10_000
-const TEST_MS = 60_000
+// Requests run sequentially, so a test's budget grows with its request count.
+const budget = (requests: number) => REQUEST_MS * (requests + 1)
 const get = (url: string) => fetch(url, { redirect: "manual", signal: AbortSignal.timeout(REQUEST_MS) })
+const SUFFIXES = ["/a/b?c=1", ENCODED_SUFFIX]
 
 describe.skipIf(process.env.TOOLS_REDIRECT_LIVE !== "1")("the deployed redirect hosts", () => {
-	test(
-		"each host answers a 302 to its origin with the encoded path and query intact, never cached",
-		async () => {
-			for (const [host, origin] of Object.entries(EXPECTED)) {
-				for (const suffix of ["/a/b?c=1", ENCODED_SUFFIX]) {
+	for (const [host, origin] of Object.entries(EXPECTED)) {
+		test(
+			`${host} answers a 302 to its origin with the encoded path and query intact, never cached`,
+			async () => {
+				for (const suffix of SUFFIXES) {
 					const res = await get(`https://${host}${suffix}`)
 					expect(res.status).toBe(302)
 					expect(res.headers.get("location")).toBe(`${origin}${suffix}`)
 					expect(res.headers.get("cache-control")).toBe("no-store")
 					expect(res.headers.get("cf-mitigated")).toBeNull()
 				}
-			}
-		},
-		TEST_MS,
-	)
+			},
+			budget(SUFFIXES.length),
+		)
 
-	test(
-		"no hostile path moves a redirect off its origin",
-		async () => {
-			for (const [host, origin] of Object.entries(EXPECTED)) {
+		test(
+			`no hostile path moves ${host}'s redirect off its origin`,
+			async () => {
 				for (const path of HOSTILE_PATHS) {
 					const res = await get(`https://${host}${path}`)
 					expect(res.status).toBe(302)
 					expect(new URL(res.headers.get("location") as string).origin).toBe(origin)
 				}
-			}
-		},
-		TEST_MS,
-	)
+			},
+			budget(HOSTILE_PATHS.length),
+		)
+	}
 })
