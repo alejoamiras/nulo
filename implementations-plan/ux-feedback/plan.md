@@ -310,7 +310,8 @@ in user-visible text this program adds; the empty-value glyph "—" stays where 
 After batch 5's arc loops converge: a fresh codex session over the net diff from `origin/dev` to
 the stack top, asking for seams between batches, duplication across them, and drift from the
 spec, with the rules below; loop until clean. Then every row of [Local gates](#local-gates) on
-the stack top, smoke and network on both browsers, the full network suite (no file filter).
+the stack top, smoke and network on both browsers, the full network suite (no file filter: every
+file, in one run or in shards that cover it once each).
 
 **Record** ([lessons/final-pass.md](lessons/final-pass.md)). Round 1 raised two minors: the
 comment fix landed on arc 5a, and the account row's ring went to the owner. The stack then moved
@@ -320,12 +321,13 @@ confidence: high". Round 3, on arc 5b's fold fix `d893ae95`: "no new material fi
 with smoke and the full network suite on both browsers; the Firefox canaries wait for CI on the
 stack top's head. After the owner's sign-off (2026-09-28), a codex session read its three
 changes and arc 4's pin in four rounds, the last "No material findings or further nits. The
-previous coverage gap is closed." At `df1849a2`, every Local gates row exited 0 on both
-browsers but Firefox's network suite, where `send-picker` failed (Follow-ups). The whole
+previous coverage gap is closed." At `df1849a2`, the six local checks and both browsers'
+suites exited 0 except Firefox's network suite, where `send-picker` failed (Follow-ups). The whole
 Firefox network suite then exited 0 on `9900de28`, in three shards covering its 102 files
 once each, and `9900de28`'s code outside `implementations-plan/` is `df1849a2`'s. The codex
 session's fifth round, on the records, had found them calling that gate passed before this
-rerun ("the records overstate completion of the required gate").
+rerun ("the records overstate completion of the required gate"). Its sixth: "Material findings:
+**no**."
 
 ## Post-implementation rules (every codex prompt, initial and resumed)
 
@@ -487,9 +489,10 @@ Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks and § P5, b4 § P8, b
     then adds a second listener there, and that test fails too.
   - `packages/wallet-bridge/src/method-descriptors.test.ts`'s exhaustiveness test imports
     `@nulo/wallet-sdk-schema-patch/register`, then `@aztec/aztec.js/wallet`.
-  - Seen on this stack's tops on 2026-09-28 in 2 of 6 `test:all` runs, on a 192-core host whose load
-    average read 130 to 220 when checked. The one rerun, on `49a42355`, passed, and so did both
-    runs on `df1849a2`. The stack changes neither test nor the modules whose imports timed out.
+  - Seen on this stack's tops on 2026-09-28 in 2 of the 6 `test:all` runs before the `9900de28`
+    gate, on a 192-core host whose load average read 130 to 220 when checked. The one rerun, on
+    `49a42355`, passed, and so did both runs on `df1849a2`. The stack changes neither test nor the
+    modules whose imports timed out.
   - A possible mitigation, not validated: warm each import in a `beforeAll` with its own
     timeout, keeping the schema patch's import first. The relay test resets modules before
     every test, so a trial must show that each test still gets a fresh module while the
