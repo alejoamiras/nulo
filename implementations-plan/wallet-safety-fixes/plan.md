@@ -945,7 +945,7 @@ Gate:
 - `bun run lint`, `bun run typecheck:all`, `bun run test:all` exit 0.
 - Layers: typecheck, lint, unit.
 
-### P5 · The journal id comment (A5)
+### P5 · The journal id comment (A5) ✓
 
 1. `operation-journal/service.ts:289-291` as § A5.
 
