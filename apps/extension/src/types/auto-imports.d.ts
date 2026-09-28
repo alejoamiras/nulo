@@ -154,6 +154,7 @@ declare global {
   const isReadonly: typeof import('vue').isReadonly
   const isReceiptAboveDustThreshold: typeof import('../utils/incoming-dust').isReceiptAboveDustThreshold
   const isRef: typeof import('vue').isRef
+  const isRepeatOrComposing: typeof import('../composables/usePopupEntity').isRepeatOrComposing
   const isShallow: typeof import('vue').isShallow
   const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
   const isValidAmount: typeof import('../utils/amount').isValidAmount
@@ -655,6 +656,7 @@ declare module 'vue' {
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
     readonly isReceiptAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isReceiptAboveDustThreshold']>
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
+    readonly isRepeatOrComposing: UnwrapRef<typeof import('../composables/usePopupEntity')['isRepeatOrComposing']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
     readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
     readonly isValidAmount: UnwrapRef<typeof import('../utils/amount')['isValidAmount']>

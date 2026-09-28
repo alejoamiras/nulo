@@ -787,7 +787,7 @@ red run in its lessons file before the fix. A test listed as a pin is green befo
 
 Gate: `bun run lint`, `bun run test:ci-gating` exit 0 (the plans check reads the new directory).
 
-### P1 · No Enter confirms a transaction popup from another control (A1)
+### P1 · No Enter confirms a transaction popup from another control (A1) ✓
 
 1. Red, in `RevokeAuthwitsPopup.test.ts` and `ChangeAuthwitsRegistryPopup.test.ts`, mounted with
    `attachTo: document.body`, fees set. A control is pressed with `pressOn` (the `keydown`, then

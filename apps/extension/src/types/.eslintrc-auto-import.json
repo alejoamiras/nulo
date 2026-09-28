@@ -302,6 +302,7 @@
     "isReadonly": true,
     "isReceiptAboveDustThreshold": true,
     "isRef": true,
+    "isRepeatOrComposing": true,
     "isShallow": true,
     "isUnknownRow": true,
     "isValidAmount": true,

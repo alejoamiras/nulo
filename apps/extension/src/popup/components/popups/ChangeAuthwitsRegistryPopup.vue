@@ -11,7 +11,7 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
-import { usePopupEntity } from "@/composables/usePopupEntity"
+import { isRepeatOrComposing, usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -48,13 +48,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleChangeRegistry() {
-	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
-	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	// Full-lifetime submit latch, handler-owned: every route (click, any future caller) self-checks
+	// here; the button's :disabled is defense-in-depth, not the guard.
 	if (isLoading.value) return
-	// `isAllowedToExecute` is a computed ref (always truthy as a ref object) —
-	// must dereference `.value` for the guard to actually work. Pre-fix this
-	// guard was a no-op, letting Enter / programmatic clicks fire the handler
-	// before `feeSettings.value` was set. Codex audit-codex-rootcause-8 #3.
 	if (!isAllowedToExecute.value) return
 
 	try {
@@ -78,19 +74,13 @@ async function handleChangeRegistry() {
 	}
 }
 
-// No input to focus here: a global Enter confirms, gated by the handler's own latch and fee check.
-usePopupEntity(
-	() => props.show,
-	{
-		submit: handleChangeRegistry,
-		onShow: registry.fetch,
-		onHide: () => {
-			registry.reset()
-			authwitsService.disconnect()
-		},
+usePopupEntity(() => props.show, {
+	onShow: registry.fetch,
+	onHide: () => {
+		registry.reset()
+		authwitsService.disconnect()
 	},
-	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
-)
+})
 </script>
 
 <template>
@@ -126,9 +116,11 @@ usePopupEntity(
 				/>
 
 				<Flex v-snack-footer align="center" direction="column" gap="12">
+					<!-- A held or composing Enter that first reaches this button idle must not send. -->
 					<Button
 						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"
+						@keydown.enter="isRepeatOrComposing($event) && $event.preventDefault()"
 						variant="primary"
 						size="medium"
 						wide

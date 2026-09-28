@@ -228,7 +228,10 @@ const onKeydown = (event) => {
 		close()
 	}
 	if (event.key === "Enter") {
-		if (document.activeElement?.getAttribute("aria-disabled") !== "true") document.activeElement?.click()
+		const active = document.activeElement
+		// Focus can rest outside the menu (the trap sets no initial focus), on the host's controls.
+		const inMenu = dropdown.value?.$el.contains(active)
+		if (inMenu && active.getAttribute("aria-disabled") !== "true") active.click()
 	}
 
 	if (event.key === "ArrowDown") focusAdjacentItem(1)
