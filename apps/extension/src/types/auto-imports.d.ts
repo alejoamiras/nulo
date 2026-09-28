@@ -257,6 +257,7 @@ declare global {
   const toRefs: typeof import('vue').toRefs
   const toRestoreError: typeof import('../utils/restore-error').toRestoreError
   const toValue: typeof import('vue').toValue
+  const tokenForReceipt: typeof import('../utils/received-display').tokenForReceipt
   const transferLabel: typeof import('../utils/token-transfer-vocabulary').transferLabel
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
@@ -307,6 +308,7 @@ declare global {
   const useProfileNameField: typeof import('../composables/useProfileNameField').useProfileNameField
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
+  const useScopedTokens: typeof import('../composables/useScopedTokens').useScopedTokens
   const useSecretClipboardCopy: typeof import('../composables/useSecretClipboardCopy').useSecretClipboardCopy
   const useSecretCountdown: typeof import('../composables/useSecretCountdown').useSecretCountdown
   const useSeedStatus: typeof import('../composables/useSeedStatus').useSeedStatus
@@ -412,6 +414,9 @@ declare global {
   // @ts-ignore
   export type { ProfileNameFieldOptions, ValidateOptions, ProfileNameField } from '../composables/useProfileNameField'
   import('../composables/useProfileNameField')
+  // @ts-ignore
+  export type { TokenScope, UseScopedTokensOptions, UseScopedTokensResult } from '../composables/useScopedTokens'
+  import('../composables/useScopedTokens')
   // @ts-ignore
   export type { UseSecretCountdownOptions } from '../composables/useSecretCountdown'
   import('../composables/useSecretCountdown')
@@ -756,6 +761,7 @@ declare module 'vue' {
     readonly toRefs: UnwrapRef<typeof import('vue')['toRefs']>
     readonly toRestoreError: UnwrapRef<typeof import('../utils/restore-error')['toRestoreError']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
+    readonly tokenForReceipt: UnwrapRef<typeof import('../utils/received-display')['tokenForReceipt']>
     readonly transferLabel: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['transferLabel']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
@@ -806,6 +812,7 @@ declare module 'vue' {
     readonly useProfileNameField: UnwrapRef<typeof import('../composables/useProfileNameField')['useProfileNameField']>
     readonly useRoute: UnwrapRef<typeof import('vue-router')['useRoute']>
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>
+    readonly useScopedTokens: UnwrapRef<typeof import('../composables/useScopedTokens')['useScopedTokens']>
     readonly useSecretClipboardCopy: UnwrapRef<typeof import('../composables/useSecretClipboardCopy')['useSecretClipboardCopy']>
     readonly useSecretCountdown: UnwrapRef<typeof import('../composables/useSecretCountdown')['useSecretCountdown']>
     readonly useSeedStatus: UnwrapRef<typeof import('../composables/useSeedStatus')['useSeedStatus']>

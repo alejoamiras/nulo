@@ -63,4 +63,42 @@ describe("modules/activity/TransactionsList", () => {
 		expect(w.find('[data-stub="TransactionTerminalCard"]').attributes("data-to")).toBe("/popup/journal/op-1")
 		expect(w.find('[data-stub="TransactionIncomingCard"]').attributes("data-to")).toBe("/popup/received/r1")
 	})
+
+	test("a transfer row and a received row take their token from `tokens`", () => {
+		const token = { id: 7, contract: "0xc", symbol: "TST", decimals: 6 }
+		const op = {
+			id: "op-2",
+			kind: "transfer",
+			tokenId: 7,
+			amountRaw: "1500000",
+			terminalAt: 1,
+			createdAt: 1,
+			progress: { stage: "cancelled" },
+		}
+		const inc = { id: "r3", kind: "note", tokenId: 7, contract: "0xc", amountRaw: "2000000", txHash: "0xh" }
+		const w = mount(TransactionsList, {
+			props: {
+				rows: [
+					{ type: "journal", key: "journal:op-2", sortKey: 2000, op },
+					{ type: "incoming", key: "inc:r3", sortKey: 1000, inc },
+				],
+				tokens: [token],
+			},
+			global: {
+				stubs: {
+					Flex: { template: "<div><slot /></div>" },
+					TransactionTerminalCard: {
+						props: ["title", "amount"],
+						template: '<div data-stub="terminal" :data-title="title" :data-amount="amount" />',
+					},
+					TransactionIncomingCard: {
+						props: ["tokenSymbol", "tokenDecimals"],
+						template: '<div data-stub="incoming" :data-symbol="tokenSymbol" :data-decimals="tokenDecimals" />',
+					},
+				},
+			},
+		})
+		expect(w.get('[data-stub="terminal"]').attributes()).toMatchObject({ "data-title": "TST", "data-amount": "1.5" })
+		expect(w.get('[data-stub="incoming"]').attributes()).toMatchObject({ "data-symbol": "TST", "data-decimals": "6" })
+	})
 })

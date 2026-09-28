@@ -1,8 +1,9 @@
 import { PRIVATE_ADDRESS_MAGIC_VALUE } from "@nulo/aztec-runtime/pxe/public-events"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import type { IncomingNoteRecord, IncomingPublicEventRecord } from "@/wallet/services/incoming-transfer/spec"
-import { receivedLabel, resolveFromDisplay, resolveReceivedType } from "./received-display"
+import type { TokenInfo } from "@/wallet/services/token/spec"
+import { buildIncomingCardProps, receivedLabel, resolveFromDisplay, resolveReceivedType, tokenForReceipt } from "./received-display"
 
 const ZERO = AztecAddress.ZERO.toString()
 const REAL = AztecAddress.fromBigIntUnsafe(0xabcn).toString()
@@ -74,5 +75,48 @@ describe("resolveFromDisplay", () => {
 	})
 	test("public zero → mint (never renders the zero sentinel raw)", () => {
 		expect(resolveFromDisplay(pubRec(ZERO))).toEqual({ kind: "mint" })
+	})
+})
+
+describe("tokenForReceipt + buildIncomingCardProps", () => {
+	const token = (over: Partial<TokenInfo>): TokenInfo => ({
+		id: 1,
+		chainId: 1,
+		contract: "0xc",
+		name: "Test",
+		symbol: "TST",
+		decimals: 18,
+		hasPublicBalances: true,
+		hasPublicTransfers: true,
+		hasPublicToPrivateTransfers: true,
+		hasPrivateBalances: true,
+		hasPrivateTransfers: true,
+		hasPrivateToPublicTransfers: true,
+		...over,
+	})
+	const fiatLabel = vi.fn((_token: TokenInfo, raw: bigint) => `≈ ${raw}`)
+
+	test("a known token gives the row its symbol, its decimals and a dollar value for the amount", () => {
+		const props = buildIncomingCardProps(noteRec(), [token({ decimals: 6 })], fiatLabel)
+		expect(props).toMatchObject({ tokenSymbol: "TST", amountRaw: "100", tokenDecimals: 6, amountFiat: "≈ 100", txHash: "0xtx" })
+	})
+
+	test("no token: no decimals, so the card draws no amount, and no dollar value", () => {
+		fiatLabel.mockClear()
+		const props = buildIncomingCardProps(noteRec(), [token({ id: 2, contract: "0xother" })], fiatLabel)
+		expect(props).toMatchObject({ tokenSymbol: "Token", tokenDecimals: null, amountFiat: null })
+		expect(fiatLabel).not.toHaveBeenCalled()
+	})
+
+	test("a tokenId gone stale (the token removed and re-added) matches by contract", () => {
+		const readded = token({ id: 12 })
+		expect(tokenForReceipt([readded], noteRec())).toBe(readded)
+		expect(buildIncomingCardProps(noteRec(), [readded], fiatLabel).tokenSymbol).toBe("TST")
+	})
+
+	test("the tokenId wins over another row with the receipt's contract", () => {
+		const byContract = token({ id: 5, symbol: "OLD" })
+		const byId = token({ id: 1, contract: "0xnew", symbol: "NEW" })
+		expect(tokenForReceipt([byContract, byId], noteRec())).toBe(byId)
 	})
 })
