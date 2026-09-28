@@ -277,3 +277,17 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
 - **`forge install` stages submodules.** In a git checkout, the pinned `forge install` adds `.gitmodules` and three gitlinks to the index; a commit that stages everything would ship them. `rehearse.sh` now passes `--no-git`.
 - **`git grep` skips untracked files,** so a baseline generated before new files are added misses them. The staged run is the one that catches them.
 
+- **Codex rounds 2–4** (reject, then conditional twice); every finding adopted:
+  - `extract.sh`'s scan piped `git log` into `grep -q`, which can SIGPIPE the producer under pipefail (fail-open there). `rehearse.sh`'s rename-follow check had the same shape and failed closed spuriously on a real run.
+  - Brand guard: sequential replacements could splice an allowed name back together; a file named `__proto__` or `constructor` hid its mentions from the comparison. One alternation now runs in a single pass, and the maps have no prototype. Both cases are pinned in `scripts/ci-cd/check-brand.test.ts`.
+  - `behavior-gating.test.ts` still read nulo's extension, Firefox and canary workflows, so `test:ci-gating` was red. It is trimmed to unleashed's own workflows.
+- **`EncryptionKey`, owner's call (2026-09-27): keep the npm dependency.** Codex round 2 found that the npm package's `EncryptionKey` is upstream-derived and bundled into the tools site, whose build drops the package's NOTICE. The driver recommended a fresh, format-compatible rewrite; the owner kept the dependency. Recorded in the plan's decision ledger.
+- **Sign-off screenshots** of Send, Exit, Drip and the wallet picker, before and after, in both themes, were published as a private artifact for the owner.
+
+## Recipe hardening after the re-scrub (codex, 3 rounds: reject → conditional → approve)
+
+- A tree-mode `git grep` skips symlink blobs, so "every blob" was false. `upstream-scan.py` reads every object reachable from HEAD as raw bytes. It ignores replacement refs, refuses grafts and shallow repositories, and parses each `cat-file --batch` record by header and exact length. Fixtures: a clean repo passes; a message hit, a blob hit, a symlink target and a replaced blob each fail; a graft, a shallow clone and a missing repo are each refused.
+- The two scrub rules matched any lowercase word where they meant the upstream's name, so they could delete an unrelated lesson or rewrite an unrelated commit. They now pin the name. Checked against the real texts, plus two near-miss controls that must survive.
+- The bootstrap removes the exact upstream LICENSE line and refuses any other "Portions" line.
+- The rehearsal's `prepare`/`install` phases and `design.ts` are retired: they copied nulo's design package. `rehearse.sh` is now the gate alone, on an installed unleashed checkout. It creates its report dir, fails a phase whose log could not be written, and refuses a history comparison of HEAD with itself.
+- Editing a shell script while bash is executing it: the running `for … done` loop is already parsed, but anything after it is read from the old byte offset. Judge such a run by its per-phase logs, not by the final line.
