@@ -361,6 +361,14 @@ U13: (a)"), and no em dash joining two clauses in new copy; the quotes and the m
 § The owner's answers. The older strings that do: "separate follow-up for those 45 older
 strings" (below).
 
+The stack's sign-off page (2026-09-28, <https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its
+`answers` store): the fee line when the account pays, "Fine as it is"; tooltip text, "Pass
+4.5:1"; a receipt with fiat values off, "No chip when fiat is off"; Home's received row, "Keep
+today's row"; the dApp window width, "Only the permission window at 400px". Everything else is
+signed off as built ("Everytihng else looks good."), with two changes from its note: the
+permission window's groups run in reverse, and the onboarding import opens no success snack.
+Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks, b4 § P8, b5 § P11).
+
 ## Follow-ups (not this program)
 
 - About 45 older user-visible strings join two clauses with an em dash: toasts ("Couldn't

@@ -34,7 +34,8 @@ export const ROW_ORDER: readonly RowKey[] = [
 
 export type RowGroup = "without-asking" | "if-you-allow" | "always-asks"
 
-export const GROUP_ORDER: readonly RowGroup[] = ["without-asking", "if-you-allow", "always-asks"]
+/** What always asks leads, so the window's guarantee reads before what the app may do alone. */
+export const GROUP_ORDER: readonly RowGroup[] = ["always-asks", "if-you-allow", "without-asking"]
 
 export const GROUP_LABELS: Record<RowGroup, string> = {
 	"without-asking": "Without asking, it can",

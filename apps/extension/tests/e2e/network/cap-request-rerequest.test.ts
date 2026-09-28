@@ -48,9 +48,9 @@ test.skipIf(!hasConfig)(
 
 		const items = await getCapItems(popup2)
 		expect(items.map((i) => ({ row: i.row, id: i.id, rerequested: i.rerequested }))).toEqual([
-			{ row: "contracts", id: "contracts", rerequested: true },
 			{ row: "address-book", id: "data", rerequested: true },
 			{ row: "private-events", id: "data", rerequested: true },
+			{ row: "contracts", id: "contracts", rerequested: true },
 		])
 
 		await approveCapabilities(popup2)

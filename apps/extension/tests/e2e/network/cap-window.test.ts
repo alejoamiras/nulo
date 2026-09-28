@@ -220,11 +220,11 @@ test.skipIf(!hasConfig)(
 	async ({ dappConnectedExtensionPerTest: ctx }) => {
 		const { popup, seq } = await openWindow(ctx, "transaction-listed")
 		expect((await getCapItems(popup)).map((item) => item.row)).toEqual([
+			"transaction",
+			"authorizations",
 			"account-address",
 			"simulation",
 			"contracts",
-			"authorizations",
-			"transaction",
 		])
 		expect(await popup.$(sel("cap-unknown-contracts-note"))).not.toBeNull()
 		expect(await attrOf(popup, "cap-detail-toggle", "aria-expanded")).toBe("false")

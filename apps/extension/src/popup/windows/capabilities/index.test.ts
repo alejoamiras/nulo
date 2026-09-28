@@ -615,14 +615,14 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 			expect(identity()).toBe("wants to connect on Aztec:1")
 			expect(w!.findAll("h2").map((h) => [h.text(), h.attributes("data-count")])).toEqual([
 				["Account to share", "1"],
-				["Without asking, it can", undefined],
-				["If you allow, it can", undefined],
 				["Always asks you first", undefined],
+				["If you allow, it can", undefined],
+				["Without asking, it can", undefined],
 			])
 			expect(groups()).toEqual([
-				["Without asking, it can", ["account-address", "simulation", "contracts"]],
-				["If you allow, it can", ["authorizations"]],
 				["Always asks you first", ["transaction"]],
+				["If you allow, it can", ["authorizations"]],
+				["Without asking, it can", ["account-address", "simulation", "contracts"]],
 			])
 			expect(read("account-address")).toEqual({
 				title: "See Alice's address",
@@ -693,7 +693,7 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 				knownContracts: [{ address: FEE_JUICE, name: "Fee Juice" }],
 			}),
 		)
-		expect(rowKeys()).toEqual(["account-address", "simulation", "contracts", "authorizations", "transaction"])
+		expect(rowKeys()).toEqual(["transaction", "authorizations", "account-address", "simulation", "contracts"])
 		expect(note().text()).toBe("Nulo doesn't recognize any of its contracts.")
 	})
 
@@ -709,9 +709,9 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		test("flags, the chip, the Off defaults and the any-contract words", async () => {
 			await mountWindow(request)
 			expect(groups()).toEqual([
-				["Without asking, it can", ["account-address", "simulation"]],
-				["If you allow, it can", ["authorizations", "address-book", "unknown"]],
 				["Always asks you first", ["transaction"]],
+				["If you allow, it can", ["authorizations", "address-book", "unknown"]],
+				["Without asking, it can", ["account-address", "simulation"]],
 			])
 			expect(read("simulation")).toEqual({
 				title: "Run simulations on any contract",
@@ -780,7 +780,7 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 
 	test("data: two rows, each with its switch; private events on any contract start Off with the chip", async () => {
 		await mountWindow(firstRequest([{ type: "data", addressBook: true, privateEvents: { contracts: "*" } }, contractsAny]))
-		expect(rowKeys()).toEqual(["contracts", "address-book", "private-events"])
+		expect(rowKeys()).toEqual(["address-book", "private-events", "contracts"])
 		expect(rowOf("address-book").attributes("data-cap-id")).toBe("data")
 		expect(read("address-book")).toMatchObject({ title: "See your address book", line: "Every name and address you saved.", on: true })
 		expect(toggleOf("address-book").attributes("aria-label")).toBe("Share address book")
@@ -865,9 +865,9 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 		const heldData = { type: "data", addressBook: true, privateEvents: { contracts: [TOKEN] } }
 		const eventsAny = { type: "data", addressBook: true, privateEvents: { contracts: "*" } }
 		const TOOLS_FOLDED = [
-			["Without asking, it can", ["account-address", "simulation", "contracts"]],
-			["If you allow, it can", ["authorizations"]],
 			["Always asks you first", ["transaction"]],
+			["If you allow, it can", ["authorizations"]],
+			["Without asking, it can", ["account-address", "simulation", "contracts"]],
 		]
 		/** A re-request under a narrow consent: the snapshot holds `held`, the request asks `delta`. */
 		const reRequest = (delta: unknown[], held: unknown[], extra: Record<string, unknown> = {}) => ({
@@ -890,9 +890,9 @@ describe("capabilities window — permission rows and the answer (real rows)", (
 			await mountWindow(reRequest([simAny, txAny], TOOLS))
 			expect(identity()).toBe("wants more permissions on Aztec:1")
 			expect(groups()).toEqual([
-				["Without asking, it can", ["simulation"]],
-				["If you allow, it can", ["authorizations"]],
 				["Always asks you first", ["transaction"]],
+				["If you allow, it can", ["authorizations"]],
+				["Without asking, it can", ["simulation"]],
 			])
 			expect(read("simulation")).toMatchObject({ title: "Run simulations on any contract", flagged: true, chip: "Any contract" })
 			expect(read("authorizations")).toEqual({
