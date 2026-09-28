@@ -3,3 +3,5 @@ regex:/home/[A-Za-z0-9_][A-Za-z0-9._-]*==>~
 regex:/mnt/user-data/[A-Za-z0-9_][A-Za-z0-9._-]*==>~
 regex:(?<![\w./-])/root(?=/)==>~
 regex:[A-Za-z]:(?:\\)+Users(?:\\)+[A-Za-z0-9_][A-Za-z0-9._-]*==>~
+regex:(?m)^- Durable repo lesson from the phase-1 commit, recorded here: `(?i:azguard)` is on\n  `scripts/check-no-brand\.sh`'s banned list[^\n]*\n==>
+regex:(?s)\Afix\(legal\): attribute (?i:azguard) wallet as apache-2\.0 section 4 requires \((?:alejoamiras/nulo)?#680\)\n.*==>chore(bridge): point the compile script at check-no-local-paths.sh (alejoamiras/nulo#680)\n

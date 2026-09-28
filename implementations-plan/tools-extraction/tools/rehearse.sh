@@ -1,59 +1,39 @@
 #!/usr/bin/env bash
-# The local rehearsal of the unleashed import: applies the workspace changes (design package,
-# codemod, the three published packages as dependencies) to an extract.sh output on a throwaway
-# branch and runs the validation gate phase by phase. Nothing is published, pushed or deployed.
+# The local validation gate of the unleashed import, phase by phase, on an unleashed checkout at
+# <workdir>/unleashed. Nothing is published, pushed or deployed. The phases that built that checkout
+# from an extract.sh output are retired: they copied nulo's design package, which unleashed no
+# longer carries, and unleashed's own commits now do that work.
 #
-#   rehearse.sh <workdir> <tgz-dir> [phase ...]
+#   rehearse.sh <workdir> [phase ...]
 #
-# <workdir> is extract.sh's output; <tgz-dir> holds the three packed tarballs. Phases run in order,
-# each logging to <workdir>/report/rehearse-<phase>.log; name phases to resume from a failure.
+# The checkout must be installed (`bun install`). Phases run in order, each logging to
+# <workdir>/report/rehearse-<phase>.log; name phases to resume from a failure. `history` compares
+# HEAD with $REHEARSE_BASE (default `main`, the audited import) and refuses to compare it with itself.
 # Toolchains: Foundry from $FOUNDRY_BIN, halmos from $EXTRACTION_TOOLS, Aztec CLIs under ~/.aztec/versions.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-PHASES=(prepare preinstall install fast identity tools e2e control contracts history audit)
-PUBLISHED=(wallet-crypto resolve-asset wallet-sdk-schema-patch)
+PHASES=(preinstall fast identity tools e2e control contracts history audit)
 
 die() {
   echo "rehearse: $*" >&2
   exit 1
 }
 
-[ $# -ge 2 ] || die "usage: rehearse.sh <workdir> <tgz-dir> [phase ...]"
+[ $# -ge 1 ] || die "usage: rehearse.sh <workdir> [phase ...]"
 work=$(cd "$1" && pwd)
-tgz=$(cd "$2" && pwd)
-shift 2
+shift
 [ $# -gt 0 ] || set -- "${PHASES[@]}"
 repo=$work/unleashed
 report=$work/report
+base=${REHEARSE_BASE:-main}
+[ -d "$repo/node_modules" ] || die "$repo is not installed: run bun install there first"
+mkdir -p "$report"
 export PATH="${FOUNDRY_BIN:-$HOME/.cache/unleashed-rehearsal/foundry/bin}:${EXTRACTION_TOOLS:-$HOME/.local/share/extraction-tools/bin}:$PATH"
 
 # The Aztec line a crate's Nargo.toml pins, as _bridge-contracts.yml resolves it.
 aztec_pin() {
   sed -n 's/.*aztec-packages\/".*tag = "v\([^"]*\)".*/\1/p' "$repo/contracts/bridge/aztec/$1/Nargo.toml" | head -1
-}
-
-phase_prepare() {
-  # Always from the audited main, so a failed prepare can simply be re-run.
-  git -C "$repo" switch -q -f main
-  git -C "$repo" clean -q -fdx
-  git -C "$repo" branch -q -D rehearsal 2>/dev/null || true
-  git -C "$repo" switch -q -c rehearsal
-  bun "$here/design.ts" "$work/freeze" "$repo"
-  git -C "$repo" add -A
-  # Relative specs keep the absolute scratch path out of manifests and the lockfile; every
-  # dependent sits two levels down (apps/tools, packages/bridge-core), and install fails otherwise.
-  mkdir -p "$work/tgz"
-  local specs=() name
-  for name in "${PUBLISHED[@]}"; do
-    cp "$tgz/alejoamiras-nulo-$name-0.1.0.tgz" "$work/tgz/"
-    specs+=("$name=file:../../../tgz/alejoamiras-nulo-$name-0.1.0.tgz")
-  done
-  bun "$here/codemod.ts" "$repo" "${specs[@]}"
-  # Seeding nulo's lockfile keeps every shared dependency at the version nulo's gates ran against.
-  cp "$work/freeze/bun.lock" "$repo/bun.lock"
-  git -C "$repo" add -A
-  git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "rehearsal: design package, codemod, tarball dependencies"
 }
 
 phase_preinstall() {
@@ -68,14 +48,6 @@ phase_preinstall() {
   ')
   git -C "$repo" check-ignore -q packages/bridge-core/.env || die "packages/bridge-core/.env is not ignored"
   git -C "$repo" check-ignore -q apps/tools/.env.local || die "apps/tools/.env.local is not ignored"
-}
-
-phase_install() {
-  # The longer specifiers push some lines past the formatter's width, so the codemod is always
-  # followed by a format.
-  (cd "$repo" && bun install && bun run format)
-  git -C "$repo" add -A
-  git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "rehearsal: lockfile, reformat"
 }
 
 phase_fast() {
@@ -128,7 +100,7 @@ phase_tools() {
 forge_prep() {
   (
     cd "$repo/contracts/bridge/evm"
-    [ -d lib/forge-std ] || forge install \
+    [ -d lib/forge-std ] || forge install --no-git \
       foundry-rs/forge-std@bf647bd6046f2f7da30d0c2bf435e5c76a780c1b \
       OpenZeppelin/openzeppelin-contracts@cab19933c33c2ad1d4c7a84864a3601dddfd16f3 \
       Uniswap/v4-core@e50237c43811bd9b526eff40f26772152a42daba
@@ -209,9 +181,11 @@ phase_contracts() {
 
 phase_history() {
   [ -z "$(git -C "$repo" status --porcelain -- apps/tools/tests)" ] || die "apps/tools/tests has uncommitted changes"
-  # The e2e specs may differ from main only in specifiers: undoing the renames and formatting both
-  # sides must give identical text, so a changed literal or statement cannot hide in a reflow.
-  (cd "$repo" && bun -e '
+  [ "$(git -C "$repo" rev-parse "$base^{commit}")" != "$(git -C "$repo" rev-parse HEAD)" ] ||
+    die "HEAD is $base itself; set REHEARSE_BASE to the import HEAD should be compared with"
+  # The e2e specs may differ from the import only in specifiers: undoing the renames and formatting
+  # both sides must give identical text, so a changed literal or statement cannot hide in a reflow.
+  (cd "$repo" && BASE=$base bun -e '
     const run = (cmd, input) => {
       const r = Bun.spawnSync(cmd, { stdin: input === undefined ? "ignore" : new Blob([input]) })
       if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")} exited ${r.exitCode}`)
@@ -222,12 +196,16 @@ phase_history() {
     const format = (file, text) =>
       formats.test(file) ? run(["node_modules/.bin/biome", "format", `--stdin-file-path=${file}`], text) : text
     const unrename = (text) => text.replaceAll("@unleashed/", "@nulo/").replaceAll("@alejoamiras/nulo-", "@nulo/")
-    const changed = run(["git", "diff", "--name-only", "main", "HEAD", "--", "apps/tools/tests"]).split("\n").filter(Boolean)
-    const bad = changed.filter((f) => format(f, run(["git", "show", `main:${f}`])) !== format(f, unrename(run(["git", "show", `HEAD:${f}`]))))
+    const base = process.env.BASE
+    const changed = run(["git", "diff", "--name-only", base, "HEAD", "--", "apps/tools/tests"]).split("\n").filter(Boolean)
+    const bad = changed.filter((f) => format(f, run(["git", "show", `${base}:${f}`])) !== format(f, unrename(run(["git", "show", `HEAD:${f}`]))))
     if (bad.length) { console.error("changed beyond specifiers:", bad); process.exit(1) }
-    console.log(`history: ${changed.length} spec file(s) differ from main only in specifiers`)
+    console.log(`history: ${changed.length} spec file(s) differ from ${base} only in specifiers`)
   ')
-  git -C "$repo" log --follow --name-status --format= -- apps/tools/src/main.ts | grep -q "packages/faucet/src/main.ts" ||
+  # Captured first: under pipefail, `grep -q` exiting on its match can SIGPIPE git log into a false failure.
+  local renames
+  renames=$(git -C "$repo" log --follow --name-status --format= -- apps/tools/src/main.ts)
+  grep -q "packages/faucet/src/main.ts" <<<"$renames" ||
     die "apps/tools/src/main.ts does not follow back to packages/faucet"
   echo "history: apps/tools/src/main.ts follows back to packages/faucet"
 }
@@ -236,6 +214,7 @@ phase_history() {
 phase_audit() {
   mkdir -p "$report/workspace"
   python3 "$here/audit.py" "$repo" "$report/workspace" "$here/audit-allowlist.txt" "$here/audit-allowlist-workspace.txt"
+  python3 "$here/upstream-scan.py" "$repo"
 }
 
 for phase in "$@"; do
@@ -243,9 +222,10 @@ for phase in "$@"; do
   echo "rehearse: $phase"
   # A function called from a condition runs with errexit off, so each phase gets its own shell.
   set +e
-  (set -e; "phase_$phase") > >(tee "$report/rehearse-$phase.log") 2>&1
-  status=$?
+  (set -e; "phase_$phase") 2>&1 | tee "$report/rehearse-$phase.log"
+  statuses=("${PIPESTATUS[@]}")
   set -e
-  [ "$status" -eq 0 ] || die "$phase failed ($status); see $report/rehearse-$phase.log"
+  [ "${statuses[1]}" -eq 0 ] || die "$phase: could not write $report/rehearse-$phase.log"
+  [ "${statuses[0]}" -eq 0 ] || die "$phase failed (${statuses[0]}); see $report/rehearse-$phase.log"
 done
 echo "rehearse: all requested phases passed"

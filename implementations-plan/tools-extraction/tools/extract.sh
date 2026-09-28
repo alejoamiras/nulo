@@ -79,5 +79,7 @@ git -C "$repo" add -A
 printf 'chore: bootstrap the unleashed workspace\n\nRoot configuration copied from alejoamiras/nulo@%s by\nimplementations-plan/tools-extraction/tools/bootstrap/.\n' "$sha" >"$report/bootstrap-message.txt"
 git -C "$repo" commit --quiet -F "$report/bootstrap-message.txt"
 
+python3 "$here/upstream-scan.py" "$repo" || die "the history names nulo's upstream, or the scan failed"
+
 python3 "$here/audit.py" "$repo" "$report" "$here/audit-allowlist.txt"
 echo "extract: done — $repo ($(git -C "$repo" rev-list --count HEAD) commits); report in $report"
