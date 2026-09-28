@@ -222,9 +222,10 @@ The gate at `a3629ac3` was red on `network/window-placement.test.ts` in both bro
 4's snack, which batch 4 then fixed (1c and the end-of-scroll rule). The arc now sits on that
 batch 4: `023ca03c`, on arc 4's `4c20a006` and `origin/dev` at `b15f5218`. It carries the card fix
 of P5.1 and the final cross-batch pass's comment fix in `dispatcher.ts` and
-`scope-enforcement.test.ts`. Each browser ran in its own clean detached checkout, every e2e file
-at retry 0: Chrome prover on, with the `@requires-proverless` files run proverless, and Firefox
-proverless. The flake bar is P5's three files, three runs each.
+`scope-enforcement.test.ts`. Each browser ran in its own clean detached checkout: the network
+files at retry 0, Chrome prover on, with the `@requires-proverless` files run proverless, and
+Firefox proverless; smoke at its config's two retries, which no test used. The flake bar is P5's
+three files, three runs each.
 
 | Step | Chrome | Firefox |
 |---|---|---|
