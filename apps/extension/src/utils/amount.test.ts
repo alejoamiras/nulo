@@ -473,4 +473,37 @@ describe("amount/balanceFormatted — compact", () => {
 		expect(out.slashed).toBe(out.value !== balanceFormatted(units, decimals).value)
 		expect(balanceFormatted(units, decimals, 8).value).toBe(today)
 	})
+
+	/** The other caps, all at 18 decimals: Home's token-row sides (6), its total and the token page's
+	 *  split (10), the token page's hero (20). */
+	const OTHER_WIDTHS: Array<Omit<Row, "locale" | "decimals"> & { length: number }> = [
+		{ length: 6, name: "whole part fits, the trim", units: 12_345_678n * 10n ** 14n, compact: "1,234", today: "1,234." },
+		{ length: 6, name: "whole part fits exactly", units: 99_999n * E18, compact: "99,999", today: "99,999" },
+		{ length: 6, name: "first K", units: 100_000n * E18, compact: "100K", today: "100,00" },
+		{ length: 6, name: "K with a fraction", units: 123_456n * E18, compact: "123.4K", today: "123,45" },
+		{ length: 6, name: "at the K/M boundary, never rounded up", units: 999_995n * E18, compact: "999.9K", today: "999,99" },
+		{ length: 6, name: "first M", units: 1_000_000n * E18, compact: "1M", today: "1,000," },
+		{ length: 6, name: "the brief's amount with cents", units: 12_345_678_912n * 10n ** 16n, compact: "123.4M", today: "123,45" },
+		{ length: 6, name: "one base unit, the hint wins", units: 1n, compact: "<0.0001", today: "<0.0001" },
+		{ length: 10, name: "whole part fits, the trim", units: 123_456_789n * 10n ** 16n, compact: "1,234,567", today: "1,234,567." },
+		{ length: 10, name: "top of M", units: 999_999_999n * E18, compact: "999.99M", today: "999,999,99" },
+		{ length: 10, name: "B with a fraction", units: 1_234_567_890n * E18, compact: "1.23B", today: "1,234,567," },
+		{ length: 10, name: "the brief's amount with cents", units: 12_345_678_912n * 10n ** 16n, compact: "123.45M", today: "123,456,78" },
+		{
+			length: 20,
+			name: "whole part fits, the trim",
+			units: 9_999_999_999_999_995n * 10n ** 17n,
+			compact: "999,999,999,999,999",
+			today: "999,999,999,999,999.",
+		},
+		{ length: 20, name: "past T", units: 10n ** 15n * E18, compact: ">999T", today: "1,000,000,000,000,00" },
+	]
+
+	test.each(OTHER_WIDTHS)("length $length, $name: $compact", ({ length, units, compact, today }) => {
+		useSeparators("en-US")
+		const out = balanceFormatted(units, 18, length, { compact: true })
+		expect(out.value).toBe(compact)
+		expect(out.slashed).toBe(out.value !== balanceFormatted(units, 18).value)
+		expect(balanceFormatted(units, 18, length).value).toBe(today)
+	})
 })

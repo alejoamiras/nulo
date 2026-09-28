@@ -188,7 +188,7 @@ const executingAmount = computed(() => {
 	if (!isUiTransfer.value) return null
 	const token = tokenById(executingTask.value.content.tokenId)
 	if (!token) return null
-	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8).value
+	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8, { compact: true }).value
 })
 const executingAmountSymbol = computed(() => {
 	if (!isUiTransfer.value) return null
@@ -373,7 +373,7 @@ function cardAmountFor(op) {
 	if (op.tokenId === undefined) return null
 	const token = tokenById(op.tokenId)
 	if (!token) return null
-	return balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
+	return balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 }
 
 /** Per-op symbol. Same gating as the amount — returns null when token

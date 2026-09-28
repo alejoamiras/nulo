@@ -70,16 +70,16 @@ const totalTokenBalance = computed(() => {
 	if (!props.tokenBalance) return { value: 0 }
 	const sides = heroSides.value
 	if (!sides) return { value: "—" }
-	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20)
+	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20, { compact: true })
 })
 
 const privateBalanceFormatted = computed(() => {
 	const sides = heroSides.value
-	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10).value : "—"
+	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10, { compact: true }).value : "—"
 })
 const publicBalanceFormatted = computed(() => {
 	const sides = heroSides.value
-	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10).value : "—"
+	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10, { compact: true }).value : "—"
 })
 
 /** Live prices. Parent owns the client lifecycle; the composable owns

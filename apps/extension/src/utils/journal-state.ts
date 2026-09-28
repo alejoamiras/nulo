@@ -324,7 +324,7 @@ function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): J
 	let amount: string | null = null
 	let amountSymbol: string | null = null
 	if (op.amountRaw && token) {
-		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
+		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 		amountSymbol = token.symbol ?? null
 	}
 

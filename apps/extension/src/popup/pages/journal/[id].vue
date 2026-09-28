@@ -95,7 +95,7 @@ const title = computed(() => {
 
 const amountDisplay = computed(() => {
 	if (!isTransfer.value || !op.value?.amountRaw || !token.value) return null
-	return balanceFormatted(op.value.amountRaw, token.value.decimals ?? 0, 8).value
+	return balanceFormatted(op.value.amountRaw, token.value.decimals ?? 0, 8, { compact: true }).value
 })
 
 const transferTypeLabel = computed(() => {

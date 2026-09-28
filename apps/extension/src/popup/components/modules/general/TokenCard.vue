@@ -35,7 +35,7 @@ const decimals = computed(() => (isMalformed.value ? 0 : token.value.decimals))
 const publicRaw = computed(() => (isMalformed.value ? 0n : BigInt(props.tokenBalance.publicBalance || 0)))
 const privateRaw = computed(() => (isMalformed.value ? 0n : BigInt(props.tokenBalance.privateBalance || 0)))
 const totalBalance = computed(() =>
-	isMalformed.value ? "—" : balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10).value,
+	isMalformed.value ? "—" : balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10, { compact: true }).value,
 )
 
 /** Holding fiat value between amount and split — absent when unpriced.
@@ -48,8 +48,8 @@ onBeforeUnmount(() => {
 	prices.dispose()
 	priceService.disconnect()
 })
-const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
-const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
+const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6, { compact: true }).value)
+const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6, { compact: true }).value)
 // Treat updatedAt===0 as "balance has never synced" — the projector hasn't run yet
 // so the "0" placeholder in the row would be misleading. Render a skeleton instead.
 const isInitialSync = computed(() => !!props.tokenBalance && props.tokenBalance.updatedAt === 0)
