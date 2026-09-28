@@ -2019,7 +2019,7 @@ the repo.
 The driver's. It reruns P6's gate on the stack's final source; its network list keeps
 `network/window-placement.test.ts`, three runs per browser at retry 0.
 
-### P8 · The owner's stack sign-off
+### P8 · The owner's stack sign-off ✓
 
 The owner, 2026-09-28, on the stack's sign-off page
 (<https://claude.ai/artifact/WD1NGANFrHcE7fsrJKXPMp>, its `answers` store):
@@ -2041,9 +2041,14 @@ longer opens a success snack. `onboarding/pages/import.vue` drops it ("Profile i
 "Profile imported. Unlock to continue." when the session could not be confirmed); the popup's
 import keeps its own. A profile the import leaves locked meets the popup's unlock screen, since
 nothing onboarding shows after the import needs the session. Onboarding's other snacks stay: the
-Terms page's error and the import form's "Error is copied".
+Terms page's error and the import form's "Error is copied". `onboarding/pages/import.test.ts`
+pins it: a phrase import runs through the real import flow for both outcomes, a session that
+activates and one left locked, and each goes on to `/onboarding/learn` with no snack open.
 
 Gate: the program's Local gates on the stack top, smoke and network e2e on both browsers.
+
+Passed on the stack top `df1849a2` ([lessons](lessons/phase-8.md)). Firefox's one red network
+file, the known `send-picker` flake, then passed three runs alone.
 
 ## Arc boundary
 
