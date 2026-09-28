@@ -272,8 +272,9 @@ approve — confidence: high"*
 
 ## Gates on the stack (`27704795`)
 
-Every e2e run is retry 0. The gates ran on `27704795`; the arc was then restacked onto batch 2's
-gate record, which changes only batch 2's docs.
+The network files and the flake bar ran at retry 0, the two full smoke suites at their config's
+two retries. The gates ran on `27704795`; the arc was then restacked onto batch 2's gate record,
+which changes only batch 2's docs.
 
 | Gate | Result |
 |---|---|
