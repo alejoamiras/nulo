@@ -225,7 +225,7 @@ export const chromeDriver: BrowserDriver = {
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {
-			await page.goto(`${SCHEME}${extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+			await page.goto(`${SCHEME}${extensionId}/src/setup/index.html#/install`, { waitUntil: "domcontentloaded" })
 			return page
 		} catch (err) {
 			// The caller retries a detached frame with a fresh page and never sees this one.

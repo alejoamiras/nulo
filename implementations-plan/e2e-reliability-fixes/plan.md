@@ -6,7 +6,7 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 same_family_leg: none (light tier)
 eli5_mode: artifact
-eli5: (one ELI5 Artifact covers the program's four plans; URL filled in after publish)
+eli5: https://claude.ai/artifact/AwdUMz4EYvyU2Kgoh9W9Td
 branch: test/e2e-reliability-fixes
 worktree: a harness-created agent worktree (its repo-relative path is recorded in lessons/phase-0.md)
 ---
@@ -626,7 +626,7 @@ Validation gate:
   reported duration is not the criterion).
 - Layers: lint, typecheck, unit (both workspaces), load probe.
 
-### P3 · C1 · the scratch page, and the vitest defect on record
+### P3 · C1 · the scratch page, and the vitest defect on record ✓
 
 1. The drivers, the contract, the caller and the three stale comments (change map).
 2. A temporary probe spec, never committed, run on each browser at retry 0 for 10 launches:

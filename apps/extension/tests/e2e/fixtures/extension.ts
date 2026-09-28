@@ -114,7 +114,7 @@ async function settleLaunchedExtension(
 	for (let attempt = 1; ; attempt++) {
 		let candidate: Page | undefined
 		try {
-			candidate = await openScratchPage(browser, extensionId, { freshProfile })
+			candidate = await openScratchPage(browser, extensionId)
 			patchPagePolling(candidate)
 			blankPage = candidate
 			break
