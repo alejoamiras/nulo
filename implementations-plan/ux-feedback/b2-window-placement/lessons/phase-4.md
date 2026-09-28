@@ -23,7 +23,8 @@ VERDICT: approve — confidence: high"*
 
 ## Gates on the stack (`b21317af`)
 
-Every run is retry 0 on `b21317af`, the arc's tip after the fix loop.
+Every run is on `b21317af`, the arc's tip after the fix loop: the network files at retry 0, and
+the two smoke suites at their config's two retries.
 
 | Gate | Result |
 |---|---|
