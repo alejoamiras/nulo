@@ -339,3 +339,17 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
     3. A fixture comment overstated the attack.
   - Round 3: that rollback note was too broad. Reconciliation with at least one route left can detach omitted domains; only removing every route skips it.
 - The live probe (`bun run test:live`, `TOOLS_REDIRECT_LIVE=1`) is C1's verification once the domains move.
+
+## Creating the Workers (2026-09-28)
+
+- The owner offered to paste a Cloudflare token into the chat. It goes through a keyed run instead: `infra/cloudflare.env.example` here and `apps/tools/cloudflare.env.example` in unleashed, item `Keyed-Runs/Cloudflare-Workers`. The token's scope is Account › Workers Scripts › Edit plus Account Settings › Read on the one account, IP-filtered and with a TTL.
+  - Codex argued Account Settings: Read is unneeded because the config carries `account_id`. It stays anyway: passkey-rp's README records it from a real deploy, and a failed keyed run costs an owner round-trip.
+  - Neither build can leak the token into its bundle: Vite exposes only `VITE_` variables, and the landing reads only `GITHUB_*`.
+- **§ 5's per-Worker build token does not exist.** Cloudflare's Workers Builds docs say "only user tokens are supported, with account-owned token support coming soon", and resource-scoped permissions are an account-owned-token feature. At connection, select an existing narrow user token instead of the auto-created one. The auto-created token adds KV, R2, Workers Routes on every zone, User Details and Memberships. Codex flagged it in its review of the keyed template; the docs confirmed it.
+- **`nulo-landing` created** by keyed run `nulo-landing-create-f78e4a04` at `81e424ba` (dev plus N4): a route-free `wrangler deploy`, version `960450f4-5187-443b-8aab-a092b6150fd6`, served at `nulo-landing.alejo-amiras.workers.dev`. Its headers match `nulo.sh` (Pages) on `/`, a hashed asset and `/forms/uninstall`, except for three differences, none load-bearing:
+  - Pages adds `access-control-allow-origin: *`. Nothing fetches from `nulo.sh` cross-origin; the wallet only navigates to it.
+  - Pages sends `text/html; charset=utf-8`. The page declares `<meta charset="UTF-8">`.
+  - Pages sends `application/javascript` where the Worker sends `text/javascript`.
+- The preview half of N3's gate waits for the owner to connect Workers Builds.
+- **The unleashed stack is merged:** #3 as `c7dd6a8` and #4 as `a58e823`. #4 gained the keyed-run template plus a README correction on the build token, and passed CI again after them. N4 merged as #708 (`2e8524c2`). Its advisory Firefox network lane timed out once opening the playground in `contracts-register`; the same suite passed on Chrome, and the job was re-run.
+- **env-exec refuses any `.env` in the tree, even an ignored one inside a dependency.** A worktree with the forge libraries installed carries `contracts/bridge/evm/lib/v4-core/.env`. File keyed runs from a fresh worktree at the commit instead.
