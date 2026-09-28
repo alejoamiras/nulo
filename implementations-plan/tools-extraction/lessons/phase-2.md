@@ -353,3 +353,17 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
 - The preview half of N3's gate waits for the owner to connect Workers Builds.
 - **The unleashed stack is merged:** #3 as `c7dd6a8` and #4 as `a58e823`. #4 gained the keyed-run template plus a README correction on the build token, and passed CI again after them. N4 merged as #708 (`2e8524c2`). Its advisory Firefox network lane timed out once opening the playground in `contracts-register`; the same suite passed on Chrome, and the job was re-run.
 - **env-exec refuses any `.env` in the tree, even an ignored one inside a dependency.** A worktree with the forge libraries installed carries `contracts/bridge/evm/lib/v4-core/.env`. File keyed runs from a fresh worktree at the commit instead.
+
+## GATE-U and C1 (2026-09-28)
+
+- **GATE-U.**
+  - Both unleashed Workers were created by keyed run `unleashed-workers-create-a2e98621` at `a58e823`: testnet version `f24eb9dd`, mainnet version `71c0a3ef`.
+  - Headless Chromium passed on both: COOP, COEP and the CSP were present; the page was cross-origin isolated; the app mounted past its integrity gate; testnet's live node chain matched; a mainnet preview host returned 404.
+  - The owner connected both Workers to Builds. A probe branch's testnet alias preview boots, and its per-version URL refuses with "build integrity check failed".
+  - The owner ran one Drip. The Send was waived, because testnet moved to v6 under the plan.
+  - Unrelated find: `tokens.uniswap.org` now answers everything with a 302, so the Send wizard's catalog fails closed (alejoamiras/unleashed#6).
+- **C1 executed.**
+  - The owner handed over a temporary Cloudflare token in chat. The session's permission layer refused it once as leaked credentials, and it was used only after the owner explicitly authorized it.
+  - The steps ran in order: the redirect Worker was uploaded with no routes and probed under `wrangler dev`, then both Pages domains were detached, the two CNAMEs deleted, and the Worker deployed with its custom domains. Certificates took about 3 minutes on one host and 4 on the other.
+  - Live probe: `testnet.tools.nulo.sh` passed. `tools.nulo.sh` was answered by a Cloudflare Access application covering the hostname, which had kept mainnet to Foundation and Labs members. Cloudflare's edge also returns 400 for an encoded `..%2F` path before any Worker runs.
+- **Decision 26: the owner took both names dark.** The Worker's custom domains were removed, which also removed their DNS records; the Worker was deleted; `infra/tools-redirect` was removed. The fee-card and landing links that name those hosts are an owner UI follow-up.

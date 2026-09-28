@@ -147,14 +147,6 @@
         "wrangler": "^4",
       },
     },
-    "infra/tools-redirect": {
-      "name": "@nulo/tools-redirect",
-      "version": "0.0.0",
-      "devDependencies": {
-        "typescript": "^6.0.3",
-        "wrangler": "4.129.1",
-      },
-    },
     "packages/aztec-runtime": {
       "name": "@nulo/aztec-runtime",
       "version": "0.1.0",
@@ -786,8 +778,6 @@
     "@nulo/resolve-asset": ["@nulo/resolve-asset@workspace:packages/resolve-asset"],
 
     "@nulo/third-party-notices": ["@nulo/third-party-notices@workspace:packages/third-party-notices"],
-
-    "@nulo/tools-redirect": ["@nulo/tools-redirect@workspace:infra/tools-redirect"],
 
     "@nulo/wallet-bridge": ["@nulo/wallet-bridge@workspace:packages/wallet-bridge"],
 
