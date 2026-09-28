@@ -424,7 +424,8 @@ Batches 3, 4 and 5 quote their parts (b3 § Round-5 picks and § P5, b4 § P8, b
   touches the verify path); round 1's "A + B" drawing is its design.
 - The extension's testnet default "Test USDC" (`default-tokens.ts`) points at `0x1c81…e9ae`,
   which `apps/tools/public/testnet-bridge.json` no longer lists: its "Test USDC" is another
-  address. A mirror fix for the `aztec-update` skill, noticed while drawing item 6.
+  address. A mirror fix for the `aztec-update` skill, noticed while drawing item 6. Re-pointed to
+  unleashed's testnet token by #713 (2026-09-28).
 - With no saved choice, Send and the execute card default to the first sponsor in storage order,
   so a fee contract added by hand can be the default payer over Nulo's own. Whether the default
   should be Nulo's sponsor is an owner question; batch 1 reorders only the menu.

@@ -2,6 +2,9 @@
 
 Open follow-ups lifted out of closing plans, one entry each, or a pointer to the GitHub issue that owns it. Read when planning; delete an entry when it resolves. A plan never closes while it still owns an open follow-up.
 
+- **P1, the first release after the tools extraction** (from [tools-extraction](tools-extraction/plan.md), 2026-09-28). The next `release: promote dev → main` carries the tools removal, #711 and #713 to `main`, and with them the first production build of `nulo-landing` from `main` with the routes-free config. After `attach-assets`, re-run that build in the Cloudflare dashboard, confirm it succeeded, and check that `curl -s https://nulo.sh` links `releases/tag/v<version>` and that `curl -sI` returns every header in `apps/landing/public/_headers`. Delete this entry when it passes.
+- **The gas link and USDC on mainnet** (owner UI calls, 2026-09-28). The fee card's get-gas link opens unleashed's testnet app on every network, on its `workers.dev` host; the mainnet USDC seed is the retired bridge's token. Revisit when unleashed has its own domain or a public mainnet bridge.
+
 ## ux-feedback: taken by a follow-up plan
 
 The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Delete an entry when the plan it names merges.
@@ -31,7 +34,6 @@ The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Del
 - The backup import's product questions: should an import skip preloaded contracts as it skips protocol ones, and should it wait on public networks at all? [Record](ux-feedback/plan.md)
 - Layout around batch 4's surfaces that predates the program: row gaps, Home's row height, the History and Settings title offsets, History's date heading, Home's section labels and Settings' account header. The owner, 2026-09-25: "(a) follow-up maybe?". [Record](ux-feedback/plan.md)
 - The popup's Terms sheet sits at z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden. [Record](ux-feedback/plan.md)
-- The testnet "Test USDC" seed (`default-tokens.ts`, `price-map.ts`) is the retired single-token bridge's token; re-pointing it is the owner's call, per CLAUDE.md § The wallet repo. [Record](ux-feedback/plan.md)
 - A-27: which form of an unknown contract's address a screen reader hears in the permission window's Details rows. `DetailsTable.test.ts` holds it as a `test.todo`. [Record](ux-feedback/b5-permissions/lessons/phase-6.md)
 - The glossary's `where` for "authorization" reads "Permission window · approval window", while the term is dotted in the permission window and in Settings → Connected apps. A copy change. [Record](ux-feedback/b5-permissions/lessons/phase-3.md)
 - Whether a dApp should learn that a call was refused for scope: the error envelope gives it the unclassified message today, and classifying it is a product and privacy call. [Record](ux-feedback/b5-permissions/lessons/phase-4.md)
