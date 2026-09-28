@@ -14,6 +14,13 @@ eli5: https://claude.ai/artifact/HtXnDzds12RLSFpS5L8paW
 parity: https://claude.ai/artifact/8EE5kUaqgpr1e2WeCucYqh
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: closed with parent ux-feedback (completed).
+- **Shipped**: #701 `c25cc95d`, arc 3 of the six.
+- **Open items**: none of its own; the [program plan](../plan.md)'s Outcome carries them.
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are spent and must never be pasted.
+
 # Batch 3 · Tooltips and glossary
 
 Arc 3 of the UX program's six-PR stack, on top of batch 2 (window placement). It covers:

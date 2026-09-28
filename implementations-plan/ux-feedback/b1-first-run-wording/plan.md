@@ -13,6 +13,13 @@ design: implementations-plan/ux-feedback/design/spec.md (items 1, 3, 5, 7, 8; ro
 artifact: https://claude.ai/artifact/SgFiFtDsLtsku8CFre4CsF
 ---
 
+## Outcome
+
+- **Date**: 2026-09-28. **Status**: closed with parent ux-feedback (completed).
+- **Shipped**: #699 `3d02d5ce`, arc 1 of the six.
+- **Open items**: none of its own; the [program plan](../plan.md)'s Outcome carries them.
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are spent and must never be pasted.
+
 # Batch 1 · First run and wording
 
 Items 1, 3, 5, 7 and 8 of the UX program, plus the round-5 states U11, U12 and U13. Arc 1 of the
