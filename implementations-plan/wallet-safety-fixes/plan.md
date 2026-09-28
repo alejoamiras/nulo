@@ -109,7 +109,7 @@ keep plain native activation (follow-up F-6).
 
 | # | Surface | Before → after | Sign-off |
 |---|---|---|---|
-| 1 | Revoke authwits and Change account authwits registry popups, keyboard | Once fees are set, any Enter that reaches the document confirms: on the header's ×, a fee method in the open menu (which then sends with the method picked *before* it), a priority button, or the page behind the popup where focus rests at open → only the focused Revoke / Send button confirms (Enter or Space, the button's own activation), and a repeat or composing Enter that first lands on it idle confirms nothing. Enter on another control does only that control's action. Nothing drawn changes | **O1, pending** |
+| 1 | Revoke authwits and Change account authwits registry popups, keyboard | Once fees are set, any Enter that reaches the document confirms: on the header's ×, a fee method in the open menu (which then sends with the method picked *before* it), a priority button, or the page behind the popup where focus rests at open → only the focused Revoke / Send button confirms (Enter or Space, the button's own activation), and a repeat or composing Enter that first lands on it idle confirms nothing. Enter on another control does only that control's action. Nothing drawn changes | **O1 (a), the owner's pick** (P7) |
 | 2 | The 13 form popups on `usePopupEntity`'s default (New/Edit Account, Contact, Endpoint, Fpc, Network, Profile, Sender, Token) | Enter in a field submits, including the Enter that commits an IME composition and each auto-repeat of a held Enter → the same, except a composing Enter and a repeat, which submit nothing | **owner's blanket sign-off, pending** (on the sign-off page next to O1; no drawn change) |
 | 3 | The incoming trust prompt (Allow, Block) | A choice sent just before a lock or a profile switch is already dropped today, except in a short window after its registration check reads the active profile, or when the lock or switch is undone (unlock, switch back) while an Allow reads the chain tip; then it lands → it is always dropped: no success toast, the contract stays pending, and the prompt comes back later on that profile | **owner's blanket sign-off, pending** |
 | 4 | Receipts of a contract whose Allow the lock's watchdog displaced (a stall of five minutes or more inside the lock) | The displaced Allow resumes and un-hides every receipt, even after a Block that ran in its place → it stops: a later Block keeps the rest hidden, and with no later Block the contract stays trusted with its remaining receipts hidden and nothing un-hides them. Receipts an Allow already un-hid stay visible after a later Block, before and after | **owner's blanket sign-off, pending** |
@@ -642,6 +642,7 @@ collisions between concurrent dApp interactions." No code change; the id is not 
 - **O1 · Which Enter confirms the two authwit popups.** (a) only the focused Revoke/Send button
   confirms; (b) Enter also confirms when nothing is focused. Recommendation: (a). Confidence:
   moderate. (§ UI asks.) The blanket sign-off for UI impact row 2 goes on the same page.
+  **Answered:** Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O1 (a).
 - **Blanket sign-off** (unanswered): UI impact rows 2 to 4 and the residual list (§ UI asks).
 
 **Codex** (the final fresh pass's decisions; the confirmation checks C5's follow-through and C8)
@@ -765,8 +766,8 @@ fresh pass read the revised plan, `recon.md` and the brief, owing round 1 nothin
 ## Approval
 
 Approved for build by the final pass's confirmation (conditional approve, confidence high; its two
-findings applied, rows 27 and 28). O1 and the blanket sign-off stay pending for the PR (built as
-recommended), with the scope above unchanged.
+findings applied, rows 27 and 28). The owner picked O1 (a), as built (P7); the blanket sign-off
+stays pending for the PR, with the scope above unchanged.
 
 **Delivery boundary** (the same rule in P7 and Delivery): the PR opens and CI runs while the
 owner's answers are pending, but it does not merge until the owner's O1 answer and the blanket
@@ -986,6 +987,11 @@ Layers: typecheck, lint, unit, component, CI-gating, build, e2e, e2e-live-networ
    Enter on ×) and one blanket sign-off for UI impact rows 2 to 4 and the residual list.
 2. Record the answers here. If the owner picks (b), that is a new phase: the nothing-focused rule
    in the two popups (container-scoped, repeat- and composition-safe), its tests, P6's gates again.
+
+Answers:
+- O1: Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O1 (a). No new
+  phase.
+- The blanket sign-off (UI impact rows 2 to 4, R1): pending.
 
 Gate: the delivery boundary (§ Approval): the PR may open before this gate; it does not merge
 until the owner's O1 answer and the blanket sign-off are quoted in this plan.
