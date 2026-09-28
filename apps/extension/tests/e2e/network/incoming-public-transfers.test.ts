@@ -1,15 +1,12 @@
 /**
- * Phase 5 behavioral ship gate for implementations-plan/incoming-public-transfers.
- *
  * A second account (the token minter) delivers PUBLIC receipts to the wallet account and the
  * extension must, WITHOUT a manual refresh:
  *   1. pub→pub (`transfer_public_to_public`)  → a `tx-incoming-card` row with the "Public → Public"
  *      kind chip that History shows as "TST" and "+10", AND the token's PUBLIC balance auto-updates
- *      (the D4 outbox-drain pin).
+ *      through the balance outbox.
  *   2. priv→pub (`transfer_private_to_public`) → a "Private → Public" chip (`from == MAGIC`).
  *   3. pub→priv to us (`transfer_public_to_private`) → the private note arm shows "Received
- *      privately", sender redacted (D7 dropped — no public receipt, since the public leg is `to ==
- *      MAGIC`).
+ *      privately", sender redacted: no public receipt, since the public leg is `to == MAGIC`.
  *
  * Receipt assertions get a >=120s budget — the default 30s test timeout EQUALS the scheduler
  * interval, so a receipt could time out on the very first idle tick.
@@ -83,7 +80,7 @@ test.skipIf(!hasConfig)(
 				.toEqual({ title: "TST", amount: "+10" })
 			console.log("✓ History's pub→pub row reads TST +10")
 
-			// The wallet started at 1000 public (tokenReadyExtension). D4: it auto-refreshes to 1010
+			// The wallet started at 1000 public (tokenReadyExtension). It auto-refreshes to 1010
 			// with NO manual refresh click — just the scheduler's scan → outbox → drain.
 			// `waitForKindChip` left us on #/popup/activity; the token card lives on the home page, so
 			// return there before `navigateToTokenDetail` (which clicks the `tokens-card`).
