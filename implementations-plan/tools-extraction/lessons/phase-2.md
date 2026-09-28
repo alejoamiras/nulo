@@ -291,3 +291,31 @@ The owner approved run 36171341020. npm lists `@alejoamiras/nulo-{wallet-crypto,
 - The bootstrap removes the exact upstream LICENSE line and refuses any other "Portions" line.
 - The rehearsal's `prepare`/`install` phases and `design.ts` are retired: they copied nulo's design package. `rehearse.sh` is now the gate alone, on an installed unleashed checkout. It creates its report dir, fails a phase whose log could not be written, and refuses a history comparison of HEAD with itself.
 - Editing a shell script while bash is executing it: the running `for … done` loop is already parsed, but anything after it is read from the old byte offset. Judge such a run by its per-phase logs, not by the final line.
+
+## B2–B4 and the cross-arc pass (2026-09-28)
+
+- **B2's contract block.** The first run failed mid-suite when the TXE oracle server crashed natively (`Napi::Error`). After that, every later hub test reported "Failed calling external resolver". Re-running the contract phase alone passed: keystone 10, hub 2 + 65 Noir tests, the sandbox integration suite 35 tests in about 32 minutes, and the sole-consumer guard with 14 bearer regressions rejected. Suspect the oracle server before the code.
+- **B3's install.** Any manifest edit in unleashed re-gates the young `0.1.0` packages against the 7-day release age. Install under a local, uncommitted `minimumReleaseAgeExcludes`, then prove the lockfile with `bun install --frozen-lockfile --force` without it.
+- **B4's plans.** The 38 imported plans moved to `archive/`, each with an Outcome block. Their transcripts left the tree, and links to them became permalinks at unleashed's first `main`. Links into plans that stayed here became permalinks at the freeze. The relinker also normalized one HTML `src="./main.ts"` to `main.ts`; that was reverted, because a relinker must leave a link it does not move byte-for-byte alone.
+- **Brand guard, revised (ledger).** B4 kept the verbatim line baseline instead of adding a category allowlist, and made it shrink-only:
+  - `baseline:brand` refuses to record a new line; it rewrites only the lines that survive.
+  - The PR lint job refuses a baseline holding a line its base's did not (`--ratchet <base>`).
+  - A baseline whose counts are not positive integers is refused. A string count compared as `NaN` and hid every change.
+  - The repository slug `alejoamiras/nulo` joined ALLOWED.
+  - The cost, accepted: moving a file, or editing a baselined line, forces the mention out rather than carrying it.
+- **The pre-commit hook runs the working-tree `check-brand.ts` against the staged baseline and staged files.** A guard edit therefore applies to every commit from the moment it is written, whether or not it is staged. Stage the guard with the baseline it regenerates, and commit that pair before anything else. Any commit in between is judged by the new rules against the old baseline, and fails on lines the new rules no longer need.
+- **`gh stack` with worktrees.**
+  - The stack state lives in the main clone's git dir (`.git/gh-stack`), and a linked worktree does not see it.
+  - `gh stack init` records the stack, then fails to check out the top branch that a worktree holds.
+  - To submit from the top arc's worktree, copy the state file to `.git/worktrees/<name>/gh-stack`, then copy it back after `submit`.
+- **Cross-arc codex pass** (GPT-6 Astra, high).
+  - Round 1: approve with fixes, 7 findings, all adopted:
+    1. Malformed baseline counts bypassed the check and the ratchet.
+    2. The retarget recovery comment pointed at a `workflow_dispatch`, which skips the PR-only checks; the fix is to close and reopen the PR.
+    3. The preview alias's 8-hex digest fell to a birthday search, so it is now 32 hex and the colliding pair is a regression test.
+    4. The runbook's private-first canary passed its environment variables as arguments.
+    5. The runbook's manifest paths did not resolve under `bun run --cwd`.
+    6. Four references to a wallet-side skill remained.
+    7. Two doc summaries contradicted their own rules.
+  - Round 2: approve, no remaining findings.
+- **Submitted** as alejoamiras/unleashed#1–#4 (stack #5). Before the push, `upstream-scan.py` over the docs worktree's HEAD, which reaches `main` and all four arcs: 4,698 objects and every commit message, clean.
