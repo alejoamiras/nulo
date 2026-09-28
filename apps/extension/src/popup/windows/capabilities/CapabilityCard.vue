@@ -1,52 +1,50 @@
 <script setup lang="ts">
 /**
- * Single capability card rendered inside the capabilities window. Two
- * shapes:
+ * One card of the capabilities window. A new card with a `switchLabel` has a switch whose state
+ * the parent drives; a new card without one is granted as requested; a granted card is
+ * read-only. The head expands the detail panel, and the switch stops propagation so a flip never
+ * expands it.
  *
- * - `granted=false` (the "new" delta variant) — toggleable via the
- *   leading checkbox; head is fully clickable to expand the detail
- *   panel; risk tag + chevron sit on the right; an optional
- *   "previously denied" badge surfaces re-requests.
- * - `granted=true` — readonly with a static check icon; chevron
- *   toggles expansion only.
- *
- * The parent owns the index → card mapping; the card just emits
- * `toggleSelected` (head checkbox) and `toggleExpanded` (head body or
- * chevron) so the parent can drive `capabilities[i].selected` and the
- * `expandedCards` set.
- *
- * Risk visual is mono uppercase + glyph (no semantic color). Targeted
- * orange accents are reserved for the warning badges (PREVIOUSLY DENIED)
- * so the user's eye lands on a warning, not on risk severity.
+ * Risk visual is mono uppercase + glyph (no semantic color). Targeted orange accents are reserved
+ * for the warning badges (PREVIOUSLY DENIED) so the user's eye lands on a warning, not on risk
+ * severity.
  */
 import CapabilityDetailPanel from "@/components/composite/capabilities/CapabilityDetailPanel.vue"
 import type { Capability } from "@nulo/wallet-bridge"
 import type { CapabilityRisk } from "@/wallet/services/dapp-session/capability-meta"
 
-defineProps<{
+const props = defineProps<{
 	capability: Capability
+	/** Every capability the detail panel lists; defaults to `capability`. */
+	panelCapabilities?: Capability[]
+	rowKey: string
+	/** `data-cap-id`; absent on a card that stands for several types. */
+	capId?: string
 	label: string
 	description: string
 	risk: CapabilityRisk
 	selected: boolean
 	granted: boolean
 	expanded: boolean
+	/** The switch's accessible name; a card without one has no switch. */
+	switchLabel?: string
 	reRequested?: boolean
 	/**
-	 * Unknown capability types pass `isUnknown=true` so the card head
-	 * shows an UNRECOGNIZED chip. The `label` itself is the wallet-
-	 * controlled constant "Unknown permission" — the parent
-	 * (`build-items.ts`) routes through `getSafeDisplay()` and overrides
-	 * the dApp-controlled `cap.type` before it ever reaches this prop.
-	 * The parent also flips `selected` to `false` for these — together,
-	 * the user gets a loud visual signal AND must deliberately click to
-	 * approve.
+	 * Unknown capability types pass `isUnknown=true` so the card head shows an UNRECOGNIZED chip.
+	 * The `label` is the wallet-controlled constant "Unknown permission": the dApp-controlled
+	 * `cap.type` never reaches this prop.
 	 */
 	isUnknown?: boolean
 	disabled?: boolean
 }>()
 
 const emit = defineEmits(["toggleExpanded", "toggleSelected"])
+
+const panels = computed(() => props.panelCapabilities ?? [props.capability])
+
+const toggle = () => {
+	if (!props.disabled) emit("toggleSelected")
+}
 
 /**
  * Mono glyphs for the risk indicator. `—` (em-dash) reads as a quiet
@@ -69,7 +67,8 @@ function riskWord(r: CapabilityRisk): string {
 <template>
 	<Flex
 		data-testid="cap-item"
-		:data-cap-id="capability.type"
+		:data-cap-id="capId"
+		:data-cap-row="rowKey"
 		:data-cap-name="label"
 		:data-cap-granted="granted ? 'true' : undefined"
 		direction="column"
@@ -82,10 +81,19 @@ function riskWord(r: CapabilityRisk): string {
 			gap="10"
 			:class="$style.cap_head"
 		>
+			<!-- The hit area spans the head; top-aligning the glyph keeps it level with the title's first line. -->
 			<Flex
-				align="center"
+				v-if="switchLabel"
+				align="start"
 				data-testid="cap-toggle"
-				@click.stop="emit('toggleSelected')"
+				role="switch"
+				:aria-checked="selected ? 'true' : 'false'"
+				:aria-label="switchLabel"
+				:aria-disabled="disabled || undefined"
+				:tabindex="disabled ? -1 : 0"
+				@click.stop="toggle"
+				@keydown.enter.prevent.stop="toggle"
+				@keydown.space.prevent.stop="toggle"
 				:class="$style.checkbox_hit"
 			>
 				<Icon v-if="selected" name="check-circle" size="16" color="primary" />
@@ -95,7 +103,13 @@ function riskWord(r: CapabilityRisk): string {
 			<Flex direction="column" gap="2" wide>
 				<Flex align="center" justify="between" gap="8">
 					<Flex align="center" gap="6" :class="$style.head_label_row">
-						<Text size="14" weight="600" :color="isUnknown ? 'tertiary' : 'primary'" :class="isUnknown && $style.mono_label">
+						<Text
+							size="14"
+							weight="600"
+							:color="isUnknown ? 'tertiary' : 'primary'"
+							:class="isUnknown && $style.mono_label"
+							:style="{ lineHeight: 'normal' }"
+						>
 							{{ label }}
 						</Text>
 						<span v-if="isUnknown" data-testid="cap-unrecognized-badge" :class="$style.warning_badge">
@@ -126,14 +140,14 @@ function riskWord(r: CapabilityRisk): string {
 		</Flex>
 
 		<Flex v-else gap="10" :class="$style.cap_head_readonly">
-			<Flex align="center">
+			<Flex align="start">
 				<Icon name="check-circle" size="16" color="tertiary" />
 			</Flex>
 
 			<Flex direction="column" gap="2" wide>
 				<Flex align="center" justify="between" gap="8">
 					<Flex align="center" gap="6" :class="$style.head_label_row">
-						<Text size="14" weight="600" color="tertiary" :class="isUnknown && $style.mono_label">
+						<Text size="14" weight="600" color="tertiary" :class="isUnknown && $style.mono_label" :style="{ lineHeight: 'normal' }">
 							{{ label }}
 						</Text>
 						<span v-if="isUnknown" data-testid="cap-unrecognized-badge" :class="$style.warning_badge">
@@ -156,7 +170,9 @@ function riskWord(r: CapabilityRisk): string {
 			</Flex>
 		</Flex>
 
-		<CapabilityDetailPanel v-if="expanded" :capability="capability" :granted="granted" />
+		<template v-if="expanded">
+			<CapabilityDetailPanel v-for="(panel, i) in panels" :key="i" :capability="panel" :granted="granted" />
+		</template>
 	</Flex>
 </template>
 
@@ -248,16 +264,8 @@ function riskWord(r: CapabilityRisk): string {
 	white-space: nowrap;
 }
 
-/**
- * Mono treatment for the unknown-capability head label. The label
- * itself is the wallet-controlled constant "Unknown permission"
- * (build-items.ts routes through getSafeDisplay so the dApp-controlled
- * cap.type never reaches the head). The mono typography is a
- * visual-rhythm tweak that pairs with the UNRECOGNIZED chip — both
- * signal "this card is the odd one out" so the eye lands on the
- * warning. The dApp-controlled raw type is rendered separately in the
- * detail panel through sanitizeWireString.
- */
+/** The label is the wallet's constant "Unknown permission"; the dApp-controlled type reaches only
+ *  the detail panel, through sanitizeWireString. */
 .mono_label {
 	font-family: var(--font-mono);
 	letter-spacing: 0.04em;

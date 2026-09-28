@@ -42,7 +42,7 @@ export async function clickPgButton(page: Page, name: string): Promise<void> {
 	await clickByTestId(page, `pg-btn-${name}`)
 }
 
-export type PgBundle = "accounts" | "transaction" | "transaction-contracts"
+export type PgBundle = "accounts" | "transaction" | "transaction-contracts" | "transaction-listed" | "data" | "data-scopedEvents"
 
 /** Pick the capability bundle the next `requestCapabilities` click sends. */
 export async function selectPgBundle(page: Page, bundle: PgBundle): Promise<void> {
@@ -57,6 +57,14 @@ export async function selectPgBundle(page: Page, bundle: PgBundle): Promise<void
 /** Set a playground input value via the v-model-aware `replaceInputValue`. */
 export async function setPgInput(page: Page, name: string, value: string): Promise<void> {
 	await replaceInputValue(page, `[data-testid="pg-input-${name}"]`, value)
+}
+
+/** Select `bundle` and click `requestCapabilities`. A scoped bundle reads its contract from the
+ *  `tokenAddress` input when the manifest is built, so `tokenAddress` is set before the click. */
+export async function requestPgBundle(page: Page, bundle: PgBundle, opts: { tokenAddress?: string } = {}): Promise<void> {
+	await selectPgBundle(page, bundle)
+	if (opts.tokenAddress !== undefined) await setPgInput(page, "tokenAddress", opts.tokenAddress)
+	await clickPgButton(page, "requestCapabilities")
 }
 
 /** Set a playground textarea (the contract-instance JSON inputs) through the prototype setter,

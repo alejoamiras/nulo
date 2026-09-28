@@ -619,3 +619,16 @@
 /* FeeMethodSelector.vue's disabled row: title in tertiary. */
 .n-menu-item.dis { color: var(--txt-tertiary); cursor: default; }
 .n-menu-item.dis:hover { background: none; }
+
+/* Round 5 addendum · CapabilityCard.vue states the round-1 replica never drew: the badge row
+   (:97, :237-249), the unknown label (:98, :261-264) and the granted card (:128-157, :193-195). */
+.n-cap-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.n-cap-label.mono { font-family: var(--font-mono); letter-spacing: 0.04em; color: var(--txt-tertiary); }
+.n-cap.granted { opacity: 0.6; }
+.n-cap.granted .n-cap-head { cursor: default; }
+.n-cap.granted .n-cap-head:hover { background: none; }
+.n-cap.granted .n-cap-label, .n-cap.granted .n-cap-desc { color: var(--txt-tertiary); }
+/* "previously denied" on a permission row's title line: the chip without its icon, in grey, wrapping
+   under the title with no indent, as CapabilityCard.vue:97's gap-6 wrap row does. */
+.n-tline { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
+.n-flag.quiet { margin: 0; color: var(--txt-secondary); }

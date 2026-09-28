@@ -24,7 +24,7 @@ describe("pass-through methods", () => {
 		expect(() => enforceScope("unknownMethod", [], [])).not.toThrow()
 	})
 
-	// Phase 1 / F-004: registerSender and getAddressBook are NO LONGER
+	// F-004: registerSender and getAddressBook are not
 	// pass-through. They require `data.addressBook === true`. With no grants,
 	// the type-level check at enforceCapability would have thrown first, but
 	// if grants exist without the addressBook flag, the scope checker fires.
@@ -397,6 +397,24 @@ describe("getPrivateEvents", () => {
 	test("contract not in list throws", () => {
 		const grants = [grant({ type: "data", privateEvents: { contracts: [ADDR_A] } })]
 		expect(() => enforceScope("getPrivateEvents", [{}, { contractAddress: addr(ADDR_B) }], grants)).toThrow(/Scope violation/)
+	})
+
+	// With the scope's account approved the account check passes, so only the grant decides.
+	describe("the scope's account approved", () => {
+		const sessionAccounts = new Set([`aztec:0:${ADDR_A}`, ADDR_A])
+		const args = [{ eventName: "Transfer" }, { contractAddress: addr(ADDR_B), scopes: [addr(ADDR_A)] }]
+
+		test("private events granted pass", () => {
+			const grants = [grant({ type: "data", addressBook: true, privateEvents: { contracts: "*" } })]
+			expect(() => enforceScopeWithSession("getPrivateEvents", args, grants, sessionAccounts)).not.toThrow()
+		})
+
+		test("an address-book-only grant fails the private-events check", () => {
+			const grants = [grant({ type: "data", addressBook: true })]
+			expect(() => enforceScopeWithSession("getPrivateEvents", args, grants, sessionAccounts)).toThrow(
+				/not permitted by granted data\.privateEvents scope/,
+			)
+		})
 	})
 })
 

@@ -11,6 +11,8 @@ const STUBS = {
 
 const baseProps = {
 	capability: { type: "transaction" as const, scope: "*" as const },
+	rowKey: "transaction",
+	capId: "transaction",
 	label: "Send transactions",
 	description: "Submit transactions",
 	risk: "high" as const,
@@ -29,12 +31,19 @@ const factory = (props: Record<string, unknown> = {}) =>
 	})
 
 describe("CapabilityCard", () => {
-	test("preserves the canonical 'cap-item' testid + cap-id + cap-name", () => {
+	test("preserves the canonical 'cap-item' testid + cap-id + cap-name, and adds cap-row", () => {
 		const w = factory()
 		const card = w.find('[data-testid="cap-item"]')
 		expect(card.exists()).toBe(true)
 		expect(card.attributes("data-cap-id")).toBe("transaction")
+		expect(card.attributes("data-cap-row")).toBe("transaction")
 		expect(card.attributes("data-cap-name")).toBe("Send transactions")
+	})
+
+	test("a card standing for several types carries its row key and no cap-id", () => {
+		const card = factory({ rowKey: "unknown", capId: undefined }).find('[data-testid="cap-item"]')
+		expect(card.attributes("data-cap-row")).toBe("unknown")
+		expect(card.attributes("data-cap-id")).toBeUndefined()
 	})
 
 	test("granted=true sets the cap-granted attribute", () => {
@@ -69,9 +78,8 @@ describe("CapabilityCard", () => {
 		expect(factory({ risk: "low" }).text()).toContain("—")
 	})
 
-	test("checkbox uses neutral 'primary' color when checked, not semantic green", () => {
-		// Phase 2: drop the saturated green check; checkbox stays brutalist mono.
-		const w = factory({ selected: true })
+	test("the switch uses the neutral 'primary' color when on, not semantic green", () => {
+		const w = factory({ selected: true, switchLabel: "Share address book" })
 		const check = w.find('i[data-name="check-circle"]')
 		expect(check.exists()).toBe(true)
 		expect(check.attributes("data-color")).toBe("primary")
@@ -107,10 +115,7 @@ describe("CapabilityCard", () => {
 	})
 
 	test("granted + isUnknown variant ALSO renders the UNRECOGNIZED chip", () => {
-		// codex post-impl §5: read-only existing-grant cards in the popup
-		// must still surface the unknown-cap warning, otherwise a user who
-		// scrolls down to the "Already granted" section sees no signal that
-		// one of their existing grants is for an unrecognized type.
+		// Without it, "Already granted" gives no sign that a held grant is of an unrecognized type.
 		const w = factory({ granted: true, isUnknown: true })
 		expect(w.find('[data-testid="cap-unrecognized-badge"]').exists()).toBe(true)
 	})
@@ -121,10 +126,44 @@ describe("CapabilityCard", () => {
 		expect(w.emitted("toggleExpanded")).toHaveLength(1)
 	})
 
-	test("clicking the checkbox emits toggleSelected and stops propagation", async () => {
-		const w = factory()
+	test("clicking the switch emits toggleSelected and never expands the card", async () => {
+		const w = factory({ switchLabel: "Share address book" })
 		await w.find('[data-testid="cap-toggle"]').trigger("click")
 		expect(w.emitted("toggleSelected")).toHaveLength(1)
+		expect(w.emitted("toggleExpanded")).toBeUndefined()
+	})
+
+	test("the switch is a named, focusable switch control reporting its state", () => {
+		const on = factory({ selected: true, switchLabel: "Share private events" }).find('[data-testid="cap-toggle"]')
+		expect(on.attributes("role")).toBe("switch")
+		expect(on.attributes("aria-label")).toBe("Share private events")
+		expect(on.attributes("aria-checked")).toBe("true")
+		expect(on.attributes("tabindex")).toBe("0")
+		const off = factory({ selected: false, switchLabel: "Share private events" }).find('[data-testid="cap-toggle"]')
+		expect(off.attributes("aria-checked")).toBe("false")
+	})
+
+	test.each(["enter", "space"])("%s on the switch emits toggleSelected and never expands the card", async (key) => {
+		const w = factory({ switchLabel: "Authorizations without asking" })
+		await w.find('[data-testid="cap-toggle"]').trigger(`keydown.${key}`)
+		expect(w.emitted("toggleSelected")).toHaveLength(1)
+		expect(w.emitted("toggleExpanded")).toBeUndefined()
+	})
+
+	test("a disabled switch leaves the Tab order and ignores clicks and keys", async () => {
+		const w = factory({ switchLabel: "Share address book", disabled: true })
+		const toggle = w.find('[data-testid="cap-toggle"]')
+		expect(toggle.attributes("tabindex")).toBe("-1")
+		expect(toggle.attributes("aria-disabled")).toBe("true")
+		await toggle.trigger("click")
+		await toggle.trigger("keydown.space")
+		expect(w.emitted("toggleSelected")).toBeUndefined()
+	})
+
+	test("a card without a switch name renders no switch control", () => {
+		const w = factory()
+		expect(w.find('[data-testid="cap-toggle"]').exists()).toBe(false)
+		expect(w.find('[role="switch"]').exists()).toBe(false)
 	})
 
 	test("granted variant renders the readonly head (no cap-detail-toggle)", () => {
@@ -135,6 +174,17 @@ describe("CapabilityCard", () => {
 	test("expanded=true renders the detail panel", () => {
 		const w = factory({ expanded: true })
 		expect(w.find("[data-detail-panel]").exists()).toBe(true)
+	})
+
+	test("an expanded card renders one detail panel per panel capability", () => {
+		const w = factory({
+			expanded: true,
+			panelCapabilities: [
+				{ type: "unknown-a", foo: 1 },
+				{ type: "unknown-b", foo: 2 },
+			],
+		})
+		expect(w.findAll("[data-detail-panel]")).toHaveLength(2)
 	})
 
 	test("expanded=false hides the detail panel", () => {

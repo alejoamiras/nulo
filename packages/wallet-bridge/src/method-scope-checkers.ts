@@ -214,14 +214,11 @@ export function checkGetPrivateEvents(args: unknown[], grants: GrantedCapability
 
 /**
  * Check a call ({contract, function}) against the union of transaction and
- * simulation.transactions scopes on the given grants. Used by createAuthWit to
- * ensure an authwit cannot authorize a call broader than the dApp's granted
- * transaction scope.
+ * simulation.transactions scopes on the given grants, so an authwit cannot authorize a call
+ * broader than the dApp's granted scope.
  *
- * Returns true if any grant's scope covers the call, or if there are no
- * transaction/simulation grants at all (which means the authwit is being
- * requested without a transaction capability — let the accounts-level check
- * decide).
+ * `hasTxCaps` is false when no such scope is held, and `permitted` is then false too: the
+ * caller decides what an absent scope means.
  */
 function callWithinTxOrSimulationScope(
 	contract: string,
@@ -263,9 +260,9 @@ function isIntentInnerHash(x: unknown): x is IntentInnerHashShape {
 
 /**
  * Whether a dApp createAuthWit intent's target call is covered by a granted
- * transaction/simulation scope. The dispatcher uses this to route a covered call
- * to silent execution and an uncovered call — or any `IntentInnerHash`, which
- * carries no call to check — to an explicit confirmation popup.
+ * transaction/simulation scope. An `IntentInnerHash` carries no call, so it is never covered.
+ * Coverage alone never signs silently: the dispatcher also requires the app's authorizations
+ * consent.
  */
 export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, grants: GrantedCapabilityRecord[]): boolean {
 	if (!isCallIntent(intent)) return false
@@ -402,10 +399,59 @@ export function checkProfileTx(args: unknown[], grants: GrantedCapabilityRecord[
  * yet — `contractClasses` is read-only (no `canRegister`), and ScopeCheck is synchronous while the
  * artifact's class-id derivation is async. Deny it at scope-enforcement (the single source of truth;
  * scope runs before routing, so no dispatcher branch is needed). Revisit when canRegister + a
- * class-id-scoped async gate land. (codex audit, aztec-5.0-upgrade.)
+ * class-id-scoped async gate land.
  */
 export function checkRegisterContractClassDisabled(): never {
 	throw new Error(
 		"registerContractClass is intentionally disabled in Nulo pending contractClasses.canRegister support and class-id-scoped enforcement.",
 	)
+}
+
+// ── Authorizations consent ────────────────────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function typeOf(cap: unknown): string | undefined {
+	return isRecord(cap) && typeof cap.type === "string" ? cap.type : undefined
+}
+
+/** Whether a scope reaches any contract. A malformed scope counts as any contract, so it never
+ *  keeps a narrow consent effective. */
+export function isAnyContractScope(scope: unknown): boolean {
+	if (!Array.isArray(scope)) return true
+	return scope.some((p) => !isRecord(p) || typeof p.contract !== "string" || typeof p.function !== "string" || p.contract === "*")
+}
+
+/** Whether a transaction or `simulation.transactions` scope reaches any contract. Utility scopes
+ *  are left out: they never authorize a call intent. */
+export function coversAnyContract(caps: readonly unknown[]): boolean {
+	return caps.some((cap) => {
+		if (!isRecord(cap)) return false
+		if (cap.type === "transaction") return isAnyContractScope(cap.scope)
+		if (cap.type !== "simulation" || cap.transactions === undefined) return false
+		return !isRecord(cap.transactions) || isAnyContractScope(cap.transactions.scope)
+	})
+}
+
+/** The stored consent, read strictly: it crosses `IDappSessionRef` as `unknown`, and a tolerant
+ *  read would let a truthy junk value sign silently. */
+export function readConsent(value: unknown): { broad: boolean } | undefined {
+	if (!isRecord(value) || typeof value.broad !== "boolean" || Object.keys(value).length !== 1) return undefined
+	return { broad: value.broad }
+}
+
+/** Whether the consent lets a covered call intent sign without asking. A narrow consent holds
+ *  only while no scope reaches any contract. */
+export function authorizationsEffective(consent: unknown, caps: readonly unknown[]): boolean {
+	const read = readConsent(consent)
+	return read !== undefined && (read.broad || !coversAnyContract(caps))
+}
+
+/** The grants a decision leaves in force, by the same per-type replacement the session writer
+ *  applies; `existing` is every stored grant, a rejected type's included. */
+export function effectiveGrants(existing: readonly unknown[], delta: readonly unknown[]): unknown[] {
+	const replaced = new Set(delta.map(typeOf))
+	return [...existing.filter((cap) => !replaced.has(typeOf(cap))), ...delta]
 }

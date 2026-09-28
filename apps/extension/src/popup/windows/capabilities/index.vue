@@ -15,7 +15,7 @@ import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { requireNetwork } from "@/utils/core"
-import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrant, type CapabilityWindowParams, currentLine, type UICapabilityItem } from "./build-items"
 import { resolveDappChain } from "./chain-mismatch"
 
 /** Services */
@@ -75,12 +75,7 @@ const switchedTo = ref<number>()
 const isLoading = ref(false)
 const expandedCards = ref(new Set<number>())
 
-// initComplete flips after init() resolves the dApp interaction payload
-// AND populates `capabilities.value`. Without it, the Approve button can be
-// clicked while `payload.value` is still null / `capabilities.value` is still
-// `[]`; approve() would silently no-op or approve an empty grant set. Codex
-// audit-final-merge HIGH #1. Race-safety parallel to execute/index.vue's
-// `initComplete` predicate.
+// Flips once init() has the payload AND the cards: before that, Approve would grant an empty set.
 const initComplete = ref(false)
 
 // "Approve as is" is only offered where approving is possible: not before init lands (no chain
@@ -163,18 +158,27 @@ const init = async () => {
 			}
 		}
 
-		const reRequestedTypes = new Set(payload.value.params.reRequested ?? [])
-		const existingGrants = payload.value.params.existingGrants as Capability[]
-
-		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes, {
-			accountsMembershipOnly: accountsMembershipOnly.value,
-		})
+		capabilities.value = buildCapabilityItems(windowParams(payload.value.params))
 		// Only flip after capabilities are committed to state. If init throws
 		// or the popup is cancelled mid-flight, the approve gate stays closed.
 		initComplete.value = true
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
+	}
+}
+
+/** Everything the cards start from is the dispatch snapshot in `params`, never `payload.session`,
+ *  which is re-read after the snapshot and may already hold a later Settings write. */
+const windowParams = (params: CapabilityPayload["params"]): CapabilityWindowParams => {
+	const existingGrants = params.existingGrants as Capability[]
+	return {
+		delta: params.delta as Capability[],
+		existingGrants,
+		heldGrants: (params.heldGrants ?? existingGrants) as Capability[],
+		reRequested: new Set(params.reRequested ?? []),
+		accountsMembershipOnly: params.accountsMembershipOnly === true,
+		consent: params.authorizationsWithoutAsking,
 	}
 }
 
@@ -196,7 +200,7 @@ const isAccountGranted = (account: UIAccount) => grantedAccountSet.value.has(acc
 
 const toggleCapability = (index: number) => {
 	const cap = capabilities.value[index]
-	if (cap.isNew) cap.selected = !cap.selected
+	if (cap.isNew && cap.switchLabel) cap.selected = !cap.selected
 }
 
 const selectAccount = (account: UIAccount) => {
@@ -209,20 +213,15 @@ const selectAccount = (account: UIAccount) => {
 
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
-/** Riders are excluded here: the authwit rider's `capability` IS the accounts
- *  cap, which is pushed separately below — including riders would grant
- *  accounts twice (and bypass the account picker's own selected-accounts gate). */
-const buildGrantedCaps = (): Capability[] => {
-	const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
-	const existing = capabilities.value.filter((c) => !c.isNew && !c.authwitRider).map((c) => c.capability)
-
-	const granted: Capability[] = [...approvedNew, ...existing]
-	if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
-		const delta = payload.value!.params.delta as Capability[]
-		const accountsCap = delta.find((cap) => cap.type === "accounts")
-		if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
-	}
-	return granted
+const decideGrant = () => {
+	const params = windowParams(payload.value!.params)
+	return buildGrant({
+		items: capabilities.value,
+		delta: params.delta,
+		existingGrants: params.existingGrants,
+		heldGrants: params.heldGrants,
+		accountsSelected: needsAccountSelection.value && selectedAccounts.value.length > 0,
+	})
 }
 
 /** CAIP-formatted account selection + alias map; both undefined when no picker ran. */
@@ -242,10 +241,8 @@ const approve = async () => {
 	// so a keyboard-focused Approve can still emit a click mid-grant — the
 	// handler must self-guard like execute/discover already do.
 	if (isLoading.value || isSwitching.value) return
-	// Defense in depth: template's `:disabled="!initComplete"` should already
-	// block this, but if Enter / programmatic click slips through during init,
-	// throw loudly instead of silently no-opping (which was the 19-iteration
-	// failure mode in the discover popup). Codex audit-final-merge HIGH #1.
+	// The footer's `!initComplete` gate should already block this; an Enter or programmatic click
+	// that slips through throws instead of silently granting an empty set.
 	if (!initComplete.value) {
 		throw new Error("capabilities approve() called before init() completed — :disabled gate must include !initComplete")
 	}
@@ -264,13 +261,14 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		const granted = buildGrantedCaps()
+		const { granted, authorizationsWithoutAsking } = decideGrant()
 		const selection = buildAccountSelectionResult()
 
 		await interactionService.resolveInteraction(requestId.value!, {
 			granted,
 			selectedAccounts: selection.selectedAccounts,
 			accountAliases: selection.accountAliases,
+			...(authorizationsWithoutAsking !== undefined ? { authorizationsWithoutAsking } : {}),
 		})
 		closeWindow(true)
 	} catch (error) {
@@ -388,12 +386,16 @@ onUnmounted(disposeWindow)
 							v-show="cap.isNew"
 							:key="`new-${i}`"
 							:capability="cap.capability"
+							:panelCapabilities="cap.panelCapabilities"
+							:rowKey="cap.rowKey"
+							:capId="cap.capId"
 							:label="cap.label"
-							:description="cap.description"
+							:description="currentLine(cap)"
 							:risk="cap.risk"
 							:selected="cap.selected"
 							:granted="false"
 							:expanded="expandedCards.has(i)"
+							:switchLabel="cap.switchLabel"
 							:reRequested="cap.reRequested"
 							:isUnknown="cap.isUnknown"
 							:disabled="isLoading || processingError?.type === 'error'"
@@ -412,8 +414,11 @@ onUnmounted(disposeWindow)
 							v-show="!cap.isNew"
 							:key="`existing-${i}`"
 							:capability="cap.capability"
+							:panelCapabilities="cap.panelCapabilities"
+							:rowKey="cap.rowKey"
+							:capId="cap.capId"
 							:label="cap.label"
-							:description="cap.description"
+							:description="currentLine(cap)"
 							:risk="cap.risk"
 							:selected="cap.selected"
 							granted

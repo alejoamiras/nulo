@@ -14,7 +14,6 @@ import SignerIdentityStrip from "./SignerIdentityStrip.vue"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Local utilities */
-import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { resolveOperationScope, scopeBannerCopy, scopeBannerState } from "./scope-mismatch"
 import { createScopeFollow } from "./scope-follow"

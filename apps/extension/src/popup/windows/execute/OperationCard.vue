@@ -101,6 +101,9 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 
 const isNoFrom = (op: SendLikeUIOp): boolean => op.kind === "aztec_sendTx" && op.executionMode === "default_entrypoint"
 
+/** `humanizeOperationKind` serves other surfaces, so this window's own names live here. */
+const opTitle = (kind: UIOperation["kind"]): string => (kind === "aztec_createAuthWit" ? "Authorization" : humanizeOperationKind(kind))
+
 /** The decoding for call `j`, or `unavailable` when the parent's batch came back short. */
 const decodedAt = (j: number): DecodedCall | undefined =>
 	props.decodedCalls ? (props.decodedCalls[j] ?? { kind: "undecoded", reason: "unavailable" }) : undefined
@@ -319,7 +322,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 		wide
 	>
 		<Flex wide justify="between">
-			<Text size="14" color="primary">{{ humanizeOperationKind(op.kind) }}</Text>
+			<Text data-testid="execute-op-title" size="14" color="primary">{{ opTitle(op.kind) }}</Text>
 		</Flex>
 
 		<Flex v-if="op.account" :class="$style.prop">

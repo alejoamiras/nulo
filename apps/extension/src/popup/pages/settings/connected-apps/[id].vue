@@ -11,6 +11,8 @@
 import { Dropdown } from "@/components/ui/Dropdown"
 import DappSessionVerification from "@/popup/components/modules/settings/connected-apps/DappSessionVerification.vue"
 import GrantedCapabilitiesList from "@/popup/components/modules/settings/connected-apps/GrantedCapabilitiesList.vue"
+import PermissionRow from "@/components/composite/capabilities/PermissionRow.vue"
+import DottedTerm from "@/components/composite/DottedTerm.vue"
 import { getChainName } from "@/components/ui/utils.js"
 
 /** Vendor */
@@ -28,6 +30,8 @@ const { openToast } = useToast()
 
 /** Helpers */
 import { formatSessionExpiry, parseSessionParams } from "@/popup/components/modules/settings/connected-apps/connected-app-helpers"
+import { authorizationsRow, holdsCallScope, holdsCanCreateAuthWit } from "@/popup/windows/capabilities/permission-rows"
+import { authorizationsEffective, coversAnyContract } from "@nulo/wallet-bridge"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -66,6 +70,26 @@ const hasSessionAllowances = computed(() => methods.value.length > 0 || events.v
 const grantedCapabilities = computed(() => session.value?.capabilityGrants ?? [])
 
 const isTrusted = computed(() => session.value?.trustedVerification ?? false)
+
+const grantedCaps = computed(() => grantedCapabilities.value.map((g) => g.capability))
+// An On consents to the breadth the row shows, so the write carries it.
+const shownBroad = computed(() => coversAnyContract(grantedCaps.value))
+// Absent without `canCreateAuthWit`: there is nothing for the app to sign.
+const authorizations = computed(() => {
+	const caps = grantedCaps.value
+	if (!holdsCanCreateAuthWit(caps)) return undefined
+	return authorizationsRow({ broad: shownBroad.value, noScope: !holdsCallScope(caps) })
+})
+// The switch shows what the write asked for until the session event lands, and reverts on a failure.
+const pendingAuthorizations = ref()
+const isSavingAuthorizations = ref(false)
+const authorizationsOn = computed(
+	() => pendingAuthorizations.value ?? authorizationsEffective(session.value?.authorizationsWithoutAsking, grantedCaps.value),
+)
+const authorizationsLine = computed(() => {
+	const row = authorizations.value
+	return (row?.switchLabel && !authorizationsOn.value ? row.subOff : row?.subOn) ?? []
+})
 
 const fetchSession = async () => {
 	try {
@@ -143,6 +167,20 @@ const getAccountAlias = (acc) => {
 const toggleTrust = async () => {
 	if (!session.value) return
 	await dappSessionService.setTrustedVerification(session.value.id, !isTrusted.value)
+}
+
+const setAuthorizations = async (on) => {
+	if (!session.value || isSavingAuthorizations.value) return
+	isSavingAuthorizations.value = true
+	pendingAuthorizations.value = on
+	try {
+		onDappSessionUpdated(await dappSessionService.setAuthorizationsWithoutAsking(session.value.id, on, shownBroad.value))
+	} catch {
+		openToast({ kind: "error", label: "Couldn't save this setting" })
+	} finally {
+		pendingAuthorizations.value = undefined
+		isSavingAuthorizations.value = false
+	}
 }
 
 const dappSessionService = new DappSessionServiceClient()
@@ -278,6 +316,29 @@ onBeforeUnmount(() => {
 					confirmationPolicies.find((x) => x.confirmationLevel === session?.confirmationLevel)?.description ?? "Unknown"
 				}}
 			</Text>
+		</Flex>
+
+		<Flex v-if="authorizations" direction="column" gap="10" wide>
+			<SectionLabel label="If you allow, it can" />
+			<ItemsContainer>
+				<PermissionRow
+					data-testid="connected-app-authorizations"
+					switchTestid="connected-app-authorizations-toggle"
+					:icon="authorizations.icon"
+					:title="authorizations.title"
+					:switchLabel="authorizations.switchLabel"
+					:flagged="authorizations.flagged"
+					:modelValue="authorizationsOn"
+					@update:modelValue="setAuthorizations"
+				>
+					<template #sub>
+						<template v-for="(segment, i) in authorizationsLine" :key="i">
+							<DottedTerm v-if="'term' in segment" term="authorization" testid="cap-auth-term">{{ segment.term }}</DottedTerm>
+							<template v-else>{{ segment.text }}</template>
+						</template>
+					</template>
+				</PermissionRow>
+			</ItemsContainer>
 		</Flex>
 
 		<!-- Granted permissions -->
