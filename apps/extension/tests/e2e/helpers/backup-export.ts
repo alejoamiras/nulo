@@ -49,3 +49,15 @@ export async function armBackupDownloadCapture(page: Page): Promise<void> {
 export async function readCapturedBackupDownload(page: Page): Promise<string> {
 	return await page.evaluate(() => (window as unknown as { __backupCapture: Promise<string> }).__backupCapture)
 }
+
+/** Keeps only `chainId`'s account-state items: public-chain recovery material would make the import
+ *  register contracts over public RPC. Throws unless a kept item still lists `tokenAddress`. */
+export function keepChainAccountState(data: Record<string, unknown>, chainId: number, tokenAddress: string): void {
+	const items = (data["account-state"] ?? []) as Array<{ chainId?: number; contracts?: Array<{ address?: string }> }>
+	const kept = items.filter((item) => item.chainId === chainId)
+	const token = tokenAddress.toLowerCase()
+	if (!kept.some((item) => item.contracts?.some((c) => c.address?.toLowerCase() === token))) {
+		throw new Error(`no account-state item of chain ${chainId} lists the funded token's contract`)
+	}
+	data["account-state"] = kept
+}

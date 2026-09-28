@@ -716,7 +716,7 @@ Validation gate:
     probe's counters.
 - Layers: lint, typecheck, network e2e (both browsers), probe.
 
-### P5 · C4 · the account-state filter
+### P5 · C4 · the account-state filter ✓
 
 1. `helpers/backup-export.ts`: `keepChainAccountState(data, chainId, tokenAddress)` with its one
    comment. Both backup tests call it before the re-seal (X3).

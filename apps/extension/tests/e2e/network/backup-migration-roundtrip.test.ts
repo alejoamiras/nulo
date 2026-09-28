@@ -28,7 +28,15 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
+import {
+	clickByTestId,
+	type ExtensionContext,
+	launchExtension,
+	openPopup,
+	replaceInputValue,
+	test,
+	waitForHash,
+} from "../fixtures/extension"
 import {
 	captureBalanceBaseline,
 	getAccountAddress,
@@ -38,7 +46,7 @@ import {
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
 } from "../fixtures/helpers"
-import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
+import { armBackupDownloadCapture, keepChainAccountState, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -98,14 +106,19 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 				abbr: "RA",
 			},
 		]
+		const backupAccounts = exported.data.account as Array<{ address: string; chainId: number }>
+		const chainId = backupAccounts.find((a) => a.address === tokenReadyExtension.accountAddress)?.chainId
+		if (chainId === undefined) throw new Error("the funded account is missing from the exported backup")
+		keepChainAccountState(exported.data, chainId, aztecConfig!.tokenAddress)
 		const { checksum: _stale, ...body } = exported
 		const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
-		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
 
 		// ── 3. Import into a FRESH extension ──────────────────────────────
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-backup-rt-"))
-		const ctx2 = await launchExtension({ userDataDir: profileDir })
+		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
+		let ctx2: ExtensionContext | undefined
 		try {
+			ctx2 = await launchExtension({ userDataDir: profileDir })
 			const page2 = await gotoPopupImport(ctx2)
 			await importFullBackup(page2, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
@@ -164,11 +177,14 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 
 			await page2.close()
 		} finally {
-			await ctx2.close()
-			rmSync(profileDir, { recursive: true, force: true })
-			// The doctored file embeds the wallet's REAL (local-chain test)
-			// master-key — never leave it in the temp dir (codex post-impl audit).
-			rmSync(dirname(filePath), { recursive: true, force: true })
+			try {
+				await ctx2?.close()
+			} finally {
+				rmSync(profileDir, { recursive: true, force: true })
+				// The doctored file embeds the wallet's REAL (local-chain test)
+				// master-key — never leave it in the temp dir.
+				rmSync(dirname(filePath), { recursive: true, force: true })
+			}
 		}
 	},
 )

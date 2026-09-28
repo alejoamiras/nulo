@@ -1,7 +1,7 @@
 /**
- * Backup-restore integrity on a live sandbox — proves the P1 tx-restore
+ * Backup-restore integrity on a live sandbox — proves the tx-restore
  * PROVENANCE FILTER end-to-end through real chrome.storage + the real restore
- * pipeline (backup-restore-corruption-fix).
+ * pipeline.
  *
  * A funded wallet exports a real backup; the backup is doctored to carry two
  * schema-valid txs — one for the funded account (imported → must survive) and
@@ -16,19 +16,20 @@
  * foreign-account TOKEN-BALANCE row (both must be dropped) plus a funded-account
  * authwit (must survive).
  *
- * Finally it drives a delete → re-add round-trip (finding D): resetting the
+ * Finally it drives a delete → re-add round-trip: resetting the
  * profile fires the awaited deletion coordinator, which must purge every
  * account-owned root AND clear its durable tombstone (proving the cascade is
  * awaited to completion, not fire-and-forget), and a freshly-registered profile
  * must not resurrect the deleted account's tx.
  *
- * Coverage split (see the plan): P1's cross-profile WIPE is proven through the
- * real service graph in `src/wallet/services/cross-profile-isolation.test.ts`
- * (real Account+Transaction+onAccountDeleted cascade; only chrome.storage is a
- * FakeBrowserApi); P2 index-pairing + P3 composite key are unit-proven — a live
- * network-id collision and multi-node multi-chain restore aren't cheaply
- * forgeable in a single-sandbox e2e. This e2e adds the real-storage proof for
- * the provenance filter + deletion cascade + on-chain functionality.
+ * Coverage split: the cross-profile WIPE is proven through the real service
+ * graph in `src/wallet/services/cross-profile-isolation.test.ts` (real
+ * Account+Transaction+onAccountDeleted cascade; only chrome.storage is a
+ * FakeBrowserApi); the chain binding of network-scoped rows and the token-balance
+ * (chainId, contract) key are unit-proven — a live network-id collision and
+ * multi-node multi-chain restore aren't cheaply forgeable in a single-sandbox
+ * e2e. This e2e adds the real-storage proof for the provenance filter + deletion
+ * cascade + on-chain functionality.
  */
 import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -36,7 +37,16 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
+import {
+	clickByTestId,
+	type ExtensionContext,
+	launchExtension,
+	openPopup,
+	registerProfile,
+	replaceInputValue,
+	test,
+	waitForHash,
+} from "../fixtures/extension"
 import {
 	captureBalanceBaseline,
 	captureSoleProfileId,
@@ -49,7 +59,7 @@ import {
 	waitForProfilePurged,
 	waitForTokenCardAmount,
 } from "../fixtures/helpers"
-import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
+import { armBackupDownloadCapture, keepChainAccountState, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -57,9 +67,9 @@ const hasConfig = aztecConfig !== undefined
 
 const FOREIGN_ACCOUNT = `0x${"de".repeat(32)}`
 
-// UNCONDITIONAL arming contract (Phase 9): this file runs ONLY via the network
-// e2e agent runner, which provisions a live sandbox — so an absent config here
-// means the required gate mis-set up and must FAIL, never vacuously skip.
+// UNCONDITIONAL arming contract: this file runs ONLY via the network e2e agent
+// runner, which provisions a live sandbox — so an absent config here means the
+// required gate mis-set up and must FAIL, never vacuously skip.
 test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 	expect(hasConfig).toBe(true)
 })
@@ -140,14 +150,16 @@ test.skipIf(!hasConfig)(
 			{ id: 999_001, token: someTokenId, account: FOREIGN_ACCOUNT, publicBalance: "5", updatedAt: 1 },
 		]
 
+		keepChainAccountState(exported.data, chainId, aztecConfig!.tokenAddress)
 		const { checksum: _stale, ...body } = exported
 		const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
-		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
 
 		// ── 3. Import into a FRESH extension ──────────────────────────────
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-backup-integrity-"))
-		const ctx2 = await launchExtension({ userDataDir: profileDir })
+		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
+		let ctx2: ExtensionContext | undefined
 		try {
+			ctx2 = await launchExtension({ userDataDir: profileDir })
 			const page2 = await gotoPopupImport(ctx2)
 			await importFullBackup(page2, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
@@ -217,7 +229,7 @@ test.skipIf(!hasConfig)(
 			})
 			await waitForTokenCardAmount(page2, "1,000", "TST")
 
-			// ── 6. Delete → re-add round-trip (finding D) ──────────────────────
+			// ── 6. Delete → re-add round-trip ──────────────────────────────────
 			// The reset UI AWAITS the coordinator's full purge before navigating
 			// (reset.vue handleReset awaits deleteProfile), so observe the purge
 			// itself FIRST — profile row (proven to exist pre-submit) + exact
@@ -244,10 +256,13 @@ test.skipIf(!hasConfig)(
 			expect(resurrectedTx).toBe(false)
 			await page3.close()
 		} finally {
-			await ctx2.close()
-			rmSync(profileDir, { recursive: true, force: true })
-			// The doctored file embeds the wallet's REAL (local-chain test) master-key.
-			rmSync(dirname(filePath), { recursive: true, force: true })
+			try {
+				await ctx2?.close()
+			} finally {
+				rmSync(profileDir, { recursive: true, force: true })
+				// The doctored file embeds the wallet's REAL (local-chain test) master-key.
+				rmSync(dirname(filePath), { recursive: true, force: true })
+			}
 		}
 	},
 )
