@@ -677,7 +677,7 @@ Validation gate:
 - Layers: lint, typecheck, smoke e2e (both browsers), network e2e (touched paths, both browsers),
   probe.
 
-### P4 · C2 · `send-picker` retries
+### P4 · C2 · `send-picker` retries ✓
 
 1. `send-picker.test.ts` lines 7-29 as in § C2: the file-scoped `altToken` fixture, the body
    requesting it.

@@ -5,7 +5,7 @@
  */
 
 import { expect, inject } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
+import { test as base, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
 import { importTokenAndWaitForBalance, selectSendToken } from "../fixtures/helpers"
 import { openSend } from "../fixtures/send-page"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -15,18 +15,31 @@ const hasConfig = aztecConfig !== undefined
 
 const ONE = 10n ** 18n
 
+// File-scoped, like the wallet it imports into: a retried test reuses this ALT rather than importing
+// a second one, which would add a row the assertions below count.
+const test = base.extend<{ altToken: string }>({
+	altToken: [
+		async ({ tokenReadyExtension }, use) => {
+			const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
+			const { ALT } = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, [
+				{ symbol: "ALT", amount: 25n * ONE },
+			])
+			const page = await openPopup(tokenReadyExtension)
+			await waitForHash(page, "#/popup/general")
+			await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, ALT, (25n * ONE).toString())
+			await page.close()
+			await use(ALT)
+		},
+		{ scope: "file" },
+	],
+})
+
 test.skipIf(!hasConfig)(
 	"send picker: choosing another token updates the trigger and marks the row selected",
 	{ timeout: 420_000 },
-	async ({ tokenReadyExtension }) => {
-		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
-		const addresses = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, [
-			{ symbol: "ALT", amount: 25n * ONE },
-		])
-
+	async ({ tokenReadyExtension, altToken: _altToken }) => {
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
 
 		// Until the page's token loads, the trigger opens the import popup; openSend waits for the token.
 		await openSend(page)
