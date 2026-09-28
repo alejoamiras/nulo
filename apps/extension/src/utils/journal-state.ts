@@ -215,6 +215,12 @@ export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
 				context: "Couldn't reach the network. The transaction may not have been submitted.",
 			}
 		case "transfer":
+			// Also recorded after the node may hold the tx (a lost `sendTx` reply, a failed record),
+			// and the failed stage keeps no hash, so the copy cannot say it never landed.
+			return {
+				label: "Send failed",
+				context: "Your wallet couldn't finish this send. If it was already submitted, it may still go through.",
+			}
 		case "dapp_execute":
 			return { label: "Reported by app", context: "The connected app reported an error." }
 		default:

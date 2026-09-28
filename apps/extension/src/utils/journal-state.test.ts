@@ -482,10 +482,17 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 	test("network → 'Network error'", () => {
 		expect(categoricalLabel(failed("network")).label).toBe("Network error")
 	})
-	test("transfer / dapp_execute → 'Reported by app'", () => {
-		for (const kind of ["transfer", "dapp_execute"]) {
-			expect(categoricalLabel(failed(kind)).label).toBe("Reported by app")
-		}
+	test("transfer → 'Send failed', blaming no app and saying a submitted send may still go through", () => {
+		expect(categoricalLabel(failed("transfer"))).toEqual({
+			label: "Send failed",
+			context: "Your wallet couldn't finish this send. If it was already submitted, it may still go through.",
+		})
+	})
+	test("dapp_execute → 'Reported by app'", () => {
+		expect(categoricalLabel(failed("dapp_execute"))).toEqual({
+			label: "Reported by app",
+			context: "The connected app reported an error.",
+		})
 	})
 	test("unknown / unrecognized → 'Error'", () => {
 		expect(categoricalLabel(failed("unknown")).label).toBe("Error")
