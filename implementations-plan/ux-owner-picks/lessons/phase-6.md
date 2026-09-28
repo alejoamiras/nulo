@@ -55,3 +55,11 @@ stays with this plan's under it. The five `ux-owner-picks` entries in `follow-up
 taken by a follow-up plan" are deleted in the merge: D1 to D5 resolve each. `fee-helpers.ts`
 merged cleanly; dev's change there is `FEE_JUICE_BRIDGE_URL`'s default, which the sponsor default
 does not read (the get-gas nudge's conditions are unchanged).
+
+## Round 3 (HEAD `11192069`): approve, no new material findings
+
+The round 2 fixes and what the merge brought in (`#713`'s get-gas link default, the testnet USDC
+seed and its price entry) were re-read against the sponsor default, the get-gas nudge, the token
+lookup and the compact amounts. Codex, verbatim: "No new material findings. Both fixes and the
+merged changes checked out in source review and targeted in-memory probes." The loop converged
+in three rounds of three; no finding was rejected.
