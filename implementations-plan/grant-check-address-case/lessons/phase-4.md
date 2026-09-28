@@ -66,3 +66,27 @@ Checked against every network spec that requests a scoped bundle or re-requests 
   4 skipped, 8 todo; wallet-bridge 478; no workspace red); `test:ci-gating` 246 tests, 244 pass,
   2 skip, 0 fail; the chrome build `✓ built`, notices emitted.
 - `bun run e2e:reap`: exit 0, nothing to reap.
+
+## The codex loop
+
+`/codex high` (GPT-6 Astra), one session, `01a0e9f5-1e9b-7d60-ac20-912584fe70df`, over
+`origin/dev...HEAD` with this plan and its ledgers, both rules and the adversarial ask in each
+prompt.
+
+- **Round 1: approve, confidence high**, "Nothing material found": every scoped comparison uses
+  the guarded helper, malformed keys cannot match each other, the wildcards and the out-of-scope
+  behaviour are unchanged, the table's grouping agrees with enforcement for valid addresses, and
+  the three interpolating logs are gone. Codex ran five unit-test files (420 tests, all passing)
+  and read the e2e without running it. Two nits:
+  1. `scope-enforcement.test.ts:661`: `A_MIXED` equalled `A`, since every even position of
+     `"0a1b2c3d"` is a digit, so the mixed row repeated the lower-to-upper one. Verified and
+     accepted: `A_MIXED` now upper-cases the first half, and the test asserts the three spellings
+     differ. Own commit; lint, `typecheck:all` and `test:all` exit 0 after it.
+  2. `method-scope-checkers.ts:4`: fold the header paragraph into one sentence. Rejected: the
+     paragraph predates this branch except the phrase that keeps the leaf claim true, which is
+     all P2 step 3 and audit-ledger row 8 ask for; `F-005` is a live security-decision marker; a
+     rewrite of the header is outside this change.
+- **Round 2 (resumed): approve, confidence high**, "Nothing material": the fixture now exercises
+  three distinct spellings, the full diff has no missed comparison, invalid-key match, wildcard
+  widening or table-check disagreement, and codex accepts the rejection of nit 2. The loop
+  converged in two rounds of three.

@@ -14,6 +14,26 @@ program: the ux-feedback follow-ups, four independent PRs off dev (this is the s
 
 # Contract-address case in the grant check
 
+## Outcome
+
+- **Date:** 2026-09-28. **Status:** closed, awaiting archive: delivered on
+  `fix/grant-check-address-case`, not yet merged. The owner answered O-1 yes, as built (§ Approval).
+- **Shipped:** one field-address key, `packages/wallet-bridge/src/field-address.ts`, behind every
+  grant-to-call contract, class-id and event-contract comparison (`matchesPattern`,
+  `inAddressList` and the three coverage functions) and behind the Details table's row key;
+  `handleSendTx`'s three interpolating debug calls deleted. P1 to P4 as planned, plus one test fix
+  from the codex loop.
+- **Gates at delivery:** lint, `typecheck:all`, `test:all`, `test:ci-gating` and `build` exit 0;
+  the eleven scoped-grant network specs at retry 0, Chrome 21 of 21 and Firefox 20 of 21 (one
+  Chrome-only test skipped); the new test's flake bar six of six; smoke green on both browsers;
+  codex approve, confidence high, in two rounds of three (`lessons/phase-4.md`).
+- **Dropped:** nothing. The change map counted four follow-ups; the fourth, the debug
+  interpolation, was resolved in P2 instead, so three move out.
+- **Open items:** none left here. The three follow-ups are in `follow-ups.md` § Grants and scopes
+  and the lesson is in `lessons.md` § Authorization checks; the program's close PR marks the
+  ux-feedback follow-up resolved (§ Delivery).
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 A dApp's granted scope names contracts; the wallet checks every later call against it. The check
 compares addresses as exact strings, so a scope that lists a contract as `0xABCD…` refuses every
 call to `0xabcd…`, the same contract. The permission window's Details table merges the two
@@ -420,7 +440,7 @@ invalid values.
 
 | # | Who | Question | Recommendation | Confidence |
 |---|---|---|---|---|
-| O-1 | owner | Should a scope that names a contract in another letter case count as naming that contract? Four consequences: (1) calls to that contract, refused today (the dApp gets "The wallet could not process the request."), are authorized; (2) grants already stored in another case start working, with no rewrite; (3) a re-request differing only in case opens no window, and a window that does open omits a row already held in another case (UI impact's table); (4) under an On authorizations switch, the covered call intent signs without a window. Options: **yes**, ship all four; **no, split**: keep exact matching and make the Details table split by exact spelling, so one contract can show as two rows; **no, refuse**: reject a non-lower-case address when the dApp connects. | Yes: it is the reach the window already shows, it never reaches another contract, and a wildcard's reach is unchanged | high |
+| O-1 | owner | Should a scope that names a contract in another letter case count as naming that contract? Four consequences: (1) calls to that contract, refused today (the dApp gets "The wallet could not process the request."), are authorized; (2) grants already stored in another case start working, with no rewrite; (3) a re-request differing only in case opens no window, and a window that does open omits a row already held in another case (UI impact's table); (4) under an On authorizations switch, the covered call intent signs without a window. Options: **yes**, ship all four; **no, split**: keep exact matching and make the Details table split by exact spelling, so one contract can show as two rows; **no, refuse**: reject a non-lower-case address when the dApp connects. | Yes: it is the reach the window already shows, it never reaches another contract, and a wildcard's reach is unchanged. **Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O-1 yes.** | high |
 | C-1 | codex | Where does the key live: a new leaf `field-address.ts`, or inside `method-scope-checkers.ts`? | New leaf, with `isFieldAddress` moved into it. **Codex: approve.** | high |
 | C-2 | codex | Do the three coverage comparisons change with enforcement? | Yes; coverage is documented to mirror enforcement (`dispatcher.ts:214-217`). **Codex: approve**, with Fact 5's `contractClasses` qualification recorded. | high |
 | C-3 | codex | Keep `String(...)` coercion on the call side, or require `typeof === "string"`? | Keep it, with the per-method guarantee stated precisely (the boundary table), representative wildcard-path tests, and the coerced-array claim corrected (`isTokenRegistered` does not parse). **Codex: amend**, applied. | moderate |
@@ -496,9 +516,15 @@ confidence high** (conditions 1–4). After the fixes below, the same session re
 
 ## Approval
 
-Pending. Done: both legs' round-1 verdicts, the final fresh-context codex pass (approve,
-confidence high), C-1 to C-7 logged above. Open: O-1 answered by the owner (it carries the
-window change in UI impact), and the ELI5 Artifact URL.
+Approved. Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O-1 yes. The
+page asked "A dApp writes 0xAbC4…9F21. Your saved permission says 0xabc4…9f21. Same contract?",
+showed today's refusal and, under yes, the call allowed, a repeat request with no window and,
+with authorizations On, a call intent signed without one; grants stored in another case follow
+the same rule. The two alternatives, split rows and refuse at connect, were shown and not picked.
+The answer is the build's reading, so no code or gate changed with it. This is the sign-off for
+the window change in UI impact. Before it: both legs' round-1 verdicts, the final fresh-context
+codex pass (approve, confidence high), C-1 to C-7 logged above. The ELI5 page is the front
+matter's link.
 
 ## Phases
 
