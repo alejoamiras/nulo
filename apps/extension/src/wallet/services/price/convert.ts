@@ -75,6 +75,11 @@ export function tokenAmountToUsdMicro(raw: bigint, decimals: number, usd: number
 	return divHalfUp(raw * rate, 10n ** BigInt(decimals))
 }
 
+/** Micro-USD in whole cents, half-up: the cents `formatUsdMicro` prints. */
+export function usdMicroToCents(micro: bigint): bigint {
+	return divHalfUp(micro, 10_000n)
+}
+
 /**
  * Render micro-USD for display: `$1,249.38` (half-up to cents),
  * `<$0.01` when positive but under a cent, `$0.00` for zero.
@@ -84,8 +89,7 @@ export function formatUsdMicro(micro: bigint): string {
 	if (micro < 0n) throw new Error("negative usd value")
 	if (micro === 0n) return "$0.00"
 	if (micro < 10_000n) return "<$0.01"
-	const cents = divHalfUp(micro, 10_000n)
-	return `$${formatBaseUnits(cents, 2, { minDecimals: 2, trimTrailingZeros: false })}`
+	return `$${formatBaseUnits(usdMicroToCents(micro), 2, { minDecimals: 2, trimTrailingZeros: false })}`
 }
 
 /**

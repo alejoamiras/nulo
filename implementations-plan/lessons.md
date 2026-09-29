@@ -32,7 +32,12 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 
 - A wire-shaped field fixture must stay below the BN254 modulus (`0x3064…`): `0x` + `aa` × 32 is above it, so the capability validator refuses it as malformed, while `0x` + `0a` × 32 passes. [Evidence](ux-feedback/b5-permissions/lessons/phase-6.md)
 - A lock section the watchdog force-released keeps running (`packages/wallet-core/src/utils/lock.ts`), and `nextNumericId` (max + 1) hands a purged top id to the next restore, so a late compensating delete by id can take a same-id successor's row. Gate it on `withLock`'s `isCurrent` where the row predates the deletion, whose purge then removes it; where the row may postdate the purge's snapshot, skipping the delete orphans it. [Evidence](wallet-safety-fixes/lessons/phase-6.md)
+- The local network's chain id is 0 (`CHAIN_IDS.SANDBOX`), so a truthiness guard on `chainId` skips the chain every network e2e runs on: History never named a received row's token there. Test for the network, or for `chainId === undefined`. [Evidence](ux-owner-picks/lessons/phase-2.md)
 
 ## Authorization checks
 
 - Validate both sides before comparing normalised keys: `key(a) === key(b)`, where `key` returns `undefined` for bad input, matches two bad inputs, and plain string equality let a malformed listed contract match an identical call target ([red run](grant-check-address-case/lessons/phase-1.md)).
+
+## Popup UI
+
+- Space Grotesk's default digits are proportional (at weight 700 "1" is 452 units, "0" 648), so a figure re-fitted to its line on every frame of a count pulses: while it counts, let the fit only shrink, and fit the next figure afresh. The shipped font has `tnum`, but tabular digits change how every figure looks, an owner call. [Evidence](ux-owner-picks/lessons/phase-1.md)

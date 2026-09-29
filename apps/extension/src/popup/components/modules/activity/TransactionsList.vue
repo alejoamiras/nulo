@@ -15,10 +15,9 @@ import { buildIncomingCardProps } from "@/utils/received-display"
 
 const props = defineProps({
 	rows: { type: Array, required: true },
-	/** Token lookup map (id → Token) used by terminal transfer rows to
-	 *  format amounts. Optional — when absent, transfer cards render
-	 *  without amount info (graceful degradation). */
-	tokensById: { type: Object, default: () => ({}) },
+	/** The current profile and chain's tokens: a transfer or received row shows an amount only for a
+	 *  token in this list. */
+	tokens: { type: Array, default: () => [] },
 	/** Whether an incoming row's receipt is arriving now; judged when the row renders. */
 	isArriving: { type: Function, default: undefined },
 })
@@ -43,15 +42,12 @@ onBeforeUnmount(() => {
 	priceService.disconnect()
 })
 function incomingCardProps(inc) {
-	const token = props.tokensById[inc.tokenId]
-	return buildIncomingCardProps(inc, token, token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
+	return buildIncomingCardProps(inc, props.tokens, prices.tokenFiatLabel)
 }
 
-/** Map a journal record row → TransactionTerminalCard props via the shared
- *  helper. Previously this file inlined a byte-identical duplicate of
- *  RecentActivityView's resolver; the shared helper closes the drift surface. */
+const tokensById = computed(() => new Map(props.tokens.map((t) => [t.id, t])))
 function terminalCardProps(op) {
-	return buildJournalTerminalCardProps(op, { tokenById: (id) => props.tokensById[id] })
+	return buildJournalTerminalCardProps(op, { tokenById: (id) => tokensById.value.get(id) })
 }
 </script>
 

@@ -290,6 +290,21 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		expect(w.text()).toContain("Test Token")
 	})
 
+	test("a holding too long for the row keeps every whole digit: the total at 10 characters, each side at 6", async () => {
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1,
+			privateBalance: (12_345_678_912n * 10n ** 16n).toString(),
+			publicBalance: (12_345n * 10n ** 17n).toString(),
+		})
+		await flushPromises()
+		// 123,458,023.62 in total, 123,456,789.12 private, 1,234.5 public.
+		expect(w.text()).toContain("123.45M")
+		expect(w.text()).toContain("123.4M")
+		expect(w.text()).toContain("1,234")
+		expect(w.text()).not.toContain("1,234.")
+	})
+
 	test("the split line renders a bone lock (private) and a grey globe (public) with both amounts", async () => {
 		mockQuotes = {}
 		const w = factory({ updatedAt: 1, privateBalance: (7n * 10n ** 18n).toString(), publicBalance: (3n * 10n ** 18n).toString() })

@@ -59,27 +59,47 @@ export const normalizeAmount = (target: string): string | undefined => {
 	if (Number.parseFloat(purgeNumber(target)) >= 9_999_999_999_999) return "9999999999999"
 }
 
+const COMPACT_SUFFIXES = ["K", "M", "B", "T"] as const
+
 /**
- * Format a base-units value for display, with optional total-string-length
- * truncation + small-value hint. Returns `{ value, slashed }` so callers
- * can render an "expand" affordance when truncation fired (BalanceView).
+ * `fullValue` in `length` characters without losing a whole digit: the cut minus a trailing
+ * decimal separator while the whole part fits, else the whole part in its largest K/M/B/T tier with
+ * at most two truncated digits of the next group, or `>999T` past a thousand trillion.
+ */
+const compactCut = (fullValue: string, units: bigint, decimals: number, length: number, decimalSep: string): string => {
+	if ((fullValue.split(decimalSep)[0] ?? fullValue).length <= length) {
+		const cut = fullValue.slice(0, length)
+		return cut.endsWith(decimalSep) ? cut.slice(0, -decimalSep.length) : cut
+	}
+	const whole = units / 10n ** BigInt(decimals)
+	if (whole >= 1000n ** 5n) return ">999T"
+	let tier = COMPACT_SUFFIXES.length
+	while (tier > 1 && whole < 1000n ** BigInt(tier)) tier--
+	const scale = 1000n ** BigInt(tier)
+	const head = (whole / scale).toString()
+	const places = Math.max(0, Math.min(2, length - head.length - 2))
+	const frac = (whole % scale)
+		.toString()
+		.padStart(3 * tier, "0")
+		.slice(0, places)
+		.replace(/0+$/, "")
+	return `${head}${frac ? decimalSep + frac : ""}${COMPACT_SUFFIXES[tier - 1]}`
+}
+
+/**
+ * Format base units for display, truncated (never rounded up), in at most `length` characters
+ * when given; `slashed` is set when the value shown is not the full one.
  *
- * `length` is the OUTPUT-string length cap, not a decimal-places count:
- * - String shorter than `length`  → returned as-is, slashed=false.
- * - Value > 0 but smaller than `10^-(length-2)` after scaling → renders
- *   `<0.0001` (length-3 zeros + `1`), slashed=true. UX hint that the
- *   actual amount is non-zero but too small to show at this width.
- * - String exceeds `length`       → sliced to `length` chars, slashed=true.
- *   No "..." suffix — callers that need an affordance use the `slashed`
- *   flag to render their own (e.g. a "Show full" button).
- *
- * Uses `formatBaseUnits` (TRUNCATE-only rounding) under the hood — display
- * always shows ≤ actual.
+ * - Non-zero but below what `length` can show → `<0.0001`, its zeros filling the width.
+ * - Longer than `length` → cut to it, with no ellipsis; callers draw their own "Show full".
+ * - `compact`: whole digits are never cut. The cut drops a trailing decimal separator, and a whole
+ *   part longer than `length` reads K/M/B/T (`123.45M`), or `>999T` past a thousand trillion.
  */
 export const balanceFormatted = (
 	units: bigint | string | null | undefined,
 	decimals: number,
 	length?: number,
+	opts: { compact?: boolean } = {},
 ): { value: string; slashed: boolean } => {
 	if (units == null || units === "") return { value: "0", slashed: false }
 	const u = typeof units === "bigint" ? units : BigInt(units)
@@ -109,7 +129,8 @@ export const balanceFormatted = (
 	}
 
 	if (fullValue.length > length) {
-		return { value: fullValue.slice(0, length), slashed: true }
+		const value = opts.compact ? compactCut(fullValue, u, decimals, length, decimalSep) : fullValue.slice(0, length)
+		return { value, slashed: true }
 	}
 
 	return { value: fullValue, slashed: false }

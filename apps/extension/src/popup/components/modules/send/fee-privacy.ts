@@ -1,5 +1,5 @@
 import type { TransferSide } from "@/components/composite/send/publish-facts"
-import { buildFeeMethods, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
+import { buildFeeMethods, defaultSponsor, type FeeMethodOption, type GasBalances, type RegisteredFpc } from "./fee-helpers"
 
 export type { TransferSide }
 
@@ -47,7 +47,7 @@ function payersOf(methods: FeeMethodOption[]): Payers {
 	return {
 		fj: methods.find((m) => m.type === "fj"),
 		privateFj: methods.find((m) => m.type === "private_fpc"),
-		sponsor: methods.find((m) => m.type === "fpc"),
+		sponsor: defaultSponsor(methods),
 	}
 }
 

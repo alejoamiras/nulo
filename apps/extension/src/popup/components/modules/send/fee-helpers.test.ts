@@ -3,6 +3,7 @@ import { FpcType } from "@/wallet/services/fpc/client"
 import {
 	buildFeeMethods,
 	buildSettings,
+	defaultSponsor,
 	FEE_JUICE_BRIDGE_URL,
 	type FeeMethodOption,
 	feeDisplay,
@@ -267,7 +268,7 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 		])
 	})
 
-	test("the menu lists Nulo's sponsor before hand-added ones; the payer list keeps storage order", () => {
+	test("the menu lists Nulo's sponsor before hand-added ones; only the menu is reordered", () => {
 		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
 		const methods = buildFeeMethods([PRIVATE, HAND_ADDED, NULO_SPONSOR, second])
 		expect(menuOrder(methods).map((m) => m.title)).toEqual([
@@ -278,6 +279,14 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 			"Other sponsor",
 		])
 		expect(methods.map((m) => m.title)).toEqual(["Public Fee Juice", "Private Fee Juice", "Dev sponsor", "Sponsored", "Other sponsor"])
+	})
+
+	test("the default sponsor is Nulo's wherever it is listed, and never one added by hand", () => {
+		const second = { ...HAND_ADDED, id: "s4", name: "Other sponsor" }
+		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, NULO_SPONSOR, second]))?.fpc?.id).toBe("s1")
+		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, second]))).toBeUndefined()
+		expect(defaultSponsor(buildFeeMethods([PRIVATE]))).toBeUndefined()
+		expect(defaultSponsor(buildFeeMethods([NULO_SPONSOR], undefined, { allowSponsored: false }))).toBeUndefined()
 	})
 })
 

@@ -11,6 +11,7 @@ import OperationCard from "./OperationCard.vue"
 const mocks = vi.hoisted(() => ({
 	getGasBalances: vi.fn(),
 	getFpcs: vi.fn(),
+	storageSet: vi.fn(async (_items: Record<string, unknown>) => {}),
 	feeJuiceUsd: undefined as number | undefined,
 }))
 
@@ -118,15 +119,19 @@ const stubs = {
 }
 
 let mounted: VueWrapper | undefined
-const mountCard = async (op: unknown) => {
+const mountCard = async (op: unknown, dapp?: { name: string }) => {
 	const w = mount(OperationCard, {
-		props: { op: op as never, index: 0, profile: { id: "p1", name: "Main" } as never, feeEstimate: ESTIMATE },
+		props: { op: op as never, index: 0, profile: { id: "p1", name: "Main" } as never, feeEstimate: ESTIMATE, dapp },
 		global: { stubs },
 	})
 	mounted = w
 	await flushPromises()
 	return w
 }
+/** The fee settings the card last handed the window. */
+const lastSettings = (w: VueWrapper) => w.emitted<[number, unknown]>("updateFeeSettings")?.at(-1)?.[1]
+const FEE_PICKS_KEY = "nulo:ui:feePaymentMethods"
+const savedKeys = () => mocks.storageSet.mock.calls.flatMap(([items]) => Object.keys(items))
 
 /** The text a screen reader reaches in `el`: every text node outside an `aria-hidden` subtree. */
 function spokenText(el: Element): string {
@@ -149,8 +154,9 @@ beforeEach(() => {
 	;(globalThis as any).chrome = {
 		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
 		...(globalThis as any).chrome,
-		storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {}, getKeys: async () => [] } },
+		storage: { local: { get: async () => ({}), set: mocks.storageSet, remove: async () => {}, getKeys: async () => [] } },
 	}
+	mocks.storageSet.mockClear()
 	mocks.getGasBalances.mockReset().mockResolvedValue({ publicFeeJuice: "5000000000000000000", privateFeeJuice: null })
 	mocks.getFpcs.mockReset().mockResolvedValue([NULO_SPONSOR])
 	mocks.feeJuiceUsd = 0.06
@@ -183,13 +189,34 @@ describe("OperationCard — who pays a wire-shaped transaction's fee", () => {
 		expect(spokenText(fee(w).element)).not.toContain("3.577824")
 	})
 
-	test("a sponsor added by hand pays: a dash, never Nothing, and no amount", async () => {
+	test("a sponsor added by hand is never chosen for the person; once picked it pays: a dash, never Nothing, and no amount", async () => {
 		mocks.getFpcs.mockResolvedValue([HAND_ADDED])
 		const w = await mountCard(sendTx())
-		expect(w.find('[data-testid="send-fee-method-trigger"]').text()).toContain("Dev sponsor")
+		const trigger = () => w.find('[data-testid="send-fee-method-trigger"]')
+		expect(trigger().text()).toContain("Select method")
+		await w.find('[data-testid="send-fee-method-sponsored"]').trigger("click")
+		await flushPromises()
+		expect(trigger().text()).toContain("Dev sponsor")
 		expect(fee(w).text()).toContain("—")
 		expect(fee(w).text()).not.toContain("Nothing")
 		expect(fee(w).text()).not.toContain("3.577824")
 		expect(spokenText(fee(w).element)).toContain("Nulo can't tell what this fee contract charges you.")
+	})
+})
+
+describe("OperationCard — the sponsor a wire-shaped transaction defaults to", () => {
+	test.each([
+		["listed after one added by hand", [HAND_ADDED, NULO_SPONSOR], {}, undefined],
+		[
+			"with an app and a hand-added row named like it, and extra payload fields",
+			[{ ...HAND_ADDED, name: "Sponsored" }, NULO_SPONSOR],
+			{ authWitnesses: [], capsules: [], extraHashedArgs: [] },
+			{ name: "Nulo Sponsored" },
+		],
+	])("Nulo's sponsor, %s, and no pick is saved", async (_case, fpcs, exec, dapp) => {
+		mocks.getFpcs.mockResolvedValue(fpcs)
+		const w = await mountCard(sendTx(exec), dapp)
+		expect(lastSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		expect(savedKeys()).not.toContain(FEE_PICKS_KEY)
 	})
 })
