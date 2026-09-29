@@ -592,7 +592,7 @@ field runs the page action once; green before and after, labelled so):
 0, each page's red runs recorded, Outcome criteria 1 and 2 each proven by a named case. Layers:
 lint, typecheck, unit, component, CI-gating, build.
 
-### P3 · Browser proof
+### P3 · Browser proof ✓
 
 Assumptions: Facts 18, 28; Inferences 1, 6; C4 as applied.
 
@@ -601,15 +601,20 @@ Assumptions: Facts 18, 28; Inferences 1, 6; C4 as applied.
 2. `tests/e2e/keyboard-guards.test.ts` (new smoke file, testid selectors only, the recorder of
    § Non-obvious mechanics). Record the red run on Chrome first.
    - "a held Enter on Retrieve retrieves once" (`registeredExtension`): Security → Export →
-     Recovery phrase, Agree, fill `unlock-password-input`, focus `unlock-submit-btn`
-     (`waitForFocus`), `keyboard.down("Enter")` twice, `keyboard.up`. Asserts the recorded Enters
-     are `[{ on: "unlock-submit-btn", repeat: false }, { on: "unlock-submit-btn", repeat: true }]`,
-     one click on the button, and `reveal-content` shown. Red today on Chrome (two or more clicks).
+     Recovery phrase, Agree, fill `unlock-password-input` with a wrong password, focus
+     `unlock-submit-btn` (`waitForFocus`), `keyboard.down("Enter")` twice, `keyboard.up`. Asserts
+     the recorded Enters are `[{ on: "unlock-submit-btn", repeat: false }, { on: "unlock-submit-btn", repeat: true }]`
+     and one click on the button; then the right password and one Enter show `reveal-content`.
+     As built: a failed retrieval leaves Retrieve on the page, while with the right password
+     Firefox reveals the phrase before the repeat lands (`lessons/phase-3.md`). Red on `85c4d20f`
+     on Chrome and Firefox (two clicks).
    - "Enter in the confirm field creates the wallet once" (`freshExtensionPerTest`): Welcome →
      Create, fill both password fields, focus `onboarding-password-confirm-input`, the same held
-     Enter. Asserts the recorded Enters on that testid with `repeat` false then true, one `submit`,
-     the hash reaches `#/onboarding/learn`, and `readProfileNames` is `["Main"]`. Preservation of
-     the native path (green before and after).
+     Enter. Asserts the recorded Enters on that testid with `repeat` false then true, one click on
+     `onboarding-submit-create`, the hash reaches `#/onboarding/learn`, and `readProfileNames` is
+     `["Main"]`. As built: implicit submission clicks the default button, whose handler disables
+     it before its activation runs, so no `submit` fires. Red on `85c4d20f` too, not green before
+     and after: the document handler created the wallet and the native path never ran.
 3. Smoke, each browser in turn:
    `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:<b>`,
    then `NULO_E2E_BROWSER=<b> NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` (`<b>` = `chrome`,
