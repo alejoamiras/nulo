@@ -73,6 +73,7 @@ onBeforeUnmount(() => {
 		:tabindex="isLoading ? -1 : 0"
 		:aria-busy="isLoading || undefined"
 		:aria-disabled="isLoading || undefined"
+		:aria-label="isLoading ? 'Loading tokens' : undefined"
 		:data-state="state"
 		data-testid="send-token-trigger"
 	>

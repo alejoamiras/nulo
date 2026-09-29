@@ -61,3 +61,16 @@ redundant, so it was dropped.
 | `bun run typecheck:all` | 0 | |
 | `bun --bun vitest run` the three P3 files (from `apps/extension`) | 0 | 3 files, 87 passed |
 | `bun run test:all` | 0 | extension 7848 passed, 4 skipped, 8 todo; every workspace exit 0 |
+
+## The owner's name for the loading card
+
+On the sign-off page (2026-09-29, `name`) the owner picked "Name it Loading tokens (Recommended)":
+while the card loads, a screen reader hears "Loading tokens" instead of a nameless busy button.
+Nothing drawn changes.
+
+- Red first: one new case in `SelectTokenCard.test.ts`, 1 failed and 6 passed
+  (`expected undefined to be 'Loading tokens'`).
+- Built: `:aria-label="isLoading ? 'Loading tokens' : undefined"`. The ready and empty rows keep
+  the names their content gives, and so does a token handed in while loading, which is drawn.
+- `bun --bun vitest run src/popup/components/modules/send/` (from `apps/extension`): exit 0,
+  12 files, 275 passed.

@@ -50,6 +50,18 @@ describe("send/SelectTokenCard", () => {
 		expect(w.text()).not.toContain("No available tokens")
 	})
 
+	test("only while loading is the row named Loading tokens; ready and empty keep the names their content gives", async () => {
+		const { w } = mountCard({ loading: true })
+		expect(trigger(w).attributes("aria-label")).toBe("Loading tokens")
+		await w.setProps({ loading: false })
+		expect(trigger(w).attributes("aria-label")).toBeUndefined()
+		await w.setProps({ token: TOKEN })
+		expect(trigger(w).attributes("aria-label")).toBeUndefined()
+		// A token handed in while loading is drawn, so the row reads it rather than the wait.
+		await w.setProps({ loading: true })
+		expect(trigger(w).attributes("aria-label")).toBeUndefined()
+	})
+
 	test("loading with a token: the token is drawn, ready to open", () => {
 		const { w } = mountCard({ loading: true, token: TOKEN })
 		expect(trigger(w).attributes("data-state")).toBe("ready")
