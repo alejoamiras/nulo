@@ -59,10 +59,12 @@ describe("refuseRepeatEnter", () => {
 		expect([repeat.defaultPrevented, composing.defaultPrevented]).toEqual([true, true])
 	})
 
-	it("leaves a plain Enter to the control", () => {
+	it("leaves a plain Enter, and another key's repeat, to the control", () => {
 		const plain = enter()
+		const otherRepeat = enter({ key: "ArrowDown", repeat: true })
 		refuseRepeatEnter(plain)
-		expect(plain.defaultPrevented).toBe(false)
+		refuseRepeatEnter(otherRepeat)
+		expect([plain.defaultPrevented, otherRepeat.defaultPrevented]).toEqual([false, false])
 	})
 })
 
