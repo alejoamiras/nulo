@@ -12,6 +12,36 @@ worktree: a harness-created agent worktree (its path is recorded in lessons/phas
 base: dev @ 624117cd
 ---
 
+## Outcome
+
+- **Date:** 2026-09-29. **Status:** closed, awaiting archive: delivered as #717 on
+  `fix/wallet-safety-fixes`, not yet merged. The owner picked O1 (a) on 2026-09-28 and gave the
+  blanket sign-off for UI impact rows 2 to 4 and R1 on 2026-09-29: "Sign off all" (P7).
+- **Shipped** in #717, A1 to A5 as planned, P0 to P7:
+  - A1: only the focused Revoke or Send button confirms the two authwit popups, and a repeat or
+    composing Enter confirms nothing; `DropdownRoot`'s Enter clicks only an item of its menu; the
+    form popups on `usePopupEntity` ignore a repeat or composing Enter; CLAUDE.md states the rule.
+  - A2: the three `createAuthWit` refusals carry fixed text, with no request value.
+  - A3: `setTrustAllow`, `setTrustReject` and the token add's auto-trust write only in the session
+    and the profile incarnation that decided them.
+  - A4: every deletion path removes `nulo:ui:pinnedTokens@<profileId>`, and a pin writes nothing
+    once its scope has changed.
+  - A5: the journal id comment states the id's real width and cites no review.
+  - From the codex loop: the token add's last fence deletes its row only while it owns the lock,
+    and `unhideLocked`'s comment states its partial stop.
+- **Gates at delivery:** P6's final gate on `00e5b013` (`lessons/phase-6.md`): lint,
+  `typecheck:all`, `test:all`, `test:ci-gating` and `build` exit 0; the three network specs at
+  retry 0, 4 of 4 tests on Chrome (prover on) and on Firefox (proverless), none skipped; the new
+  case's flake bar three of three per browser; smoke green on both browsers at retry 0; codex
+  approve in two rounds of three. After the merge of `dev` at `f51ec001` (`7f8d0835`, which
+  brought in #716's address comparisons in the scope checkers): lint, `typecheck:all`,
+  `test:all` and `test:ci-gating` exit 0, and the three network specs on Chrome at retry 0,
+  4 of 4 tests, none skipped.
+- **Dropped:** nothing.
+- **Open items:** none left here. F-1 to F-7 are in `follow-ups.md` § Wallet safety, and four
+  lessons are in `lessons.md` (§ CI & gates, § E2E, § Extension runtime).
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # Wallet safety fixes
 
 Four security and privacy fixes and one comment, from the ux-feedback program's follow-ups
