@@ -1,6 +1,6 @@
 import { createServer } from "node:net"
-import { describe, expect, test } from "vitest"
-import { ephemeralFloor, reservePortPack } from "./resolve-ports"
+import { describe, expect, test, vi } from "vitest"
+import { ephemeralFloor, reservePort, reservePortPack, staticWindow } from "./resolve-ports"
 
 /** Can we bind this exact loopback port right now? */
 function bindable(port: number): Promise<boolean> {
@@ -55,5 +55,21 @@ describe("resolve-ports — collision-immune static allocation", () => {
 		const { ports, release } = await reservePortPack()
 		await release()
 		expect(await bindable(ports.aztec)).toBe(true)
+	})
+
+	// 10080 is a Fetch bad port inside the window: Node's WebSocket refused a BiDi socket on it.
+	test("never returns 10080, even when every draw lands on it", async () => {
+		const { lo, hi } = staticWindow(await ephemeralFloor())
+		expect(lo).toBeLessThanOrEqual(10080)
+		expect(hi).toBeGreaterThan(10080)
+		const random = vi.spyOn(Math, "random").mockReturnValue((10080 - lo + 0.5) / (hi - lo))
+		try {
+			const reservation = await reservePort()
+			await reservation.release()
+			expect(random).toHaveBeenCalled()
+			expect(reservation.port).not.toBe(10080)
+		} finally {
+			random.mockRestore()
+		}
 	})
 })

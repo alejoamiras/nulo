@@ -17,6 +17,8 @@ Puppeteer speaks WebDriver BiDi to Firefox, and BiDi alone is not enough: it has
 - **geckodriver (WebDriver classic, HTTP)** owns the session: it launches Firefox, installs the add-on, navigates and reloads extension pages, adds the virtual authenticator, lists window handles.
 - **Puppeteer over BiDi** attaches to that same session for everything else. `puppeteer.connect` insists on sending `session.new`, which Firefox refuses while the classic session holds the only slot, so `bidi-attach.ts` answers `session.new` / `session.end` locally and forwards the rest untouched.
 
+Both geckodriver ports come from `reservePort` (`scripts/e2e/resolve-ports.ts`), which never draws one of Fetch's bad ports: Node's WebSocket refuses one, such as 10080, before connecting, so the attach fails with `BiDi socket … failed to open` while Firefox logs BiDi listening on that very port.
+
 A classic window handle and a BiDi browsing-context id are the same string in Firefox, which is what lets a Puppeteer `Page` be addressed on the classic channel. The id is read from Puppeteer's internal `Frame._id` (`contextIdOf` in `firefox.ts`); it throws by name if a Puppeteer upgrade moves it. **A Puppeteer bump is the one routine change that can break the Firefox driver wholesale** — run the Firefox smoke on it.
 
 `--allow-system-access` is passed to geckodriver because Firefox otherwise refuses remote navigation to `moz-extension://` on both channels. It lets the automation session reach privileged contexts; acceptable on a single-user dev host and a single-tenant CI runner, and nowhere else.

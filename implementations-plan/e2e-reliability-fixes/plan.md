@@ -98,7 +98,7 @@ contract; it renders nothing and changes no layout, copy, order or state. The fe
 in the popup's Send page and the dApp execute window through `FeeSettingsCard.vue:763`. Its rows
 come from the wallet's own FPC records (`fee-helpers.ts:190-203`), not from dApp data, so the
 wire-shaped fixture rule does not apply. No owner sign-off is needed; no screenshot. C6, the
-addendum, changes test code only.
+addendum, and C7, the second, change test code only.
 
 ## Architecture & Implementation
 
@@ -327,6 +327,32 @@ after it reads the settled layout. No testid is added. The wait matches this fil
 registered wallet with no tokens and no seeds, and times out loudly if that setup ever shows rows.
 Test code only, so no UI impact.
 
+### C7 · The port draw skips Fetch's bad ports (addendum)
+
+Added during the build on 2026-09-29 at the driver's request; the `ux-owner-picks` builder found
+and proved it.
+
+**Failure.** Firefox smoke, `onboarding-tab.test.ts`, "presto available renders the connected card
+and an enabled Continue", 1 of 164: `BiDi socket ws://127.0.0.1:10080/session/… failed to open`
+(`fixtures/browser/bidi-attach.ts:125`), while Firefox logged "WebDriver BiDi listening on
+ws://127.0.0.1:10080".
+
+**Mechanism.** 10080 is on the Fetch standard's bad-port list, and Node's built-in WebSocket
+(undici, Node 24.21.0) refuses a bad port before it opens any TCP connection: a raw TCP listener
+on 10080 saw no connection from `new WebSocket("ws://127.0.0.1:10080/…")`, and the same listener
+on 10079 and on 10081 saw one each. `reservePort()` (`scripts/e2e/resolve-ports.ts`) draws
+uniformly from [10000, the ephemeral floor − 512), and 10080 is the only bad port in that window,
+so about 1 draw in 22k lands on it. The draw serves every port a run owns, not only geckodriver's
+`--websocket-port`: browsers refuse bad ports too (Chrome's `ERR_UNSAFE_PORT`), and so does
+undici's fetch, so a node, anvil or playground port drawn there fails the same way.
+
+**Fix.** `reservePort` skips every candidate on the bad-port list, a named set equal to undici's
+list with a one-line why, instead of a hard-coded 10080. The window's bounds move into an exported
+`staticWindow(floor)`, so the unit test can aim the draw without restating the formula. One
+deterministic unit test, red first: `Math.random` is stubbed so that every draw lands on 10080,
+and the test fails if 10080 comes back. A ledger row, and one line in `FIREFOX.md` where the BiDi
+attach is described. Test infrastructure only, so no UI impact.
+
 ### Alternatives considered
 
 - **C1: a test-only inert page behind a `VITE_NULO_E2E_*` flag.** It would be a new rollup input,
@@ -361,9 +387,9 @@ Test code only, so no UI impact.
 | `apps/extension/tests/e2e/fixtures/browser/chrome.ts` | scratch path | C1 |
 | `apps/extension/tests/e2e/fixtures/browser/firefox.ts` | scratch path, one branch; comment | C1 |
 | `apps/extension/tests/e2e/fixtures/extension.ts` | caller of `openScratchPage` (`:117`) | C1 |
-| `apps/extension/tests/e2e/FIREFOX.md` | row at `:43` | C1 |
+| `apps/extension/tests/e2e/FIREFOX.md` | row at `:43`; a line on bad ports under the BiDi attach | C1, C7 |
 | `apps/extension/tests/e2e/onboarding-tab.test.ts` | comment at `:298-301` only | C1 |
-| `.claude/skills/e2e-testing/SKILL.md` | ledger: new rows for C1, C4 and C6, row 37's fix cell for C2 | C1, C2, C4, C6 |
+| `.claude/skills/e2e-testing/SKILL.md` | ledger: new rows for C1, C4, C6 and C7, row 37's fix cell for C2 | C1, C2, C4, C6, C7 |
 | `apps/extension/tests/e2e/network/send-picker.test.ts` | lines 7-29: file-scoped `altToken` fixture | C2 |
 | `apps/extension/tests/e2e/fixtures/helpers.ts` | only on the fallback branch: export `hasTokenRow` | C2 |
 | `apps/extension/src/wallet/services/wallet-sdk/content-message-relay.test.ts` | async `beforeEach` import; `freshRelay` reads it | C3 |
@@ -374,6 +400,8 @@ Test code only, so no UI impact.
 | `apps/extension/src/popup/components/modules/send/FeeMethodSelector.vue` | `:data-fpc-id` | C5 |
 | `apps/extension/src/popup/components/modules/send/FeeMethodSelector.test.ts` | one case | C5 |
 | `apps/extension/tests/e2e/rows.test.ts` | `backToHome` waits for the settled token card | C6 |
+| `apps/extension/scripts/e2e/resolve-ports.ts` | the draw skips Fetch's bad ports; `staticWindow` | C7 |
+| `apps/extension/scripts/e2e/resolve-ports.test.ts` | one case | C7 |
 | `implementations-plan/e2e-reliability-fixes/` + `implementations-plan/index.md` | the plan, one index line | all |
 
 ## Security & Adversarial Considerations
@@ -814,7 +842,7 @@ Run at the final code revision (the branch head after the last code commit), one
 
 ### P7 · C6 · Home's settled token card (addendum) ✓
 
-Added mid-build, with C6. P6 runs after it, at the final code revision.
+Added mid-build, with C6. P6 runs after it and P8, at the final code revision.
 
 1. `rows.test.ts`: `goBackTo(page, expected)` becomes `backToHome(page)`, which also waits for
    `tokens-empty-import-link`; its three callers change with it.
@@ -838,6 +866,26 @@ Validation gate:
 - Pass criteria: every command exits 0, except the base probe, which fails with the recorded
   `'nothing'`.
 - Layers: lint, smoke e2e (both browsers), probe.
+
+### P8 · C7 · the port draw skips Fetch's bad ports (addendum) ✓
+
+Added mid-build, with C7. P6 runs after it, at the final code revision.
+
+1. `resolve-ports.ts`: `staticWindow(floor)` holds the window's bounds, with no change in
+   behaviour; then the unit test; then the named bad-port set and the skip in the draw.
+2. `resolve-ports.test.ts`: one case. It asserts 10080 lies inside `staticWindow`'s bounds, stubs
+   `Math.random` so every draw lands on 10080, and fails if the reservation is 10080. Run red on
+   the unfixed draw first.
+3. A ledger row in `.claude/skills/e2e-testing/SKILL.md` § 5, and one line in `FIREFOX.md` under
+   the BiDi attach.
+
+Validation gate:
+- Commands: from `apps/extension`, `bun --bun vitest run scripts/e2e/resolve-ports.test.ts`, red
+  before the skip and green after it; `bun run lint`; `bun run typecheck:all`; a check that the set
+  equals undici's `badPorts` (`lib/web/fetch/constants.js`).
+- Pass criteria: the red run fails with `expected 10080 not to be 10080`; every other command
+  exits 0.
+- Layers: unit, lint, typecheck. P6's network legs, which draw every run's ports, follow.
 
 ## Post-implementation (read by the implementing session)
 
