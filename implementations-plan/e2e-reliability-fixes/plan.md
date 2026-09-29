@@ -346,12 +346,14 @@ so about 1 draw in 22k lands on it. The draw serves every port a run owns, not o
 `--websocket-port`: browsers refuse bad ports too (Chrome's `ERR_UNSAFE_PORT`), and so does
 undici's fetch, so a node, anvil or playground port drawn there fails the same way.
 
-**Fix.** `reservePort` skips every candidate on the bad-port list, a named set equal to undici's
-list with a one-line why, instead of a hard-coded 10080. The window's bounds move into an exported
-`staticWindow(floor)`, so the unit test can aim the draw without restating the formula. One
-deterministic unit test, red first: `Math.random` is stubbed so that every draw lands on 10080,
-and the test fails if 10080 comes back. A ledger row, and one line in `FIREFOX.md` where the BiDi
-attach is described. Test infrastructure only, so no UI impact.
+**Fix.** `reservePort` skips every candidate on the bad-port list, a named set equal to the Fetch
+standard's table (undici's 82 entries plus 0) with a one-line why, instead of a hard-coded 10080.
+The window's bounds move into an exported `staticWindow(floor)`, so the unit test can aim the draw
+without restating the formula. One deterministic unit test, red first: `Math.random` is stubbed
+so that every draw lands on 10080, and the test fails if any bind tries 10080 or 10080 comes back.
+The bind check is what keeps it red without the skip when another process holds 10080: the draw
+then ends on the `listen(0)` fallback, whose port alone passes. A ledger row, and one line in
+`FIREFOX.md` where the BiDi attach is described. Test infrastructure only, so no UI impact.
 
 ### Alternatives considered
 
@@ -874,17 +876,18 @@ Added mid-build, with C7. P6 runs after it, at the final code revision.
 1. `resolve-ports.ts`: `staticWindow(floor)` holds the window's bounds, with no change in
    behaviour; then the unit test; then the named bad-port set and the skip in the draw.
 2. `resolve-ports.test.ts`: one case. It asserts 10080 lies inside `staticWindow`'s bounds, stubs
-   `Math.random` so every draw lands on 10080, and fails if the reservation is 10080. Run red on
-   the unfixed draw first.
+   `Math.random` so every draw lands on 10080, spies on `Server.prototype.listen`, and fails if a
+   bind tries 10080 or the reservation is 10080. Run red on the unfixed draw first, with 10080
+   free and with it held by another process.
 3. A ledger row in `.claude/skills/e2e-testing/SKILL.md` § 5, and one line in `FIREFOX.md` under
    the BiDi attach.
 
 Validation gate:
 - Commands: from `apps/extension`, `bun --bun vitest run scripts/e2e/resolve-ports.test.ts`, red
-  before the skip and green after it; `bun run lint`; `bun run typecheck:all`; a check that the set
-  equals undici's `badPorts` (`lib/web/fetch/constants.js`).
-- Pass criteria: the red run fails with `expected 10080 not to be 10080`; every other command
-  exits 0.
+  before the skip and green after it, each with 10080 free and held; `bun run lint`;
+  `bun run typecheck:all`; a check that the set equals the Fetch standard's bad-port table.
+- Pass criteria: the red runs fail with `expected [ 10080 ] to not include 10080` (free) and
+  `expected [ 10080, 10080, … ] to not include 10080` (held); every other command exits 0.
 - Layers: unit, lint, typecheck. P6's network legs, which draw every run's ports, follow.
 
 ## Post-implementation (read by the implementing session)

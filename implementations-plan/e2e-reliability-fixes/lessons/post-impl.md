@@ -45,8 +45,38 @@ and raises no timeout; and that every Home coordinate read now follows `backToHo
 first Home entry uses storage reads and the keyboard, and the file's other measurements are on
 Contacts and History. Its one condition is round 1's finding 1, P6 at the final revision.
 
+## Round 4 · `2829f9a4` · the second addendum
+
+After round 3 the driver added C7 (`resolve-ports.ts`, the port draw skips Fetch's bad ports;
+plan § C7, P8), new code after the loop had converged, so it went to the same session with the P8
+diff. The round reviewed that scope only; the cap the plan sets is on findings still material
+after three rounds, and none was.
+
+| # | Severity | Finding | Verdict |
+|---|---|---|---|
+| 1 | minor | The test asserted only that the reservation is not 10080. With 10080 held by another process, a draw without the skip exhausts its 256 refused binds, takes the `listen(0)` fallback and passes | Accepted, reproduced first: with 10080 held, the committed case passed on a draw without the skip (`phase-8.md`). Fixed in `396a3473`: the case also spies on `Server.prototype.listen` and fails if any bind tries 10080; it is red without the skip whether 10080 is held or free |
+| 2 | nit | The set omits 0, which the Fetch standard's table lists | Accepted after reading the table (83 entries: undici's 82 and 0). Fixed in `5f32ab5b`: the set holds 0, so it equals the table its comment cites; no candidate is ever 0, so nothing else changes |
+
+Codex confirmed the skip removes the cause for all five service ports and both geckodriver
+ports, that skips spend the existing 256-try budget so the draw stays bounded, that the fallback
+is unchanged, and that no assertion, timeout, retry or advisory flag was weakened. Verdict:
+conditional approve, on finding 1 and P6 at the final revision.
+
+Neither fix touches an e2e file or `tests/e2e/fixtures/**`, so no flake bar reruns; the unit file
+reran on Bun and on Node (5 passed each), and P6's network legs draw every port through the
+changed function.
+
+## Round 5 · `5f32ab5b` · conditional approve, no code finding
+
+Codex re-reviewed both fix commits (`git diff 2829f9a4..5f32ab5b`): "No material code findings
+remain over the whole diff." The `listen` spy sees both bind paths, which pass the port first, so
+removing the skip fails whether 10080 is held or free; both spies are restored in `finally` and
+the file's cases run in sequence, so nothing leaks; the new comment is exact; 0 changes neither
+candidate selection nor `listen(0)`. Its one condition is P6 at the final revision.
+
 ## Convergence
 
-Three rounds, the plan's cap. Round 1's three findings were accepted and fixed; rounds 2 and 3
-found no code problem. No finding was rejected. The loop's final code revision is `722ad239`,
-and P6 runs there.
+Five rounds, over two scopes. The original implementation converged in round 2, after round 1's
+three findings were fixed; C6 (round 3) drew no finding; C7 (round 4) drew two, both fixed, and
+round 5 confirmed them. No finding was rejected, and none was still material after three rounds
+of its own scope. The loop's final code revision is `5f32ab5b`, and P6 runs there.
