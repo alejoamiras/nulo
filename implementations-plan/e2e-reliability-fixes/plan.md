@@ -11,6 +11,47 @@ branch: test/e2e-reliability-fixes
 worktree: a harness-created agent worktree (its repo-relative path is recorded in lessons/phase-0.md)
 ---
 
+## Outcome
+
+- **Date:** 2026-09-29. **Status:** closed, awaiting archive: delivered as #719 on
+  `test/e2e-reliability-fixes`, not yet merged. No owner sign-off applied: nothing a person sees
+  changes (§ UI impact).
+- **Shipped:** C1 to C7 through P0 to P8, plus three fixes from the codex loop:
+  - C1: both drivers settle a launch on the setup page, which no onboarding state closes;
+    vitest 4.1.10's fixture-retry defect is documented, not worked around.
+  - C2: `send-picker` deploys and imports its ALT in a file-scoped fixture, so a retry reuses it
+    and a failed setup is rethrown, not re-run.
+  - C3: the relay test imports in `beforeEach`, on the hook's own budget, and
+    `method-descriptors` imports statically, so each 5 s budget covers only the behaviour.
+  - C4: both backup tests keep only the funded chain's account-state before re-sealing, and
+    remove the doctored backup even when the launch or the teardown fails.
+  - C5: each fee-menu row with a fee payment contract carries `data-fpc-id`; the testid is
+    unchanged.
+  - C6: `rows.test.ts` measures Home only once its token card has settled.
+  - C7: the e2e port draw skips the Fetch standard's bad ports.
+  - From the codex loop (`lessons/post-impl.md`): the backup file's removal in a `finally` of its
+    own, a comment rid of a plan path, and the port test checking every bind, with port 0 in the
+    set.
+- **Gates at delivery:**
+  - At the last code commit `5f32ab5b` (`lessons/phase-6.md`): the static gates, smoke on both
+    browsers, and the network pool, heavy and canary legs on both browsers at retry 0, all green
+    except the local Firefox canary, which fails on a pre-existing product defect (§ P6).
+  - The Firefox canary's evidence for the branch's code, before the last `dev` merge, is CI's
+    `Run / canary / real-proving` job on `8eaf8f25` (run 36583649521, job 109463507540, green on
+    2026-09-29), by the driver's call of 2026-09-29. The final head's own CI runs that canary
+    again on the merged tree, and the merge waits for it.
+  - After each merge of `dev`, the static gates again, all green.
+  - Codex converged in five rounds over two scopes, no finding rejected (`lessons/post-impl.md`).
+- **Dropped:** the C2 fallback (`hasTokenRow`), since the fixture branch shipped (P4).
+- **Owner answers, 2026-09-29:** the popup's 60 s timeout joins the failed-send check ("Fold into
+  failed-send check"), and the drafted vitest comment is not posted ("Skip (Recommended)").
+- **Open items:** none left here; `follow-ups.md` holds them. The failed-send check carries the 60 s
+  timeout (§ Amounts, sends and fees). The vitest recheck, the three sibling tests that share C2's
+  old defect and `incoming-arrival`'s early hero read are under § ux-feedback: technical, and C4's
+  two product questions under § ux-feedback: owner decisions. Two lessons are in `lessons.md`
+  (§ E2E, § CI & gates).
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # e2e reliability fixes
 
 One PR off `dev` that closes five test-reliability follow-ups from the ux-feedback program
@@ -811,7 +852,7 @@ Validation gate:
   negative control, with no interception failure; no flake-bar run reaches the errors screen.
 - Layers: lint, typecheck, network e2e (both browsers), probe.
 
-### P6 · Whole-tree and full-suite gate
+### P6 · Whole-tree and full-suite gate ✓
 
 Run at the final code revision (the branch head after the last code commit), one leg at a time.
 
@@ -842,13 +883,16 @@ Run at the final code revision (the branch head after the last code commit), one
   both browsers. The three-run bars of P3–P5 stay the evidence for the changed e2e files; any later
   code change reruns the affected phase's bar and this phase.
 
-Result, at `5f32ab5b`'s code (`lessons/phase-6.md`): every command exits 0 except the Firefox
-canary, whose `transfers.test.ts` fails twice at step 2. That is a pre-existing defect, reproduced
-on the base commit `0fa5a2cb`: the popup's `executeTransfer` call times out at 60 s while Firefox
-proves in the browser for about 90 s, so the Send screen reports a failure for a transfer that
-succeeds. CI's Firefox canary proves through Presto and passes. Not marked ✓: the fix is product
-code outside this plan, and whether CI's canary job on the PR head stands in for the local run, as
-it did for ux-feedback, is the owner's call.
+Result, at `5f32ab5b`'s code (`lessons/phase-6.md`): every command exits 0 except the local
+Firefox canary, whose `transfers.test.ts` fails twice at step 2. That is a pre-existing defect,
+reproduced on the base commit `0fa5a2cb`: the popup's `executeTransfer` call times out at 60 s
+while Firefox proves in the browser for about 90 s, so the Send screen reports a failure for a
+transfer that succeeds. The driver decided on 2026-09-29 that CI's Firefox canary job on the PR
+head stands in for that leg, as it did for ux-feedback. On `8eaf8f25`, the head before the last
+`dev` merge, whose code is `5f32ab5b`'s, run 36583649521's job 109463507540
+(`Run / canary / real-proving`) passed through Presto: that is the leg's evidence for the branch's
+code. The final head's own CI runs the Firefox canary again on the merged tree, and the merge waits
+for it. The defect's fix went to the failed-send check (the owner, 2026-09-29).
 
 ### P7 · C6 · Home's settled token card (addendum) ✓
 
@@ -932,25 +976,30 @@ conflict is surfaced, not resolved by it.
 
 - Single arc, one branch `test/e2e-reliability-fixes`, one PR into `dev`, plain
   `gh pr create`, opened only after the codex loop converges. `/code-review`: off.
-- Title (≤ 93 characters): `test(e2e): scratch page, send-picker setup fixture, hook imports, sponsor ids`.
+- Title (≤ 93 characters): `test: fix seven e2e and unit test reliability defects at their cause`.
 - Commits: conventional, lower-case, signed; one per phase at least, loop fixes separate.
-- PR body: the five items with their before/after mechanism, C1 split into "trigger fixed" and
-  "runner defect open"; the probe results, flake bars and P6's per-leg counts from the lessons;
-  "No visible change" for C5; the drafted vitest comment's location; the follow-ups. Then
+- PR body: the seven items, each with what was wrong, the fix and its red-first evidence, C1 split
+  into "trigger fixed" and "runner defect open"; P6's per-leg counts, with the Firefox canary's
+  evidence from CI; the codex loop; "UI impact: none"; the shared files; the owner questions. Then
   `gh pr checks --watch`.
-- Merge order with `ux-owner-picks`: either; whichever lands second rebases (§ recon, collision
-  risks).
+- Merge order with `ux-owner-picks`: it landed first, and this branch merged `dev` (no rebase),
+  keeping both sides' `follow-ups.md` deletions.
 
 ## Follow-ups (lifted into `implementations-plan/follow-ups.md` at close)
 
-- C4's owner questions, unchanged: whether an import should skip preloaded contracts as it skips
-  protocol ones, and whether it should wait on public networks at all.
+- C4's owner questions, unchanged, stay where ux-feedback put them (§ ux-feedback: owner
+  decisions): whether an import should skip preloaded contracts as it skips protocol ones, and
+  whether it should wait on public networks at all.
 - The vitest fixture retry defect is already reported upstream (vitest-dev/vitest#11237, fix PR
-  #11238 open), so there is no issue to file: the owner posts the confirmation comment drafted in
-  `lessons/phase-3.md`, or skips it. On the vitest release that ships the fix, recheck C2: a
-  failed file-scoped setup then re-runs on retry instead of being rethrown.
+  #11238 open), so there is no issue to file; the owner skipped the confirmation comment drafted
+  in `lessons/phase-3.md` (2026-09-29, "Skip (Recommended)"). On the vitest release that ships the
+  fix, recheck C2: a failed file-scoped setup then re-runs on retry instead of being rethrown.
 - `holdings`, `home-cap` and `pin-to-home` share `send-picker`'s retry defect (Fact 10). The fix is
   the same file-scoped setup fixture, plus a reset of the pin and sort state each attempt changes.
+- The popup's 60 s timeout on `executeTransfer` (§ P6): the owner folded it into the failed-send
+  check on 2026-09-29 ("Fold into failed-send check"), under § Amounts, sends and fees.
+- `network/incoming-arrival`'s calm-arrival check reads Home's hero before its quotes land (flake
+  ledger row 43, found on this PR's CI): the hygiene follow-up takes it.
 
 ## Seeds
 

@@ -128,3 +128,31 @@ and CI reruns the e2e on it:
 | `bun run test:all` | 0 | extension 7,904 passed, 4 skipped, 8 todo (599 files passed, 3 skipped); wallet-bridge 481; aztec-runtime 250 passed, 2 skipped; design 401; wallet-core 247; extension-messaging 239; wallet-crypto 120; third-party-notices 66; legal 54; landing 40; resolve-asset 14; wallet-sdk-schema-patch 11; passkey-rp 5 passed, 6 skipped |
 | `bun scripts/ci-cd/plans/check.ts` | 0 | 3 findings, 0 enforced: path-token reports `dev` carries |
 | `scripts/check-no-local-paths.sh` | 0 | |
+
+## CI on the PR head
+
+The driver decided on 2026-09-29 that CI's Firefox canary job on the PR head counts for this gate's
+Firefox canary leg, as it did for ux-feedback, so P6 is marked ✓. On `8eaf8f25`, whose code is
+`5f32ab5b`'s, run 36583649521's job 109463507540 (`Run / canary / real-proving / Aztec agent`)
+passed at 14:57:06 UTC, proving through `presto-server`. The final head's own CI runs the canary
+again on the tree merged with `dev`, and the merge waits for it.
+
+The same head's Chrome network run 36583649490 failed once, on shard 2/5 (job 109461436679):
+`network/incoming-arrival`'s second `expectCalmArrival` read the hero as "$0.00" before its quotes
+landed (`expected [ '$1,046.00', '$1,052.00' ] to deeply equal [ '$0.00', '$1,052.00' ]`). The file
+is not on this branch, and the re-run passed with no code change. It is the flake ledger's row 43;
+the hygiene follow-up takes it.
+
+## After merging `dev` (`f32b1e0a`)
+
+The merge (`f3424d7c`) brought the UX owner-picks changes. Its one conflict was `follow-ups.md`
+again: each side deleted its own five entries from the same list, and both deletions stand. The
+static gates on the merged tree:
+
+| Command | Exit | Result |
+|---|---|---|
+| `bun run lint` | 0 | 1,899 files, complexity baseline OK; warnings only |
+| `bun run typecheck:all` | 0 | every `@nulo/*` workspace |
+| `bun run test:all` | 0 | extension 8,022 passed, 4 skipped, 8 todo (605 files passed, 3 skipped); wallet-bridge 481; aztec-runtime 250 passed, 2 skipped; design 401; wallet-core 247; extension-messaging 239; wallet-crypto 120; third-party-notices 66; legal 54; landing 40; resolve-asset 14; wallet-sdk-schema-patch 11; passkey-rp 5 passed, 6 skipped |
+| `bun scripts/ci-cd/plans/check.ts` | 0 | 3 findings, 0 enforced: path-token reports `dev` carries |
+| `scripts/check-no-local-paths.sh` | 0 | |
