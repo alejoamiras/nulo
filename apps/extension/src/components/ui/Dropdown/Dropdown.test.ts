@@ -356,6 +356,27 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		w.unmount()
 	})
 
+	// The trap can leave focus outside the menu, on the host popup's confirm or ×.
+	test("Enter with focus outside the open menu clicks nothing", async () => {
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: '<div data-dropdown-item tabindex="0">Item</div>' },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const outside = document.createElement("button")
+		const outsideClick = vi.fn()
+		outside.addEventListener("click", outsideClick)
+		document.body.appendChild(outside)
+		outside.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(outsideClick).not.toHaveBeenCalled()
+		outside.remove()
+		w.unmount()
+	})
+
 	// Regression pin (real-browser lock-up): focus-trap.activate() THROWS when the menu has no
 	// tabbable node — every item disabled, e.g. the fee-source list on a fresh account with zero fee
 	// juice. The open path must survive it: still position + wire outside-click + emit onOpen, and

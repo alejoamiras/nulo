@@ -34,10 +34,7 @@ const { entities: tokens, refresh: refreshTokens } = useEntityCrud({
 	fetch: () => tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
 	added: tokenService.onTokenAdded,
 	deleted: tokenService.onTokenDeleted,
-	// TokenInfo carries no profileId (it crosses the dApp boundary), so no
-	// accept predicate can anchor an event to this list's profile+chain scope —
-	// resync re-reads through the scoped fetch instead, which is always correct
-	// (the senders list set the precedent for payloads without scope fields).
+	// Resync re-reads through the scoped fetch, which is always correct.
 	mode: "resync",
 })
 

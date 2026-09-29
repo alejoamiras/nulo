@@ -186,6 +186,13 @@ describe("the new rows", () => {
 		])
 	})
 
+	test("private events held in another case add no row: only the address book is new", () => {
+		const heldData = cap({ type: "data", privateEvents: { contracts: [`0x${A.slice(2).toUpperCase()}`] } })
+		const asked = cap({ type: "data", addressBook: true, privateEvents: { contracts: [A] } })
+		const rows = buildCapabilityItems(params({ delta: [asked], heldGrants: [heldData] }))
+		expect(keys(fresh(rows))).toEqual(["address-book"])
+	})
+
 	test("the address book and unknown rows are flagged when the grants after Allow reach any contract", () => {
 		const data = cap({ type: "data", addressBook: true })
 		const broad = buildCapabilityItems(params({ delta: [data, unknownA], heldGrants: [txAny] }))

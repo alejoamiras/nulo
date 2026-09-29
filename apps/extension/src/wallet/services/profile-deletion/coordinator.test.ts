@@ -1,13 +1,16 @@
 /**
- * Direct unit pins for `ProfileDeletionCoordinator.purge` — the awaited 12-step
- * cascade (finding D). The e2e proves end-state; this proves the CONTRACT the
- * ordering comment relies on: every leaf purge is awaited, the address-derived
- * purges (tx/auth/balance) run BEFORE the account/token/network tail (so the
- * tail's re-emitted delete events find rows already gone), `pxe.clearProfileState`
- * runs LAST, a leaf throw PROPAGATES (caller keeps the tombstone), and `runFor`
- * is single-flight. Drives the real coordinator over `svc()` leaf stubs.
+ * Direct unit pins for `ProfileDeletionCoordinator.purge` — the awaited 13-step
+ * cascade. The e2e proves end-state; this proves the CONTRACT the ordering
+ * comment relies on: every leaf purge is awaited, the address-derived purges
+ * (tx/auth/balance) run BEFORE the account/token/network tail (so the tail's
+ * re-emitted delete events find rows already gone), the profile's UI keys go
+ * after the networks, `pxe.clearProfileState` runs LAST, a leaf throw
+ * PROPAGATES (caller keeps the tombstone), and `runFor` is single-flight.
+ * Drives the real coordinator over `svc()` leaf stubs.
  */
 import { describe, expect, test } from "vitest"
+import type { StorageArea } from "@nulo/wallet-core/ports"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
@@ -28,7 +31,17 @@ import { ProfileDeletionCoordinator } from "./coordinator"
 
 const SNAP = { addresses: ["0xa"], tokenIds: [1], networkIds: ["n1"], pxeGeneration: "gen-1" }
 
-const build = async (order: string[]) => {
+/** Local storage holding `seeded` keys; `remove` records its turn in `order`. */
+function uiKeyStore(order: string[], seeded: string[] = []) {
+	const keys = new Set(seeded)
+	const remove = async (removed: string | string[]) => {
+		order.push("uiKeys")
+		for (const key of [removed].flat()) keys.delete(key)
+	}
+	return { keys, storage: { remove } as unknown as StorageArea }
+}
+
+const build = async (order: string[], storage: StorageArea = uiKeyStore(order).storage) => {
 	const rec = (name: string) => async () => {
 		order.push(name)
 	}
@@ -45,7 +58,7 @@ const build = async (order: string[]) => {
 	services.add(svc(AccountService.name, { purgeForProfile: rec("accounts") }))
 	services.add(svc(TokenService.name, { purgeForProfile: rec("tokens") }))
 	services.add(svc(NetworkService.name, { purgeForProfile: rec("networks") }))
-	const coord = new ProfileDeletionCoordinator(new LoggerStore(new ConfigStore()))
+	const coord = new ProfileDeletionCoordinator(new LoggerStore(new ConfigStore()), storage)
 	services.add(coord)
 	await services.start()
 	// The coordinator constructs its own PXE client; replace it with a recorder.
@@ -58,7 +71,7 @@ const build = async (order: string[]) => {
 }
 
 describe("ProfileDeletionCoordinator.purge — awaited order contract", () => {
-	test("awaits all 12 purges in order; address-derived BEFORE the account/token/network tail; pxe LAST", async () => {
+	test("awaits all 13 purges in order; address-derived BEFORE the account/token/network tail; pxe LAST", async () => {
 		const order: string[] = []
 		const coord = await build(order)
 
@@ -76,6 +89,7 @@ describe("ProfileDeletionCoordinator.purge — awaited order contract", () => {
 			"accounts",
 			"tokens",
 			"networks",
+			"uiKeys",
 			"pxe",
 		])
 		// Load-bearing orderings the coordinator's comment promises:
@@ -97,6 +111,30 @@ describe("ProfileDeletionCoordinator.purge — awaited order contract", () => {
 		// fail-fast: the later steps did NOT run.
 		expect(order).not.toContain("pxe")
 		expect(order).not.toContain("networks")
+	})
+
+	test("removes exactly the deleted profile's UI keys, after the networks and before the PXE", async () => {
+		const order: string[] = []
+		const store = uiKeyStore(order, [pinnedTokensKey("p1"), pinnedTokensKey("p10")])
+		const coord = await build(order, store.storage)
+
+		await coord.runFor("p1", SNAP)
+
+		expect([...store.keys]).toEqual([pinnedTokensKey("p10")])
+		expect(order.slice(-3)).toEqual(["networks", "uiKeys", "pxe"])
+	})
+
+	test("a failed UI-key removal propagates and the PXE clear does not run", async () => {
+		const order: string[] = []
+		const failing = {
+			remove: async () => {
+				throw new Error("quota")
+			},
+		} as unknown as StorageArea
+		const coord = await build(order, failing)
+
+		await expect(coord.runFor("p1", SNAP)).rejects.toThrow("quota")
+		expect(order).not.toContain("pxe")
 	})
 
 	test("single-flight: a concurrent runFor for the same profile returns the SAME promise", async () => {
