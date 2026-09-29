@@ -89,8 +89,8 @@ const tokenService = new TokenServiceClient()
 tokenService.onTokenAdded.add(onTokenAdded)
 tokenService.onTokenDeleted.add(onTokenDeleted)
 let tokenAddedDuringLoad = false
-/** The event names no profile and can come from any chain, so it only prompts a re-read for the
- *  current identity; during an identity fetch, that fetch reads the tokens again instead. */
+/** Fires for any profile's or chain's add, so it re-reads the current identity's tokens rather
+ *  than appending one; an add during an identity fetch makes that fetch read them again. */
 function onTokenAdded() {
 	if (tokensLoading.value) {
 		tokenAddedDuringLoad = true
