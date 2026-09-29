@@ -11,6 +11,7 @@
 <script setup>
 /** Composables */
 import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
+import { isPopupSubmitKey, refuseRepeatEnter } from "@/composables/usePopupEntity"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
@@ -144,7 +145,7 @@ const {
 
 /** Listeners — popup-only full-backup Enter shortcut. */
 const onKeydown = (e) => {
-	if (e.key !== "Enter") return
+	if (e.defaultPrevented || !isPopupSubmitKey(e)) return
 	const action = resolveFullBackupEnterAction({
 		selectedBackup: selectedBackup.value,
 		restoreStatus: restoreStatus.value,
@@ -156,13 +157,8 @@ const onKeydown = (e) => {
 }
 
 /** Lifecycle */
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
-
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
@@ -175,6 +171,7 @@ onBeforeUnmount(() => {
 		data-testid="import-page"
 		:data-name-field="nameFieldState"
 		:data-restore-stage="restoreStage"
+		@keydown="onKeydown"
 	>
 		<div v-if="nameFieldState === 'shown'" :class="$style.name_section">
 			<span :class="$style.section_label">Profile name</span>
@@ -239,6 +236,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"
 						@click="decryptBackup"
+						@keydown.enter="refuseRepeatEnter"
 						:disabled="!decryptionPassword"
 						data-testid="import-full-backup-decrypt-btn"
 						variant="cta"
@@ -248,6 +246,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="selectedBackup?.profileType && restoreStatus !== 'finished'"
 						@click="restoreBackup"
+						@keydown.enter="refuseRepeatEnter"
 						:disabled="!isAllowedToImportBackup || restoreStatus === 'failed' || restoreStatus === 'progress'"
 						data-testid="import-full-backup-submit-btn"
 						variant="cta"
@@ -270,6 +269,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="completeImport(importedProfile)"
+						@keydown.enter="refuseRepeatEnter"
 						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>

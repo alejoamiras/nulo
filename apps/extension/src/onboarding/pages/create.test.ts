@@ -19,7 +19,9 @@ vi.mock("@/composables/usePasskeyCeremony", () => ({
 const routerPush = vi.fn()
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: routerPush }), useRoute: () => ({ meta: {} }) }))
 
-import { BrutalistTitle, Flex, Input, Text } from "@nulo/design"
+import { BrutalistTitle, Flex, Input, MaterialIcon, Text } from "@nulo/design"
+import { pressOn } from "../../../tests/helpers/press-key"
+import OnboardingBackLink from "../components/OnboardingBackLink.vue"
 import OnboardingProfileNameField from "../components/OnboardingProfileNameField.vue"
 import Create from "./create.vue"
 
@@ -30,12 +32,11 @@ async function mountCreate() {
 		attachTo: document.body,
 		global: {
 			plugins: [createTestingPinia({ createSpy: vi.fn })],
-			components: { BrutalistTitle, Flex, Input, OnboardingProfileNameField, Text },
+			components: { BrutalistTitle, Flex, Input, MaterialIcon, OnboardingBackLink, OnboardingProfileNameField, Text },
 			stubs: {
 				// Registered globally, the design Button would resolve its own `<component is="button">` to itself.
 				Button: { template: '<button v-bind="$attrs"><slot /></button>' },
 				OnboardingPage: { template: "<main><slot /></main>" },
-				OnboardingBackLink: true,
 				StepIndicator: true,
 				PasskeyCeremonyDialog: true,
 			},
@@ -88,5 +89,38 @@ describe("onboarding create", () => {
 		const w = await mountCreate()
 		expect(page(w).attributes("data-name-field")).toBe("shown")
 		expect((w.get('[data-testid="onboarding-name-input"] input').element as HTMLInputElement).value).toBe("Profile 2")
+	})
+})
+
+describe("onboarding create — Enter does what the focused control says, with a valid password pair", () => {
+	async function mountWithValidPair() {
+		const w = await mountCreate()
+		await w.get('[data-testid="onboarding-password-input"] input').setValue("password123")
+		await w.get('[data-testid="onboarding-password-confirm"] input').setValue("password123")
+		return w
+	}
+
+	test("Enter on Back goes back to Welcome and creates nothing", async () => {
+		const w = await mountWithValidPair()
+		pressOn(w.get('[data-testid="onboarding-create-back"]').element as HTMLElement, "Enter")
+		await flushPromises()
+		expect(routerPush).toHaveBeenCalledWith("/onboarding/welcome")
+		expect(profileApi.createProfile).not.toHaveBeenCalled()
+	})
+
+	test("Enter on the active method tab keeps it selected and creates nothing", async () => {
+		const w = await mountWithValidPair()
+		const tab = w.get('[data-testid="onboarding-method-password"]')
+		pressOn(tab.element as HTMLElement, "Enter")
+		await flushPromises()
+		expect(tab.attributes("aria-selected")).toBe("true")
+		expect(profileApi.createProfile).not.toHaveBeenCalled()
+	})
+
+	test("a repeat Enter in the confirm field is cancelled, so the form cannot submit on it", async () => {
+		const w = await mountWithValidPair()
+		const field = w.get('[data-testid="onboarding-password-confirm"] input').element
+		const repeat = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true })
+		expect(field.dispatchEvent(repeat)).toBe(false)
 	})
 })

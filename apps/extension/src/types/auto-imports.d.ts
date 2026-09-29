@@ -215,6 +215,7 @@ declare global {
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
+  const refuseRepeatEnter: typeof import('../composables/usePopupEntity').refuseRepeatEnter
   const relinkRestoredTokenBalances: typeof import('../composables/useFullBackupImport').relinkRestoredTokenBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
   const remapNetworkIdByChain: typeof import('../utils/full-backup-helpers').remapNetworkIdByChain
@@ -725,6 +726,7 @@ declare module 'vue' {
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
+    readonly refuseRepeatEnter: UnwrapRef<typeof import('../composables/usePopupEntity')['refuseRepeatEnter']>
     readonly relinkRestoredTokenBalances: UnwrapRef<typeof import('../composables/useFullBackupImport')['relinkRestoredTokenBalances']>
     readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
     readonly remapNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapNetworkIdByChain']>

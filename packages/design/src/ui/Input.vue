@@ -91,6 +91,11 @@ const props = defineProps({
 		type: Boolean,
 		default: undefined,
 	},
+	/** The native `<input>`'s `data-testid`; a `data-testid` attribute names the root. */
+	inputTestid: {
+		type: String,
+		required: false,
+	},
 })
 
 const isFocused = ref(false)
@@ -299,6 +304,7 @@ const handleClear = () => {
 					:autocapitalize="autocapitalize"
 					:autocorrect="autocorrect"
 					:aria-invalid="ariaInvalid"
+					:data-testid="inputTestid"
 				/>
 			</Flex>
 

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { createApp, h, nextTick, ref } from "vue"
 import { usePopupEntity } from "@/composables/usePopupEntity"
+import { pressOn } from "../../../../tests/helpers/press-key"
 
 const authwitsServiceMock = {
 	getRegistryEnabled: vi.fn(),
@@ -124,21 +125,6 @@ async function mountAndOpen(authwits: { id: string; content: string }[] = [{ id:
 	await w.setProps({ show: true })
 	await flushPromises()
 	return w
-}
-
-/** Presses `key` on `el` as a browser does: Enter clicks it on keydown and Space on keyup, each only
- *  when no handler cancelled the key. `init` sets the keydown's `repeat`, `isComposing` or `keyCode`.
- *  Returns whether each key event went through. */
-function pressOn(el: HTMLElement, key: "Enter" | " ", init: KeyboardEventInit = {}): boolean[] {
-	el.focus()
-	const down = el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }))
-	if (key === "Enter") {
-		if (down) el.click()
-		return [down]
-	}
-	const up = el.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }))
-	if (down && up) el.click()
-	return [down, up]
 }
 
 async function setAllFees(w: ReturnType<typeof mount>) {

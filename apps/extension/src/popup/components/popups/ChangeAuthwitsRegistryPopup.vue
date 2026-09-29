@@ -11,7 +11,7 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
-import { isRepeatOrComposing, usePopupEntity } from "@/composables/usePopupEntity"
+import { refuseRepeatEnter, usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -120,7 +120,7 @@ usePopupEntity(() => props.show, {
 					<Button
 						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"
-						@keydown.enter="isRepeatOrComposing($event) && $event.preventDefault()"
+						@keydown.enter="refuseRepeatEnter"
 						variant="primary"
 						size="medium"
 						wide
