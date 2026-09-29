@@ -21,10 +21,17 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 - The extension's unit vitest auto-imports only `vue` and `vue-router` and registers no components, unlike the build: an auto-imported composable or store throws "is not defined" and a bare component tag stays unresolved, so import them or pass `global.components`. [Evidence](ux-feedback/b5-permissions/lessons/phase-7.md), [more](ux-feedback/b4-snackbar-rows-arrivals/lessons/phase-3.md)
 - The tracked declarations in `apps/extension/src/types/` regenerate only when Vite builds or serves (vitest runs with `dts: false`), so local gates can pass on a stale copy and CI's build job then fails on the diff: build before you commit a new auto-imported export or component. [Evidence](ux-feedback/b5-permissions/lessons/phase-4.md), [more](ux-feedback/b3-tooltips-glossary/lessons/phase-3.md)
 - Under `vi.useFakeTimers()` a natively dispatched event runs only the first Vue listener it reaches, since runtime-dom skips listeners attached no earlier than the event's `_vts`: dispatch with `wrapper.trigger`, which stamps `_vts` 1 ms ahead, or advance time 1 ms first (Vue 3.5.41, 2026-09). [Evidence](ux-feedback/b3-tooltips-glossary/lessons/phase-1.md), [more](ux-feedback/b3-tooltips-glossary/lessons/phase-4.md)
+- A second `@vue/test-utils` `mount` in one test drops the first wrapper's stubs: VTU installs its stub transform through Vue's process-global `transformVNodeArgs` and replaces it on every mount, so the first tree re-renders with real components and its failed unmount leaks document listeners into later tests. Show the second tree in a plain `createApp` (VTU 2.4.11, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-1.md)
+
+## E2E
+
+- One Puppeteer `waitForFunction` is one protocol call, so the connection's `protocolTimeout` caps it whatever its own `timeout` (300 s in `apps/extension/tests/e2e/fixtures/browser/`): a longer wait fails with `Runtime.callFunctionOn timed out`, not its own message. Poll in short reads (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
+- A held key is a second `keyboard.down`: Chrome (CDP) and Firefox (BiDi) both deliver it with `repeat: true`, and Chrome's native button activates on it (Firefox unprobed). Record `repeat` in the page, so a driver that stops sending it fails the step instead of passing it (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
 
 ## Extension runtime
 
 - A wire-shaped field fixture must stay below the BN254 modulus (`0x3064…`): `0x` + `aa` × 32 is above it, so the capability validator refuses it as malformed, while `0x` + `0a` × 32 passes. [Evidence](ux-feedback/b5-permissions/lessons/phase-6.md)
+- A lock section the watchdog force-released keeps running (`packages/wallet-core/src/utils/lock.ts`), and `nextNumericId` (max + 1) hands a purged top id to the next restore, so a late compensating delete by id can take a same-id successor's row. Gate it on `withLock`'s `isCurrent` where the row predates the deletion, whose purge then removes it; where the row may postdate the purge's snapshot, skipping the delete orphans it. [Evidence](wallet-safety-fixes/lessons/phase-6.md)
 
 ## Authorization checks
 

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest"
-import { authorizationsEffective, coversAnyContract, effectiveGrants, isAnyContractScope, readConsent } from "./method-scope-checkers"
+import type { GrantedCapabilityRecord } from "./capabilities"
+import {
+	authorizationsEffective,
+	checkCreateAuthWit,
+	coversAnyContract,
+	effectiveGrants,
+	isAnyContractScope,
+	readConsent,
+} from "./method-scope-checkers"
 
 const A = "0x1111111111111111111111111111111111111111111111111111111111111111"
 const B = "0x2222222222222222222222222222222222222222222222222222222222222222"
@@ -96,5 +104,44 @@ describe("effectiveGrants", () => {
 	test("a held type absent from the delta stays, as a rejected type's grant does", () => {
 		const data = { type: "data", privateEvents: { contracts: [A] } }
 		expect(effectiveGrants([accounts, data], [tx(listed(A))])).toEqual([accounts, data, tx(listed(A))])
+	})
+})
+
+describe("checkCreateAuthWit refusals", () => {
+	const grant = (capability: unknown) => ({ capability, grantedAt: 0 }) as GrantedCapabilityRecord
+	const from = "SENTINEL-FROM"
+	const callIntent = { caller: "SENTINEL-CALLER", call: { to: "SENTINEL-TO", name: "SENTINEL-NAME" } }
+	const innerHash = { consumer: "SENTINEL-CONSUMER", innerHash: "SENTINEL-INNER-HASH" }
+	// Each refusal's grants refuse it, and its pattern proves that branch threw.
+	const refusals: [string, unknown[], GrantedCapabilityRecord[], RegExp][] = [
+		[
+			"the account",
+			[from, callIntent],
+			[grant({ ...accounts, accounts: [{ alias: "a", item: A }] })],
+			/^Scope violation: createAuthWit .*accounts scope$/,
+		],
+		[
+			"the call",
+			[from, callIntent],
+			[grant(tx(listed(A)))],
+			/^Scope violation: createAuthWit (?!inner-hash).*transaction or simulation scope$/,
+		],
+		[
+			"the inner hash's consumer",
+			[from, innerHash],
+			[grant(tx(listed(A)))],
+			/^Scope violation: createAuthWit inner-hash .*transaction or simulation scope$/,
+		],
+	]
+
+	test.each(refusals)("no request value reaches a refusal of %s", (_name, args, grants, branch) => {
+		let refusal: Error | undefined
+		try {
+			checkCreateAuthWit(args, grants)
+		} catch (error) {
+			refusal = error as Error
+		}
+		expect(refusal?.message).toMatch(branch)
+		expect(JSON.stringify({ ...refusal, message: refusal?.message, stack: refusal?.stack })).not.toMatch(/SENTINEL-/)
 	})
 })

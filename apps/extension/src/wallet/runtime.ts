@@ -522,7 +522,7 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	)
 	services.add(new PasskeyService(logger, windowManager))
 	// Started LAST (declares dependencies on every service it purges) — finding D.
-	const deletionCoordinator = new ProfileDeletionCoordinator(logger)
+	const deletionCoordinator = new ProfileDeletionCoordinator(logger, browserApi.storage.local)
 	services.add(deletionCoordinator)
 	// Also last-phase: registers as ProfileService's pre-open address verifier + AccountService's
 	// operation-time mismatch sink (the address-freeze runtime guard).

@@ -4,9 +4,10 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { TokenService, type Token, type TokenInfo, type TokenDeleted } from "@/wallet/services/token/service"
+import { TokenService, type Token, type TokenAdded, type TokenDeleted } from "@/wallet/services/token/service"
 import { TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { NoteService, type RawNote } from "@/wallet/services/note/service"
@@ -71,6 +72,8 @@ type PublicEventContext = {
 	account: string
 	epochAtStart: number
 }
+
+type TrustFence = (isCurrent: () => boolean) => { live: () => boolean; kept: () => boolean }
 
 type OutboxRowKey = { profileId: string; networkId: string; accountAddress: string; tokenId: number }
 type RefreshRequestResult = { taskId: string } | { busy: true } | { missing: true }
@@ -596,64 +599,89 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		return record?.state ?? "unknown"
 	}
 
-	/** Internal trust transition. Caller MUST hold the service lock; `fence` is read just before the write. */
+	/** Internal trust transition. Caller MUST hold the service lock; `fence` is read just before the
+	 *  write. Resolves whether the write landed. */
 	private async _setTrustStateLocked(
 		profileId: string,
 		networkId: string,
 		contract: string,
 		state: IncomingTrustState,
 		fence?: () => boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const record = await this.repo.setTrust(profileId, networkId, contract, state, fence)
 		if (record) this.emit("onIncomingTrustChanged", record)
+		return record !== undefined
+	}
+
+	/** Undefined while locked or while another profile is active; otherwise `live` holds while the lock
+	 *  and the deciding session do, and `kept` while the lock and the profile's incarnation do, so a
+	 *  lock or a switch after the decision cannot strand the receipts it accepted. */
+	private async captureTrustFence(profileId: string): Promise<TrustFence | undefined> {
+		let fence: ExecutionFence
+		try {
+			fence = await this.profileService.captureExecutionFence()
+		} catch {
+			return undefined
+		}
+		if (fence.profileId !== profileId) return undefined
+		const deletion = this.profileService.getDeletionState()
+		return (isCurrent) => ({
+			live: () => isCurrent() && this.profileService.isFenceLive(fence),
+			kept: () => isCurrent() && deletion.isCurrent(fence.profileId, fence.epoch),
+		})
 	}
 
 	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
 		await this.ensureInitialized()
+		const trustFence = await this.captureTrustFence(profileId)
+		if (!trustFence) return false
 		const epochAtTip = this.serviceEpoch
 		const tip = await this.readTip(networkId)
 		return this.withServiceLock(async (isCurrent) => {
+			const { live, kept } = trustFence(isCurrent)
 			// Stale-popup guard: refuse the flip if the contract is no longer
 			// registered. Inside the lock, so the check + writes are atomic.
 			if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
-			await this._setTrustStateLocked(profileId, networkId, contract, "trusted")
+			if (!(await this._setTrustStateLocked(profileId, networkId, contract, "trusted", live))) return false
 
 			// The records it un-hides are history the person just accepted, on every account of the
 			// profile: the floor covers them before any of them turns visible.
 			const records = await this.repo.listByContract(profileId, networkId, contract)
-			const lowerBound = maxBlock(records.filter((r) => r.hidden))
-			await this.moveArrivalFloorLocked(profileId, networkId, contract, { tip, lowerBound, epochAtTip, isCurrent })
-
-			// Flip every hidden record for this contract to visible; emit
-			// Added for each so the popup activity feed updates atomically.
-			// Visibility gate: if `incomingTransfersVisible` is off, persist
-			// records visible (so a future toggle-on shows them) but DO NOT
-			// emit live events.
-			const visibilityEnabled = await this.isVisibilityEnabled()
-			for (const record of records) {
-				if (!record.hidden) continue
-				// Per-iteration getRecord re-check: tests may directly mutate
-				// the records Map (bypassing the service + the lock). Lock
-				// alone can't catch those. Cheap (one repo read per record).
-				const stillThere = await this.repo.getRecord(record.id)
-				if (!stillThere) continue
-				const updated = { ...record, hidden: false }
-				await this.repo.upsertRecord(updated)
-				if (visibilityEnabled) {
-					this.emit("onIncomingTransferAdded", updated)
-				}
-			}
-			return true
+			const floor = { tip, lowerBound: maxBlock(records.filter((r) => r.hidden)), epochAtTip, isCurrent: kept }
+			if (!(await this.moveArrivalFloorLocked(profileId, networkId, contract, floor))) return false
+			return this.unhideLocked(records, kept)
 		})
+	}
+
+	/** Not atomic: stops at the first write `kept` refuses and resolves false, leaving the records
+	 *  before it visible. With `incomingTransfersVisible` off the records still turn visible (a later
+	 *  toggle-on shows them) but emit nothing. */
+	private async unhideLocked(records: IncomingTransferRecord[], kept: () => boolean): Promise<boolean> {
+		const visibilityEnabled = await this.isVisibilityEnabled()
+		for (const record of records) {
+			if (!record.hidden) continue
+			const stillThere = await this.repo.getRecord(record.id)
+			if (!stillThere) continue
+			// A deleted profile's id can come back through a restore, so each write proves that this
+			// section still holds the lock and that its profile is the incarnation that allowed it.
+			if (!kept()) return false
+			const updated = { ...record, hidden: false }
+			await this.repo.upsertRecord(updated)
+			if (visibilityEnabled) {
+				this.emit("onIncomingTransferAdded", updated)
+			}
+		}
+		return true
 	}
 
 	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<boolean> {
 		await this.ensureInitialized()
-		return this.withServiceLock(async () => {
+		const trustFence = await this.captureTrustFence(profileId)
+		if (!trustFence) return false
+		return this.withServiceLock(async (isCurrent) => {
 			if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
-			await this._setTrustStateLocked(profileId, networkId, contract, "blocked")
 			// Hidden records stay hidden. No event emission — silent rejection.
-			return true
+			return this._setTrustStateLocked(profileId, networkId, contract, "blocked", trustFence(isCurrent).live)
 		})
 	}
 
@@ -823,22 +851,25 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 * Floors never move down, so every write takes the max with the stored number: two writers read
 	 * their tips before the lock and can enter it in either order. Without a tip, or when the epoch
 	 * moved since it was read, the floor goes pending and keeps its number, so nothing of the token
-	 * plays until a later read resolves it. A section the watchdog displaced writes nothing.
+	 * plays until a later read resolves it. A section `isCurrent` refuses writes nothing and resolves
+	 * false.
 	 */
 	private async moveArrivalFloorLocked(
 		profileId: string,
 		networkId: string,
 		contract: string,
 		move: { tip: number | undefined; lowerBound?: number; epochAtTip: number; isCurrent: () => boolean },
-	): Promise<void> {
+	): Promise<boolean> {
 		const stored = await this.repo.getTrust(profileId, networkId, contract)
-		if (!stored || !move.isCurrent()) return
+		if (!move.isCurrent()) return false
+		if (!stored) return true
 		const known = maxDefined(stored.arrivalFloor, move.lowerBound)
 		if (move.tip === undefined || this.serviceEpoch !== move.epochAtTip) {
 			await this.repo.setArrivalFloor(stored, { arrivalFloor: known, pending: true })
-			return
+			return true
 		}
 		await this.repo.setArrivalFloor(stored, { arrivalFloor: maxDefined(known, move.tip), pending: false })
+		return true
 	}
 
 	/** Resolves only floors that were pending before `tip` was read and still are: a floor marked
@@ -1099,13 +1130,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await Promise.all(polls)
 	}
 
-	private onTokenAdded = async (token: TokenInfo): Promise<void> => {
-		// TokenInfo lacks `profileId`; trust the active profile context the
-		// emit is happening in. (The token service emits while the owning
-		// profile is loaded.)
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return
-		const network = await this.resolveNetworkByChainId(token.chainId)
+	private onTokenAdded = async (token: TokenAdded): Promise<void> => {
+		const { profileId } = token
+		const trustFence = await this.captureTrustFence(profileId)
+		if (!trustFence) return
+		const network = (await this.networkService.getNetworksRaw(profileId, token.chainId).catch(() => []))[0]
 		if (!network) return
 
 		// Every TokenService.addToken call is a user-explicit add path —
@@ -1120,13 +1149,19 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const epochAtTip = this.serviceEpoch
 		const tip = await this.readTip(network.id)
 		await this.withServiceLock(async (isCurrent) => {
-			const current = await this.repo.getTrust(profile.id, network.id, token.contract)
+			const { live, kept } = trustFence(isCurrent)
+			const current = await this.repo.getTrust(profileId, network.id, token.contract)
 			// A delete of the token, its network or its profile can finish while the tip is read, and one
 			// the watchdog lets in can finish at any await here: the registration read catches the first,
 			// and each write reads `isCurrent` after its last await, which catches the second.
-			if (!(await this.isTokenStillRegistered(profile.id, network.id, token.contract))) return
-			if (current?.state !== "trusted") await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted", isCurrent)
-			await this.moveArrivalFloorLocked(profile.id, network.id, token.contract, { tip, epochAtTip, isCurrent })
+			if (!(await this.isTokenStillRegistered(profileId, network.id, token.contract))) return
+			// A row already trusted takes no trust write, so its session is read here instead.
+			const trusted =
+				current?.state === "trusted"
+					? live()
+					: await this._setTrustStateLocked(profileId, network.id, token.contract, "trusted", live)
+			if (!trusted) return
+			await this.moveArrivalFloorLocked(profileId, network.id, token.contract, { tip, epochAtTip, isCurrent: kept })
 		})
 
 		// Rebuild the WHOLE scheduler set from the current token set rather than

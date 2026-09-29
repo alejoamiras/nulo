@@ -1,3 +1,5 @@
+import type { StorageArea } from "@nulo/wallet-core/ports"
+import { profileUiKeys } from "@/utils/profile-ui-keys"
 import type { ILogger } from "@/wallet/logger"
 import type { IService, ServiceCollection } from "@/wallet/base"
 import { AccountService } from "@/wallet/services/account/service"
@@ -20,9 +22,9 @@ export type { ProfileDeletionDelegate, ProfileDeletionRows, ProfileDeletionSnaps
 
 /**
  * ProfileDeletionCoordinator — the awaited, idempotent purge of EVERY
- * profile-bearing root (finding D). Started LAST (declares dependencies on all
+ * profile-bearing root. Started LAST (declares dependencies on all
  * the services it drives), then registers itself as ProfileService's deletion
- * delegate. It owns NO storage: ProfileService owns the tombstone lifecycle and
+ * delegate. It owns no rows: ProfileService owns the tombstone lifecycle and
  * calls `snapshot`/`runFor`; the coordinator only executes the purge.
  */
 export class ProfileDeletionCoordinator implements IService, ProfileDeletionDelegate {
@@ -59,7 +61,10 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 	/** Single-flight per profile so a resume + a live delete can't run twice. */
 	private readonly inflight = new Map<string, Promise<void>>()
 
-	public constructor(private readonly logger: ILogger) {
+	public constructor(
+		private readonly logger: ILogger,
+		private readonly storage: StorageArea,
+	) {
 		this.pxe = new PxeServiceClient(logger)
 	}
 
@@ -127,6 +132,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 		await this.accounts.purgeForProfile(profileId)
 		await this.tokens.purgeForProfile(profileId)
 		await this.networks.purgeForProfile(profileId)
+		await this.storage.remove(profileUiKeys(profileId))
 		await this.pxe.clearProfileState(profileId, s.pxeGeneration)
 	}
 
