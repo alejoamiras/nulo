@@ -1014,6 +1014,54 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 	})
 })
 
+describe("dispatcher.handleSendTx — logs none of the request's values", () => {
+	test("a sendTx a scope in another case admits: no log line at any level carries its account, origin, session accounts, fee payer or scopes", async () => {
+		const ACCOUNT = `0x${"0a".repeat(32)}`
+		const FEE_PAYER = `0x${"0f".repeat(32)}`
+		const TARGET = `0x${"0e1f2a3b".repeat(8)}`
+		const sessionAccounts = [`aztec:0:${ACCOUNT}`]
+		const additionalScopes = [`aztec:0:${ACCOUNT}`]
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false }, grantedAt: 1 },
+				{
+					capability: { type: "transaction", scope: [{ contract: `0x${TARGET.slice(2).toUpperCase()}`, function: "transfer" }] },
+					grantedAt: 1,
+				},
+			] as GrantedCapabilityRecord[],
+			accounts: sessionAccounts,
+		})
+		const { writer } = makeSessionWriter(session)
+		const logged: unknown[][] = []
+		const logger: ILogger = {
+			log: (...entry) => {
+				logged.push(entry)
+			},
+		}
+		const sent: unknown[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async (params) => {
+				sent.push(params)
+				return [{ status: "ok", result: "0xtx" }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: ACCOUNT, name: "A", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, logger)
+		const exec = { calls: [{ to: TARGET, name: "transfer" }], feePayer: FEE_PAYER }
+		await expect(dispatcher.dispatch("sendTx", [exec, { from: ACCOUNT, additionalScopes }], ctx)).resolves.toBe("0xtx")
+		expect(sent).toHaveLength(1)
+		const text = JSON.stringify(logged, (_key, value) =>
+			value instanceof Error ? { message: value.message, stack: value.stack } : value,
+		)
+		for (const value of [ACCOUNT, ctx.origin, ...sessionAccounts, FEE_PAYER, ...additionalScopes]) expect(text).not.toContain(value)
+	})
+})
+
 describe("dispatcher — simulateTx / profileTx act as the account named in `opts.from`", () => {
 	// A dApp connected to A and B that simulates or profiles `from: B` must have the
 	// operation built as B. A dApp that simulates each claim before sending it relies
@@ -1599,6 +1647,8 @@ describe("dispatcher — getWalletFeatures", () => {
 // ── isTokenRegistered (Nulo-custom) — reachability + gating + routing ───
 
 describe("dispatcher — isTokenRegistered reachability + gating", () => {
+	const TOKEN = `0x${"07".repeat(32)}`
+	const OTHER = `0x${"08".repeat(32)}`
 	const contractsSession = (contracts: "*" | string[], canGetMetadata = true) =>
 		makeSession({
 			capabilityGrants: [
@@ -1630,19 +1680,24 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	})
 
 	test("granted address ⇒ boolean from the reader, NO interaction service involved", async () => {
-		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
-		const result = await dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)
+		const dispatcher = makeReaderDispatcher(contractsSession([TOKEN]), true)
+		const result = await dispatcher.dispatch("isTokenRegistered", [TOKEN], ctx)
 		expect(result).toBe(true)
 	})
 
 	test("ungranted address ⇒ scope violation (never a silent false)", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession([TOKEN]), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", [OTHER], ctx)).rejects.toThrow(/Scope violation: isTokenRegistered/)
+	})
+
+	test("a held value that is not an address grants no call, not even one naming it", async () => {
 		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
-		await expect(dispatcher.dispatch("isTokenRegistered", ["0xother"], ctx)).rejects.toThrow(/Scope violation: isTokenRegistered/)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/Scope violation: isTokenRegistered/)
 	})
 
 	test("contracts grant without canGetMetadata ⇒ scope violation", async () => {
-		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"], false), true)
-		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/Scope violation/)
+		const dispatcher = makeReaderDispatcher(contractsSession([TOKEN], false), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", [TOKEN], ctx)).rejects.toThrow(/Scope violation/)
 	})
 
 	test("no contracts grant at all ⇒ capability refusal", async () => {
@@ -1651,13 +1706,13 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	})
 
 	test("a build without the reader refuses explicitly", async () => {
-		const { writer } = makeSessionWriter(contractsSession(["0xtok"]))
+		const { writer } = makeSessionWriter(contractsSession([TOKEN]))
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
 			requestCapabilities: (async () => ({})) as never,
 		}
 		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
-		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/not available/)
+		await expect(dispatcher.dispatch("isTokenRegistered", [TOKEN], ctx)).rejects.toThrow(/not available/)
 	})
 })
 
@@ -2008,6 +2063,52 @@ describe("dispatcher — the grant boundary", () => {
 		expect(await h.stored()).toEqual(requested)
 	})
 
+	describe("a held contract in another case", () => {
+		const LOWER_CASE = MIXED_CASE.toLowerCase()
+		const held = (capability: Capability) => makeSession({ capabilityGrants: [{ capability, grantedAt: 1 }] })
+		const tx = (contract: string): Capability => ({ type: "transaction", scope: [{ contract, function: "transfer" }] })
+		const sim = (contract: string): Capability => ({
+			type: "simulation",
+			transactions: { scope: [{ contract, function: "transfer" }] },
+			utilities: { scope: [{ contract, function: "balance_of" }] },
+		})
+		const contracts = (contract: string): Capability => ({
+			type: "contracts",
+			contracts: [contract],
+			canRegister: true,
+			canGetMetadata: true,
+		})
+		const events = (contract: string): Capability => ({ type: "data", privateEvents: { contracts: [contract] } })
+
+		// The answer echoes the request, except data's, which is the stored grant.
+		const cases: Array<[string, Capability, Capability, unknown]> = [
+			["transaction", tx(MIXED_CASE), tx(LOWER_CASE), tx(LOWER_CASE)],
+			["simulation", sim(MIXED_CASE), sim(LOWER_CASE), sim(LOWER_CASE)],
+			["contracts", contracts(MIXED_CASE), contracts(LOWER_CASE), contracts(LOWER_CASE)],
+			["data.privateEvents", events(MIXED_CASE), events(LOWER_CASE), { ...events(MIXED_CASE), addressBook: false }],
+		]
+
+		test.each(cases)(
+			"%s covers the request in lower case: no window, no decision, the held spelling kept",
+			async (_name, stored, requested, answer) => {
+				const h = capabilityHarness(held(stored))
+				const result = await h.request([requested])
+				expect(h.seen.windows).toBe(0)
+				expect(h.decisions).toHaveLength(0)
+				expect(result.granted).toEqual([answer])
+				expect(await h.stored()).toEqual([stored])
+			},
+		)
+
+		test("beside a new type, the window opens for the new type only", async () => {
+			const added = contracts(A)
+			const h = capabilityHarness(held(tx(MIXED_CASE)))
+			await h.request([tx(LOWER_CASE), added])
+			expect(h.seen.windows).toBe(1)
+			expect(h.seen.params?.delta).toEqual([added])
+		})
+	})
+
 	test("reordered fields store the same grant", async () => {
 		const first = capabilityHarness(makeSession())
 		await first.request([{ type: "contracts", contracts: [A], canRegister: true, canGetMetadata: true }])
@@ -2255,6 +2356,16 @@ describe("dispatcher — createAuthWit asks unless the authorizations consent is
 		expect(h.counts).toEqual({ signed: 1, windows: 0 })
 	})
 
+	test("an effective consent signs a call intent to a contract its scope lists in upper case, without a window", async () => {
+		const LETTERED = `0x${"0d".repeat(32)}`
+		const UPPER = `0x${LETTERED.slice(2).toUpperCase()}`
+		expect(UPPER).not.toBe(LETTERED)
+		const upperListed = { capability: { type: "transaction", scope: [{ contract: UPPER, function: "transfer" }] }, grantedAt: 1 }
+		const h = harness({ capabilityGrants: [accounts, upperListed], authorizationsWithoutAsking: { broad: false } })
+		await expect(h.authwit(intent(LETTERED))).resolves.toBe("0xsigned")
+		expect(h.counts).toEqual({ signed: 1, windows: 0 })
+	})
+
 	test("an effective consent still refuses a call intent outside a held scope, with no window", async () => {
 		const h = harness({ capabilityGrants: [accounts, listed], authorizationsWithoutAsking: { broad: false } })
 		await expect(h.authwit(intent(OTHER))).rejects.toThrow(/Scope violation/)
@@ -2403,6 +2514,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 	const OLD = `0x${"01".repeat(32)}`
 	const NEW = `0x${"02".repeat(32)}`
 	const B = `0x${"0b".repeat(32)}`
+	const TOKEN = `0x${"07".repeat(32)}`
 	const grant = (
 		contracts: string[],
 		flags: { canRegister?: boolean; canGetMetadata?: boolean } = { canRegister: true, canGetMetadata: true },
@@ -2490,7 +2602,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 				{
 					capability: {
 						type: "simulation",
-						utilities: { scope: [{ contract: "0xtok", function: "balance_of_private" }] },
+						utilities: { scope: [{ contract: TOKEN, function: "balance_of_private" }] },
 						transactions: { scope: [] },
 					},
 					grantedAt: 1,
@@ -2509,7 +2621,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 			.dispatch(
 				"executeUtility",
 				[
-					{ to: "0xtok", name: "balance_of_private" },
+					{ to: TOKEN, name: "balance_of_private" },
 					{ scopes: ["0x1c4d2aee53b88fa9e4061ec8c673dec03aadc3cd012177d0dcf20802ea9be10a"], authWitnesses: [], capsules: [] },
 				],
 				ctx,
@@ -2524,7 +2636,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 		const session = makeSession({
 			capabilityGrants: [
 				{
-					capability: { type: "contracts", contracts: ["0xtok"], canGetMetadata: true },
+					capability: { type: "contracts", contracts: [TOKEN], canGetMetadata: true },
 					grantedAt: 1,
 				} as unknown as GrantedCapabilityRecord,
 			],
@@ -2542,8 +2654,8 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 			requestCapabilities: (async () => ({})) as never,
 		}
 		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger, reader)
-		await dispatcher.dispatch("isTokenRegistered", ["0xtok"], { ...ctx, profileId: "profile-A", chainId: 42 })
-		expect(seen[0]).toEqual(["0xtok", "profile-A", 42])
+		await dispatcher.dispatch("isTokenRegistered", [TOKEN], { ...ctx, profileId: "profile-A", chainId: 42 })
+		expect(seen[0]).toEqual([TOKEN, "profile-A", 42])
 	})
 
 	test("a flag upgrade re-prompts even with the same addresses", async () => {
@@ -2566,6 +2678,9 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 // dApp-supplied account validated against the session's authorized set.
 
 describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
+	const TOKEN = `0x${"07".repeat(32)}`
+	const OTHER = `0x${"08".repeat(32)}`
+
 	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
 		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
@@ -2591,7 +2706,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 				{
 					capability: {
 						type: "transaction",
-						scope: [{ contract: "0xtoken", function: "transfer_public_to_public" }],
+						scope: [{ contract: TOKEN, function: "transfer_public_to_public" }],
 					} as Capability,
 					grantedAt: 1,
 				},
@@ -2626,7 +2741,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 
 		const grantContent = {
 			caller: "0xcaller",
-			contract: "0xtoken",
+			contract: TOKEN,
 			method: "transfer_public_to_public",
 			args: ["0xacc", "0xcaller", "5", "1"],
 		}
@@ -2646,7 +2761,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		expect(op.actions[0].content).toEqual({
 			kind: "call",
 			caller: "0xcaller",
-			contract: "0xtoken",
+			contract: TOKEN,
 			method: "transfer_public_to_public",
 			args: ["0xacc", "0xcaller", "5", "1"],
 		})
@@ -2656,7 +2771,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		const session = makeSession({
 			capabilityGrants: [
 				{
-					capability: { type: "transaction", scope: [{ contract: "0xt", function: "m" }] } as Capability,
+					capability: { type: "transaction", scope: [{ contract: TOKEN, function: "m" }] } as Capability,
 					grantedAt: 1,
 				},
 			],
@@ -2676,7 +2791,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
 		await expect(
-			dispatcher.dispatch("grantPublicAuthwit", ["0xother", { caller: "0xc", contract: "0xt", method: "m", args: [] }], ctx),
+			dispatcher.dispatch("grantPublicAuthwit", ["0xother", { caller: "0xc", contract: TOKEN, method: "m", args: [] }], ctx),
 		).rejects.toThrow(/not authorized for this dApp session/)
 	})
 
@@ -2738,7 +2853,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 				{
 					capability: {
 						type: "transaction",
-						scope: [{ contract: "0xtoken", function: "transfer_public_to_public" }],
+						scope: [{ contract: TOKEN, function: "transfer_public_to_public" }],
 					} as Capability,
 					grantedAt: 1,
 				},
@@ -2771,7 +2886,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		await expect(
 			dispatcher.dispatch(
 				"grantPublicAuthwit",
-				["0xacc", { caller: "0xc", contract: "0xOTHER", method: "transfer_public_to_public", args: [] }],
+				["0xacc", { caller: "0xc", contract: OTHER, method: "transfer_public_to_public", args: [] }],
 				ctx,
 			),
 		).rejects.toThrow(/[Ss]cope/)
