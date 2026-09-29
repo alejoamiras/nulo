@@ -27,7 +27,8 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 ## E2E
 
 - One Puppeteer `waitForFunction` is one protocol call, so the connection's `protocolTimeout` caps it whatever its own `timeout` (300 s in `apps/extension/tests/e2e/fixtures/browser/`): a longer wait fails with `Runtime.callFunctionOn timed out`, not its own message. Poll in short reads (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
-- A held key is a second `keyboard.down`: Chrome (CDP) and Firefox (BiDi) both deliver it with `repeat: true`, and Chrome's native button activates on it (Firefox unprobed). Record `repeat` in the page, so a driver that stops sending it fails the step instead of passing it (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
+- A held key is a second `keyboard.down`: Chrome (CDP) and Firefox (BiDi) both deliver it with `repeat: true`, and both browsers' native buttons activate on it. Firefox's repeat lands 40 to 50 ms after the press, so an action that ends sooner has already swapped the page. Record `repeat` and the target in the page, so a driver that stops sending it, or a repeat that misses the control, fails the step (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md), [Firefox](keyboard-guards/lessons/phase-3.md)
+- Enter in a form field submits by clicking the form's default button. When that click's handler disables the button, Vue's render lands before the button's activation, so no `submit` event fires on Chrome or Firefox: count clicks on the default button, not submits (Vue 3.5, 2026-09). [Evidence](keyboard-guards/lessons/phase-3.md)
 - Browsers and Node's fetch and WebSocket refuse the Fetch standard's bad ports before connecting, and 10080 lies inside the e2e port draw's window: a randomly drawn port skips the whole table (Node 24.21, 2026-09). [Evidence](e2e-reliability-fixes/lessons/phase-8.md)
 
 ## Extension runtime
