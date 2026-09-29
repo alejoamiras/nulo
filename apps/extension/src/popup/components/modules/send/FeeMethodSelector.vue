@@ -56,6 +56,7 @@ const menu = computed(() => menuOrder(props.methods))
 					:class="$style.method"
 					:disabled="method.disabled"
 					:data-testid="`send-fee-method-${method.subtitle}`"
+					:data-fpc-id="method.fpc?.id"
 					@click="!method.disabled && emit('update:modelValue', method)"
 				>
 					<Flex align="center" justify="between" gap="8" wide>

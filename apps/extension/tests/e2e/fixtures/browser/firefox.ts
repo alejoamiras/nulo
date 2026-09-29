@@ -331,18 +331,9 @@ async function reloadExtensionPage(page: Page): Promise<void> {
  */
 const newPage = (browser: Browser): Promise<Page> => browser.newPage({ type: "window" })
 
-/**
- * The popup closes itself when onboarding is unfinished and no profile exists, and Firefox honours
- * that `window.close()` where Chrome ignores it on a tab no script opened. Preload scripts do not
- * run in extension documents, so the call cannot be stubbed. In exactly that state the onboarding
- * page is the inert one — it only replaces itself once the flag is set or a profile exists — so a
- * fresh profile settles through it instead. A reused profile finished onboarding on an earlier
- * launch, which is the state where the popup stays and the onboarding page would not.
- */
-async function openScratchPage(browser: Browser, extensionId: string, { freshProfile }: { freshProfile: boolean }): Promise<Page> {
+async function openScratchPage(browser: Browser, extensionId: string): Promise<Page> {
 	const page = await newPage(browser)
-	const path = freshProfile ? "/src/onboarding/index.html" : "/src/popup/index.html"
-	await gotoExtensionPage(page, `${SCHEME}${extensionId}${path}`)
+	await gotoExtensionPage(page, `${SCHEME}${extensionId}/src/setup/index.html#/install`)
 	return page
 }
 

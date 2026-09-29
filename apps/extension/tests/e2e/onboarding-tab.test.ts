@@ -295,11 +295,8 @@ describe("onboarding tab", () => {
 		)
 		await gotoExtensionPage(popup, extensionUrl(extension.extensionId, "/src/popup/index.html"))
 
-		// The redirect happens in onBeforeMount of register.vue. We expect the
-		// onboarding tab to appear. window.close() inside register.vue is a
-		// no-op for puppeteer-opened pages (no window.opener), so we don't
-		// assert popup closure here — that behavior works in the real
-		// extension when Chrome opens the popup via toolbar click.
+		// The redirect in register.vue's onBeforeMount opens the onboarding tab, then closes this popup;
+		// both browsers honour that close.
 		const tabTarget = await tabPromise
 		expect(tabTarget).toBeDefined()
 

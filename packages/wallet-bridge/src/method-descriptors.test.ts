@@ -1,3 +1,5 @@
+import "@nulo/wallet-sdk-schema-patch/register"
+import { WalletSchema } from "@aztec/aztec.js/wallet"
 import { describe, test, expect } from "vitest"
 import {
 	METHOD_REGISTRY,
@@ -28,10 +30,8 @@ import {
 } from "./method-scope-checkers"
 
 // ── Frozen snapshots ──────────────────────────────────────────────────
-// Hand-transcribed from the pre-refactor tables on `dev` (the 18-method matrix
-// in implementations-plan/method-metadata-registry/plan.md). These are the
-// contract the derivations must reproduce EXACTLY — latent quirks included.
-// Sources: capability-map.ts:18,21; dispatcher.ts:251,272,286; scope-enforcement.ts:379.
+// Written by hand, independent of the registry: the derivations must reproduce
+// them exactly, latent quirks included.
 
 const FROZEN_CAPABILITY_MAP: Record<string, string> = {
 	createAuthWit: "accounts",
@@ -205,13 +205,9 @@ describe("method-descriptors — structural invariants", () => {
 // ── Exhaustiveness: silent omission is a BUILD FAILURE ─────────────────
 
 describe("method-descriptors — exhaustiveness (the silent-omission killer)", () => {
-	test("(i) every patched WalletSchema method has a descriptor, and vice versa", async () => {
-		// Import the production schema-patch side-effect FIRST (established pattern,
-		// dispatcher.test.ts:682) so the 3 Nulo-custom methods are present on
-		// WalletSchema. WITHOUT this import the custom trio would be invisible — the
-		// import order is load-bearing for the guarantee.
-		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+	test("(i) every patched WalletSchema method has a descriptor, and vice versa", () => {
+		// WalletSchema carries the three Nulo-custom methods only through the schema-patch import
+		// at the top of this file.
 		const schemaMethods = new Set(Object.keys(WalletSchema))
 		const registryMethods = new Set(Object.keys(METHOD_REGISTRY))
 

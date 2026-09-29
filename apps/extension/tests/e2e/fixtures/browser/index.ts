@@ -83,12 +83,12 @@ export interface BrowserDriver {
 	/** Reload an extension page in place. Over BiDi a reload strands the `Page` just as a navigation does. */
 	reloadExtensionPage(page: Page): Promise<void>
 	/**
-	 * An extension page with `chrome.*` that stays open on a wallet that has not finished onboarding,
-	 * for the launch fixture to settle the extension through. It has to be a driver's job because
-	 * the popup redirects to the onboarding tab and calls `window.close()`: Chrome ignores the
-	 * call on a tab no script opened, Firefox honours it and the page dies under the fixture.
+	 * An extension page with `chrome.*` for the launch fixture to settle the extension through, whose
+	 * lifetime no onboarding state decides: both browsers honour the `window.close()` that the popup
+	 * and the onboarding page call when they redirect. Both drivers load the setup page, static text
+	 * that no product code opens, so deleting it as dead code fails every launch.
 	 */
-	openScratchPage(browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page>
+	openScratchPage(browser: Browser, extensionId: string): Promise<Page>
 	/**
 	 * Resolve with the first target matching `predicate`, or reject after `timeout` ms. Over BiDi a
 	 * window is born `about:blank` and no event reports the URL it then loads, so Puppeteer's own
@@ -214,8 +214,7 @@ export const interceptRpc = (
 	fromOrigin: string,
 	mode: RpcInterception,
 ): Promise<ArmedInterception> => driver.interceptRpc(browser, extensionId, fromOrigin, mode)
-export const openScratchPage = (browser: Browser, extensionId: string, opts: { freshProfile: boolean }): Promise<Page> =>
-	driver.openScratchPage(browser, extensionId, opts)
+export const openScratchPage = (browser: Browser, extensionId: string): Promise<Page> => driver.openScratchPage(browser, extensionId)
 export const prepareClick = (page: Page): Promise<void> => driver.prepareClick(page)
 export const prepareKeys = (page: Page): Promise<void> => driver.prepareKeys(page)
 export const pickFile = (page: Page, open: () => Promise<void>, filePath: string): Promise<void> => driver.pickFile(page, open, filePath)
