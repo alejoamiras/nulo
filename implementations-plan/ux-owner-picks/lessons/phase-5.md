@@ -205,3 +205,96 @@ popups.
 The PNGs and a one-line-per-file index went to the driver, who publishes the sign-off Artifact
 (step 7). The gate's last clause, the printed Artifact URL, is the driver's, so P5 takes its ✓ when
 that URL is in.
+
+## The rebuilt heroes' gates
+
+The owner's sign-off sent the two heroes back (`plan.md` § P6), so P5's gates ran again at
+`abc822c7` for what the rebuild changed. Codex round 4 (`phase-6.md`) ran beside the browser
+runs. It found nothing, so none of them needed a rerun.
+
+### Local gates
+
+Each ran on its own, at a load average of 39 to 55.
+
+| Gate | Exit | Notes |
+|---|---|---|
+| `bun run lint` | 0 | 1899 files; 29 warnings and 3 infos, as before |
+| `bun run typecheck:all` | 0 | |
+| `bun run test:all` | 0 | every workspace green; extension 8020 passed, 4 skipped, 8 todo |
+| `bun scripts/ci-cd/plans/check.ts` | 0 | 3 report-only findings, 0 enforced, none in a file this branch touches |
+| `bash scripts/check-no-local-paths.sh` | 0 | |
+| `bun run test:ci-gating` | 0 | 244 pass, 2 skip |
+| `bun run build` | 0 | |
+
+### Smoke
+
+Built with the plan's flags and run at `--retry=0` with a JSON report. Each suite passed on its
+first run.
+
+| Run | Exit | Cases | Passed | Failed | Skipped | Seconds |
+|---|---|---|---|---|---|---|
+| Chrome | 0 | 164 | 157 | 0 | 7 | 1082 |
+| Firefox | 0 | 164 | 153 | 0 | 11 | 1245 |
+
+The skips are the suite's own, the same cases the first P5 runs skipped (§ Step 2 above).
+
+### Network e2e
+
+Home's hero renders in almost every e2e flow, since `registerProfile` waits for it, and the smoke
+runs above cover it on both browsers. Six network files read a hero or open the token page
+(`balance-amount`, `balance-arrival-*`, `navigateToTokenDetail`).
+
+Those six ran on both browsers, one file per run at `NULO_E2E_RETRY=0`. Each report was removed
+before its run and checked with `jq -e` after it. Chrome proves, except `incoming-arrival`
+(`@requires-proverless`); Firefox is proverless.
+
+| File | Chrome: passed/cases, seconds | Firefox: passed/cases, seconds |
+|---|---|---|
+| `incoming-public-transfers` | 1/1, 233 | 1/1, 191 |
+| `fiat-send` | 1/1, 115 | 1/1, 105 |
+| `transfers` | 1/1, 235 | 1/1, 163 |
+| `pin-to-home` | 1/1, 139 | 1/1, 124 |
+| `receive-unregistered` | 1/1, 121 | 1/1, 121 |
+| `incoming-arrival` | 7/7, 418 | 7/7, 388 |
+
+All 12 runs exited 0 and passed the `jq -e` check: 0 failed, 0 skipped. The load average was 36 to
+114.
+
+### Captures
+
+A throwaway spec, `tests/e2e/network/_captures-ux-owner-picks-rebuild.test.ts`, was copied in for
+the two runs and removed after them, never committed. It ran through `e2e:agent`, proverless at
+retry 0, at 360×600, and shot each state in both themes.
+
+Its data was public mints to the account:
+
+- the fixture's 1,000 TST: the short amount;
+- 234.567890123456789 TST more, for a long 18-decimal fraction, the owner's realistic way to the
+  60% floor;
+- 124,457,554.332109876543211 TST more, for a total of 124,458,788.9.
+
+Home's shot seeds a $1 quote first. Both runs passed 1 of 1, and both browsers drew the same
+figure at the same scale:
+
+| State | Figure | Scale | Width, px, of the 312 px line |
+|---|---|---|---|
+| Token page, short | `1,000 TST` | 1 | 165.4 |
+| Token page, long fraction | `1,234.5678901234567 TST` | 0.6 | 309.8 on Chrome, 309.9 on Firefox |
+| Token page, 124,458,788.9 | `124,458,788.9 TST` | 0.9 | 309.7 |
+| Home, $124,458,788.90 | `$124,458,788.90` | 0.88 | 311.6 on Chrome, 311.7 on Firefox |
+
+What the four states showed:
+
+- The hero's box is 61 px tall in every state, and nothing in it is clipped.
+- The page never scrolls sideways.
+- Neither run logged a ResizeObserver message or a page error.
+- The long fraction's 20-character form does not fit at 60%, so the fit draws the next one, 19
+  characters, at 60%.
+
+The index and PNGs went to the driver for the owner's re-check.
+
+### Reap
+
+`bun run e2e:reap` ran after both capture runs, both smoke runs and every network run, and once
+more at the end. Each of the 17 outputs reads "nothing to reap — no owned run, no orphaned data
+dirs, no orphaned Firefox launches".
