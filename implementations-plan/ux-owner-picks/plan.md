@@ -12,6 +12,50 @@ worktree: a harness-created agent worktree (its path is recorded in lessons/phas
 follows: implementations-plan/ux-feedback/plan.md § Follow-ups (D1 to D5)
 ---
 
+## Outcome
+
+- **Date:** 2026-09-29. **Status:** closed, awaiting archive: delivered as #718 on
+  `feat/ux-owner-picks`, not yet merged. The owner signed off every surface on 2026-09-29: the rest
+  of O1, O2 to O4 and the blanket as built, then the rebuilt heroes (§ P6).
+- **Shipped:** D1 to D5 with the owner's picks, O1 (a) to O4 (a), P0 to P6, plus UI impact rows 12
+  to 14 from the sign-off:
+  - D1: an amount too long for its row keeps every whole-number digit, as a truncated compact form
+    ("123.45M"), on every capped amount whose token the wallet knows; a cut ending on a separator
+    drops it.
+  - D2: Home and History build received rows with one builder over one scoped token lookup, so
+    History shows Home's token, amount and dollar value, on a cold open and on the local network.
+  - D3: Send's token card waits, inert, for the current identity's tokens (an empty row, then a
+    skeleton after 300 ms) and never shows the previous identity's token; loaded, it is one Tab
+    stop.
+  - D4: with no saved choice every fee card starts on Nulo's sponsor, never one added by hand, and
+    picks none where Nulo's is missing.
+  - D5: a failed wallet send reads "Send failed", with O3 (a)'s hedged context.
+  - Rows 12 and 13: both heroes shrink until every character fits, down to 60%, before D1's rule
+    shortens them, and while Home counts the size only shrinks. Row 14: Send's loading token card
+    is named "Loading tokens".
+  - From the codex loop (`lessons/phase-6.md`): outside Send, a fee card drops a sponsor it chose by
+    default once an edit makes that row custom, and neither a gas-read recovery nor an account
+    switch undoes that or drops the next account's saved pick; the callers scan reads each call by
+    its arguments.
+- **Gates at delivery** (`lessons/phase-5.md`):
+  - On the reviewed tree (`11192069`; `8664ffa3` adds only a log): the local gates; seven network
+    files per browser at retry 0, every report passing its `jq -e` check, and
+    `incoming-public-transfers` three of three per browser; smoke on both browsers, after one
+    rerun each for a flake root-caused outside this branch.
+  - After the two merges of `dev`: the local gates again.
+  - The rebuild, at `abc822c7`: the local gates; smoke on both browsers at the first run; the six
+    network files that read a hero, on both browsers, 12 of 12 runs passing and none skipped.
+  - Codex approved in round 3, and in round 4 on the rebuild (`lessons/phase-6.md`).
+- **Dropped:** C7's held identity reply, since Firefox runs no preload script in extension pages;
+  its block runs unheld and is deterministic on the local network (`lessons/phase-2.md`). The P5
+  capture of a fee card with Nulo's sponsor missing, a state the e2e cannot reach without a product
+  hook; units pin it (`lessons/phase-5.md`).
+- **Open items:** none left here. The five follow-ups are in `follow-ups.md` § Amounts, sends and
+  fees, and two lessons are in `lessons.md` (§ Popup UI, § Extension runtime). The send-amount
+  validator, `AmountCard`'s float regrouping and Send's balance corner belong to
+  `fix/send-amount-exact`; the two smoke flakes P5 root-caused belong to `e2e-reliability-fixes`.
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # UX owner picks · five follow-ups from the ux-feedback program
 
 One PR off `dev` building the five UI decisions the owner picked on 2026-09-28:
@@ -94,8 +138,8 @@ whenever it is chosen (a funding probe is a follow-up).
 
 Rows 1 to 11 were built with the owner's picks, O1 (a) to O4 (a) (§ Asks → owner), shown to the
 owner on one page with its screenshots (Chrome and Firefox), and signed off on 2026-09-29 (§ P6).
-O1's note on that page sent the two heroes back: rows 12 and 13 rebuild them and are **sign-off
-pending**. Row 14 is the owner's pick from the same page.
+O1's note on that page sent the two heroes back: rows 12 and 13 rebuild them, and the owner signed
+them off the same day (§ P6). Row 14 is the owner's pick from the same page.
 
 | # | Surface | Before → after | Item |
 |---|---|---|---|
@@ -902,7 +946,7 @@ As run (`lessons/phase-5.md`): steps 1 to 6 pass, each smoke suite after one rer
 root-caused flake outside this branch. The driver published the sign-off page for step 7:
 https://claude.ai/artifact/652Ef58H3aefeESJPZ4Y4R.
 
-### P6 · The owner's sign-off
+### P6 · The owner's sign-off ✓
 
 The owner's answers on the P5 page, quoted here and in the PR body. A changed answer loops back
 to the phase that built it, then reruns P5's gate for the affected surfaces.
@@ -935,10 +979,21 @@ So O2, O3, O4, the rest of O1 and the blanket are signed off as built. The heroe
 (UI impact rows 12 and 13) and the name to P3 (row 14). The rebuilt heroes go back to the owner
 with new captures, and P6 closes on that answer.
 
+The owner's answer on the rebuilt heroes, 2026-09-29:
+
+- In chat: "#718 & [the sign-off page] updated shrink to fit look right."
+- On the page, `heroes`, 14:35 UTC: "as-built".
+
+So rows 12 and 13 are signed off as built, and row 14 is the owner's own pick: every row of the UI
+impact table has the owner's word.
+
 Gate:
 - Commands: P5 steps 1 to 3 for any surface changed after sign-off.
 - Pass: exit 0, and a quoted owner message naming each signed-off surface.
 - Layers: as P5, for the changed surfaces.
+
+As run (`lessons/phase-5.md` § The rebuilt heroes' gates): P5 steps 1 to 3 for the rebuilt
+surfaces pass, and the owner's answers are quoted above.
 
 ## Post-implementation (read by the implementing session)
 
@@ -977,7 +1032,7 @@ Codex is advisory: it cannot override the owner's picks, CLAUDE.md or this scope
 - Commits: conventional, lower-case, signed; one per phase at least, loop fixes separate.
 - Body: summary; the UI impact table; the owner's quotes (the 2026-09-28 request and every sign-off
   answer); the sign-off Artifact link; test evidence; the shared-file lines (recon § Collision).
-- New follow-ups for `implementations-plan/follow-ups.md` at close:
+- New follow-ups, moved at close to `implementations-plan/follow-ups.md` § Amounts, sends and fees:
   - `dapp_execute` failures read "Reported by app" although the kind also covers the wallet's own
     simulate, prove and send failures of a dApp request (`journal-state.ts:217-219`).
   - Send's failed token load shows "No available tokens" / "Import token"; a real error state with a

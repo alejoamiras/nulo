@@ -150,6 +150,9 @@ past that does D1's rule shorten the figure. The rest of O1 stays as built.
   - "$124,458,788.90" is 356.6 px, so about 87.5%;
   - "124,458,788.9 TST" is 350.4 px, so about 89%.
 - `line-height: normal` is (984 + 292) / 1000 = 1.276em, 61.2 px at 48 px.
+- The file (`packages/design/src/fonts/SpaceGrotesk-latin.woff2`) carries `pnum` and `tnum` in
+  GSUB and `kern` in GPOS. Tabular digits would hold a counting figure's width steady, but they
+  change how every figure looks, which is the owner's call; the hold keeps today's digits.
 
 ### The owner's realism rule
 
@@ -171,3 +174,7 @@ tokens my friend. let's cover realistic scenarios lol." Applied here:
 - The capture's fraction in the real font: the 20-character cut plus " TST" is about 547 px (57%)
   and the 19-character one about 520 px (59.9%, just under the floor), so the hero draws the
   18-character cut at about 63%.
+- That estimate was wrong by a character. Both browsers drew the 19-character cut at 60%, 309.8 px
+  of 312 on Chrome and 309.9 on Firefox (`phase-5.md` § The rebuilt heroes' gates). The drawn
+  width is narrower than the estimate, which counts no kerning. Widths near the floor are read in
+  a browser, not from the font file.
