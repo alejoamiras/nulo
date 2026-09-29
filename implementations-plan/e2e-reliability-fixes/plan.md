@@ -842,6 +842,13 @@ Run at the final code revision (the branch head after the last code commit), one
   both browsers. The three-run bars of P3–P5 stay the evidence for the changed e2e files; any later
   code change reruns the affected phase's bar and this phase.
 
+Result, at `5f32ab5b`'s code (`lessons/phase-6.md`): every command exits 0 except the Firefox
+canary, whose `transfers.test.ts` fails twice at step 2. That is a pre-existing defect, reproduced
+on the base commit `0fa5a2cb`: the popup's `executeTransfer` call times out at 60 s while Firefox
+proves in the browser for about 90 s, so the Send screen reports a failure for a transfer that
+succeeds. CI's Firefox canary proves through Presto and passes. Not marked ✓: the fix is product
+code outside this plan, and whether CI's canary stands in for the local one is the owner's call.
+
 ### P7 · C6 · Home's settled token card (addendum) ✓
 
 Added mid-build, with C6. P6 runs after it and P8, at the final code revision.
