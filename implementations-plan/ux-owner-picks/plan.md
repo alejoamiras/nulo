@@ -108,6 +108,7 @@ most about five calls and one blanket sign-off.
 | 8 | Send, token card and the keyboard | not reachable by Tab → one Tab stop between the recipient field and the amount; Enter or Space acts as a tap; out of the Tab path while loading | D3 |
 | 9 | Default fee sponsor with no saved choice: Send, the execute window's fee card, Revoke authorizations, authwit registry | the first sponsor in storage order, so a hand-added one can win → Nulo's sponsor; where Nulo's is missing, per O4's recommendation no sponsor is chosen automatically (Send's walk goes on to its next payer or holds; the other three cards open on "Select method", as they do today on a network with no sponsor rows) | D4, O4 |
 | 10 | Journal detail page of a failed wallet send ("What happened" and "Outcome") | "Reported by app" / "The connected app reported an error." → O3 (a) in the decision page's wording, "Send failed" / "Your wallet couldn't finish this send. If it was already submitted, it may still go through." | D5, O3 |
+| 11 | Send, where the only sponsor is one added by hand (Nulo's is missing) and the account holds no Fee Juice | the hand-added sponsor paid unasked, so no nudge → the get-gas nudge and the "Get Fee Juice" / "Get private gas" button, as on a network with no sponsor rows; both open unleashed's testnet app (`FEE_JUICE_BRIDGE_URL`, re-pointed on `dev` by #713) | D4, O4 |
 
 The compact form truncates like every other amount (Ask C2), so the brief's example "123.46M"
 reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary entry is added.
@@ -528,6 +529,11 @@ through." The owner then asked whether the wallet could check what happened inst
 (a) ships here as built, and the check is the next plan after this arc (owner, 2026-09-28: "Add it
 as an immediate follow-up maybe after this arc?").
 
+The funding check (P5 step 7's last call): the owner, 2026-09-29, answered "Nulo's sponsor is
+picked by identity. If it holds no Fee Juice, the send proves and the network refuses it with
+nothing spent, as today. Add a funding check before picking it?" with "Follow-up (Recommended)".
+No check ships here; it is a follow-up (§ Delivery).
+
 - **O1 · Where the compact form applies (D1).** Built: the incoming row only. The same cut drops
   whole digits on the other capped surfaces (17 calls in 10 files, recon § Every capped caller).
   (a) the compact form, and the trailing-separator trim, on every capped amount whose token the
@@ -888,6 +894,10 @@ Gate:
   the flake bar's runs all pass; the sign-off Artifact URL printed.
 - Layers: lint, types, unit, component, smoke e2e, e2e-live-network, both browsers.
 
+As run (`lessons/phase-5.md`): steps 1 to 6 pass, each smoke suite after one rerun for a
+root-caused flake outside this branch. The captures went to the driver for step 7. P5 takes its ✓
+when the Artifact URL is printed.
+
 ### P6 · The owner's sign-off
 
 The owner's answers on the P5 page, quoted here and in the PR body. A changed answer loops back
@@ -945,7 +955,8 @@ Codex is advisory: it cannot override the owner's picks, CLAUDE.md or this scope
     `received/[id].vue:105`, `IncomingTrustPopup.vue:62-63`).
   - The protocol sponsor is stored without a deployment or funding check
     (`fpc/service.ts:163-173`), and the estimate cannot tell (Fact 16); a funding probe would let
-    the card say so before the person waits for a proof the network then refuses.
+    the card say so before the person waits for a proof the network then refuses. The owner,
+    2026-09-29: "Follow-up (Recommended)".
   - Next after this arc, by the owner's call (2026-09-28): a failed send checks the network instead
     of hedging.
 
