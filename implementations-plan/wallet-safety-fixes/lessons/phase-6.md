@@ -138,3 +138,12 @@ Session `01a0ea74-cd47-76e0-a830-14c1b14ffc98` (gpt-6-astra, high, read-only), o
    partial stop.
 
 Commits: `1ccfe4e8`, `358adcb0`.
+
+## Codex round 2
+
+The same session, resumed with the round-1 fix diff, the reasoning behind the ownership gate, F-7,
+the adversarial ask and both rules verbatim, over `origin/dev...4d3c9885`. Verdict: approve, no new
+findings. On the gate (confidence high): the earlier post-set check establishes that the row
+predates the deletion and the purge rereads tokens under the token lock; a displaced add skips the
+delete, and an owned add issues it with no await in between. It found nothing else material in the
+whole branch diff and called F-7 a distinct, documented pre-existing risk. The loop converged.
