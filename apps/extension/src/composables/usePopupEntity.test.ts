@@ -1,12 +1,12 @@
 /**
  * Unit tests for `usePopupEntity`, the show/hide lifecycle the popups share: the Enter guard (a field
  * only, never a repeat or a composition), the listener installed only with `submit` and removed on hide
- * and on scope dispose, and the onShow/onHide hooks.
+ * and on scope dispose, and the onShow/onHide hooks; and for `refuseRepeatEnter`, a control's refusal.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { createApp, effectScope, nextTick, ref } from "vue"
-import { isPopupSubmitKey, usePopupEntity } from "./usePopupEntity"
+import { isPopupSubmitKey, refuseRepeatEnter, usePopupEntity } from "./usePopupEntity"
 
 /** Run the composable inside an effect scope so its `watch` is active; return a
  *  `stop()` to tear it down (mirrors component unmount). */
@@ -46,6 +46,24 @@ describe("isPopupSubmitKey", () => {
 	it("false for Enter on a non-field element (<div>)", () => expect(keyOn("div", "Enter")).toBe(false))
 	it("false for a non-Enter key on an <input>", () => expect(keyOn("input", "a")).toBe(false))
 	it("false when target is null", () => expect(isPopupSubmitKey({ key: "Enter", target: null } as unknown as KeyboardEvent)).toBe(false))
+})
+
+describe("refuseRepeatEnter", () => {
+	const enter = (init: KeyboardEventInit = {}) => new KeyboardEvent("keydown", { key: "Enter", cancelable: true, ...init })
+
+	it("cancels a repeat and a composing Enter", () => {
+		const repeat = enter({ repeat: true })
+		const composing = enter({ isComposing: true })
+		refuseRepeatEnter(repeat)
+		refuseRepeatEnter(composing)
+		expect([repeat.defaultPrevented, composing.defaultPrevented]).toEqual([true, true])
+	})
+
+	it("leaves a plain Enter to the control", () => {
+		const plain = enter()
+		refuseRepeatEnter(plain)
+		expect(plain.defaultPrevented).toBe(false)
+	})
 })
 
 describe("usePopupEntity", () => {

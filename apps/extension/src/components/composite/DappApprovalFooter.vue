@@ -11,6 +11,7 @@
 
 /** Composables */
 import { vSnackFooter } from "@/composables/snackInset"
+import { refuseRepeatEnter } from "@/composables/usePopupEntity"
 
 defineProps({
 	/** The window's processing error ({ title, tooltip?, type }) or undefined. */
@@ -50,6 +51,7 @@ const emit = defineEmits(["reject", "approve"])
 			<Button
 				:data-testid="confirmTestid"
 				@click="emit('approve')"
+				@keydown.enter="refuseRepeatEnter"
 				wide
 				variant="primary"
 				size="medium"

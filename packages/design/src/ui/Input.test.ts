@@ -59,6 +59,17 @@ describe("Input", () => {
 		expect(mountInput({ size: "small" }).html()).toMatch(/small/)
 	})
 
+	test("inputTestid names the native <input> while a data-testid stays on the root", () => {
+		const w = mount(Input, {
+			props: { placeholder: "Type something", inputTestid: "native-id" },
+			attrs: { "data-testid": "root-id" },
+			global: { stubs: { ...STUBS, Flex: { template: "<div><slot /></div>" } } },
+		})
+		expect(w.attributes("data-testid")).toBe("root-id")
+		expect(w.get("input").attributes("data-testid")).toBe("native-id")
+		expect(mountInput().get("input").attributes("data-testid")).toBeUndefined()
+	})
+
 	test("type prop maps to the native input type", () => {
 		expect(mountInput({ type: "password" }).find("input").attributes("type")).toBe("password")
 	})

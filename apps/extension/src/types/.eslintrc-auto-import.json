@@ -366,6 +366,7 @@
     "receivedLabel": true,
     "ref": true,
     "refreshBalances": true,
+    "refuseRepeatEnter": true,
     "relinkRestoredTokenBalances": true,
     "remapByMap": true,
     "remapNetworkIdByChain": true,

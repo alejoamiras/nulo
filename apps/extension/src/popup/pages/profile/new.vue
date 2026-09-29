@@ -80,17 +80,10 @@ const {
 	},
 })
 
-// Quirk 2: only submit on Enter from a text field, so Enter on a focused
-// button doesn't double-fire alongside its native click.
 const onKeydown = makeCreateKeydownHandler(handleCreate)
-
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
 
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
@@ -102,6 +95,7 @@ onBeforeUnmount(() => {
 		:backTo="backTo"
 		data-testid="register-page"
 		:data-name-field="nameFieldState"
+		@keydown="onKeydown"
 	>
 		<div v-if="nameFieldState === 'shown'" :class="$style.section_last">
 			<span :class="$style.section_label">Profile name</span>

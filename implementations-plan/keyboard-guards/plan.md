@@ -521,7 +521,7 @@ Assumptions: none beyond § Assumptions.
 **Validation gate.** Commands: `bun run lint`; `bun scripts/ci-cd/plans/check.ts`. Pass: both exit
 0. Layers: lint, CI-gating.
 
-### P1 · Shared pieces (the refusal, K-B, the footer, the test helper, the design prop)
+### P1 · Shared pieces (the refusal, K-B, the footer, the test helper, the design prop) ✓
 
 Assumptions: Facts 1, 2, 13, 20, 25, 27; C3, C5, C7 as recommended.
 

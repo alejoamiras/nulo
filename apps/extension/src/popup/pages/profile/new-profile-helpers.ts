@@ -1,4 +1,5 @@
 import type { Router } from "vue-router"
+import { isPopupSubmitKey } from "@/composables/usePopupEntity"
 import type { useAppStore } from "@/stores/app.store"
 import { initTransactionService, managers } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
@@ -43,27 +44,10 @@ export async function activateCreatedProfile(profile: { id: string }, deps: { ap
 	router.push("/popup/general")
 }
 
-/**
- * Canonical Enter double-fire guard (mirrors `NewContactPopup.vue`): only treat
- * Enter as a submit when it originates from a text input, so Enter while a
- * button is focused doesn't fire the document-level handler in addition to the
- * button's native Enter→click activation. Enter from the name field still
- * submits; Enter on a method-tab button no longer does.
- */
-export function shouldHandleEnter(e: KeyboardEvent): boolean {
-	if (e.key !== "Enter") return false
-	const target = e.target
-	return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
-}
-
-/**
- * Builds popup-create's document-level keydown handler: submit only when the
- * Enter originates from a text field (see `shouldHandleEnter`). Extracted so the
- * page WIRING — not just the predicate — is unit-tested, without mounting the
- * whole page.
- */
+/** Popup-create's Enter shortcut, bound on the page's root: an Enter in one of its fields submits
+ *  unless a child already handled it. */
 export function makeCreateKeydownHandler(onSubmit: () => void): (e: KeyboardEvent) => void {
 	return (e) => {
-		if (shouldHandleEnter(e)) onSubmit()
+		if (!e.defaultPrevented && isPopupSubmitKey(e)) onSubmit()
 	}
 }

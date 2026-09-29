@@ -6,6 +6,11 @@ export function isRepeatOrComposing(e: KeyboardEvent): boolean {
 	return e.repeat || e.isComposing || e.keyCode === 229
 }
 
+/** Cancels a repeat or composing Enter so a focused control's native activation does not fire. */
+export function refuseRepeatEnter(e: KeyboardEvent): void {
+	if (isRepeatOrComposing(e)) e.preventDefault()
+}
+
 /** Enter pressed in an `<input>` or `<textarea>`, neither repeated nor composing. */
 export function isPopupSubmitKey(e: KeyboardEvent): boolean {
 	if (e.key !== "Enter" || isRepeatOrComposing(e)) return false
