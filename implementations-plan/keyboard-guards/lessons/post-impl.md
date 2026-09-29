@@ -16,3 +16,9 @@ over `git diff 85c4d20f...HEAD` with the plan, its ledger, the adversarial ask a
   (`popup/pages/import.test.ts`, `settings/security/change-password.test.ts`,
   `settings/security/export/seed.test.ts`). Accepted: the headers go. The comments that explain
   CodeMirror in jsdom and the Back branch stay.
+
+## Round 2 · approve, no new material findings
+
+Resumed the same session over `git diff 418d59f3..HEAD` (the two fix commits) and the whole
+branch, with the two rules again. Codex: both findings resolved, the Enter check keeps every
+caller's behaviour, and the new assertion catches the old behaviour. The loop converged.
