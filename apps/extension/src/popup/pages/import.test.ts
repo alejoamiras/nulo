@@ -1,10 +1,3 @@
-/**
- * Component tests for the popup import page's Enter shortcut on the full-backup form: an Enter in one
- * of the page's fields runs the stage's action once, a focused button runs only its own action, a
- * repeat Enter on a CTA runs nothing, and a key in the error viewer (a shell popup outside the page)
- * never continues the import.
- */
-
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"

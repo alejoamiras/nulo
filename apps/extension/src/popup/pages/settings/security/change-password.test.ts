@@ -1,9 +1,3 @@
-/**
- * Component tests for the change-password page's Enter shortcut, with all three fields valid: an
- * Enter in a field changes the password once, the back arrow only goes back, Change Password sends
- * one change, and a repeat Enter on it sends none.
- */
-
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"

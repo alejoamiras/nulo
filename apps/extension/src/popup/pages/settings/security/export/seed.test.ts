@@ -1,9 +1,3 @@
-/**
- * Component tests for the recovery-phrase page's Enter shortcut, agreed and with a password typed: an
- * Enter in the password field retrieves the phrase once, the back arrow only goes back, Retrieve
- * retrieves once, and a repeat Enter on it retrieves nothing.
- */
-
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
