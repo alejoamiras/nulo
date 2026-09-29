@@ -92,15 +92,16 @@ whenever it is chosen (a funding probe is a follow-up).
 
 ## UI impact
 
-Every surface below is **sign-off pending**: built with the owner's picks, O1 (a) to O4 (a)
-(§ Asks → owner), then shown to the owner on one page with its screenshots (Chrome and Firefox), at
-most about five calls and one blanket sign-off.
+Rows 1 to 11 were built with the owner's picks, O1 (a) to O4 (a) (§ Asks → owner), shown to the
+owner on one page with its screenshots (Chrome and Firefox), and signed off on 2026-09-29 (§ P6).
+O1's note on that page sent the two heroes back: rows 12 and 13 rebuild them and are **sign-off
+pending**. Row 14 is the owner's pick from the same page.
 
 | # | Surface | Before → after | Item |
 |---|---|---|---|
 | 1 | Incoming row (Home "Recent transactions", History) | 123,456,789 TST reads "+123,456," (the 8-character cut, en-US) → "+123.45M"; past 999 trillion whole tokens, "+>999T" (O1 text); an amount whose whole part fits is unchanged | D1, O1 |
 | 2 | Incoming row, an amount whose whole part fits but whose cut ends on a separator | "+999,999." → "+999,999" (the trim rides the same `{ compact: true }` option, so no other surface gets it) | D1 |
-| 3 | The other capped amounts whose token the wallet knows (outgoing Home rows' in-flight and awaiting amounts, terminal journal rows, the journal detail page, Home token rows, the token page split and hero, the snack) | the compact form and the trim, O1 (a): "1,234." → "1,234" on Home's token-row split, "123,456." → "123,456" in the snack, a whole part past the cap as K/M/B/T ("123.45M" at 8 and 10 characters, "123.4M" at 6); the snack still prints the full amount when the whole part does not fit | D1, O1 |
+| 3 | The other capped amounts whose token the wallet knows (outgoing Home rows' in-flight and awaiting amounts, terminal journal rows, the journal detail page, Home token rows, the token page split and hero, the snack) | the compact form and the trim, O1 (a): "1,234." → "1,234" on Home's token-row split, "123,456." → "123,456" in the snack, a whole part past the cap as K/M/B/T ("123.45M" at 8 and 10 characters, "123.4M" at 6); the snack still prints the full amount when the whole part does not fit; the token page's hero also fits its line (row 12) | D1, O1 |
 | 4 | History's received rows | "Token", "+1,000,00", no dollar value (seen on batch 4's parity page) → "TST", "+1,000", "≈ $1,000.00", as Home | D2 |
 | 5 | A received row whose token is not known (Home and History) | "Token" and the raw integer cut to 8 characters → "Token" and no amount or dollar value, as terminal journal rows already do (`journal-state.ts:312-323`); a receipt whose `tokenId` went stale (token removed and re-added) now matches by contract and reads its symbol, as its detail page already does (`received/[id].vue:95-99`) | D2 |
 | 6 | History's failed-send rows after a cold open | no amount (the token map is empty) → the amount, as Home | D2 |
@@ -109,6 +110,9 @@ most about five calls and one blanket sign-off.
 | 9 | Default fee sponsor with no saved choice: Send, the execute window's fee card, Revoke authorizations, authwit registry | the first sponsor in storage order, so a hand-added one can win → Nulo's sponsor; where Nulo's is missing, per O4's recommendation no sponsor is chosen automatically (Send's walk goes on to its next payer or holds; the other three cards open on "Select method", as they do today on a network with no sponsor rows) | D4, O4 |
 | 10 | Journal detail page of a failed wallet send ("What happened" and "Outcome") | "Reported by app" / "The connected app reported an error." → O3 (a) in the decision page's wording, "Send failed" / "Your wallet couldn't finish this send. If it was already submitted, it may still go through." | D5, O3 |
 | 11 | Send, where the only sponsor is one added by hand (Nulo's is missing) and the account holds no Fee Juice | the hand-added sponsor paid unasked, so no nudge → the get-gas nudge and the "Get Fee Juice" / "Get private gas" button, as on a network with no sponsor rows; both open unleashed's testnet app (`FEE_JUICE_BRIDGE_URL`, re-pointed on `dev` by #713) | D4, O4 |
+| 12 | The token page's hero, the balance and its symbol | a figure wider than its line is cut by a CSS ellipsis ("124,458,788...." at 124,458,788.9 TST, as on `dev`) → never an ellipsis: the type shrinks until every character fits, down to 60% of its size, so 124,458,788.9 TST draws in full a little smaller; a short amount keeps today's size; past 60%, D1's rule (O1 (a)) at the length that fits: fraction digits go first, truncated, never rounded, with no trailing separator (1,234.567890123456789 TST draws "1,234.567890123456"), and K/M/B/T only when the whole part alone does not fit; only a symbol too long for the line can take the shortest form below 60%; the line keeps its height, so nothing below the hero moves | D1, O1 |
+| 13 | Home's total value | "$124,458,78…" at $124,458,788.90, as on `dev` → the same shrink, so the figure draws in full; past 60% the cents go, then the whole dollars read K/M/B/T, truncated ("$124.45M"), taken from the cents shown so no shorter form contradicts the figure; while the total counts after an arrival, and on the figure it lands on, the size may shrink but not grow (the font's digits are proportional, and a size that followed them would pulse); the next figure fits afresh | D1, O1 |
+| 14 | Send, token card while loading, to a screen reader | a busy, disabled button with no name → named "Loading tokens"; the ready and empty rows keep the names their content gives; nothing drawn changes | D3, the `name` answer |
 
 The compact form truncates like every other amount (Ask C2), so the brief's example "123.46M"
 reads "123.45M"; the sign-off page says so. No dotted term, tooltip or glossary entry is added.
@@ -848,7 +852,7 @@ Gate:
   excepted, red before step 2 (logged); the refusal text recorded in the log.
 - Layers: lint, types, unit, component (wire-shaped execute fixture).
 
-### P5 · Full gates, browsers, the sign-off page
+### P5 · Full gates, browsers, the sign-off page ✓
 
 1. Every local gate: `bun run lint`, `bun run typecheck:all`, `bun run test:all`,
    `bun run test:ci-gating`, `bun run build`.
@@ -895,13 +899,41 @@ Gate:
 - Layers: lint, types, unit, component, smoke e2e, e2e-live-network, both browsers.
 
 As run (`lessons/phase-5.md`): steps 1 to 6 pass, each smoke suite after one rerun for a
-root-caused flake outside this branch. The captures went to the driver for step 7. P5 takes its ✓
-when the Artifact URL is printed.
+root-caused flake outside this branch. The driver published the sign-off page for step 7:
+https://claude.ai/artifact/652Ef58H3aefeESJPZ4Y4R.
 
 ### P6 · The owner's sign-off
 
 The owner's answers on the P5 page, quoted here and in the PR body. A changed answer loops back
 to the phase that built it, then reruns P5's gate for the affected surfaces.
+
+The page's `answers` database, 2026-09-29 (UTC):
+
+- `rest`, 02:37: "signed". It is the blanket for the page's lines 1 to 9: the "123.45M"
+  truncation, History parity, the unknown-token rows, the cold open, the token card's Tab stop, the
+  failed-load empty state, D4's payer order line, Nulo's sponsor chosen by identity with the
+  funding check as a follow-up, and row 11's nudge.
+- `o1`, 02:38, "change": "I don't love having "...." four stops.  wondering if there is abetter
+  UX /uI tool to showcase that. Feels that we've just done what was easier. (On the total value I
+  mean."
+- `o2`, 02:41, `o3`, 02:42, `o4`, 02:42: "as-built".
+- `name`, 02:42: "loading-tokens", the page's "Name it Loading tokens".
+
+The owner, in chat the same day:
+
+- Asked "Your O1 note is about the big totals: the token page reads 124,458,788.... and Home reads
+  $124,458,78…, because CSS cuts both heroes (dev does the same today). Which fix, for both
+  heroes? The rest of O1 stays as built.", the owner answered "Shrink to fit (Recommended)", which
+  read: "The hero's type shrinks until every digit fits, down to about 60% of its size. Only past
+  that does it switch to 124.45M. A short amount keeps today's size."
+- Asked to "name the loading token card "Loading tokens"? Nothing drawn changes.", the owner
+  answered "Name it Loading tokens (Recommended)".
+- A standing rule, said of another PR's trillion-token edge case: "Don't even care with a balance
+  of 10 trillion tokens my friend. let's cover realistic scenarios lol."
+
+So O2, O3, O4, the rest of O1 and the blanket are signed off as built. The heroes loop back to P1
+(UI impact rows 12 and 13) and the name to P3 (row 14). The rebuilt heroes go back to the owner
+with new captures, and P6 closes on that answer.
 
 Gate:
 - Commands: P5 steps 1 to 3 for any surface changed after sign-off.
