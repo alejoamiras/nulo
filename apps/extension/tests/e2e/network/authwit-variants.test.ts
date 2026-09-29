@@ -37,13 +37,20 @@ const hasConfig = aztecConfig !== undefined
 
 type Connected = ExtensionContext & { playgroundPage: Page }
 
-/** Connect `bundle` on the token, check the authorizations switch starts at `expectDefault`,
- *  approve with `switchTo` if given, and require the request's answer to be `ok`. */
-async function connect(ctx: Connected, bundle: PgBundle, expectDefault: boolean, switchTo?: boolean): Promise<void> {
+/** Connect `bundle` on the token, spelled `opts.tokenAddress` if given, check the authorizations
+ *  switch starts at `expectDefault`, approve with `opts.switchTo` if given, and require the
+ *  request's answer to be `ok`. */
+async function connect(
+	ctx: Connected,
+	bundle: PgBundle,
+	expectDefault: boolean,
+	opts: { switchTo?: boolean; tokenAddress?: string } = {},
+): Promise<void> {
+	const { switchTo, tokenAddress = aztecConfig!.tokenAddress } = opts
 	const page = ctx.playgroundPage
 	const seq = await snapshotResultSeq(page)
 	const popupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
-	await requestPgBundle(page, bundle, { tokenAddress: aztecConfig!.tokenAddress })
+	await requestPgBundle(page, bundle, { tokenAddress })
 	const popup = await popupP
 	await popup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
 	expect(await readCapabilitySwitch(popup, "authorizations")).toBe(expectDefault)
@@ -83,6 +90,18 @@ test.skipIf(!hasConfig)(
 )
 
 test.skipIf(!hasConfig)(
+	"authwit-callIntent — a request listing its contract in upper case starts On: the call intent signs without a window",
+	{ timeout: 180_000 },
+	async ({ dappConnectedExtensionPerTest: ctx }) => {
+		// The call-intent button parses the same input into an AztecAddress, which goes out lower case.
+		const upper = `0x${aztecConfig!.tokenAddress.slice(2).toUpperCase()}`
+		expect(upper).not.toBe(upper.toLowerCase())
+		await connect(ctx, "transaction-listed", true, { tokenAddress: upper })
+		await assertPgOk(ctx.playgroundPage, await signWithoutWindow(ctx), "listed-upper:callIntent")
+	},
+)
+
+test.skipIf(!hasConfig)(
 	"authwit-callIntent — a request reaching any contract starts Off: the call intent asks, titled Authorization",
 	{ timeout: 180_000 },
 	async ({ dappConnectedExtensionPerTest: ctx }) => {
@@ -98,7 +117,7 @@ test.skipIf(!hasConfig)(
 	"authwit — switched On for any contract: the call intent signs silently, an inner hash still asks, Settings Off asks again",
 	{ timeout: 240_000 },
 	async ({ dappConnectedExtensionPerTest: ctx }) => {
-		await connect(ctx, "transaction", false, true)
+		await connect(ctx, "transaction", false, { switchTo: true })
 		await assertPgOk(ctx.playgroundPage, await signWithoutWindow(ctx), "any-on:callIntent")
 
 		const inner = await signThroughWindow(ctx, "pg-btn-createAuthWit-innerHash", (popup) => approveExecute(popup))

@@ -3,6 +3,7 @@
 Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 
 - [ux-feedback](ux-feedback/plan.md) — closed, awaiting archive — the user-testing proposal (items 1–12 and the tooltip map) in five batches, merged 2026-09-28 as #699 to #704; its open items are in follow-ups.md
+- [grant-check-address-case](grant-check-address-case/plan.md) — closed, awaiting archive — one field-address key for every contract comparison in the grant check and the Details table
 - [ux-owner-picks](ux-owner-picks/plan.md) — in progress — ux-feedback's follow-ups D1 to D5 in one PR (mid): compact known-token amounts, one token lookup for Home and History, Send's loading token card, Nulo's sponsor as the default, a failed wallet send's own label; O1 to O4 picked (all (a)), the owner's sign-off pending
 
 - [third-party-notices](third-party-notices/plan.md) — **completed 2026-09-20 (#639, #640, #641, #642 merged)** — reworked legal-terms arc C into arcs a review could finish: Presto on its MIT versions with no min-age exclude left open, 37 test modules out of the production routes (690 kB), the notices policy library with hash-bound font claims and MPL-2.0 off the allowlist, then build wiring + CI floor check + the About row; both targets ship byte-identical notices (122 components); every Codex loop closed within two rounds of three under an "honest dependencies" standard; wasm inventories, final-zip reconciliation and nested-licence discovery are declined with reopen triggers in `follow-ups.md`; an upstream issue draft is in `lessons/upstream-issue.md`

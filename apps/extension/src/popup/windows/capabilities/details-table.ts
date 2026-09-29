@@ -3,6 +3,7 @@
  * lists for it. Pure, over the grants the app would hold after Allow and the contracts the wallet
  * names, so a retained grant is listed and a name never comes from the request.
  */
+import { fieldAddressKey } from "@nulo/wallet-bridge"
 import { ANY_CONTRACT } from "./permission-rows"
 
 export type DetailsRow = {
@@ -66,14 +67,14 @@ function addScope(into: Collected, scope: unknown, column: "simulate" | "transac
 	}
 }
 
-/** One row per contract, in the order the grants first name it. It matches case-blind while the
- *  scope checks compare exactly, so a merge can only overstate reach. */
+/** One row per contract, in the order the grants first name it. A field address is keyed as the
+ *  scope check compares it; any other string by its lower case, which can only overstate reach. */
 function rowFor(into: Collected, contract: unknown): DetailsRow {
 	if (typeof contract !== "string" || contract === "*") {
 		into.anyContract ??= { name: ANY_CONTRACT, simulate: [], add: false, transact: [] }
 		return into.anyContract
 	}
-	const key = contract.toLowerCase()
+	const key = fieldAddressKey(contract) ?? contract.toLowerCase()
 	const row = into.listed.get(key) ?? { address: contract, simulate: [], add: false, transact: [] }
 	into.listed.set(key, row)
 	return row

@@ -5,6 +5,12 @@ Open follow-ups lifted out of closing plans, one entry each, or a pointer to the
 - **P1, the first release after the tools extraction** (from [tools-extraction](tools-extraction/plan.md), 2026-09-28). The next `release: promote dev → main` carries the tools removal, #711 and #713 to `main`, and with them the first production build of `nulo-landing` from `main` with the routes-free config. After `attach-assets`, re-run that build in the Cloudflare dashboard, confirm it succeeded, and check that `curl -s https://nulo.sh` links `releases/tag/v<version>` and that `curl -sI` returns every header in `apps/landing/public/_headers`. Delete this entry when it passes.
 - **The gas link and USDC on mainnet** (owner UI calls, 2026-09-28). The fee card's get-gas link opens unleashed's testnet app on every network, on its `workers.dev` host; the mainnet USDC seed is the retired bridge's token. Revisit when unleashed has its own domain or a public mainnet bridge.
 
+## Grants and scopes
+
+- **Account addresses in the grant check compare by exact string.** `resolveAuthorizedSessionAccount` (`packages/wallet-bridge/src/account-resolution.ts:54`, `:58`), `checkCreateAuthWit`'s accounts list (`method-scope-checkers.ts:289`), `validateAccountScopes` (`scope-enforcement.ts:37-45`), `sessionAccountsOf` (`dispatcher.ts:438-449`) and the membership filter in `projectSessionAccounts` (`dispatcher.ts:1046`) refuse an account spelled in another case: they fail closed. The dispatcher and the journal must change together (`account-resolution.ts:1-13`). From [grant-check-address-case](grant-check-address-case/plan.md), Fact 12.
+- **`fee-payer.ts` compares by exact string.** A `feePayer` that differs from `from` only by case is classified `fpc` (`packages/wallet-bridge/src/fee-payer.ts:63`), and a claim that credits the payer in another case is not recognised as one, so the payload routes `self-pay` (`isClaimAndEndSetup`, `:46-54`). The Fee Juice address has no hex letters (`:14`), so only the payer can differ. From [grant-check-address-case](grant-check-address-case/plan.md), § Security.
+- **A wildcard scope admits a call target before anything validates it as an address** (`packages/wallet-bridge/src/method-scope-checkers.ts:42`, `:55`, `:60`). What rejects a malformed target afterwards differs per method, and `isTokenRegistered` parses nothing; tightening the wildcard is a behaviour change. The per-method boundaries are the rejection-boundary table in [grant-check-address-case](grant-check-address-case/plan.md), § Non-obvious mechanics.
+
 ## ux-feedback: taken by a follow-up plan
 
 The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Delete an entry when the plan it names merges.
@@ -14,7 +20,6 @@ The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Del
 - `wallet-safety-fixes`: `setTrustAllow` and `setTrustReject` write trust with no ownership fence after their awaits.
 - `wallet-safety-fixes`: `nulo:ui:pinnedTokens@<profileId>` outlives the profile's deletion.
 - `wallet-safety-fixes`: the operation journal's id comment says 128 bits, but `nextRandomId(storage, 16)` draws 64.
-- `grant-check-address-case`: `matchesPattern` compares a scope's contract address by exact string (it fails closed), while the permission window's Details table merges addresses case-blind.
 - `e2e-reliability-fixes`: Chrome's launch fixture can lose its scratch page when a fresh wallet's popup closes itself, and vitest 4.1.10's in-test retries cannot recover a failed fixture setup.
 - `e2e-reliability-fixes`: once an attempt of `network/send-picker` has imported ALT, its retries cannot pass.
 - `e2e-reliability-fixes`: two unit tests can time out on a cold dynamic import under load (`content-message-relay.test.ts`, `method-descriptors.test.ts`).
