@@ -340,7 +340,8 @@ export type Methods = {
 	 *  all hidden records for this contract to visible; emits
 	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract
 	 *  no longer has a token registration (stale-popup race: user deleted
-	 *  the token between Pending emit and Allow click) — caller should
+	 *  the token between Pending emit and Allow click), or a lock, a profile
+	 *  switch or the profile's deletion overtook the write — caller should
 	 *  suppress the success toast in that case. */
 	setTrustAllow(profileId: string, networkId: string, contract: string): boolean
 	/** User rejected the first-receive prompt: `pending → blocked`. Same

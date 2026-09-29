@@ -36,6 +36,7 @@ import { IncomingTransferService } from "./service"
 import { PublicScanCursorSchema, noteRecordId } from "./spec"
 import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 import { TaskStatus } from "@/wallet/services/task/spec"
+import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import type { PublicEventReader } from "./public-event-indexer"
 import { SCAN_EPISODES_KEY } from "./scan-episodes"
 import { type ArrivalRow, isArrivalEligible } from "./arrival-state"
@@ -160,14 +161,45 @@ function eh<T>(): EventHandler<T> {
 	return new EventHandler<T>()
 }
 
+/** The session model mirrors ProfileService's fence: a lock ends the session, every unlock (a switch
+ *  included) opens a new serial, and a deletion bumps the profile's epoch and closes its session. */
 function makeProfileStub(activeProfile: { id: string } | null = { id: "p1" }) {
+	const deletion = new ProfileDeletionState()
+	let serial = 1
+	let session = activeProfile ? { profileId: activeProfile.id, serial } : undefined
+	const live = () => (session && !deletion.isReserved(session.profileId) ? session : undefined)
 	return {
 		name: "profile",
 		dependencies: [],
 		onActiveProfileChanged: eh<void>(),
 		onProfileDeleted: eh<{ id: string }>(),
-		getActiveProfile: vi.fn().mockResolvedValue(activeProfile),
+		getActiveProfile: vi.fn().mockImplementation(async () => {
+			const current = live()
+			return current ? { id: current.profileId } : null
+		}),
 		getProfiles: vi.fn().mockResolvedValue(activeProfile ? [activeProfile] : []),
+		captureExecutionFence: vi.fn(async (): Promise<ExecutionFence> => {
+			const current = live()
+			if (!current) throw new Error("Wallet locked")
+			return { profileId: current.profileId, epoch: deletion.capture(current.profileId), session: current.serial }
+		}),
+		isFenceLive: (fence: ExecutionFence) =>
+			session?.serial === fence.session && session.profileId === fence.profileId && deletion.isCurrent(fence.profileId, fence.epoch),
+		getDeletionState: () => deletion,
+		lock() {
+			session = undefined
+		},
+		unlock(profileId: string) {
+			serial += 1
+			session = { profileId, serial }
+		},
+		beginDeletion(profileId: string) {
+			deletion.beginDeletion(profileId)
+			if (session?.profileId === profileId) session = undefined
+		},
+		releaseDeletion(profileId: string) {
+			deletion.release(profileId)
+		},
 		async start() {},
 	}
 }
@@ -2290,6 +2322,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 
 		const addPromise = tokenStub.onTokenAdded.invoke({
 			id: tokenB.id,
+			profileId: "p1",
 			chainId: tokenB.chainId,
 			contract: tokenB.contract,
 			symbol: tokenB.symbol,
@@ -2338,6 +2371,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		tokenStub.getTokensRaw.mockResolvedValue([tokenA, tokenB])
 		void tokenStub.onTokenAdded.invoke({
 			id: tokenB.id,
+			profileId: "p1",
 			chainId: tokenB.chainId,
 			contract: tokenB.contract,
 			symbol: tokenB.symbol,
@@ -2512,6 +2546,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 
 		await tokenStub.onTokenAdded.invoke({
 			id: tokenA.id,
+			profileId: "p1",
 			chainId: tokenA.chainId,
 			contract: tokenA.contract,
 			symbol: tokenA.symbol,
@@ -2555,6 +2590,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 
 		await tokenStub.onTokenAdded.invoke({
 			id: tokenA.id,
+			profileId: "p1",
 			chainId: tokenA.chainId,
 			contract: tokenA.contract,
 			symbol: tokenA.symbol,
@@ -4753,7 +4789,7 @@ function receipt(n: number, block: number, over: Partial<IncomingNoteRecord> = {
 	return seedNote({ siloedNullifier: validNullifier(1_000 + n), contract: tokenA.contract, l2BlockNumber: block, ...over })
 }
 
-const tokenAdd = (token: typeof tokenB) => ({ ...token, name: `${token.symbol} Token` })
+const tokenAdd = (token: typeof tokenB) => ({ ...token, profileId: "p1", name: `${token.symbol} Token` })
 
 describe("IncomingTransferService — arrival state", () => {
 	test("a missing row is baselined to the tip, so a receipt in the tip's block is history", async () => {
@@ -5015,6 +5051,260 @@ describe("IncomingTransferService — a token add displaced by the watchdog whil
 		const row = trust.get(trustKey("p1", "n1", tokenB.contract))
 		expect(row?.state).not.toBe("trusted")
 		expect(row?.arrivalFloor).toBeUndefined()
+		expect(row?.arrivalFloorPending).toBeUndefined()
+	})
+})
+
+describe("IncomingTransferService — a trust write lands only in its session and incarnation", () => {
+	const key = (profileId = "p1") => trustKey(profileId, "n1", tokenA.contract)
+	const seedPending = (profileId = "p1") =>
+		trust.set(key(profileId), { profileId, networkId: "n1", contract: tokenA.contract, state: "pending", updatedAt: 0 })
+	const allow = (f: Booted) => f.service.setTrustAllow("p1", "n1", tokenA.contract)
+	const reject = (f: Booted) => f.service.setTrustReject("p1", "n1", tokenA.contract)
+	const setters = [
+		["Allow", allow],
+		["Reject", reject],
+	] as const
+	const sessionMoves = [
+		["a profile switch", (f: Booted) => f.profile.unlock("p2")],
+		["a lock", (f: Booted) => f.profile.lock()],
+	] as const
+	const hiddenOf = (receipts: IncomingTransferRecord[]) => receipts.map((r) => records.get(r.id)?.hidden)
+
+	/** Parks the next chain-tip read until the returned `resolve`. */
+	function parkTip(f: Booted) {
+		const read = deferred<number>()
+		f.tip.queue.push(read.promise)
+		return read
+	}
+
+	test("setters queued behind the cascade's clear write nothing once their profile's deletion began", async () => {
+		const f = await bootArrivals(100)
+		seedPending()
+		const wipe = holdCall(internals(f.service).repo, "clearProfile", 1, "before")
+		const clear = f.service.clearProfile("p1")
+		await flushPromises()
+		expect(wipe.held.reached).toBe(true)
+
+		const queued = [allow(f), reject(f)]
+		await flushPromises()
+		f.profile.beginDeletion("p1")
+		wipe.release()
+		await clear
+
+		expect(await Promise.all(queued)).toEqual([false, false])
+		expect(trust.has(key())).toBe(false)
+	})
+
+	test("a setter called after its profile's deletion began is refused at the capture", async () => {
+		const f = await bootArrivals(100)
+		seedPending()
+		f.profile.beginDeletion("p1")
+		const tipReads = f.tip.calls
+		f.token.getTokensRaw.mockClear()
+
+		expect(await allow(f)).toBe(false)
+		expect(await reject(f)).toBe(false)
+		expect(f.tip.calls).toBe(tipReads)
+		expect(f.token.getTokensRaw).not.toHaveBeenCalled()
+		expect(trust.get(key())?.state).toBe("pending")
+	})
+
+	test.each([
+		["deleted", (_f: Booted) => {}],
+		[
+			"deleted, re-imported under the same id and unlocked",
+			(f: Booted) => {
+				f.profile.releaseDeletion("p1")
+				f.profile.unlock("p1")
+			},
+		],
+	])("an Allow whose tip read spans its profile being %s writes nothing", async (_name, after) => {
+		const f = await bootArrivals(100)
+		seedPending()
+		const tip = parkTip(f)
+		const call = allow(f)
+		await flushPromises()
+		expect(f.tip.queue).toHaveLength(0)
+
+		f.profile.beginDeletion("p1")
+		await f.service.clearProfile("p1")
+		after(f)
+		tip.resolve(100)
+
+		expect(await call).toBe(false)
+		expect(trust.has(key())).toBe(false)
+	})
+
+	test.each(sessionMoves)("%s while an Allow reads the tip leaves the contract pending", async (_name, move) => {
+		const f = await bootArrivals(100)
+		seedPending()
+		const tip = parkTip(f)
+		const call = allow(f)
+		await flushPromises()
+		expect(f.tip.queue).toHaveLength(0)
+
+		move(f)
+		tip.resolve(100)
+
+		expect(await call).toBe(false)
+		expect(trust.get(key())?.state).toBe("pending")
+	})
+
+	test.each(setters.flatMap(([setter, run]) => sessionMoves.map(([name, move]) => [setter, name, run, move] as const)))(
+		"%s waiting in its registration read through %s leaves the contract pending",
+		async (_setter, _name, run, move) => {
+			const f = await bootArrivals(100)
+			seedPending()
+			const registration = holdCall(f.token, "getTokensRaw", 1, "after")
+			const call = run(f)
+			await flushPromises()
+			expect(registration.held.reached).toBe(true)
+
+			move(f)
+			registration.release()
+
+			expect(await call).toBe(false)
+			expect(trust.get(key())?.state).toBe("pending")
+		},
+	)
+
+	test.each(setters)(
+		"%s displaced by the watchdog in its registration read writes nothing after a successor's clear",
+		async (_setter, run) => {
+			const f = await bootArrivals(100)
+			seedPending()
+			const registration = holdCall(f.token, "getTokensRaw", 1, "after")
+			vi.useFakeTimers()
+			try {
+				const call = run(f)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(registration.held.reached).toBe(true)
+
+				const successor = f.service.clearProfile("p1")
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+				await successor
+				registration.release()
+
+				expect(await call).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+			expect(trust.has(key())).toBe(false)
+		},
+	)
+
+	test("an Allow displaced in its un-hide loop leaves a successor Reject's block and the receipts hidden", async () => {
+		const f = await bootArrivals(100)
+		seedPending()
+		const receipts = [receipt(1, 40, { hidden: true }), receipt(2, 41, { hidden: true })]
+		const unhide = holdCall(internals(f.service).repo, "getRecord", 1, "after")
+		vi.useFakeTimers()
+		try {
+			const call = allow(f)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(unhide.held.reached).toBe(true)
+
+			const successor = reject(f)
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			expect(await successor).toBe(true)
+			unhide.release()
+
+			expect(await call).toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(trust.get(key())?.state).toBe("blocked")
+		expect(hiddenOf(receipts)).toEqual([true, true])
+	})
+
+	test("(BUG PIN) an Allow the watchdog displaced mid-un-hide leaves the contract trusted over receipts it never un-hid", async () => {
+		// The trust write lands before the loop and the displaced loop stops at its next un-hide. Only
+		// setTrustAllow writes `hidden: false`, and replay prompts only for `pending` rows, so the
+		// receipts after the stop stay hidden with no path back. Tracked separately for a repair.
+		const f = await bootArrivals(100)
+		seedPending()
+		const receipts = [receipt(1, 40, { hidden: true }), receipt(2, 41, { hidden: true }), receipt(3, 42, { hidden: true })]
+		const unhide = holdCall(internals(f.service).repo, "getRecord", 2, "after")
+		vi.useFakeTimers()
+		try {
+			const call = allow(f)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(unhide.held.reached).toBe(true)
+
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+			unhide.release()
+
+			expect(await call).toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(trust.get(key())?.state).toBe("trusted")
+		expect(hiddenOf(receipts)).toEqual([false, true, true])
+		const prompts = vi.fn()
+		f.service.onIncomingTransferPending.add(prompts)
+		await f.service.replayPendingPrompts("p1", "n1", "0xa")
+		expect(prompts).not.toHaveBeenCalled()
+	})
+
+	test("a lock while an Allow un-hides still lands its floor and every un-hide", async () => {
+		const f = await bootArrivals(100)
+		seedPending()
+		const receipts = [receipt(1, 40, { hidden: true }), receipt(2, 41, { hidden: true })]
+		const unhide = holdCall(internals(f.service).repo, "getRecord", 1, "after")
+		const call = allow(f)
+		await flushPromises()
+		expect(unhide.held.reached).toBe(true)
+
+		f.profile.lock()
+		unhide.release()
+
+		expect(await call).toBe(true)
+		expect(trust.get(key())).toMatchObject({ state: "trusted", arrivalFloor: 100 })
+		expect(hiddenOf(receipts)).toEqual([false, false])
+	})
+
+	test("a token add emitted after a switch away from its profile changes neither profile's trust", async () => {
+		const f = await bootArrivals(100)
+		f.token.getTokensRaw.mockImplementation(async (profileId: string) => [{ ...tokenA, profileId }])
+		seedPending("p1")
+		seedPending("p2")
+		f.profile.unlock("p2")
+
+		await internals(f.service).onTokenAdded(tokenAdd(tokenA))
+
+		expect([trust.get(key("p1"))?.state, trust.get(key("p2"))?.state]).toEqual(["pending", "pending"])
+	})
+
+	test("a token add whose tip read spans its profile's deletion writes neither trust nor a floor", async () => {
+		const f = await bootArrivals(100)
+		const tip = parkTip(f)
+		const add = internals(f.service).onTokenAdded(tokenAdd(tokenA))
+		await flushPromises()
+		expect(f.tip.queue).toHaveLength(0)
+
+		f.profile.beginDeletion("p1")
+		await f.service.clearProfile("p1")
+		tip.resolve(100)
+		await add
+
+		expect(trust.get(key())).toBeUndefined()
+	})
+
+	test("an already-trusted token add whose session moves during its registration read leaves the floor", async () => {
+		const f = await bootArrivals(100)
+		seedTrust(tokenA.contract, { arrivalFloor: 40 })
+		const registration = holdCall(f.token, "getTokensRaw", 1, "after")
+		const add = internals(f.service).onTokenAdded(tokenAdd(tokenA))
+		await flushPromises()
+		expect(registration.held.reached).toBe(true)
+
+		f.profile.unlock("p2")
+		registration.release()
+		await add
+
+		const row = trust.get(key())
+		expect(row).toMatchObject({ state: "trusted", arrivalFloor: 40 })
 		expect(row?.arrivalFloorPending).toBeUndefined()
 	})
 })

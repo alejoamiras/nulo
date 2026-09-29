@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick, reactive } from "vue"
-import { pinnedTokensKey } from "@/popup/constants/storage-keys"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {

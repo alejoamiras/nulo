@@ -289,7 +289,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 			(c) => c.canCreateAuthWit && (!Array.isArray(c.accounts) || c.accounts.some((a) => String(a.item) === from)),
 		)
 		if (!permitted) {
-			throw new Error(`Scope violation: createAuthWit for account ${from}, not permitted by granted accounts scope`)
+			throw new Error("Scope violation: createAuthWit account not permitted by granted accounts scope")
 		}
 	}
 
@@ -304,9 +304,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const fn = intent.call.name
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(contract, fn, grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error(
-				`Scope violation: createAuthWit authorizes ${fn}@${contract}, not permitted by granted transaction or simulation scope`,
-			)
+			throw new Error("Scope violation: createAuthWit call not permitted by granted transaction or simulation scope")
 		}
 		return
 	}
@@ -319,9 +317,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const consumer = String(intent.consumer)
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(consumer, "*", grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error(
-				`Scope violation: createAuthWit inner-hash authorizes consumer ${consumer}, not permitted by granted transaction or simulation scope`,
-			)
+			throw new Error("Scope violation: createAuthWit inner-hash consumer not permitted by granted transaction or simulation scope")
 		}
 		return
 	}

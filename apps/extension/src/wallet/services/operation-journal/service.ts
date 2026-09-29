@@ -286,9 +286,8 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			}
 		}
 
-		// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
-		// codex round-1 (defense-in-depth against requestId / journal-id
-		// collisions once concurrent dApp interactions are possible).
+		// 16 hex characters (64 bits), twice the default width: defense in depth against id
+		// collisions between concurrent dApp interactions.
 		const id = await nextRandomId(this.storage, 16)
 
 		const now = Date.now()

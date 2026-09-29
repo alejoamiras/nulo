@@ -11,7 +11,7 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 import { vSnackFooter } from "@/composables/snackInset"
 import { useToast } from "@/composables/toast"
 import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
-import { usePopupEntity } from "@/composables/usePopupEntity"
+import { isRepeatOrComposing, usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -69,13 +69,9 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
-	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
-	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
+	// Full-lifetime submit latch, handler-owned: every route (click, any future caller) self-checks
+	// here; the button's :disabled is defense-in-depth, not the guard.
 	if (isLoading.value) return
-	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
-	// Pre-fix this guard was a no-op (refs are always truthy as objects);
-	// Enter could fire the handler before feeSettings was set on all chunks.
-	// Codex audit-codex-rootcause-8 #4.
 	if (!isAllowedToExecute.value) return
 
 	isLoading.value = true
@@ -126,30 +122,21 @@ function showChunkContent(chunk) {
 	popupStore.open("data_viewer")
 }
 
-// No input to focus here: a global Enter confirms. The handler owns the latch and the fee check; the
-// error gate mirrors the button's :disabled, which the handler does not check itself.
-usePopupEntity(
-	() => props.show,
-	{
-		submit: () => {
-			if (!isErrorOccurred.value) handleRevokeAuthwits()
-		},
-		onShow: async () => {
-			await registry.fetch()
+usePopupEntity(() => props.show, {
+	onShow: async () => {
+		await registry.fetch()
 
-			authwits.value = cacheStore.preselectedAuthwits
-			chunkAuthwits()
-		},
-		onHide: () => {
-			authwits.value = []
-			chunkedAuthwits.value = []
-			registry.reset()
-
-			authwitsService.disconnect()
-		},
+		authwits.value = cacheStore.preselectedAuthwits
+		chunkAuthwits()
 	},
-	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
-)
+	onHide: () => {
+		authwits.value = []
+		chunkedAuthwits.value = []
+		registry.reset()
+
+		authwitsService.disconnect()
+	},
+})
 </script>
 
 <template>
@@ -202,12 +189,10 @@ usePopupEntity(
 								<Text v-if="ch.count > 1" size="12" color="tertiary"> {{ `(${ch.count})` }} </Text>
 							</Flex>
 							<Tooltip position="end">
-								<!-- The sheet revokes on any Enter that reaches the document; here Enter only opens the content. -->
 								<RowAction
 									label="View authwits content"
 									data-testid="revoke-authwits-view-content"
 									@click="showChunkContent(ch)"
-									@keydown.enter.stop
 								>
 									<Icon name="expand" size="16" color="tertiary" />
 								</RowAction>
@@ -258,9 +243,11 @@ usePopupEntity(
 				</template>
 
 				<Flex v-snack-footer align="center" direction="column" gap="12">
+					<!-- A held or composing Enter that first reaches this button idle must not revoke. -->
 					<Button
 						data-testid="revoke-authwits-submit"
 						@click="handleRevokeAuthwits"
+						@keydown.enter="isRepeatOrComposing($event) && $event.preventDefault()"
 						variant="primary"
 						size="medium"
 						wide

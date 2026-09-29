@@ -1,8 +1,7 @@
 /**
- * Unit tests for `usePopupEntity` — the narrow show/hide lifecycle helper the
- * plain FormPopup create/edit popups share (Q-14). Covers the Enter-key guard
- * (input-only), the listener add/remove on show/hide, the onShow/onHide hooks,
- * and the remove-before-onHide order that the hand-rolled copies relied on.
+ * Unit tests for `usePopupEntity`, the show/hide lifecycle the popups share: the Enter guard (a field
+ * only, never a repeat or a composition), the listener installed only with `submit` and removed on hide
+ * and on scope dispose, and the onShow/onHide hooks.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
@@ -23,8 +22,8 @@ function mount(
 
 /** Dispatch a bubbling keydown FROM `target` so the document-level listener sees
  *  it with `event.target === target` (jsdom sets target from the dispatch node). */
-function pressKey(target: Element, key: string) {
-	target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
+function pressKey(target: Element, key: string, init: KeyboardEventInit = {}) {
+	target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }))
 }
 
 const cleanup: Array<() => void> = []
@@ -39,7 +38,7 @@ function makeInput(): HTMLInputElement {
 	return el
 }
 
-describe("isPopupSubmitKey (Q-07)", () => {
+describe("isPopupSubmitKey", () => {
 	const keyOn = (tag: string, key: string) => isPopupSubmitKey({ key, target: document.createElement(tag) } as unknown as KeyboardEvent)
 
 	it("true for Enter on an <input>", () => expect(keyOn("input", "Enter")).toBe(true))
@@ -101,6 +100,34 @@ describe("usePopupEntity", () => {
 		await nextTick()
 		pressKey(makeInput(), "a")
 		expect(submit).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		["a repeat", { repeat: true }],
+		["a composing Enter", { isComposing: true }],
+		["an IME boundary Enter (keyCode 229, isComposing false)", { keyCode: 229, isComposing: false }],
+	] as const)("%s in an <input> does NOT fire submit", async (_name, init) => {
+		const submit = vi.fn()
+		const show = ref(false)
+		cleanup.push(mount(show, { submit }))
+		show.value = true
+		await nextTick()
+		pressKey(makeInput(), "Enter", init)
+		expect(submit).not.toHaveBeenCalled()
+	})
+
+	it("without submit: no keydown listener is added, and onShow then onHide still run", async () => {
+		const addListener = vi.spyOn(document, "addEventListener")
+		cleanup.push(() => addListener.mockRestore())
+		const calls: string[] = []
+		const show = ref(false)
+		cleanup.push(mount(show, { onShow: () => void calls.push("show"), onHide: () => void calls.push("hide") }))
+		show.value = true
+		await nextTick()
+		show.value = false
+		await nextTick()
+		expect(addListener.mock.calls.filter(([type]) => type === "keydown")).toEqual([])
+		expect(calls).toEqual(["show", "hide"])
 	})
 
 	it("hides: removes the listener (Enter no longer submits) and runs onHide", async () => {
@@ -224,19 +251,5 @@ describe("usePopupEntity", () => {
 		await nextTick()
 		pressKey(makeInput(), "Enter")
 		expect(submit).toHaveBeenCalledOnce()
-	})
-})
-
-describe("usePopupEntity — submitKey", () => {
-	it("a custom predicate replaces the input-only Enter guard", async () => {
-		const submit = vi.fn()
-		const show = ref(false)
-		cleanup.push(mount(show, { submit }, { submitKey: (e) => e.key === "Enter" }))
-		show.value = true
-		await nextTick()
-		pressKey(document.body, "Enter") // no input focused — the default guard would drop this
-		expect(submit).toHaveBeenCalledTimes(1)
-		pressKey(makeInput(), "Escape")
-		expect(submit).toHaveBeenCalledTimes(1)
 	})
 })
