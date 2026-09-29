@@ -107,3 +107,34 @@ Firefox launches".
 The sign-off captures of the two authwit popups (idle and loading, Chrome, 360×600) came from a
 scratch spec copied into `tests/e2e/network/` for one run and deleted afterwards. Nothing of it is
 committed.
+
+## Codex round 1
+
+Session `01a0ea74-cd47-76e0-a830-14c1b14ffc98` (gpt-6-astra, high, read-only), over
+`origin/dev...dc52464d`. Verdict: changes requested. Two findings, both accepted.
+
+1. **Major, confidence high** (`token/service.ts`, the last fence before `onTokenAdded`). The fence
+   deleted the add's row by id whenever the profile's epoch had moved. If the watchdog displaced
+   the add during its last network check, a deletion's purge and a same-id restore (`restore`
+   allocates with `nextNumericId`) could both run first, and the delete then took the restore's
+   row. Verified against `Lock.withLock`, whose `isCurrent` argument exists for exactly this, and
+   against `restore`. Accepted: the fence deletes only while the add owns the lock
+   (`assertCurrentBeforeEmit`); the row predates that deletion, so its purge removes it otherwise.
+   Inline, the nested `if` took the lock callback to cognitive complexity 18, so the check moved
+   into its own method.
+   - Red first: the watchdog test now purges the profile and restores a token that reuses the
+     add's id (asserted). On the unfixed code: `AssertionError: expected [] to have a length of 1
+     but got +0`, the restored row deleted; 1 failed, 21 passed. Fixed: the token directory, 8
+     files and 128 tests, passed.
+   - The owned branch has its own test (a deletion during the last check with the lock held: the
+     row is compensated, nothing is emitted). Red on a probe that never deletes (`expected 1 to be
+     +0`), restored from a scratch copy; green on the fix, the token directory at 129 tests.
+   - The add's two earlier compensations have the same shape. They are older than this plan, and
+     there the row can postdate the purge's snapshot, so skipping the delete can orphan it: F-7.
+2. **Nit, confidence high** (`incoming-transfer/service.ts`, `unhideLocked`). Its comment promised
+   the activity feed updates atomically, but the loop writes and emits one record at a time and
+   stops at the first refused write. Accepted with other words than codex's (its text restated
+   `kept`'s scope, which the loop's own comment already gives): the comment now states the
+   partial stop.
+
+Commits: `1ccfe4e8`, `358adcb0`.

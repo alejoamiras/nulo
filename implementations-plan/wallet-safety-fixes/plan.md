@@ -762,6 +762,11 @@ fresh pass read the revised plan, `recon.md` and the brief, owing round 1 nothin
   idle, as the two authwit confirms did (codex final 3). No window focuses its confirm by itself
   (the one `.focus()` under `popup/windows/` is an input, `capabilities/AccountSelectRow.vue:45`),
   so reaching one needs focus moved there with Enter held; `isRepeatOrComposing` would cover them.
+- **F-7 · The add's other two compensations delete by id without lock ownership** (codex round 1
+  on the build): `persistToken`'s post-set deletion and network checks delete `token.id` even when
+  the watchdog displaced the section, so a same-id restore's row can go there too. Unlike the last
+  fence, that row may postdate the purge's snapshot, so skipping the delete can orphan it; the
+  choice needs its own decision.
 
 ## Approval
 
@@ -1034,7 +1039,7 @@ until the owner's O1 answer and the blanket sign-off are quoted in this plan.
   expected. `grant-check-address-case` shares `method-scope-checkers.ts` (§ A2).
 - **Merge boundary** (§ Approval): not merged until the owner's O1 answer and the blanket sign-off
   are quoted in this plan. Merging is the owner's call.
-- Closing the plan: the `## Outcome` block, lessons promoted, follow-ups F-1 to F-6 moved to
+- Closing the plan: the `## Outcome` block, lessons promoted, follow-ups F-1 to F-7 moved to
   `implementations-plan/follow-ups.md`, in the same PR.
 
 ## Seeds
