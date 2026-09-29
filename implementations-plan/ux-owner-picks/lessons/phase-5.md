@@ -161,26 +161,44 @@ Not captured:
   `FeeSettingsCard` as Send and the execute window.
 - **A huge outgoing amount on a terminal row** (row 3): item 1 above.
 
-## The last merge of dev, and the final gates
+## The late merges of dev, and the final gates
 
-`dev` at `f51ec001` (the grant check's address-case fix) merged as `79e834b9`, just before these
-gates. Only the curated `index.md` and `follow-ups.md` changed on both sides. `follow-ups.md`
-merged cleanly. `index.md` conflicted and keeps dev's lines, with this plan's line under them. At
-`79e834b9`, load average 50 to 69:
+Two merges of `dev` came after the captures, each just before its gates. In both, the code merged
+cleanly and only the curated `index.md` and `follow-ups.md` conflicted. The index keeps dev's
+closed-plan lines, with this plan's line under them.
 
-| Gate | Exit | Notes |
+1. **`f51ec001`, the grant check's address-case fix, merged as `79e834b9`.** `follow-ups.md`
+   merged cleanly.
+2. **`a7b1ff62`, the wallet safety fixes, merged as `d88ba7e2`.**
+   - **`follow-ups.md`:** the list of ux-feedback items taken by a follow-up plan loses both plans'
+     entries, since each side had deleted its own.
+   - **Two reconciliations, each in its own commit:**
+     - The new fee-maps follow-up cited `FeeSettingsCard.vue:292-295`, counted on dev. This
+       branch's fee card edits move those lines down by one, so the citation now reads 293-296.
+     - `send.vue`'s add handler comment said the token-added event names no profile. That event
+       now carries `profileId`, so the comment is corrected; the handler is unchanged.
+   - **The fee card's neighbours:** #717 rewrote them (the authwit popups, `usePopupEntity`,
+     `DropdownRoot`). Both popups' tests stub `FeeSettingsCard`, so the default sponsor change
+     does not reach them, and no Send or fee card test went red.
+
+| Gate | At `79e834b9` (load 50 to 69) | At `f61c20e7` (load 95 to 113) |
 |---|---|---|
-| `bun run lint` | 0 | 1893 files, 29 warnings and 3 infos, as before the merge |
-| `bun run typecheck:all` | 0 | |
-| `bun run test:all` | 0 | every workspace green; extension 7944 passed, 4 skipped, 8 todo |
-| `bun scripts/ci-cd/plans/check.ts` | 0 | the same 5 report-only path-token findings, 0 enforced |
-| `bash scripts/check-no-local-paths.sh` | 0 | |
-| `bun run test:ci-gating` | 0 | 244 pass, 2 skip, 0 fail |
-| `bun run build` | 0 | |
+| `bun run lint` | 0; 1893 files | 0; 1896 files |
+| `bun run typecheck:all` | 0 | 0 |
+| `bun run test:all` | 0; extension 7944 passed | 0; extension 8004 passed |
+| `bun scripts/ci-cd/plans/check.ts` | 0; 5 report-only findings | 0; 3 report-only findings |
+| `bash scripts/check-no-local-paths.sh` | 0 | 0 |
+| `bun run test:ci-gating` | 0; 244 pass, 2 skip | 0; 244 pass, 2 skip |
+| `bun run build` | 0 | 0; the generated auto-import files unchanged |
 
-The e2e was not rerun here: the merge's only conflicts were in the curated docs, and CI reruns the
-e2e on the merged tree. That rerun matters, because the merge brings in `wallet-bridge`'s changed
-scope checks, which the dApp flow in `tx-sendTx-sponsoredFpc` passes through.
+Lint reports 29 warnings and 3 infos in both columns, as before the merges. `test:all` was green
+in every workspace, with extension skips at 4 and todos at 8 in both runs. Each suite ran on its
+own. The plans check enforced 0 findings in both runs.
+
+The e2e was not rerun after either merge. CI runs the full suites on the merged tree, and those runs
+matter: the merges bring in `wallet-bridge`'s changed scope checks, which the dApp flow in
+`tx-sendTx-sponsoredFpc` passes through, and #717's Enter handling in `DropdownRoot` and the authwit
+popups.
 
 ## Step 7 and the gate
 
