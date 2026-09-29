@@ -15,6 +15,8 @@ const SRC = resolve(__dirname, "..")
 const CALLS: Record<string, [number, number]> = {
 	"components/composite/activity/TransactionIncomingCard.vue": [1, 0],
 	"popup/components/modules/general/BalanceView.vue": [3, 0],
+	// The fiat hero's whole dollars are exact, so their decimals 0 are no guess.
+	"popup/components/modules/general/hero-fit.ts": [3, 0],
 	"popup/components/modules/general/RecentActivityView.vue": [2, 0],
 	"popup/components/modules/general/TokenCard.vue": [3, 0],
 	"popup/pages/journal/[id].vue": [1, 0],

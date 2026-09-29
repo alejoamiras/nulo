@@ -97,3 +97,77 @@ known-token calls, none at the six that guess decimals.
 | `bun run typecheck:all` | 0 | |
 | `bun --bun vitest run` the four P1 files and the touched callers' tests (from `apps/extension`) | 0 | 9 files, 309 passed |
 | `bun run test:all` | 1, then 0 | the relay flake above; then extension 7878 passed, 4 skipped, 8 todo, every workspace exit 0 (run on the line-by-line scan; the 9-file run above is on the final one, and P5 reruns `test:all`) |
+
+## The owner's O1 note: both heroes shrink to fit
+
+The sign-off page's O1 answer (2026-09-29) was "change", about the two heroes' CSS ellipsis
+(`124,458,788....` on the token page, `$124,458,78…` on Home). Asked which fix, the owner picked
+"Shrink to fit (Recommended)": the type shrinks until every digit fits, down to about 60%, and only
+past that does D1's rule shorten the figure. The rest of O1 stays as built.
+
+### Red first
+
+- `hero-fit.test.ts` (12 cases) failed to import: the module did not exist.
+- Four new cases in `BalanceView.test.ts` ran on the unfixed component: 4 failed, 38 passed. The
+  figure was a bare text node with no scaled span (`expected 'AAA' to be '1,250 AAA'`) and carried
+  no scale (`expected '' to be '0.74'`).
+- A first run also failed two existing arrival cases: the new first case's spy on
+  `requestAnimationFrame` outlived it and stood in for the fake timers' frame. The describe now
+  restores its spies after each case.
+- Probe (the component copied aside and restored from the copy): with the hold disabled, the count
+  case reads the scales `0.82, 0.9, 0.8, 0.85, …` against `0.8`. The case proves the hold.
+
+### Built
+
+- `hero-fit.ts`, pure:
+  - `fitHero` takes the first form that fits at 60% or more, at the largest hundredth. The ruler
+    checks the width at that size, because glyph advances need not scale linearly.
+  - When no form fits at 60%, the shortest form takes whatever size fits. Only a symbol too long
+    for the line can cause that (symbols run to 32 characters).
+  - `tokenHeroCandidates` applies D1's compact rule at each shorter length. It stops at three
+    characters when the whole part is under a thousand, where a shorter cut would read "0K" or "0".
+  - `fiatHeroCandidates` gives the figure, its whole dollars, then those dollars in K/M/B/T,
+    truncated. The dollars come from the rounded cents shown ($999.995 shows as $1,000.00, so its
+    dollars read $1,000).
+- `hero-ruler.ts`: the two layout reads, which the component test mocks with a stand-in font.
+- `BalanceView.vue`:
+  - A hidden ruler holds every form at the full size, in a 0×0 clipped box, so it never widens the
+    page.
+  - The figure is a span at `calc(1em * var(--hero-scale))` inside the 48 px line, which keeps
+    today's height, so nothing below the hero moves.
+  - The symbol is `0.5em`, 24 px at the full size. `text-overflow: ellipsis` is gone.
+  - It fits on mount, after each render that changes the forms or the symbol (`flush: "post"`, so
+    before the paint), on a resize of the section and on a font load.
+- The count hold. Space Grotesk's default figures are proportional: at weight 700 "1" is 452 units
+  and "0" 648. A counting figure's width therefore changes every frame. While Home counts, and on
+  the figure it lands on, the fit may shrink but not grow. The next figure fits afresh.
+- `convert.ts` exports `usdMicroToCents`, the half-up rule `formatUsdMicro` already applied.
+
+### Measured from the font file
+
+- Widths at 48 px, weight 700, letter-spacing −0.04em, before kerning, against the popup's 312 px
+  line:
+  - "$124,458,788.90" is 356.6 px, so about 87.5%;
+  - "124,458,788.9 TST" is 350.4 px, so about 89%.
+- `line-height: normal` is (984 + 292) / 1000 = 1.276em, 61.2 px at 48 px.
+
+### The owner's realism rule
+
+The owner, 2026-09-29, relayed by the driver: "Don't even care with a balance of 10 trillion
+tokens my friend. let's cover realistic scenarios lol." Applied here:
+
+- The fiat hero's `>$999T` branch and its test are gone. Only a total past a thousand trillion
+  dollars reached them.
+- The component case for the 60% floor is a long 18-decimal fraction, 1,234.567890123456789, at the
+  popup's 312 px, where the fraction cut kicks in (`1,234.56789012345 AAA` at 61% in the stand-in
+  font). It replaced two cases that squeezed the line to 150 and 200 px. Red on the unfixed
+  component like its siblings: the figure was a bare text node.
+- Measured from the font file, the popup's 312 px line holds these at 60% or more, so realistic
+  balances only ever shrink or lose fraction digits:
+  - the full fiat figure up to about a trillion dollars (`$1,000,000,000,000.00` is 516.7 px, the
+    widest digits);
+  - a token's whole part plus " TST" past ten trillion tokens (`10,000,000,000,000` is 447.9 px).
+  The compact forms stay in the lists as the rule's tail.
+- The capture's fraction in the real font: the 20-character cut plus " TST" is about 547 px (57%)
+  and the 19-character one about 520 px (59.9%, just under the floor), so the hero draws the
+  18-character cut at about 63%.
