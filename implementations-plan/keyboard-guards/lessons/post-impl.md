@@ -22,3 +22,38 @@ over `git diff 85c4d20f...HEAD` with the plan, its ledger, the adversarial ask a
 Resumed the same session over `git diff 418d59f3..HEAD` (the two fix commits) and the whole
 branch, with the two rules again. Codex: both findings resolved, the Enter check keeps every
 caller's behaviour, and the new assertion catches the old behaviour. The loop converged.
+
+## Final gate on `f08bafed`
+
+`dev` had not moved (`origin/dev` is still `85c4d20f`), so nothing was merged first. Every
+command exited 0.
+
+- `bun run lint`: 29 warnings and 3 infos, as on `85c4d20f`; the complexity baseline is OK.
+- `bun run typecheck:all`.
+- `bun run test:all`: `@nulo/extension` 608 files passed and 3 skipped; 8043 tests passed, 4
+  skipped and 8 todo. Every other workspace passed.
+- `bun run test:ci-gating`: 244 passed and 2 skipped.
+- `bun scripts/ci-cd/plans/check.ts`: 3 report-only path-token findings, all in files this branch
+  does not touch.
+- `bun run build`. The tree was clean after it.
+- The smoke builds with the P3 flags, `build:chrome` and `build:firefox`.
+- **Smoke, Chrome**, unsharded (it ran before the owner's sharding instruction arrived), in 21
+  minutes. 39 files passed and 3 skipped (42); 159 tests passed and 7 skipped (166). The skips are
+  P3's, and no test passed on a retry.
+- **Smoke, Firefox**, in three shards run in parallel, each at `--retry=0` with its own copy of the
+  build and its own `EXTENSION_PATH` (`dist/firefox`, `dist/ffsmoke2`, `dist/ffsmoke3`), in 14
+  minutes of wall time:
+
+  | Shard | Files | Tests |
+  |---|---|---|
+  | 1 of 3 | 13 passed, 1 skipped | 51 passed, 1 skipped |
+  | 2 of 3 | 13 passed, 1 skipped | 34 passed, 4 skipped |
+  | 3 of 3 | 14 passed | 70 passed, 6 skipped |
+  | Sum | 40 passed, 2 skipped (42) | 155 passed, 11 skipped (166) |
+
+  The sum and the skip list are P3's unsharded ones.
+- An unsharded Firefox smoke was stopped when the instruction arrived, after 9 of 42 files, all of
+  which had passed. It is an interruption, not a flake; the sharded run replaced it.
+- Flake bar, three runs per browser at `--retry=0`: each run shows both `keyboard-guards` cases
+  and `backup-roundtrip` passed, 3 of 3, none skipped.
+- `bun run e2e:reap`: nothing to reap.

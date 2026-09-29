@@ -496,6 +496,13 @@ Disputed points: none.
   handler `:75-80`). It neither sends nor signs, so CLAUDE.md's rule does not bind it, but it
   records "Always trust". `connect-window` rewrites this window; it applies `refuseRepeatEnter`
   there when it merges.
+- **FU-3 · Two focus rings do not show.** The sub-page back arrow is a bare `<button>`
+  (`packages/design/src/ui/SubPageHeaderBase.vue:36-45`) under the base stylesheet's
+  `button { outline: none; }` (`packages/design/src/base.css:270-275`), on every page built on
+  `SubPageHeader` or `CollapsingHeroLayout`; onboarding's active method tab draws its
+  `:focus-visible` outline in `--nulo-accent` over a fill of the same colour (`create.vue:253-261`).
+  A keyboard user cannot see that focus sits on Back. Found by the P4 captures; drawing a ring
+  changes how those screens look, so it is the owner's call, outside this plan.
 
 ## Approval
 
