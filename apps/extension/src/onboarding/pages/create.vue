@@ -5,6 +5,7 @@
 <script setup lang="ts">
 /** Composables */
 import { vSnackFooter } from "@/composables/snackInset"
+import { refuseRepeatEnter } from "@/composables/usePopupEntity"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
@@ -85,19 +86,8 @@ const onMethodKeydown = (e: KeyboardEvent) => {
 	nextTick(() => (authMethod.value === "password" ? passwordTabRef.value : passkeyTabRef.value)?.focus())
 }
 
-// Onboarding keeps its own document-level Enter handler alongside the
-// `<form @submit.prevent>`; both are latch-protected by `isCreating`.
-function onKeydown(e: KeyboardEvent) {
-	if (e.key === "Enter" && !isCreating.value) handleSubmit()
-}
-
-onMounted(() => {
-	document.addEventListener("keydown", onKeydown)
-})
-
 onBeforeUnmount(() => {
 	dispose()
-	document.removeEventListener("keydown", onKeydown)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
@@ -113,7 +103,7 @@ onBeforeUnmount(() => {
 			<div :class="$style.hero_bar" />
 		</header>
 
-		<form :class="$style.form" @submit.prevent="handleSubmit">
+		<form :class="$style.form" @submit.prevent="handleSubmit" @keydown.enter="refuseRepeatEnter">
 			<OnboardingProfileNameField
 				v-if="nameFieldState === 'shown'"
 				ref="nameInputRef"
@@ -175,6 +165,7 @@ onBeforeUnmount(() => {
 						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-confirm"
+						inputTestid="onboarding-password-confirm-input"
 					/>
 				</Flex>
 				<Text v-if="passwordStrengthHint" size="12" color="secondary" height="150">

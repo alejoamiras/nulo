@@ -5,7 +5,7 @@ driver: claude-code
 code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 eli5_mode: artifact
-eli5: (one ELI5 Artifact covers the wave's plans; its URL is filled in later)
+eli5: https://claude.ai/artifact/WY5w8GEggYX9zZTEuqBktk (one page for the wave's ten plans)
 branch: fix/keyboard-guards
 worktree: .claude/worktrees/keyboard-guards
 base: dev @ 85c4d20f
@@ -544,7 +544,7 @@ Assumptions: Facts 1, 2, 13, 20, 25, 27; C3, C5, C7 as recommended.
 `git status --short apps/extension/src/types/` shows nothing uncommitted. Pass: all exit 0, each red
 case recorded red first. Layers: lint, typecheck, unit, component, build.
 
-### P2 · The five pages (K-A)
+### P2 · The five pages (K-A) ✓
 
 Assumptions: Facts 3 to 19, 23, 24, 26; Inference 1; K1 built as (a); C1 as applied.
 

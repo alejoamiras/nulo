@@ -21,6 +21,8 @@ import { managers } from "@/utils/core"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
+import { isPopupSubmitKey, refuseRepeatEnter } from "@/composables/usePopupEntity"
+import { useSecretClipboardCopy } from "@/composables/useSecretClipboardCopy"
 import { useSecretCountdown } from "@/composables/useSecretCountdown"
 const { openToast } = useToast()
 
@@ -64,29 +66,19 @@ const handleUnlock = async () => {
 	}
 }
 
-// F-14 scrub + honest copy toast live in useSecretClipboardCopy (shared with
-// the key page — the block was previously duplicated word for word here).
 const { isCopied, copySecret } = useSecretClipboardCopy({ toastLabel: "Recovery phrase copied", openToast })
 const handleCopy = () => {
 	copySecret(phrase.value)
 }
 
 const onKeydown = (e) => {
-	if (e.key === "Enter") handleUnlock()
+	if (e.defaultPrevented || !isPopupSubmitKey(e)) return
+	handleUnlock()
 }
 
-watch(
-	() => isStarted.value,
-	() => {
-		if (isStarted.value) document.addEventListener("keydown", onKeydown)
-	},
-)
-
 onBeforeUnmount(() => {
-	// The scrub timer deliberately survives unmount — see useSecretClipboardCopy's
-	// F-14 rationale. This page owns only its secret-nulling + listener cleanup.
+	// The clipboard scrub timer deliberately outlives the page (useSecretClipboardCopy says why).
 	phrase.value = null
-	document.removeEventListener("keydown", onKeydown)
 })
 </script>
 
@@ -96,6 +88,7 @@ onBeforeUnmount(() => {
 		heroSub="Phrase"
 		collapsingLabel="Recovery Phrase"
 		backTo="/popup/settings/security/export"
+		@keydown="onKeydown"
 	>
 		<!-- Agreement gate -->
 		<template v-if="!isStarted">
@@ -182,6 +175,7 @@ onBeforeUnmount(() => {
 			<Button
 				v-else-if="isStarted && !isUnlocked"
 				@click="handleUnlock"
+				@keydown.enter="refuseRepeatEnter"
 				:disabled="!password"
 				variant="cta"
 				data-testid="unlock-submit-btn"
