@@ -1,15 +1,14 @@
 # Phase 4 · The owner's sign-off
 
-Steps 1 and 2 (the pictures) are done. Step 3 waits for the owner: K1 and the blanket sign-off are
-both unanswered.
+Steps 1 and 2 (the pictures) are done. At step 3, on 2026-09-29, the owner picked K1 (a) and signed
+off rows 1 to 7 (§ P4). (a) is what is built, so no phase was added and no gate was rerun for it.
 
 ## The K1 (b) capture-only commit
 
 A `document` keydown listener in `full.vue` and `import.vue` ran the stage's action only for a
 non-repeat Enter aimed at `document.body`. It was committed alone on a local branch on top of the
 head, `f08bafed`. Its captures were taken, then the commit was dropped: the branch was deleted and
-never pushed. Its diff is kept off-repo in case the owner picks (b), where step 3 rebuilds it with
-its tests.
+never pushed. The owner picked (a), so it is not rebuilt.
 
 ## The captures
 

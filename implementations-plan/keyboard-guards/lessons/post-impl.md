@@ -57,3 +57,19 @@ command exited 0.
 - Flake bar, three runs per browser at `--retry=0`: each run shows both `keyboard-guards` cases
   and `backup-roundtrip` passed, 3 of 3, none skipped.
 - `bun run e2e:reap`: nothing to reap.
+
+## The closing commit
+
+The closing commit changes only `implementations-plan/`: the owner's answers, the Outcome block, one
+lesson and one follow-up.
+
+- `bun scripts/ci-cd/plans/check.ts` and `bun run lint` exited 0.
+- The first `bun run test:ci-gating` exited 1. `crash` and `unhandled rejection` under
+  `test-soak/cli.test.ts` › fixtures on bun each hit `bun test`'s 5 s default budget, while the
+  host sat at a load of 192 on 192 cores.
+  - Each of those cases starts a vitest subprocess, which `runFixture` allows 60 s. The
+    per-test budget is still 5 s: of the six cases per engine, only `hang` sets its own.
+  - No diff here can reach that file.
+  - The file alone then passed 14 of 14, and a full rerun exited 0 with 244 passed and 2 skipped.
+  - The defect is a follow-up (`follow-ups.md` § ux-feedback: technical), not fixed in this
+    docs-only commit.

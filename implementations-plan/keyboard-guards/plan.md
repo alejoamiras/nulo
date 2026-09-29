@@ -11,6 +11,51 @@ worktree: .claude/worktrees/keyboard-guards
 base: dev @ 85c4d20f
 ---
 
+## Outcome
+
+- **Date:** 2026-09-29. **Status:** closed, awaiting archive: delivered as #720 on
+  `fix/keyboard-guards`, not yet merged. On 2026-09-29 the owner picked K1 (a) and gave the
+  blanket sign-off for UI impact rows 1 to 7 (§ P4).
+- **Shipped** in #720, K-A, K-B and F-6 as planned, P0 to P4:
+  - K-A: onboarding Create, popup Import, Change password, Recovery phrase and Full backup bind
+    their Enter shortcut on the page's root instead of `document`. It answers only an Enter in one
+    of the page's fields that no child handled, and each button it names refuses a repeat or
+    composing Enter. Onboarding keeps only the browser's form submission, and its form refuses a
+    repeat or composing Enter, so a held Enter creates the wallet once.
+  - K-B: New profile's copy of the field check folds into `isPopupSubmitKey`.
+  - F-6: `DappApprovalFooter`'s confirm (execute, capabilities, discover) refuses a repeat or
+    composing Enter.
+  - Shared pieces:
+    - `refuseRepeatEnter`, which checks the key itself, on eleven buttons and onboarding's form.
+    - `pressOn`, the button-activation test helper.
+    - `@nulo/design`'s `Input` gains `inputTestid`.
+    - CLAUDE.md § Keyboard & focus order states the page rule.
+  - Tests: a red-first unit or component case per page and control; `keyboard-guards.test.ts` holds
+    a real Enter on Chrome and Firefox; `backup-roundtrip.test.ts` drops its document Enters.
+  - From the codex loop: the key check in `refuseRepeatEnter`, and three list-only test headers
+    removed.
+- **Gates at delivery:** the final gate on `f08bafed` (`lessons/post-impl.md`). Lint,
+  `typecheck:all`, `test:all`, `test:ci-gating`, the plans gate and the build exit 0. Smoke is
+  green on Chrome, and on Firefox in three shards, with P3's counts. The flake bar passes
+  three of three per browser at retry 0. Codex approved in two rounds of three, with no finding
+  rejected. The later commits touch only `implementations-plan/`; the plans gate, lint and
+  `test:ci-gating` ran again on them.
+- **Dropped:** K1 (b)'s body-Enter listener and the `full.test.ts` case it would have restored,
+  since the owner picked (a). Its capture-only commit was never pushed.
+- **Owner answers, 2026-09-29:** K1, "(a) Nothing until Tab (Recommended)"; rows 1 to 7, "sign off
+  rows 1 to 7 as built sir!" (§ P4).
+- **Open items:** none left here; `follow-ups.md` holds them. In § Wallet safety:
+  - FU-1: no submit latch on Retrieve or Change Password.
+  - FU-2: Verify's OK, for `connect-window`.
+  - FU-3: the two focus rings that do not show, which the owner left out of this PR.
+
+  In § ux-feedback: technical, `test-soak/cli.test.ts`'s fixture cases, which run under
+  `bun test`'s 5 s default (`lessons/post-impl.md`).
+
+  `lessons.md` carries three. In § E2E: the held-key entry, extended with Firefox, and the
+  implicit-submission one. In § Popup UI: the focus-ring one.
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # Keyboard guards
 
 The Enter paths #717 left open (`implementations-plan/follow-ups.md` § Wallet safety), as one PR
@@ -100,18 +145,18 @@ double run (FU-1); with nothing focused, Enter behaves as the owner picks in K1.
 ## UI impact
 
 Nothing drawn changes. The keyboard behaviour below does; all rows are built as recommended and
-are **sign-off pending** (§ P4).
+were **signed off by the owner on 2026-09-29** (§ P4).
 
 | # | Surface | Before → after | Sign-off |
 |---|---|---|---|
-| 1 | Onboarding → Create wallet | Enter on Back or on the active method tab creates the wallet when the password pair is valid or Passkey is chosen (Passkey opens the passkey prompt), and Back also routes to Welcome → Back only goes back, the tab only selects. Enter in a field still creates, once for a held Enter | pending (blanket) |
-| 2 | Popup → Import / Recover → Full backup | Enter on Back or "Choose a backup file" decrypts the chosen file or starts restoring it; Enter on "View Errors", or Enter in the error viewer's search, continues to Home → each control does only its own thing, and the search finds the next match. Enter in a field still decrypts or restores; a held Enter on Decrypt, Import or Continue runs it once | pending (blanket) |
-| 3 | Settings → Security → Change password | Enter on the back arrow with valid fields changes the password; Enter on Change Password is predicted to send two changes (Inference 6; Vue may disable it before the native click), the second failing its reseal as a wrong current password → the back arrow only goes back; Change Password sends one change | pending (blanket) |
-| 4 | Settings → Security → Export → Recovery phrase | Enter on the back arrow with a password typed retrieves the phrase in the background; Enter on Retrieve retrieves twice, and a held Enter more, leaving an auto-close timer that "keep open" cannot cancel → the back arrow only goes back; Retrieve retrieves once, held or not | pending (blanket) |
-| 5 | Settings → Security → Export → Full backup | At the backup-ready stage, Enter on "Download Backup" encrypts instead (password profile), or hides the recommendation and downloads the plain file (passkey profile, no password typed); Enter on the back arrow runs the stage's action; a held Enter on Download downloads again per repeat (predicted) → "Download Backup" downloads once; the back arrow only goes back | pending (blanket) |
-| 6 | Popup → New profile | A repeat or composing Enter in the name field submits → it does not | pending (blanket) |
-| 7 | dApp windows → execute, capabilities, discover: Confirm / Allow | A repeat or composing Enter that lands on the idle confirm approves → it does nothing; a fresh Enter or a click approves as today | pending (blanket) |
-| 8 | Full backup export and Import, with nothing focused (after a stage swaps the focused button away) | Enter runs the next stage's action (encrypt, then download; Continue past restore errors) → per K1: (a) nothing, Tab to the button; (b) unchanged | **K1** |
+| 1 | Onboarding → Create wallet | Enter on Back or on the active method tab creates the wallet when the password pair is valid or Passkey is chosen (Passkey opens the passkey prompt), and Back also routes to Welcome → Back only goes back, the tab only selects. Enter in a field still creates, once for a held Enter | signed (blanket), the owner, 2026-09-29 |
+| 2 | Popup → Import / Recover → Full backup | Enter on Back or "Choose a backup file" decrypts the chosen file or starts restoring it; Enter on "View Errors", or Enter in the error viewer's search, continues to Home → each control does only its own thing, and the search finds the next match. Enter in a field still decrypts or restores; a held Enter on Decrypt, Import or Continue runs it once | signed (blanket), the owner, 2026-09-29 |
+| 3 | Settings → Security → Change password | Enter on the back arrow with valid fields changes the password; Enter on Change Password is predicted to send two changes (Inference 6; Vue may disable it before the native click), the second failing its reseal as a wrong current password → the back arrow only goes back; Change Password sends one change | signed (blanket), the owner, 2026-09-29 |
+| 4 | Settings → Security → Export → Recovery phrase | Enter on the back arrow with a password typed retrieves the phrase in the background; Enter on Retrieve retrieves twice, and a held Enter more, leaving an auto-close timer that "keep open" cannot cancel → the back arrow only goes back; Retrieve retrieves once, held or not | signed (blanket), the owner, 2026-09-29 |
+| 5 | Settings → Security → Export → Full backup | At the backup-ready stage, Enter on "Download Backup" encrypts instead (password profile), or hides the recommendation and downloads the plain file (passkey profile, no password typed); Enter on the back arrow runs the stage's action; a held Enter on Download downloads again per repeat (predicted) → "Download Backup" downloads once; the back arrow only goes back | signed (blanket), the owner, 2026-09-29 |
+| 6 | Popup → New profile | A repeat or composing Enter in the name field submits → it does not | signed (blanket), the owner, 2026-09-29 |
+| 7 | dApp windows → execute, capabilities, discover: Confirm / Allow | A repeat or composing Enter that lands on the idle confirm approves → it does nothing; a fresh Enter or a click approves as today | signed (blanket), the owner, 2026-09-29 |
+| 8 | Full backup export and Import, with nothing focused (after a stage swaps the focused button away) | Enter runs the next stage's action (encrypt, then download; Continue past restore errors) → per K1: (a) nothing, Tab to the button; (b) unchanged | **K1**: (a), the owner, 2026-09-29 |
 
 ### UI asks for the owner (built as recommended)
 
@@ -132,7 +177,8 @@ are **sign-off pending** (§ P4).
   moderate.
   Pictures, per option, as built captures (§ P4 capture list): (a) and (b) at full export's
   backup-ready stage and at import's finished-with-errors stage, before and after Enter, and for
-  (a) the frame after one Tab, focus ring visible wherever it landed.
+  (a) the frame after one Tab, focus ring visible wherever it landed. **Answered (a)** by the
+  owner, 2026-09-29 (§ P4).
 - **The blanket sign-off** covers UI impact rows 1 to 7, each pictured on the page (§ P4 capture
   list): a built capture with the focus ring visible before the key and the frame after it, or,
   where a headless browser cannot produce the state (an IME composition, a held Enter carried onto
@@ -419,7 +465,7 @@ nothing listens (K1 (a)).
 ### Asks
 
 - **K1 · owner** · Enter with nothing focused (§ UI asks). Recommendation (a). Confidence:
-  moderate. Pictures: § P4 capture list, rows K1.
+  moderate. Pictures: § P4 capture list, rows K1. Answered (a), 2026-09-29 (§ P4).
 - **C1 · codex · amend, applied.** Codex: prefer native onboarding submission with local
   repeat/composition cancellation; jsdom's limits are no reason for a duplicate production path.
   The document handler goes, the form refuses, P3 proves native submission.
@@ -634,7 +680,7 @@ Assumptions: Facts 18, 28; Inferences 1, 6; C4 as applied.
 skip counts recorded; in each of the three retry-0 runs per browser, the verbose output lists both
 `keyboard-guards` cases and `backup-roundtrip` as passed, none skipped. Layers: e2e (smoke).
 
-### P4 · The owner's sign-off
+### P4 · The owner's sign-off ✓
 
 1. Build K1 (b) on a local capture-only commit (a `document` listener in `full.vue` and
    `import.vue` that runs the stage's action only for an Enter targeted at `document.body`), take
@@ -660,7 +706,15 @@ skip counts recorded; in each of the three retry-0 runs per browser, the verbose
    listener to `full.vue` and `import.vue`, restores `full.test.ts`'s body-Enter encryption case,
    and re-runs P2's and P3's gates.
 
-Answers: pending.
+Answers, the owner, 2026-09-29, in chat with the driver:
+
+- **K1**: "(a) Nothing until Tab (Recommended)", picked from the two options. (a) is what is
+  built, so nothing changes.
+- **Blanket sign-off, UI impact rows 1 to 7**: "sign off rows 1 to 7 as built sir!". The sign-off
+  page (https://claude.ai/artifact/XzufunDBKoP5zBWQfcMYz3) records the same answer: `answers/rows`
+  is `signed`, at 21:37 UTC.
+- **FU-3**, the two focus rings the captures found, is not part of this PR. It stays in
+  `follow-ups.md`.
 
 **Validation gate.** The delivery boundary (§ Approval): both answers quoted here before merge.
 

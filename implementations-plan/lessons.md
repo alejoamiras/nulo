@@ -44,3 +44,4 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 ## Popup UI
 
 - Space Grotesk's default digits are proportional (at weight 700 "1" is 452 units, "0" 648), so a figure re-fitted to its line on every frame of a count pulses: while it counts, let the fit only shrink, and fit the next figure afresh. The shipped font has `tnum`, but tabular digits change how every figure looks, an owner call. [Evidence](ux-owner-picks/lessons/phase-1.md)
+- A bare `<button>` shows no focus ring, since `@nulo/design`'s base.css sets `button { outline: none; }`, and onboarding's active method tab draws its accent outline on an accent fill. Look at a capture before it claims a ring. Picture a refused key with its action enabled, or validation passes for the guard. [Evidence](keyboard-guards/lessons/phase-4.md)
