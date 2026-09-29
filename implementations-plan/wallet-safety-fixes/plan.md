@@ -110,9 +110,9 @@ keep plain native activation (follow-up F-6).
 | # | Surface | Before → after | Sign-off |
 |---|---|---|---|
 | 1 | Revoke authwits and Change account authwits registry popups, keyboard | Once fees are set, any Enter that reaches the document confirms: on the header's ×, a fee method in the open menu (which then sends with the method picked *before* it), a priority button, or the page behind the popup where focus rests at open → only the focused Revoke / Send button confirms (Enter or Space, the button's own activation), and a repeat or composing Enter that first lands on it idle confirms nothing. Enter on another control does only that control's action. Nothing drawn changes | **O1 (a), the owner's pick** (P7) |
-| 2 | The 13 form popups on `usePopupEntity`'s default (New/Edit Account, Contact, Endpoint, Fpc, Network, Profile, Sender, Token) | Enter in a field submits, including the Enter that commits an IME composition and each auto-repeat of a held Enter → the same, except a composing Enter and a repeat, which submit nothing | **owner's blanket sign-off, pending** (on the sign-off page next to O1; no drawn change) |
-| 3 | The incoming trust prompt (Allow, Block) | A choice sent just before a lock or a profile switch is already dropped today, except in a short window after its registration check reads the active profile, or when the lock or switch is undone (unlock, switch back) while an Allow reads the chain tip; then it lands → it is always dropped: no success toast, the contract stays pending, and the prompt comes back later on that profile | **owner's blanket sign-off, pending** |
-| 4 | Receipts of a contract whose Allow the lock's watchdog displaced (a stall of five minutes or more inside the lock) | The displaced Allow resumes and un-hides every receipt, even after a Block that ran in its place → it stops: a later Block keeps the rest hidden, and with no later Block the contract stays trusted with its remaining receipts hidden and nothing un-hides them. Receipts an Allow already un-hid stay visible after a later Block, before and after | **owner's blanket sign-off, pending** |
+| 2 | The 13 form popups on `usePopupEntity`'s default (New/Edit Account, Contact, Endpoint, Fpc, Network, Profile, Sender, Token) | Enter in a field submits, including the Enter that commits an IME composition and each auto-repeat of a held Enter → the same, except a composing Enter and a repeat, which submit nothing | **the owner's blanket sign-off, 2026-09-29** (P7) |
+| 3 | The incoming trust prompt (Allow, Block) | A choice sent just before a lock or a profile switch is already dropped today, except in a short window after its registration check reads the active profile, or when the lock or switch is undone (unlock, switch back) while an Allow reads the chain tip; then it lands → it is always dropped: no success toast, the contract stays pending, and the prompt comes back later on that profile | **the owner's blanket sign-off, 2026-09-29** (P7) |
+| 4 | Receipts of a contract whose Allow the lock's watchdog displaced (a stall of five minutes or more inside the lock) | The displaced Allow resumes and un-hides every receipt, even after a Block that ran in its place → it stops: a later Block keeps the rest hidden, and with no later Block the contract stays trusted with its remaining receipts hidden and nothing un-hides them. Receipts an Allow already un-hid stay visible after a later Block, before and after | **the owner's blanket sign-off, 2026-09-29** (P7) |
 
 Nothing else a user sees changes: A2's messages reach no screen (Fact 13); `DropdownRoot`'s Enter
 changes nothing while its focus trap holds (Fact 32); a token add that completes after a switch
@@ -121,7 +121,7 @@ today's first-receive prompt (§ A3); a profile restored under a deleted one's i
 the deleted profile's pins, which is what A4 is for (its race residual is R1 below); A5 has no
 surface.
 
-### UI asks for the owner (built as recommended, sign-off pending)
+### UI asks for the owner (built as recommended, both answered)
 
 - **O1 · Which Enter confirms the two authwit popups.** As sent to the owner: **(a) only the
   focused Revoke/Send button confirms; (b) Enter also confirms when nothing is focused.**
@@ -131,8 +131,8 @@ surface.
   the sheet, at the cost of a rule a later control can break by being non-focusable. Confidence:
   moderate. On the sign-off page with a short capture of each (Tab to the button and Enter; Enter
   on ×), next to the blanket sign-off for UI impact row 2.
-- **The blanket sign-off** (unanswered) covers UI impact rows 2 to 4 and this residual list, one
-  line each:
+- **The blanket sign-off** (answered 2026-09-29, P7) covers UI impact rows 2 to 4 and this
+  residual list, one line each:
   - R1 · A pin or a token-deletion cleanup that races a profile deletion, in a popup that has not
     yet seen it, can recreate that profile's pinned-tokens key; a later restore of the same
     profile id then shows those pins, and otherwise the key stays as an orphan (§ A4).
@@ -643,7 +643,8 @@ collisions between concurrent dApp interactions." No code change; the id is not 
   confirms; (b) Enter also confirms when nothing is focused. Recommendation: (a). Confidence:
   moderate. (§ UI asks.) The blanket sign-off for UI impact row 2 goes on the same page.
   **Answered:** Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O1 (a).
-- **Blanket sign-off** (unanswered): UI impact rows 2 to 4 and the residual list (§ UI asks).
+- **Blanket sign-off**: UI impact rows 2 to 4 and the residual list (§ UI asks).
+  **Answered:** the owner, 2026-09-29: "Sign off all" (P7).
 
 **Codex** (the final fresh pass's decisions; the confirmation checks C5's follow-through and C8)
 
@@ -771,8 +772,9 @@ fresh pass read the revised plan, `recon.md` and the brief, owing round 1 nothin
 ## Approval
 
 Approved for build by the final pass's confirmation (conditional approve, confidence high; its two
-findings applied, rows 27 and 28). The owner picked O1 (a), as built (P7); the blanket sign-off
-stays pending for the PR, with the scope above unchanged.
+findings applied, rows 27 and 28). The owner picked O1 (a), as built, and signed off UI impact
+rows 2 to 4 and R1 on 2026-09-29 (P7), with the scope above unchanged. The delivery boundary
+below is met: both answers are quoted in P7.
 
 **Delivery boundary** (the same rule in P7 and Delivery): the PR opens and CI runs while the
 owner's answers are pending, but it does not merge until the owner's O1 answer and the blanket
@@ -986,7 +988,7 @@ passed and skipped counts. A skipped network spec (no network configuration, Fac
 pass.
 Layers: typecheck, lint, unit, component, CI-gating, build, e2e, e2e-live-network.
 
-### P7 · The owner's sign-off
+### P7 · The owner's sign-off ✓
 
 1. One page for the owner with O1 (both options, a short capture of each: Tab to Send and Enter;
    Enter on ×) and one blanket sign-off for UI impact rows 2 to 4 and the residual list.
@@ -996,7 +998,9 @@ Layers: typecheck, lint, unit, component, CI-gating, build, e2e, e2e-live-networ
 Answers:
 - O1: Owner pick on the decision page, 2026-09-28 (confirmed in chat: "done"): O1 (a). No new
   phase.
-- The blanket sign-off (UI impact rows 2 to 4, R1): pending.
+- The blanket sign-off (UI impact rows 2 to 4, R1): the owner, 2026-09-29, answered the question
+  "Wallet-safety blanket sign-off: do these four behaviour changes read right? Nothing drawn
+  changes", which listed UI impact rows 2, 3 and 4 and residual R1: "Sign off all".
 
 Gate: the delivery boundary (§ Approval): the PR may open before this gate; it does not merge
 until the owner's O1 answer and the blanket sign-off are quoted in this plan.
