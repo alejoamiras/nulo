@@ -63,3 +63,44 @@ seed and its price entry) were re-read against the sponsor default, the get-gas 
 lookup and the compact amounts. Codex, verbatim: "No new material findings. Both fixes and the
 merged changes checked out in source review and targeted in-memory probes." The loop converged
 in three rounds of three; no finding was rejected.
+
+## Round 4 (HEAD `abc822c7`): approve, no new material findings
+
+The owner's sign-off sent the two heroes back, so the same session was resumed over the diff from
+`33b19cb3`:
+
+- the fit: `hero-fit.ts`, `hero-ruler.ts` and `BalanceView.vue`;
+- the loading card's name;
+- the plan's UI impact rows 12 to 14.
+
+The prompt carried the two verbatim rules, the adversarial ask, the parity rule for rows 12 to 14
+and the owner's realism rule. It asked hardest about five things:
+
+- a drawn figure wider than the ruler measured;
+- a paint before the fit;
+- a ResizeObserver loop;
+- the count's hold;
+- any form that misstates a balance.
+
+Codex compiled the component's template to check that the figure and the ruler put the same space
+before the symbol, and says it ran the pure hero cases in memory. Verbatim:
+
+- "No new material findings."
+- "Adversarial review found no new trust-boundary weakness: numeric inputs remain validated,
+  symbols are escaped, and no dependencies, permissions, cryptography, or dApp execution paths
+  changed."
+
+Its confidence was moderate, because "actual browser layout and paint timing were not exercised".
+The rebuild's captures cover the layout on both browsers (`phase-5.md`): every state is unclipped,
+and the hero is 61 px tall at every scale.
+
+Paint timing rests on how Vue schedules updates:
+
+- the fit runs after each render and before the browser paints (on mount, and in a `flush: "post"`
+  watcher);
+- the component test pins that no frame is awaited;
+- one window remains: a font that swaps in after the first paint (`font-display: swap`) is refit
+  on `loadingdone`, which the browser dispatches after the swap, so that one change can land a
+  frame late.
+
+There was no finding, so there was no second round and no realism ledger line.
