@@ -653,9 +653,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 	}
 
-	/** Flips every hidden record to visible and emits Added for each, so the popup activity feed
-	 *  updates atomically. With `incomingTransfersVisible` off the records still turn visible (a later
-	 *  toggle-on shows them) but emit nothing. Resolves false once `kept` refuses a write. */
+	/** Not atomic: stops at the first write `kept` refuses and resolves false, leaving the records
+	 *  before it visible. With `incomingTransfersVisible` off the records still turn visible (a later
+	 *  toggle-on shows them) but emit nothing. */
 	private async unhideLocked(records: IncomingTransferRecord[], kept: () => boolean): Promise<boolean> {
 		const visibilityEnabled = await this.isVisibilityEnabled()
 		for (const record of records) {
