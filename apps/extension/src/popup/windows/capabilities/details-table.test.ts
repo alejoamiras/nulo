@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { effectiveGrants } from "@nulo/wallet-bridge"
+import { effectiveGrants, enforceScope } from "@nulo/wallet-bridge"
 import { buildDetailsTable, type DetailsRow } from "./details-table"
 
 // Wire-shaped: 0x + 64 hex, each value below the field modulus.
@@ -131,5 +131,49 @@ describe("the Details table", () => {
 		const table = buildDetailsTable([tx({ scope: "odd" }), sim([null, { contract: 7, function: "f" }, { contract: A }])], [])
 		expect(table.anyContract).toEqual(row({ name: "Any contract", simulate: ["Any function", "f"], transact: ["Any function"] }))
 		expect(table.unknown).toEqual([row({ address: A, simulate: ["Any function"] })])
+	})
+})
+
+describe("the Details table and the scope check", () => {
+	const UPPER = `0x${A.slice(2).toUpperCase()}`
+	const MIXED = `0x${A.slice(2, 34).toUpperCase()}${A.slice(34)}`
+	const SPELLINGS = [A, UPPER, MIXED, B]
+	const NOT_AN_ADDRESS = "0xTok"
+	const checkPasses = (scoped: string, called: string): boolean => {
+		const grants = [{ capability: { type: "transaction" as const, scope: [{ contract: scoped, function: "f" }] }, grantedAt: 1 }]
+		try {
+			enforceScope("sendTx", [{ calls: [{ to: called, name: "f" }] }], grants)
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	test("two valid spellings share a row exactly when the check lets a scope of one reach the other", () => {
+		expect([new Set(SPELLINGS).size, new Set(SPELLINGS.map((s) => s.toLowerCase())).size]).toEqual([4, 2])
+		const table = buildDetailsTable([tx(SPELLINGS.map((contract, i) => ({ contract, function: `f${i}` })))], [])
+		const rowOf = (i: number) => table.unknown.find((r) => r.transact.includes(`f${i}`))
+		for (const [i, scoped] of SPELLINGS.entries()) {
+			for (const [j, called] of SPELLINGS.entries()) {
+				expect(rowOf(i) === rowOf(j), `${scoped} → ${called}`).toBe(checkPasses(scoped, called))
+			}
+		}
+	})
+
+	test("a held value that is not an address keeps its lower-cased row, and the check refuses it everywhere", () => {
+		const table = buildDetailsTable(
+			[
+				tx([
+					{ contract: NOT_AN_ADDRESS, function: "a" },
+					{ contract: "0xtok", function: "b" },
+				]),
+			],
+			[],
+		)
+		expect(table.unknown).toEqual([row({ address: NOT_AN_ADDRESS, transact: ["a", "b"] })])
+		for (const other of [NOT_AN_ADDRESS, ...SPELLINGS]) {
+			expect(checkPasses(NOT_AN_ADDRESS, other), `scope ${NOT_AN_ADDRESS} → ${other}`).toBe(false)
+			expect(checkPasses(other, NOT_AN_ADDRESS), `scope ${other} → ${NOT_AN_ADDRESS}`).toBe(false)
+		}
 	})
 })

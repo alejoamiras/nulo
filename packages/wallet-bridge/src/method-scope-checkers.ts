@@ -1,12 +1,13 @@
 /**
  * Per-method scope-check function bodies + their helpers.
  *
- * Leaf module: imports only capability types from `./capabilities`. Both the
- * `method-descriptors` registry (which references these checkers in its
- * `scopeCheck` fields) and `scope-enforcement` (which derives the
- * method→checker map and owns the F-005 `enforceScopeWithSession` wrapper)
- * depend on this module. Keeping the bodies here — depended on, never
- * depending back — is what breaks the registry↔scope-enforcement cycle.
+ * Leaf module: imports only capability types from `./capabilities` and the
+ * `./field-address` leaf. Both the `method-descriptors` registry (which
+ * references these checkers in its `scopeCheck` fields) and
+ * `scope-enforcement` (which derives the method→checker map and owns the
+ * F-005 `enforceScopeWithSession` wrapper) depend on this module. Keeping the
+ * bodies here — depended on, never depending back — is what breaks the
+ * registry↔scope-enforcement cycle.
  *
  * Each checker mirrors a `WalletSchema` arg shape and must stay in sync with
  * `buildNetworkOperation` / `buildAccountOperation` in dispatcher.ts.
@@ -23,6 +24,7 @@ import type {
 	TransactionCapability,
 	DataCapability,
 } from "./capabilities"
+import { sameFieldAddress } from "./field-address"
 
 /** A per-method scope checker. Throws on a scope violation; returns on pass. */
 export type ScopeCheck = (args: unknown[], grants: GrantedCapabilityRecord[]) => void
@@ -36,7 +38,10 @@ type WireExecPayload = { calls?: unknown }
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function matchesPattern(contract: string, fn: string, pattern: ScopePattern): boolean {
-	return (pattern.contract === "*" || String(pattern.contract) === contract) && (pattern.function === "*" || pattern.function === fn)
+	return (
+		(pattern.contract === "*" || sameFieldAddress(String(pattern.contract), contract)) &&
+		(pattern.function === "*" || pattern.function === fn)
+	)
 }
 
 function matchesScope(contract: string, fn: string, scope: Scope): boolean {
@@ -53,7 +58,7 @@ function matchesScope(contract: string, fn: string, scope: Scope): boolean {
 
 function inAddressList(address: string, list: "*" | unknown[]): boolean {
 	if (list === "*") return true
-	return list.some((item) => String(item) === address)
+	return list.some((item) => sameFieldAddress(String(item), address))
 }
 
 function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecord[], type: string): T[] {

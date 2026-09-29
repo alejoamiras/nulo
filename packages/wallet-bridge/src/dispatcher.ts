@@ -51,7 +51,6 @@
 // Imports use relative paths because this file IS part of wallet-bridge — the
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
-import { Fr } from "@aztec/foundation/curves/bn254"
 import { resolveAuthorizedSessionAccount } from "./account-resolution"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount } from "./caip"
 import type {
@@ -66,6 +65,7 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
+import { isFieldAddress, sameFieldAddress } from "./field-address"
 import {
 	METHOD_REGISTRY,
 	METHOD_TO_KIND,
@@ -205,7 +205,7 @@ function contractsRequestCovered(existing: ContractsCapability[], requested: Con
 		if (!requested[flag]) return true
 		if (requested.contracts === "*") return existing.some((e) => e[flag] && e.contracts === "*")
 		return requested.contracts.every((addr) =>
-			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => String(x) === String(addr)))),
+			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => sameFieldAddress(String(x), String(addr))))),
 		)
 	}
 	return flagCovered("canRegister") && flagCovered("canGetMetadata")
@@ -221,7 +221,7 @@ function scopeCovers(existing: Scope, requested: Scope): boolean {
 	return requested.every((rp) =>
 		existing.some(
 			(ep) =>
-				(ep.contract === "*" || String(ep.contract) === String(rp.contract)) &&
+				(ep.contract === "*" || sameFieldAddress(String(ep.contract), String(rp.contract))) &&
 				(ep.function === "*" || ep.function === rp.function),
 		),
 	)
@@ -265,7 +265,7 @@ function privateEventsCovered(held: DataCapability[], requested: "*" | string[] 
 	return requested.every((addr) =>
 		held.some((h) => {
 			const list = h.privateEvents?.contracts
-			return list === "*" || (Array.isArray(list) && list.some((x) => String(x) === String(addr)))
+			return list === "*" || (Array.isArray(list) && list.some((x) => sameFieldAddress(String(x), String(addr))))
 		}),
 	)
 }
@@ -309,13 +309,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function knownTypeOf(cap: unknown): Capability["type"] | undefined {
 	return isRecord(cap) && typeof cap.type === "string" && isKnownCapabilityType(cap.type) ? cap.type : undefined
-}
-
-const FIELD_ADDRESS = /^0x[0-9a-fA-F]{64}$/
-
-/** Kept in the case sent: coverage compares addresses as strings. */
-function isFieldAddress(value: unknown): value is string {
-	return typeof value === "string" && FIELD_ADDRESS.test(value) && BigInt(value) < Fr.MODULUS
 }
 
 function malformed(): never {
@@ -1116,16 +1109,10 @@ export class WalletSdkDispatcher {
 		const requestedFrom = requestedFromOf(rawOpts)
 		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
-		this.logDebug(`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`)
 
 		this.requireSession(dappSession, ctx)
-		this.logDebug(`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`)
 
 		const opts = isNoFrom ? rawOpts : { ...rawOpts, from: account.address }
-		const execPayload = args[0] as Record<string, unknown> | undefined
-		this.logDebug(
-			`handleSendTx: isNoFrom=${isNoFrom}, exec.feePayer=${execPayload?.feePayer}, exec.calls=${(execPayload?.calls as unknown[] | undefined)?.length}, additionalScopes=${JSON.stringify(rawOpts.additionalScopes)}`,
-		)
 
 		const sendOp: AztecSendTxRequest = {
 			kind: "aztec_sendTx" as const,
