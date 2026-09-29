@@ -147,3 +147,21 @@ findings. On the gate (confidence high): the earlier post-set check establishes 
 predates the deletion and the purge rereads tokens under the token lock; a displaced add skips the
 delete, and an owned add issues it with no await in between. It found nothing else material in the
 whole branch diff and called F-7 a distinct, documented pre-existing risk. The loop converged.
+
+## The final gate, on `00e5b013`
+
+P6's gate again after the loop, with `origin/dev` still at `0fa5a2cb`. Every command as above.
+
+- Network, the three files, retry 0: Chrome, prover on, exit 0, 3 files and 4 tests passed, none
+  skipped (242.4 s); Firefox, proverless, exit 0, 3 files and 4 tests passed, none skipped
+  (233.4 s).
+- Flake bar, `popup-escape-layered.test.ts`: 3 of 3 per browser, each 2 of 2 with none skipped
+  (runs 2 and 3: Chrome 80.5 s and 80.4 s, Firefox 99.0 s and 91.3 s).
+- Smoke, retry 0: Chrome exit 0, 38 files passed and 3 skipped, 157 tests passed and 7 skipped;
+  Firefox exit 0, 39 files passed and 2 skipped, 153 tests passed and 11 skipped. The same skips
+  as the first run.
+- `bun run lint` exit 0 (29 warnings, 3 infos); `bun run typecheck:all` exit 0;
+  `bun run test:ci-gating` exit 0 (244 passed, 2 skipped); `bun run test:all` exit 0 (the
+  extension 598 files passed and 3 skipped, 7844 tests passed, 4 skipped, 8 todo; every other
+  workspace green); `bun run build` exit 0 with `git status` clean; `bun run e2e:reap` exit 0,
+  nothing to reap.
