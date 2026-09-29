@@ -119,6 +119,8 @@ import { TRANSFER_FAILED_COPY, TRANSFER_TERMS_COPY } from "@/popup/utils/transfe
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
 import { TransferType } from "@/wallet/services/transaction/client"
 import { installChromeStorage } from "../../../tests/helpers/chrome-storage-mock"
 import Send from "./send.vue"
@@ -136,14 +138,18 @@ const STUBS = {
 		emits: ["click"],
 		inheritAttrs: false,
 	},
-	SelectTokenCard: { template: '<div data-testid="stub-token-card" />', props: ["token"] },
+	SelectTokenCard: {
+		template: '<div data-testid="stub-token-card" :data-loading="loading ? \'true\' : \'false\'" :data-symbol="token?.symbol" />',
+		props: ["token", "loading"],
+	},
 	RecipientField: {
 		template: '<input data-testid="stub-recipient" :value="searchTerm" @input="$emit(\'update:searchTerm\', $event.target.value)" />',
 		props: ["searchTerm", "selectedContact", "candidates"],
 		emits: ["update:searchTerm", "update:selectedContact"],
 	},
 	AmountCard: {
-		template: '<input data-testid="stub-amount" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+		template:
+			'<input data-testid="stub-amount" :data-token="token?.symbol" :data-balance="tokenBalanceByType" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
 		props: ["modelValue", "fiatMode", "fiatGuard", "token", "tokenBalanceByType", "balanceRawByType", "liveQuote", "proxyTicker"],
 		emits: ["update:modelValue", "update:fiatMode", "update:fiatGuard"],
 		methods: { refreezeQuote() {} },
@@ -188,7 +194,7 @@ const FJ = { settings: { paymentMethod: { kind: "fj" } }, payer: { type: "fj", i
 /** A protocol sponsor: hidden, one tap. */
 const SPONSOR = { settings: { paymentMethod: { kind: "fpc", fpcId: "s1" } }, payer: { type: "fpc", fpcId: "s1", isProtocol: true } }
 
-async function mountSend() {
+async function mountSend(opts: { errorHandler?: (error: unknown) => void } = {}) {
 	installChromeStorage()
 	const pinia = createTestingPinia({ stubActions: false })
 	const appStore = useAppStore(pinia)
@@ -200,7 +206,12 @@ async function mountSend() {
 	const popupStore = usePopupStore(pinia)
 	const w = mount(Send, {
 		attachTo: document.body,
-		global: { plugins: [pinia], stubs: STUBS, mocks: { getChainName: () => "Test" } },
+		global: {
+			plugins: [pinia],
+			stubs: STUBS,
+			mocks: { getChainName: () => "Test" },
+			config: opts.errorHandler ? { errorHandler: opts.errorHandler } : {},
+		},
 	})
 	await flushPromises()
 	return { w, appStore, cacheStore, popupStore }
@@ -727,6 +738,199 @@ describe("send page — the contact in the URL", () => {
 		await flushPromises()
 		expect(recipient(w).props("selectedContact")).toEqual(ALICE)
 		expect(recipient(w).props("searchTerm")).toBe(ALICE.address)
+		w.unmount()
+	})
+})
+
+describe("send page — the token card while the tokens load", () => {
+	const OTHER = { ...TOKEN, id: 8, contract: `0x${"d".repeat(64)}`, symbol: "OTH" }
+	/** Another chain's token that carries the id the page keeps selected. */
+	const FOREIGN = { ...TOKEN, chainId: 999, contract: `0x${"f".repeat(64)}`, symbol: "FRN" }
+
+	type Held = { promise: Promise<unknown[]>; resolve: (tokens: unknown[]) => void; reject: (error: unknown) => void }
+	function held(): Held {
+		let resolve!: Held["resolve"]
+		let reject!: Held["reject"]
+		const promise = new Promise<unknown[]>((res, rej) => {
+			resolve = res
+			reject = rej
+		})
+		return { promise, resolve, reject }
+	}
+	/** Every getTokens call waits for the test: `reads[n]` settles the n-th. */
+	function holdTokenReads(): Held[] {
+		const reads: Held[] = []
+		mocks.getTokens.mockImplementation(() => {
+			const read = held()
+			reads.push(read)
+			return read.promise
+		})
+		return reads
+	}
+	const lastClient = <T>(ctor: unknown) => (ctor as { mock: { results: { value: T }[] } }).mock.results.at(-1)?.value as T
+	const tokenAdded = () => lastClient<{ onTokenAdded: EventHandler<unknown> }>(TokenServiceClient).onTokenAdded
+	const balanceAdded = () => lastClient<{ onTokenBalanceAdded: EventHandler<unknown> }>(TokenBalanceServiceClient).onTokenBalanceAdded
+	const card = (w: W) => {
+		const el = w.get('[data-testid="stub-token-card"]')
+		return { loading: el.attributes("data-loading"), symbol: el.attributes("data-symbol") }
+	}
+	const amount = (w: W) => w.get('[data-testid="stub-amount"]')
+	/** A profile switch: another profile's tokens and another account's balances. */
+	const toB = async (store: ReturnType<typeof useAppStore>) => {
+		store.profile = { id: "p2" } as never
+		store.account = { address: "0xbob" } as never
+		await flushPromises()
+	}
+	const refused = () => new Error("port closed")
+
+	test("loading while the mount's read is out; the read ends it and draws the token", async () => {
+		const reads = holdTokenReads()
+		const { w } = await mountSend()
+		expect(card(w)).toEqual({ loading: "true", symbol: undefined })
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: "TST" })
+		w.unmount()
+	})
+
+	test("a superseded read does not end the newer read's loading", async () => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		await toB(appStore)
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "true", symbol: undefined })
+		reads[1]?.resolve([OTHER])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: "OTH" })
+		w.unmount()
+	})
+
+	test("A to B: B's load shows neither A's token nor its balance, and B's refused read ends on the empty card", async () => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: "TST" })
+		expect(amount(w).attributes("data-balance")).toBe("5")
+
+		await toB(appStore)
+		// B's balance for the kept token id lands before B's tokens: the page still renders.
+		balanceAdded().invoke({ ...BALANCE, id: "b2", account: "0xbob" })
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "true", symbol: undefined })
+		expect(amount(w).attributes("data-token")).toBeUndefined()
+		expect(amount(w).attributes("data-balance")).toBe("0")
+
+		reads[1]?.reject(refused())
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test("the identity going incomplete mid-load ends the loading on the empty card", async () => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		appStore.account = undefined as never
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test("a token re-read still out when the identity goes incomplete never lands", async () => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		tokenAdded().invoke(OTHER)
+		await flushPromises()
+		appStore.account = undefined as never
+		await flushPromises()
+		reads[1]?.resolve([TOKEN, OTHER])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test("after a refused read, the next identity's read draws its token", async () => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		reads[0]?.reject(refused())
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		await toB(appStore)
+		expect(card(w).loading).toBe("true")
+		reads[1]?.resolve([OTHER])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: "OTH" })
+		w.unmount()
+	})
+
+	test("a read that finds no tokens ends on the empty card", async () => {
+		mocks.getTokens.mockResolvedValue([])
+		const { w } = await mountSend()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test("the mount's read refused: logged at debug, nothing unhandled, the empty card", async () => {
+		mocks.getTokens.mockRejectedValue(refused())
+		const errorHandler = vi.fn()
+		const { w } = await mountSend({ errorHandler })
+		expect(errorHandler.mock.calls.length).toBe(0)
+		expect(console.debug).toHaveBeenCalledWith(expect.any(String), { error: expect.objectContaining({ message: "port closed" }) })
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test.each([
+		["during B's load, which it does not end", true],
+		["after B's read is refused", false],
+	])("a token added on another chain, with the kept token's id, is never drawn: %s", async (_when, duringLoad) => {
+		const reads = holdTokenReads()
+		const { w, appStore } = await mountSend()
+		reads[0]?.resolve([TOKEN])
+		await flushPromises()
+		await toB(appStore)
+		if (!duringLoad) reads[1]?.reject(refused())
+		await flushPromises()
+
+		tokenAdded().invoke(FOREIGN)
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: duringLoad ? "true" : "false", symbol: undefined })
+
+		if (duringLoad) reads[1]?.reject(refused())
+		for (const read of reads.slice(2)) read.resolve([])
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		w.unmount()
+	})
+
+	test("a token added for this identity during the load is in the loaded list", async () => {
+		const first = held()
+		mocks.getTokens.mockReturnValueOnce(first.promise).mockResolvedValue([TOKEN, OTHER])
+		const { w, cacheStore } = await mountSend()
+		tokenAdded().invoke(OTHER)
+		await flushPromises()
+		expect(card(w).loading).toBe("true")
+		first.resolve([TOKEN])
+		await flushPromises()
+		cacheStore.activeTokenIdx = OTHER.id
+		await nextTick()
+		expect(card(w)).toEqual({ loading: "false", symbol: "OTH" })
+		w.unmount()
+	})
+
+	test("after an empty load, a token added for this identity becomes the active token", async () => {
+		mocks.getTokens.mockResolvedValueOnce([]).mockResolvedValue([OTHER])
+		const { w } = await mountSend()
+		expect(card(w)).toEqual({ loading: "false", symbol: undefined })
+		tokenAdded().invoke(OTHER)
+		await flushPromises()
+		expect(card(w)).toEqual({ loading: "false", symbol: "OTH" })
 		w.unmount()
 	})
 })

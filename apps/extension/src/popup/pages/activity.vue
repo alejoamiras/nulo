@@ -26,6 +26,7 @@ import { buildActivityRows } from "@/utils/activity-rows"
 /** Composables */
 import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+import { useScopedTokens } from "@/composables/useScopedTokens"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -34,19 +35,15 @@ const appStore = useAppStore()
 
 /** Service clients */
 const transactionService = new TransactionServiceClient()
-/** Phase 2 follow-up: merge journal terminal records (cancel / interrupted /
- *  failed paths that never produced an on-chain tx) into the History list
- *  alongside settled chain transactions. */
+/** Journal terminal records (cancel / interrupted / failed paths that never produced an on-chain
+ *  tx) merge into the History list alongside settled chain transactions. */
 const journalService = new OperationJournalServiceClient()
-/** Phase 2 follow-up v4: tokens lookup so terminal transfer rows can format
- *  their amounts. Same pattern as RecentActivityView. */
 const tokenService = new TokenServiceClient()
-const tokens = ref([])
-const tokensById = computed(() => {
-	const map = {}
-	for (const t of tokens.value) map[t.id] = t
-	return map
+const scopedTokens = useScopedTokens({
+	tokenService,
+	scope: () => (appStore.profile && appStore.network ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined),
 })
+const { tokens } = scopedTokens
 
 /** Incoming-receive surface — third source for the activity row merge.
  *  Filtered by trust state at the service layer; only visible (trusted)
@@ -126,17 +123,6 @@ const heroRef = useTemplateRef("heroRef")
 const heroVisible = ref(true)
 let heroObserver = null
 
-async function loadTokens() {
-	if (!appStore.profile?.id || !appStore.network?.chainId) return
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-}
-
-// Keep the tokens map fresh during this session — without this, an
-// incoming-transfer record for a just-added token renders with the
-// "Token" placeholder until the user re-opens the extension. Same
-// pattern as RecentActivityView.
-tokenService.onTokenAdded.add(loadTokens)
-
 watch(activityRows, (rows) => arrivals?.present(rows.filter((row) => row.type === "incoming").map((row) => row.inc)), { flush: "post" })
 
 /** Lifecycle hooks */
@@ -150,8 +136,9 @@ onMounted(async () => {
 		)
 		heroObserver.observe(heroRef.value)
 	}
+	// Never behind the journal read: a rejected one would leave every row without its token.
+	void scopedTokens.reload()
 	await loadTerminalJournalOps()
-	await loadTokens()
 	await loadIncomingTransfers()
 	// Trigger an explicit ConfigService connect so the onUpdate listener
 	// receives runtime toggle changes (ServiceClient registers but doesn't
@@ -171,6 +158,7 @@ onBeforeUnmount(() => {
 	configService.disconnect()
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
+	scopedTokens.dispose()
 	heroObserver?.disconnect()
 })
 </script>
@@ -196,7 +184,7 @@ onBeforeUnmount(() => {
 
 		<Flex direction="column" gap="24" :class="$style.content">
 			<!-- Mixed activity list (chain tx + journal terminal records) -->
-			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokensById="tokensById" :isArriving="arrivals?.isArriving" />
+			<TransactionsList v-if="activityRows.length" :rows="activityRows" :tokens="tokens" :isArriving="arrivals?.isArriving" />
 
 			<!-- Empty state -->
 			<Flex

@@ -108,6 +108,23 @@ vi.mock("vue-router", async (importOriginal) => {
 	return { ...mod, useRouter: () => ({ push: vi.fn(), back: vi.fn() }) }
 })
 
+// jsdom has no layout: a stand-in font measures the hero's forms. `room` is the hero's line and
+// `fontWidth` scales every glyph (a wider fallback font before the real one loads).
+let room = 10_000
+let fontWidth = 1
+/** Full-size widths: "1" is narrow, as in the hero's font; separators 12 px; the symbol at half size. */
+const glyph = (c: string) => (c === "1" ? 20 : c === "," || c === "." ? 12 : 30)
+function standInWidth(text: string): number {
+	const [amount = "", symbol] = text.split(" ")
+	const sum = (s: string) => [...s].reduce((w, c) => w + glyph(c), 0)
+	return fontWidth * (symbol === undefined ? sum(amount) : sum(amount) + 12 + sum(symbol) / 2)
+}
+vi.mock("./hero-ruler", () => ({
+	heroRoom: () => room,
+	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
+}))
+
+import { nextTick } from "vue"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { useAppStore } from "@/stores/app.store"
 import BalanceView from "./BalanceView.vue"
@@ -192,7 +209,16 @@ afterEach(() => {
 	mockShowFiat = true
 	seedRows = SEED
 	fetchRows = async () => seedRows
+	room = 10_000
+	fontWidth = 1
+	vi.unstubAllGlobals()
+	Reflect.deleteProperty(document, "fonts")
 })
+
+const USD_1 = () => ({ "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } })
+/** The hero's figure and the scale its type is drawn at. */
+const figure = (w: { find: (s: string) => { text: () => string; element: Element } }) => w.find('[data-testid="balance-amount"] > span')
+const heroScale = (w: Parameters<typeof figure>[0]) => (figure(w).element as HTMLElement).style.getPropertyValue("--hero-scale")
 
 describe("BalanceView — Home aggregate", () => {
 	test("Home has no balance split and so no icon labels", async () => {
@@ -556,9 +582,82 @@ describe("BalanceView — token hero (tokenBalance prop)", () => {
 	})
 })
 
+describe("BalanceView — the hero fits its line", () => {
+	const LONG_TOKEN = { ...SEED[0], publicBalance: "124458788900000", privateBalance: "0" }
+	const LONG_FIAT = [{ ...SEED[0], publicBalance: "0", privateBalance: "124458788900000" }]
+	beforeEach(() => {
+		room = 312
+		mockQuotes = USD_1()
+	})
+	// A spy left on the global frame would stand in for the fake timers' one in later cases.
+	afterEach(() => vi.restoreAllMocks())
+
+	test("a short amount keeps today's size; a long one shrinks until every digit fits, with no frame to wait for", async () => {
+		const frame = vi.spyOn(globalThis, "requestAnimationFrame")
+		const short = await mountView({ tokenBalance: SEED[0] })
+		expect(figure(short.wrapper).text()).toBe("1,250 AAA")
+		expect(heroScale(short.wrapper)).toBe("1")
+
+		const token = await mountView({ tokenBalance: LONG_TOKEN })
+		expect(figure(token.wrapper).text()).toBe("124,458,788.9 AAA")
+		expect(heroScale(token.wrapper)).toBe("0.81")
+
+		seedRows = LONG_FIAT as typeof SEED
+		const home = await mountView()
+		expect(figure(home.wrapper).text()).toBe("$124,458,788.90")
+		expect(heroScale(home.wrapper)).toBe("0.8")
+		expect(frame).not.toHaveBeenCalled()
+	})
+
+	test("a long 18-decimal fraction reaches the 60% floor: its fraction is cut to the length that fits", async () => {
+		const fraction = {
+			...SEED[0],
+			token: { ...SEED[0].token, decimals: 18 },
+			publicBalance: "1234567890123456789000",
+			privateBalance: "0",
+		}
+		const { wrapper } = await mountView({ tokenBalance: fraction })
+		expect(figure(wrapper).text()).toBe("1,234.56789012345 AAA")
+		expect(heroScale(wrapper)).toBe("0.61")
+	})
+
+	test("a font load or a resize fits the hero again; unmounting stops both", async () => {
+		let resized: () => void = () => {}
+		const disconnect = vi.fn()
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: () => void) {
+					resized = callback
+				}
+				observe() {}
+				disconnect = disconnect
+			},
+		)
+		const fonts = new EventTarget()
+		const stopListening = vi.spyOn(fonts, "removeEventListener")
+		Object.defineProperty(document, "fonts", { value: fonts, configurable: true })
+		fontWidth = 1.1
+
+		const { wrapper } = await mountView({ tokenBalance: LONG_TOKEN })
+		expect(heroScale(wrapper)).toBe("0.74")
+		fontWidth = 1
+		fonts.dispatchEvent(new Event("loadingdone"))
+		await nextTick()
+		expect(heroScale(wrapper)).toBe("0.81")
+		room = 400
+		resized()
+		await nextTick()
+		expect(heroScale(wrapper)).toBe("1")
+
+		wrapper.unmount()
+		expect(disconnect).toHaveBeenCalledTimes(1)
+		expect(stopListening).toHaveBeenCalledWith("loadingdone", expect.any(Function))
+	})
+})
+
 describe("BalanceView — an arrival on Home", () => {
 	type Wrapper = Awaited<ReturnType<typeof mountView>>["wrapper"]
-	const USD_1 = () => ({ "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } })
 	const LARGE = 98_765_432_109_876n * 10n ** 6n
 	const row = (privateRaw: bigint) => ({ ...SEED[0], privateBalance: privateRaw.toString(), publicBalance: "0" })
 	const status = (w: Wrapper) => w.find('[data-testid="balance-arrival-status"]')
@@ -640,6 +739,31 @@ describe("BalanceView — an arrival on Home", () => {
 		expect([before, after]).not.toContain(hero(wrapper))
 		await vi.advanceTimersByTimeAsync(1_000)
 		expect(hero(wrapper)).toBe(after)
+	})
+
+	test("a count never grows the type: its smallest fit holds through the frames and on the figure it lands on", async () => {
+		room = 312
+		// In the stand-in font "$100,000,000.00" needs 80%; "$111,111,111.11", all narrow ones, fits at full size.
+		const { wrapper } = await settledHome(100_000_000n * 10n ** 6n)
+		expect(heroScale(wrapper)).toBe("0.8")
+		await wrapper.setProps({ arrival: { id: "r1", label: "+11,111,111.11 AAA" } })
+		updatedHandler?.(row(111_111_111_110_000n))
+		await flushPromises()
+		const [texts, scales] = [new Set<string>(), new Set<string>()]
+		for (let t = 0; t < 1_000; t += 50) {
+			await vi.advanceTimersByTimeAsync(50)
+			texts.add(hero(wrapper))
+			scales.add(heroScale(wrapper))
+		}
+		expect(texts.size).toBeGreaterThan(2)
+		expect(hero(wrapper)).toBe("$111,111,111.11")
+		expect([...scales]).toEqual(["0.8"])
+
+		// A fall lands at once: a figure the hero was not counting to fits afresh.
+		updatedHandler?.(row(111_111_111_100_000n))
+		await flushPromises()
+		expect(hero(wrapper)).toBe("$111,111,111.10")
+		expect(heroScale(wrapper)).toBe("1")
 	})
 
 	test("a rise 11 s after the arrival, or a fall, lands at once", async () => {

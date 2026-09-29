@@ -34,6 +34,7 @@ import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-ro
 import { ARRIVALS_KEY } from "@/composables/useArrivals"
 import { useIncomingSyncHealth } from "@/composables/useIncomingSyncHealth"
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+import { useScopedTokens } from "@/composables/useScopedTokens"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -137,49 +138,21 @@ const executingSubtasks = ref([])
 /** PER-LOADER scope fences: a newer trigger of the SAME loader supersedes its
  *  older in-flight run (A→B→A cannot revalidate a stale run — captured-equality
  *  alone would), while independent loaders never cross-cancel — one shared
- *  fence let a standalone journal reconnect silently kill parked token/task
- *  loads AFTER the switch-clear, starving the feed until an unrelated event.
- *  The scope watcher begins all three so its clear + reloads form one
- *  supersede unit per loader. */
+ *  fence let a standalone journal reconnect silently kill parked task loads
+ *  AFTER the switch-clear, starving the feed until an unrelated event. The
+ *  scope watcher begins both so its clear + reloads form one supersede unit
+ *  per loader; the token lookup fences itself. */
 const journalFence = createRunFence()
 const taskFence = createRunFence()
-const tokensFence = createRunFence()
 
-/** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
- *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
-const tokens = ref([])
+/** UI Transfer tasks and journal rows carry a tokenId; the lookup resolves it to symbol + decimals
+ *  so the awaiting card mirrors TransactionCard (icon + amount). */
 const tokenService = new TokenServiceClient()
-async function loadTokens(isCurrent = tokensFence.begin()) {
-	if (!appStore.profile || !appStore.network) return
-	let fetched
-	try {
-		fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-	} catch (error) {
-		// A port that cannot open rejects at once. The map is a label lookup: keep what we have so a
-		// mount-time failure cannot abort the rest of mount, and a fire-and-forget reload cannot go unhandled.
-		console.debug("recent activity token lookup failed", { error })
-		return
-	}
-	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
-	if (!isCurrent()) return
-	tokens.value = fetched
-}
-
-// Keep the local tokens map fresh as new tokens are added during this
-// session. Without this, incoming-transfer rows for a just-added token
-// render with the "Token" placeholder until the user re-opens the
-// extension: the tokenById lookup misses because `tokens` was only
-// populated once at mount.
-// Wrapped: EventHandler invokes callbacks WITH the payload — a bare
-// registration would feed the TokenInfo object into loadTokens' isCurrent
-// default parameter and TypeError after the first await (the listener dies).
-tokenService.onTokenAdded.add(() => {
-	loadTokens()
+const scopedTokens = useScopedTokens({
+	tokenService,
+	scope: () => (appStore.profile && appStore.network ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined),
 })
-
-function tokenById(id) {
-	return tokens.value.find((t) => t.id === id)
-}
+const { tokens, tokenById } = scopedTokens
 
 const isUiTransfer = computed(() => executingTask.value?.content?.kind === ContentKind.Transfer)
 
@@ -215,7 +188,7 @@ const executingAmount = computed(() => {
 	if (!isUiTransfer.value) return null
 	const token = tokenById(executingTask.value.content.tokenId)
 	if (!token) return null
-	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8).value
+	return balanceFormatted(String(executingTask.value.content.amount), token.decimals || 0, 8, { compact: true }).value
 })
 const executingAmountSymbol = computed(() => {
 	if (!isUiTransfer.value) return null
@@ -268,8 +241,7 @@ const syncHealth = useIncomingSyncHealth({
 })
 const showStalledLine = computed(() => !props.token && syncHealth.stalled.value)
 function incomingCardProps(inc) {
-	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
-	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
+	return buildIncomingCardProps(inc, tokens.value, incomingPrices.tokenFiatLabel)
 }
 const executionService = new ExecutionServiceClient()
 
@@ -401,7 +373,7 @@ function cardAmountFor(op) {
 	if (op.tokenId === undefined) return null
 	const token = tokenById(op.tokenId)
 	if (!token) return null
-	return balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
+	return balanceFormatted(op.amountRaw, token.decimals || 0, 8, { compact: true }).value
 }
 
 /** Per-op symbol. Same gating as the amount — returns null when token
@@ -722,8 +694,8 @@ async function loadExecutingTaskSnapshot(isCurrent = taskFence.begin()) {
  *  part is missing (bare interpolation would stringify undefined into a
  *  never-falsy key, killing the not-ready guard and firing throwaway RPCs on
  *  every bootstrap transition). A rename (same triple) still does not reset.
- *  Incoming transfers are reset separately by `useIncomingTransfers`' own sync
- *  scope watcher. */
+ *  Incoming transfers and tokens are reset separately by their composables' own
+ *  sync scope watchers. */
 const scopeTripleKey = () => {
 	const p = appStore.profile?.id
 	const n = appStore.network?.id
@@ -736,16 +708,13 @@ watch(
 		if (nv === ov) return
 		const journalRun = journalFence.begin()
 		const taskRun = taskFence.begin()
-		const tokensRun = tokensFence.begin()
 		journalOps.value = []
 		executingTask.value = null
 		executingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
-		tokens.value = []
 		if (!nv) return
 		resnapshotJournal(journalRun)
 		loadExecutingTaskSnapshot(taskRun)
-		loadTokens(tokensRun)
 	},
 	{ flush: "sync" },
 )
@@ -774,7 +743,7 @@ watch(
 defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows, tokens })
 
 onMounted(async () => {
-	await loadTokens()
+	await scopedTokens.reload()
 
 	// ServiceClient doesn't auto-connect on listener registration — make
 	// explicit connects so the onUpdate (visibility toggle) and
@@ -813,6 +782,7 @@ onBeforeUnmount(() => {
 	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
 	syncHealth.dispose()
+	scopedTokens.dispose()
 })
 </script>
 

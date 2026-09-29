@@ -17,6 +17,8 @@ import { aggregateFiat } from "@/utils/token-aggregate"
 import { forChain } from "@/utils/token-order"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { createBalanceCount } from "./balance-count"
+import { FULL_SIZE, fiatHeroCandidates, fitHero, holdHeroFit, tokenHeroCandidates } from "./hero-fit"
+import { heroRoom, rulerWidth } from "./hero-ruler"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"
@@ -70,16 +72,16 @@ const totalTokenBalance = computed(() => {
 	if (!props.tokenBalance) return { value: 0 }
 	const sides = heroSides.value
 	if (!sides) return { value: "—" }
-	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20)
+	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20, { compact: true })
 })
 
 const privateBalanceFormatted = computed(() => {
 	const sides = heroSides.value
-	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10).value : "—"
+	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10, { compact: true }).value : "—"
 })
 const publicBalanceFormatted = computed(() => {
 	const sides = heroSides.value
-	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10).value : "—"
+	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10, { compact: true }).value : "—"
 })
 
 /** Live prices. Parent owns the client lifecycle; the composable owns
@@ -117,7 +119,6 @@ const isAggregatePartial = computed(() => aggregate.value.partial)
 
 /** The hero's figure while it counts toward the aggregate; null shows the aggregate's own string. */
 const countMicro = ref(null)
-const heroFiatDisplay = computed(() => (countMicro.value === null ? aggregateFiatDisplay.value : prices.formatUsdMicro(countMicro.value)))
 const balanceCount = createBalanceCount({
 	now: () => Date.now(),
 	frame: (step) => requestAnimationFrame(step),
@@ -131,6 +132,32 @@ const isCalm = () =>
 /** Home's arrival chip: none on the token hero, and none while the fiat hero is hidden. */
 const chip = computed(() => (!tokenToDisplay.value && showFiatValues.value && props.arrival?.label ? props.arrival : null))
 const chipCalm = ref(false)
+
+/** Every form the hero's figure may take, longest first; the fit draws the longest that fits. */
+const heroCandidates = computed(() => {
+	if (!tokenToDisplay.value) return fiatHeroCandidates(countMicro.value ?? aggregate.value.micro)
+	const sides = heroSides.value
+	if (!sides) return ["—"]
+	return tokenHeroCandidates(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20)
+})
+const heroFit = ref(FULL_SIZE)
+const heroText = computed(() => heroCandidates.value[Math.min(heroFit.value.index, heroCandidates.value.length - 1)])
+const heroSection = ref(null)
+const heroRuler = ref(null)
+let heroResizes
+// The figure a count runs to: until the hero shows another, its fit only shrinks.
+let heroHeldFor = null
+function fitHeroToLine() {
+	const forms = heroRuler.value?.children
+	if (!heroSection.value || !forms) return
+	const candidates = heroCandidates.value
+	if (countMicro.value !== null) heroHeldFor = aggregateFiatDisplay.value
+	else if (heroHeldFor !== candidates[0]) heroHeldFor = null
+	const widthAt = (index, scale) => rulerWidth(forms[index], scale)
+	const fresh = fitHero(Math.min(candidates.length, forms.length), widthAt, heroRoom(heroSection.value))
+	const next = heroHeldFor === null ? fresh : holdHeroFit(heroFit.value, fresh)
+	if (next.index !== heroFit.value.index || next.scale !== heroFit.value.scale) heroFit.value = next
+}
 
 const handleCopy = (value, label) => {
 	void copyWithToast(value, openToast, `${label} is copied`)
@@ -280,10 +307,19 @@ watch(
 		balanceCount.arrive(chipCalm.value)
 	},
 )
+// After the render, so the ruler holds the new forms, and before the paint.
+watch([heroCandidates, () => tokenToDisplay.value?.symbol], fitHeroToLine, { flush: "post" })
 onMounted(async () => {
+	fitHeroToLine()
+	// jsdom has neither; there the fit still runs on each render.
+	heroResizes = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(fitHeroToLine)
+	heroResizes?.observe(heroSection.value)
+	document.fonts?.addEventListener("loadingdone", fitHeroToLine)
 	await enterScope()
 })
 onBeforeUnmount(() => {
+	heroResizes?.disconnect()
+	document.fonts?.removeEventListener("loadingdone", fitHeroToLine)
 	fetchGeneration++
 	balanceCount.stop()
 	clearTimeout(capTimer)
@@ -299,7 +335,7 @@ onBeforeUnmount(() => {
 <template>
 	<Flex direction="column" :class="$style.wrapper">
 		<!-- Balance section -->
-		<section :class="$style.balance_section">
+		<section ref="heroSection" :class="$style.balance_section">
 			<div :class="$style.hero_wrap">
 				<div
 					v-if="tokenToDisplay || showFiatValues"
@@ -308,12 +344,12 @@ onBeforeUnmount(() => {
 					:aria-busy="(!tokenToDisplay && heroPending) || undefined"
 					:class="$style.balance_amount"
 				>
-					<template v-if="tokenToDisplay">
-						{{ totalTokenBalance.value }}
+					<span v-if="tokenToDisplay" :class="$style.hero_fit" :style="{ '--hero-scale': heroFit.scale }">
+						{{ heroText }}
 						<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
-					</template>
+					</span>
 					<Skeleton v-else-if="heroPending" :width="150" :height="40" data-testid="balance-hero-loading" :class="$style.hero_skeleton" />
-					<template v-else-if="isTotalKnown">{{ heroFiatDisplay }}</template>
+					<span v-else-if="isTotalKnown" :class="$style.hero_fit" :style="{ '--hero-scale': heroFit.scale }">{{ heroText }}</span>
 					<!-- The balance list could not be read at all: unknown, which is not zero. -->
 					<span v-else data-testid="balance-hero-unknown">—</span>
 				</div>
@@ -328,6 +364,18 @@ onBeforeUnmount(() => {
 						{{ chip.label }}
 					</span>
 				</span>
+				<!-- Each form at the full size, for the fit to measure: clipped to nothing, never drawn. -->
+				<div ref="heroRuler" aria-hidden="true" :class="[$style.balance_amount, $style.hero_ruler]">
+					<template v-if="tokenToDisplay">
+						<span v-for="form in heroCandidates" :key="form" :class="$style.hero_fit">
+							{{ form }}
+							<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
+						</span>
+					</template>
+					<template v-else>
+						<span v-for="form in heroCandidates" :key="form" :class="$style.hero_fit">{{ form }}</span>
+					</template>
+				</div>
 			</div>
 
 			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
@@ -400,9 +448,26 @@ onBeforeUnmount(() => {
 
 	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: ellipsis;
 	max-width: 100%;
 	min-width: 0;
+}
+
+/* The figure's type scales down from the hero's size, while its line keeps the full size's height. */
+.hero_fit {
+	font-size: calc(1em * var(--hero-scale, 1));
+	letter-spacing: -0.04em;
+}
+
+.hero_ruler {
+	position: absolute;
+	width: 0;
+	height: 0;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.hero_ruler > span {
+	position: absolute;
 }
 
 /* The arrival chip rises above the hero; the hero keeps its own clipping. */
@@ -471,7 +536,7 @@ onBeforeUnmount(() => {
 }
 
 .balance_symbol {
-	font-size: 24px;
+	font-size: 0.5em;
 	color: var(--txt-tertiary);
 }
 

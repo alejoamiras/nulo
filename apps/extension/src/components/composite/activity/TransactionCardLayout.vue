@@ -102,7 +102,7 @@ function hasActionsContent() {
 
 			<Flex direction="column" gap="4" :class="$style.text">
 				<Flex align="center" gap="6">
-					<span :id="titleId" :class="$style.title">{{ title }}</span>
+					<span :id="titleId" :class="$style.title" data-testid="activity-title">{{ title }}</span>
 					<slot name="title-trailing" />
 				</Flex>
 				<Flex v-if="$slots.secondary" align="center" gap="6" :class="$style.secondary_row">
@@ -112,7 +112,7 @@ function hasActionsContent() {
 		</Flex>
 
 		<Flex v-if="amount" direction="column" align="end" gap="2" :class="$style.amount_col">
-			<span :class="[$style.amount, arriving && $style['n-amt']]">{{ amount }}</span>
+			<span :class="[$style.amount, arriving && $style['n-amt']]" data-testid="activity-amount">{{ amount }}</span>
 			<span v-if="amountSymbol" :class="$style.amount_symbol">{{ amountSymbol }}</span>
 			<!-- Raised above the target so its title shows; `.stop` so a press opens the row once. -->
 			<span
