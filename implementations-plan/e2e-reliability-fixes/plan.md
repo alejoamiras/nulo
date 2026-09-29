@@ -847,7 +847,8 @@ canary, whose `transfers.test.ts` fails twice at step 2. That is a pre-existing 
 on the base commit `0fa5a2cb`: the popup's `executeTransfer` call times out at 60 s while Firefox
 proves in the browser for about 90 s, so the Send screen reports a failure for a transfer that
 succeeds. CI's Firefox canary proves through Presto and passes. Not marked ✓: the fix is product
-code outside this plan, and whether CI's canary stands in for the local one is the owner's call.
+code outside this plan, and whether CI's canary job on the PR head stands in for the local run, as
+it did for ux-feedback, is the owner's call.
 
 ### P7 · C6 · Home's settled token card (addendum) ✓
 

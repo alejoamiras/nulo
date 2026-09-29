@@ -92,6 +92,14 @@ the RPC layer or proving. CI's Firefox canary lane proves natively through `pres
 (`VITE_NULO_PRESTO_REQUIRED=1`), which is why `dev`'s nightly passes it; setting
 `NULO_E2E_DISABLE_PRESTO=1` would turn that lane red for this reason.
 
+**Seen before, misread.** ux-feedback's batch 1 hit the same wait on a local Firefox prover-ON run
+and concluded that a WASM-proved transfer took more than 300 s
+([b1 phase 5](../../ux-feedback/b1-first-run-wording/lessons/phase-5.md)). The journal row shows
+the transfer succeeding in about 90 s; the snack the test waits for was lost at 60 s. That program
+then took its Firefox canary evidence from CI's Presto canary job on the PR head
+([plan § Proving modes](../../ux-feedback/plan.md)), since the local `presto-server` (1.1.1) is
+not CI's (1.1.2).
+
 **Not fixed here.** The fix is product code outside this plan (a per-method timeout for the popup's
 long-running execution calls, as the offscreen client already has for `proveTx`), and it changes
 what the Send screen tells a person, which needs the owner. A person shown the false failure may
@@ -102,5 +110,21 @@ also send again, and both transfers would go through. It is recorded in the e2e-
 
 Every leg is green except the Firefox canary, whose one failure is the pre-existing defect above,
 reproduced on the base commit. The gate's own criterion (every command exits 0) is not met, so P6
-is not marked ✓; whether CI's Presto-backed Firefox canary stands in for the local one is the
-owner's call.
+is not marked ✓. The Firefox canary's evidence can come, as it did for ux-feedback, from CI's
+`Firefox / Run / canary / real-proving` job on the PR head; that, and the defect's fix, are the
+owner's calls.
+
+## After merging `dev` (`a7b1ff62`)
+
+The merge (`2b53816f`) brought the grant-check and wallet-safety fixes; its one conflict was
+`follow-ups.md`, where both sides deleted neighbouring entries, and both deletions stand. With no
+dependency change and only the curated docs in conflict, the static gates reran on the merged tree
+and CI reruns the e2e on it:
+
+| Command | Exit | Result |
+|---|---|---|
+| `bun run lint` | 0 | 1,890 files, complexity baseline OK; warnings only |
+| `bun run typecheck:all` | 0 | every `@nulo/*` workspace |
+| `bun run test:all` | 0 | extension 7,904 passed, 4 skipped, 8 todo (599 files passed, 3 skipped); wallet-bridge 481; aztec-runtime 250 passed, 2 skipped; design 401; wallet-core 247; extension-messaging 239; wallet-crypto 120; third-party-notices 66; legal 54; landing 40; resolve-asset 14; wallet-sdk-schema-patch 11; passkey-rp 5 passed, 6 skipped |
+| `bun scripts/ci-cd/plans/check.ts` | 0 | 3 findings, 0 enforced: path-token reports `dev` carries |
+| `scripts/check-no-local-paths.sh` | 0 | |
