@@ -161,6 +161,27 @@ Not captured:
   `FeeSettingsCard` as Send and the execute window.
 - **A huge outgoing amount on a terminal row** (row 3): item 1 above.
 
+## The last merge of dev, and the final gates
+
+`dev` at `f51ec001` (the grant check's address-case fix) merged as `79e834b9`, just before these
+gates. Only the curated `index.md` and `follow-ups.md` changed on both sides. `follow-ups.md`
+merged cleanly. `index.md` conflicted and keeps dev's lines, with this plan's line under them. At
+`79e834b9`, load average 50 to 69:
+
+| Gate | Exit | Notes |
+|---|---|---|
+| `bun run lint` | 0 | 1893 files, 29 warnings and 3 infos, as before the merge |
+| `bun run typecheck:all` | 0 | |
+| `bun run test:all` | 0 | every workspace green; extension 7944 passed, 4 skipped, 8 todo |
+| `bun scripts/ci-cd/plans/check.ts` | 0 | the same 5 report-only path-token findings, 0 enforced |
+| `bash scripts/check-no-local-paths.sh` | 0 | |
+| `bun run test:ci-gating` | 0 | 244 pass, 2 skip, 0 fail |
+| `bun run build` | 0 | |
+
+The e2e was not rerun here: the merge's only conflicts were in the curated docs, and CI reruns the
+e2e on the merged tree. That rerun matters, because the merge brings in `wallet-bridge`'s changed
+scope checks, which the dApp flow in `tx-sendTx-sponsoredFpc` passes through.
+
 ## Step 7 and the gate
 
 The PNGs and a one-line-per-file index went to the driver, who publishes the sign-off Artifact
