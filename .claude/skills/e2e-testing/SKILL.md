@@ -62,8 +62,9 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
 ### Hazards that mass-fail a run
 
 - **Both global setups `pkill` every Chrome loaded from THIS dist path**, at setup and at teardown.
-  Parallel worktrees are safe; smoke and network on ONE worktree are not. Tell a reviewer running
-  locally not to invoke any e2e config.
+  Parallel worktrees are safe; smoke and network on ONE worktree are not, nor two `e2e:agent`
+  runs there (each rebuilds `dist/<browser>` and owns the worktree's `.e2e-state/`). Tell a
+  reviewer running locally not to invoke any e2e config.
 - **Heavy suites run alone on the host.** A concurrent `audit:vue`, a proving run, or a second
   suite starves the sandbox and the browsers; the signature is timeouts across unrelated files.
   Rerun before triage. Shard for wall-clock (`--shard=N/M` across agents), never overlap.

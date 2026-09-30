@@ -119,7 +119,7 @@ function standInWidth(text: string): number {
 	const sum = (s: string) => [...s].reduce((w, c) => w + glyph(c), 0)
 	return fontWidth * (symbol === undefined ? sum(amount) : sum(amount) + 12 + sum(symbol) / 2)
 }
-vi.mock("./hero-ruler", () => ({
+vi.mock("@/utils/hero-ruler", () => ({
 	heroRoom: () => room,
 	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
 }))

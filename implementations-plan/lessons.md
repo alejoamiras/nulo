@@ -22,13 +22,13 @@ Curated gotchas from closed plans, read at the start of every task so no dead en
 - A second `@vue/test-utils` `mount` in one test drops the first wrapper's stubs: VTU installs its stub transform through Vue's process-global `transformVNodeArgs` and replaces it on every mount, so the first tree re-renders with real components and its failed unmount leaks document listeners into later tests. Show the second tree in a plain `createApp` (VTU 2.4.11, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-1.md)
 - vitest 4.1.10 never re-runs a fixture setup that threw: every retry gets a test-scoped fixture as `undefined` and a file-scoped one's first error, so one setup failure reads as a second bug (2026-09). [Evidence](e2e-reliability-fixes/lessons/phase-3.md)
 - A test that something never happens proves nothing until its fixture can make it happen: pair it with a success-path control in the same fixture. [Evidence](connect-window/lessons/post-impl.md)
+- Under a parent's `v-model`, a `defineModel` write reads back only once the parent re-renders, so a second write built on `model.value` restores the old value; a test with no `onUpdate:*` misses it (Vue 3.5, 2026-09). [Evidence](send-amount-exact/lessons/phase-12.md)
 
 ## E2E
 
 - One Puppeteer `waitForFunction` is one protocol call, so `protocolTimeout` caps it whatever its own `timeout` (300 s in `apps/extension/tests/e2e/fixtures/browser/`): a longer wait fails as `Runtime.callFunctionOn timed out`. Poll in short reads (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
 - A held key is a second `keyboard.down`: Chrome (CDP) and Firefox (BiDi) both deliver it with `repeat: true`, and both browsers' native buttons activate on it. Firefox's repeat lands 40 to 50 ms after the press, so an action that ends sooner has already swapped the page. Record `repeat` and the target in the page, so a driver that stops sending it, or a repeat that misses the control, fails the step (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md), [Firefox](keyboard-guards/lessons/phase-3.md)
 - Enter in a form field clicks the form's default button; when that click's handler disables the button, Vue re-renders before the activation, so no `submit` fires on Chrome or Firefox: count clicks on the default button, not submits (Vue 3.5, 2026-09). [Evidence](keyboard-guards/lessons/phase-3.md)
-- Browsers and Node's fetch and WebSocket refuse the Fetch standard's bad ports before connecting, and 10080 lies inside the e2e port draw's window: a randomly drawn port skips the whole table (Node 24.21, 2026-09). [Evidence](e2e-reliability-fixes/lessons/phase-8.md)
 
 ## Extension runtime
 

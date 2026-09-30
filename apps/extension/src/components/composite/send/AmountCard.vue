@@ -1,7 +1,10 @@
 <script setup>
 /** Utils */
-import { purgeNumber, normalizeAmount, clampDecimals, comma, formatBaseUnits } from "@/utils/amount"
+import { purgeNumber, normalizeAmount, clampDecimals, formatBaseUnits } from "@/utils/amount"
+import { fitHero } from "@/utils/hero-fit"
+import { inputRoom, rulerWidth } from "@/utils/hero-ruler"
 import { usdToTokenAmount, tokenAmountToUsdMicro, formatUsdMicro, usdMicroToPlainString } from "@/wallet/services/price/convert"
+import { restingAmount } from "./amount-field"
 
 const props = defineProps({
 	token: {
@@ -9,9 +12,8 @@ const props = defineProps({
 		required: false,
 	},
 	tokenBalanceByType: Number,
-	/** Raw base-units balance for the selected send type (string). Powers the
-	 *  bigint-exact fiat-mode Max/Half — the display-unit `tokenBalanceByType`
-	 *  Number path stays for token mode (pre-existing behavior, preserved). */
+	/** The selected side's balance in base units, as a digit string; null until it loads. Every
+	 *  balance digit Max fills or the corner shows comes from it: `tokenBalanceByType` is a float. */
 	balanceRawByType: { type: String, required: false, default: null },
 	/** Live usable quote for the selected token ({ usd, fetchedAt }) or null.
 	 *  Null hides all fiat UI (and the fiat-input toggle). */
@@ -35,6 +37,7 @@ const fiatMode = defineModel("fiatMode", { default: false })
 const fiatGuard = defineModel("fiatGuard", { default: null })
 
 const inputEl = useTemplateRef("inputEl")
+const fieldRuler = useTemplateRef("fieldRuler")
 
 const tokenDecimals = computed(() => (typeof props.token?.decimals === "number" ? props.token.decimals : undefined))
 
@@ -46,6 +49,8 @@ const wasClamped = ref(false)
 
 onMounted(() => {
 	if (props.tokenBalanceByType) inputEl.value.focus()
+	fitField()
+	document.fonts?.addEventListener("loadingdone", fitField)
 })
 
 // Works on the input's own value and writes the model once: `model.value` only reflects a write
@@ -60,11 +65,10 @@ const handleAmountInput = (e) => {
 	const normalizedAmount = normalizeAmount(purgedAmount)
 	if (typeof normalizedAmount === "string") next = normalizedAmount
 
-	// Clamp decimal places to the token's `decimals`. If the typed value
-	// had more, surface a small inline hint so the truncation is visible.
+	// Clamping the typed text instead would keep a paste's other characters in the amount.
 	if (tokenDecimals.value !== undefined) {
-		const clamped = clampDecimals(typed, tokenDecimals.value)
-		wasClamped.value = clamped !== typed
+		const clamped = clampDecimals(purgedAmount, tokenDecimals.value)
+		wasClamped.value = clamped !== purgedAmount
 		if (wasClamped.value) next = clamped
 	}
 
@@ -92,18 +96,25 @@ watch(
 const isFocused = ref(false)
 const handleAmountFocus = () => {
 	if (props.tokenBalanceByType) isFocused.value = true
+	fieldScale.value = 1
 }
 const handleAmountBlur = () => {
 	isFocused.value = false
+	if (!model.value || tokenDecimals.value === undefined) return
+	model.value = restingAmount(String(model.value), tokenDecimals.value)
+}
 
-	if (!model.value) return
-	if (model.value.toString().includes(",")) return model.value
-
-	// Cap the post-blur formatting at the token's decimals (was hardcoded 8;
-	// tokens with >8 decimals were silently rounded). Falls back to 8 when
-	// decimals unknown, matching prior behavior.
-	const fixed = tokenDecimals.value !== undefined ? Math.min(tokenDecimals.value, 8) : 8
-	model.value = comma(model.value, ",", fixed)
+/** The token field's type as a fraction of its 40 px: full with focus, and at rest the largest
+ *  that shows the whole amount, however small. */
+const fieldScale = ref(1)
+function fitField() {
+	const input = inputEl.value
+	const form = fieldRuler.value
+	if (fiatMode.value || !input || !form) return
+	// Both: the fiat input sets `isFocused` and never clears it, and a window losing focus blurs the
+	// field while leaving it the document's active element.
+	const typing = isFocused.value && document.activeElement === input
+	fieldScale.value = typing ? 1 : fitHero(1, (_, scale) => rulerWidth(form, scale), inputRoom(input)).scale
 }
 
 // ── C3: fiat-denominated input ──────────────────────────────────────────
@@ -148,10 +159,12 @@ const tokenModeFiatLabel = computed(() => {
 const conversionTitle = computed(() => (props.proxyTicker ? `Priced via ${props.proxyTicker}, at today's rate` : "At today's rate"))
 
 /** Corner balance segment: amount + symbol only — the From selector above
- *  already names the private/public side, so no dot/word repeats it here. */
+ *  already names the private/public side, so no dot/word repeats it here.
+ *  Truncated at 8 places, so it never reads more than the balance. */
 const balanceSegment = computed(() => {
-	if (!props.token || !props.tokenBalanceByType) return null
-	return `${comma(props.tokenBalanceByType, ",", 8)} ${props.token.symbol}`
+	if (!props.token || !props.tokenBalanceByType || props.balanceRawByType == null || tokenDecimals.value === undefined) return null
+	const amount = formatBaseUnits(props.balanceRawByType, tokenDecimals.value, { maxDecimals: 8, thousandsSep: ",", decimalSep: "." })
+	return `${amount} ${props.token.symbol}`
 })
 
 /** Fiat-mode secondary line: the DERIVED token amount that will send;
@@ -161,15 +174,15 @@ const derivedTokenLabel = computed(() => {
 	return `≈ ${formatBaseUnits(modelRaw.value, tokenDecimals.value, { thousandsSep: ",", decimalSep: "." })} ${props.token?.symbol ?? ""}`
 })
 
+const plainAmount = (raw) => formatBaseUnits(raw, tokenDecimals.value, { thousandsSep: "", decimalSep: "." })
+
 const writeModelFromRaw = (raw) => {
-	// Plain machine format (no separators) — this exact string is what the
-	// parent validates and integerizes; it IS the amount that sends.
-	model.value = formatBaseUnits(raw, tokenDecimals.value, { thousandsSep: "", decimalSep: "." })
+	model.value = plainAmount(raw)
 }
 
-const scheduleConvert = () => {
-	if (!fiatGuard.value) return
-	fiatGuard.value = { ...fiatGuard.value, converting: true }
+const scheduleConvert = (base = fiatGuard.value) => {
+	if (!base) return
+	fiatGuard.value = { ...base, converting: true }
 	clearTimeout(convertTimer)
 	convertTimer = setTimeout(() => {
 		const guard = fiatGuard.value
@@ -234,6 +247,8 @@ watch(
 watch(canUseFiatInput, (can) => {
 	if (!can && fiatMode.value) exitFiatMode({ clearAmount: true })
 })
+// After the render, so the ruler holds what the field shows; the fiat toggle takes the field's width.
+watch([model, isFocused, fiatMode, canUseFiatInput], fitField, { flush: "post" })
 /**
  * Watch-driven exits are FAIL-CLOSED: they also clear the amount. Leaving the
  * fiat-derived token amount sendable after the session's basis vanished (quote
@@ -256,13 +271,14 @@ function exitFiatMode({ clearAmount = false } = {}) {
  *  amount before confirming. */
 const refreezeQuote = () => {
 	if (!fiatMode.value || !props.liveQuote) return
-	fiatGuard.value = { frozenUsd: props.liveQuote.usd, frozenAt: Date.now(), converting: false }
-	scheduleConvert()
+	// Handed over, not written first: `fiatGuard.value` reads the page's old quote until it re-renders.
+	scheduleConvert({ frozenUsd: props.liveQuote.usd, frozenAt: Date.now(), converting: false })
 }
 defineExpose({ refreezeQuote })
 
 onBeforeUnmount(() => {
 	clearTimeout(convertTimer)
+	document.fonts?.removeEventListener("loadingdone", fitField)
 })
 
 const handleFocus = () => {
@@ -275,7 +291,10 @@ const handleMax = () => {
 		handleFiatBalanceAction(1n)
 		return
 	}
-	model.value = props.tokenBalanceByType
+	if (props.balanceRawByType == null || tokenDecimals.value === undefined) return
+	// Max's click stops short of the card's focus, so no blur rests the amount: it is written at rest,
+	// in one write, as `model.value` reads the page's old value until the page re-renders.
+	model.value = restingAmount(plainAmount(BigInt(props.balanceRawByType)), tokenDecimals.value)
 }
 
 /** Fiat-mode Max/Half: bigint-exact from the RAW balance — the sent amount is
@@ -294,30 +313,35 @@ const handleFiatBalanceAction = (divisor) => {
 <template>
 	<Flex @click="handleFocus" gap="8" direction="column" :class="$style.wrapper">
 		<Flex direction="column" gap="4">
-			<Flex gap="8" align="baseline" justify="between">
-				<input
-					v-if="fiatMode"
-					ref="inputEl"
-					v-model="fiatTerm"
-					@input="handleFiatInput"
-					@focus="handleAmountFocus"
-					:disabled="!tokenBalanceByType"
-					placeholder="0.00"
-					data-testid="send-amount-fiat-input"
-					:class="$style.input_field"
-				/>
-				<input
-					v-else
-					ref="inputEl"
-					v-model="model"
-					@input="handleAmountInput"
-					@focus="handleAmountFocus"
-					@blur="handleAmountBlur"
-					:disabled="!tokenBalanceByType"
-					placeholder="0.00"
-					data-testid="send-amount-input"
-					:class="$style.input_field"
-				/>
+			<Flex gap="8" justify="between" data-testid="send-amount-row">
+				<div :class="$style.field_line">
+					<input
+						v-if="fiatMode"
+						ref="inputEl"
+						v-model="fiatTerm"
+						@input="handleFiatInput"
+						@focus="handleAmountFocus"
+						:disabled="!tokenBalanceByType"
+						placeholder="0.00"
+						data-testid="send-amount-fiat-input"
+						:class="[$style.input_field, $style.field_type]"
+					/>
+					<input
+						v-else
+						ref="inputEl"
+						v-model="model"
+						@input="handleAmountInput"
+						@focus="handleAmountFocus"
+						@blur="handleAmountBlur"
+						:disabled="!tokenBalanceByType"
+						placeholder="0.00"
+						data-testid="send-amount-input"
+						:class="[$style.input_field, $style.field_type]"
+						:style="{ '--hero-scale': fieldScale }"
+					/>
+					<!-- The fit's ruler: it shares the field's `field_type` class, or the two widths part. -->
+					<span aria-hidden="true" :class="$style.field_ruler"><span ref="fieldRuler" :class="$style.field_type">{{ model }}</span></span>
+				</div>
 				<span
 					v-if="canUseFiatInput"
 					@click.stop="toggleFiatMode"
@@ -348,7 +372,7 @@ const handleFiatBalanceAction = (divisor) => {
 
 				<Flex align="center" gap="8" style="flex: none">
 					<span v-if="balanceSegment" data-testid="send-amount-balance" :class="$style.balance_corner">{{ balanceSegment }}</span>
-					<span @click="handleMax" data-testid="send-amount-max" :class="$style.action_link">Max</span>
+					<span @click.stop="handleMax" data-testid="send-amount-max" :class="$style.action_link">Max</span>
 				</Flex>
 			</Flex>
 
@@ -367,20 +391,61 @@ const handleFiatBalanceAction = (divisor) => {
 	padding: 8px 0;
 }
 
-.input_field {
-	width: 100%;
+/* The line keeps the full size's height and baseline while the amount's type shrinks, so nothing
+ * below it moves. */
+.field_line {
+	position: relative;
 	flex: 1;
 	min-width: 0;
+
+	white-space: nowrap;
+}
+
+/* A zero-width strut in the full type, with the input's vertical padding. The unit toggle holds
+ * one too, so its label sits on the amount's baseline and its box, the press target, still fills
+ * the row. */
+.field_line::after,
+.unit_pair::before {
+	content: "\200b";
+	display: inline-block;
+	width: 0;
+	padding-block: 1px;
 
 	font-family: var(--font-headline);
 	font-size: 40px;
 	font-weight: 700;
-	letter-spacing: -0.04em;
+}
+
+.input_field {
+	width: 100%;
+	/* The browsers' own, stated because the strut copies it. */
+	padding-block: 1px;
+
 	color: var(--txt-primary);
 
 	&::placeholder {
 		color: var(--txt-tertiary);
 	}
+}
+
+.field_type {
+	font-family: var(--font-headline);
+	font-size: calc(40px * var(--hero-scale, 1));
+	font-weight: 700;
+	letter-spacing: -0.04em;
+}
+
+.field_ruler {
+	position: absolute;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.field_ruler > span {
+	position: absolute;
 }
 
 .unit_pair {
