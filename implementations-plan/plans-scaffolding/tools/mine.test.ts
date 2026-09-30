@@ -4,7 +4,18 @@ import { join } from "node:path"
 import type { Closures, Row } from "./classify"
 import { cleanupRepos, git, P, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
-import { admit, carried, type Decisions, inventoryFor, readRecords, type Rec, verify, writeRecords } from "./mine"
+import {
+	admit,
+	carried,
+	type Decisions,
+	type Inventory,
+	inventoryFor,
+	readRecords,
+	type Rec,
+	type Verdict,
+	verify,
+	writeRecords,
+} from "./mine"
 
 afterAll(cleanupRepos)
 
@@ -105,6 +116,37 @@ function cleanRun(repo: string, file: Closures): Rec[] {
 	]
 }
 
+/** Each change yields one of the problems the --verify test expects; every other record passes through. */
+const INVENTORY_BREAKS: Readonly<Record<string, (u: Inventory) => Rec[]>> = {
+	a: (u) => [{ ...u, files: u.files.map((f, i) => (i === 0 ? { ...f, status: "skipped" as const } : f)) }],
+	b: (u) => [{ ...u, files: u.files.map((f) => ({ ...f, status: undefined })) }],
+	c: (u) => [{ ...u, host: `${P}/c/plan.md` }],
+	"a/sub": () => [],
+}
+
+function breakVerdict(v: Verdict, lessonId: string): Rec[] {
+	if (v.ref === "F1") return v.stage === "verifier" ? [] : [{ ...v, verdict: "fails" }]
+	return v.stage === "driver" && v.ref === lessonId ? [] : [v]
+}
+
+function breakRecord(r: Rec, lessonId: string): Rec[] {
+	switch (r.kind) {
+		case "candidate":
+			return r.by === "t" ? [{ ...r, quote: `${r.quote}!` }] : [r]
+		case "verdict":
+			return breakVerdict(r, lessonId)
+		case "line":
+			return r.id === "F1"
+				? [
+						{ ...r, followUp: undefined },
+						{ ...r, id: "L1", followUp: undefined },
+					]
+				: [r]
+		case "inventory":
+			return Object.hasOwn(INVENTORY_BREAKS, r.plan) ? INVENTORY_BREAKS[r.plan](r) : [r]
+	}
+}
+
 describe("mine", () => {
 	test("the inventory is keyed by plan: a nested plan owns its files, hosts come from the table, only sources are listed", () => {
 		const { repo, file } = minedTree()
@@ -151,22 +193,7 @@ describe("mine", () => {
 
 		writeFileSync(lessons, `${readFileSync(lessons, "utf8")}- An entry nobody mined.\n`)
 		const lessonId = recs.flatMap((r) => (r.kind === "line" && r.id === "L1" ? r.candidates : []))[0]
-		const broken = readRecords(repo).flatMap((r): Rec[] => {
-			if (r.kind === "candidate" && r.by === "t") return [{ ...r, quote: `${r.quote}!` }]
-			if (r.kind === "verdict" && r.ref === "F1") return r.stage === "verifier" ? [] : [{ ...r, verdict: "fails" }]
-			if (r.kind === "verdict" && r.stage === "driver" && r.ref === lessonId) return []
-			if (r.kind === "line" && r.id === "F1")
-				return [
-					{ ...r, followUp: undefined },
-					{ ...r, id: "L1", followUp: undefined },
-				]
-			if (r.kind === "inventory" && r.plan === "b") return [{ ...r, files: r.files.map((f) => ({ ...f, status: undefined })) }]
-			if (r.kind === "inventory" && r.plan === "a")
-				return [{ ...r, files: r.files.map((f, i) => (i === 0 ? { ...f, status: "skipped" as const } : f)) }]
-			if (r.kind === "inventory" && r.plan === "c") return [{ ...r, host: `${P}/c/plan.md` }]
-			if (r.kind === "inventory" && r.plan === "a/sub") return []
-			return [r]
-		})
+		const broken = readRecords(repo).flatMap((r) => breakRecord(r, lessonId))
 		writeRecords(repo, broken)
 		expect(verify(repo).map((p) => p.replace(/([ck])-[0-9a-f]{10}/, "$1-…"))).toEqual([
 			`${P}/a/plan.md: skipped without a reason`,

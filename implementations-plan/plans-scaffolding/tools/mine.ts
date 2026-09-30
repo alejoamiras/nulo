@@ -230,47 +230,59 @@ export function carried(cwd: string, file: Closures): Candidate[] {
 	})
 }
 
+type ReaderCandidate = ReaderOutput["candidates"][number]
+
+/** A reader's candidate and its verdict, or why its path, cluster or quote was refused. */
+function admitCandidate(
+	cwd: string,
+	base: string,
+	reader: string,
+	c: ReaderCandidate,
+	known: ReadonlySet<string>,
+): { add: Rec[]; problems: string[] } {
+	const problems: string[] = []
+	if (!known.has(c.path)) problems.push(`${c.path}: not a mining source in the inventory`)
+	if (!CLUSTERS.includes(c.cluster)) problems.push(`${c.path}: unknown cluster ${c.cluster}`)
+	const at = locate(cwd, base, c.path, c.quote)
+	if (typeof at === "string") return { add: [], problems: [...problems, `${c.path}: ${at}: ${JSON.stringify(c.quote.slice(0, 60))}`] }
+	const id = idOf("c", c.path, c.quote)
+	const proposal: Proposal = { target: c.target, gotcha: c.gotcha, owner: c.owner, sourceDate: c.sourceDate }
+	const verdict: Verdict = { kind: "verdict", stage: "reader", ref: id, verdict: "proposed", note: scrub(`${c.check} → ${c.result}`) }
+	return { add: [{ kind: "candidate", id, ...at, cluster: c.cluster, by: reader, proposal }, verdict], problems }
+}
+
+const carriedVerdict = (k: ReaderOutput["carried"][number]): Verdict => ({
+	kind: "verdict",
+	stage: "reader",
+	ref: k.id,
+	verdict: k.verdict,
+	note: scrub(`${k.check} → ${k.result}${k.note ? `; ${k.note}` : ""}`),
+})
+
+/** The inventory entries holding a file this reader reports, with its statuses applied. */
+function statusUpdates(inventory: readonly Inventory[], out: ReaderOutput): Inventory[] {
+	const statuses = new Map(out.files.map((f) => [f.path, f]))
+	const apply = (f: FileEntry): FileEntry => {
+		const s = statuses.get(f.path)
+		return s ? { ...f, status: s.status, reason: s.reason ? scrub(s.reason) : undefined, by: out.reader } : f
+	}
+	return inventory.filter((u) => u.files.some((f) => statuses.has(f.path))).map((u) => ({ ...u, files: u.files.map(apply) }))
+}
+
 /** Candidates and verdicts from one reader, or the reasons its quotes and paths were refused. */
 export function admit(cwd: string, file: Closures, out: ReaderOutput, recs: readonly Rec[]): { add: Rec[]; problems: string[] } {
 	const inventory = recs.filter((r): r is Inventory => r.kind === "inventory")
 	const known = new Set(inventory.flatMap((u) => u.files.map((f) => f.path)))
 	const ids = new Set(recs.filter((r) => r.kind === "candidate").map((r) => r.id))
-	const problems: string[] = []
-	const add: Rec[] = []
-	for (const c of out.candidates) {
-		if (!known.has(c.path)) problems.push(`${c.path}: not a mining source in the inventory`)
-		if (!CLUSTERS.includes(c.cluster)) problems.push(`${c.path}: unknown cluster ${c.cluster}`)
-		const at = locate(cwd, file.closuresBase, c.path, c.quote)
-		if (typeof at === "string") {
-			problems.push(`${c.path}: ${at}: ${JSON.stringify(c.quote.slice(0, 60))}`)
-			continue
-		}
-		const id = idOf("c", c.path, c.quote)
-		const proposal: Proposal = { target: c.target, gotcha: c.gotcha, owner: c.owner, sourceDate: c.sourceDate }
-		add.push({ kind: "candidate", id, ...at, cluster: c.cluster, by: out.reader, proposal })
-		add.push({ kind: "verdict", stage: "reader", ref: id, verdict: "proposed", note: scrub(`${c.check} → ${c.result}`) })
-	}
+	const admitted = out.candidates.map((c) => admitCandidate(cwd, file.closuresBase, out.reader, c, known))
+	const add: Rec[] = admitted.flatMap((a) => a.add)
+	const problems = admitted.flatMap((a) => a.problems)
 	for (const k of out.carried) {
-		if (!ids.has(k.id)) problems.push(`${k.id}: no such carried candidate`)
-		else
-			add.push({
-				kind: "verdict",
-				stage: "reader",
-				ref: k.id,
-				verdict: k.verdict,
-				note: scrub(`${k.check} → ${k.result}${k.note ? `; ${k.note}` : ""}`),
-			})
+		if (ids.has(k.id)) add.push(carriedVerdict(k))
+		else problems.push(`${k.id}: no such carried candidate`)
 	}
-	const statuses = new Map(out.files.map((f) => [f.path, f]))
 	for (const f of out.files) if (!known.has(f.path)) problems.push(`${f.path}: reported but not in the inventory`)
-	for (const u of inventory) {
-		if (!u.files.some((f) => statuses.has(f.path))) continue
-		const files = u.files.map((f) => {
-			const s = statuses.get(f.path)
-			return s ? { ...f, status: s.status, reason: s.reason ? scrub(s.reason) : undefined, by: out.reader } : f
-		})
-		add.push({ ...u, files })
-	}
+	add.push(...statusUpdates(inventory, out))
 	return { add, problems }
 }
 
@@ -281,24 +293,24 @@ function merge(recs: readonly Rec[], add: readonly Rec[]): Rec[] {
 	return [...next.values()]
 }
 
+const statusProblems = (f: FileEntry): string[] => {
+	if (!f.status) return [`${f.path}: neither mined nor skipped`]
+	return f.status === "skipped" && !f.reason?.trim() ? [`${f.path}: skipped without a reason`] : []
+}
+
+function planProblems(want: Inventory, got: Inventory | undefined): string[] {
+	if (!got) return [`${want.plan}: no inventory entry`]
+	const paths = new Set(got.files.map((f) => f.path))
+	return [
+		...(got.host === want.host ? [] : [`${want.plan}: host ${got.host} is not the Outcome host ${want.host}`]),
+		...want.files.filter((f) => !paths.has(f.path)).map((f) => `${f.path}: missing from ${want.plan}'s inventory`),
+		...got.files.flatMap(statusProblems),
+	]
+}
+
 function inventoryProblems(cwd: string, file: Closures, recs: readonly Rec[]): string[] {
 	const recorded = new Map(recs.filter((r): r is Inventory => r.kind === "inventory").map((r) => [r.plan, r]))
-	const problems: string[] = []
-	for (const want of inventoryFor(cwd, file)) {
-		const got = recorded.get(want.plan)
-		if (!got) {
-			problems.push(`${want.plan}: no inventory entry`)
-			continue
-		}
-		if (got.host !== want.host) problems.push(`${want.plan}: host ${got.host} is not the Outcome host ${want.host}`)
-		const paths = new Set(got.files.map((f) => f.path))
-		for (const f of want.files) if (!paths.has(f.path)) problems.push(`${f.path}: missing from ${want.plan}'s inventory`)
-		for (const f of got.files) {
-			if (!f.status) problems.push(`${f.path}: neither mined nor skipped`)
-			else if (f.status === "skipped" && !f.reason?.trim()) problems.push(`${f.path}: skipped without a reason`)
-		}
-	}
-	return problems
+	return inventoryFor(cwd, file).flatMap((want) => planProblems(want, recorded.get(want.plan)))
 }
 
 function candidateProblems(cwd: string, recs: readonly Rec[]): string[] {
@@ -314,36 +326,59 @@ function candidateProblems(cwd: string, recs: readonly Rec[]): string[] {
 		})
 }
 
+type VerdictOf = (stage: Verdict["stage"], ref: string) => string | undefined
+
+function duplicateIds(lines: readonly Line[]): string[] {
+	const seen = new Set<string>()
+	return lines.flatMap((l) => {
+		const dup = seen.has(l.id)
+		seen.add(l.id)
+		return dup ? [`${l.id}: two lines share the id, so one's verdicts would pass the other`] : []
+	})
+}
+
+/** Why a line's candidates, currency check or verifier verdict do not carry it. */
+function lineVerdictProblems(l: Line, verdictOf: VerdictOf, candidates: ReadonlySet<string>): string[] {
+	const problems = l.candidates.length === 0 ? [`${l.id}: no candidate`] : []
+	for (const c of l.candidates) {
+		if (!candidates.has(c)) problems.push(`${l.id}: no candidate ${c}`)
+		else if (verdictOf("driver", c) !== "accept") problems.push(`${l.id}: the driver did not accept ${c}`)
+	}
+	if (!["holds", "dated"].includes(verdictOf("currency", l.id) ?? "")) problems.push(`${l.id}: no currency check that held`)
+	if (verdictOf("verifier", l.id) !== "supported") problems.push(`${l.id}: the verifier has not supported it`)
+	return problems
+}
+
+function curatedProblems(cwd: string, name: CuratedFile, mine: readonly Line[], check: (l: Line) => string[]): string[] {
+	const entries = entriesOf(readFileSync(join(cwd, CURATED[name]), "utf8")).map(norm)
+	const texts = new Set(mine.map((l) => norm(l.text)))
+	return [
+		...entries.filter((e) => !texts.has(e)).map((e) => `${name}: an entry no line records: ${JSON.stringify(e.slice(0, 80))}`),
+		...mine.flatMap((l) => [...(entries.includes(norm(l.text)) ? [] : [`${l.id}: its text is not an entry of ${name}`]), ...check(l)]),
+	]
+}
+
 function lineProblems(cwd: string, file: Closures, recs: readonly Rec[]): string[] {
-	const verdict = new Map(recs.filter((r): r is Verdict => r.kind === "verdict").map((v) => [`${v.stage}\0${v.ref}`, v.verdict]))
+	const verdicts = new Map(recs.filter((r): r is Verdict => r.kind === "verdict").map((v) => [`${v.stage}\0${v.ref}`, v.verdict]))
+	const verdictOf: VerdictOf = (stage, ref) => verdicts.get(`${stage}\0${ref}`)
 	const candidates = new Set(recs.filter((r) => r.kind === "candidate").map((r) => r.id))
 	const lines = recs.filter((r): r is Line => r.kind === "line")
-	const problems: string[] = []
-	const seen = new Set<string>()
-	for (const l of lines) {
-		if (seen.has(l.id)) problems.push(`${l.id}: two lines share the id, so one's verdicts would pass the other`)
-		seen.add(l.id)
-	}
-	for (const name of Object.keys(CURATED) as CuratedFile[]) {
-		const entries = entriesOf(readFileSync(join(cwd, CURATED[name]), "utf8")).map(norm)
-		const mine = lines.filter((l) => l.file === name)
-		const texts = new Set(mine.map((l) => norm(l.text)))
-		for (const e of entries) if (!texts.has(e)) problems.push(`${name}: an entry no line records: ${JSON.stringify(e.slice(0, 80))}`)
-		for (const l of mine) {
-			if (!entries.includes(norm(l.text))) problems.push(`${l.id}: its text is not an entry of ${name}`)
-			if (l.candidates.length === 0) problems.push(`${l.id}: no candidate`)
-			for (const c of l.candidates) {
-				if (!candidates.has(c)) problems.push(`${l.id}: no candidate ${c}`)
-				else if (verdict.get(`driver\0${c}`) !== "accept") problems.push(`${l.id}: the driver did not accept ${c}`)
-			}
-			if (!["holds", "dated"].includes(verdict.get(`currency\0${l.id}`) ?? "")) problems.push(`${l.id}: no currency check that held`)
-			if (verdict.get(`verifier\0${l.id}`) !== "supported") problems.push(`${l.id}: the verifier has not supported it`)
-		}
-	}
+	const check = (l: Line) => lineVerdictProblems(l, verdictOf, candidates)
 	const covered = new Set(lines.filter((l) => l.file === "follow-ups.md").map((l) => l.followUp))
-	for (const id of new Set(file.rows.flatMap((r) => r.followUps)))
-		if (!covered.has(id)) problems.push(`follow-up ${id}: no follow-ups.md entry`)
-	return problems
+	return [
+		...duplicateIds(lines),
+		...(Object.keys(CURATED) as CuratedFile[]).flatMap((name) =>
+			curatedProblems(
+				cwd,
+				name,
+				lines.filter((l) => l.file === name),
+				check,
+			),
+		),
+		...[...new Set(file.rows.flatMap((r) => r.followUps))]
+			.filter((id) => !covered.has(id))
+			.map((id) => `follow-up ${id}: no follow-ups.md entry`),
+	]
 }
 
 export function verify(cwd: string): string[] {
@@ -358,54 +393,72 @@ function refreshInventory(cwd: string, file: Closures, recs: readonly Rec[]): Re
 	return [...recs.filter((r) => r.kind !== "inventory"), ...fresh]
 }
 
-function main(argv: readonly string[]): number {
-	const cwd = process.cwd()
-	const file = readClosures(cwd)
-	const recs = readRecords(cwd)
-	const [flag, arg] = argv
-	if (flag === "--verify") {
-		const problems = verify(cwd)
-		for (const p of problems) console.log(p)
-		const counts = (Object.keys(ORDER) as Rec["kind"][]).map((k) => `${recs.filter((r) => r.kind === k).length} ${k}`)
-		console.log(`mine --verify: ${counts.join(", ")}; ${problems.length} problem(s)`)
+type Command = (cwd: string, file: Closures, recs: readonly Rec[], argv: readonly string[]) => number
+
+function runVerify(cwd: string, _file: Closures, recs: readonly Rec[]): number {
+	const problems = verify(cwd)
+	for (const p of problems) console.log(p)
+	const counts = (Object.keys(ORDER) as Rec["kind"][]).map((k) => `${recs.filter((r) => r.kind === k).length} ${k}`)
+	console.log(`mine --verify: ${counts.join(", ")}; ${problems.length} problem(s)`)
+	return problems.length === 0 ? 0 : 1
+}
+
+function runAdd(cwd: string, file: Closures, recs: readonly Rec[], argv: readonly string[]): number {
+	const { add, problems } = admit(cwd, file, JSON.parse(readFileSync(argv[1], "utf8")) as ReaderOutput, recs)
+	for (const p of problems) console.log(`refused: ${p}`)
+	const admitted = add.filter((r) => r.kind === "candidate").length
+	if (argv.includes("--dry-run") || problems.length > 0) {
+		console.log(`${admitted} candidate(s) would be admitted; ${problems.length} refused; nothing written`)
 		return problems.length === 0 ? 0 : 1
 	}
-	if (flag === "--inventory") {
-		const next = refreshInventory(cwd, file, recs)
-		writeRecords(cwd, next)
-		console.log(`inventory: ${next.filter((r) => r.kind === "inventory").length} plans`)
-		return 0
+	writeRecords(cwd, merge(recs, add))
+	console.log(`admitted ${admitted} candidate(s)`)
+	return 0
+}
+
+function runDecide(cwd: string, _file: Closures, recs: readonly Rec[], argv: readonly string[]): number {
+	const d = JSON.parse(readFileSync(argv[1], "utf8")) as Decisions
+	const add: Rec[] = [
+		...d.verdicts.map((v) => ({ kind: "verdict", ...v, note: scrub(v.note) }) satisfies Verdict),
+		...d.lines.map((l) => ({ kind: "line", ...l }) satisfies Line),
+	]
+	writeRecords(cwd, merge(recs, add))
+	console.log(`recorded ${d.verdicts.length} verdict(s) and ${d.lines.length} line(s)`)
+	return 0
+}
+
+const COMMANDS: ReadonlyMap<string, { command: Command; takesFile?: true }> = new Map(
+	Object.entries({
+		"--verify": { command: runVerify },
+		"--inventory": {
+			command: (cwd, file, recs) => {
+				const next = refreshInventory(cwd, file, recs)
+				writeRecords(cwd, next)
+				console.log(`inventory: ${next.filter((r) => r.kind === "inventory").length} plans`)
+				return 0
+			},
+		},
+		"--carry": {
+			command: (cwd, file, recs) => {
+				const add = carried(cwd, file)
+				writeRecords(cwd, merge(recs, add))
+				console.log(`carried: ${add.length} candidates`)
+				return 0
+			},
+		},
+		"--add": { command: runAdd, takesFile: true },
+		"--decide": { command: runDecide, takesFile: true },
+	}),
+)
+
+function main(argv: readonly string[]): number {
+	const entry = COMMANDS.get(argv[0] ?? "")
+	if (!entry || (entry.takesFile && !argv[1])) {
+		console.log("usage: mine.ts --inventory | --carry | --add <file> [--dry-run] | --decide <file> | --verify")
+		return 2
 	}
-	if (flag === "--carry") {
-		const add = carried(cwd, file)
-		writeRecords(cwd, merge(recs, add))
-		console.log(`carried: ${add.length} candidates`)
-		return 0
-	}
-	if (flag === "--add" && arg) {
-		const { add, problems } = admit(cwd, file, JSON.parse(readFileSync(arg, "utf8")) as ReaderOutput, recs)
-		for (const p of problems) console.log(`refused: ${p}`)
-		const admitted = add.filter((r) => r.kind === "candidate").length
-		if (argv.includes("--dry-run") || problems.length > 0) {
-			console.log(`${admitted} candidate(s) would be admitted; ${problems.length} refused; nothing written`)
-			return problems.length === 0 ? 0 : 1
-		}
-		writeRecords(cwd, merge(recs, add))
-		console.log(`admitted ${admitted} candidate(s)`)
-		return 0
-	}
-	if (flag === "--decide" && arg) {
-		const d = JSON.parse(readFileSync(arg, "utf8")) as Decisions
-		const add: Rec[] = [
-			...d.verdicts.map((v) => ({ kind: "verdict", ...v, note: scrub(v.note) }) satisfies Verdict),
-			...d.lines.map((l) => ({ kind: "line", ...l }) satisfies Line),
-		]
-		writeRecords(cwd, merge(recs, add))
-		console.log(`recorded ${d.verdicts.length} verdict(s) and ${d.lines.length} line(s)`)
-		return 0
-	}
-	console.log("usage: mine.ts --inventory | --carry | --add <file> [--dry-run] | --decide <file> | --verify")
-	return 2
+	const cwd = process.cwd()
+	return entry.command(cwd, readClosures(cwd), readRecords(cwd), argv)
 }
 
 if (import.meta.main) process.exit(main(process.argv.slice(2)))
