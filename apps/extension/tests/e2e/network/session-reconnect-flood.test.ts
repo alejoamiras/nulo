@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
 import { openPlayground } from "../fixtures/playground"
-import { approveDiscover, approveVerify, countVerifyWindows, waitForPopup } from "../fixtures/popups"
+import { approveConnect, approveVerify, countVerifyWindows, waitForPopup } from "../fixtures/popups"
 import { switchToLocalNetwork } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -30,8 +30,7 @@ test.skipIf(!hasConfig)(
 		const first = await openPlayground(ctx)
 		const discoverP = waitForPopup(ctx, "discover", { timeout: 30_000 })
 		await clickByTestId(first, "pg-btn-connect")
-		await approveDiscover(await discoverP)
-		await approveVerify(await waitForPopup(ctx, "verify", { timeout: 30_000 }))
+		await approveVerify(await approveConnect(ctx, await discoverP))
 		await first.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 		await first.close()
 

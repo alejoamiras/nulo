@@ -57,6 +57,36 @@ describe("ChromeWindowsAdapter", () => {
 	})
 })
 
+describe("ChromeWindowsAdapter.navigate", () => {
+	const URL = "chrome-extension://abc/src/popup/index.html#/windows/verify?sessionId=row-1&verificationHash=SENTINELHASH"
+
+	function stubTabs(tabs: Array<{ id?: number }>) {
+		const query = vi.fn<Stub>(async () => tabs)
+		const update = vi.fn<Stub>(async () => ({}))
+		const base = (globalThis as { chrome?: object }).chrome
+		vi.stubGlobal("chrome", { ...base, tabs: { query, update } })
+		return { query, update, windows: new RealChromeBrowserApi().windows }
+	}
+
+	test("loads the URL in the window's tab", async () => {
+		const { query, update, windows } = stubTabs([{ id: 314 }])
+
+		await windows.navigate(41, URL)
+		expect(query).toHaveBeenCalledWith({ windowId: 41 })
+		expect(update).toHaveBeenCalledWith(314, { url: URL })
+	})
+
+	test("a window with no tab rejects, and the adapter's own error carries no URL", async () => {
+		const { update, windows } = stubTabs([])
+
+		const error = await windows.navigate(41, URL).catch((e: unknown) => e)
+		expect(error).toBeInstanceOf(Error)
+		expect((error as Error).message).not.toContain("SENTINELHASH")
+		expect((error as Error).message).not.toContain("chrome-extension://")
+		expect(update).not.toHaveBeenCalled()
+	})
+})
+
 describe("ChromeWindowsAdapter on Firefox (getLastFocused ignores windowTypes)", () => {
 	const boundsOf = ({ left, top, width, height }: Win) => ({ left, top, width, height })
 

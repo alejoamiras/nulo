@@ -131,6 +131,44 @@ export async function approveDiscover(page: Page): Promise<void> {
 	await clickByTestId(page, "discover-allow-btn")
 }
 
+type ConnectWindowRead = { id: number | undefined; popups: number }
+
+/** Read inside the page: BiDi has no window handles, so Puppeteer cannot name a window on Firefox. */
+function readConnectWindow(page: Page): Promise<ConnectWindowRead> {
+	return page.evaluate(async () => ({
+		id: (await chrome.windows.getCurrent()).id,
+		popups: (await chrome.windows.getAll({ windowTypes: ["popup"] })).filter((w) => w.type === "popup").length,
+	}))
+}
+
+/**
+ * Allow a new connection and wait for its emoji check in the same window, with no popup window
+ * opened or closed on the way. Resolves with that page, now the check, for `approveVerify`.
+ * `allow` is the click, `approveDiscover` unless the caller drives the real pointer.
+ */
+export async function approveConnect(
+	ctx: ExtensionContext,
+	discoverPage: Page,
+	allow: () => Promise<void> = () => approveDiscover(discoverPage),
+): Promise<Page> {
+	const before = await readConnectWindow(discoverPage)
+	await allow()
+	await discoverPage
+		.waitForFunction(
+			() => location.hash.startsWith("#/windows/verify") && document.querySelector('[data-testid="verify-emoji-grid"]') !== null,
+			{ timeout: 30_000, polling: 200 },
+		)
+		.catch((err) => {
+			const where = discoverPage.isClosed() ? "the connect window closed" : "the connect window never showed the check"
+			throw new Error(`approveConnect: ${where} (verify windows open: ${countVerifyWindows(ctx)})`, { cause: err })
+		})
+	const after = await readConnectWindow(discoverPage)
+	if (after.id !== before.id || after.popups !== before.popups) {
+		throw new Error(`approveConnect: the check moved windows: ${JSON.stringify({ before, after })}`)
+	}
+	return discoverPage
+}
+
 export async function denyDiscover(page: Page): Promise<void> {
 	await clickByTestId(page, "discover-deny-btn")
 }

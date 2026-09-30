@@ -66,7 +66,7 @@ export function getProvider(): WalletProvider | null {
 export async function connect(): Promise<void> {
 	if (getState().status === "connected") return
 
-	setState({ status: "discovering", lastError: null })
+	setState({ status: "discovering", lastError: null, verificationHash: null })
 
 	const manager = WalletManager.configure({ extensions: { enabled: true } })
 	const discovery = manager.getAvailableWallets({
@@ -91,6 +91,7 @@ export async function connect(): Promise<void> {
 	setState({ status: "verifying" })
 
 	const pending = await provider.establishSecureChannel(APP_ID)
+	setState({ verificationHash: pending.verificationHash })
 	wallet = await pending.confirm()
 
 	// Wallet-INITIATED disconnects (session termination, profile switch) arrive

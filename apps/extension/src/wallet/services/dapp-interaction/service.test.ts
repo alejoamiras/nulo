@@ -34,7 +34,7 @@ import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { DappInteractionService } from "./service"
-import type { CapabilityPayload, DappInteraction, ExecutionHooks, OperationRequest } from "./spec"
+import type { CapabilityPayload, DappInteraction, DiscoveryResult, ExecutionHooks, OperationRequest } from "./spec"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -755,5 +755,78 @@ describe("DappInteractionService — the capability window's known contracts", (
 			{ address: "0x1e8e7e73c592a1b1c9199b4b655ddc7a16fa8a8488df595610b71d3dc1cc666c", name: "Auth registry" },
 			{ address: "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8c60299b03b790e6502", name: "Test USDC" },
 		])
+	})
+})
+
+describe("DappInteractionService — an approved connect window is handed to the connection", () => {
+	const METADATA = { name: "dapp.example", url: "https://dapp.example" }
+
+	/** A real WindowManager on a fake browser: `open` starts an interaction and waits for its window. */
+	function handOverHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const clock = new MockClock()
+		const dapp = new DappInteractionService(noopLogger, new WindowManager(api.windows, clock, noopLogger))
+		const creates = vi.spyOn(api.windows, "create")
+		const removes = vi.spyOn(api.windows, "remove")
+		const storage = (dapp as unknown as { storage: Map<string, DappInteraction> }).storage
+		const interaction = (dapp as unknown as { interaction: (type: string, payload: unknown) => Promise<unknown> }).interaction
+		const open = async (start: () => Promise<unknown>) => {
+			const pending = start()
+			await expect.poll(() => creates.mock.results.length).toBe(1)
+			const created = (await creates.mock.results[0]?.value) as { id: number }
+			await flush()
+			return { pending, windowId: created.id, id: [...storage.keys()][0] as string }
+		}
+		const closeByUser = (windowId: number) => (api.windows as unknown as { closeByUser: (id: number) => void }).closeByUser(windowId)
+		return { dapp, clock, removes, open, interaction, closeByUser }
+	}
+
+	test("an approved discovery resolves with the handle's window id, never the page's, and the window stays open", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: true, windowId: 999 } as DiscoveryResult)
+
+		await expect(w.pending).resolves.toEqual({ approved: true, windowId: w.windowId })
+		expect(w.windowId).not.toBe(999)
+		// Nothing watches the window now: its later close and the old timeout settle nothing.
+		h.closeByUser(w.windowId)
+		h.clock.advance(10 * 60 * 1000)
+		expect(h.removes).not.toHaveBeenCalled()
+	})
+
+	test("a discovery answer other than approved: true is a denial and closes the window", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: "yes", windowId: 999 } as unknown as DiscoveryResult)
+
+		await expect(w.pending).resolves.toEqual({ approved: false })
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+
+	test("a denied discovery settles and closes the window", async () => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.dapp.discover({ dappMetadata: METADATA }))
+
+		await h.dapp.resolveInteraction(w.id, { approved: false })
+
+		await expect(w.pending).resolves.toEqual({ approved: false })
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
+	})
+
+	const capabilityPayload = { params: { sessionId: "s1" }, session: { profileId: "p1", dappMetadata: METADATA } }
+	test.each([
+		["capabilities", capabilityPayload, { approved: true }],
+		["execute", emptyPayload, [{ status: "ok", result: "0x01" }]],
+	])("a %s window answered through resolveInteraction settles with that answer and closes", async (kind, payload, answer) => {
+		const h = handOverHarness()
+		const w = await h.open(() => h.interaction.call(h.dapp, kind, payload))
+
+		await h.dapp.resolveInteraction(w.id, answer as never)
+
+		await expect(w.pending).resolves.toEqual(answer)
+		expect(h.removes).toHaveBeenCalledWith(w.windowId)
 	})
 })

@@ -40,7 +40,7 @@ import { type ContentScriptMessageEnvelope, isSubframeSender, validateContentScr
 import { sessionDisconnectedMessage, sessionKnownTo, staleSessionVerdict } from "./stale-session"
 import { SESSION_INVALID_ERROR, toWalletResponseError } from "./error-envelope"
 import { toJsonSafe } from "./to-json-safe"
-import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
+import { cancelPendingVerification, deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
 import {
 	enforceSessionProfileBinding,
 	type ProfileSwitchEpoch,
@@ -111,7 +111,7 @@ export function initWalletSdkHandler(
 	ports: { windows: WindowPort; clock: ClockPort },
 ): BackgroundConnectionHandler {
 	const deps = resolveSdkDeps(services, logger)
-	const state = createSdkHandlerState(ports.clock)
+	const state = createSdkHandlerState(ports)
 
 	const handler = new BackgroundConnectionHandler(
 		{
@@ -154,7 +154,7 @@ export function initWalletSdkHandler(
 	// lives in `tab-lifecycle.ts` (Q-04 pilot); it MUST stay registered before
 	// `handler.initialize()`. Handler methods are arrow-wrapped to keep `this`.
 	wireTabLifecycle({
-		onTabTeardown: (tabId) => deletePendingVerificationForTab(state.pendingVerification, tabId),
+		onTabTeardown: (tabId) => tearDownTabAttempts(state, tabId),
 		terminateForTab: (tabId) => handler.terminateForTab(tabId),
 		terminateSession: (sessionId) => handler.terminateSession(sessionId),
 		getActiveSessions: () => handler.getActiveSessions(),
@@ -273,6 +273,11 @@ type SdkHandlerState = {
 	admission: VerifyAdmissionGate
 	/** Handshakes currently waiting on another popup for the same `(origin, chainId)`, bounded. */
 	dedupeWaiters: Map<string, number>
+	/** Request id → the connect window its Allow handed over, until `runDiscoveryPopup` settles: a
+	 *  closed tab finds it here while the Allow still waits for a slot and no marker exists. */
+	handedOver: Map<string, { tabId: number; windowId: number }>
+	/** Best effort: a window already gone rejects, and its removal is what frees anything it held. */
+	closeWindow: (windowId: number) => void
 	/**
 	 * Bound right after the handler is constructed, before `initialize()`
 	 * attaches any listener; callbacks read these at call time, never earlier.
@@ -280,19 +285,36 @@ type SdkHandlerState = {
 	late: { handler?: BackgroundConnectionHandler; discoveryQueue?: DiscoveryQueue; switchEpoch?: ProfileSwitchEpoch }
 }
 
-function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
+function createSdkHandlerState(ports: { windows: WindowPort; clock: ClockPort }): SdkHandlerState {
+	const pendingVerification = new Map<string, PendingVerificationEntry>()
+	const closeWindow = (windowId: number) => void ports.windows.remove(windowId).catch(() => undefined)
 	return {
-		pendingVerification: new Map(),
+		pendingVerification,
 		sessionProfiles: new Map(),
 		pendingDiscoveryPromises: new Map(),
 		sessionQueues: new Map(),
 		establishmentStatus: new Map(),
 		// maxHoldMs: null — the prior hand-rolled decrypt chain had no watchdog (Q-08).
 		decryptLocks: new KeyedLock({ maxHoldMs: null }),
-		admission: new VerifyAdmissionGate(clock),
+		admission: new VerifyAdmissionGate(ports.clock, {
+			closeWindow,
+			// A marker still waiting when its slot is given back is tombstoned: that id can no longer establish.
+			released: (id) => cancelPendingVerification(pendingVerification, id),
+		}),
 		dedupeWaiters: new Map(),
+		handedOver: new Map(),
+		closeWindow,
 		late: {},
 	}
+}
+
+/** The markers go last: they are how the tab's reservations are found. Deleting its tombstones is
+ *  safe because the SDK has already dropped the tab's discoveries, so none of their ids can
+ *  establish. */
+function tearDownTabAttempts(state: SdkHandlerState, tabId: number): void {
+	for (const waiting of state.handedOver.values()) if (waiting.tabId === tabId) state.closeWindow(waiting.windowId)
+	for (const [id, marker] of state.pendingVerification) if (marker.tabId === tabId) state.admission.onSessionGone(id)
+	deletePendingVerificationForTab(state.pendingVerification, tabId)
 }
 
 /** What the content wrapper needs besides the SDK's listener. */
@@ -669,6 +691,8 @@ type DiscoveryDeps = {
 	legal: LegalAdmission
 	admission: VerifyAdmissionGate
 	dedupeWaiters: Map<string, number>
+	handedOver: SdkHandlerState["handedOver"]
+	closeWindow: (windowId: number) => void
 	logger: ILogger
 }
 
@@ -684,6 +708,8 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 		legal: deps.legal,
 		admission: state.admission,
 		dedupeWaiters: state.dedupeWaiters,
+		handedOver: state.handedOver,
+		closeWindow: state.closeWindow,
 		logger: deps.logger,
 	}
 }
@@ -945,7 +971,9 @@ function checkDiscoveryPopupCaps(discovery: PendingDiscovery, deps: DiscoveryDep
 
 /** New dApp → show discovery popup (Allow/Deny), then persist + approve. The
  *  dedupe registration, the durable writes and the `finally` release are one
- *  unit: no await separates registering the popup promise from creating it. */
+ *  unit: no await separates registering the popup promise from creating it.
+ *  An Allow hands its connect window over to show the emoji check: this function
+ *  closes it on every exit until a verify-window reservation takes it. */
 async function runDiscoveryPopup(
 	discovery: PendingDiscovery,
 	chainId: string,
@@ -968,6 +996,7 @@ async function runDiscoveryPopup(
 	// discoveries can await it.
 	const { promise: popupPromise, resolve: resolvePopup } = deferred()
 	pendingDiscoveryPromises.set(dedupeKey, popupPromise)
+	let waitingWindow: number | undefined
 
 	try {
 		const result = await deps.dappInteractionService.discover(params, discovery.requestId)
@@ -975,6 +1004,10 @@ async function runDiscoveryPopup(
 			handler.rejectDiscovery(discovery.requestId)
 			logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${describeExternalId(discovery.requestId)}`)
 			return
+		}
+		waitingWindow = result.windowId
+		if (waitingWindow !== undefined) {
+			deps.handedOver.set(discovery.requestId, { tabId: discovery.tabId, windowId: waitingWindow })
 		}
 
 		// B-16: the user may have taken longer than the dApp's 60s window to
@@ -996,8 +1029,18 @@ async function runDiscoveryPopup(
 			rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
 			return
 		}
+		if (waitingWindow !== undefined) {
+			// A window closed while its Allow was queued fails the attach: its removal was buffered.
+			if (!admitted?.attach(waitingWindow)) {
+				rejectThrottled(discovery, deps, "its connect window closed while waiting for a verify-window slot")
+				return
+			}
+			waitingWindow = undefined
+		}
 		await persistAndApprove(discovery, chainId, params, profileId, admitted, deps)
 	} finally {
+		deps.handedOver.delete(discovery.requestId)
+		if (waitingWindow !== undefined) deps.closeWindow(waitingWindow)
 		resolvePopup()
 		pendingDiscoveryPromises.delete(dedupeKey)
 	}
@@ -1049,6 +1092,7 @@ async function persistAndApprove(
 			discovery,
 			sessionId: newSession.id,
 			approverProfileId: newSession.profileId,
+			attemptOpen: () => reservation?.abandoned !== true,
 			approveDiscovery: (id) => handler.approveDiscovery(id),
 			rejectDiscovery: (id) => handler.rejectDiscovery(id),
 			deleteSession: (id) => dappSessionService.deleteDappSession(id),

@@ -24,7 +24,12 @@ const clock = {
 }
 
 function harness() {
-	const gate = new VerifyAdmissionGate(clock)
+	const closed: number[] = []
+	const releasedIds: string[] = []
+	const gate = new VerifyAdmissionGate(clock, {
+		closeWindow: (windowId) => closed.push(windowId),
+		released: (id) => releasedIds.push(id),
+	})
 	const served: string[] = []
 	const expired: string[] = []
 	const reservations = new Map<string, WindowReservation | undefined>()
@@ -37,7 +42,7 @@ function harness() {
 			},
 			() => expired.push(id),
 		)
-	return { gate, served, expired, reservations, admit }
+	return { gate, served, expired, reservations, admit, closed, releasedIds }
 }
 
 beforeEach(() => vi.useFakeTimers())
@@ -236,5 +241,154 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		expect(served).toEqual(["w1", "w2"])
 		gate.windowRemoved(11)
 		expect(served).toEqual(["w1", "w2", "w3"])
+	})
+})
+
+describe("VerifyAdmissionGate — a connect window on standby", () => {
+	const needs = { needsWindow: true, consumesToken: false }
+
+	test("an attached window holds its slot until it is removed, and the gate never closes it", () => {
+		const { gate, admit, served, reservations, closed, releasedIds } = harness()
+		admit("w1", needs)
+		admit("w2", needs)
+		admit("w3", needs)
+		const w1 = reservations.get("w1")!
+		expect(w1.attach(41)).toBe(true)
+		expect(w1.status).toBe("standby")
+		expect(gate.windowsHeld(ORIGIN)).toBe(VERIFY_WINDOWS_PER_ORIGIN)
+		expect(served).toEqual(["w1", "w2"])
+		gate.windowRemoved(41)
+		expect(w1.status).toBe("released")
+		expect(served).toEqual(["w1", "w2", "w3"])
+		expect(releasedIds).toEqual(["w1"])
+		expect(closed).toEqual([])
+	})
+
+	test("a window removed before its attach fails the attach and frees the slot", () => {
+		const { gate, admit, reservations, closed, releasedIds } = harness()
+		admit("w1", needs)
+		// Closed while its Allow waited for a slot: no reservation knew the id, so the gate buffered it.
+		gate.windowRemoved(41)
+		const w1 = reservations.get("w1")!
+		expect(w1.attach(41)).toBe(false)
+		expect(w1.status).toBe("released")
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+		expect(releasedIds).toEqual(["w1"])
+		expect(closed).toEqual([])
+	})
+
+	test("attach binds only an unstarted slot", () => {
+		const { admit, reservations } = harness()
+		admit("w1", needs)
+		const w1 = reservations.get("w1")!
+		w1.markInFlight()
+		expect(w1.attach(41)).toBe(false)
+		expect(w1.status).toBe("in-flight")
+	})
+
+	type Exit = (gate: VerifyAdmissionGate, w1: WindowReservation) => void
+	const exits: Array<[string, Exit]> = [
+		["cancel", (gate, w1) => gate.onSessionGone(w1.id)],
+		["releaseIfUnstarted", (_, w1) => void w1.releaseIfUnstarted()],
+		["expiry", () => vi.advanceTimersByTime(55_000 + RESERVATION_GRACE_MS + 1)],
+	]
+
+	test.each(exits)("%s on a standby slot closes its window once and holds the slot until the removal", (_, exit) => {
+		const { gate, admit, served, reservations, closed, releasedIds } = harness()
+		admit("w1", needs)
+		admit("w2", needs)
+		admit("w3", { ...needs, deadline: Date.now() + 200_000 })
+		const w1 = reservations.get("w1")!
+		w1.attach(41)
+		// In flight, w2 is never timer-reclaimed: only w1 can free a slot for w3.
+		reservations.get("w2")!.markInFlight()
+		exit(gate, w1)
+		expect(closed).toEqual([41])
+		expect(w1.status).toBe("closing")
+		expect(served).toEqual(["w1", "w2"])
+		expect(gate.windowsHeld(ORIGIN)).toBe(VERIFY_WINDOWS_PER_ORIGIN)
+		exit(gate, w1)
+		expect(closed).toEqual([41])
+		expect(releasedIds).toEqual([])
+		gate.windowRemoved(41)
+		expect(served).toEqual(["w1", "w2", "w3"])
+		expect(releasedIds).toEqual(["w1"])
+	})
+
+	test("claimStandby hands the window over once, and markInFlight refuses a standby slot", () => {
+		const { admit, reservations } = harness()
+		admit("w1", needs)
+		const w1 = reservations.get("w1")!
+		expect(w1.claimStandby()).toBeUndefined()
+		w1.attach(41)
+		expect(w1.markInFlight()).toBe(false)
+		expect(w1.claimStandby()).toBe(41)
+		expect(w1.status).toBe("in-flight")
+		expect(w1.claimStandby()).toBeUndefined()
+		expect(w1.adopt(41)).toBe("live")
+		expect(w1.status).toBe("opened")
+	})
+
+	test("a claimed window removed before its adoption frees the slot, and the adoption aborts", () => {
+		const { gate, admit, reservations, releasedIds } = harness()
+		admit("w1", needs)
+		const w1 = reservations.get("w1")!
+		w1.attach(41)
+		w1.claimStandby()
+		gate.windowRemoved(41)
+		expect(w1.status).toBe("released")
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+		expect(w1.adopt(41)).toBe("abort")
+		expect(releasedIds).toEqual(["w1"])
+	})
+
+	test("abandoned is false while unstarted or standby, and true once closing or released", () => {
+		const { gate, admit, reservations } = harness()
+		admit("w1", needs)
+		admit("w2", needs)
+		const w1 = reservations.get("w1")!
+		expect(w1.abandoned).toBe(false)
+		w1.attach(41)
+		expect(w1.abandoned).toBe(false)
+		w1.releaseIfUnstarted()
+		expect(w1.abandoned).toBe(true)
+		gate.windowRemoved(41)
+		expect(w1.abandoned).toBe(true)
+		const w2 = reservations.get("w2")!
+		w2.releaseIfUnstarted()
+		expect(w2.abandoned).toBe(true)
+	})
+
+	test("released(id) fires once per release, from every state that can release", () => {
+		const { gate, admit, reservations, releasedIds } = harness()
+		const ids = ["unstarted", "gone", "standby", "closing", "failed", "opened", "claimed", "expired"]
+		// One origin each, so no slot cap interferes.
+		for (const id of ids) admit(id, { ...needs, origin: `https://${id}.example` })
+		const r = (id: string) => reservations.get(id)!
+		r("unstarted").releaseIfUnstarted()
+		gate.windowRemoved(40)
+		r("gone").attach(40)
+		r("standby").attach(41)
+		gate.windowRemoved(41)
+		r("closing").attach(42)
+		r("closing").cancel()
+		gate.windowRemoved(42)
+		r("failed").markInFlight()
+		r("failed").creationFailed()
+		r("opened").markInFlight()
+		r("opened").adopt(43)
+		gate.windowRemoved(43)
+		r("claimed").attach(44)
+		r("claimed").claimStandby()
+		r("claimed").adopt(44)
+		gate.windowRemoved(44)
+		vi.advanceTimersByTime(55_000 + RESERVATION_GRACE_MS + 1)
+		for (const id of ids) {
+			r(id).releaseIfUnstarted()
+			r(id).cancel()
+			r(id).creationFailed()
+		}
+		for (const windowId of [40, 41, 42, 43, 44]) gate.windowRemoved(windowId)
+		expect(releasedIds).toEqual(ids)
 	})
 })

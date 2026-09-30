@@ -1,6 +1,6 @@
 /**
  * Real-Chrome implementation of BrowserApi. Wraps chrome.{storage, runtime,
- * windows, alarms}. Tests substitute FakeBrowserApi (see src/core/testing/).
+ * windows, tabs, alarms}. Tests substitute FakeBrowserApi (see src/core/testing/).
  *
  * Notes on MV3 semantics carried through:
  *
@@ -12,7 +12,9 @@
  *    only see changes in their area.
  * 3. chrome.alarms requires the "alarms" permission in the manifest.
  *    Instantiation is fine without it; method calls will throw.
- * 4. chrome.windows works without a permission declaration.
+ * 4. chrome.windows works without a permission declaration, and so do the
+ *    tabs.query and tabs.update that `navigate` uses: without "tabs" a queried
+ *    tab only lacks its url and title.
  */
 
 import type {
@@ -195,6 +197,12 @@ class ChromeWindowsAdapter implements WindowPort {
 
 	public async update(windowId: number, options: UpdateWindowOptions): Promise<void> {
 		await chrome.windows.update(windowId, options)
+	}
+
+	public async navigate(windowId: number, url: string): Promise<void> {
+		const [tab] = await chrome.tabs.query({ windowId })
+		if (tab?.id === undefined) throw new Error("window has no tab")
+		await chrome.tabs.update(tab.id, { url })
 	}
 
 	public async getLastFocused(): Promise<WindowBounds | undefined> {

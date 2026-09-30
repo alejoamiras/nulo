@@ -38,6 +38,7 @@ import {
 	type DiscoveryPayload,
 	type DiscoveryParams,
 	type DiscoveryResult,
+	type DiscoveryOutcome,
 	type ExecutionHooks,
 	type ExecutionParams,
 	type CaipChain,
@@ -63,6 +64,11 @@ const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 /** A capability payload also carries a session; only an execution payload has operations to run. */
 function isExecutionPayload(payload: DappInteraction["payload"]): payload is ExecutionPayload {
 	return "session" in payload && Array.isArray((payload as { params?: { operations?: unknown } }).params?.operations)
+}
+
+/** A discovery is the only interaction without a session: it is what creates one. */
+function isDiscoveryPayload(payload: DappInteraction["payload"]): payload is DiscoveryPayload {
+	return !("session" in payload)
 }
 
 /** The confirmation gate keys off the strongest level in a batch; a kind missing here is a
@@ -215,7 +221,21 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// as the resolveInteraction RPC, and the onRemoved event could race
 		// with settle if it arrives first.
 		this.windowManager.detach(interactionRequest.handleId)
+		if (isDiscoveryPayload(interactionRequest.payload)) {
+			this.settleDiscovery(interactionRequest.handleId, result)
+			return
+		}
 		this.windowManager.settle(interactionRequest.handleId, result)
+	}
+
+	/** An approved connect window stays open to show the emoji check, and its id comes from the
+	 *  handle, never the page. Any other answer is a denial and closes the window. */
+	private settleDiscovery(handleId: string, result: unknown): void {
+		if ((result as Partial<DiscoveryResult> | null | undefined)?.approved === true) {
+			this.windowManager.handOver(handleId, (windowId): DiscoveryOutcome => ({ approved: true, windowId }))
+			return
+		}
+		this.windowManager.settle<DiscoveryOutcome>(handleId, { approved: false })
 	}
 
 	public async rejectInteraction(id: string, reason: string): Promise<void> {
@@ -421,9 +441,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		return (await this.interaction("capabilities", payload, cancellationToken)) as CapabilityResult
 	}
 
-	public async discover(params: DiscoveryParams, cancellationToken?: string): Promise<DiscoveryResult> {
+	public async discover(params: DiscoveryParams, cancellationToken?: string): Promise<DiscoveryOutcome> {
 		const payload: DiscoveryPayload = { params }
-		return (await this.interaction("discover", payload, cancellationToken)) as DiscoveryResult
+		return (await this.interaction("discover", payload, cancellationToken)) as DiscoveryOutcome
 	}
 
 	private async interaction(

@@ -102,6 +102,10 @@ export type DiscoveryResult = {
 	approved: boolean
 }
 
+/** What `discover()` resolves with: the page's answer plus, for an approval, the window the
+ *  connection flow now owns. `windowId` is set by the service from its handle, never by the page. */
+export type DiscoveryOutcome = DiscoveryResult & { windowId?: number }
+
 export type Methods = {
 	getInteractionPayload(id: string): ExecutionPayload | CapabilityPayload | DiscoveryPayload
 	/**

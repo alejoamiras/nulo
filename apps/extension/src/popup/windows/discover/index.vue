@@ -7,6 +7,7 @@ import DappStatusStrip from "@/components/composite/DappStatusStrip.vue"
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
 import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
+import ConnectStepBar from "../ConnectStepBar.vue"
 
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
@@ -30,13 +31,9 @@ const router = useRouter()
 const profile = ref<ProfileInfo>()
 const isLoading = ref(false)
 
-// isReady flips true only after init() commits payload + dApp identity +
-// active profile. Gates Allow so the user can't approve a session whose
-// hostname/logo/name they haven't seen yet (phishing surface). Allow stays
-// disabled until the trust anchor is rendered; Deny stays fast on
-// !requestId because early reject is harmless. Codex audit-codex-final-pass
-// §2 chose Allow-only-gate over opus's symmetric-gate. Investigation
-// journey: implementations-plan/network-followups/investigation-journey.md.
+// Allow opens only once init has committed the payload, the dApp's identity and the active profile,
+// so no one approves a session whose hostname, logo and name they have not seen. Deny needs only the
+// request id: an early reject is harmless.
 const isReady = ref(false)
 
 const interactionService = new DappInteractionServiceClient()
@@ -61,6 +58,7 @@ const {
 	start: startWindow,
 	dispose: disposeWindow,
 	closeWindow,
+	completeInteraction,
 	onActiveProfileChanged,
 	stripStatus,
 	processingError,
@@ -85,11 +83,7 @@ const init = async () => {
 	try {
 		profile.value = await profileService.getActiveProfile()
 		await loadInteractionPayload()
-		// Belt-and-suspenders: require every state `approve()` reads is committed
-		// (profile, requestId, dapp). Codex review nit — relying on the composable
-		// invariant alone ("load() only resolves after dapp.value is set") is true
-		// today but brittle against future composable refactors. Stays false in
-		// error paths so the Allow button never opens on a half-loaded popup.
+		// Every value `approve()` reads must be committed; an error path leaves Allow closed.
 		if (profile.value && requestId.value && dapp.value) isReady.value = true
 	} catch (error) {
 		console.error(getErrorData(error))
@@ -98,11 +92,8 @@ const init = async () => {
 }
 
 const approve = async () => {
-	// Defensive: template's `:disabled="!isReady"` should already block this,
-	// but if a stray Enter / programmatic click slips through during init,
-	// throw loudly rather than silently no-op. Silent guards on async-init
-	// popups cost 19 iterations to find last time — see
-	// implementations-plan/network-followups/investigation-journey.md.
+	// Allow is disabled until init completes: a call that slips past that gate throws, so a broken
+	// gate is loud instead of silently doing nothing.
 	if (!isReady.value) {
 		throw new Error("discover approve() called before init() completed — :disabled gate must include !isReady")
 	}
@@ -110,8 +101,12 @@ const approve = async () => {
 	try {
 		isLoading.value = true
 		await interactionService.resolveInteraction(requestId.value, { approved: true })
-		closeWindow(true)
+		// The window waits here for this connection's emoji check, still loading. Its id comes only
+		// from the service's handle, and nothing this page does on unmount touches the reservation
+		// that now holds it.
+		completeInteraction()
 	} catch (error) {
+		isLoading.value = false
 		if (error instanceof JobCancelledError) {
 			// A raced approve refused service-side (the dApp cancelled first):
 			// the refusal IS the cancelled state — overlay, not an error banner.
@@ -120,8 +115,6 @@ const approve = async () => {
 			console.error(getErrorData(error))
 			setError("Something went wrong")
 		}
-	} finally {
-		isLoading.value = false
 	}
 }
 
@@ -146,6 +139,7 @@ onUnmounted(disposeWindow)
 			:networkName="appStore.network?.name"
 			:status="stripStatus"
 		/>
+		<ConnectStepBar :step="1" />
 
 		<Flex direction="column" :class="$style.scroll_area">
 			<DappIdentityBlock
@@ -159,7 +153,7 @@ onUnmounted(disposeWindow)
 
 			<Flex direction="column" gap="8" :class="$style.body">
 				<Text size="12" color="tertiary" :style="{ lineHeight: '1.5' }">
-					Make sure you trust the site you're connecting to. You can revoke this connection any time from Settings → General → Sessions.
+					Make sure you trust the site you're connecting to. You can revoke this connection any time from Settings → Connected Apps.
 				</Text>
 			</Flex>
 		</Flex>
@@ -173,7 +167,7 @@ onUnmounted(disposeWindow)
 			confirm-testid="discover-allow-btn"
 			confirm-label="Allow"
 			:confirm-loading="isLoading"
-			:confirm-disabled="processingError?.type === 'error' || !isReady"
+			:confirm-disabled="processingError?.type === 'error' || !isReady || isLoading"
 			@reject="reject"
 			@approve="approve"
 		/>

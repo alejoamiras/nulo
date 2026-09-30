@@ -38,6 +38,7 @@ function renderHeader(): string {
 			<span data-testid="pg-status" data-status="${s.status}">${s.status}</span>
 			<span data-testid="pg-account">${accountText}</span>
 			<span data-testid="pg-chain">${chainText}</span>
+			<span data-testid="pg-verification-hash" hidden>${s.verificationHash ?? ""}</span>
 		</header>
 	`
 }

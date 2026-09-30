@@ -2,7 +2,7 @@ import { expect, inject } from "vitest"
 import { extensionUrl, gotoExtensionPage, newPage } from "../fixtures/browser"
 import { clickByTestId, test, waitForHash } from "../fixtures/extension"
 import { createAndActivateProfile } from "../fixtures/helpers"
-import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
+import { approveConnect, approveVerify, waitForPopup } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -43,14 +43,9 @@ test.skipIf(!hasConfig)(
 		await playground.waitForSelector('[data-testid="pg-status"][data-status="disconnected"]', { timeout: 20_000 })
 
 		// ── Reconnect under B goes through fresh discovery + verification ──
-		// Arm the verify wait BEFORE approving discovery: the SW can open the
-		// verify window faster than a post-approval snapshot, which would
-		// classify it preExisting and hang the wait (see fixtures/extension.ts).
 		const discoverPopup = waitForPopup(ctx, "discover")
-		const verifyPopup = waitForPopup(ctx, "verify")
 		await clickByTestId(playground, "pg-btn-connect")
-		await approveDiscover(await discoverPopup)
-		await approveVerify(await verifyPopup)
+		await approveVerify(await approveConnect(ctx, await discoverPopup))
 		await playground.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 })
 
 		await wallet.close()
