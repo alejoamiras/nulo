@@ -513,7 +513,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 					</Flex>
 					<Flex :class="$style.prop">
 						<Text size="11" color="orange" data-testid="execute-authwit-opaque-warning">
-							Opaque authorization — the wallet cannot show what this hash authorizes
+							Opaque authorization. The wallet cannot show what this hash authorizes
 						</Text>
 					</Flex>
 				</template>

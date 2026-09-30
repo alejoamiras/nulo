@@ -118,7 +118,7 @@ describe("ImportContactsPopup — counted sender banner", () => {
 	test("no active network: states that registrations will be skipped (not a contradictory network name)", async () => {
 		appStoreState.network = null
 		const w = await mountWithStaged([{ name: "A", address: VALID_A, isSender: true }])
-		expect(w.text()).toContain("No active network — sender registrations will be skipped.")
+		expect(w.text()).toContain("No active network. Sender registrations will be skipped.")
 		expect(w.text()).not.toContain("will be registered on")
 	})
 })

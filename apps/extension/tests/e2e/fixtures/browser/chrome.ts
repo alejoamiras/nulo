@@ -175,6 +175,24 @@ async function stopBackground(browser: Browser, extensionId: string): Promise<vo
 	}
 }
 
+/** Over CDP, which the extension's CSP does not govern. The session is gone before this resolves:
+ *  one left attached would park the worker's host through a later stop (see `stopBackground`). */
+async function evaluateInBackground<T>(browser: Browser, extensionId: string, body: string): Promise<T> {
+	const worker = browser.targets().find(isServiceWorkerOf(extensionId))
+	if (!worker) throw new Error("evaluateInBackground: no service worker runs for the extension")
+	const session = await worker.createCDPSession()
+	try {
+		const { result, exceptionDetails } = await session.send("Runtime.evaluate", {
+			expression: `(function () { ${body} })()`,
+			returnByValue: true,
+		})
+		if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text)
+		return result.value as T
+	} finally {
+		await session.detach().catch(() => {})
+	}
+}
+
 /** The MV3 service worker is the first extension context Chrome starts, and its URL carries the id. */
 async function discoverExtensionId(browser: Browser): Promise<string> {
 	const worker = await browser.waitForTarget(
@@ -222,6 +240,7 @@ export const chromeDriver: BrowserDriver = {
 	pxeHostState,
 	stopBackground,
 	backgroundAlive,
+	evaluateInBackground,
 	openScratchPage: async (browser, extensionId) => {
 		const page = await browser.newPage()
 		try {

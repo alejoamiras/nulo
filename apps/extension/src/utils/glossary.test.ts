@@ -20,7 +20,7 @@ const SPEC = [
 		"authorization",
 		"Authorization",
 		"Lets a contract do one specific thing for you, once.",
-		"Permission window · approval window",
+		"Permission window · Connected apps",
 	],
 	["Apps", "name-for-this-app", "Name for this app", "A private name for this account visible only to this app.", "Permission window"],
 	[

@@ -147,7 +147,7 @@ describe("onboarding import", () => {
 		backup.restoreStatus.value = "finished"
 		backup.restoreErrorLog.value = {
 			"account-state": [
-				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped — ran out of time reaching the network" },
+				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped: ran out of time reaching the network" },
 			],
 		}
 		await flushPromises()
@@ -183,7 +183,7 @@ describe("onboarding import", () => {
 		backup.restoreStatus.value = "finished"
 		backup.restoreErrorLog.value = {
 			"account-state": [
-				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped — ran out of time reaching the network" },
+				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped: ran out of time reaching the network" },
 			],
 		}
 		await flushPromises()

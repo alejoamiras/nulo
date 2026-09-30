@@ -298,7 +298,10 @@ page) hit-tests the control's centre with `elementFromPoint`, fails naming what 
 then clicks through `page.mouse`, which is `Input.dispatchMouseEvent` and not the hanging
 element-handle path. It reads the centre only once the control holds still: the same box on three
 reads 50 ms apart and no `*-enter-from` class above it, since a throttled frame can hold a popup still
-at its start offset. After 5 s a still control is pressed anyway — best effort, as a frame that never
+at its start offset. A CSS-module transition class (`$style.enter_from`, drawn as
+`_enter_from_<hash>`) escapes that match, so the snack card counts as settled only at opacity 1 with
+no running animation (`readSnackOverSheet`; `settledCard` in `network/snack-placement.test.ts`).
+After 5 s a still control is pressed anyway — best effort, as a frame that never
 comes and one that comes late look alike. Popups enter sliding 40px over 300ms, and a centre read
 mid-slide was pressed after a 16px control had settled past it (ledger #34). Holding still is not
 being ready — content that arrives later can still move a control — so wait for the popup's own

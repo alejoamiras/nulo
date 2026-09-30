@@ -88,7 +88,7 @@ onBeforeUnmount(() => {
 				<div :class="$style.spinner" />
 				<h2 :class="$style.title">Waiting for passkey…</h2>
 				<p :class="$style.subtitle">Use your authenticator (Touch ID, Windows Hello, security key) to continue.</p>
-				<p :class="$style.hint">Don't navigate away — press Escape to cancel.</p>
+				<p :class="$style.hint">Don't navigate away. Press Escape to cancel.</p>
 			</div>
 		</div>
 	</teleport>

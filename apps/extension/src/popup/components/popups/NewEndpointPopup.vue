@@ -53,7 +53,7 @@ const handleCreate = async () => {
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
-			errorText.value = `Wrong chain — this network is chain ${network.value?.chainId}.`
+			errorText.value = `Wrong chain. This network is chain ${network.value?.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
 			errorText.value = "This URL is already an endpoint of this network."
 		} else if (msg === "Failed to fetch node info") {

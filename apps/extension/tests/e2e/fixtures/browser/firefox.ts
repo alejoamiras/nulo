@@ -392,6 +392,16 @@ const BACKGROUND_IDENTITY = `
 /** Rejects while the background page is not running. */
 export const backgroundIdentity = (browser: Browser): Promise<BackgroundIdentity> => evaluateInBackgroundPage(browser, BACKGROUND_IDENTITY)
 
+/**
+ * `body` in the event page's own realm. A frame script sees the page through Xrays, which hide the
+ * `chrome` the page's code holds, and the page's CSP refuses its `eval`; a sandbox with the page's
+ * principal and the page, unwrapped, as its prototype sees those globals, and `evalInSandbox` is
+ * not the page's `eval`. The sandbox stays alive: a function `body` leaves in the page runs in it.
+ */
+const inPageRealm = (body: string) => `
+	const sandbox = Components.utils.Sandbox(content, { sandboxPrototype: content, wantXrays: false });
+	return JSON.parse(Components.utils.evalInSandbox(${JSON.stringify(`JSON.stringify((function () { ${body} })() ?? null)`)}, sandbox));`
+
 /** The running background page's `timeOrigin`, or undefined while none runs. Any other failure is thrown. */
 async function backgroundTimeOrigin(browser: Browser): Promise<number | undefined> {
 	try {
@@ -699,6 +709,7 @@ export const firefoxDriver: BrowserDriver = {
 	pxeHostState: (page) => evaluateInBackgroundPage<PxeHostState>(page.browser(), PXE_HOST_STATE),
 	stopBackground,
 	backgroundAlive: async (browser) => (await backgroundTimeOrigin(browser)) !== undefined,
+	evaluateInBackground: (browser, _extensionId, body) => evaluateInBackgroundPage(browser, inPageRealm(body)),
 	// Firefox reports a closed window as a missing browsing context, per command.
 	targetGone: /no such frame|Browsing Context with id \S+ not found|DiscardedBrowsingContext|Browsing context already closed/i,
 }

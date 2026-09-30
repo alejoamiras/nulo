@@ -154,6 +154,12 @@ export interface BrowserDriver {
 	/** Whether a background instance runs right now. Both browsers reap an idle one. */
 	backgroundAlive(browser: Browser, extensionId: string): Promise<boolean>
 	/**
+	 * Run `body`, the source of a function body, in the running background with the globals the
+	 * extension's own code holds there, and resolve with the JSON value it returns. Rejects when no
+	 * background runs, or with the message `body` throws.
+	 */
+	evaluateInBackground<T>(browser: Browser, extensionId: string, body: string): Promise<T>
+	/**
 	 * How this driver's protocol words "the window went away under the call", beyond the CDP
 	 * phrases the fixtures already match. An approval window closes itself on the click that
 	 * resolves it, so that error is the expected end of a click there, not a failure.
@@ -225,3 +231,5 @@ export const holdNextCredentialGet = (page: Page): Promise<void> => driver.holdN
 export const pxeHostState = (page: Page): Promise<PxeHostState> => driver.pxeHostState(page)
 export const stopBackground = (owner: BackgroundOwner): Promise<void> => driver.stopBackground(owner.browser, owner.extensionId)
 export const backgroundAlive = (owner: BackgroundOwner): Promise<boolean> => driver.backgroundAlive(owner.browser, owner.extensionId)
+export const evaluateInBackground = <T>(owner: BackgroundOwner, body: string): Promise<T> =>
+	driver.evaluateInBackground<T>(owner.browser, owner.extensionId, body)

@@ -117,7 +117,7 @@ describe("scopeBannerCopy — the owner-approved table, verbatim", () => {
 		})
 		expect(scopeBannerCopy("chain-declined", view, ACTIVE_ROWS)).toEqual({
 			title: "Runs on Local Network",
-			body: "Your wallet stays on Savings · Testnet. This still executes — you just won't see it in your balances or activity.",
+			body: "Your wallet stays on Savings · Testnet. This still executes. You just won't see it in your balances or activity.",
 			action: "Switch after confirming",
 		})
 	})
@@ -128,7 +128,7 @@ describe("scopeBannerCopy — the owner-approved table, verbatim", () => {
 			"Your wallet is on Testnet. It switches to Local Network after you confirm, so you can watch the transaction.",
 		)
 		expect(scopeBannerCopy("chain-declined", view, ACTIVE_ROWS).body).toBe(
-			"Your wallet stays on Testnet. This still executes — you just won't see it in your balances or activity.",
+			"Your wallet stays on Testnet. This still executes. You just won't see it in your balances or activity.",
 		)
 	})
 
@@ -141,7 +141,7 @@ describe("scopeBannerCopy — the owner-approved table, verbatim", () => {
 		})
 		expect(scopeBannerCopy("account-declined", view, ACTIVE_ROWS)).toEqual({
 			title: "Signed by Main",
-			body: "Your wallet stays on Savings. This still executes — you just won't see it in your balances or activity.",
+			body: "Your wallet stays on Savings. This still executes. You just won't see it in your balances or activity.",
 			action: "Switch after confirming",
 		})
 	})

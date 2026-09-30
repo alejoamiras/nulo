@@ -74,7 +74,7 @@ onBeforeUnmount(() => {
 				This version of the wallet derives a different address than this profile's accounts were
 				created with, so the profile has been locked. Your recovery phrase still derives your accounts
 				on a compatible version of Nulo. Never enter your recovery phrase anywhere in response to this
-				message — no legitimate screen will ask for it.
+				message. No legitimate screen will ask for it.
 			</template>
 			<template #detail>
 				Install a compatible wallet version, then unlock from the lock screen to re-run

@@ -77,18 +77,16 @@ Open follow-ups lifted out of closing plans, one entry each, or a pointer to the
 - **Screen readers hear History's and Settings' title twice.** The compact bar's label (`page-title-bar`, `apps/extension/src/popup/pages/activity.vue`, `settings/index.vue`) stays in the accessibility tree while hidden, at opacity 0 with no `aria-hidden`, beside the hero's title. It predates layout-polish. From [layout-polish](layout-polish/plan.md), the panel.
 - **Home's section header against the drawing.** The built header has an 8px `padding-bottom` and a 1px rule (`RecentActivityView.vue:887-890`) and sits 16px above the list; the drawn one has `padding: 14px 24px 6px` and no rule. Not in the owner's record, so not changed. From [layout-polish](layout-polish/plan.md), Fact 13.
 
+## Copy
+
+- **Add token shows the PXE store's developer errors verbatim.** A retry after a stalled store open, or a store reopened after a network reset, shows the store's own refusal under Submit (`packages/aztec-runtime/src/pxe/opfs-store.ts:58`, `:222`, through `apps/extension/src/popup/components/popups/NewTokenPopup.vue:334`), split at the dash and otherwise in developer wording. Mapping them to user copy is an owner copy decision. From [copy-polish](copy-polish/plan.md), E45 and E46.
+
 ## ux-feedback: taken by a follow-up plan
 
 The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Delete an entry when the plan it names merges.
 
-- The full-backup import's four skip strings join two clauses with an em dash (`apps/extension/src/wallet/services/account-state/normalize.ts`, and the reseed stage's in `apps/extension/src/composables/full-backup-restore.ts`); copy-polish takes them (its E25 to E28). [Record](backup-import/plan.md), F-7
-
 ## ux-feedback: owner decisions
 
-- About 45 older strings join two clauses with an em dash. The owner, 2026-09-25: "separate follow-up for those 45 older strings". Find them by scanning `apps/extension/src` for " — " outside comments, logs and thrown errors; the empty-value "—" stays, and each string's pinning test changes with it. [Record](ux-feedback/plan.md)
-- The popup's Terms sheet sits at z-index 9000, above the snack's 2000, so a snack raised while the sheet is open stays hidden. [Record](ux-feedback/plan.md)
-- A-27: which form of an unknown contract's address a screen reader hears in the permission window's Details rows. `DetailsTable.test.ts` holds it as a `test.todo`. [Record](ux-feedback/b5-permissions/lessons/phase-6.md)
-- The glossary's `where` for "authorization" reads "Permission window · approval window", while the term is dotted in the permission window and in Settings → Connected apps. A copy change. [Record](ux-feedback/b5-permissions/lessons/phase-3.md)
 - The full-backup import's yellow warning reads at about 1.6:1 on the light theme (`apps/extension/src/components/composite/import/ImportFullBackupForm.vue`, `--yellow`); a colour change is an owner call. [Record](backup-import/plan.md), F-4
 - A Retry on the import's errors screen that fails again returns a pixel-identical screen, so nothing shows that it tried. [Record](backup-import/plan.md), F-5
 - The import's error viewer lists networks by id, and onboarding's `View errors` notice says "Check the developer console for details" (`apps/extension/src/onboarding/pages/import.vue`); only the warning names the networks. [Record](backup-import/plan.md), F-6

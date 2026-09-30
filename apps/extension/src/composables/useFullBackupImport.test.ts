@@ -1017,7 +1017,7 @@ describe("useFullBackupImport — rows bind to the seeded network of their chain
 		expect(networkClient.probeNodeStatus).not.toHaveBeenCalled()
 		expect(c.isRestoreHasErrors.value).toBe(true)
 		// Ordinal-only records: the dropped rows are backup payload and the log is user-visible.
-		const reason = "Skipped — its network is not one of the built-in networks"
+		const reason = "Skipped: its network is not one of the built-in networks"
 		expect(c.restoreErrorLog.value["account-state"]).toEqual([0, 1, 2].map((row) => ({ row, restoreError: reason })))
 		expect(c.restoreErrorLog.value.transaction).toEqual([{ row: 0, restoreError: reason }])
 		expect(JSON.stringify(c.restoreErrorLog.value)).not.toMatch(/0xabab|h1|senders|0xaaaa/)
@@ -1029,7 +1029,7 @@ describe("useFullBackupImport — Retry the networks that did not restore", () =
 		{ id: "M1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 },
 		{ id: "M2", name: "Alpha V5", rpcUrl: "https://a/", chainId: 2 },
 	]
-	const DROPPED = "Skipped — its network is not one of the built-in networks"
+	const DROPPED = "Skipped: its network is not one of the built-in networks"
 	const item = (networkId: string, senders = [AS_SENDER]) => ({ networkId, contracts: [], senders })
 	const answered = (networkId: string) => [item(networkId)]
 	const ranOutOfTime = (networkId: string) => [
