@@ -2,6 +2,7 @@ import { MessageType } from "@nulo/extension-messaging/messages"
 import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { ElementHandle, Page } from "puppeteer"
 import { defaultProfileName } from "@/utils/profile-name"
+import { pinnedTokensKey } from "@/utils/profile-ui-keys"
 import { reloadExtensionPage } from "./browser"
 import { TEST_PASSWORD } from "./constants"
 import { clickByTestId, clickSelector, expectNameFieldPrefill, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
@@ -1061,6 +1062,14 @@ export async function pinFromTokenPage(page: Page): Promise<void> {
 		;(document.querySelector('[data-testid="token-menu-pin"]') as HTMLElement)?.click()
 	})
 	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+}
+
+/** Removes every profile's pinned-tokens key; an open page's pins follow the storage change. */
+export async function clearPinnedTokens(page: Page): Promise<void> {
+	await page.evaluate(async (prefix: string) => {
+		const all = await chrome.storage.local.get()
+		await chrome.storage.local.remove(Object.keys(all).filter((key) => key.startsWith(prefix)))
+	}, pinnedTokensKey(""))
 }
 
 /** On a token page, read the pin item's `data-pinned` ("true" | "false") and close the menu again. */

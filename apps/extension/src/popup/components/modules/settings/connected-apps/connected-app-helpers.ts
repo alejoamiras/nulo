@@ -5,9 +5,8 @@ import { DateTime } from "luxon"
 import { getSafeDisplay } from "@/wallet/services/dapp-session/capability-meta"
 
 export function getCapabilityLabel(type: string): string {
-	// Route through getSafeDisplay so unknown wire types render as the
-	// constant "Unknown permission" — codex post-impl §5 caught that the
-	// settings surfaces were still leaking the raw cap.type label.
+	// Route through getSafeDisplay so an unknown wire type renders as the constant
+	// "Unknown permission", never as its raw cap.type label.
 	return getSafeDisplay(type).label
 }
 

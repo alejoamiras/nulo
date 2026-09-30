@@ -71,7 +71,7 @@ bun run e2e:agent             # Extension network e2e — owns anvil + aztec + p
 bun run audit:vue             # One-shot pre-PR gate: typecheck → test → lint → build
 bun run lint                  # biome check
 bun run format                # biome format --write
-bun run typecheck             # vue-tsc across all packages
+bun run typecheck:all         # every workspace's typecheck
 ```
 
 ## Quality gates

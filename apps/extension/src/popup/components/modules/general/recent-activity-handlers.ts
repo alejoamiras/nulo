@@ -1,16 +1,3 @@
-/**
- * Pure handler builders for RecentActivityView (Phase 2 follow-up).
- *
- * The Vue component itself is hard to unit-test (4+ service clients to
- * stub, appStore, useTicker, useRouter, ...). Extracting the cancel +
- * retry wire to a tiny pure module gives us regression coverage on the
- * "emit → service call / navigation" link without mounting Vue.
- *
- * Both handlers close over a getter rather than the value directly:
- * Vue refs are captured at handler-build time and read at emit time,
- * so we test the same "read at click" semantics.
- */
-
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { ContentKind } from "@/wallet/services/task/spec"
 import { TxStatus } from "@/wallet/services/transaction/spec"

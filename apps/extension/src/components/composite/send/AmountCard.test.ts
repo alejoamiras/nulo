@@ -372,7 +372,7 @@ describe("composite/AmountCard — code-review fixes", () => {
 	})
 })
 
-describe("composite/AmountCard — codex post-impl fixes", () => {
+describe("composite/AmountCard — fiat mode", () => {
 	test("quote lost mid-fiat-session exits fiat mode (requote would be a no-op)", async () => {
 		const w = mountCard({
 			token: { symbol: "cUSD", decimals: 6 },

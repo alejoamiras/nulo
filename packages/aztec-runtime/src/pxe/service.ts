@@ -246,7 +246,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			// The barrier loop stays INLINE: the next orphan's `enterWrite()` must
 			// be reserved on the same continuation the previous `leaveWrite()` ran
 			// on — a helper-return hop here would let a concurrent reader win the
-			// barrier and change removal/warning timing (codex post-impl).
+			// barrier and change removal/warning timing.
 			for (const profileId of orphanProfiles) {
 				// Serialize against store-opens: dirs are (re)created by
 				// `registry.ensure` under this profile's `barrier.read`, so holding
@@ -487,8 +487,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			// dapp-send, view, authwit-discovery). The ONE exception is the NO_FROM discovery path
 			// (dapp-send-executor's executeNoFromSendTx), which simulates with dapp-only scopes and no
 			// signing account — there senderForTags is not the real sender. That path is public-only
-			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first (codex
-			// post-impl audit MEDIUM — tracked for a follow-up).
+			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first.
 			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
 			const parsed = await TxExecutionRequest.schema.parseAsync(txRequest)
 			// One attempt at a time per runtime (we hold its write lock), so the prover's

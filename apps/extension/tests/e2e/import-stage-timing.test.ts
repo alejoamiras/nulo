@@ -161,7 +161,7 @@ describe("formatTrajectoryDiagnostic", () => {
 	test("a stale baseline terminal with zero transitions never labels the attempt failed", () => {
 		// The fence at the label layer: baseline "failed" (prior attempt), no
 		// post-baseline transitions, DOM still showing "failed" — the headline
-		// must stay generic, not "IMPORT FAILED" (codex post-impl round 1).
+		// must stay generic, not "IMPORT FAILED".
 		const msg = formatTrajectoryDiagnostic(
 			makeFinal([{ stage: "failed", tMs: 0, baseline: true }], { hash: "#/popup/import", stage: "failed" }),
 			SUCCESS_HASH,

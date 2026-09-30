@@ -7,8 +7,9 @@
  */
 
 import { expect, inject } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "../fixtures/extension"
-import { importTokenAndWaitForBalance, openHoldings, seedUsdQuoteAndReload } from "../fixtures/helpers"
+import { test as base, openPopup, waitForHash, clickByTestId, replaceInputValue } from "../fixtures/extension"
+import { extraTokensFixture } from "../fixtures/extra-tokens"
+import { openHoldings, seedUsdQuoteAndReload } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -16,25 +17,22 @@ const hasConfig = aztecConfig !== undefined
 
 const ONE = 10n ** 18n
 
+const test = base.extend<{ extraTokens: Record<string, string> }>({
+	extraTokens: extraTokensFixture([
+		{ symbol: "ZED", amount: 5000n * ONE },
+		{ symbol: "EMPTY", amount: 0n },
+	]),
+})
+
 const listedSymbols = (page: Awaited<ReturnType<typeof openPopup>>) =>
 	page.$$eval('[data-testid="holdings-page"] [data-testid="token-symbol"]', (els) => els.map((el) => (el as HTMLElement).dataset.symbol))
 
 test.skipIf(!hasConfig)(
 	"holdings: value order, real balances, search, sort and the empty fold",
 	{ timeout: 420_000 },
-	async ({ tokenReadyExtension }) => {
-		const extras = [
-			{ symbol: "ZED", amount: 5000n * ONE },
-			{ symbol: "EMPTY", amount: 0n },
-		]
-		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
-		const addresses = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, extras)
-
+	async ({ tokenReadyExtension, extraTokens: _extraTokens }) => {
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		for (const { symbol, amount } of extras) {
-			await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses[symbol], amount.toString())
-		}
 
 		await seedUsdQuoteAndReload(page)
 

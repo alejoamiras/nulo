@@ -115,7 +115,7 @@ test.skipIf(!hasConfig)(
 		const counts = await countInFlight(walletPopup)
 		// Keep T1 HELD through the reject+assert below — otherwise (proverless) T1
 		// could settle `ok` first and waitForPgResult would catch it instead of
-		// T2's error (codex post-impl audit). walletPopup stays open for the release.
+		// T2's error. walletPopup stays open for the release.
 
 		// Two in-flight records at once: T1 active + T2 still queued behind it on
 		// the execution mutex. (>= tolerates any stray prior in-flight op.)

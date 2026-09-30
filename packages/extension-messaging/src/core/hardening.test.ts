@@ -135,9 +135,9 @@ describe("service — hostile requests", () => {
 	})
 })
 
-// ── Post-audit hardening (codex post-impl findings) ───────────────────
+// ── Hostile peer messages ─────────────────────────────────────────────
 
-describe("post-audit hardening", () => {
+describe("hostile peer messages", () => {
 	test("forged framework lifecycle events (onConnected/onDisconnected) are dropped — no reconnect hijack", async () => {
 		const c = new HClient()
 		await c.connect()

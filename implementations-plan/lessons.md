@@ -6,7 +6,7 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 
 - Bun trusts a warm cache (1.4.2, 2026-09): it never re-checks the lockfile's sha512 against its cache, so a poisoned cached file survives `bun install --frozen-lockfile`; a job that produces release bytes restores no cache ([evidence](tools-extraction/lessons/phase-2.md)).
 - Under `bun test`, loading `@aztec/*` in process throws from `expect.addEqualityTesters` on a cold transpiler cache; run such checks in a `bun` subprocess ([evidence](tools-extraction/lessons/phase-2.md)).
-- Tests with a timing budget (`presto/client`, `e2e/config`) time out under the full parallel `test:all` / `audit:vue` load; rerun the file alone before treating it as breakage (2026-09) ([evidence](tools-extraction/lessons/phase-1.md)). A cold dynamic import in the timed body is one cause: `content-message-relay` moved its import into `beforeEach`, on the hook's own budget ([evidence](e2e-reliability-fixes/lessons/phase-2.md)).
+- Tests with a timing budget (`e2e/config` today) time out under the full parallel `test:all` / `audit:vue` load; rerun the file alone before treating it as breakage (2026-09) ([evidence](tools-extraction/lessons/phase-1.md)). A cold dynamic import in the timed body is one cause: `content-message-relay` and `presto/client` import in `beforeEach` instead, on the hook's default budget, never a raised one ([evidence](e2e-reliability-fixes/lessons/phase-2.md), [evidence](hygiene/lessons/phase-1.md)).
 
 ## Cloudflare
 

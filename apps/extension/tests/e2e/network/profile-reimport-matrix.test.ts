@@ -164,7 +164,7 @@ test.skipIf(!hasConfig)(
 			await importToken(page, aztecConfig!.tokenAddress)
 
 			// No stale-rejection console assertion here: PXE rejections log offscreen-side and never
-			// reach the popup's error-event collector (post-impl audit) — the digit-render + token-import
+			// reach the popup's error-event collector; the digit-render + token-import
 			// assertions above are the real proof. Page errors stay asserted (popup-side truth).
 			expect(ctx.pageErrors).toEqual([])
 		} finally {
@@ -200,7 +200,7 @@ test.skipIf(!hasConfig)(
 			await importToken(page, aztecConfig!.tokenAddress)
 
 			// No stale-rejection console assertion here: PXE rejections log offscreen-side and never
-			// reach the popup's error-event collector (post-impl audit) — the digit-render + token-import
+			// reach the popup's error-event collector; the digit-render + token-import
 			// assertions above are the real proof. Page errors stay asserted (popup-side truth).
 			expect(ctx.pageErrors).toEqual([])
 		} finally {

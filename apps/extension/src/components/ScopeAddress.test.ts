@@ -77,7 +77,7 @@ describe("ScopeAddress", () => {
 		expect(openToast).toHaveBeenCalled()
 	})
 
-	test("clipboard payload is stripped of invisible/control chars even when input has them (codex post-impl §3)", async () => {
+	test("clipboard payload is stripped of invisible/control chars even when input has them", async () => {
 		// A hostile dApp could send an address with embedded zero-width chars
 		// so the user sees a visually-clean address but pastes a different
 		// value. The clipboard write strips invisibles WITHOUT truncating.

@@ -2942,7 +2942,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
 		})
 
-		// Post-impl codex round 2: a password change must neither LAUNDER an uncovered dek (re-MACing
+		// A password change must neither LAUNDER an uncovered dek (re-MACing
 		// a transplanted slot into a freshly-valid envelope) NOR self-heal by minting a fresh one —
 		// a MAC failure cannot tell a replaced slot from corruption of the MAC field alone, so
 		// minting would silently destroy still-recoverable imported keys. It refuses, and the
@@ -2987,7 +2987,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(Array.from(await service.exportImportedKeysDek(p.id, "pass1234"))).toEqual(Array.from(dek!))
 		})
 
-		// Post-impl codex round 2: a passkey backup carries `dekSealed` verbatim, so nothing
+		// A passkey backup carries `dekSealed` verbatim, so nothing
 		// downstream ever proves it opens — a corrupt slot would yield a backup that reports
 		// success and only fails at restore, when the source profile may be long gone.
 		test("exportPlain (credentialId path) still succeeds for a passkey profile whose dekSealed slot does not open — a passkey profile has no phrase, so the backup is its only repair", async () => {
@@ -3005,7 +3005,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(await service.exportPlain(p.id, undefined, fakeCredentialData(credentialId, "uh-x"))).toBe(credentialId)
 		})
 
-		// Post-impl codex MEDIUM: the stale sweep EXCLUDES the id being consumed, so the TTL has to
+		// The stale sweep EXCLUDES the id being consumed, so the TTL has to
 		// be enforced on the consumed entry too — otherwise an abandoned restore's raw SOURCE dek
 		// stays consumable for the whole SW lifetime.
 		test("consumeDekRewrapContext enforces the TTL on the entry it consumes", async () => {

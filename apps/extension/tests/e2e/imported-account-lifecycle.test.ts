@@ -116,8 +116,7 @@ describe("imported account lifecycle", () => {
 		// ── Stage 5 (destructive, LAST): corrupt the envelope MAC at rest → degradation ──
 		// The MAC field alone is flipped — dekSealed stays intact — which is precisely the case
 		// the state machine must treat as untrusted: derived-only session, user-visible warning,
-		// and a REFUSED password change (self-healing here would destroy recoverable keys — the
-		// post-implementation round-3 decision).
+		// and a REFUSED password change (self-healing here would destroy recoverable keys).
 		const tamperedCount = await page2.evaluate(async () => {
 			const all = await chrome.storage.local.get(null)
 			let count = 0

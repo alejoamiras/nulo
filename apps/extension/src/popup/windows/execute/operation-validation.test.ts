@@ -1,6 +1,4 @@
 /**
- * Phase 2 follow-up: tests for the popup-side Operation validation helpers.
- *
  * Pinning:
  *  - `requiresFeeSelection` correctly distinguishes "user must pick"
  *    from "dApp already chose embedded" across both send-like kinds.

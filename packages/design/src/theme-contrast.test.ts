@@ -74,10 +74,7 @@ describe("theme contrast — light, enforce-only pairs", () => {
 
 // Muted-text tokens carry real + SECURITY copy (the scam-token trust prompt, the "irreversible"
 // confirm, reset guidance — IncomingTrustPopup/ConfirmPopup/reset). They MUST clear AA in BOTH themes
-// on every surface they sit on. This is the gate gap the post-impl codex audit caught (HIGH-1/HIGH-2):
-// the original table only checked primary/secondary/inverse, so sub-AA body/tertiary shipped green.
-// Light was raised first; dark was initially left frozen (pre-existing sub-AA, 2.1–4.1:1) and is now
-// raised to AA too (the dark-muted-aa follow-up) — both themes are asserted here.
+// on every surface they sit on.
 const MUTED_TOKENS = ["--txt-body", "--txt-tertiary", "--txt-support"]
 const MUTED_SURFACES = ["--card-bg", "--nulo-surface", "--nulo-surface-low", "--nulo-surface-high"]
 for (const theme of ["light", "dark"] as const) {

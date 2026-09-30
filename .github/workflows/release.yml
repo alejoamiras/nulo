@@ -47,7 +47,7 @@ concurrency:
 # cache ops don't need a `permissions:` scope). The handful of jobs that write
 # (release-please, auto-unstick, attach-assets, sync) escalate explicitly in
 # their own block — so build/test/resolve/deploy/verify/status no longer inherit
-# a write-capable token (codex post-impl audit, Should-fix 3).
+# a write-capable token.
 permissions:
   contents: read
 

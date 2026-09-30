@@ -7,8 +7,9 @@
  */
 
 import { expect, inject } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
-import { importTokenAndWaitForBalance, seedUsdQuoteAndReload } from "../fixtures/helpers"
+import { test as base, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
+import { extraTokensFixture } from "../fixtures/extra-tokens"
+import { seedUsdQuoteAndReload } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -16,27 +17,24 @@ const hasConfig = aztecConfig !== undefined
 
 const ONE = 10n ** 18n
 
+// Fixture: TST with 1000 public. Add BIG (5000), MID (10), TINY (1) — four tokens total.
+const test = base.extend<{ extraTokens: Record<string, string> }>({
+	extraTokens: extraTokensFixture([
+		{ symbol: "BIG", amount: 5000n * ONE },
+		{ symbol: "MID", amount: 10n * ONE },
+		{ symbol: "TINY", amount: 1n * ONE },
+	]),
+})
+
 const homeSymbols = (page: Awaited<ReturnType<typeof openPopup>>) =>
 	page.$$eval('[data-testid="tokens-card"] [data-testid="token-symbol"]', (els) => els.map((el) => (el as HTMLElement).dataset.symbol))
 
 test.skipIf(!hasConfig)(
 	"home caps at three value-ordered rows and links to Holdings when more exist",
 	{ timeout: 420_000 },
-	async ({ tokenReadyExtension }) => {
-		// Fixture: TST with 1000 public. Add BIG (5000), MID (10), TINY (1) — four tokens total.
-		const extras = [
-			{ symbol: "BIG", amount: 5000n * ONE },
-			{ symbol: "MID", amount: 10n * ONE },
-			{ symbol: "TINY", amount: 1n * ONE },
-		]
-		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
-		const addresses = await deployExtraTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, extras)
-
+	async ({ tokenReadyExtension, extraTokens: _extraTokens }) => {
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		for (const { symbol, amount } of extras) {
-			await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses[symbol], amount.toString())
-		}
 
 		await seedUsdQuoteAndReload(page)
 

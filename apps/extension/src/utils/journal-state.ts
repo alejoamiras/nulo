@@ -124,10 +124,9 @@ export function sanitizeJournalSubtitle(raw: string | undefined | null): string 
  * "Network error"). Both surfaces stay consistent with the kind value
  * the reaper / executor classify against.
  *
- * `stuck_queued` IS in the whitelist — the reaper at
- * `operation-journal/reaper.ts:192` emits it on queued-record time-out.
+ * `stuck_queued` IS in the whitelist — the reaper's `classifyReapKind`
+ * (`operation-journal/reaper.ts`) emits it on queued-record time-out.
  * Without humanization it would leak the raw kind name into the UI.
- * Codex post-impl audit H2 + opus C1.
  */
 export function humanizeErrorKind(kind: JobErrorKind): string {
 	switch (kind) {

@@ -131,8 +131,8 @@ export function formatTrajectoryDiagnostic(final: FinalObservation, successHash:
 	// The attempt fence, applied to LABELS: only post-baseline transitions may
 	// classify. With a baseline-seeded trace and zero transitions, the DOM's
 	// current stage IS the (possibly stale) baseline — falling back to it
-	// would label a prior attempt's terminal as this attempt's failure (codex
-	// post-impl round 1). `final.stage` is used only when no trace exists.
+	// would label a prior attempt's terminal as this attempt's failure.
+	// `final.stage` is used only when no trace exists.
 	const postBaseline = final.events.filter((e) => !e.baseline)
 	const lastStage = postBaseline.at(-1)?.stage ?? (final.events.length === 0 ? final.stage : "")
 	let label = `success hash ${successHash} never observed`

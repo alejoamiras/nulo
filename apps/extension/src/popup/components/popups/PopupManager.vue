@@ -47,12 +47,11 @@ const cacheStore = useCacheStore()
 // Multi-contract queue: the service can emit-storm a batch of Pending
 // events (e.g. `replayPendingPrompts` on (re)connect for N pending
 // contracts), but the popup can only show one at a time. We queue them
-// here, deduping by `(profileId, networkId, contract)` triple — codex
-// post-impl audit M3 + opus C3: bare-contract dedup mis-handles the same
-// token address that legitimately exists on multiple networks (e.g. a
-// USDC twin). The dedup check covers BOTH (a) entries already in the
-// queue and (b) the currently-open popup's payload (codex final-review
-// L) so a replay-while-open doesn't enqueue a duplicate.
+// here, deduping by the `(profileId, networkId, contract)` triple:
+// bare-contract dedup mis-handles the same token address that legitimately
+// exists on multiple networks (e.g. a USDC twin). The dedup check covers
+// BOTH (a) entries already in the queue and (b) the currently-open popup's
+// payload, so a replay-while-open doesn't enqueue a duplicate.
 const incomingTransferService = new IncomingTransferServiceClient()
 const pendingTrustQueue = []
 
@@ -80,7 +79,7 @@ function payloadMatchesLiveTriple(p) {
 
 function dequeueNextPendingTrust() {
 	if (popupStore.isOpened("incoming_trust")) return
-	// Defensive drop on dequeue (post-impl codex audit High second-cycle).
+	// Defensive drop on dequeue.
 	// Even with the live-triple guard on ingress, an identity switch can
 	// happen WHILE payloads are queued. Skip any mismatched entries
 	// without opening them.
@@ -105,7 +104,7 @@ function dequeueNextPendingTrust() {
 }
 
 function onIncomingTransferPending(payload) {
-	// Stale-triple defense (post-impl codex audit High #1). Replay calls
+	// Stale-triple defense. Replay calls
 	// are async; under rapid profile switch (A→B→A) a payload emitted
 	// for A's triple can resolve AFTER the user has switched to B. The
 	// triple-key queue dedup alone is insufficient because the payload
@@ -120,7 +119,7 @@ function onIncomingTransferPending(payload) {
 }
 incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
 
-// Stale-trust defense (codex post-impl audit Path-2 High #2). If a token
+// Stale-trust defense. If a token
 // gets deleted while its trust prompt is queued or open, the service
 // resets trust to `unknown` and wipes records. We must (a) purge any
 // queued payloads for that triple so the next dequeue doesn't open a
@@ -193,8 +192,7 @@ const unwatchTriple = watch(
 		// Identity switched. Purge queued payloads that no longer match
 		// the live triple AND close an open incoming_trust popup if its
 		// payload is now stale. Without this, a payload accepted on A
-		// before the switch could still open under B (post-impl codex
-		// audit second-cycle High).
+		// before the switch could still open under B.
 		for (let i = pendingTrustQueue.length - 1; i >= 0; i--) {
 			if (!payloadMatchesLiveTriple(pendingTrustQueue[i])) {
 				pendingTrustQueue.splice(i, 1)
@@ -205,8 +203,7 @@ const unwatchTriple = watch(
 			// Trust payloads are account-scoped (see incoming-transfer/spec.ts
 			// `IncomingTransferPending.accountAddress`); replay is filtered
 			// by account in service.replayPendingPrompts. Account-only
-			// switches MUST also close the popup. Post-impl audit 3rd-
-			// cycle Medium.
+			// switches MUST also close the popup.
 			const matches =
 				t?.profileId === appStore.profile?.id &&
 				t?.networkId === appStore.network?.id &&
@@ -229,10 +226,10 @@ const unwatchTriple = watch(
 // in pending state while toggled OFF gets no auto-prompt on toggle-on —
 // PopupManager owns the false→true replay because it knows the active
 // `(profile, network, account)` triple from `appStore`. The service can't
-// reach that triple safely. Co-authored via codex post-impl audit H1.
+// reach that triple safely.
 const configService = new ConfigServiceClient()
 let lastVisibility = true
-// Init gate (P6, codex Med #1): the onUpdate handler must NOT process
+// Init gate: the onUpdate handler must NOT process
 // events until the seed `getValue` has resolved. Otherwise an OFF→ON
 // flip arriving in the connect-vs-seed window reads the optimistic
 // `true` default and misclassifies as no-op. Belt + suspenders alongside

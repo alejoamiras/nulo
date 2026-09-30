@@ -44,7 +44,7 @@ export interface ShallowPxeFake {
 	 * tree-shaking whenever the factory is bundled — so the `dist/chrome` grep
 	 * in `_build-extension.yml` reliably catches a fake that leaked into prod.
 	 * (An unused exported const could be tree-shaken away while the factory
-	 * ships — codex post-impl audit High.)
+	 * ships.)
 	 */
 	marker: typeof SHALLOW_PXE_FAKE_BUNDLE_MARKER
 }

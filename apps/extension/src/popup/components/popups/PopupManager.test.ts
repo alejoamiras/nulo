@@ -284,7 +284,7 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 	})
 
 	test("same contract on DIFFERENT networks: BOTH surface (triple-key dedup, not bare-contract)", async () => {
-		// Post-impl audit High #1: the stale-triple guard drops payloads
+		// The stale-triple guard drops payloads
 		// whose triple doesn't match the live appStore. To still exercise
 		// the queue's triple-key dedup (vs bare-contract dedup), switch
 		// `appStoreState.network` between firing the two payloads so each
@@ -313,7 +313,7 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		expect(popupStore.isOpened("incoming_trust")).toBe(true)
 	})
 
-	test("(post-impl) stale-triple defense: payload for non-active triple is dropped", async () => {
+	test("stale-triple defense: payload for non-active triple is dropped", async () => {
 		mount(PopupManager, { shallow: SHALLOW })
 		await flushPromises()
 		// appStore is on net-1; fire a payload for net-2 → must NOT enqueue.
@@ -322,9 +322,9 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		expect(cacheState.incomingTrust.contract).toBeUndefined()
 	})
 
-	test("(post-impl 3rd cycle) account-switch on same profile/network closes the stale open popup", async () => {
-		// Codex 3rd-cycle Medium: trust payloads are account-scoped per
-		// incoming-transfer/spec.ts:84. Account-only switches MUST also
+	test("account-switch on same profile/network closes the stale open popup", async () => {
+		// Trust payloads are account-scoped (`IncomingTransferPending.accountAddress`
+		// in incoming-transfer/spec.ts). Account-only switches MUST also
 		// close a popup whose payload references the prior account.
 		mount(PopupManager, { shallow: SHALLOW })
 		await flushPromises()
@@ -343,8 +343,8 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		expect(cacheState.incomingTrust.accountAddress).toBeUndefined()
 	})
 
-	test("(post-impl 2nd cycle) accept on A, switch to B, close → no stale A popup re-opens under B", async () => {
-		// Codex post-impl 2nd-cycle High repro: queue/open A payloads,
+	test("accept on A, switch to B, close → no stale A popup re-opens under B", async () => {
+		// Queue/open A payloads,
 		// switch identity to B, close the active popup. Without the
 		// triple-watcher purge + dequeue defense, the next queued A
 		// payload would still open under B.
