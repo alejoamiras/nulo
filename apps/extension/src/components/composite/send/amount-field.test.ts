@@ -68,6 +68,8 @@ describe("composite/send/caretAfter", () => {
 		["a key typed after the comma of the rest 1,234 lands after the key", "1,5234", 3, "15234", 2],
 		["a letter typed inside 12 goes, and the caret stays between the digits", "1x2", 2, "12", 1],
 		["a point re-read at the end leaves the caret at the end", "1.234.", 6, "1234.", 5],
+		["a key typed before the point of the rest 1,234.56 keeps the caret before the point", "1,2340.56", 6, "12340.56", 5],
+		['a key typed before the point of "$12.34" keeps the caret before the point', "$125.34", 4, "125.34", 3],
 	])("%s", (_name, value, caret, text, at) => {
 		expect(caretAfter(value, caret, text)).toBe(at)
 	})

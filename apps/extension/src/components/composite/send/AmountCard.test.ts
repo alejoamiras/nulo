@@ -666,6 +666,16 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 		expect([textOf(w), lastEmit(w, "update:modelValue")]).toEqual(["1.52", "1.52"])
 	})
 
+	test('"00" typed before the point of the rest "1,234.56" reads 123400.56: the caret keeps its side of the point', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await typeKeys(w, "1234.56")
+		await input(w).trigger("blur")
+		;(input(w).element as HTMLInputElement).setSelectionRange(5, 5)
+		await typeAtCaret(w, "0")
+		await typeAtCaret(w, "0")
+		expect([textOf(w), lastEmit(w, "update:modelValue")]).toEqual(["123400.56", "123400.56"])
+	})
+
 	test("one event holding text that reads no way says so only once the field is left", async () => {
 		const w = mountCard({ token: TOKEN, modelValue: "" })
 		await input(w).setValue("1.234,5,678901")
@@ -808,6 +818,16 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 			await typeAtCaret(w, "5", USD)
 			expect(textOf(w, USD)).toBe("1.52")
 			expect(await converted(w)).toBe("1.52")
+		})
+
+		test('"56" typed before the point of a pasted "$12.34" reads 1256.34', async () => {
+			const w = mountUsd()
+			await paste(w, "$12.34", USD)
+			;(input(w, USD).element as HTMLInputElement).setSelectionRange(3, 3)
+			await typeAtCaret(w, "5", USD)
+			await typeAtCaret(w, "6", USD)
+			expect(textOf(w, USD)).toBe("1256.34")
+			expect(await converted(w)).toBe("1256.34")
 		})
 
 		test('"1,234" typed and then "." re-reads the comma as grouping', async () => {

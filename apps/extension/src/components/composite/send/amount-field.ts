@@ -85,13 +85,14 @@ function settle(text: string, edit: AmountEdit, pasteLike: boolean): { text: str
 }
 
 /** Where the caret goes once the input's `value`, its caret at `caret`, shows `text` instead: before
- *  as many digits as followed it, so the next key lands where the person typed the last. */
+ *  as many digits and points as followed it, so the next key lands where the person typed the last,
+ *  on the same side of the point. */
 export function caretAfter(value: string, caret: number, text: string): number {
-	let digits = value.slice(caret).replace(/\D/g, "").length
+	let kept = value.slice(caret).replace(/[^\d.]/g, "").length
 	let at = text.length
-	while (at > 0 && digits > 0) {
+	while (at > 0 && kept > 0) {
 		at -= 1
-		if (/\d/.test(text[at])) digits -= 1
+		if (/[\d.]/.test(text[at])) kept -= 1
 	}
 	return at
 }
