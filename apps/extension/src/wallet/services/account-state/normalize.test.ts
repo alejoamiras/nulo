@@ -1,3 +1,10 @@
+import { ProtocolContractAddress } from "@aztec/protocol-contracts"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import {
+	HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
+	STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
+} from "@aztec/standard-contracts/handshake-registry/constants"
+import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec/standard-contracts/multi-call-entrypoint/constants"
 import { describe, expect, test } from "vitest"
 import {
 	ACCOUNT_STATE_CAPS,
@@ -100,6 +107,22 @@ describe("registrableNetworkIds", () => {
 			{ networkId: "hasContract", senders: [], contracts: [contract()] },
 		])
 		expect(registrableNetworkIds(normalized).sort()).toEqual(["hasContract", "hasSender"])
+	})
+
+	test("a network holding only what every PXE boot registers has no work; one dApp contract gives it some", () => {
+		const rebuilt = [
+			...Object.values(ProtocolContractAddress),
+			STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS,
+			STANDARD_AUTH_REGISTRY_ADDRESS,
+			STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
+			...HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
+		].map((a) => contract(a.toString()))
+		const normalized = normalizeAccountStateSlice([
+			{ networkId: "alpha", senders: [], contracts: rebuilt },
+			{ networkId: "testnet", senders: [], contracts: [...rebuilt, contract(`0x${"07".repeat(32)}`)] },
+		])
+		expect(normalized.items[0].contracts).toHaveLength(7)
+		expect(registrableNetworkIds(normalized)).toEqual(["testnet"])
 	})
 })
 

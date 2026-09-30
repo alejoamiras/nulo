@@ -19,7 +19,6 @@ import { Flex, Input, MaterialIcon, Text } from "@nulo/design"
 import { pressOn } from "../../../tests/helpers/press-key"
 import JsonViewer from "@/components/JsonViewer/JsonViewer.vue"
 import SubPageHeader from "@/components/ui/SubPageHeader.vue"
-import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import ImportPage from "./import.vue"
 
 /** The flow's surface with a decrypted password-profile backup chosen and a valid new password. */
@@ -54,6 +53,12 @@ function makeFlow() {
 		importedProfile: ref<{ id: string } | null>(null),
 		isAllowedToImportBackup: ref(true),
 		isRestoreHasErrors: ref(false),
+		canRetryAccountState: ref(false),
+		isRetryingAccountState: ref(false),
+		unrestoredNetworkNames: ref<string[]>([]),
+		hasOtherRestoreErrors: ref(false),
+		retryAccountState: vi.fn(),
+		continueImport: vi.fn(),
 		pickBackupFile: vi.fn(),
 		decryptBackup: vi.fn(),
 		restoreBackup: vi.fn(),
@@ -171,7 +176,7 @@ describe("popup import — full backup, finished with errors", () => {
 		pressOn(w.get('[data-testid="import-full-backup-view-errors-btn"]').element as HTMLElement, "Enter")
 		await flushPromises()
 		expect(holder.flow.showRestoreErrorLog).toHaveBeenCalledTimes(1)
-		expect(setLastActiveProfileId).not.toHaveBeenCalled()
+		expect(holder.flow.continueImport).not.toHaveBeenCalled()
 	})
 
 	test("a repeat Enter on Continue continues nothing", async () => {
@@ -179,7 +184,7 @@ describe("popup import — full backup, finished with errors", () => {
 		const w = await mountImport()
 		pressOn(w.get('[data-testid="import-full-backup-continue-btn"]').element as HTMLElement, "Enter", { repeat: true })
 		await flushPromises()
-		expect(setLastActiveProfileId).not.toHaveBeenCalled()
+		expect(holder.flow.continueImport).not.toHaveBeenCalled()
 	})
 
 	test("Enter in the error viewer's search finds the next match, and on its checkbox does nothing, never continuing", async () => {
@@ -201,6 +206,37 @@ describe("popup import — full backup, finished with errors", () => {
 		matchCase.focus()
 		matchCase.dispatchEvent(enterKey())
 		await flushPromises()
-		expect(setLastActiveProfileId).not.toHaveBeenCalled()
+		expect(holder.flow.continueImport).not.toHaveBeenCalled()
+	})
+})
+
+describe("popup import — full backup, finished with a network left to retry", () => {
+	beforeEach(() => {
+		finishWithErrors()
+		holder.flow.canRetryAccountState.value = true
+		holder.flow.unrestoredNetworkNames.value = ["Alpha V5"]
+	})
+
+	test("Enter on a focused Retry retries once and does not continue", async () => {
+		const w = await mountImport()
+		pressOn(w.get('[data-testid="import-full-backup-retry-btn"]').element as HTMLElement, "Enter")
+		await flushPromises()
+		expect(holder.flow.retryAccountState).toHaveBeenCalledTimes(1)
+		expect(holder.flow.continueImport).not.toHaveBeenCalled()
+	})
+
+	test("Back is disabled while the Retry runs", async () => {
+		holder.flow.isRetryingAccountState.value = true
+		const w = await mountImport()
+		const back = w.findAll("button").find((b) => b.text() === "Back")
+		if (!back) throw new Error("no Back button")
+		expect((back.element as HTMLButtonElement).disabled).toBe(true)
+	})
+
+	test("the warning names the network the Retry replays", async () => {
+		const w = await mountImport()
+		expect(w.get('[data-testid="import-full-backup-warning"]').text()).toContain(
+			"Alpha V5 didn't answer in time, so what was saved for it may not be restored. You can retry or continue.",
+		)
 	})
 })

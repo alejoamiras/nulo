@@ -315,6 +315,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	}
 	function dispose() {
 		nameField.dispose()
+		backup.dispose()
 	}
 
 	return {
@@ -381,11 +382,18 @@ function wireBackupImport(deps: WireBackupImportDeps) {
 		isAllowedToImportBackup,
 		isRestoreHasErrors,
 		parsedBackupName,
+		canRetryAccountState,
+		unrestoredNetworkNames,
+		hasOtherRestoreErrors,
+		isRetryingAccountState,
+		retryAccountState,
+		continueImport,
 		pickBackupFile,
 		decryptBackup,
 		restoreBackup,
 		showRestoreErrorLog,
 		resetBackupState,
+		dispose,
 	} = useFullBackupImport({
 		password: deps.password,
 		repeatedPassword: deps.repeatedPassword,
@@ -406,6 +414,7 @@ function wireBackupImport(deps: WireBackupImportDeps) {
 
 	return {
 		resetBackupState,
+		dispose,
 		surface: {
 			selectedBackup,
 			decryptionPassword,
@@ -414,6 +423,12 @@ function wireBackupImport(deps: WireBackupImportDeps) {
 			importedProfile,
 			isAllowedToImportBackup,
 			isRestoreHasErrors,
+			canRetryAccountState,
+			unrestoredNetworkNames,
+			hasOtherRestoreErrors,
+			isRetryingAccountState,
+			retryAccountState,
+			continueImport,
 			pickBackupFile,
 			decryptBackup,
 			restoreBackup,

@@ -27,6 +27,7 @@ import {
 	normalizeAccountStateSlice,
 	truncateErrorMessage,
 } from "./normalize"
+import { isPxeProvidedAddress } from "./pxe-provided"
 
 export * from "./spec"
 
@@ -310,12 +311,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			const senders: Restored<BackupSender>[] = []
 			const contracts: Restored<BackupContract>[] = []
 
-			// Flat operation stream: the sync preparation helpers own the guard
-			// ladders and record every skip/failure IMMEDIATELY (evaluated lazily
-			// per operation, so unreachable/expired are sampled at the same points
-			// the monolith sampled them); `launch` is the SOLE await and sits
-			// exactly where the monolith awaited the PXE registration. Skipped
-			// operations and empty items execute zero awaits.
+			// `launch` is the only await: a skipped operation or an empty item awaits nothing.
 			for (const prepared of this.iterateRegistrations(item, network, expired, reg, senders, contracts)) {
 				if (!prepared) continue
 				try {
@@ -343,10 +339,8 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		return message
 	}
 
-	/** Lazily yields one prepared registration per sender then per contract —
-	 *  laziness is load-bearing: each preparation's guards (unreachable,
-	 *  expired) must be sampled AFTER the preceding operation settled, exactly
-	 *  as the monolith's loop heads did. */
+	/** Yields one prepared registration per sender, then per contract. Lazily: each preparation
+	 *  samples its guards (unreachable, expired) only after the previous operation settled. */
 	private *iterateRegistrations(
 		item: { networkId: string; senders: BackupSender[]; contracts: BackupContract[] },
 		network: Network | undefined,
@@ -402,7 +396,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			return undefined
 		}
 		const precheck = precheckContractAddress(contract, network)
-		if (precheck === "protocol") return undefined
+		if (precheck === "pxe-provided") return undefined
 		if (precheck !== "register") {
 			contracts.push(precheck)
 			return undefined
@@ -457,14 +451,14 @@ interface PreparedRegistration {
 	recordFailure: (err: unknown) => void
 }
 
-/** Synchronous pre-launch gate for one contract: network-first error precedence
- *  (pre-existing contract — a missing network reports "Network not found", not
- *  the address-parse error), and protocol contracts (address ≤ 6) are skipped
- *  outright because their hardcoded addresses cannot be validated. */
+/** Synchronous pre-launch gate for one contract: network-first error precedence (a missing
+ *  network reports "Network not found", not the address-parse error), then the contracts every
+ *  PXE boot registers by itself (the protocol contracts, upstream's preloaded standard
+ *  contracts) are skipped outright. The parse stays here so a malformed address keeps its error. */
 function precheckContractAddress(
 	contract: BackupContract,
 	network: Network | undefined,
-): "register" | "protocol" | Restored<BackupContract> {
+): "register" | "pxe-provided" | Restored<BackupContract> {
 	let addressNum: bigint
 	try {
 		if (!network) throw new Error("Network not found")
@@ -472,7 +466,7 @@ function precheckContractAddress(
 	} catch (err) {
 		return { ...contract, restoreError: truncateErrorMessage(toRestoreError(err)) }
 	}
-	return addressNum >= 0 && addressNum <= 6 ? "protocol" : "register"
+	return isPxeProvidedAddress(addressNum) ? "pxe-provided" : "register"
 }
 
 /** Per-item registration state shared by the sender + contract loops. */

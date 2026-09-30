@@ -15,6 +15,7 @@ export function resolveFullBackupEnterAction(state: {
 	selectedBackup: BackupSelection | null
 	restoreStatus: RestoreStatus
 	isRestoreHasErrors: boolean
+	isRetrying?: boolean
 }): FullBackupEnterAction {
 	const { selectedBackup, restoreStatus, isRestoreHasErrors } = state
 	if (selectedBackup?.type === "encrypted" && !selectedBackup?.profileType) return "decrypt"
@@ -22,6 +23,7 @@ export function resolveFullBackupEnterAction(state: {
 	// composable guards re-entry too, but not firing the action keeps Enter
 	// from queueing a redundant submit mid-import.
 	if (selectedBackup?.profileType && restoreStatus !== "finished" && restoreStatus !== "progress") return "restore"
-	if (restoreStatus === "finished" && isRestoreHasErrors) return "continue"
+	// Continue is disabled while a Retry runs; the shortcut must not reach it either.
+	if (restoreStatus === "finished" && isRestoreHasErrors && !state.isRetrying) return "continue"
 	return null
 }

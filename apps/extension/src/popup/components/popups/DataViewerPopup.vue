@@ -33,7 +33,7 @@ watch(
 <template>
 	<Popup :show="show" @onClose="emit('onClose')" :displaceIdx="popupStore.popups.data_viewer?.order">
 		<PopupCard :displaceIdx>
-			<Flex wide align="center" direction="column" gap="24" :class="$style.wrapper">
+			<Flex wide align="center" direction="column" gap="24" :class="$style.wrapper" data-testid="data-viewer">
 				<JsonViewer :data="data" />
 
 				<Button v-snack-footer @click="emit('onClose')" variant="primary_outline" size="medium" wide>Close</Button>

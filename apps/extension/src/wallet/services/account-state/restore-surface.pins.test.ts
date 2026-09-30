@@ -4,6 +4,7 @@
  * the empty-item fast path (which must STAY synchronous under the length-
  * guarded loop extraction), and the deadline restoreError's exact string.
  */
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { IService } from "@/wallet/base"
 import { ServiceCollection } from "@/wallet/base"
@@ -78,6 +79,36 @@ describe("restore() pins for the PR-b loop extraction", () => {
 		expect(result[0].contracts).toHaveLength(1)
 		expect((result[0].contracts[0] as { address: string }).address).toBe(realAddr)
 		expect(result[0].restoreError).toBeUndefined()
+	})
+
+	test("a preloaded standard contract is skipped like a protocol one: no launch, no result entry", async () => {
+		const realAddr = `0x${"07".repeat(32)}`
+		const result = await accountStateService.restore(
+			[
+				{
+					networkId: "net-a",
+					senders: [],
+					contracts: [
+						{ address: STANDARD_AUTH_REGISTRY_ADDRESS.toString(), instance: { i: 1 }, artifact: { a: 1 } },
+						{ address: realAddr, instance: { i: 2 }, artifact: { a: 2 } },
+					],
+				},
+			] as never,
+			[NET],
+		)
+		expect(pxe.registerContract).toHaveBeenCalledTimes(1)
+		expect(result[0].contracts).toEqual([{ address: realAddr, instance: { i: 2 }, artifact: { a: 2 } }])
+		expect(result[0].restoreError).toBeUndefined()
+	})
+
+	test("a malformed spelling of a protocol address keeps its parse error and launches nothing", async () => {
+		const result = await accountStateService.restore(
+			[{ networkId: "net-a", senders: [], contracts: [{ address: "0x05", instance: { i: 1 }, artifact: { a: 1 } }] }] as never,
+			[NET],
+		)
+		expect(pxe.registerContract).not.toHaveBeenCalled()
+		expect(result[0].contracts).toHaveLength(1)
+		expect(typeof (result[0].contracts[0] as { restoreError?: unknown }).restoreError).toBe("string")
 	})
 
 	test("an empty item yields a clean entry with no launches and no restoreError", async () => {

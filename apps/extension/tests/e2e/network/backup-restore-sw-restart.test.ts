@@ -233,7 +233,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKillUnderPage, () => {
 			timeout: 900_000,
 		},
 		async ({ tokenReadyExtension }) => {
-			const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
+			const { filePath, funded } = await exportFundedBackup(tokenReadyExtension, aztecConfig!.tokenAddress)
 
 			const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-crash-pre-"))
 			const ctx2 = await launchExtension({ userDataDir: profileDir })
@@ -360,7 +360,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.backgroundKillUnderPage, () => {
 		"scenario B: a POST-finalize crash retains the profile — no rollback, recovery only, never torn",
 		{ timeout: 900_000 },
 		async ({ tokenReadyExtension }) => {
-			const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
+			const { filePath, funded } = await exportFundedBackup(tokenReadyExtension, aztecConfig!.tokenAddress)
 
 			const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-crash-post-"))
 			const ctx2 = await launchExtension({ userDataDir: profileDir })

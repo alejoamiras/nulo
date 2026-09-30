@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { COLLAPSING_HERO } from "../collapsing-hero"
 import ImportFullBackupForm from "./ImportFullBackupForm.vue"
 
 const stubs = {
@@ -117,5 +118,57 @@ describe("ImportFullBackupForm", () => {
 		})
 		expect(wrapper.text()).toContain("Warning")
 		expect(wrapper.text()).toContain("import completed with some errors")
+	})
+
+	it("names the networks a Retry replays in the warning", () => {
+		const wrapper = mount(ImportFullBackupForm, {
+			props: baseProps({
+				restoreStatus: "finished",
+				isRestoreHasErrors: true,
+				unrestoredNetworks: ["Alpha V5", "Testnet"],
+				hasOtherErrors: true,
+			}),
+			global: { stubs },
+		})
+		expect(wrapper.get("[data-testid=import-full-backup-warning]").text()).toContain(
+			"Alpha V5 and Testnet didn't answer in time, so what was saved for them may not be restored. You can retry, review the details, or continue.",
+		)
+	})
+
+	it("scrolls the warning into view once, as it appears, and marks it an alert", async () => {
+		const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+		try {
+			const wrapper = mount(ImportFullBackupForm, { props: baseProps({ restoreStatus: "progress" }), global: { stubs } })
+			expect(scroll).not.toHaveBeenCalled()
+
+			await wrapper.setProps({ restoreStatus: "finished", isRestoreHasErrors: true, unrestoredNetworks: ["Alpha V5"] })
+			const warning = wrapper.get("[data-testid=import-full-backup-warning]")
+			expect(warning.attributes("role")).toBe("alert")
+			expect(scroll).toHaveBeenCalledOnce()
+			expect(scroll).toHaveBeenCalledWith({ block: "nearest" })
+			expect(scroll.mock.contexts[0]).toBe(warning.element)
+
+			await wrapper.setProps({ unrestoredNetworks: [] })
+			expect(scroll).toHaveBeenCalledOnce()
+		} finally {
+			scroll.mockRestore()
+		}
+	})
+
+	it("hands the warning to an enclosing collapsing hero instead of scrolling it itself", async () => {
+		const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+		const reveal = vi.fn()
+		try {
+			const wrapper = mount(ImportFullBackupForm, {
+				props: baseProps({ restoreStatus: "progress" }),
+				global: { stubs, provide: { [COLLAPSING_HERO as symbol]: { reveal } } },
+			})
+			await wrapper.setProps({ restoreStatus: "finished", isRestoreHasErrors: true })
+			expect(reveal).toHaveBeenCalledOnce()
+			expect(reveal).toHaveBeenCalledWith(wrapper.get("[data-testid=import-full-backup-warning]").element)
+			expect(scroll).not.toHaveBeenCalled()
+		} finally {
+			scroll.mockRestore()
+		}
 	})
 })

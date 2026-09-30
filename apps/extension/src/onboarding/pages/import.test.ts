@@ -17,6 +17,34 @@ vi.mock("vue-router", () => ({ useRouter: () => router, useRoute: () => ({ meta:
 const importFlow = vi.hoisted(() => ({
 	api: undefined as ReturnType<typeof import("@/composables/useProfileImportFlow").useProfileImportFlow> | undefined,
 }))
+const backupImport = vi.hoisted(() => ({
+	api: undefined as ReturnType<typeof import("@/composables/useFullBackupImport").useFullBackupImport> | undefined,
+}))
+// The real composable, with a Retry that stays pending: reaching a retryable state for real
+// takes a whole restore, which this page test does not own.
+vi.mock("@/composables/useFullBackupImport", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("@/composables/useFullBackupImport")>()
+	const { computed, ref } = await import("vue")
+	return {
+		...mod,
+		useFullBackupImport: (opts: Parameters<typeof mod.useFullBackupImport>[0]) => {
+			const real = mod.useFullBackupImport(opts)
+			const isRetryingAccountState = ref(false)
+			backupImport.api = {
+				...real,
+				canRetryAccountState: computed(() => real.restoreStatus.value === "finished"),
+				unrestoredNetworkNames: computed(() => (real.restoreStatus.value === "finished" ? ["Alpha V5"] : [])),
+				hasOtherRestoreErrors: computed(() => false),
+				isRetryingAccountState,
+				retryAccountState: vi.fn(() => {
+					isRetryingAccountState.value = true
+					return new Promise<void>(() => {})
+				}),
+			}
+			return backupImport.api
+		},
+	}
+})
 vi.mock("@/composables/useProfileImportFlow", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("@/composables/useProfileImportFlow")>()
 	return {
@@ -110,5 +138,60 @@ describe("onboarding import", () => {
 		expect(profileApi.importMnemonic).toHaveBeenCalledTimes(1)
 		expect(router.push).toHaveBeenCalledWith("/onboarding/learn")
 		expect(useToast().toast.value).toBeNull()
+	})
+
+	test("while a Retry runs it reads Retrying..., and Continue, View errors and Back are disabled", async () => {
+		const w = await mountImport()
+		importFlow.api!.selectedImportOption.value = "full_backup"
+		const backup = backupImport.api!
+		backup.restoreStatus.value = "finished"
+		backup.restoreErrorLog.value = {
+			"account-state": [
+				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped — ran out of time reaching the network" },
+			],
+		}
+		await flushPromises()
+		const button = (testid: string) => w.get(`[data-testid="${testid}"]`)
+		const back = () => {
+			const found = w.findAll("button").find((b) => b.text() === "Back to methods")
+			if (!found) throw new Error("no Back to methods button")
+			return found
+		}
+		expect(w.get('[data-testid="import-full-backup-warning"]').text()).toContain(
+			"Alpha V5 didn't answer in time, so what was saved for it may not be restored. You can retry or continue.",
+		)
+		expect(button("import-full-backup-retry-btn").text()).toBe("Retry")
+		expect(button("import-full-backup-continue-btn").attributes("disabled")).toBeUndefined()
+		expect(back().attributes("disabled")).toBeUndefined()
+
+		await button("import-full-backup-retry-btn").trigger("click")
+		await flushPromises()
+
+		expect(backup.retryAccountState).toHaveBeenCalledTimes(1)
+		expect(button("import-full-backup-retry-btn").text()).toBe("Retrying...")
+		expect(button("import-full-backup-continue-btn").attributes("disabled")).toBeDefined()
+		expect(button("import-full-backup-view-errors-btn").attributes("disabled")).toBeDefined()
+		expect(back().attributes("disabled")).toBeDefined()
+	})
+
+	test("Continue on the errors screen completes the imported profile and goes on to /onboarding/learn", async () => {
+		bootstrap.bootstrapActiveProfile.mockResolvedValue(true)
+		const w = await mountImport()
+		importFlow.api!.selectedImportOption.value = "full_backup"
+		const backup = backupImport.api!
+		backup.importedProfile.value = { id: "p9", name: "Imported", type: "password" }
+		backup.restoreStatus.value = "finished"
+		backup.restoreErrorLog.value = {
+			"account-state": [
+				{ networkId: "M2", senders: [], contracts: [], restoreError: "Skipped — ran out of time reaching the network" },
+			],
+		}
+		await flushPromises()
+
+		await w.get('[data-testid="import-full-backup-continue-btn"]').trigger("click")
+		await flushPromises()
+
+		expect(bootstrap.bootstrapActiveProfile).toHaveBeenCalledWith({ id: "p9", name: "Imported", type: "password" })
+		expect(router.push).toHaveBeenCalledWith("/onboarding/learn")
 	})
 })

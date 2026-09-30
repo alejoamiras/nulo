@@ -181,6 +181,7 @@ import {
 	validateAndMigrateBackup,
 } from "./useFullBackupImport"
 import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
+import { ACCOUNT_STATE_SKIP_DEADLINE } from "@/wallet/services/account-state/normalize"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -961,11 +962,14 @@ describe("useFullBackupImport — rows bind to the seeded network of their chain
 
 		await c.restoreBackup()
 
+		expect(accountStateClient.restore).toHaveBeenCalledTimes(2)
 		expect(accountStateClient.restore).toHaveBeenCalledWith(
-			[
-				{ networkId: "M1", contracts: [], senders: [AS_SENDER] },
-				{ networkId: "M2", contracts: [], senders: [AS_SENDER] },
-			],
+			[{ networkId: "M1", contracts: [], senders: [AS_SENDER] }],
+			seeds,
+			expect.anything(),
+		)
+		expect(accountStateClient.restore).toHaveBeenCalledWith(
+			[{ networkId: "M2", contracts: [], senders: [AS_SENDER] }],
 			seeds,
 			expect.anything(),
 		)
@@ -1017,6 +1021,268 @@ describe("useFullBackupImport — rows bind to the seeded network of their chain
 		expect(c.restoreErrorLog.value["account-state"]).toEqual([0, 1, 2].map((row) => ({ row, restoreError: reason })))
 		expect(c.restoreErrorLog.value.transaction).toEqual([{ row: 0, restoreError: reason }])
 		expect(JSON.stringify(c.restoreErrorLog.value)).not.toMatch(/0xabab|h1|senders|0xaaaa/)
+	})
+})
+
+describe("useFullBackupImport — Retry the networks that did not restore", () => {
+	const seeds = [
+		{ id: "M1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 },
+		{ id: "M2", name: "Alpha V5", rpcUrl: "https://a/", chainId: 2 },
+	]
+	const DROPPED = "Skipped — its network is not one of the built-in networks"
+	const item = (networkId: string, senders = [AS_SENDER]) => ({ networkId, contracts: [], senders })
+	const answered = (networkId: string) => [item(networkId)]
+	const ranOutOfTime = (networkId: string) => [
+		{ ...item(networkId, []), restoreError: `${ACCOUNT_STATE_SKIP_DEADLINE} (1 registration(s) not attempted)` },
+	]
+	const networkOf = (items: unknown) => (items as Array<{ networkId: string }>)[0]?.networkId
+	type Import = ReturnType<typeof useFullBackupImport>
+	const accountStateRows = (c: Import) => (c.restoreErrorLog.value["account-state"] ?? []) as Array<Record<string, unknown>>
+	const rowsFor = (c: Import, networkId: string) => accountStateRows(c).filter((r) => r.networkId === networkId)
+
+	function deferred<T>() {
+		let resolve: (value: T) => void = () => {}
+		const promise = new Promise<T>((r) => {
+			resolve = r
+		})
+		return { promise, resolve }
+	}
+	/** Real macrotask turns, so the flow's WebCrypto and mocked RPCs settle while fake timers hold. */
+	async function until(cond: () => boolean) {
+		for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setImmediate(r))
+		expect(cond()).toBe(true)
+	}
+
+	/** Restores a backup with one sender on each seeded chain; `restore` answers per network. */
+	async function start(restore: (networkId: string) => unknown, data: Record<string, unknown> = {}) {
+		accountStateClient.restore = vi.fn(async (items: unknown) => restore(networkOf(items))) as never
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				"account-state": [
+					{ ...item("x1"), chainId: 1 },
+					{ ...item("x2"), chainId: 2 },
+				],
+				...data,
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.seedDefaultsForProfile.mockResolvedValue(seeds)
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa", chainId: 1 }])
+		return { c, opts, restored: c.restoreBackup() }
+	}
+
+	it("replays only the network that ran out of time; its clean answer clears its row and keeps every other row", async () => {
+		let m2Calls = 0
+		const { c, opts, restored } = await start((id) => (id === "M2" && ++m2Calls === 1 ? ranOutOfTime("M2") : answered(id)), {
+			"account-state": [
+				{ ...item("x1"), chainId: 1 },
+				{ ...item("x2"), chainId: 2 },
+				{ ...item("x7"), chainId: 7 },
+			],
+			transaction: [{ hash: "h9", account: "0xaaaa", chainId: 7 }],
+		})
+		await restored
+		expect(c.canRetryAccountState.value).toBe(true)
+		expect(rowsFor(c, "M2")).toHaveLength(1)
+		expect(c.unrestoredNetworkNames.value).toEqual(["Alpha V5"])
+		expect(c.hasOtherRestoreErrors.value).toBe(true)
+		accountStateClient.restore.mockClear()
+
+		await c.retryAccountState()
+
+		expect(accountStateClient.restore).toHaveBeenCalledOnce()
+		expect(accountStateClient.restore).toHaveBeenCalledWith([item("M2")], seeds, expect.anything())
+		expect(accountStateRows(c)).toEqual([{ row: 2, restoreError: DROPPED }])
+		expect(c.restoreErrorLog.value.transaction).toEqual([{ row: 0, restoreError: DROPPED }])
+		expect(c.canRetryAccountState.value).toBe(false)
+		expect(c.unrestoredNetworkNames.value).toEqual([])
+		expect(opts.completeImport).not.toHaveBeenCalled()
+	})
+
+	it("names the networks a Retry replays by their seeded names, in seed order", async () => {
+		const { c, restored } = await start((id) => ranOutOfTime(id), {
+			"account-state": [
+				{ ...item("x2"), chainId: 2 },
+				{ ...item("x1"), chainId: 1 },
+			],
+		})
+		await restored
+
+		expect(c.unrestoredNetworkNames.value).toEqual(["Testnet", "Alpha V5"])
+		expect(c.hasOtherRestoreErrors.value).toBe(false)
+	})
+
+	it("a Retry that leaves no error row goes into the wallet, once", async () => {
+		let m2Calls = 0
+		const { c, opts, restored } = await start((id) => (id === "M2" && ++m2Calls === 1 ? ranOutOfTime("M2") : answered(id)))
+		await restored
+		expect(opts.completeImport).not.toHaveBeenCalled()
+		expect(c.hasOtherRestoreErrors.value).toBe(false)
+
+		await c.retryAccountState()
+
+		expect(c.restoreErrorLog.value).toEqual({})
+		expect(c.isRestoreHasErrors.value).toBe(false)
+		expect(opts.completeImport).toHaveBeenCalledOnce()
+		expect(opts.completeImport).toHaveBeenCalledWith({ id: "new-id", name: "Imported", type: "password" })
+	})
+
+	it("the first run's late answer lands on nothing while the Retry's own answer clears the row", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+		try {
+			const late = deferred<unknown>()
+			const retried = deferred<unknown>()
+			let m2Calls = 0
+			const { c, opts, restored } = await start((id) => {
+				if (id !== "M2") return answered(id)
+				return ++m2Calls === 1 ? late.promise : retried.promise
+			})
+			await until(() => m2Calls === 1)
+			await vi.advanceTimersByTimeAsync(45_000)
+			await restored
+			expect(rowsFor(c, "M2")).toHaveLength(1)
+
+			const retry = c.retryAccountState()
+			await until(() => m2Calls === 2)
+			late.resolve(ranOutOfTime("M2"))
+			retried.resolve(answered("M2"))
+			await retry
+			await until(() => true)
+
+			expect(c.restoreErrorLog.value).toEqual({})
+			expect(opts.completeImport).toHaveBeenCalledOnce()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("a Retry that stalls again leaves exactly one row for that network, still retryable", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+		try {
+			let m2Calls = 0
+			const { c, opts, restored } = await start((id) => {
+				if (id !== "M2") return answered(id)
+				m2Calls++
+				return new Promise(() => {})
+			})
+			await until(() => m2Calls === 1)
+			await vi.advanceTimersByTimeAsync(45_000)
+			await restored
+
+			const retry = c.retryAccountState()
+			await until(() => m2Calls === 2)
+			await vi.advanceTimersByTimeAsync(45_000)
+			await retry
+
+			expect(rowsFor(c, "M2")).toEqual([{ networkId: "M2", contracts: [], senders: [], restoreError: ACCOUNT_STATE_SKIP_DEADLINE }])
+			expect(c.canRetryAccountState.value).toBe(true)
+			expect(opts.completeImport).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("a second press while a Retry runs makes no call", async () => {
+		const retried = deferred<unknown>()
+		let m2Calls = 0
+		const { c, restored } = await start((id) => {
+			if (id !== "M2") return answered(id)
+			return ++m2Calls === 1 ? ranOutOfTime("M2") : retried.promise
+		})
+		await restored
+
+		const first = c.retryAccountState()
+		await until(() => m2Calls === 2)
+		expect(c.isRetryingAccountState.value).toBe(true)
+		const second = c.retryAccountState()
+		retried.resolve(answered("M2"))
+		await Promise.all([first, second])
+
+		expect(m2Calls).toBe(2)
+		expect(c.isRetryingAccountState.value).toBe(false)
+	})
+
+	it("a Retry never clears a normalization violation, so a clean answer does not complete the import", async () => {
+		const overCap = Array.from({ length: 65 }, (_, i) => ({ address: `0x${(i + 1).toString(16).padStart(64, "0")}` }))
+		let m2Calls = 0
+		const { c, opts, restored } = await start((id) => (id === "M2" && ++m2Calls === 1 ? ranOutOfTime("M2") : answered(id)), {
+			"account-state": [
+				{ ...item("x1"), chainId: 1 },
+				{ ...item("x2", overCap), chainId: 2 },
+			],
+		})
+		await restored
+		const violation = rowsFor(c, "M2").find((r) => String(r.restoreError).includes("per-network cap"))
+		expect(violation).toBeDefined()
+		expect(rowsFor(c, "M2")).toHaveLength(2)
+
+		await c.retryAccountState()
+
+		expect(rowsFor(c, "M2")).toEqual([violation])
+		expect(c.canRetryAccountState.value).toBe(false)
+		expect(opts.completeImport).not.toHaveBeenCalled()
+	})
+
+	it("Back while a Retry runs drops it: its answer writes nothing into the reset page", async () => {
+		const retried = deferred<unknown>()
+		let m2Calls = 0
+		const { c, restored } = await start((id) => {
+			if (id !== "M2") return answered(id)
+			return ++m2Calls === 1 ? ranOutOfTime("M2") : retried.promise
+		})
+		await restored
+
+		const retry = c.retryAccountState()
+		await until(() => m2Calls === 2)
+		c.resetBackupState()
+		retried.resolve(ranOutOfTime("M2"))
+		await retry
+
+		expect(c.restoreErrorLog.value).toEqual({})
+		expect(c.isRetryingAccountState.value).toBe(false)
+		expect(c.canRetryAccountState.value).toBe(false)
+	})
+
+	it("picking another backup while a Retry runs drops it: its clean answer completes nothing", async () => {
+		const retried = deferred<unknown>()
+		let m2Calls = 0
+		const { c, opts, restored } = await start((id) => {
+			if (id !== "M2") return answered(id)
+			return ++m2Calls === 1 ? ranOutOfTime("M2") : retried.promise
+		})
+		await restored
+
+		const retry = c.retryAccountState()
+		await until(() => m2Calls === 2)
+		opts.pickFile.mockResolvedValue(new File([JSON.stringify(await buildBackup())], "other.json", { type: "application/json" }))
+		await c.pickBackupFile()
+		retried.resolve(answered("M2"))
+		await retry
+
+		expect(opts.completeImport).not.toHaveBeenCalled()
+		expect(rowsFor(c, "M2")).toHaveLength(1)
+		expect(c.selectedBackup.value?.name).toBe("other.json")
+	})
+
+	it("Continue drops the Retry, so a press while its handshake waits makes no call and no second completion", async () => {
+		let m2Calls = 0
+		const { c, opts, restored } = await start((id) => (id === "M2" && ++m2Calls === 1 ? ranOutOfTime("M2") : answered(id)))
+		await restored
+		const handshake = deferred<void>()
+		opts.completeImport.mockReturnValue(handshake.promise)
+
+		const continued = c.continueImport()
+		expect(c.canRetryAccountState.value).toBe(false)
+		await c.retryAccountState()
+		handshake.resolve()
+		await continued
+
+		expect(m2Calls).toBe(1)
+		expect(opts.completeImport).toHaveBeenCalledOnce()
+		expect(opts.completeImport).toHaveBeenCalledWith({ id: "new-id", name: "Imported", type: "password" })
 	})
 })
 
