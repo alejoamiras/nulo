@@ -259,6 +259,7 @@
     "defineComponent": true,
     "detailRowsFor": true,
     "detectBackupType": true,
+    "displaySymbol": true,
     "downloadFile": true,
     "effectScope": true,
     "feeJuicePricingFromUsd": true,
