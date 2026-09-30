@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { clip } from "./closed"
 import { memView, P, row } from "./fixture"
 import { ARCHIVE_HEADER, activeIndex, archiveIndex } from "./split-index"
 
@@ -47,7 +48,10 @@ describe("split-index", () => {
 	test("an archive line: status softened, date once, PRs, and a balanced hook clipped whole at 200 and linked from archive/", () => {
 		const hook = `${"word ".repeat(37)}[x](live/plan.md) tail`
 		const rows = [
-			row("a", { prs: [1, 2], hook: "3 phases ✓** (light) — beside [live](live/plan.md) and [b](b/plan.md)" }),
+			row("a", {
+				prs: [1, 2],
+				hook: "3 phases ✓** (light) — beside [live](live/plan.md) and [b](b/plan.md), `implementations-plan/b`",
+			}),
 			row("b", {
 				status: "historical — pre-open-source import (2026-05-19)",
 				date: "2026-05-19",
@@ -63,10 +67,12 @@ describe("split-index", () => {
 			[
 				...ARCHIVE_HEADER,
 				"",
-				"- [a](a/plan.md) — completed 2026-09-01 (#1, #2) — 3 phases ✓ (light) — beside [live](../live/plan.md) and [b](b/plan.md)",
+				"- [a](a/plan.md) — completed 2026-09-01 (#1, #2) — 3 phases ✓ (light) — beside [live](../live/plan.md) and [b](b/plan.md), `implementations-plan/archive/b`",
 				`- [b](b/README.md) — historical, pre-open-source import (2026-05-19) — ${Array(37).fill("word").join(" ")}…`,
 				"",
 			].join("\n"),
 		)
+		expect(clip("alpha beta gamma", 13)).toBe("alpha beta…")
+		expect(clip("aaa [two words](x) b", 12)).toBe("aaa…")
 	})
 })

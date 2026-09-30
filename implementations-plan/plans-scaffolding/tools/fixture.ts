@@ -122,6 +122,7 @@ export function planTree(): { files: Record<string, string>; rows: Row[] } {
 		[`${P}/live/plan.md`]: "# Live\n\n```\n/goal live seed\n```\n\nLinks [done](../done/plan.md).\n",
 		[`${P}/parked/plan.md`]: "# Parked\n",
 		[`${P}/plans-scaffolding/plan.md`]: "# Plans scaffolding\n",
+		[`${P}/plans-scaffolding/notes.md`]: "# Notes\n\nArchives [done](../done/plan.md).\n",
 		"CLAUDE.md":
 			"# Rules\n\nSee [done](implementations-plan/done/plan.md), `implementations-plan/fm/plan.md` and `implementations-plan/live/plan.md`.\n",
 		"audit/report.md": "# Report\n\nPer [the plan](../implementations-plan/done/plan.md), `implementations-plan/done/plan.md`.\n",

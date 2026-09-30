@@ -19,14 +19,14 @@ describe("repair-links", () => {
 	test("a moved file's links resolve from its old home and point from its new one; code, anchors and URLs stay", () => {
 		const src = [
 			"[sib](x.md) [dot](./x.md) [idx](../index.md) [other](../other/plan.md#top) [live](../live/plan.md?v=1)",
-			"[code](../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../index.md'>raw</a>",
+			"[code](../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../index.md'>raw</a> [self](../gone/x.md)",
 			"[cite](implementations-plan/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3) [relative](implementations-plan/other/deep.md)",
 			"`[span](../index.md)` and `implementations-plan/other/plan.md`",
 		].join("\n")
 		expect(repairFile(...MOVED, src, ctx)).toBe(
 			[
 				"[sib](x.md) [dot](./x.md) [idx](../../index.md) [other](../other/plan.md#top) [live](../../live/plan.md?v=1)",
-				"[code](../../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../../index.md'>raw</a>",
+				"[code](../../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../../index.md'>raw</a> [self](../gone/x.md)",
 				"[cite](implementations-plan/archive/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3) [relative](implementations-plan/other/deep.md)",
 				"`[span](../index.md)` and `implementations-plan/other/plan.md`",
 			].join("\n"),
@@ -43,6 +43,11 @@ describe("repair-links", () => {
 			"See [g](implementations-plan/archive/gone/plan.md), [p](./implementations-plan/archive/gone/plan.md), [d](implementations-plan/archive/gone/), [r](/implementations-plan/archive/gone/plan.md), `implementations-plan/archive/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n",
 		)
 		expect(repairFile("CHANGELOG.md", "CHANGELOG.md", claude, ctx)).toBe(claude)
+		for (const [path, src] of [
+			[`${P}/live/plan.md`, "[c](implementations-plan/gone/plan.md:3)\n"],
+			[`${P}/live/plan-v2.md`, "[g](../gone/plan.md)\n"],
+		])
+			expect(repairFile(path, path, src, ctx)).toBe(src)
 		const audit = "Per [the plan](../../implementations-plan/gone/plan.md), `implementations-plan/gone/plan.md`.\n"
 		expect(repairFile("audit/x/a.md", "audit/x/a.md", audit, ctx)).toBe(
 			"Per [the plan](../../implementations-plan/archive/gone/plan.md), `implementations-plan/gone/plan.md`.\n",
@@ -93,5 +98,13 @@ describe("repair-links", () => {
 		expect([...planRepairs(post(source), pre, moved)]).toEqual([[`${P}/archive/gone/plan.md`, repaired]])
 		expect(planRepairs(post(repaired), pre, moved).size).toBe(0)
 		expect(() => planRepairs(post("Edited after the move.\n"), pre, moved)).toThrow("changed after its move")
+		const build = "design/mocks/build.py"
+		const script = "REPO = HERE.resolve().parents[3]\n"
+		const code = planRepairs(
+			memView({ [`${P}/archive/ux-feedback/${build}`]: script }),
+			memView({ [`${P}/ux-feedback/${build}`]: script }),
+			new Set(["ux-feedback"]),
+		)
+		expect([...code]).toEqual([[`${P}/archive/ux-feedback/${build}`, script.replace("[3]", "[4]")]])
 	})
 })
