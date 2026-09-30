@@ -488,7 +488,7 @@ onBeforeUnmount(() => {
 
 		<Navigation v-if="$route.meta.showBottomNav" />
 
-		<div id="toast" :class="legalSheetShown && $style.toast_over_sheet" />
+		<div id="toast" data-testid="toast-root" :class="legalSheetShown && $style.toast_over_sheet" />
 	</Flex>
 </template>
 

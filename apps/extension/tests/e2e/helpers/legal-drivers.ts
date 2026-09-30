@@ -1,9 +1,92 @@
 import type { Page } from "puppeteer"
-import { reloadExtensionPage } from "../fixtures/browser"
+import { type BackgroundOwner, evaluateInBackground, reloadExtensionPage } from "../fixtures/browser"
 import { clickByTestId, seedLegalAcceptance, waitForHash } from "../fixtures/extension"
 import { LEGAL_ACCEPTANCE_KEY, type LegalSeed } from "../fixtures/legal"
 
 const sel = (testid: string) => `[data-testid="${testid}"]`
+
+/** Swaps the background's `chrome.storage.local.set`, the object its storage adapter holds, for one
+ *  that refuses a write carrying the acceptance key once and puts the real one back as it does. */
+const REFUSE_NEXT_ACCEPTANCE_WRITE = `
+	const area = chrome.storage.local;
+	const own = Object.getOwnPropertyDescriptor(area, "set");
+	const set = area.set;
+	Object.defineProperty(area, "set", {
+		configurable: true,
+		writable: true,
+		value: function (items, ...rest) {
+			if (items === null || typeof items !== "object" || !(${JSON.stringify(LEGAL_ACCEPTANCE_KEY)} in items)) return set.apply(this, [items, ...rest]);
+			if (own) Object.defineProperty(area, "set", own);
+			else delete area.set;
+			return Promise.reject(new Error("the e2e refused this write"));
+		},
+	});
+	return true;`
+
+/** The background's next acceptance write fails as a refused storage write does; the one after it lands. */
+export async function refuseNextAcceptanceWrite(owner: BackgroundOwner): Promise<void> {
+	await evaluateInBackground(owner, REFUSE_NEXT_ACCEPTANCE_WRITE)
+}
+
+/** Most specific first: the controls sit inside the sheet. */
+const LAYERS = ["snackbar", "legal-continue", "legal-sheet-not-now", "legal-sheet"]
+
+export interface SnackOverSheet {
+	/** Continue's top less the card's bottom; Continue is its row's first child, and the row has no padding. */
+	gapAboveContinue: number
+	/** What a tap hits: the card's centre, Continue's, "Not now"'s, and a point in the card's row beside it. */
+	hits: Record<"card" | "continue" | "notNow" | "beside", string | null>
+}
+
+/** Where the snack sits over the Terms sheet once the sheet's body is scrolled to its end, the one
+ *  place its placement promises. */
+export async function readSnackOverSheet(page: Page): Promise<SnackOverSheet> {
+	await page.$eval(sel("legal-sheet-body"), (body) => body.scrollTo({ top: body.scrollHeight, behavior: "instant" }))
+	await waitUntilStill(page, sel("legal-continue"), false)
+	await waitUntilStill(page, sel("snackbar"), false)
+	return page.evaluate((layers) => {
+		const box = (testid: string) => {
+			const el = document.querySelector(`[data-testid="${testid}"]`)
+			if (!el) throw new Error(`${testid} is not on the page`)
+			return el.getBoundingClientRect()
+		}
+		const centre = (r: DOMRect) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
+		const hit = ({ x, y }: { x: number; y: number }) => {
+			const el = document.elementFromPoint(x, y)
+			return layers.find((layer) => el?.closest(`[data-testid="${layer}"]`)) ?? el?.tagName ?? null
+		}
+		const card = box("snackbar")
+		const cont = box("legal-continue")
+		const cardCentre = centre(card)
+		return {
+			gapAboveContinue: cont.top - card.bottom,
+			hits: {
+				card: hit(cardCentre),
+				continue: hit(centre(cont)),
+				notNow: hit(centre(box("legal-sheet-not-now"))),
+				beside: hit({ x: card.left / 2, y: cardCentre.y }),
+			},
+		}
+	}, LAYERS)
+}
+
+/** The snack host's computed `z-index`: `9500` while the Terms sheet shows, `auto` otherwise. */
+export async function waitForToastLayer(page: Page, zIndex: "9500" | "auto"): Promise<void> {
+	const read = () => page.$eval(sel("toast-root"), (el) => getComputedStyle(el).zIndex)
+	try {
+		await page.waitForFunction(
+			(s, want) => {
+				const el = document.querySelector(s)
+				return !!el && getComputedStyle(el).zIndex === want
+			},
+			{ timeout: 5_000 },
+			sel("toast-root"),
+			zIndex,
+		)
+	} catch {
+		throw new Error(`the snack host's z-index is ${await read()}, not ${zIndex}`)
+	}
+}
 
 /** The stored acceptance record, read from any extension page. */
 export async function readLegalRecord(page: Page): Promise<Record<string, unknown> | undefined> {
