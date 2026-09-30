@@ -71,7 +71,7 @@ defineProps({
 		</template>
 
 		<template #secondary>
-			<span :class="[$style.subtitle, $style[`subtitle_${color}`]]" role="status" aria-live="polite" aria-atomic="true">{{ subtitle }}</span>
+			<span :class="[$style.subtitle, $style[`subtitle_${color}`]]" role="status" aria-live="polite" aria-atomic="true" data-testid="tx-terminal-subtitle">{{ subtitle }}</span>
 		</template>
 	</TransactionCardLayout>
 </template>

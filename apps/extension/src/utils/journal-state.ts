@@ -194,6 +194,8 @@ export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
 			return { label: "You rejected", context: "You stopped this transaction." }
 		case "popup_bound":
 			return { label: "Popup closed early", context: "The popup closed before this transaction could finish." }
+		case "scope_refused":
+			return { label: "Not allowed", context: "The app asked for more than you allowed. Nothing was sent." }
 		case "simulation":
 		case "prover":
 		case "stuck_proving":
@@ -242,6 +244,8 @@ function failedSubtitleFor(kind: JobErrorKind): string {
 			return "Account already initialized — retry after sync"
 		case "session_ended":
 			return "Stopped — wallet was locked"
+		case "scope_refused":
+			return "Not allowed"
 		// popup_bound, transfer, dapp_execute, unknown, and any other / future
 		// kind all fall through to the generic copy. The kind is still preserved
 		// in the journal record's error.kind field for debugging / future

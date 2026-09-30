@@ -132,6 +132,11 @@ describe("journalTerminalDisplay — Failed state (catch-all + per-kind subtitle
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Transaction failed")
 	})
 
+	test("error.kind === 'scope_refused' → 'Not allowed', on the red failed card", () => {
+		const op = recordWith({ error: { kind: "scope_refused", message: "...", normalizedRaw: null } })
+		expect(journalTerminalDisplay(op)).toEqual({ state: "failed", subtitle: "Not allowed", icon: "close-circle", color: "red" })
+	})
+
 	test("(N-15) error.kind === 'duplicate_initialization' → the honest init-race subtitle", () => {
 		const op = recordWith({ error: { kind: "duplicate_initialization", message: "...", normalizedRaw: null } })
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized — retry after sync")
@@ -466,6 +471,12 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 	})
 	test("popup_bound → 'Popup closed early'", () => {
 		expect(categoricalLabel(failed("popup_bound")).label).toBe("Popup closed early")
+	})
+	test("scope_refused → 'Not allowed', saying nothing was sent", () => {
+		expect(categoricalLabel(failed("scope_refused"))).toEqual({
+			label: "Not allowed",
+			context: "The app asked for more than you allowed. Nothing was sent.",
+		})
 	})
 	test("simulation / prover / stuck_proving / stuck_queued → 'Stopped before broadcast'", () => {
 		for (const kind of ["simulation", "prover", "stuck_proving", "stuck_queued"]) {

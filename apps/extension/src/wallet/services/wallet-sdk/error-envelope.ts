@@ -24,6 +24,7 @@ import {
 	PxeStaleAnchorError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	ScopeViolationError,
 	SessionEndedError,
 	TermsAcceptanceRequiredError,
 	TooManyPendingError,
@@ -84,6 +85,11 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 				capabilityType: (error.details as { capabilityType?: string } | undefined)?.capabilityType,
 			},
 		}
+	}
+	if (error instanceof ScopeViolationError) {
+		// The classification tells a dApp that its grant refused the call before execution, not that
+		// something downstream failed.
+		return SCOPE_VIOLATION_ENVELOPE
 	}
 	if (error instanceof RpcTimeoutError) {
 		// An internal RPC (e.g. offscreen prove/simulate) exceeded its timeout.
@@ -197,6 +203,17 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
  * Deliberately constant: it is the only shape that cannot carry internal state outward.
  */
 export const UNCLASSIFIED_ERROR_MESSAGE = "The wallet could not process the request."
+
+/** Every scope refusal's dApp text, never the refusal's own: dApps may show or match it, so it is a
+ *  public contract. */
+export const SCOPE_VIOLATION_MESSAGE = "This request is outside the permissions you gave this app."
+
+/** One object answers every scope refusal, so it is frozen: no sink can edit what the next dApp gets. */
+export const SCOPE_VIOLATION_ENVELOPE = Object.freeze({
+	code: 4100,
+	message: SCOPE_VIOLATION_MESSAGE,
+	data: Object.freeze({ walletErrorCode: ScopeViolationError.CODE }),
+})
 
 /**
  * The session was invalidated mid-flight (profile switch, revocation) and the dApp must reconnect.

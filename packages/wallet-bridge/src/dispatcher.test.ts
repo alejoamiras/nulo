@@ -4,6 +4,7 @@ import {
 	ContractNotRegisteredError,
 	JobCancelledError,
 	PxeStaleAnchorError,
+	ScopeViolationError,
 	UserRejectedError,
 	ValidationError,
 } from "@nulo/extension-messaging/errors"
@@ -1062,6 +1063,68 @@ describe("dispatcher.handleSendTx — logs none of the request's values", () => 
 	})
 })
 
+describe("dispatcher.sendTx — a scope refusal is typed and names no request value", () => {
+	const ACCOUNT = `0x${"0a".repeat(32)}`
+	const TOKEN = `0x${"0b".repeat(32)}`
+
+	function refusedSend(args: unknown[]): Promise<{ refusal: Error; sent: unknown[] }> {
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false }, grantedAt: 1 },
+				{ capability: { type: "transaction", scope: [{ contract: TOKEN, function: "transfer" }] }, grantedAt: 1 },
+			] as GrantedCapabilityRecord[],
+			accounts: [`aztec:0:${ACCOUNT}`],
+		})
+		const { writer } = makeSessionWriter(session)
+		const sent: unknown[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async (params) => {
+				sent.push(params)
+				return [{ status: "ok", result: "0xtx" }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: ACCOUNT, name: "A", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
+		return dispatcher.dispatch("sendTx", args, ctx).then(
+			() => {
+				throw new Error("the send was not refused")
+			},
+			(error: unknown) => ({ refusal: error as Error, sent }),
+		)
+	}
+
+	const facts = (refusal: Error) => ({
+		typed: refusal instanceof ScopeViolationError,
+		message: refusal.message,
+		leaks: /SENTINEL-/.test(JSON.stringify({ ...refusal, message: refusal.message, stack: refusal.stack })),
+	})
+
+	test("an explicit `from` outside the session", async () => {
+		const { refusal, sent } = await refusedSend([{ calls: [{ to: TOKEN, name: "transfer" }] }, { from: "SENTINEL-FROM" }])
+		expect(facts(refusal)).toEqual({
+			typed: true,
+			message: "Scope violation: requested account not authorized for this dApp session",
+			leaks: false,
+		})
+		expect(sent).toHaveLength(0)
+	})
+
+	test("a call outside a listed transaction scope", async () => {
+		const { refusal, sent } = await refusedSend([{ calls: [{ to: "SENTINEL-TO", name: "transfer" }] }, { from: ACCOUNT }])
+		expect(facts(refusal)).toEqual({
+			typed: true,
+			message: "Scope violation: sendTx call not permitted by granted transaction scope",
+			leaks: false,
+		})
+		expect(sent).toHaveLength(0)
+	})
+})
+
 describe("dispatcher — simulateTx / profileTx act as the account named in `opts.from`", () => {
 	// A dApp connected to A and B that simulates or profiles `from: B` must have the
 	// operation built as B. A dApp that simulates each claim before sending it relies
@@ -1385,7 +1448,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 		await expect(
 			dispatcher.dispatch("grantPublicAuthwit", ["0xunauthorized", { caller: "0xc", contract: "0xd", method: "m", args: [] }], ctx),
-		).rejects.toThrow(/Requested account 0xunauthorized is not authorized/)
+		).rejects.toThrow("Scope violation: requested account not authorized for this dApp session")
 	})
 
 	test("grantPublicAuthwit failure branches use the SHARED resolver's differentiated errors", async () => {
@@ -1980,6 +2043,64 @@ function capabilityHarness(session: IDappSessionRef, answer?: (params: Capabilit
 	return { request, row, setRow, stored, seen, decisions }
 }
 
+describe("dispatcher — the answer is the stored grant", () => {
+	const A = `0x${"0a".repeat(32)}`
+	const B = `0x${"0b".repeat(32)}`
+	const C = `0x${"0c".repeat(32)}`
+	const held = (...capabilities: Capability[]) =>
+		makeSession({ capabilityGrants: capabilities.map((capability) => ({ capability, grantedAt: 1 })) })
+	const listed = (contracts: string[]) => contracts.map((contract) => ({ contract, function: "transfer" }))
+	const tx = (...contracts: string[]): Capability => ({ type: "transaction", scope: listed(contracts) })
+	const sim = (...contracts: string[]): Capability => ({ type: "simulation", transactions: { scope: listed(contracts) } })
+	const contracts = (...addresses: string[]): Capability => ({
+		type: "contracts",
+		contracts: addresses,
+		canRegister: true,
+		canGetMetadata: true,
+	})
+
+	test.each([
+		["transaction", tx(A, B), tx(A)],
+		["simulation", sim(A, B), sim(A)],
+		["contracts", contracts(A, B), contracts(A)],
+	])("%s: a request inside the held grant opens no window and is answered with the held grant", async (_name, grant, requested) => {
+		const h = capabilityHarness(held(grant))
+		const result = await h.request([requested])
+		expect({ windows: h.seen.windows, granted: result.granted }).toEqual({ windows: 0, granted: [grant] })
+	})
+
+	test("contract classes: a wider request opens no window and is answered with the held class alone", async () => {
+		const grant: Capability = { type: "contractClasses", classes: [A], canGetMetadata: true }
+		const h = capabilityHarness(held(grant))
+		const result = await h.request([{ type: "contractClasses", classes: [A, B], canGetMetadata: true }])
+		expect({ windows: h.seen.windows, granted: result.granted, stored: await h.stored() }).toEqual({
+			windows: 0,
+			granted: [grant],
+			stored: [grant],
+		})
+	})
+
+	test("after a rejected widening, a request inside the held grant is answered with it and a wider one asks again", async () => {
+		const rejection = new UserRejectedError("User rejected")
+		const h = capabilityHarness(held(tx(A, B)), () => {
+			throw rejection
+		})
+		await expect(h.request([tx(A, B, C)])).rejects.toBe(rejection)
+		const rejected = (await h.row()).capabilityRejections?.map((r) => r.capabilityType)
+		expect({ windows: h.seen.windows, rejected, stored: await h.stored() }).toEqual({
+			windows: 1,
+			rejected: ["transaction"],
+			stored: [tx(A, B)],
+		})
+
+		const inside = await h.request([tx(A)])
+		expect({ windows: h.seen.windows, granted: inside.granted }).toEqual({ windows: 1, granted: [tx(A, B)] })
+
+		await expect(h.request([tx(A, C)])).rejects.toBe(rejection)
+		expect(h.seen.windows).toBe(2)
+	})
+})
+
 describe("dispatcher — the grant boundary", () => {
 	const A = `0x${"0a".repeat(32)}`
 	const B = `0x${"0b".repeat(32)}`
@@ -2080,11 +2201,11 @@ describe("dispatcher — the grant boundary", () => {
 		})
 		const events = (contract: string): Capability => ({ type: "data", privateEvents: { contracts: [contract] } })
 
-		// The answer echoes the request, except data's, which is the stored grant.
+		// The answer is the stored grant, in the spelling the wallet holds.
 		const cases: Array<[string, Capability, Capability, unknown]> = [
-			["transaction", tx(MIXED_CASE), tx(LOWER_CASE), tx(LOWER_CASE)],
-			["simulation", sim(MIXED_CASE), sim(LOWER_CASE), sim(LOWER_CASE)],
-			["contracts", contracts(MIXED_CASE), contracts(LOWER_CASE), contracts(LOWER_CASE)],
+			["transaction", tx(MIXED_CASE), tx(LOWER_CASE), tx(MIXED_CASE)],
+			["simulation", sim(MIXED_CASE), sim(LOWER_CASE), sim(MIXED_CASE)],
+			["contracts", contracts(MIXED_CASE), contracts(LOWER_CASE), contracts(MIXED_CASE)],
 			["data.privateEvents", events(MIXED_CASE), events(LOWER_CASE), { ...events(MIXED_CASE), addressBook: false }],
 		]
 
@@ -2255,7 +2376,7 @@ describe("dispatcher — a declined type asked again", () => {
 		const h = capabilityHarness(declined(held))
 		const answer = await h.request([{ type: "contracts", contracts: [A], canRegister: true }])
 		expect(h.seen.windows).toBe(0)
-		expect(answer.granted).toEqual([{ type: "contracts", contracts: [A], canRegister: true }])
+		expect(answer.granted).toEqual([held])
 		expect(await h.stored()).toEqual([held])
 		expect(await rejectedTypes(h)).toEqual(["contracts"])
 	})
@@ -3513,7 +3634,7 @@ describe("dispatcher.requestCapabilities — a contracts permission that grants 
 		})
 		const h = harness(session, (params) => ({ granted: params.delta }))
 		const noop = { type: "contracts", contracts: "*" }
-		expect((await h.request([noop])).granted).toEqual([noop])
+		expect((await h.request([noop])).granted).toEqual([heldContracts])
 		await h.request([noop, listedTx])
 		const row = await h.writer.getDappSession("test-session-id")
 		expect(row.capabilityGrants?.map((g) => g.capability)).toEqual([heldContracts, listedTx])

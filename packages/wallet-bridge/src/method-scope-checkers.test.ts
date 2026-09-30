@@ -1,13 +1,9 @@
 import { describe, expect, test } from "vitest"
+import { ScopeViolationError } from "@nulo/extension-messaging/errors"
 import type { GrantedCapabilityRecord } from "./capabilities"
-import {
-	authorizationsEffective,
-	checkCreateAuthWit,
-	coversAnyContract,
-	effectiveGrants,
-	isAnyContractScope,
-	readConsent,
-} from "./method-scope-checkers"
+import type { MethodName } from "./method-descriptors"
+import { authorizationsEffective, coversAnyContract, effectiveGrants, isAnyContractScope, readConsent } from "./method-scope-checkers"
+import { enforceScopeWithSession } from "./scope-enforcement"
 
 const A = "0x1111111111111111111111111111111111111111111111111111111111111111"
 const B = "0x2222222222222222222222222222222222222222222222222222222222222222"
@@ -107,41 +103,209 @@ describe("effectiveGrants", () => {
 	})
 })
 
-describe("checkCreateAuthWit refusals", () => {
+describe("no request value reaches a scope refusal", () => {
 	const grant = (capability: unknown) => ({ capability, grantedAt: 0 }) as GrantedCapabilityRecord
-	const from = "SENTINEL-FROM"
-	const callIntent = { caller: "SENTINEL-CALLER", call: { to: "SENTINEL-TO", name: "SENTINEL-NAME" } }
+	const contracts = (flags: Record<string, boolean>) => grant({ type: "contracts", contracts: [A], ...flags })
+	const listedSimulation = (sub: "transactions" | "utilities") => grant({ type: "simulation", [sub]: { scope: listed(A) } })
+	const noAddressBook = grant({ type: "data", addressBook: false })
+	const sessionAccounts = new Set([`aztec:0:${A}`, A])
+	const call = { to: "SENTINEL-TO", name: "SENTINEL-NAME" }
+	const exec = { calls: [call], scopes: ["SENTINEL-EXEC-SCOPE"] }
+	const opts = { from: "SENTINEL-FROM", scopes: ["SENTINEL-OPTS-SCOPE"], additionalScopes: ["SENTINEL-ADDITIONAL-SCOPE"] }
+	const callIntent = { caller: "SENTINEL-CALLER", call }
 	const innerHash = { consumer: "SENTINEL-CONSUMER", innerHash: "SENTINEL-INNER-HASH" }
-	// Each refusal's grants refuse it, and its pattern proves that branch threw.
-	const refusals: [string, unknown[], GrantedCapabilityRecord[], RegExp][] = [
+	const events = { contractAddress: "SENTINEL-CONTRACT", scopes: ["SENTINEL-EVENT-SCOPE"] }
+	const outsideSession = (field: string) => `Scope violation: ${field} entry not in session's approved accounts`
+
+	// Each row's grants refuse it, and its message pins the branch that threw. Only a raw hash, which
+	// no grant can admit, stays a plain Error.
+	const refusals: [string, MethodName, unknown[], GrantedCapabilityRecord[], string, boolean][] = [
 		[
-			"the account",
-			[from, callIntent],
+			"registerContract, the contract",
+			"registerContract",
+			[{ address: "SENTINEL-ADDRESS" }],
+			[contracts({ canRegister: true })],
+			"Scope violation: registerContract contract not permitted by granted contracts scope",
+			true,
+		],
+		[
+			"getContractMetadata, the contract",
+			"getContractMetadata",
+			["SENTINEL-ADDRESS"],
+			[contracts({ canGetMetadata: true })],
+			"Scope violation: getContractMetadata contract not permitted by granted contracts scope",
+			true,
+		],
+		[
+			"isTokenRegistered, the token",
+			"isTokenRegistered",
+			["SENTINEL-TOKEN", { scopes: ["SENTINEL-OPTS-SCOPE"] }],
+			[contracts({ canGetMetadata: true })],
+			"Scope violation: isTokenRegistered contract not permitted by granted contracts scope",
+			true,
+		],
+		[
+			"getContractClassMetadata, the class",
+			"getContractClassMetadata",
+			["SENTINEL-CLASS"],
+			[grant({ type: "contractClasses", classes: [A], canGetMetadata: true })],
+			"Scope violation: getContractClassMetadata class not permitted by granted contractClasses scope",
+			true,
+		],
+		[
+			"sendTx, a call",
+			"sendTx",
+			[exec, opts],
+			[grant(tx(listed(A)))],
+			"Scope violation: sendTx call not permitted by granted transaction scope",
+			true,
+		],
+		[
+			"grantPublicAuthwit, the call",
+			"grantPublicAuthwit",
+			[
+				"SENTINEL-FROM",
+				{ caller: "SENTINEL-CALLER", contract: "SENTINEL-CONTRACT", method: "SENTINEL-METHOD", args: ["SENTINEL-ARG"] },
+			],
+			[grant(tx(listed(A)))],
+			"Scope violation: grantPublicAuthwit call not permitted by granted transaction scope",
+			true,
+		],
+		[
+			"simulateTx, a call",
+			"simulateTx",
+			[exec, opts],
+			[listedSimulation("transactions")],
+			"Scope violation: simulateTx call not permitted by granted simulation.transactions scope",
+			true,
+		],
+		[
+			"profileTx, a call",
+			"profileTx",
+			[exec, opts],
+			[listedSimulation("transactions")],
+			"Scope violation: profileTx call not permitted by granted simulation.transactions scope",
+			true,
+		],
+		[
+			"executeUtility, the call",
+			"executeUtility",
+			[call, opts],
+			[listedSimulation("utilities")],
+			"Scope violation: executeUtility call not permitted by granted simulation.utilities scope",
+			true,
+		],
+		[
+			"getPrivateEvents, the contract",
+			"getPrivateEvents",
+			[{ eventName: "SENTINEL-EVENT" }, events],
+			[grant({ type: "data", privateEvents: { contracts: [A] } })],
+			"Scope violation: getPrivateEvents contract not permitted by granted data.privateEvents scope",
+			true,
+		],
+		[
+			"createAuthWit, the account",
+			"createAuthWit",
+			["SENTINEL-FROM", callIntent],
 			[grant({ ...accounts, accounts: [{ alias: "a", item: A }] })],
-			/^Scope violation: createAuthWit .*accounts scope$/,
+			"Scope violation: createAuthWit account not permitted by granted accounts scope",
+			true,
 		],
 		[
-			"the call",
-			[from, callIntent],
+			"createAuthWit, the call",
+			"createAuthWit",
+			["SENTINEL-FROM", callIntent],
 			[grant(tx(listed(A)))],
-			/^Scope violation: createAuthWit (?!inner-hash).*transaction or simulation scope$/,
+			"Scope violation: createAuthWit call not permitted by granted transaction or simulation scope",
+			true,
 		],
 		[
-			"the inner hash's consumer",
-			[from, innerHash],
+			"createAuthWit, the inner hash's consumer",
+			"createAuthWit",
+			["SENTINEL-FROM", innerHash],
 			[grant(tx(listed(A)))],
-			/^Scope violation: createAuthWit inner-hash .*transaction or simulation scope$/,
+			"Scope violation: createAuthWit inner-hash consumer not permitted by granted transaction or simulation scope",
+			true,
+		],
+		[
+			"createAuthWit, a raw message hash (regression control)",
+			"createAuthWit",
+			["SENTINEL-FROM", "SENTINEL-HASH"],
+			[grant(accounts)],
+			"Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized",
+			false,
+		],
+		[
+			"getAccounts, the canGet flag",
+			"getAccounts",
+			[],
+			[grant({ type: "accounts", canGet: false })],
+			"Scope violation: getAccounts requires accounts.canGet=true",
+			true,
+		],
+		[
+			"getAddressBook, the addressBook flag",
+			"getAddressBook",
+			[],
+			[noAddressBook],
+			"Scope violation: getAddressBook requires data.addressBook=true",
+			true,
+		],
+		[
+			"registerSender, the addressBook flag",
+			"registerSender",
+			["SENTINEL-ADDRESS", "SENTINEL-ALIAS"],
+			[noAddressBook],
+			"Scope violation: registerSender requires data.addressBook=true",
+			true,
+		],
+		[
+			"sendTx, an exec.scopes account",
+			"sendTx",
+			[exec, { from: "SENTINEL-FROM" }],
+			[grant(tx("*"))],
+			outsideSession("sendTx.exec.scopes"),
+			true,
+		],
+		[
+			"sendTx, an opts.scopes account",
+			"sendTx",
+			[{ calls: [call] }, { from: "SENTINEL-FROM", scopes: ["SENTINEL-OPTS-SCOPE"] }],
+			[grant(tx("*"))],
+			outsideSession("sendTx.opts.scopes"),
+			true,
+		],
+		[
+			"sendTx, an opts.additionalScopes account",
+			"sendTx",
+			[{ calls: [call] }, { from: "SENTINEL-FROM", additionalScopes: ["SENTINEL-ADDITIONAL-SCOPE"] }],
+			[grant(tx("*"))],
+			outsideSession("sendTx.opts.additionalScopes"),
+			true,
+		],
+		[
+			"getPrivateEvents, a filter's scopes account",
+			"getPrivateEvents",
+			[{ eventName: "SENTINEL-EVENT" }, events],
+			[grant({ type: "data", privateEvents: { contracts: "*" } })],
+			outsideSession("getPrivateEvents.opts.scopes"),
+			true,
 		],
 	]
 
-	test.each(refusals)("no request value reaches a refusal of %s", (_name, args, grants, branch) => {
+	test.each(refusals)("%s", (_name, method, args, grants, message, typed) => {
 		let refusal: Error | undefined
 		try {
-			checkCreateAuthWit(args, grants)
+			enforceScopeWithSession(method, args, grants, sessionAccounts)
 		} catch (error) {
 			refusal = error as Error
 		}
-		expect(refusal?.message).toMatch(branch)
-		expect(JSON.stringify({ ...refusal, message: refusal?.message, stack: refusal?.stack })).not.toMatch(/SENTINEL-/)
+		expect(refusal).toBeInstanceOf(Error)
+		const serialized = JSON.stringify({ ...refusal, message: refusal?.message, stack: refusal?.stack })
+		expect({ typed: refusal instanceof ScopeViolationError, message: refusal?.message, leaks: /SENTINEL-/.test(serialized) }).toEqual({
+			typed,
+			message,
+			leaks: false,
+		})
 	})
 })

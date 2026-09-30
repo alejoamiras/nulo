@@ -249,6 +249,11 @@ wrapper splices its own options in at index 1 and your `{}` becomes the page fun
 — `waitForFunction((sel) => !document.querySelector(sel), {}, SEL)` then queries `{}`, matches nothing,
 and an absence-wait passes vacuously while a presence-wait times out. Always write `{ timeout: N }`.
 
+**A patched page's `waitForSelector` resolves `null`.** For a CSS selector `patchPagePolling` waits
+through `waitForFunction` and returns `null`, never the `ElementHandle` Puppeteer's type promises, so
+`(await page.waitForSelector(sel))!.evaluate(…)` compiles and throws `Cannot read properties of null`
+on both browsers. Wait, then read with `page.$eval(sel, …)` or `page.evaluate`.
+
 **A Send fee trigger can show a method that is not in effect.** With a saved pick, the card previews
 that pick's row while balances load (`send-fee-method-trigger[data-fee-method]`), and a preview pays
 nothing. To assert the method in effect, wait on something only the effective method produces

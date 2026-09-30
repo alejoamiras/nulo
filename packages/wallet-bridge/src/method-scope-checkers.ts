@@ -1,13 +1,9 @@
 /**
  * Per-method scope-check function bodies + their helpers.
  *
- * Leaf module: imports only capability types from `./capabilities` and the
- * `./field-address` leaf. Both the `method-descriptors` registry (which
- * references these checkers in its `scopeCheck` fields) and
- * `scope-enforcement` (which derives the method→checker map and owns the
- * F-005 `enforceScopeWithSession` wrapper) depend on this module. Keeping the
- * bodies here — depended on, never depending back — is what breaks the
- * registry↔scope-enforcement cycle.
+ * The method-descriptors registry and scope-enforcement both import these checkers, so at runtime
+ * this module imports only leaves (`./field-address`, `./scope-violation`; `MethodName` is
+ * type-only), which is what keeps the registry↔scope-enforcement graph acyclic.
  *
  * Each checker mirrors a `WalletSchema` arg shape and must stay in sync with
  * `buildNetworkOperation` / `buildAccountOperation` in dispatcher.ts.
@@ -25,6 +21,8 @@ import type {
 	DataCapability,
 } from "./capabilities"
 import { sameFieldAddress } from "./field-address"
+import type { MethodName } from "./method-descriptors"
+import { scopeViolation } from "./scope-violation"
 
 /** A per-method scope checker. Throws on a scope violation; returns on pass. */
 export type ScopeCheck = (args: unknown[], grants: GrantedCapabilityRecord[]) => void
@@ -70,7 +68,7 @@ function grantsOfType<T extends { type: string }>(grants: GrantedCapabilityRecor
 /** A contracts grant carrying `flag` must list `address`. No contracts grants at all — let
  *  type-level enforcement handle it. */
 function requireContractsGrant(
-	method: string,
+	method: MethodName,
 	address: string,
 	flag: "canRegister" | "canGetMetadata",
 	grants: GrantedCapabilityRecord[],
@@ -78,7 +76,7 @@ function requireContractsGrant(
 	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
 	if (!caps.length) return
 	if (!caps.some((c) => c[flag] && inAddressList(address, c.contracts))) {
-		throw new Error(`Scope violation: ${method} targets ${address}, not permitted by granted contracts scope`)
+		throw scopeViolation(`Scope violation: ${method} contract not permitted by granted contracts scope`)
 	}
 }
 
@@ -105,11 +103,11 @@ export function checkGetContractClassMetadata(args: unknown[], grants: GrantedCa
 
 	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(id, c.classes))
 	if (!permitted) {
-		throw new Error(`Scope violation: getContractClassMetadata targets class ${id}, not permitted by granted contractClasses scope`)
+		throw scopeViolation("Scope violation: getContractClassMetadata class not permitted by granted contractClasses scope")
 	}
 }
 
-function checkTransactionCalls(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
+function checkTransactionCalls(methodName: MethodName, args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const exec = args[0] as WireExecPayload
 	const calls = exec?.calls
 	if (!Array.isArray(calls)) {
@@ -123,8 +121,7 @@ function checkTransactionCalls(methodName: string, args: unknown[], grants: Gran
 	const typedCalls = calls as WireCall[]
 	const permitted = caps.some((c) => typedCalls.every((call) => matchesScope(String(call.to), call.name, c.scope)))
 	if (!permitted) {
-		const desc = typedCalls.map((c) => `${c.name}@${String(c.to)}`).join(", ")
-		throw new Error(`Scope violation: ${methodName} calls [${desc}], not permitted by granted transaction scope`)
+		throw scopeViolation(`Scope violation: ${methodName} call not permitted by granted transaction scope`)
 	}
 }
 
@@ -141,11 +138,11 @@ export function checkGrantPublicAuthwit(args: unknown[], grants: GrantedCapabili
 
 	const permitted = caps.some((c) => matchesScope(contract, method, c.scope))
 	if (!permitted) {
-		throw new Error(`Scope violation: grantPublicAuthwit authorizes ${method}@${contract}, not permitted by granted transaction scope`)
+		throw scopeViolation("Scope violation: grantPublicAuthwit call not permitted by granted transaction scope")
 	}
 }
 
-function checkSimulationTransactions(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
+function checkSimulationTransactions(methodName: MethodName, args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const exec = args[0] as WireExecPayload
 	const calls = exec?.calls
 	if (!Array.isArray(calls)) {
@@ -157,12 +154,8 @@ function checkSimulationTransactions(methodName: string, args: unknown[], grants
 	if (!caps.length) return
 
 	const typedCalls = calls as WireCall[]
-	// F-08: never dereference a raw-unknown call element. A null/non-object entry
-	// (or one missing `to`) is malformed — surface a controlled scope error rather
-	// than a `TypeError: null is not an object` from `call.to`. (simulateTx/profileTx
-	// are checker-owned post-merge, so this deep guard lives here, not in the
-	// dispatcher's `assertAuthRelevantArgShape`.) A non-string `name` is coerced
-	// safely below and rejected by the downstream execution-layer Zod.
+	// Each element is unvalidated wire data: one that is not an object with a `to` is refused before
+	// `call.to` is read, and a non-string `name` is left to the execution layer's schema.
 	for (const call of typedCalls) {
 		if (typeof call !== "object" || call === null || (call as WireCall).to === undefined) {
 			throw new Error(`Scope enforcement: ${methodName} exec.calls entries must be objects with a \`to\` field`)
@@ -174,8 +167,7 @@ function checkSimulationTransactions(methodName: string, args: unknown[], grants
 		return typedCalls.every((call) => matchesScope(String(call.to), call.name, scope))
 	})
 	if (!permitted) {
-		const desc = typedCalls.map((c) => `${c.name}@${String(c.to)}`).join(", ")
-		throw new Error(`Scope violation: ${methodName} calls [${desc}], not permitted by granted simulation.transactions scope`)
+		throw scopeViolation(`Scope violation: ${methodName} call not permitted by granted simulation.transactions scope`)
 	}
 }
 
@@ -196,7 +188,7 @@ export function checkExecuteUtility(args: unknown[], grants: GrantedCapabilityRe
 		return matchesScope(contract, fn, scope)
 	})
 	if (!permitted) {
-		throw new Error(`Scope violation: executeUtility calls ${fn}@${contract}, not permitted by granted simulation.utilities scope`)
+		throw scopeViolation("Scope violation: executeUtility call not permitted by granted simulation.utilities scope")
 	}
 }
 
@@ -213,7 +205,7 @@ export function checkGetPrivateEvents(args: unknown[], grants: GrantedCapability
 		return inAddressList(address, contracts)
 	})
 	if (!permitted) {
-		throw new Error(`Scope violation: getPrivateEvents targets contract ${address}, not permitted by granted data.privateEvents scope`)
+		throw scopeViolation("Scope violation: getPrivateEvents contract not permitted by granted data.privateEvents scope")
 	}
 }
 
@@ -289,7 +281,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 			(c) => c.canCreateAuthWit && (!Array.isArray(c.accounts) || c.accounts.some((a) => String(a.item) === from)),
 		)
 		if (!permitted) {
-			throw new Error("Scope violation: createAuthWit account not permitted by granted accounts scope")
+			throw scopeViolation("Scope violation: createAuthWit account not permitted by granted accounts scope")
 		}
 	}
 
@@ -304,7 +296,7 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const fn = intent.call.name
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(contract, fn, grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error("Scope violation: createAuthWit call not permitted by granted transaction or simulation scope")
+			throw scopeViolation("Scope violation: createAuthWit call not permitted by granted transaction or simulation scope")
 		}
 		return
 	}
@@ -317,7 +309,9 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		const consumer = String(intent.consumer)
 		const { hasTxCaps, permitted } = callWithinTxOrSimulationScope(consumer, "*", grants)
 		if (hasTxCaps && !permitted) {
-			throw new Error("Scope violation: createAuthWit inner-hash consumer not permitted by granted transaction or simulation scope")
+			throw scopeViolation(
+				"Scope violation: createAuthWit inner-hash consumer not permitted by granted transaction or simulation scope",
+			)
 		}
 		return
 	}
@@ -329,23 +323,12 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 	throw new Error("Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized")
 }
 
-/**
- * F-003: enforce `AccountsCapability.canGet === true` before allowing a
- * dApp to read its session's account addresses via `getAccounts`. Prior to
- * this checker, the `getAccounts` method was in `EXEMPT_METHODS` and the
- * `canGet` sub-grant was decorative — the UI exposed the toggle but the
- * dispatcher ignored it.
- *
- * The `accounts` cap is "any-of": if at least one granted accounts cap has
- * `canGet === true`, the read is permitted. (Multiple `accounts` grants
- * exist in some legacy session shapes; `.some()` mirrors the existing
- * pattern in `checkCreateAuthWit`.)
- */
+/** No accounts grant passes here: type-level enforcement refuses that call first. */
 export function checkGetAccounts(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
 	if (!caps.length) return
 	if (!caps.some((c) => c.canGet === true)) {
-		throw new Error("Scope violation: getAccounts requires accounts.canGet=true")
+		throw scopeViolation("Scope violation: getAccounts requires accounts.canGet=true")
 	}
 }
 
@@ -369,18 +352,17 @@ export function checkRegisterSender(_args: unknown[], grants: GrantedCapabilityR
 }
 
 /** The sub-bit must be literally `true`: a data grant with anything else denies. */
-function requireAddressBookGrant(method: string, grants: GrantedCapabilityRecord[]): void {
+function requireAddressBookGrant(method: MethodName, grants: GrantedCapabilityRecord[]): void {
 	const caps = grantsOfType<DataCapability>(grants, "data")
 	if (!caps.length) return
 	if (!caps.some((c) => c.addressBook === true)) {
-		throw new Error(`Scope violation: ${method} requires data.addressBook=true`)
+		throw scopeViolation(`Scope violation: ${method} requires data.addressBook=true`)
 	}
 }
 
-// ── Named wrappers (lifted from the former inline arrows in METHOD_SCOPE_CHECKER) ──
-// These exist so the registry's scopeCheck field can hold a STABLE function
-// reference that parity tests compare by identity. Behavior is identical to the
-// previous `(args, grants) => checkX("name", args, grants)` arrows.
+// ── Named wrappers ──
+// The registry's `scopeCheck` holds these stable references, which the parity tests compare by
+// identity.
 
 export function checkSendTx(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	checkTransactionCalls("sendTx", args, grants)

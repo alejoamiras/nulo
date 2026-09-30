@@ -72,11 +72,11 @@ import {
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
 import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
-import { TermsAcceptanceRequiredError, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
-import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
+import { ScopeViolationError, TermsAcceptanceRequiredError, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
+import { KeyedLock, deferred } from "@nulo/wallet-core/utils"
 import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
-import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
+import { failQueuedForError, failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
 import { createSessionBaton } from "./session-baton"
 import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
@@ -1170,20 +1170,18 @@ export async function handleWalletMessage(
 		// unit-tested in isolation; everything not recognised collapses to a
 		// string, preserving the original wire contract.
 		response.error = toWalletResponseError(error)
-		const refusedForTerms = error instanceof TermsAcceptanceRequiredError
 		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
 		// logger's redaction, so interpolating it here would smuggle whatever the error carries
 		// (endpoint URLs, argument values) straight into the log store.
-		// A connected dApp polls; an expected refusal at `error` would flood every user's log buffer.
 		logger.log(
 			"wallet-sdk",
-			refusedForTerms ? LogLevel.Debug : LogLevel.Error,
+			isExpectedRefusal(error) ? LogLevel.Debug : LogLevel.Error,
 			`Method ${describeWireMethod(message.type)} failed for session ${describeExternalId(session.sessionId)}`,
 			response.error,
 		)
 
 		if (hooks?.queuedJournalId) {
-			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
+			await failQueuedForError(operationJournal, hooks.queuedJournalId, error, logger)
 		}
 	}
 
@@ -1211,4 +1209,10 @@ export async function handleWalletMessage(
 		// diagnosing, and passing it whole lets the logger's projection scrub and cap it.
 		logger.log("wallet-sdk", LogLevel.Error, `Failed to send response for ${describeWireMethod(message.type)}`, sendError)
 	}
+}
+
+/** A refusal a connected dApp can repeat on every poll, so it logs at `debug`: an `error` line lands
+ *  in every user's log buffer. */
+function isExpectedRefusal(error: unknown): boolean {
+	return error instanceof TermsAcceptanceRequiredError || error instanceof ScopeViolationError
 }
