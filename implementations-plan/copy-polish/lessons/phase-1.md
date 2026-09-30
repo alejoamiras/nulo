@@ -52,3 +52,7 @@
   passed; from `packages/aztec-runtime`,
   `bun --bun vitest run src/pxe/opfs-store.test.ts src/pxe/opfs-store-open.test.ts` → exit 0, 2
   files, 17 passed. The guard lists 18.
+- **Journal, E22 to E24**: 3 strings plus `journal-state.test.ts:146`, E24's title and two
+  subtitles (`:149`, `:153`, `:453`), and E22's case-sensitive `toContain` at `:627`. From
+  `apps/extension`, `bun --bun vitest run src/utils/journal-state.test.ts` → exit 0, 91 passed.
+  The guard lists 15.

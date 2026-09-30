@@ -260,7 +260,7 @@ function kindLabel(kind: JobErrorKind): CategoricalFailureLabel {
 		case "stale_on_resume":
 			return {
 				label: "Interrupted mid-flight",
-				context: "The wallet restarted before confirming this. Transaction may still be on-chain — check the explorer.",
+				context: "The wallet restarted before confirming this. Transaction may still be on-chain. Check the explorer.",
 			}
 		case "network":
 			return {
@@ -292,9 +292,9 @@ function failedSubtitleFor(kind: JobErrorKind): string {
 		case "duplicate_initialization":
 			// The first-tx init race: another device/tx initialized the account
 			// first. Honest and actionable — a plain retry succeeds once synced.
-			return "Account already initialized — retry after sync"
+			return "Account already initialized. Retry after sync"
 		case "session_ended":
-			return "Stopped — wallet was locked"
+			return "Stopped when the wallet locked"
 		case "scope_refused":
 			return "Not allowed"
 		// popup_bound, transfer, dapp_execute, unknown, and any other / future
