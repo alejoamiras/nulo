@@ -188,8 +188,8 @@ UI impact row 5 as amended and the Refresh quote fix.
 unanswered, so the driver asked in chat: "After Max nothing is focused and the amount rests
 grouped and shrunk to fit. A review line too long even at 60% wraps before "TST" instead of
 splitting it into "T" / "ST". Refresh quote converts at the new price (no layout change). Sign
-off?" The owner answered **"Looks right"**: "Signs off the as-built captures: Max at rest, TST
-kept whole on a wrap, the Refresh quote fix." UI impact rows 3, 5 and 6 as amended and the
+off?" The owner picked **"Looks right"** (the option read: signs off the as-built captures, Max at
+rest, TST kept whole on a wrap, the Refresh quote fix). UI impact rows 3, 5 and 6 as amended and the
 Refresh quote fix now carry the owner's own answers.
 
 ### Phase 0.5 · Tier
