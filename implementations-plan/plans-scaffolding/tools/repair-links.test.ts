@@ -32,7 +32,7 @@ describe("repair-links", () => {
 			].join("\n"),
 		)
 		expect(repairFile(`${P}/index.md`, `${P}/archive/index.md`, "[c](implementations-plan/gone/plan.md)\n", ctx)).toBe(
-			"[c](../implementations-plan/gone/plan.md)\n",
+			"[c](../implementations-plan/archive/gone/plan.md)\n",
 		)
 	})
 
@@ -43,6 +43,10 @@ describe("repair-links", () => {
 			"See [g](implementations-plan/archive/gone/plan.md), [p](./implementations-plan/archive/gone/plan.md), [d](implementations-plan/archive/gone/), [r](/implementations-plan/archive/gone/plan.md), `implementations-plan/archive/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n",
 		)
 		expect(repairFile("CHANGELOG.md", "CHANGELOG.md", claude, ctx)).toBe(claude)
+		const readme = "Plan: [`../implementations-plan/gone/`](../implementations-plan/gone/), `./implementations-plan/other/plan.md`.\n"
+		expect(repairFile(".github/README.md", ".github/README.md", readme, ctx)).toBe(
+			"Plan: [`../implementations-plan/archive/gone/`](../implementations-plan/archive/gone/), `./implementations-plan/archive/other/plan.md`.\n",
+		)
 		for (const [path, src] of [
 			[`${P}/live/plan.md`, "[c](implementations-plan/gone/plan.md:3)\n"],
 			[`${P}/live/plan-v2.md`, "[g](../gone/plan.md)\n"],

@@ -37,7 +37,8 @@ const FROZEN = [`${PLANS}/`, "audit/", "architecture/", "wallets-architecture-re
 /** Release history the gate never judges; neither its links nor its tokens are rewritten. */
 const HISTORY: ReadonlySet<string> = new Set(["CHANGELOG.md", "AUDIT.md"])
 const LINE_CITE_RE = /:\d+(?:-\d+)?$/
-const TOKEN_RE = /(?<![\w./-])implementations-plan\/([A-Za-z0-9._-]*[A-Za-z0-9_-])(?![A-Za-z0-9_-])/g
+/** A plan-dir token the gate reads as repo-rooted, `./` and `../` runs included; a permalink or any other path tail is not one. */
+const TOKEN_RE = /(?<![\w./-])((?:\.{1,2}\/)*)implementations-plan\/([A-Za-z0-9._-]*[A-Za-z0-9_-])(?![A-Za-z0-9_-])/g
 
 /** A literal edit neither pass can make: `from` appears exactly `count` times, and every dir in `dirs` moves. */
 type HandFix = { path: string; from: string; to: string; count: number; dirs: readonly string[] }
@@ -102,7 +103,7 @@ export function linkScope(path: string): boolean {
 }
 
 export function repairTokens(text: string, moved: ReadonlySet<string>): string {
-	return text.replace(TOKEN_RE, (token, dir: string) => (moved.has(dir) ? `${ARCHIVE}/${dir}` : token))
+	return text.replace(TOKEN_RE, (token, prefix: string, dir: string) => (moved.has(dir) ? `${prefix}${ARCHIVE}/${dir}` : token))
 }
 
 /** `target` relative to `file`'s dir, keeping the original's trailing slash and leading `./`. */
