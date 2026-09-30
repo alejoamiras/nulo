@@ -4,7 +4,7 @@ import { clampDecimals, formatBaseUnits, readAmountText } from "@/utils/amount"
 import { fitHero } from "@/utils/hero-fit"
 import { inputRoom, rulerWidth } from "@/utils/hero-ruler"
 import { usdToTokenAmount, tokenAmountToUsdMicro, formatUsdMicro, usdMicroToPlainString } from "@/wallet/services/price/convert"
-import { nextAmountText, restingAmount } from "./amount-field"
+import { caretAfter, nextAmountText, restingAmount } from "./amount-field"
 
 const props = defineProps({
 	token: {
@@ -74,6 +74,15 @@ function writeAmount(text, { atRest = false, point = false } = {}) {
 	model.value = text
 }
 
+/** Shows `text` in the input with the caret before the digits that followed it, where a browser
+ *  would put it at the end. */
+function showText(input, text) {
+	if (input.value === text) return
+	const caret = caretAfter(input.value, input.selectionEnd ?? input.value.length, text)
+	input.value = text
+	input.setSelectionRange(caret, caret)
+}
+
 // The field's only input listener, bound one way: a browser flushes microtasks between two listeners
 // of one keystroke, so a v-model write of the raw text would reach the page, and come back through
 // the model watcher below, before this read its prior text.
@@ -92,7 +101,7 @@ const handleAmountInput = (e) => {
 	readHint.value = next.hint === "clamp" ? null : next.hint
 	writeAmount(next.text, { point: next.commaPoint })
 	// When the text equals what the parent already holds, no re-render comes to correct the field.
-	if (e.target.value !== next.text) e.target.value = next.text
+	showText(e.target, next.text)
 }
 
 // A write from the page (a token pick clears the amount) ends the card's own state.
@@ -267,6 +276,8 @@ const handleFiatInput = (e) => {
 	})
 	readHint.value = next.hint
 	const text = usdText(next.text)
+	// Before the write, so v-model's re-render finds the text in place and leaves the caret.
+	showText(e.target, text)
 	writeFiat(text, next.commaPoint && text.includes("."))
 	scheduleConvert()
 }

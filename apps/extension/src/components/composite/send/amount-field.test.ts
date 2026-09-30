@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { type AmountEdit, type AmountHint, nextAmountText, restingAmount } from "./amount-field"
+import { type AmountEdit, type AmountHint, caretAfter, nextAmountText, restingAmount } from "./amount-field"
 
 describe("composite/send/restingAmount", () => {
 	test.each([
@@ -58,5 +58,17 @@ describe("composite/send/nextAmountText", () => {
 			hint,
 			commaPoint,
 		})
+	})
+})
+
+describe("composite/send/caretAfter", () => {
+	test.each([
+		["a comma typed inside 12 is the point, and the caret stays after it", "1,2", 2, "1.2", 2],
+		["a key typed inside the rest 1,234,567 lands after the key", "10,234,567", 2, "10234567", 2],
+		["a key typed after the comma of the rest 1,234 lands after the key", "1,5234", 3, "15234", 2],
+		["a letter typed inside 12 goes, and the caret stays between the digits", "1x2", 2, "12", 1],
+		["a point re-read at the end leaves the caret at the end", "1.234.", 6, "1234.", 5],
+	])("%s", (_name, value, caret, text, at) => {
+		expect(caretAfter(value, caret, text)).toBe(at)
 	})
 })

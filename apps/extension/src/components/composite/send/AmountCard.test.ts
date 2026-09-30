@@ -634,6 +634,14 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 		return after
 	}
 	const paste = (w: Card, text: string, testid?: string) => edit(w, text, "insertFromPaste", testid)
+	/** A key typed where the input's caret is, as a browser inserts it. */
+	const typeAtCaret = async (w: Card, key: string, testid?: string) => {
+		const el = input(w, testid).element as HTMLInputElement
+		const at = el.selectionStart ?? el.value.length
+		el.value = el.value.slice(0, at) + key + el.value.slice(el.selectionEnd ?? at)
+		el.setSelectionRange(at + key.length, at + key.length)
+		await input(w, testid).trigger("input", { inputType: "insertText", data: key })
+	}
 	const hints = (w: Card) =>
 		["clamp", "unreadable", "ambiguous"].filter((name) => w.find(`[data-testid='send-amount-${name}-hint']`).exists())
 	const lastEmit = (w: Card, event: string) => w.emitted(event)?.at(-1)?.[0]
@@ -646,6 +654,16 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 		const w = mountCard({ token: TOKEN, modelValue: "" })
 		expect((await typeKeys(w, keys)).at(-1)).toBe(shown)
 		expect(hints(w)).toEqual([])
+	})
+
+	// A browser puts the caret at the end whenever script sets the input's value.
+	test('",5" typed between the digits of "12" reads 1.52: a rewrite keeps the caret where the key went', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await typeKeys(w, "12")
+		;(input(w).element as HTMLInputElement).setSelectionRange(1, 1)
+		await typeAtCaret(w, ",")
+		await typeAtCaret(w, "5")
+		expect([textOf(w), lastEmit(w, "update:modelValue")]).toEqual(["1.52", "1.52"])
 	})
 
 	test("one event holding text that reads no way says so only once the field is left", async () => {
@@ -780,6 +798,16 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 			const w = mountUsd()
 			expect(await typeKeys(w, "12,5", USD)).toEqual(["1", "12", "12.", "12.5"])
 			expect(await converted(w)).toBe("12.5")
+		})
+
+		test('",5" typed between the digits of "12" reads 1.52', async () => {
+			const w = mountUsd()
+			await typeKeys(w, "12", USD)
+			;(input(w, USD).element as HTMLInputElement).setSelectionRange(1, 1)
+			await typeAtCaret(w, ",", USD)
+			await typeAtCaret(w, "5", USD)
+			expect(textOf(w, USD)).toBe("1.52")
+			expect(await converted(w)).toBe("1.52")
 		})
 
 		test('"1,234" typed and then "." re-reads the comma as grouping', async () => {

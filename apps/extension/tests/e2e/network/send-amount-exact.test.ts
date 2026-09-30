@@ -185,6 +185,13 @@ test.skipIf(!hasConfig)(
 		await page.keyboard.type(".56")
 		await waitForAmount(page, "1234.56")
 
+		// A comma typed between two digits becomes the point there, and the next key lands after it.
+		await replaceInputValue(page, AMOUNT, "")
+		await page.keyboard.type("12")
+		await page.keyboard.press("ArrowLeft")
+		await page.keyboard.type(",5")
+		await waitForAmount(page, "1.52")
+
 		expect(tokenReadyExtension.pageErrors).toEqual([])
 	},
 )

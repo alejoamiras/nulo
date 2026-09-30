@@ -84,6 +84,18 @@ function settle(text: string, edit: AmountEdit, pasteLike: boolean): { text: str
 	return clamped === read.plain ? { text, hint: null } : { text: clamped, hint: "clamp" }
 }
 
+/** Where the caret goes once the input's `value`, its caret at `caret`, shows `text` instead: before
+ *  as many digits as followed it, so the next key lands where the person typed the last. */
+export function caretAfter(value: string, caret: number, text: string): number {
+	let digits = value.slice(caret).replace(/\D/g, "").length
+	let at = text.length
+	while (at > 0 && digits > 0) {
+		at -= 1
+		if (/\d/.test(text[at])) digits -= 1
+	}
+	return at
+}
+
 /**
  * The field's text after one input event. A paste (or any `insertFrom*` or replacing edit) and an
  * edit of a kept text that does not read stay as they stand; a keystroke keeps digits, points and
