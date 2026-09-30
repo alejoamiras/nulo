@@ -30,8 +30,6 @@ const GITIGNORE = `${PLANS}/.gitignore`
 const IGNORE = `${PLANS}/.ignore`
 /** git reads `.gitignore`; ripgrep also reads `.ignore` and `.rgignore`, above it in precedence. */
 const IGNORE_FILES: ReadonlySet<string> = new Set([".gitignore", ".ignore", ".rgignore"])
-/** Shrink-only: a nested ignore file can override the lessons re-include, so each one is a reviewed exception. */
-export const NESTED_IGNORE_ALLOWLIST: readonly string[] = [`${PLANS}/vitest-on-bun/lessons/baselines/full/.gitignore`]
 /** The dirs `local-path` covers before the archive split names an active set. */
 export const PRE_SPLIT_ACTIVE: readonly string[] = ["plans-scaffolding"]
 export const LESSONS_BUDGET = 8192
@@ -109,14 +107,7 @@ export function hygieneFindings(ctx: Ctx): Finding[] {
 
 export function nestedIgnoreFindings(ctx: Ctx): Finding[] {
 	return [...ctx.tracked]
-		.filter(
-			(p) =>
-				p.startsWith(`${PLANS}/`) &&
-				IGNORE_FILES.has(posix.basename(p)) &&
-				p !== GITIGNORE &&
-				p !== IGNORE &&
-				!NESTED_IGNORE_ALLOWLIST.includes(p),
-		)
+		.filter((p) => p.startsWith(`${PLANS}/`) && IGNORE_FILES.has(posix.basename(p)) && p !== GITIGNORE && p !== IGNORE)
 		.map((p) =>
 			finding(
 				"nested-ignore",

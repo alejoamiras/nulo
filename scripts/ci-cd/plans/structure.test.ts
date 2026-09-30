@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { CANONICAL_GITIGNORE, cleanupRepos, commitAll, findings, git, makeRepo, writeFiles } from "./fixture-repo"
-import { NESTED_IGNORE_ALLOWLIST } from "./structure"
 
 afterAll(cleanupRepos)
 
@@ -73,10 +72,10 @@ describe("nested-ignore", () => {
 		])
 	})
 
-	test("an allowlisted one passes, and the allowlist only shrinks", () => {
-		const repo = makeRepo({ ...HYGIENE, [NESTED_IGNORE_ALLOWLIST[0]]: "*\n!.gitignore\n" })
-		expect(findings(repo, "nested-ignore")).toEqual([])
-		expect(NESTED_IGNORE_ALLOWLIST.length).toBeLessThanOrEqual(1)
+	test("none is exempt: the soak baselines' ignore file fails if it returns to the plan tree", () => {
+		const baselines = "implementations-plan/vitest-on-bun/lessons/baselines/full/.gitignore"
+		const repo = makeRepo({ ...HYGIENE, [baselines]: "*\n!.gitignore\n" })
+		expect(findings(repo, "nested-ignore").map((f) => f.file)).toEqual([baselines])
 	})
 })
 
