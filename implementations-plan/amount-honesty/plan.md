@@ -128,7 +128,7 @@ rows wait for the owner's sign-off on P3's screenshots.
 | 12 | Send amount field, a first typed "," | The keystroke vanishes, so ",5" becomes "5" → "0.", so ",5" becomes "0.5" | blanket |
 | 13 | Send's USD line under text it cannot read or holds | "≈ $15.00" for "1e5" → the unit rate, as for an empty field | blanket |
 | 14 | USD field, the same pastes and commas as rows 10, 11 and 15 | Rewritten, then converted into a token amount → the same rules; no token amount derived from held text; a leading "$" ("$12.50") still reads 12.50 | O2 (a), O3 (b) |
-| 15 | Send amount field, a paste with a comma ("1.234,56", "1 234,56", "1,234", "1.234,5678901" at 6 decimals) | The comma dropped: "1.23456", "123456", "1234", "1.234567" → kept and read where only one reading exists ("1.234,56" and "1 234,56" are 1234.56, "1.234,5678901" is 1234.567890 with the clamp hint), in the wallet's form once the field is left ("1,234.56"); a pasted "1,234" is held, Send off, with "Is that 1234 or 1.234? Type the one you mean." | O3 (b) |
+| 15 | Send amount field, a paste with a comma ("1.234,56", "1 234,56", "1,234", "1.234,5678901" at 6 decimals) | The comma dropped: "1.23456", "123456", "1234", "1.234567" → kept and read where only one reading exists ("1.234,56" and "1 234,56" are 1234.56, "1.234,5678901" is 1234.567890 with the clamp hint), in the wallet's form once the field is left ("1,234.56"); a pasted "1,234" is held, Send off, with "Type it without the comma." | O3 (b); the line, the owner's sign-off (P4) |
 | 16 | The first-receive prompt ("Allow USDC?"), any contract | "You received 1.5 USDC from a contract you haven't seen before.", in the row's own decimals (0 without a getter) → "You received USDC from a contract you haven't seen before." | O4 (b) |
 
 Unchanged: letters still never appear from the keyboard; a typed or pasted "." is the decimal
@@ -279,8 +279,8 @@ with the exact copy (P4 quotes them).
   - **Clamp**, on every path: only when the text reads, on its `plain`; the clamped plain replaces
     the text and the clamp hint shows.
   - **Hints**: `unreadable` or `ambiguous` at once after a paste-like edit, after a keystroke only
-    once the field is left; each clears when the text reads or empties. The ambiguous line names
-    both readings from the text.
+    once the field is left; each clears when the text reads or empties. The ambiguous line reads
+    "Type it without the comma." (the owner's sign-off, P4).
 - **`AmountCard.vue`**:
   - `handleAmountInput` (`:58-78`) becomes a call to `nextAmountText` with the input's own value,
     `e.inputType`, `e.data`, `lastText`, `rested` and the comma point; it writes the model once, as
@@ -598,6 +598,18 @@ my friend. let's cover realistic scenarios lol."
   ambiguous under a blur-only `rested` (F3), so Max sets it; ",5" after a rested "12", "," or "5"
   after a rested "1,234", or "1,234" pasted after Max and Backspace are realistic, and every edit
   clears `rested` (F2).
+- **An edit inside the amount** (the codex loop): realistic. A rewrite keeps the caret before the
+  digits and separators that followed it, on its side of the point (`caretAfter`); where the clamp
+  or the USD micro cut drops a digit after the caret, it lands one place early, accepted.
+- **A paste into the field's own rest** (the codex loop): "1,234", the rest of 1234, with "5"
+  pasted at its end shows "1,2345" and reads 1.2345, as O3 (b) reads a paste, where a typed "5"
+  gives 12345. Keeping the rest's grouping under a paste needs the paste's selection, since the text
+  diff reads "2,000" pasted over a selected "1,000" as "2" before ",000". The owner kept it:
+  "As built: 1.2345 (Recommended)" (P4 step 3).
+- **The comma point overtyped with "."** (the codex loop): not realistic; Backspace then "." is
+  handled (P2).
+- **A restored record's symbol that is not text** (the codex loop): shows as none on the
+  transaction page and the activity row, and never throws.
 - **Not realistic**: a paste of 10 trillion or more (the owner's words above, and his decline of
   the input cap in `send-amount-exact` A-2); it stays as pasted and reads "exceeds balance"; no test.
 - **A symbol with a homoglyph**: realistic for a spam token and beyond any sanitizer; the prompt's
@@ -768,7 +780,7 @@ the re-read, as answered.
    - a paste of "1.234,56" leaves field and model at "1.234,56", no hint, and the blur rests it as
      "1,234.56" and sets `rested`;
    - a paste of "1e5" shows `send-amount-unreadable-hint`, no USD figure; a paste of "1,234" shows
-     `send-amount-ambiguous-hint` at once, naming "1234 or 1.234";
+     `send-amount-ambiguous-hint` at once, naming "1234 or 1.234" (step 7 changes the line);
    - paste "1e5", switch to a 2-decimal token, then the send page's validator: the text stays
      "1e5" and the result is `invalid`; the same with "1.234,567" re-rests the clamped reading as
      "1,234.56" and sets `rested` (red); "1.234,56" needs no clamp and keeps its text (pin);
@@ -790,6 +802,9 @@ the re-read, as answered.
    `send-amount-unreadable-hint` shows, `send-submit` stays disabled; Max then fills the balance and
    `send-submit` enables; cleared and typed with the keyboard, "1,234" reads "1.234", and a further
    ".56" makes it "1234.56".
+7. **After the sign-off** (P4 step 3): the held paste's line becomes the O3 preview's, "Type it
+   without the comma.", in place of "Is that 1234 or 1.234? Type the one you mean."; the card
+   case is rewritten to the new line and runs red on the old one, and `ambiguousReadings` goes.
 
 Gate:
 - Commands: `bun --bun vitest run src/utils/amount.test.ts src/popup/pages/send-amount.test.ts src/components/composite/send/amount-field.test.ts src/components/composite/send/AmountCard.test.ts src/popup/pages/send.test.ts src/popup/pages/send.integration.test.ts`; `bun run lint`; `bun run typecheck:all`; `bun run build`; `git status --porcelain apps/extension/src/types` prints nothing after the commit.
@@ -876,9 +891,24 @@ Gate:
      "Trust restored tokens (Recommended)" (FU-4).
 2. The driver publishes P3's screenshots in one private Artifact and asks the blanket sign-off:
    rows 1, 3 to 7, 9, 12 and 13, one line each, and row 11's two edges. The answered rows'
-   screenshots sit beside their answers.
+   screenshots sit beside their answers. With them went row 15's held-paste line, built from this
+   plan's copy where the O3 preview read "Type it without the comma."; the codex loop's one
+   question, a paste into the field's own rest (§ Decision ledger), was asked in chat.
 3. Record the sign-off here, quoted. A change the owner asks for is a new step in the phase that
    built it, then P3's gate for the affected files and new screenshots.
+   - **The sign-off**, 2026-09-30 at 18:07 UTC, on the page
+     https://claude.ai/artifact/QpooE2sKVW9Ch3WZCGNMMc. Its saved answer (`answers/signoff`) reads
+     `{mode: "delegate", changes: ["preview-line"], note: "", at: "2026-09-30T18:07:18.256Z"}`.
+     The mode's label, "Sign off both, and don't wait on me", covers every screen on the page, any
+     fix the last review round makes to those screens, and any wording or layout call a fix needs
+     in this PR. The change's label: "Change this: use the preview's line, 'Type it without the
+     comma.'", built as P2 step 7. Look 1 (a second typed comma is dropped, so "1,234,567" reads
+     1.234567) stays as built.
+   - **A paste into the field's own rest**, 2026-09-30, in chat: for "The field is resting at
+     '1,234' TST, and you paste '5' at its end. What should it read?" the owner picked "As built:
+     1.2345 (Recommended)", whose option read "A paste follows the paste rules, so the comma is
+     the decimal point. The USD line and the review sheet show ≈ $1.23 before Send. It can only
+     under-send, it is rare, and it needs no extra work." No change.
 
 Gate: the delivery boundary (§ Approval): the PR does not merge until the blanket sign-off is quoted
 here.

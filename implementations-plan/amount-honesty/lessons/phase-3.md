@@ -163,3 +163,60 @@ Every command exited 0; every network run 0 failed and 0 skipped; the flake bar'
 both native pastes recorded as `insertFromPaste`; the mint recorded as `mint_to_private` with two
 arguments; every screenshot listed exists. Layers: typecheck, lint, unit, component, CI-gating,
 build, smoke e2e, e2e-live-network, both browsers.
+
+## Post-implementation: `/codex high`, GPT-6 Astra
+
+One session, `01a0f35a-44b9-73e3-a994-b0eb094bc012`, over `git diff 0f37ab78...HEAD`, the plan and
+its ledgers, with the adversarial ask and both rules verbatim in every prompt.
+
+### Round 1, at `2383ef73`: changes-requested
+
+| # | Finding, codex's severity | Call | Commit |
+|---|---|---|---|
+| 1 | Material. "1234" left as "1,234", then "5" pasted at its end: the field shows "1,2345" and sends 1.2345, where a typed "5" gives 12345 | Not changed; an owner question (P4). O3 (b) reads a paste whole and row 15 holds a pasted "1,234". The proposed strip works on the only diff `nextAmountText` has, the prior text and the new one, where "2,000" pasted over a selected rest "1,000" splits as "2" before ",000", so it would read 2000 where row 15 holds. An exact version needs the paste's selection | none |
+| 2 | Material. A rewrite moves the caret to the end: ",5" typed between the digits of "12" reads 1.25, in both fields | Fixed: `caretAfter` and `showText` | `7cfef6d5` |
+| 3 | Material. The comma point overtyped with "." keeps its provenance, so a later "." re-reads | Not realistic: it needs the "." alone selected and the same key typed over it, a visible no-op. Backspace then "." is handled and pinned (P2). One ledger line | none |
+| 4 | Minor. A restored transfer whose `token.symbol` is not text throws in the transaction page's banner | Fixed: one `displaySymbol` for `txAmount` and the page. This branch's regression: the codec passes a transfer's token through as stored | `e57d2893` |
+| 5 | Minor. A comment in `AmountCard.vue` restates its line; `txAmount`'s "exactly" hides that a mint is known by name and arity | Fixed | `7a05351b` |
+
+Red first:
+
+- Finding 2, in jsdom on `2383ef73`: the two new `AmountCard.test.ts` cases, exit 1: the token
+  field read `["1.25", "1.25"]` and the USD field "1.25", each for 1.52.
+- Finding 2, in Chrome, prover on, retry 0: the new `send-amount-exact` step on the unfixed code (a
+  scratch worktree at `1516b938`, whose code is `2383ef73`'s): exit 1, 1 test, 1 failed, "the
+  amount field reads "1.25", not "1.52"".
+- Finding 4: the new `tx/[id].test.ts` case, exit 1 (`TypeError: input.replace is not a function`).
+
+Green: `AmountCard.test.ts`, `amount-field.test.ts` (`caretAfter`'s five cases, a new helper, so
+labelled) and `send-amount.test.ts`, 3 files, 156 passed; `tx/[id].test.ts`, `tx-amount.test.ts`
+and `TransactionCard.test.ts`, 3 files, 26 passed; `bun run lint` exit 0 (28 warnings, 3 infos).
+
+### Round 2, at `7a05351b`: changes-requested
+
+Codex found both rejections sound on the code ("partial-paste handling needs selection information
+to distinguish the stated cases; excluding identical-point overtyping is a realism judgment") and
+the symbol and comment fixes holding. One material finding, in the caret fix: counting only the
+digits after the caret put it past the point, so "00" typed before the point of the rest
+"1,234.56" read 12340.056, and "56" typed before the point of a pasted "$12.34" read 125.634.
+Fixed in `e9e940d4`: the count takes digits and points. Red first on `7a05351b`: the two cases in
+both fields and the helper's two, 4 failed, exit 1; green: 3 files, 160 passed, exit 0; lint exit 0.
+
+### Round 3, at `e9e940d4`: changes-requested, the loop's last round
+
+Both round-2 cases and eleven other probes of codex's passed. One material finding: a comma the
+text keeps as its decimal separator was not counted, so "00" typed before the comma of a pasted
+"1 234,56" read 12340.056, in both fields. Fixed in `3b74c649`: a comma after the caret counts
+wherever the rewritten text still has one (a rewrite drops the rest's grouping commas all at once,
+or none). Red first on `e9e940d4`: the case in both fields and the helper's, 3 failed, exit 1;
+green: 3 files, 163 passed, exit 0; lint exit 0.
+
+Before committing, a throwaway probe (never committed) drove `nextAmountText` and `caretAfter` from
+14 realistic texts (rests, pastes with a point, a comma or spaces as grouping, USD with "$"), at
+every caret position: 5 digit runs typed there, "," or "." then a digit, and Backspace. Every typed
+digit landed between the digits it was typed between, on its side of the separator; the only
+misses were texts that stop reading once a group breaks ("1.0234,56"), which the field holds by
+design.
+
+The plan's rule stops the loop at three rounds, so round 3's fix has no codex pass of its own; it
+is surfaced for the driver, who can ask for a fourth.
