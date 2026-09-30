@@ -1,0 +1,19 @@
+{
+	"capturedAt": "2026-09-30",
+	"totalCount": 13,
+	"items": [
+		{"number":1,"state":"OPEN"},
+		{"number":58,"state":"CLOSED"},
+		{"number":59,"state":"CLOSED"},
+		{"number":279,"state":"CLOSED"},
+		{"number":280,"state":"OPEN"},
+		{"number":281,"state":"CLOSED"},
+		{"number":284,"state":"OPEN"},
+		{"number":285,"state":"OPEN"},
+		{"number":293,"state":"OPEN"},
+		{"number":301,"state":"CLOSED"},
+		{"number":312,"state":"OPEN"},
+		{"number":334,"state":"OPEN"},
+		{"number":336,"state":"OPEN"}
+	]
+}
