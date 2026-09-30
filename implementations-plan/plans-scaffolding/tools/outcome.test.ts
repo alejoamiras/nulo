@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { baseIndexLines, closedTargets, indexView, readClosures } from "./closed"
 import { cleanupRepos, closuresRepo, commitAll, git, memView, P, planTree, read, row, tool, writeFiles } from "./fixture"
-import { isSeed, outcomeProblems, planOutcomes, untouchedProblems } from "./outcome"
+import { followUpEntries, isSeed, openItems, outcomeProblems, planOutcomes, untouchedProblems } from "./outcome"
 
 afterAll(cleanupRepos)
 
@@ -115,6 +115,24 @@ describe("outcome", () => {
 		expect(untouchedProblems(repo, head, indexView(repo), new Set(["half", "mis", "owed", "twice"]))).toEqual([
 			`${P}/live/plan.md: an Outcome or seed line changed in a dir the closure table does not close`,
 		])
+	})
+
+	test("follow-up entries are named without markup and matched whether their dir sits in the plan tree or the archive", () => {
+		const entries = followUpEntries(
+			"- **Bold [title](x/plan.md)** — text.\n- First sentence with [a link](archive/x/notes.md). More.\n- **Other** — [y](y/plan.md).\n",
+		)
+		expect(openItems(entries, `${P}/x`)).toEqual(["Bold title", "First sentence with a link"])
+		expect(openItems(entries, `${P}/archive/x`)).toEqual(["Bold title", "First sentence with a link"])
+	})
+
+	test("refuses, writing nothing, to overwrite a file whose working copy differs from the index", () => {
+		const { files, rows } = planTree()
+		const { repo } = closuresRepo(files, rows)
+		writeFiles(repo, { [`${P}/fm/plan.md`]: "# Unstaged edit\n" })
+		const run = tool(repo, "outcome", "--date", "2026-09-30")
+		expect(run.status).not.toBe(0)
+		expect(run.out).toContain(`unstaged edits in:\n  ${P}/fm/plan.md`)
+		expect(git(repo, "status", "--short")).toBe(`M ${P}/fm/plan.md`)
 	})
 
 	test("a block stays within 1 KiB by counting the open items it cannot name", () => {

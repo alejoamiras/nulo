@@ -5,7 +5,9 @@ import { applyHandFixes, planRepairs, type RepairCtx, repairFile } from "./repai
 const before = memView({
 	[`${P}/gone/plan.md`]: "",
 	[`${P}/gone/x.md`]: "",
+	[`${P}/gone/${P}/other/deep.md`]: "",
 	[`${P}/other/plan.md`]: "",
+	[`${P}/other/deep.md`]: "",
 	[`${P}/live/plan.md`]: "",
 	[`${P}/index.md`]: "",
 	"apps/x.ts": "",
@@ -18,25 +20,29 @@ describe("repair-links", () => {
 		const src = [
 			"[sib](x.md) [dot](./x.md) [idx](../index.md) [other](../other/plan.md#top) [live](../live/plan.md?v=1)",
 			"[code](../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../index.md'>raw</a>",
-			"[cite](implementations-plan/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3)",
+			"[cite](implementations-plan/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3) [relative](implementations-plan/other/deep.md)",
 			"`[span](../index.md)` and `implementations-plan/other/plan.md`",
 		].join("\n")
 		expect(repairFile(...MOVED, src, ctx)).toBe(
 			[
 				"[sib](x.md) [dot](./x.md) [idx](../../index.md) [other](../other/plan.md#top) [live](../../live/plan.md?v=1)",
 				"[code](../../../apps/x.ts:12) [ext](https://example.com/a) [anchor](#h) <a href='../../index.md'>raw</a>",
-				"[cite](implementations-plan/archive/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3)",
+				"[cite](implementations-plan/archive/other/plan.md:40) [live cite](implementations-plan/live/plan.md:3) [relative](implementations-plan/other/deep.md)",
 				"`[span](../index.md)` and `implementations-plan/other/plan.md`",
 			].join("\n"),
+		)
+		expect(repairFile(`${P}/index.md`, `${P}/archive/index.md`, "[c](implementations-plan/gone/plan.md)\n", ctx)).toBe(
+			"[c](../implementations-plan/gone/plan.md)\n",
 		)
 	})
 
 	test("a staying doc maps links into moved dirs; live docs map path tokens too, frozen prose and permalinks keep theirs", () => {
 		const claude =
-			"See [g](implementations-plan/gone/plan.md), `implementations-plan/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n"
+			"See [g](implementations-plan/gone/plan.md), [p](./implementations-plan/gone/plan.md), [d](implementations-plan/gone/), [r](/implementations-plan/gone/plan.md), `implementations-plan/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n"
 		expect(repairFile("CLAUDE.md", "CLAUDE.md", claude, ctx)).toBe(
-			"See [g](implementations-plan/archive/gone/plan.md), `implementations-plan/archive/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n",
+			"See [g](implementations-plan/archive/gone/plan.md), [p](./implementations-plan/archive/gone/plan.md), [d](implementations-plan/archive/gone/), [r](/implementations-plan/archive/gone/plan.md), `implementations-plan/archive/gone/x.md`, `implementations-plan/live/plan.md`, https://github.com/alejoamiras/nulo/blob/abc/implementations-plan/gone/plan.md.\n",
 		)
+		expect(repairFile("CHANGELOG.md", "CHANGELOG.md", claude, ctx)).toBe(claude)
 		const audit = "Per [the plan](../../implementations-plan/gone/plan.md), `implementations-plan/gone/plan.md`.\n"
 		expect(repairFile("audit/x/a.md", "audit/x/a.md", audit, ctx)).toBe(
 			"Per [the plan](../../implementations-plan/archive/gone/plan.md), `implementations-plan/gone/plan.md`.\n",
