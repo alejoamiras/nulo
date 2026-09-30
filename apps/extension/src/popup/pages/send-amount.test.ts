@@ -236,6 +236,8 @@ describe("send-amount/the field under a page that binds it as the Send page does
 			shown,
 			edit,
 			state,
+			/** Every text the card handed the page, in order. */
+			writes: () => (w.findComponent(AmountCard).emitted("update:modelValue") ?? []).map(([text]) => text),
 			/** Each key typed at the end of the text; what the field shows after each. */
 			async type(keys: string) {
 				const after: string[] = []
@@ -264,6 +266,14 @@ describe("send-amount/the field under a page that binds it as the Send page does
 		const page = mountPage()
 		expect(await page.type("1,234.56")).toEqual(["1", "1.", "1.2", "1.23", "1.234", "1234.", "1234.5", "1234.56"])
 		expect(await page.leave()).toEqual({ field: "1,234.56", review: "1,234.56", sent: sends(1_234_560n * 10n ** 15n) })
+	})
+
+	// A browser flushes microtasks between two listeners of one keystroke, so a raw key text the page
+	// held first would come back through the card's model watcher before the card read its prior.
+	test("a keystroke reaches the page only as the card's text, once, never as the raw key", async () => {
+		const page = mountPage()
+		await page.type("1,234.56")
+		expect(page.writes()).toEqual(["1", "1.", "1.2", "1.23", "1.234", "1234.", "1234.5", "1234.56"])
 	})
 
 	test('typed "1,234" reads 1.234, and shows it', async () => {

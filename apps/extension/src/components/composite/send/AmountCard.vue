@@ -74,8 +74,9 @@ function writeAmount(text, { atRest = false, point = false } = {}) {
 	model.value = text
 }
 
-// Works on the input's own value and writes the model once: `model.value` only reflects a write
-// after the parent re-renders, and nothing guarantees a flush between v-model's listener and this one.
+// The field's only input listener, bound one way: a browser flushes microtasks between two listeners
+// of one keystroke, so a v-model write of the raw text would reach the page, and come back through
+// the model watcher below, before this read its prior text.
 const handleAmountInput = (e) => {
 	const next = nextAmountText({
 		prior: lastText,
@@ -393,7 +394,7 @@ const handleFiatBalanceAction = (divisor) => {
 					<input
 						v-else
 						ref="inputEl"
-						v-model="model"
+						:value="model"
 						@input="handleAmountInput"
 						@focus="handleAmountFocus"
 						@blur="handleAmountBlur"
