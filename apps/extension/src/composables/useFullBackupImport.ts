@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from "vue"
+import { computed, ref, type Ref, type ShallowRef, shallowRef, toRaw } from "vue"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { sanitizeString } from "@/utils/string"
 import { AccountServiceClient } from "@/wallet/services/account/client"
@@ -21,6 +21,7 @@ import { type BackupSelection, collectRestoreErrors, normalizeAllIds, readBackup
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
 import { maxBackupSchemaVersion, migrateBackupData } from "@/wallet/services/backup/backup-migrator"
 import {
+	type AccountStateRetryContext,
 	applyOutcome,
 	buildRestoreSecret,
 	type RestoreIo,
@@ -32,6 +33,8 @@ import {
 	reseedNetworksStage,
 	restoreServiceSlices,
 	restoreTokensStage,
+	retryAccountStateStage,
+	retryReplacedRows,
 	runRestoreFailurePath,
 } from "./full-backup-restore"
 
@@ -363,11 +366,29 @@ export interface UseFullBackupImportResult {
 	 * `resetBackupState`.
 	 */
 	parsedBackupName: Ref<string | null>
+	/** The finished import left a network that ran out of time or could not be reached. */
+	canRetryAccountState: Ref<boolean>
+	/** The seeded names of the networks a Retry replays, in seed order; empty while none can. */
+	unrestoredNetworkNames: Ref<string[]>
+	/** The error log holds a row that no Retry replaces. */
+	hasOtherRestoreErrors: Ref<boolean>
+	/** A Retry is running; Continue and View Errors wait for it. */
+	isRetryingAccountState: Ref<boolean>
+	/**
+	 * Replays the retryable networks once; a press while one runs does nothing. When no error row
+	 * is left afterwards, completes the import the way a clean restore does.
+	 */
+	retryAccountState: () => Promise<void>
+	/** Continue from the errors screen. Drops the Retry first: a press while the completion
+	 *  handshake waits would otherwise run the tail again and complete the import twice. */
+	continueImport: () => Promise<void>
 	pickBackupFile: () => Promise<void>
 	decryptBackup: () => Promise<void>
 	restoreBackup: () => Promise<void>
 	showRestoreErrorLog: () => void
 	resetBackupState: () => void
+	/** Drops a running Retry, so one that settles after the page unmounted changes nothing. */
+	dispose: () => void
 }
 
 /** The backup-embedded profile name, sanitized — a maliciously crafted backup can embed
@@ -447,16 +468,16 @@ async function restoreProfileStep(
 /**
  * The staged restore sequence between the validate gate and completion — the order-of-restore
  * law lives here (see full-backup-restore.ts for each stage's own invariants). Returns the
- * restored profile, or null when a stage already rendered its terminal outcome. `scratch` is
- * the deposit-style out-param: the caller's catch must see `createdProfileId` and
- * `finalizeStarted` the moment they exist.
+ * restored profile with what a Retry of its account-state would replay, or null when a stage
+ * already rendered its terminal outcome. `scratch` is the deposit-style out-param: the caller's
+ * catch must see `createdProfileId` and `finalizeStarted` the moment they exist.
  */
 async function executeRestore(
 	validated: ValidatedBackup,
 	scratch: RestoreScratch,
 	io: RestoreIo,
 	deps: { profileService: ProfileServiceClient; networkService: NetworkServiceClient; opts: UseFullBackupImportOptions },
-): Promise<{ id: string; restoreError?: unknown } | null> {
+): Promise<{ profile: { id: string; restoreError?: unknown }; accountStateRetry?: AccountStateRetryContext } | null> {
 	const { data, backup } = validated
 	const { profileService, networkService, opts } = deps
 	const masterKey = backup["master-key"] as string
@@ -559,8 +580,8 @@ async function executeRestore(
 	}
 
 	io.setStage("restoring:account-state")
-	await restoreAccountStateStage(data, nets.seeded, networkService, io)
-	return newProfile
+	const accountStateRetry = await restoreAccountStateStage(data, nets.seeded, networkService, io)
+	return { profile: newProfile, accountStateRetry }
 }
 
 /** The composable's reactive state, bundled for the module-level flow functions. */
@@ -572,12 +593,37 @@ interface ImportRefs {
 	restoreErrorLog: Ref<Record<string, unknown[]>>
 	importedProfile: Ref<unknown>
 	parsedBackupName: Ref<string | null>
+	/** What a Retry replays; a reset, a new import and an unmount drop it. */
+	accountStateRetry: ShallowRef<AccountStateRetryContext | null>
+	/** The context a running Retry replays; a Retry whose context was dropped writes nothing. */
+	retryingAccountState: ShallowRef<AccountStateRetryContext | null>
+}
+
+function dropAccountStateRetry(state: ImportRefs) {
+	state.accountStateRetry.value = null
+	state.retryingAccountState.value = null
+}
+
+/**
+ * AWAIT completeImport in an isolated try/catch. At this point the import genuinely succeeded
+ * (data written, session opened via finalizeRestore), so a rejected completion handshake must NOT
+ * flip the status back to "failed" or reach the failure path's rollback — it must only surface,
+ * never undo. An un-awaited call also leaves a dangling promise that hangs the spinner.
+ */
+async function completeAfterRestore(opts: UseFullBackupImportOptions, profile: unknown): Promise<void> {
+	try {
+		await opts.completeImport(profile)
+	} catch (err) {
+		console.error("completeImport failed after a successful restore:", (err as Error)?.message || err)
+	}
 }
 
 async function runPickBackupFile(state: ImportRefs, opts: UseFullBackupImportOptions) {
 	if (state.restoreStatus.value === "progress") return
 	try {
 		const file = await opts.pickFile()
+		// A Retry belongs to the import of the selection a new pick replaces.
+		dropAccountStateRetry(state)
 		// A pick that yields no file (the capped wrapper's too-large path)
 		// must also drop any PREVIOUS selection — otherwise the old file's
 		// name and enabled import CTA sit under the new error banner, and
@@ -661,7 +707,7 @@ async function runDecryptBackup(state: ImportRefs, opts: UseFullBackupImportOpti
 async function runRestoreBackup(
 	state: ImportRefs,
 	opts: UseFullBackupImportOptions,
-	guards: { isAllowed: () => boolean; hasErrors: () => boolean; recordRestoreErrors: (serviceName: string, data: unknown) => void },
+	guards: { isAllowed: () => boolean; hasErrors: () => boolean; recordRestoreErrors: (serviceName: string, data: unknown) => unknown[] },
 ) {
 	// Re-entrancy guard: a second concurrent run (double-click, or the popup's
 	// document-level Enter handler firing again mid-flight) would create a second
@@ -671,11 +717,12 @@ async function runRestoreBackup(
 	if (state.restoreStatus.value === "progress") return
 	if (!guards.isAllowed()) return
 	opts.clearError()
+	dropAccountStateRetry(state)
 	state.restoreStatus.value = "progress"
 	state.restoreStage.value = "restoring:profile"
 
 	const sel = state.selectedBackup.value as BackupSelection
-	// Q-02: integrity + compatibility gate + forward-migration, all before any live state
+	// Integrity + compatibility gate + forward-migration, all before any live state
 	// is touched. The earlier profile name/type reads in pickBackupFile/decryptBackup are
 	// sanitized display-only prefill and gate nothing.
 	const validated = await validateAndMigrateBackup(sel.backup as FullBackupEnvelope)
@@ -711,31 +758,101 @@ async function runRestoreBackup(
 
 	try {
 		state.restoreErrorLog.value = {}
-		const newProfile = await executeRestore(validated, scratch, io, { profileService, networkService, opts })
-		if (!newProfile) return
+		const restored = await executeRestore(validated, scratch, io, { profileService, networkService, opts })
+		if (!restored) return
 
 		state.restoreStatus.value = "finished"
 		state.restoreStage.value = "finished"
 		if (!guards.hasErrors()) {
-			// AWAIT completeImport in an isolated try/catch (P7). At this point the import
-			// genuinely succeeded (data written, session opened via finalizeRestore), so a
-			// rejected completion handshake must NOT flip the status back to "failed" or
-			// reach the failure path's rollback — it must only surface, never undo. An
-			// un-awaited call also leaves a dangling promise that hangs the spinner.
-			try {
-				await opts.completeImport(newProfile)
-			} catch (err) {
-				console.error("completeImport failed after a successful restore:", (err as Error)?.message || err)
-			}
+			await completeAfterRestore(opts, restored.profile)
 			return
 		}
-		state.importedProfile.value = newProfile
+		state.importedProfile.value = restored.profile
+		state.accountStateRetry.value = restored.accountStateRetry ?? null
 	} catch (err) {
 		await runRestoreFailurePath(err, scratch, profileService, io)
 	} finally {
 		profileService.disconnect()
 		networkService.disconnect()
 	}
+}
+
+/** One Retry of the account-state tail, fenced to the context it started from. */
+async function runRetryAccountState(
+	state: ImportRefs,
+	opts: UseFullBackupImportOptions,
+	deps: { hasErrors: () => boolean; replaceRestoreErrors: (serviceName: string, stale: unknown[], data: unknown) => unknown[] },
+) {
+	const ctx = state.accountStateRetry.value
+	if (!ctx || state.retryingAccountState.value) return
+	state.retryingAccountState.value = ctx
+	// A reset, a new import or an unmount drops the context while the Retry runs: from then on
+	// nothing it learns belongs to this page.
+	const live = () => state.accountStateRetry.value === ctx
+	let next: AccountStateRetryContext | undefined
+	try {
+		next = await retryAccountStateStage(ctx, (serviceName, stale, data) =>
+			live() ? deps.replaceRestoreErrors(serviceName, stale, data) : [],
+		)
+	} finally {
+		if (state.retryingAccountState.value === ctx) state.retryingAccountState.value = null
+	}
+	if (!live()) return
+	state.accountStateRetry.value = next ?? null
+	if (!deps.hasErrors()) await completeAfterRestore(opts, state.importedProfile.value)
+}
+
+function retryNetworkNames(ctx: AccountStateRetryContext): string[] {
+	const retried = new Set(ctx.retryable.map((item) => item.networkId))
+	return ctx.networks.filter((network) => retried.has(network.id)).map((network) => network.name)
+}
+
+/** Whether `log` holds a row a Retry of `ctx` would not replace; with no context, any row. */
+function hasRowsBeyondRetry(log: Record<string, unknown[]>, ctx: AccountStateRetryContext | null): boolean {
+	const replaced = new Set(ctx ? retryReplacedRows(ctx) : [])
+	// Rows read back through the reactive log are proxies: compare the raw rows.
+	return Object.values(log).some((rows) => rows.some((row) => !replaced.has(toRaw(row))))
+}
+
+function retryWarningRefs(state: ImportRefs) {
+	return {
+		unrestoredNetworkNames: computed(() => {
+			const ctx = state.accountStateRetry.value
+			return state.restoreStatus.value === "finished" && ctx ? retryNetworkNames(ctx) : []
+		}),
+		hasOtherRestoreErrors: computed(() => hasRowsBeyondRetry(state.restoreErrorLog.value, state.accountStateRetry.value)),
+	}
+}
+
+function reportRestoreErrors(serviceName: string, data: unknown): unknown[] {
+	const errors = collectRestoreErrors(serviceName, data) ?? []
+	// Names the service that gates the Continue screen. Without it a degraded import is
+	// only visible as "some slice failed", with the reasons stranded in the RPC result.
+	if (errors.length) console.warn(`[full-backup-import] ${serviceName} reported ${errors.length} restore error(s)`, errors)
+	return errors
+}
+
+function errorLogWriters(restoreErrorLog: Ref<Record<string, unknown[]>>) {
+	function recordRestoreErrors(serviceName: string, data: unknown): unknown[] {
+		const errors = reportRestoreErrors(serviceName, data)
+		// APPEND, not assign: some services already have entries recorded before
+		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
+		// pre-restore) — a plain assignment would clobber those diagnostics.
+		if (errors.length) restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
+		return errors
+	}
+	/** Swaps `stale` rows for `data`'s in ONE assignment, so the screen never passes through an
+	 *  empty log; an emptied key is deleted, because a key alone counts as an error. */
+	function replaceRestoreErrors(serviceName: string, stale: unknown[], data: unknown): unknown[] {
+		const fresh = reportRestoreErrors(serviceName, data)
+		// Rows read back through the reactive log are proxies: compare the raw rows.
+		const staleRows = new Set(stale.map((row) => toRaw(row)))
+		const { [serviceName]: current = [], ...others } = toRaw(restoreErrorLog.value)
+		const rows = [...current.filter((row) => !staleRows.has(toRaw(row))), ...fresh]
+		restoreErrorLog.value = rows.length ? { ...others, [serviceName]: rows } : others
+		return fresh
+	}
+	return { recordRestoreErrors, replaceRestoreErrors }
 }
 
 export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBackupImportResult {
@@ -746,8 +863,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 	const restoreErrorLog = ref<Record<string, unknown[]>>({})
 	const importedProfile = ref<unknown>(null)
 	const parsedBackupName = ref<string | null>(null)
+	const accountStateRetry = shallowRef<AccountStateRetryContext | null>(null)
+	const retryingAccountState = shallowRef<AccountStateRetryContext | null>(null)
 
 	const isRestoreHasErrors = computed(() => Object.keys(restoreErrorLog.value).length > 0)
+	const canRetryAccountState = computed(() => restoreStatus.value === "finished" && accountStateRetry.value !== null)
+	const isRetryingAccountState = computed(() => retryingAccountState.value !== null)
 
 	const isAllowedToImportBackup = computed(() => {
 		if (!selectedBackup.value?.profileType || !selectedBackup.value?.backup) return false
@@ -760,18 +881,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		return true
 	})
 
-	function recordRestoreErrors(serviceName: string, data: unknown) {
-		const errors = collectRestoreErrors(serviceName, data)
-		// APPEND, not assign: some services already have entries recorded before
-		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
-		// pre-restore) — a plain assignment would clobber those diagnostics.
-		if (errors) {
-			// Names the service that gates the Continue screen. Without it a degraded import is
-			// only visible as "some slice failed", with the reasons stranded in the RPC result.
-			console.warn(`[full-backup-import] ${serviceName} reported ${errors.length} restore error(s)`, errors)
-			restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
-		}
-	}
+	const { recordRestoreErrors, replaceRestoreErrors } = errorLogWriters(restoreErrorLog)
 
 	const state: ImportRefs = {
 		selectedBackup,
@@ -781,7 +891,10 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		restoreErrorLog,
 		importedProfile,
 		parsedBackupName,
+		accountStateRetry,
+		retryingAccountState,
 	}
+	const { unrestoredNetworkNames, hasOtherRestoreErrors } = retryWarningRefs(state)
 	const pickBackupFile = () => runPickBackupFile(state, opts)
 	const decryptBackup = () => runDecryptBackup(state, opts)
 	const restoreBackup = () =>
@@ -790,6 +903,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			hasErrors: () => isRestoreHasErrors.value,
 			recordRestoreErrors,
 		})
+	const retryAccountState = () => runRetryAccountState(state, opts, { hasErrors: () => isRestoreHasErrors.value, replaceRestoreErrors })
+	async function continueImport() {
+		if (!importedProfile.value) return
+		dropAccountStateRetry(state)
+		await opts.completeImport(importedProfile.value)
+	}
 
 	function showRestoreErrorLog() {
 		if (!isRestoreHasErrors.value) return
@@ -807,6 +926,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		restoreErrorLog.value = {}
 		importedProfile.value = null
 		parsedBackupName.value = null
+		dropAccountStateRetry(state)
 	}
 
 	return {
@@ -819,10 +939,17 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		isAllowedToImportBackup,
 		isRestoreHasErrors,
 		parsedBackupName,
+		canRetryAccountState,
+		unrestoredNetworkNames,
+		hasOtherRestoreErrors,
+		isRetryingAccountState,
+		retryAccountState,
+		continueImport,
 		pickBackupFile,
 		decryptBackup,
 		restoreBackup,
 		showRestoreErrorLog,
 		resetBackupState,
+		dispose: () => dropAccountStateRetry(state),
 	}
 }

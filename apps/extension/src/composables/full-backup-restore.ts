@@ -21,6 +21,8 @@ import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
+import type { NormalizedAccountStateItem } from "@/wallet/services/account-state/normalize"
+import { NetworkServiceClient } from "@/wallet/services/network/client"
 import { runImportChainSync } from "./importChainSync"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
@@ -71,8 +73,9 @@ export interface RestoreIo {
 	fillError: (type: string, title: string, tooltip?: string) => void
 	setStatus: (s: RestoreStatus) => void
 	setStage: (s: RestoreStage) => void
-	/** collectRestoreErrors + append into the live error log (never a captured object). */
-	recordRestoreErrors: (serviceName: string, data: unknown) => void
+	/** collectRestoreErrors + append into the live error log (never a captured object); returns
+	 *  the rows it appended. */
+	recordRestoreErrors: (serviceName: string, data: unknown) => unknown[]
 	/** Direct append for pre-collected records (the dropped-balances path). */
 	appendErrors: (serviceName: string, records: unknown[]) => void
 }
@@ -430,28 +433,94 @@ export async function restoreServiceSlices(
  * tail runs on one shared wall-clock budget through the SAME errors screen. Present-but-malformed slices (a hostile
  * `{}`/`null`) MUST still enter the chain-sync: the normalizer converts them into a
  * violation record — gating on Array.isArray here would let a malformed slice auto-route
- * past the Continue gate unrecorded.
+ * past the Continue gate unrecorded. Resolves with what a Retry replays when a network is left
+ * retryable.
  */
 export async function restoreAccountStateStage(
 	data: Record<string, unknown>,
 	createdNetworks: RestoredNetwork[],
 	networkService: NetworkRestoreClient,
 	io: RestoreIo,
-): Promise<void> {
+): Promise<AccountStateRetryContext | undefined> {
 	const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]
-	if (accountStateSlice === undefined) return
+	if (accountStateSlice === undefined) return undefined
 	const accountStateService = new AccountStateServiceClient()
+	let outcomeRows: unknown[] = []
 	try {
 		io.setStage("chain-sync")
-		await runImportChainSync({
+		const retryable = await runImportChainSync({
 			slice: accountStateSlice,
-			createdNetworkIds: createdNetworks.map((n) => n.id),
-			restore: (items, deadlineMs) => accountStateService.restore(items as never, createdNetworks as never, deadlineMs) as never,
-			probe: (networkId, timeoutMs) => networkService.probeNodeStatus(networkId, timeoutMs) as never,
-			record: (records) => io.recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, records),
+			...chainSyncClients(accountStateService, networkService, createdNetworks),
+			record: (records, kind) => {
+				const rows = io.recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, records)
+				if (kind === "outcomes") outcomeRows = rows
+			},
 		})
+		return retryable.length ? { networks: createdNetworks, retryable, outcomeRows } : undefined
 	} finally {
 		accountStateService.disconnect()
+	}
+}
+
+/** What a Retry replays. It lives in the page's memory while the errors screen shows and is
+ *  never persisted: the items are hostile backup content, bounded by the normalizer. */
+export interface AccountStateRetryContext {
+	networks: RestoredNetwork[]
+	/** The normalized items of the networks the last run left retryable. */
+	retryable: NormalizedAccountStateItem[]
+	/** The account-state rows the registration outcomes wrote, the only ones a Retry replaces. */
+	outcomeRows: unknown[]
+}
+
+/** The rows a Retry of `ctx` replaces: the retried networks' outcome rows only. A violation row
+ *  records entries the normalizer discarded, which no registration brings back. */
+export function retryReplacedRows(ctx: AccountStateRetryContext): unknown[] {
+	const retried = new Set<unknown>(ctx.retryable.map((item) => item.networkId))
+	return ctx.outcomeRows.filter((row) => retried.has((row as { networkId?: unknown } | null)?.networkId))
+}
+
+/**
+ * Replays the chain-sync tail for the networks the last run left retryable, on fresh connections
+ * closed once it settles. `replaceRestoreErrors` swaps the retried networks' outcome rows for the
+ * Retry's own and returns the rows it wrote. Resolves with the next context, or `undefined` when no
+ * network is left to retry.
+ */
+export async function retryAccountStateStage(
+	ctx: AccountStateRetryContext,
+	replaceRestoreErrors: (serviceName: string, stale: unknown[], data: unknown) => unknown[],
+): Promise<AccountStateRetryContext | undefined> {
+	const accountStateService = new AccountStateServiceClient()
+	const networkService = new NetworkServiceClient()
+	let records: unknown[] = []
+	try {
+		const retryable = await runImportChainSync({
+			slice: ctx.retryable,
+			...chainSyncClients(accountStateService, networkService, ctx.networks),
+			// Items the normalizer already bounded yield no violations: only outcomes arrive.
+			record: (outcomes, kind) => {
+				if (kind === "outcomes") records = outcomes
+			},
+		})
+		const stale = retryReplacedRows(ctx)
+		const fresh = replaceRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, stale, records)
+		const outcomeRows = [...ctx.outcomeRows.filter((row) => !stale.includes(row)), ...fresh]
+		return retryable.length ? { networks: ctx.networks, retryable, outcomeRows } : undefined
+	} finally {
+		accountStateService.disconnect()
+		networkService.disconnect()
+	}
+}
+
+function chainSyncClients(
+	accountStateService: AccountStateServiceClient,
+	networkService: NetworkRestoreClient,
+	networks: RestoredNetwork[],
+) {
+	return {
+		createdNetworkIds: networks.map((n) => n.id),
+		restore: (items: unknown[], deadlineMs: number) =>
+			accountStateService.restore(items as never, networks as never, deadlineMs) as Promise<unknown>,
+		probe: (networkId: string, timeoutMs: number) => networkService.probeNodeStatus(networkId, timeoutMs) as never,
 	}
 }
 

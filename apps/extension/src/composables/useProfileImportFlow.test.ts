@@ -290,6 +290,16 @@ describe("useProfileImportFlow", () => {
 		})
 	})
 
+	test("the backup import's Retry passes through, idle until an import leaves a network to retry", async () => {
+		const { flow, stop } = makeFlow()
+		expect(flow.canRetryAccountState.value).toBe(false)
+		expect(flow.isRetryingAccountState.value).toBe(false)
+		expect(flow.unrestoredNetworkNames.value).toEqual([])
+		expect(flow.hasOtherRestoreErrors.value).toBe(false)
+		await expect(flow.retryAccountState()).resolves.toBeUndefined()
+		stop()
+	})
+
 	test("dispose() is callable and the composable registers no onUnmounted", () => {
 		// Constructed outside a component setup; if it registered onUnmounted Vue
 		// would warn. dispose() (name-field shake-timer cleanup) must be safe to

@@ -22,31 +22,21 @@
  * port pack + processes; the second browser here uses its own temp profile
  * dir and is closed + removed in finally.
  */
-import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import {
-	clickByTestId,
-	type ExtensionContext,
-	launchExtension,
-	openPopup,
-	replaceInputValue,
-	test,
-	waitForHash,
-} from "../fixtures/extension"
+import { type ExtensionContext, launchExtension, test } from "../fixtures/extension"
 import {
 	captureBalanceBaseline,
 	getAccountAddress,
-	navigateByHash,
 	reopenAndRecoverAfterImport,
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
 } from "../fixtures/helpers"
-import { armBackupDownloadCapture, keepChainAccountState, readCapturedBackupDownload } from "../helpers/backup-export"
+import { accountChainId, exportPlainBackup, keepChainAccountState, sealPlainBackup } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -66,33 +56,12 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
 		// ── 1. Export a REAL backup from the funded wallet ────────────────
-		const page = await openPopup(tokenReadyExtension)
-		await waitForHash(page, "#/popup/general")
-		await navigateByHash(page, "#/popup/settings/security/export/full")
-		await clickByTestId(page, "agree-continue-btn")
-		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
-		await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-		await clickByTestId(page, "unlock-submit-btn")
-		await page.waitForFunction(
-			() => {
-				const btn = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
-				return !!btn && !btn.disabled
-			},
-			{ timeout: 120_000, polling: 250 },
-		)
-
-		// Capture the download in-page (see helpers/backup-export.ts for the
-		// chrome.downloads stub + gunzip mechanics).
-		await armBackupDownloadCapture(page)
-		await clickByTestId(page, "download-backup-btn")
-		const exportedJson = await readCapturedBackupDownload(page)
-		await page.close()
+		const exported = await exportPlainBackup(tokenReadyExtension)
 
 		// ── 2. Doctor it into a PRE-shape backup ──────────────────────────
 		// Don't pin exact version VALUES: this harness must keep working when a
 		// real migration bumps the export stamp — the fixture's 9001 sentinel
 		// stays pending above any real version, which is all the test needs.
-		const exported = JSON.parse(exportedJson) as { checksum?: string; data: Record<string, unknown> } & Record<string, unknown>
 		expect(typeof exported["compat-epoch"]).toBe("number")
 		const exportedVersion = exported["backup-schema-version"]
 		expect(Number.isInteger(exportedVersion) && (exportedVersion as number) >= 1).toBe(true)
@@ -106,16 +75,12 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 				abbr: "RA",
 			},
 		]
-		const backupAccounts = exported.data.account as Array<{ address: string; chainId: number }>
-		const chainId = backupAccounts.find((a) => a.address === tokenReadyExtension.accountAddress)?.chainId
-		if (chainId === undefined) throw new Error("the funded account is missing from the exported backup")
+		const chainId = accountChainId(exported, tokenReadyExtension.accountAddress)
 		keepChainAccountState(exported.data, chainId, aztecConfig!.tokenAddress)
-		const { checksum: _stale, ...body } = exported
-		const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
 
 		// ── 3. Import into a FRESH extension ──────────────────────────────
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-backup-rt-"))
-		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
+		const filePath = writeBackupToTemp(sealPlainBackup(exported))
 		let ctx2: ExtensionContext | undefined
 		try {
 			ctx2 = await launchExtension({ userDataDir: profileDir })

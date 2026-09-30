@@ -71,9 +71,14 @@ const {
 	decryptionPassword,
 	restoreStatus,
 	restoreStage,
-	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	canRetryAccountState,
+	unrestoredNetworkNames,
+	hasOtherRestoreErrors,
+	isRetryingAccountState,
+	retryAccountState,
+	continueImport,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -159,6 +164,8 @@ onBeforeUnmount(() => {
 			:selectedBackup="selectedBackup"
 			:restoreStatus="restoreStatus"
 			:isRestoreHasErrors="isRestoreHasErrors"
+			:unrestoredNetworks="unrestoredNetworkNames"
+			:hasOtherErrors="hasOtherRestoreErrors"
 			:error="error"
 			:isCopied="isCopied"
 			:maxPasswordLength="maxPasswordLength"
@@ -203,11 +210,23 @@ onBeforeUnmount(() => {
 					{{ restoreStatus === "progress" ? "Importing..." : "Import profile" }}
 				</Button>
 				<Button
+					v-if="canRetryAccountState"
+					variant="cta_outline"
+					size="large"
+					:disabled="isRetryingAccountState"
+					:loading="isRetryingAccountState"
+					data-testid="import-full-backup-retry-btn"
+					@click="retryAccountState"
+				>
+					{{ isRetryingAccountState ? "Retrying..." : "Retry" }}
+				</Button>
+				<Button
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta"
 					size="large"
+					:disabled="isRetryingAccountState"
 					data-testid="import-full-backup-continue-btn"
-					@click="importedProfile && completeImport(importedProfile as { id: string })"
+					@click="continueImport"
 				>
 					Continue
 				</Button>
@@ -215,6 +234,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta_outline"
 					size="large"
+					:disabled="isRetryingAccountState"
 					data-testid="import-full-backup-view-errors-btn"
 					@click="showRestoreErrorLog"
 				>
@@ -236,7 +256,7 @@ onBeforeUnmount(() => {
 			<Button
 				variant="cta_outline"
 				size="large"
-				:disabled="restoreStatus === 'progress'"
+				:disabled="restoreStatus === 'progress' || isRetryingAccountState"
 				@click="handleBack"
 			>
 				Back to methods

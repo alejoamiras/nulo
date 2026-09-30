@@ -104,9 +104,14 @@ const {
 	decryptionPassword,
 	restoreStatus,
 	restoreStage,
-	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	canRetryAccountState,
+	unrestoredNetworkNames,
+	hasOtherRestoreErrors,
+	isRetryingAccountState,
+	retryAccountState,
+	continueImport,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -150,10 +155,11 @@ const onKeydown = (e) => {
 		selectedBackup: selectedBackup.value,
 		restoreStatus: restoreStatus.value,
 		isRestoreHasErrors: isRestoreHasErrors.value,
+		isRetrying: isRetryingAccountState.value,
 	})
 	if (action === "decrypt") decryptBackup()
 	else if (action === "restore") restoreBackup()
-	else if (action === "continue") completeImport(importedProfile.value)
+	else if (action === "continue") continueImport()
 }
 
 /** Lifecycle */
@@ -209,6 +215,8 @@ onBeforeUnmount(() => {
 			:selectedBackup="selectedBackup"
 			:restoreStatus="restoreStatus"
 			:isRestoreHasErrors="isRestoreHasErrors"
+			:unrestoredNetworks="unrestoredNetworkNames"
+			:hasOtherErrors="hasOtherRestoreErrors"
 			:error="error"
 			:isCopied="isCopied"
 			:maxPasswordLength="maxPasswordLength"
@@ -267,9 +275,19 @@ onBeforeUnmount(() => {
 						Finishing import…
 					</Button>
 					<Button
+						v-if="canRetryAccountState"
+						@click="retryAccountState"
+						:disabled="isRetryingAccountState"
+						data-testid="import-full-backup-retry-btn"
+						variant="cta_outline"
+					>
+						{{ isRetryingAccountState ? "Retrying…" : "Retry" }}
+					</Button>
+					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
-						@click="completeImport(importedProfile)"
+						@click="continueImport"
 						@keydown.enter="refuseRepeatEnter"
+						:disabled="isRetryingAccountState"
 						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>
@@ -278,6 +296,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="showRestoreErrorLog"
+						:disabled="isRetryingAccountState"
 						data-testid="import-full-backup-view-errors-btn"
 						variant="cta_outline"
 					>
@@ -296,7 +315,7 @@ onBeforeUnmount(() => {
 					Use Recovery Phrase
 				</Button>
 
-				<Button @click="handleBack" :disabled="restoreStatus === 'progress'" variant="cta_outline">Back</Button>
+				<Button @click="handleBack" :disabled="restoreStatus === 'progress' || isRetryingAccountState" variant="cta_outline">Back</Button>
 			</Flex>
 		</template>
 

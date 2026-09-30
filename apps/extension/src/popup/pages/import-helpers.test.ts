@@ -47,6 +47,17 @@ describe("resolveFullBackupEnterAction (popup full-backup Enter shortcut)", () =
 		).toBe("continue")
 	})
 
+	test("finished with errors while a Retry runs → null (Continue waits for the Retry to settle)", () => {
+		expect(
+			resolveFullBackupEnterAction({
+				selectedBackup: sel({ type: "plain", profileType: "password" }),
+				restoreStatus: "finished",
+				isRestoreHasErrors: true,
+				isRetrying: true,
+			}),
+		).toBeNull()
+	})
+
 	test("finished without errors → null (completeImport already ran)", () => {
 		expect(
 			resolveFullBackupEnterAction({

@@ -9,6 +9,7 @@
  * - Bottom-bar slot (page wires its CTA — usually `<Button>` or
  *   `<SecretCountdownClose>`)
  * - Bare `overlay` slot after the bottom bar for fixed-position dialogs
+ * - `COLLAPSING_HERO`, through which its content reveals a block
  *
  * The page owns its flow/state; the layout is purely visual chrome.
  * Extra attributes fall through to the root element (single root), so
@@ -17,6 +18,9 @@
 
 /** Composables */
 import { vSnackFooter } from "@/composables/snackInset"
+
+/** Utils */
+import { COLLAPSING_HERO, revealMove } from "./collapsing-hero"
 
 defineProps({
 	/**
@@ -35,6 +39,8 @@ defineProps({
 })
 
 const wrapperRef = useTemplateRef("wrapperRef")
+const headerRef = useTemplateRef("headerRef")
+const titleRef = useTemplateRef("titleRef")
 const heroVisible = ref(true)
 let scrollEl = null
 
@@ -42,6 +48,30 @@ const handleScroll = () => {
 	if (!scrollEl) return
 	heroVisible.value = scrollEl.scrollTop < 40
 }
+
+function reveal(el) {
+	const bar = headerRef.value?.$el
+	const title = titleRef.value
+	if (!scrollEl || !bar || !title) {
+		el.scrollIntoView({ block: "nearest" })
+		return
+	}
+	const block = el.getBoundingClientRect()
+	const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight
+	const move = revealMove({
+		scrollTop: scrollEl.scrollTop,
+		maxScroll,
+		barBottom: bar.getBoundingClientRect().bottom,
+		viewBottom: scrollEl.getBoundingClientRect().top + scrollEl.clientHeight,
+		titleBottom: title.getBoundingClientRect().bottom,
+		blockTop: block.top,
+		blockBottom: block.bottom,
+	})
+	if (move === "end") scrollEl.scrollTop = maxScroll
+	else if (move === "nearest") el.scrollIntoView({ block: "nearest" })
+}
+
+provide(COLLAPSING_HERO, { reveal })
 
 onMounted(async () => {
 	await nextTick()
@@ -59,8 +89,8 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex direction="column" :class="$style.page">
-		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
-			<SubPageHeader :backTo="backTo">
+		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper" data-testid="collapsing-hero-scroller">
+			<SubPageHeader ref="headerRef" :backTo="backTo" data-testid="collapsing-hero-header">
 				<template #title>
 					<span :class="[$style.collapsing_label, !heroVisible && $style.collapsing_label_visible]">
 						{{ collapsingLabel }}
@@ -70,11 +100,14 @@ onBeforeUnmount(() => {
 
 			<Flex direction="column" :class="$style.content">
 				<div :class="$style.hero">
-					<div :class="$style.title_stack">
+					<div ref="titleRef" :class="$style.title_stack" data-testid="collapsing-hero-title">
 						<span :class="[$style.title_main, tone === 'destructive' && $style.title_main_destructive]">{{ heroMain }}</span>
 						<span v-if="heroSub" :class="$style.title_sub">{{ heroSub }}</span>
 					</div>
-					<div :class="[$style.hero_bar, tone === 'destructive' && $style.hero_bar_destructive]" />
+					<div
+						:class="[$style.hero_bar, tone === 'destructive' && $style.hero_bar_destructive]"
+						data-testid="collapsing-hero-accent"
+					/>
 				</div>
 
 				<slot />

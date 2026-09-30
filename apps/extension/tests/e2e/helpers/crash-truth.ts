@@ -7,9 +7,9 @@
  * imports another test module and nothing is duplicated.
  */
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, replaceInputValue, waitForHash, withTimeoutMessage, type ExtensionContext } from "../fixtures/extension"
-import { getActiveProfileName, navigateByHash } from "../fixtures/helpers"
-import { armBackupDownloadCapture, readCapturedBackupDownload } from "./backup-export"
+import { clickByTestId, waitForHash, withTimeoutMessage, type ExtensionContext } from "../fixtures/extension"
+import { getActiveProfileName } from "../fixtures/helpers"
+import { accountChainId, exportPlainBackup, keepChainAccountState, sealPlainBackup } from "./backup-export"
 import { POPUP_IMPORT_SHELL, submitFullBackupImport, submitWhenEnabled, TEST_PASSWORD, writeBackupToTemp } from "./import-drivers"
 
 // The rollback/delete budget is STRUCTURAL, not sampled: the crash path's
@@ -108,31 +108,17 @@ export async function reimportToTerminal(page: Page, filePath: string): Promise<
 
 /** Stage 1: export a REAL backup from the funded wallet once per test file
  *  and reuse the file (module-level cache — each vitest file gets its own
- *  module registry, so the two crash-truth files each export once). */
+ *  module registry, so the two crash-truth files each export once). Only the
+ *  funded chain's account-state survives, so the import dials no public node. */
 let exported: { filePath: string; funded: string } | null = null
 export async function exportFundedBackup(
 	ctx: ExtensionContext & { accountAddress: string },
+	tokenAddress: string,
 ): Promise<{ filePath: string; funded: string }> {
 	if (exported) return exported
-	const page = await openPopup(ctx)
-	await waitForHash(page, "#/popup/general")
-	await navigateByHash(page, "#/popup/settings/security/export/full")
-	await clickByTestId(page, "agree-continue-btn")
-	await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
-	await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-	await clickByTestId(page, "unlock-submit-btn")
-	await page.waitForFunction(
-		() => {
-			const btn = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
-			return !!btn && !btn.disabled
-		},
-		{ timeout: 120_000, polling: 250 },
-	)
-	await armBackupDownloadCapture(page)
-	await clickByTestId(page, "download-backup-btn")
-	const exportedJson = await readCapturedBackupDownload(page)
-	await page.close()
-	exported = { filePath: writeBackupToTemp(exportedJson), funded: ctx.accountAddress }
+	const backup = await exportPlainBackup(ctx)
+	keepChainAccountState(backup.data, accountChainId(backup, ctx.accountAddress), tokenAddress)
+	exported = { filePath: writeBackupToTemp(sealPlainBackup(backup)), funded: ctx.accountAddress }
 	return exported
 }
 

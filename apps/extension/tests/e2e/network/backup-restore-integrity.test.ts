@@ -31,27 +31,16 @@
  * e2e. This e2e adds the real-storage proof for the provenance filter + deletion
  * cascade + on-chain functionality.
  */
-import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import {
-	clickByTestId,
-	type ExtensionContext,
-	launchExtension,
-	openPopup,
-	registerProfile,
-	replaceInputValue,
-	test,
-	waitForHash,
-} from "../fixtures/extension"
+import { type ExtensionContext, launchExtension, openPopup, registerProfile, test } from "../fixtures/extension"
 import {
 	captureBalanceBaseline,
 	captureSoleProfileId,
 	getAccountAddress,
-	navigateByHash,
 	reopenAndRecoverAfterImport,
 	resetProfile,
 	switchToLocalNetwork,
@@ -59,7 +48,7 @@ import {
 	waitForProfilePurged,
 	waitForTokenCardAmount,
 } from "../fixtures/helpers"
-import { armBackupDownloadCapture, keepChainAccountState, readCapturedBackupDownload } from "../helpers/backup-export"
+import { accountChainId, exportPlainBackup, keepChainAccountState, sealPlainBackup } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -79,36 +68,14 @@ test.skipIf(!hasConfig)(
 	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
 		// ── 1. Export a REAL backup from the funded wallet ────────────────
-		const page = await openPopup(tokenReadyExtension)
-		await waitForHash(page, "#/popup/general")
-		await navigateByHash(page, "#/popup/settings/security/export/full")
-		await clickByTestId(page, "agree-continue-btn")
-		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
-		await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-		await clickByTestId(page, "unlock-submit-btn")
-		await page.waitForFunction(
-			() => {
-				const btn = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
-				return !!btn && !btn.disabled
-			},
-			{ timeout: 120_000, polling: 250 },
-		)
-		await armBackupDownloadCapture(page)
-		await clickByTestId(page, "download-backup-btn")
-		const exportedJson = await readCapturedBackupDownload(page)
-		await page.close()
+		const exported = await exportPlainBackup(tokenReadyExtension)
 
 		// ── 2. Doctor: inject a valid + a foreign tx ──────────────────────
-		const exported = JSON.parse(exportedJson) as { checksum?: string; data: Record<string, unknown> } & Record<string, unknown>
 		const funded = tokenReadyExtension.accountAddress
-		// The wallet seeds several networks and the funded account lives on exactly
-		// ONE of them (NOT necessarily network[0]). Key the doctored tx to the
-		// FUNDED ACCOUNT's own chainId so it matches the provenance allow-set's
-		// (chainId, address) tuple — network[0] would be a different chain and the
-		// tx would be (correctly) dropped as cross-chain.
-		const backupAccounts = exported.data.account as Array<{ address: string; chainId: number }>
-		const chainId = backupAccounts.find((a) => a.address === funded)?.chainId
-		if (chainId === undefined) throw new Error("the funded account is missing from the exported backup")
+		// Key the doctored tx to the FUNDED ACCOUNT's own chainId so it matches the
+		// provenance allow-set's (chainId, address) tuple — another seeded network's
+		// chain would have the tx (correctly) dropped as cross-chain.
+		const chainId = accountChainId(exported, funded)
 		const mkTx = (hash: string, account: string) => ({
 			chainId,
 			account,
@@ -151,12 +118,10 @@ test.skipIf(!hasConfig)(
 		]
 
 		keepChainAccountState(exported.data, chainId, aztecConfig!.tokenAddress)
-		const { checksum: _stale, ...body } = exported
-		const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
 
 		// ── 3. Import into a FRESH extension ──────────────────────────────
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-backup-integrity-"))
-		const filePath = writeBackupToTemp(JSON.stringify({ ...body, checksum }))
+		const filePath = writeBackupToTemp(sealPlainBackup(exported))
 		let ctx2: ExtensionContext | undefined
 		try {
 			ctx2 = await launchExtension({ userDataDir: profileDir })
