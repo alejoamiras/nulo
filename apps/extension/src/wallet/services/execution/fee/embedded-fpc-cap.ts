@@ -61,7 +61,7 @@
  * cap and letting `completeFeeOptions`'s `1.5×` default flow through
  * would silently break dApps using the patterns above. Before removing,
  * verify with a real dApp that hits an embedded fee path. See
- * `implementations-plan/embedded-fpc-firsttx-cosmetic/plan-v2.md`.
+ * `implementations-plan/embedded-fpc-firsttx-cosmetic/plan.md`.
  */
 import { GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
