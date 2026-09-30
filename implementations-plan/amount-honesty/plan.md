@@ -110,7 +110,7 @@ is read by its shape (F4, conceded by codex on the resumed pass).
 ## UI impact
 
 Built as the owner answered on 2026-09-30 (P4). The answered rows carry that answer; the blanket
-rows wait for the owner's sign-off on P3's screenshots.
+rows were signed off on P3's screenshots the same day, with one change to row 15 (P4 step 3).
 
 | # | Surface | Before → after | Sign-off |
 |---|---|---|---|
@@ -159,9 +159,10 @@ with the exact copy (P4 quotes them).
 - **O4 · The first-receive prompt's amount** (row 16): (a) in the row's reported decimals, as today;
   (b) none until the person allows the contract. **Answer: (b)**, on the corrected premise of
   Fact 21, with today's sentence minus the amount.
-- **The blanket sign-off**, open until P3's screenshots: rows 1, 3 to 7, 9, 12 and 13, one line
-  each, and row 11's two edges, which follow from the O3 answer: a second typed comma is dropped
+- **The blanket sign-off**, on P3's screenshots: rows 1, 3 to 7, 9, 12 and 13, one line each, and
+  row 11's two edges, which follow from the O3 answer: a second typed comma is dropped
   ("1,234,567" reads 1.234567), and the re-read needs whole groups of three ("1,5." stays 1.5).
+  **Given** on 2026-09-30, with row 15's held-paste line changed (P4 step 3).
 
 ## Architecture & Implementation
 
@@ -780,7 +781,7 @@ the re-read, as answered.
    - a paste of "1.234,56" leaves field and model at "1.234,56", no hint, and the blur rests it as
      "1,234.56" and sets `rested`;
    - a paste of "1e5" shows `send-amount-unreadable-hint`, no USD figure; a paste of "1,234" shows
-     `send-amount-ambiguous-hint` at once, naming "1234 or 1.234" (step 7 changes the line);
+     `send-amount-ambiguous-hint` at once, with step 7's line;
    - paste "1e5", switch to a 2-decimal token, then the send page's validator: the text stays
      "1e5" and the result is `invalid`; the same with "1.234,567" re-rests the clamped reading as
      "1,234.56" and sets `rested` (red); "1.234,56" needs no clamp and keeps its text (pin);
@@ -803,8 +804,8 @@ the re-read, as answered.
    `send-submit` enables; cleared and typed with the keyboard, "1,234" reads "1.234", and a further
    ".56" makes it "1234.56".
 7. **After the sign-off** (P4 step 3): the held paste's line becomes the O3 preview's, "Type it
-   without the comma.", in place of "Is that 1234 or 1.234? Type the one you mean."; the card
-   case is rewritten to the new line and runs red on the old one, and `ambiguousReadings` goes.
+   without the comma.", in place of the line that named both readings; the card case is rewritten
+   to the new line and runs red on the old one, and `ambiguousReadings` goes.
 
 Gate:
 - Commands: `bun --bun vitest run src/utils/amount.test.ts src/popup/pages/send-amount.test.ts src/components/composite/send/amount-field.test.ts src/components/composite/send/AmountCard.test.ts src/popup/pages/send.test.ts src/popup/pages/send.integration.test.ts`; `bun run lint`; `bun run typecheck:all`; `bun run build`; `git status --porcelain apps/extension/src/types` prints nothing after the commit.
@@ -870,7 +871,7 @@ Gate:
 - Layers: typecheck, lint, unit, component, CI-gating, build, smoke e2e, e2e-live-network, both
   browsers.
 
-### P4 · The owner's sign-off
+### P4 · The owner's sign-off ✓
 
 1. The owner's answers, 2026-09-30, given in chat on text mocks with the exact copy, verbatim from
    the driver's record:
@@ -902,8 +903,9 @@ Gate:
      The mode's label, "Sign off both, and don't wait on me", covers every screen on the page, any
      fix the last review round makes to those screens, and any wording or layout call a fix needs
      in this PR. The change's label: "Change this: use the preview's line, 'Type it without the
-     comma.'", built as P2 step 7. Look 1 (a second typed comma is dropped, so "1,234,567" reads
-     1.234567) stays as built.
+     comma.'", built as P2 step 7, then P3's gate at `8f41bdcf` with row 15's three held-paste
+     screenshots re-taken (`lessons/phase-3.md`, § After the sign-off). Look 1 (a second typed
+     comma is dropped, so "1,234,567" reads 1.234567) stays as built.
    - **A paste into the field's own rest**, 2026-09-30, in chat: for "The field is resting at
      '1,234' TST, and you paste '5' at its end. What should it read?" the owner picked "As built:
      1.2345 (Recommended)", whose option read "A paste follows the paste rules, so the comma is

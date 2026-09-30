@@ -220,3 +220,48 @@ design.
 
 The plan's rule stops the loop at three rounds, so round 3's fix has no codex pass of its own; it
 is surfaced for the driver, who can ask for a fourth.
+
+### Dev merged in, and the final gate at `0e8a4e39`
+
+`origin/dev` at `9cbe4862` (#730 to #732) came in through a signed `--no-ff` merge, `0e8a4e39`.
+The branch's base, `0f37ab78`, is stack #729's head, which `dev` holds squashed as `94ef1b11`, so
+the merge met the stack's files as two unrelated adds: 12 add/add conflicts. Each was resolved
+with `git merge-file` against the true base, `0f37ab78`, and the merge was checked to bring
+exactly `git diff 94ef1b11 origin/dev`. The gate's build regenerated the auto-import declarations
+for round 1's `displaySymbol`, committed as `eb02c0a6`.
+
+| Step | Result |
+|---|---|
+| 1 | `lint` (28 warnings, 3 infos), `typecheck:all`, `test:all` (extension 627 files passed, 3 skipped; 8581 tests passed, 4 skipped, 8 todo; every other workspace 0 failed), `test:ci-gating` (244 pass, 2 skip, 0 fail), `build`: exit 0 each |
+| 2 · smoke, three shards per browser | Chrome 43 files, 165 passed, 0 failed, 7 skipped; Firefox 43 files, 161 passed, 0 failed, 11 skipped; the skips as in round 2 |
+| 3 · the five network files, one run per browser | Chrome, prover on, and Firefox, proverless: exit 0, 5 files, 6 executed, 6 passed, 0 skipped each |
+| 4 · flake bar | `send-amount-exact` 3 of 3 per browser, 1 passed and 0 skipped each |
+| 5 · native paste | both browsers: one `insertFromPaste` of "1.234,56", kept, "≈ $1,234.56", rested "1,234.56" |
+
+## After the sign-off
+
+The owner signed off on 2026-09-30 with one change: the held paste's line becomes the O3 preview's,
+"Type it without the comma." (plan P4 step 3), built as P2 step 7 in `84b5f2f5`.
+
+- Red: the rewritten `AmountCard.test.ts` case, "a paste of "1,234" is held, and the line under it
+  says so at once", on `eb02c0a6`: exit 1, 1 failed, `Expected: "Type it without the comma."`,
+  `Received: "Is that 1234 or 1.234? Type the one you mean."`.
+- Green: `AmountCard.test.ts`, `send-amount.test.ts` and `send.test.ts`, 3 files, 186 passed,
+  exit 0; `bun run lint` exit 0. No other test or spec pinned the old line.
+- `origin/dev` at `9d984244` (#733, docs only) merged in as `8f41bdcf`, signed, with no conflict.
+
+### The final gate at `8f41bdcf`
+
+| Step | Result |
+|---|---|
+| 1 | `lint` (28 warnings, 3 infos), `typecheck:all`, `test:all` (extension 627 files passed, 3 skipped; 8581 tests passed, 4 skipped, 8 todo; every other workspace 0 failed), `test:ci-gating` (244 pass, 2 skip, 0 fail), `build`: exit 0 each; the build left the tree clean |
+| 2 · smoke, three shards per browser | Chrome 43 files, 165 passed, 0 failed, 7 skipped; Firefox 43 files, 161 passed, 0 failed, 11 skipped; the skips as in round 2 |
+| 3 · the five network files, one run per browser | Chrome, prover on, and Firefox, proverless: exit 0, 5 files, 6 executed, 6 passed, 0 skipped each |
+| 4 · flake bar | `send-amount-exact` 3 of 3 per browser, 1 passed and 0 skipped each |
+| 5 · native paste | both browsers: one `insertFromPaste` of "1.234,56", kept, "≈ $1,234.56", rested "1,234.56" |
+| 6 · reap | `bun run e2e:reap` exit 0 after every run |
+
+The field group's 48 captures were re-taken at this commit, and row 15's three held-paste files
+replaced P3's under the same names. Pixel by pixel, the other 45 differ from P3's only in the
+header's account address (a fresh account per run), the fee row's loading shimmer and single
+pixels on the card's edge: none of the codex loop's fixes changes a captured screen.
