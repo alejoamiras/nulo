@@ -796,7 +796,7 @@ Gate:
 - Pass: every command exits 0; each red case failed on the unfixed code (recorded).
 - Layers: typecheck, lint, unit, component, build.
 
-### P3 · Browser proof, the arc gate and the screenshots
+### P3 · Browser proof, the arc gate and the screenshots ✓
 
 1. `bun run lint`; `bun run typecheck:all`; `bun run test:all`; `bun run test:ci-gating`;
    `bun run build`.
