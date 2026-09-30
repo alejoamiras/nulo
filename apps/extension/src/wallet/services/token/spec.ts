@@ -67,6 +67,8 @@ export type TokenInfo = {
 	symbol: string
 	/** Token decimals. */
 	decimals: number
+	/** Whether the token has a decimals getter; without one, `decimals` is stored as 0. */
+	hasDecimals: boolean
 	/** Whether or not the token has this functionality. */
 	hasPublicBalances: boolean
 	/** Whether or not the token has this functionality. */

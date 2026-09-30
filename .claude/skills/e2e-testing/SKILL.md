@@ -349,6 +349,11 @@ assertion; drive the rest of the flow with the ordinary helpers.
 - **Prove the disruption happened**, not only the downstream state — a test whose kill never killed
   passed for months for reasons unrelated to its subject (ledger #16–19). Red-team a pin by removing
   what it guards: if it still passes, another gate was holding it.
+- **A field's input handling is proven by real input.** A browser runs a microtask checkpoint
+  between two listeners of an event it dispatches, and a scripted event (jsdom's, or `dispatchEvent`
+  inside `page.evaluate`) runs none, so Vue can re-render between `v-model` and a sibling `@input`
+  only under `page.keyboard`: every component test passed while each real keystroke misread its
+  prior text (`implementations-plan/amount-honesty/lessons/phase-3.md`).
 
 ### Product couplings the harness respects
 

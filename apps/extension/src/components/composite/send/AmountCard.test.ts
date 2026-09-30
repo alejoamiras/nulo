@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, beforeEach, vi } from "vitest"
 import { mount } from "@vue/test-utils"
 import { nextTick } from "vue"
+import { validateSendAmount } from "@/popup/pages/send-amount"
 import { parseAmountToBaseUnits } from "@/utils/amount"
 import AmountCard from "./AmountCard.vue"
 
@@ -164,14 +165,14 @@ describe("composite/AmountCard", () => {
 		expect(hint.text()).toContain("6 decimal")
 	})
 
-	test("a paste past the decimals keeps only digits and the point, then is clamped at once", async () => {
+	test("a paste past the decimals is read whole, then its reading is clamped at once", async () => {
 		const w = mountCard({ modelValue: "", "onUpdate:modelValue": () => {}, token: { symbol: "USDC", decimals: 6 } })
 		const input = w.find("input[data-testid='send-amount-input']")
 		;(input.element as HTMLInputElement).value = "1.234,5678901"
 		await input.trigger("input", { inputType: "insertFromPaste" })
-		expect((input.element as HTMLInputElement).value).toBe("1.234567")
+		expect((input.element as HTMLInputElement).value).toBe("1234.567890")
 		const emits = w.emitted("update:modelValue")
-		expect(emits?.[emits.length - 1]).toEqual(["1.234567"])
+		expect(emits?.[emits.length - 1]).toEqual(["1234.567890"])
 		expect(w.find("[data-testid='send-amount-clamp-hint']").exists()).toBe(true)
 	})
 
@@ -611,5 +612,259 @@ describe("composite/AmountCard — the field at rest shows the whole amount", ()
 		} finally {
 			Reflect.deleteProperty(document, "fonts")
 		}
+	})
+})
+
+describe("composite/AmountCard — the field reads its text whole", () => {
+	const TOKEN = { symbol: "TST", decimals: 18 }
+	type Card = ReturnType<typeof mountCard>
+	const input = (w: Card, testid = "send-amount-input") => w.get(`[data-testid='${testid}']`)
+	const textOf = (w: Card, testid?: string) => (input(w, testid).element as HTMLInputElement).value
+	const edit = async (w: Card, value: string, inputType: string, testid?: string) => {
+		;(input(w, testid).element as HTMLInputElement).value = value
+		await input(w, testid).trigger("input", { inputType, data: inputType === "insertText" ? value.slice(-1) : null })
+	}
+	/** Each key typed at the end of the text; what the field shows after each. */
+	const typeKeys = async (w: Card, keys: string, testid?: string) => {
+		const after: string[] = []
+		for (const key of keys) {
+			await edit(w, textOf(w, testid) + key, "insertText", testid)
+			after.push(textOf(w, testid))
+		}
+		return after
+	}
+	const paste = (w: Card, text: string, testid?: string) => edit(w, text, "insertFromPaste", testid)
+	/** A key typed where the input's caret is, as a browser inserts it. */
+	const typeAtCaret = async (w: Card, key: string, testid?: string) => {
+		const el = input(w, testid).element as HTMLInputElement
+		const at = el.selectionStart ?? el.value.length
+		el.value = el.value.slice(0, at) + key + el.value.slice(el.selectionEnd ?? at)
+		el.setSelectionRange(at + key.length, at + key.length)
+		await input(w, testid).trigger("input", { inputType: "insertText", data: key })
+	}
+	const hints = (w: Card) =>
+		["clamp", "unreadable", "ambiguous"].filter((name) => w.find(`[data-testid='send-amount-${name}-hint']`).exists())
+	const lastEmit = (w: Card, event: string) => w.emitted(event)?.at(-1)?.[0]
+	const lastRested = (w: Card) => (lastEmit(w, "update:rested") as string | null | undefined) ?? null
+
+	test.each([
+		["1,234,567", "1.234567"],
+		["1,234", "1.234"],
+	])("typed %j shows %j, with no hint", async (keys, shown) => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		expect((await typeKeys(w, keys)).at(-1)).toBe(shown)
+		expect(hints(w)).toEqual([])
+	})
+
+	// A browser puts the caret at the end whenever script sets the input's value.
+	test('",5" typed between the digits of "12" reads 1.52: a rewrite keeps the caret where the key went', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await typeKeys(w, "12")
+		;(input(w).element as HTMLInputElement).setSelectionRange(1, 1)
+		await typeAtCaret(w, ",")
+		await typeAtCaret(w, "5")
+		expect([textOf(w), lastEmit(w, "update:modelValue")]).toEqual(["1.52", "1.52"])
+	})
+
+	test('"00" typed before the point of the rest "1,234.56" reads 123400.56: the caret keeps its side of the point', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await typeKeys(w, "1234.56")
+		await input(w).trigger("blur")
+		;(input(w).element as HTMLInputElement).setSelectionRange(5, 5)
+		await typeAtCaret(w, "0")
+		await typeAtCaret(w, "0")
+		expect([textOf(w), lastEmit(w, "update:modelValue")]).toEqual(["123400.56", "123400.56"])
+	})
+
+	test('"00" typed before the comma of a pasted "1 234,56" reads 123400.56: a kept comma keeps its side too', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await paste(w, "1 234,56")
+		;(input(w).element as HTMLInputElement).setSelectionRange(5, 5)
+		await typeAtCaret(w, "0")
+		await typeAtCaret(w, "0")
+		expect(textOf(w)).toBe("123400,56")
+		expect(validateSendAmount({ input: textOf(w), tokenDecimals: 18, balanceRaw: 10n ** 40n })).toEqual({
+			valid: true,
+			integerized: 12_340_056n * 10n ** 16n,
+		})
+	})
+
+	test("one event holding text that reads no way says so only once the field is left", async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await input(w).setValue("1.234,5,678901")
+		expect([textOf(w), hints(w)]).toEqual(["1.234,5,678901", []])
+		await input(w).trigger("blur")
+		expect([textOf(w), hints(w)]).toEqual(["1.234,5,678901", ["unreadable"]])
+	})
+
+	test('a paste of "1.234,56" stays as pasted with no hint, and rests as "1,234.56" once left', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await paste(w, "1.234,56")
+		expect([textOf(w), lastEmit(w, "update:modelValue"), hints(w)]).toEqual(["1.234,56", "1.234,56", []])
+		await input(w).trigger("blur")
+		expect([textOf(w), lastRested(w)]).toEqual(["1,234.56", "1,234.56"])
+	})
+
+	test('a paste of "1e5" says it is not an amount, and prices nothing', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "", liveQuote: { usd: 1, fetchedAt: Date.now() } })
+		await paste(w, "1e5")
+		expect(w.get("[data-testid='send-amount-unreadable-hint']").text()).toBe("Not an amount. Type it like 1234.56")
+		expect(w.get("[data-testid='send-amount-fiat-label']").text()).toBe("1 TST ≈ $1.00")
+	})
+
+	test('a paste of "1,234" is held, and the line under it says so at once', async () => {
+		const w = mountCard({ token: TOKEN, modelValue: "" })
+		await paste(w, "1,234")
+		expect(w.get("[data-testid='send-amount-ambiguous-hint']").text()).toBe("Type it without the comma.")
+	})
+
+	test.each([
+		["1e5", "1e5", null, "invalid"],
+		["1.234,567", "1,234.56", "1,234.56", 123_456n],
+		["1.234,56", "1.234,56", null, 123_456n],
+	])(
+		"%j pasted, then a 2-decimal token: the field shows %j, at rest as %j, and the page reads %s",
+		async (pasted, shown, rested, sent) => {
+			const w = mountCard({ token: TOKEN, modelValue: "" })
+			await paste(w, pasted)
+			await w.setProps({ token: { symbol: "USDC", decimals: 2 } })
+			expect([textOf(w), lastRested(w)]).toEqual([shown, rested])
+			expect(validateSendAmount({ input: textOf(w), rested: lastRested(w), tokenDecimals: 2, balanceRaw: 10n ** 40n })).toEqual(
+				typeof sent === "bigint" ? { valid: true, integerized: sent } : { valid: false, reason: sent },
+			)
+		},
+	)
+
+	describe("the rest Max marks", () => {
+		// The page owns both models, so a write reads back once the page re-renders.
+		const mountBound = () => {
+			const w: Card = mountCard({
+				token: TOKEN,
+				tokenBalanceByType: 1234,
+				balanceRawByType: (1_234n * 10n ** 18n).toString(),
+				modelValue: "",
+				rested: null,
+				"onUpdate:modelValue": (v: unknown) => void w.setProps({ modelValue: v }),
+				"onUpdate:rested": (v: unknown) => void w.setProps({ rested: v }),
+			})
+			return w
+		}
+		const max = (w: Card) => w.get("[data-testid='send-amount-max']").trigger("click")
+
+		test("Max marks its text as the rest, and a keystroke after it reads those commas as grouping", async () => {
+			const w = mountBound()
+			await max(w)
+			expect([textOf(w), lastRested(w)]).toEqual(["1,234", "1,234"])
+			expect(await typeKeys(w, "5")).toEqual(["12345"])
+			expect(lastRested(w)).toBeNull()
+		})
+
+		test("a paste after Max clears the rest, and a keystroke edits the pasted text as it stands", async () => {
+			const w = mountBound()
+			await max(w)
+			await paste(w, "1,234")
+			expect([textOf(w), lastRested(w), hints(w)]).toEqual(["1,234", null, ["ambiguous"]])
+			expect(await typeKeys(w, "5")).toEqual(["1,2345"])
+			expect(hints(w)).toEqual([])
+		})
+
+		test("a write of null from the page clears the rest, and the next keystroke starts from empty", async () => {
+			const w = mountBound()
+			await max(w)
+			await w.setProps({ modelValue: null })
+			expect(w.emitted("update:rested")?.at(-1)).toEqual([null])
+			expect(await typeKeys(w, "5")).toEqual(["5"])
+		})
+	})
+
+	describe("in USD", () => {
+		const USD = "send-amount-fiat-input"
+		const mountUsd = () => {
+			const w: Card = mountCard({
+				token: { symbol: "cUSD", decimals: 6 },
+				tokenBalanceByType: 1000,
+				liveQuote: { usd: 1, fetchedAt: Date.now() },
+				fiatMode: true,
+				fiatGuard: { frozenUsd: 1, frozenAt: Date.now(), converting: false },
+				modelValue: "",
+				"onUpdate:modelValue": (v: unknown) => void w.setProps({ modelValue: v }),
+			})
+			return w
+		}
+		/** The token amount the debounced conversion leaves in the page's model, at $1 a token. */
+		const converted = async (w: Card) => {
+			await vi.advanceTimersByTimeAsync(300)
+			return w.props("modelValue")
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers()
+		})
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		test.each([
+			["1e5", "", ["unreadable"]],
+			["1,234", "", ["ambiguous"]],
+			["1.234,56", "1234.56", []],
+			["$12.50", "12.5", []],
+			[".5", "0.5", []],
+		])("%j pasted converts to %j tokens, with hints %j", async (pasted, tokens, shown) => {
+			const w = mountUsd()
+			await paste(w, pasted, USD)
+			expect(await converted(w)).toBe(tokens)
+			expect(hints(w)).toEqual(shown)
+		})
+
+		test('"12,5" typed reads 12.5', async () => {
+			const w = mountUsd()
+			expect(await typeKeys(w, "12,5", USD)).toEqual(["1", "12", "12.", "12.5"])
+			expect(await converted(w)).toBe("12.5")
+		})
+
+		test('",5" typed between the digits of "12" reads 1.52', async () => {
+			const w = mountUsd()
+			await typeKeys(w, "12", USD)
+			;(input(w, USD).element as HTMLInputElement).setSelectionRange(1, 1)
+			await typeAtCaret(w, ",", USD)
+			await typeAtCaret(w, "5", USD)
+			expect(textOf(w, USD)).toBe("1.52")
+			expect(await converted(w)).toBe("1.52")
+		})
+
+		test('"56" typed before the point of a pasted "$12.34" reads 1256.34', async () => {
+			const w = mountUsd()
+			await paste(w, "$12.34", USD)
+			;(input(w, USD).element as HTMLInputElement).setSelectionRange(3, 3)
+			await typeAtCaret(w, "5", USD)
+			await typeAtCaret(w, "6", USD)
+			expect(textOf(w, USD)).toBe("1256.34")
+			expect(await converted(w)).toBe("1256.34")
+		})
+
+		test('"00" typed before the comma of a pasted "1 234,56" reads 123400.56', async () => {
+			const w = mountUsd()
+			await paste(w, "1 234,56", USD)
+			;(input(w, USD).element as HTMLInputElement).setSelectionRange(5, 5)
+			await typeAtCaret(w, "0", USD)
+			await typeAtCaret(w, "0", USD)
+			expect(textOf(w, USD)).toBe("123400,56")
+			expect(await converted(w)).toBe("123400.56")
+		})
+
+		test('"1,234" typed and then "." re-reads the comma as grouping', async () => {
+			const w = mountUsd()
+			expect(await typeKeys(w, "1,234.", USD)).toEqual(["1", "1.", "1.2", "1.23", "1.234", "1234."])
+			expect(await converted(w)).toBe("1234")
+		})
+
+		test('a replacing edit ends the comma point: a "." after it is dropped', async () => {
+			const w = mountUsd()
+			expect((await typeKeys(w, "1,234", USD)).at(-1)).toBe("1.234")
+			await edit(w, "1.234", "insertReplacementText", USD)
+			expect(await typeKeys(w, ".", USD)).toEqual(["1.234"])
+			expect(await converted(w)).toBe("1.234")
+		})
 	})
 })

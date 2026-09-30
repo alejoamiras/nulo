@@ -15,8 +15,8 @@ import { buildIncomingCardProps } from "@/utils/received-display"
 
 const props = defineProps({
 	rows: { type: Array, required: true },
-	/** The current profile and chain's tokens: a transfer or received row shows an amount only for a
-	 *  token in this list. */
+	/** The current profile and chain's tokens: a mint, journal transfer or received row shows an
+	 *  amount only for a token in this list. */
 	tokens: { type: Array, default: () => [] },
 	/** Whether an incoming row's receipt is arriving now; judged when the row renders. */
 	isArriving: { type: Function, default: undefined },
@@ -60,7 +60,7 @@ function terminalCardProps(op) {
 			</Flex>
 
 			<template v-for="row in group.rows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :to="`/popup/tx/${row.tx.hash}`" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :tokens="tokens" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
 					v-else-if="row.type === 'incoming'"
 					v-bind="incomingCardProps(row.inc)"

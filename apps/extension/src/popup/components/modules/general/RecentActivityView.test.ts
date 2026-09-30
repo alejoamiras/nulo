@@ -502,8 +502,9 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 })
 
 describe("RecentActivityView — rows link to their detail routes", () => {
-	test("a tx, a terminal journal record and a receipt each carry their route; the receipt row renders it as its link", async () => {
+	test("a tx, a terminal journal record and a receipt each carry their route; the receipt row renders it as its link; the tx card gets the tokens", async () => {
 		H.store.current.transactions = [{ hash: "0xh1", account: ACCT_A, chainId: 1, updatedAt: 3000, calls: [] } as never]
+		H.getTokens.mockResolvedValue([{ id: 2, symbol: "TST" }])
 		H.getOperations.mockResolvedValue([{ ...inFlightTransferOp(ACCT_A, "op-1"), terminalAt: 5, progress: { stage: "cancelled" } }])
 		H.getIncomingTransfers.mockResolvedValue([incomingRecord({ siloedNullifier: "sn-1", discoveredAt: 2000 })])
 
@@ -527,6 +528,7 @@ describe("RecentActivityView — rows link to their detail routes", () => {
 		await flushPromises()
 
 		expect(w.findComponent({ name: "TransactionCard" }).props("to")).toBe("/popup/tx/0xh1")
+		expect(w.findComponent({ name: "TransactionCard" }).props("tokens")).toEqual([{ id: 2, symbol: "TST" }])
 		expect(w.findComponent({ name: "TransactionTerminalCard" }).props("to")).toBe("/popup/journal/op-1")
 		const receipt = w.find('[data-testid="tx-incoming-card"] a[data-row-target]')
 		expect(receipt.attributes("href")).toBe("/popup/received/note:p1|net-1|sn-1")

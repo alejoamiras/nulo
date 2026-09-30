@@ -91,7 +91,7 @@ async function readReviewAmount(page: Page): Promise<{ text: string; overflow: n
 }
 
 test.skipIf(!hasConfig)(
-	"a million or more estimates and confirms, typed and Max amounts stay exact, and all of it shows",
+	"a million or more estimates and confirms, typed and Max amounts stay exact, all of it shows, and an unreadable paste blocks Send",
 	{ timeout: 420_000, retry: 0 },
 	async ({ tokenReadyExtension }) => {
 		await mintPublicTokensForAccount(aztecConfig!, tokenReadyExtension.accountAddress, MINTED)
@@ -161,6 +161,36 @@ test.skipIf(!hasConfig)(
 		expect.soft(review.overflow, `the review's amount line overflows: ${JSON.stringify(review)}`).toBeLessThanOrEqual(0)
 		expect.soft(review.fontSize, "the review's amount is below 60% of 30 px").toBeGreaterThanOrEqual(18)
 		await closeReview(page)
+
+		// A paste the field cannot read stays as pasted, says so, and blocks Send until an amount reads.
+		await page.$eval(AMOUNT, (el) => {
+			const input = el as HTMLInputElement
+			input.focus()
+			input.value = "1e5"
+			input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }))
+		})
+		await waitForAmount(page, "1e5")
+		await page.waitForSelector('[data-testid="send-amount-unreadable-hint"]', { visible: true, timeout: 5_000 })
+		await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-testid="send-submit"]')?.disabled === true, {
+			timeout: 5_000,
+		})
+		await pointerClick(page, "send-amount-max")
+		await waitForAmount(page, "1,235,567.123456789012345678")
+		await waitForEstimateAndConfirm(page)
+
+		// Typed, a comma is the decimal point, and a point after it re-reads that comma as grouping.
+		await replaceInputValue(page, AMOUNT, "")
+		await page.keyboard.type("1,234")
+		await waitForAmount(page, "1.234")
+		await page.keyboard.type(".56")
+		await waitForAmount(page, "1234.56")
+
+		// A comma typed between two digits becomes the point there, and the next key lands after it.
+		await replaceInputValue(page, AMOUNT, "")
+		await page.keyboard.type("12")
+		await page.keyboard.press("ArrowLeft")
+		await page.keyboard.type(",5")
+		await waitForAmount(page, "1.52")
 
 		expect(tokenReadyExtension.pageErrors).toEqual([])
 	},

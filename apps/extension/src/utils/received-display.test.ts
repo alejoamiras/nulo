@@ -86,6 +86,7 @@ describe("tokenForReceipt + buildIncomingCardProps", () => {
 		name: "Test",
 		symbol: "TST",
 		decimals: 18,
+		hasDecimals: true,
 		hasPublicBalances: true,
 		hasPublicTransfers: true,
 		hasPublicToPrivateTransfers: true,

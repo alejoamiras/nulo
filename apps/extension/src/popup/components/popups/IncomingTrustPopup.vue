@@ -8,15 +8,13 @@
  *   user Allow → trusted (queued hidden records flip visible atomically)
  *   user Reject → blocked (queued records stay hidden permanently)
  *
- * Defense against the `aztec_registerToken` pollution vector flagged by
- * codex / opus: even after a malicious dApp socially-engineers the user
- * into adding a fake-USDC contract, the FIRST incoming note from that
- * contract requires an explicit second confirmation here showing the
- * contract address.
+ * Adding a token trusts its contract at once, so this opens only for a listed token with no trust
+ * row, after a trust write that failed at add or a backup restore. It states no amount, which the
+ * contract's own decimals would scale.
  *
  * Caller (`PopupManager`) sets:
  *   cacheStore.incomingTrust = {
- *     tokenSymbol, tokenDecimals, amountRaw, contract,
+ *     tokenSymbol, contract,
  *     allow: () => service.setTrustAllow(profileId, networkId, contract),
  *     reject: () => service.setTrustReject(profileId, networkId, contract),
  *   }
@@ -32,7 +30,6 @@ import { useCacheStore } from "@/stores/cache.store.ts"
 import { usePopupStore } from "@/stores/popup.store"
 
 /** Utils */
-import { balanceFormatted } from "@/utils/amount.js"
 import { copyToClipboard } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
@@ -49,19 +46,10 @@ const displaceIdx = computed(() => {
 	return popupStore.len - popupStore.popups.incoming_trust?.order
 })
 
-// F-009 / Phase 6: tokenSymbol comes from the on-chain contract (attacker-
-// controlled if they deployed it). Route through sanitizeWireString to strip
-// bidi overrides, zero-width chars, and other Unicode tricks that could
-// disguise a phishing token as a familiar symbol (e.g. Cyrillic "с" in "USDC").
+// The contract sets the symbol; sanitizing drops invisible and bidi characters, not look-alikes.
 const tokenSymbol = computed(() => sanitizeWireString(cacheStore.incomingTrust.tokenSymbol ?? "Token", 32))
 const contractFull = computed(() => cacheStore.incomingTrust.contract ?? "")
 const contractSlice = computed(() => (contractFull.value ? trimAddress(contractFull.value, 6, 4) : ""))
-const formattedAmount = computed(() => {
-	const raw = cacheStore.incomingTrust.amountRaw
-	if (!raw) return ""
-	const decimals = cacheStore.incomingTrust.tokenDecimals ?? 0
-	return balanceFormatted(raw, decimals, 8).value
-})
 
 // Verification surface: keyboard-reachable expand toggle + copy. Without
 // these as real <button> elements, a keyboard-only user couldn't get to
@@ -156,7 +144,7 @@ watch(
 					<span :class="$style.pre_title">First receive</span>
 					<h2 :class="$style.title">Allow {{ tokenSymbol }}?</h2>
 					<Text size="13" weight="500" color="body" height="150" align="center">
-						You received <strong>{{ formattedAmount }} {{ tokenSymbol }}</strong> from a contract you haven't seen before.
+						You received <strong>{{ tokenSymbol }}</strong> from a contract you haven't seen before.
 					</Text>
 				</Flex>
 

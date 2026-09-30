@@ -64,7 +64,7 @@ describe("modules/activity/TransactionsList", () => {
 		expect(w.find('[data-stub="TransactionIncomingCard"]').attributes("data-to")).toBe("/popup/received/r1")
 	})
 
-	test("a transfer row and a received row take their token from `tokens`", () => {
+	test("a settled row, a transfer row and a received row take their token from `tokens`", () => {
 		const token = { id: 7, contract: "0xc", symbol: "TST", decimals: 6 }
 		const op = {
 			id: "op-2",
@@ -79,6 +79,7 @@ describe("modules/activity/TransactionsList", () => {
 		const w = mount(TransactionsList, {
 			props: {
 				rows: [
+					{ type: "tx", key: "tx:0xh1", sortKey: 3000, tx: { hash: "0xh1" } },
 					{ type: "journal", key: "journal:op-2", sortKey: 2000, op },
 					{ type: "incoming", key: "inc:r3", sortKey: 1000, inc },
 				],
@@ -87,6 +88,10 @@ describe("modules/activity/TransactionsList", () => {
 			global: {
 				stubs: {
 					Flex: { template: "<div><slot /></div>" },
+					TransactionCard: {
+						props: ["tokens"],
+						template: '<div data-stub="settled" :data-symbols="tokens.map((t) => t.symbol)" />',
+					},
 					TransactionTerminalCard: {
 						props: ["title", "amount"],
 						template: '<div data-stub="terminal" :data-title="title" :data-amount="amount" />',
@@ -98,6 +103,7 @@ describe("modules/activity/TransactionsList", () => {
 				},
 			},
 		})
+		expect(w.get('[data-stub="settled"]').attributes("data-symbols")).toBe("TST")
 		expect(w.get('[data-stub="terminal"]').attributes()).toMatchObject({ "data-title": "TST", "data-amount": "1.5" })
 		expect(w.get('[data-stub="incoming"]').attributes()).toMatchObject({ "data-symbol": "TST", "data-decimals": "6" })
 	})

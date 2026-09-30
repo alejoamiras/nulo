@@ -17,11 +17,11 @@ import { DateTime } from "luxon"
 
 /** Services */
 import { TokenServiceClient } from "@/wallet/services/token/client"
-import { OriginType } from "@/wallet/services/transaction/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { displaySymbol, txAmount } from "@/utils/tx-amount"
 import { copyWithToast } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import {
@@ -77,25 +77,12 @@ const transferTypeLabel = computed(() => {
 })
 const tokens = ref([])
 const token = computed(() => tokens.value.find((t) => call.value?.contract === t.contract))
+const transferSymbol = computed(() => displaySymbol(transfer.value?.token?.symbol))
 
-const transferAmount = computed(() => {
-	if (transfer.value) {
-		return balanceFormatted(transfer.value.amount || 0, token.value?.decimals || 0, 8).value
-	}
-	return 0
-})
-
-const mintAmount = computed(() => {
-	if (type.value !== "mint" || !tx.value?.calls) return 0
-
-	const decimals = tx.value?.origin?.type === OriginType.UI ? 8 : 0
-	let amount = 0n
-	for (const c of tx.value.calls) {
-		const last = c.args?.at(-1)
-		if (last !== undefined && last !== null) amount += BigInt(last)
-	}
-	return balanceFormatted(amount, decimals, 8).value
-})
+const amount = computed(() => txAmount(tx.value?.calls, tokens.value))
+const formattedAmount = computed(() =>
+	amount.value ? balanceFormatted(amount.value.units, amount.value.decimals, 8, { compact: true }).value : null,
+)
 
 const showFeeBreakdown = ref(false)
 
@@ -195,20 +182,20 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<Flex v-if="transferAmount" align="center" direction="column" gap="6">
+			<Flex v-if="type === 'transfer' && formattedAmount" align="center" direction="column" gap="6">
 				<span :class="$style.amount_value">
-					{{ transferAmount }}
-					<span :class="$style.amount_symbol">{{ transfer.token.symbol }}</span>
+					{{ formattedAmount }}
+					<span :class="$style.amount_symbol">{{ amount.symbol }}</span>
 				</span>
 				<span v-if="transferFiat" data-testid="tx-detail-fiat" title="At today's price" :class="$style.amount_fiat">
 					{{ transferFiat }}
 				</span>
 			</Flex>
 
-			<Flex v-else-if="mintAmount" align="center" direction="column" gap="6">
+			<Flex v-else-if="type === 'mint' && formattedAmount" align="center" direction="column" gap="6">
 				<span :class="$style.amount_value">
-					{{ mintAmount }}
-					<span v-if="token" :class="$style.amount_symbol">{{ token.symbol }}</span>
+					{{ formattedAmount }}
+					<span :class="$style.amount_symbol">{{ amount.symbol }}</span>
 				</span>
 				<span :class="$style.amount_caption">Mint amount</span>
 			</Flex>
@@ -220,7 +207,7 @@ onBeforeUnmount(() => {
 				:action="{ name: 'Copy token address', callback: () => handleCopy(call.contract) }"
 				wide
 			>
-				<template #title> {{ transfer.token.symbol }} is missing </template>
+				<template #title> {{ transferSymbol }} is missing </template>
 				<template #description> This token not found in your token list </template>
 			</Banner>
 

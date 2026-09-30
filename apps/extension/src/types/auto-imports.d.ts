@@ -102,6 +102,7 @@ declare global {
   const defineComponent: typeof import('vue').defineComponent
   const detailRowsFor: typeof import('../utils/presto-ui-state').detailRowsFor
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
+  const displaySymbol: typeof import('../utils/tx-amount').displaySymbol
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
@@ -168,6 +169,7 @@ declare global {
   const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
+  const knownDecimals: typeof import('../utils/token-amount').knownDecimals
   const legalAboutRow: typeof import('../utils/legal-about').legalAboutRow
   const managers: typeof import('../utils/core').managers
   const markRaw: typeof import('vue').markRaw
@@ -214,6 +216,7 @@ declare global {
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
+  const readAmountText: typeof import('../utils/amount').readAmountText
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readLiveness: typeof import('../utils/background-liveness').readLiveness
   const readonly: typeof import('vue').readonly
@@ -277,6 +280,7 @@ declare global {
   const transferLabel: typeof import('../utils/token-transfer-vocabulary').transferLabel
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
+  const txAmount: typeof import('../utils/tx-amount').txAmount
   const txBelongsToScope: typeof import('../stores/activity.store').txBelongsToScope
   const txScope: typeof import('../stores/activity.store').txScope
   const uiStateFromStatus: typeof import('../utils/presto-ui-state').uiStateFromStatus
@@ -458,7 +462,7 @@ declare global {
   export type { ActivityRowTx, ActivityRowJournal, ActivityRowIncoming, ActivityRow, BuildActivityRowsParams } from '../utils/activity-rows'
   import('../utils/activity-rows')
   // @ts-ignore
-  export type { FormatBaseUnitsOpts } from '../utils/amount'
+  export type { AmountRead, FormatBaseUnitsOpts } from '../utils/amount'
   import('../utils/amount')
   // @ts-ignore
   export type { CopyToastSpec } from '../utils/clipboard'
@@ -526,6 +530,9 @@ declare global {
   // @ts-ignore
   export type { TransferIntent, ProjectedArgument } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
+  // @ts-ignore
+  export type { TxAmount } from '../utils/tx-amount'
+  import('../utils/tx-amount')
 }
 
 // for vue template auto import
@@ -627,6 +634,7 @@ declare module 'vue' {
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
     readonly detailRowsFor: UnwrapRef<typeof import('../utils/presto-ui-state')['detailRowsFor']>
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
+    readonly displaySymbol: UnwrapRef<typeof import('../utils/tx-amount')['displaySymbol']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
@@ -693,6 +701,7 @@ declare module 'vue' {
     readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
+    readonly knownDecimals: UnwrapRef<typeof import('../utils/token-amount')['knownDecimals']>
     readonly legalAboutRow: UnwrapRef<typeof import('../utils/legal-about')['legalAboutRow']>
     readonly managers: UnwrapRef<typeof import('../utils/core')['managers']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
@@ -739,6 +748,7 @@ declare module 'vue' {
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
+    readonly readAmountText: UnwrapRef<typeof import('../utils/amount')['readAmountText']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readLiveness: UnwrapRef<typeof import('../utils/background-liveness')['readLiveness']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
@@ -800,6 +810,7 @@ declare module 'vue' {
     readonly transferLabel: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['transferLabel']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
+    readonly txAmount: UnwrapRef<typeof import('../utils/tx-amount')['txAmount']>
     readonly txBelongsToScope: UnwrapRef<typeof import('../stores/activity.store')['txBelongsToScope']>
     readonly txScope: UnwrapRef<typeof import('../stores/activity.store')['txScope']>
     readonly uiStateFromStatus: UnwrapRef<typeof import('../utils/presto-ui-state')['uiStateFromStatus']>

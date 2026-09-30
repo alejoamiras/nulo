@@ -3,11 +3,10 @@ import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 
 /**
- * Which amounts read compact: every capped call whose token the wallet knows, and none of the
- * calls that guess decimals 0 for an unknown token or a dApp mint, where one 18-decimal token
- * would read as >999T. Textual on purpose: a new call fails here until someone picks its kind, and
- * an option other than `{ compact: true }` is refused. A parenthesis inside a string or comment
- * within a call's arguments defeats it; review catches that.
+ * Which amounts read compact: every capped call whose token the wallet knows. Textual on purpose:
+ * a new call fails here until someone picks its kind, and an option other than `{ compact: true }`
+ * is refused. A parenthesis inside a string or comment within a call's arguments defeats it;
+ * review catches that.
  */
 
 const SRC = resolve(__dirname, "..")
@@ -22,10 +21,9 @@ const CALLS: Record<string, [number, number]> = {
 	"utils/hero-fit.ts": [3, 0],
 	"utils/journal-state.ts": [1, 0],
 	"utils/snack-amount.ts": [1, 1],
-	"popup/components/modules/activity/TransactionCard.vue": [0, 2],
-	"popup/components/popups/IncomingTrustPopup.vue": [0, 1],
-	"popup/pages/received/[id].vue": [0, 1],
-	"popup/pages/tx/[id].vue": [0, 2],
+	"popup/components/modules/activity/TransactionCard.vue": [1, 0],
+	"popup/pages/received/[id].vue": [1, 0],
+	"popup/pages/tx/[id].vue": [1, 0],
 }
 
 /** Each call's argument text up to its closing parenthesis, so a call split over lines counts;
@@ -79,7 +77,7 @@ function kinds(text: string): [number, number] {
 }
 
 describe("balanceFormatted's callers", () => {
-	test("every known-token capped amount reads compact, and no guessed-decimals one does", () => {
+	test("every known-token capped amount reads compact", () => {
 		const found: Record<string, [number, number]> = {}
 		for (const path of readdirSync(SRC, { recursive: true, encoding: "utf8" })) {
 			if (!/\.(ts|vue)$/.test(path) || path.endsWith(".test.ts")) continue
