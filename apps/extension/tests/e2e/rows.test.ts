@@ -1,23 +1,22 @@
 /** In a real browser: a row's Tab stop, its ring, the native Enter/Space activation of a link and a
- *  button, a modified click's new tab, the measured 24px box and what sits on top of a titled span
- *  and of the row's icon. */
+ *  button, a modified click's new tab, the measured 24px box, what sits on top of a titled span
+ *  and of the row's icon, and how far apart rows sit and whether anything leaves one. */
 import type { Page } from "puppeteer"
 import { expect } from "vitest"
-import { seedsForChain } from "@/wallet/services/token/default-tokens"
 import { prepareKeys, waitForNewTab, waitForTarget } from "./fixtures/browser"
 import { type ExtensionContext, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	addContact,
-	captureSoleProfileId,
 	clickNavTab,
-	getAccountAddress,
 	navigateByHash,
 	navigateToSettings,
 	openNetworkDetail,
 	seedUsdQuoteAndReload,
 	setDeveloperMode,
+	setTheme,
 } from "./fixtures/helpers"
 import { settleClosedPopup } from "./fixtures/popup-leave"
+import { readActivityScope, seedReceipt, seedTokenRow, seedTransaction } from "./helpers/activity-seeds"
 import { pointerClick } from "./helpers/legal-drivers"
 import { coveredAt, pressEscape, tabAround, waitForFocus } from "./helpers/pointer-probes"
 
@@ -37,54 +36,11 @@ type Probe = {
 	__linkClick?: { modified: boolean; href: string | null; prevented: boolean } | null
 }
 
-/** A finalized 1.5 USDC transfer for the active scope, under the tx root. Every field the row codec
- *  branches on is set; the priced contract is the chain's seeded USDC, so the quote reaches its row. */
-async function seedTransaction(page: Page): Promise<void> {
-	const profileId = await captureSoleProfileId(page)
-	const account = await getAccountAddress(page)
-	const { networkId, chainId } = await page.evaluate(async (pid: string) => {
-		const all = await chrome.storage.local.get(null)
-		const networkId = all[`nulo:core:active-network@${pid}`] as string
-		const network = JSON.parse(all[`nulo:core:networks@${networkId}`] as string) as { chainId: number }
-		return { networkId, chainId: network.chainId }
-	}, profileId)
-	const seed = seedsForChain(chainId)[0]
-	if (!seed) throw new Error(`no default token seed for chain ${chainId}`)
-	const now = Date.now()
-	const token = { name: seed.displayName, symbol: seed.expectedSymbol, decimals: 6 }
-	const tx = {
-		chainId,
-		profileId,
-		networkId,
-		account,
-		nonce: "0",
-		feePaymentMethod: 0,
-		hash: TX_HASH,
-		createdAt: now,
-		updatedAt: now,
-		status: 5,
-		executionResult: 0,
-		origin: { type: 0 },
-		calls: [
-			{
-				contract: seed.contract,
-				method: "transfer",
-				args: [],
-				transfers: [{ token, type: 0, from: account, to: account, amount: "1500000" }],
-			},
-		],
-	}
-	await page.evaluate(
-		(key: string, row: unknown) => chrome.storage.local.set({ [key]: JSON.stringify(row) }),
-		`nulo:core:txs@${TX_HASH}`,
-		tx,
-	)
-}
-
+/** A priced 1.5 USDC transfer: the chain's seeded USDC carries the quote to its row. */
 async function openHomeWithRow(ctx: ExtensionContext): Promise<Page> {
 	const page = await openPopup(ctx)
 	await waitForHash(page, "#/popup/general")
-	await seedTransaction(page)
+	await seedTransaction(page, await readActivityScope(page), { hash: TX_HASH, amount: "1500000" })
 	await seedUsdQuoteAndReload(page)
 	await page.waitForSelector(sel("tx-card"), { visible: true, timeout: 15_000 })
 	await page.bringToFront()
@@ -477,3 +433,154 @@ test("History's list keeps the −8px row box inside the page: nothing scrolls s
 
 	expect(registeredExtension.pageErrors).toEqual([])
 }, 60_000)
+
+const ROWS = `${sel("tx-card")}, ${sel("tx-incoming-card")}`
+const RECEIPT_TOKEN_ID = 1
+/** A dApp's own name: with it the row's title line wraps at 360px. */
+const DAPP_NAME = "Shielded Payroll Portal"
+
+type RowLayout = {
+	row: string
+	top: number
+	bottom: number
+	amount: string | null
+	fiat: string | null
+	/** Descendants whose box leaves the row's. */
+	escapes: string[]
+	/** Descendants outside the amount column whose box enters it. */
+	intrudes: string[]
+	/** The amount's text is wider than its box. */
+	cut: boolean
+}
+
+function readRows(page: Page): Promise<RowLayout[]> {
+	return page.evaluate((rowsSel: string) => {
+		const EDGE = 0.5
+		const name = (el: Element) => el.getAttribute("data-testid") ?? el.tagName.toLowerCase()
+		const within = (b: DOMRect, box: DOMRect) =>
+			b.left >= box.left - EDGE && b.right <= box.right + EDGE && b.top >= box.top - EDGE && b.bottom <= box.bottom + EDGE
+		const meets = (b: DOMRect, box: DOMRect) =>
+			b.left < box.right - EDGE && b.right > box.left + EDGE && b.top < box.bottom - EDGE && b.bottom > box.top + EDGE
+		const drawn = (row: Element) =>
+			[...row.querySelectorAll("*")].filter((el) => {
+				const b = el.getBoundingClientRect()
+				return b.width > 0 && b.height > 0
+			})
+		const intruders = (row: Element, col: Element | null) => {
+			if (!col) return []
+			const colBox = col.getBoundingClientRect()
+			// The row's link is stretched under the whole row by design.
+			const outside = drawn(row).filter((el) => !col.contains(el) && !el.closest("[data-row-target]"))
+			return outside.filter((el) => meets(el.getBoundingClientRect(), colBox)).map(name)
+		}
+		return [...document.querySelectorAll(rowsSel)].map((row) => {
+			const box = row.getBoundingClientRect()
+			const amount = row.querySelector<HTMLElement>('[data-testid="activity-amount"]')
+			return {
+				row: `${name(row)} ${row.getAttribute("data-tx-hash")?.slice(0, 6) ?? ""}`.trim(),
+				top: box.top,
+				bottom: box.bottom,
+				amount: amount?.textContent?.trim() ?? null,
+				fiat: row.querySelector('[data-testid="activity-fiat"]')?.textContent?.trim() ?? null,
+				escapes: drawn(row)
+					.filter((el) => !within(el.getBoundingClientRect(), box))
+					.map(name),
+				intrudes: intruders(row, row.querySelector('[data-testid="activity-amount-col"]')),
+				cut: amount !== null && amount.scrollWidth > amount.clientWidth,
+			}
+		})
+	}, ROWS)
+}
+
+/** The page's rows once `count` of them show their dollar figure and hold still across two polls: a
+ *  receipt, a token lookup or a quote that lands late moves them. */
+async function settledRows(page: Page, count: number): Promise<RowLayout[]> {
+	await page
+		.waitForFunction(
+			(rowsSel: string, n: number) => {
+				const w = window as unknown as { __rowsKey?: string }
+				const rows = [...document.querySelectorAll(rowsSel)]
+				const priced = rows.every((row) => row.querySelector('[data-testid="activity-fiat"]')?.textContent?.includes("$"))
+				const boxes = rows.map((el) => {
+					const b = el.getBoundingClientRect()
+					return `${b.top},${b.bottom}`
+				})
+				const key = boxes.join("|")
+				const still = boxes.length === n && priced && key === w.__rowsKey
+				w.__rowsKey = key
+				return still
+			},
+			{ timeout: 15_000, polling: 100 },
+			ROWS,
+			count,
+		)
+		.catch(async (error: unknown) => {
+			throw new Error(`${count} rows never held still: ${JSON.stringify(await readRows(page))}; ${String(error)}`)
+		})
+	return readRows(page)
+}
+
+const gapsOf = (rows: RowLayout[]) => rows.slice(1).map((row, i) => row.top - rows[i].bottom)
+
+/** Opens a surface by its hash and waits for the rows on screen to leave: the hash changes before
+ *  the router swaps the page, so the old page's rows could pass for the new page's. */
+async function openSurface(page: Page, hash: string): Promise<void> {
+	const leaving = await page.$$(ROWS)
+	await navigateByHash(page, hash)
+	await page.waitForFunction((...rows: Element[]) => rows.every((row) => !row.isConnected), { timeout: 15_000, polling: 100 }, ...leaving)
+	await Promise.all(leaving.map((row) => row.dispose()))
+}
+
+/** Each opened by its hash: Appearance, where the theme is set, has no bottom nav. */
+const SURFACES = [
+	{ name: "Home", hash: "#/popup/general" },
+	{ name: "the token page", hash: `#/popup/tokens/${RECEIPT_TOKEN_ID}` },
+	{ name: "History", hash: "#/popup/activity" },
+]
+
+test("rows sit 10px apart on Home, a token's page and History, the date heading 12px above the first; a dApp's long title, a nine-digit amount and a priced receipt stay inside their rows and never cover an amount, dark and light", async ({
+	registeredExtensionPerTest,
+}) => {
+	const page = await openPopup(registeredExtensionPerTest)
+	await waitForHash(page, "#/popup/general")
+	const scope = await readActivityScope(page)
+	const now = Date.now()
+	await seedTransaction(page, scope, { hash: TX_HASH, amount: "1500000", at: now })
+	await seedTransaction(page, scope, { hash: `0x${"6a".repeat(32)}`, amount: "123456789123456", at: now - 1_000 })
+	await seedTransaction(page, scope, {
+		hash: `0x${"6b".repeat(32)}`,
+		amount: "2500000",
+		at: now - 2_000,
+		transferType: 2,
+		dapp: DAPP_NAME,
+	})
+	await seedTokenRow(page, scope, RECEIPT_TOKEN_ID)
+	await seedReceipt(page, scope, { tokenId: RECEIPT_TOKEN_ID, amount: "4200000", nullifier: `0x${"5c".repeat(32)}`, at: now - 3_000 })
+	await seedUsdQuoteAndReload(page)
+	await page.bringToFront()
+
+	for (const theme of ["dark", "light"] as const) {
+		await navigateToSettings(page, "appearance")
+		await setTheme(page, theme)
+		for (const surface of SURFACES) {
+			await openSurface(page, surface.hash)
+			const rows = await settledRows(page, 4)
+			const gaps = gapsOf(rows)
+			console.log(
+				`[rows] ${theme}, ${surface.name}: heights ${rows.map((r) => (r.bottom - r.top).toFixed(1)).join(", ")}; gaps ${gaps.map((g) => g.toFixed(1)).join(", ")}; amounts ${rows.map((r) => r.amount).join(", ")}`,
+			)
+			expect(rows.filter((r) => r.amount === null || r.cut || r.escapes.length > 0 || r.intrudes.length > 0)).toEqual([])
+			for (const gap of gaps) expect.soft(gap, `${surface.name}'s row gap`).toBeCloseTo(10, 0)
+			if (surface.name !== "History") continue
+			const clearance = await page.evaluate((rowsSel: string) => {
+				const label = document.querySelector('[data-testid="activity-date-label"]')
+				const first = document.querySelector(rowsSel)
+				return label && first ? first.getBoundingClientRect().top - label.getBoundingClientRect().bottom : null
+			}, ROWS)
+			console.log(`[rows] ${theme}, History: date label to first row ${clearance?.toFixed(1)}`)
+			expect(clearance).toBeCloseTo(12, 0)
+		}
+	}
+
+	expect(registeredExtensionPerTest.pageErrors).toEqual([])
+}, 180_000)

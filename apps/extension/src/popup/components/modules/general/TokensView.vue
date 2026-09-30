@@ -523,7 +523,6 @@ onBeforeUnmount(() => {
 	}
 }
 
-/* Same voice as RecentActivityView's "View Archives" link. */
 .view_all {
 	font-family: var(--font-headline);
 	font-size: 10px;

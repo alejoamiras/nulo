@@ -1,5 +1,5 @@
 /** Vendor */
-import { computed, ref } from "vue"
+import { computed, readonly, ref } from "vue"
 
 /** Composables */
 import { useTicker } from "@/composables/ticker"
@@ -21,10 +21,13 @@ import { tokenAmountToUsdMicro, formatUsdMicro } from "@/wallet/services/price/c
  */
 export function usePrices(priceService: PriceServiceClient) {
 	const quotes = ref<PriceState>({})
+	/** The first price answer has arrived: a refresh result or failure, or a broadcast. */
+	const settled = ref(false)
 	const now = useTicker(30_000)
 
 	const onQuotesUpdated = (state: PriceState) => {
 		quotes.value = state
+		settled.value = true
 	}
 	priceService.onQuotesUpdated.add(onQuotesUpdated)
 
@@ -36,6 +39,7 @@ export function usePrices(priceService: PriceServiceClient) {
 			.then(onQuotesUpdated)
 			.catch(() => {
 				// Price data is best-effort; surfaces render token-only without it.
+				settled.value = true
 			})
 	}
 	resnapshot()
@@ -94,5 +98,5 @@ export function usePrices(priceService: PriceServiceClient) {
 		priceService.onConnected.remove(resnapshot)
 	}
 
-	return { usableQuotes, quoteFor, feeJuiceQuote, tokenFiatMicro, tokenFiatLabel, formatUsdMicro, dispose }
+	return { usableQuotes, settled: readonly(settled), quoteFor, feeJuiceQuote, tokenFiatMicro, tokenFiatLabel, formatUsdMicro, dispose }
 }

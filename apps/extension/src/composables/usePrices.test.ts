@@ -63,6 +63,32 @@ describe("composables/usePrices", () => {
 		expect(Object.keys(api.usableQuotes.value).sort()).toEqual(["aztec", "usd-coin"])
 	})
 
+	test("settled turns true on the first price answer: a refresh that resolves or rejects, or a broadcast", async () => {
+		let answer: (state: PriceState) => void = () => {}
+		const held = fakeClient()
+		held.refreshIfStale.mockReturnValue(
+			new Promise<PriceState>((resolve) => {
+				answer = resolve
+			}),
+		)
+		const { api } = await withPrices(held)
+		expect(api.settled.value).toBe(false)
+		answer({})
+		await flushPromises()
+		expect(api.settled.value).toBe(true)
+
+		const failed = fakeClient()
+		failed.refreshIfStale.mockRejectedValue(new Error("offline"))
+		expect((await withPrices(failed)).api.settled.value).toBe(true)
+
+		const broadcast = fakeClient()
+		broadcast.refreshIfStale.mockReturnValue(new Promise(() => {}))
+		const { api: live } = await withPrices(broadcast)
+		expect(live.settled.value).toBe(false)
+		broadcast.onQuotesUpdated.invoke(quoteState(Date.now()))
+		expect(live.settled.value).toBe(true)
+	})
+
 	test("a refreshIfStale rejection is swallowed (surfaces render token-only)", async () => {
 		const client = fakeClient()
 		client.refreshIfStale.mockRejectedValue(new Error("offline"))

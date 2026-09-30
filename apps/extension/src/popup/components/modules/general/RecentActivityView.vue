@@ -1,5 +1,6 @@
 <script setup>
 /** Components */
+import { SectionLabel } from "@nulo/design"
 import TransactionAwaitingCard from "@/components/composite/activity/TransactionAwaitingCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
 import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
@@ -790,8 +791,8 @@ onBeforeUnmount(() => {
 		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
-			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
+			<SectionLabel label="Recent activity" />
+			<span @click="router.push('/popup/activity')" :class="$style.archive_link" data-testid="activity-view-all">View history</span>
 		</Flex>
 
 		<div v-if="showStalledLine" :class="$style.stalled_line" data-testid="incoming-sync-stalled">
@@ -866,7 +867,7 @@ onBeforeUnmount(() => {
 	</Flex>
 	<Flex v-else-if="token" direction="column" gap="16" data-testid="activity-feed-root" :data-active-account="appStore.account?.address">
 		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
+			<SectionLabel label="Recent activity" />
 		</Flex>
 
 		<div :class="$style.empty_state">
@@ -880,15 +881,6 @@ onBeforeUnmount(() => {
 .section_header {
 	padding-bottom: 8px;
 	border-bottom: 1px solid rgba(74, 70, 63, 0.2);
-}
-
-.header_title {
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .archive_link {
@@ -949,7 +941,7 @@ onBeforeUnmount(() => {
 .list {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 10px;
 }
 
 .empty_state {
