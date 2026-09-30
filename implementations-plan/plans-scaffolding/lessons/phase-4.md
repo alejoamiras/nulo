@@ -1,0 +1,85 @@
+# Phase 4: mining `lessons.md` and `follow-ups.md` (Arc J)
+
+**2026-09-30, green locally.** Branch `plans-scaffolding-closures`, on `910a4def`. Every quote re-derives from that commit, `closures.json`'s `closuresBase`.
+
+## The record
+
+`mining.jsonl`: 325 inventory entries, 269 candidates, 902 verdicts, 181 lines.
+
+**Inventory.** One entry per `closures.json` row (270) and nested plan (55). 320 name a host; 5 have none: passkey-e2e (relocated, L19) and the four dirs D stubs. Their 1,264 source files, 13.9 MB, are each `read` or `scanned`, none skipped:
+- read in full: 911 lessons logs, 43 `plan.md`, 9 `STATUS.md`, 6 `WRAP-UP.md`, 1 `README.md`, and 19 ledgers, runbooks and follow-up files;
+- scanned for their follow-up, residual and ledger sections: 275 long hosts (268 `plan.md`, 4 `README.md`, 2 `scope.md`, 1 `seed.md`).
+
+**Candidates.** 97 carried: every entry the two curated files held at the base (26 lessons, 71 follow-ups). 172 from sources: 161 from eight Opus readers, 11 from the driver. The readers were the seven clusters and one for the UX program's 21 plans; a ninth re-checked 67 carried follow-ups at the base, and the program, ci-release and aztec readers the other 30 carried entries (26 lessons, 4 follow-ups). The plan capped a reader at 12 proposals; they returned 12 to 25, because a cluster spans up to 78 plans. The driver's budget did the cutting instead.
+
+| Reader | Proposed | Accepted |
+|---|---|---|
+| crypto-backup | 25 | 24 |
+| aztec | 24 | 19 |
+| runtime | 23 | 19 |
+| ui-design | 21 | 14 |
+| ci-release | 20 | 15 |
+| e2e | 19 | 15 |
+| bun-deps | 17 | 13 |
+| program | 12 | 7 |
+| driver | 11 | 11 |
+
+**Verdicts.**
+- Readers and the driver: 172 proposals, each with the command it re-ran at the base; of the carried, 79 keep and 18 update (16 follow-ups, 2 lessons).
+- Driver: 227 accepted, 42 rejected, each with a reason. 7 are carried lessons, retired below; 2 are new follow-ups the verifier found no longer open.
+- Currency: 181 lines hold at `910a4def`, each citing its readers' check or, for a rewritten line, the driver's and the verifier's. A line tied to a tool version names it and the month.
+- Verifier: see below.
+
+## The files
+
+| File | Before | After |
+|---|---|---|
+| `lessons.md` | 8,131 B, 26 entries | 7,862 B, 34 entries in 6 sections |
+| `follow-ups.md` | 34,354 B, 71 entries | 62,412 B, 147 entries |
+
+**`lessons.md`.** 11 lines carry 13 of the 26 old entries, some merged or reworded, and 23 lines are new. 6 old entries a skill or doc already owns became F506 and F508 (L24). 7 retired:
+- `toRaw`: general Vue reactivity knowledge.
+- The fee-juice balance import: its file's header comment says it where the import lives.
+- The count-up's tabular digits: one component, and an owner call.
+- `withLock`: its TSDoc says it (`packages/wallet-core/src/utils/lock.ts`); the open delete is a follow-up.
+- Hand-built field fixtures: one test file's concern.
+- vitest#11237: its follow-up carries it until the fix ships.
+- The two missing focus rings: their follow-up carries them, and CLAUDE.md's screenshot rule covers reading a capture.
+
+After D adds `archive/` to 36 of its 38 links, the file is 8,150 B (L23). One new candidate, the unchecked `scripts/` typecheck, is an open gap rather than a gotcha, so it became F507.
+
+**`follow-ups.md`.** The 71 carried entries stay, 16 of them updated after their re-check (the Firefox prover-ON entry, for one, now marks row 42 fixed by #721). 76 are new: 15 in existing sections, 61 in eight new ones after Copy (Incoming transfers, Backup and storage, Older plans' residuals, Tests and e2e, Dependencies and supply chain, Release, Plans, docs and tooling, Issues and unleashed). The empty "ux-feedback: taken by a follow-up plan" section is gone. Each of the 11 closure follow-up ids names its entry (L18). The five issues are pointers; #280 and #293 share one unleashed line.
+
+## Index moves
+
+`transport-ready-handshake/spec-rows.md` holds the parked arc's spec verbatim (L20), and its index line names it (`b9e20e41`). The `incoming-tip-first-scan` line is gone: it never had a plan, and its item is a follow-up.
+
+## Verifier
+
+Three fresh-context Opus verifiers read every line against its quotes and the code at the base: 175 supported, 8 unsupported. Six were rewritten and verified again (L25), two dropped:
+- **L10**: now names `auto-imports.d.ts` only, which regenerates when Vite builds or serves and keeps a removed export's global. `components.d.ts` is rewritten, and two files in `src/types/` are hand-written.
+- **L35**: `set -e` stops nothing in the agent shell, not only in a subshell; a fresh `zsh -c` honours it (reproduced).
+- **C33**: the journal page renders no status colour, so the entry names the activity card.
+- **C34**: its pointer to the sponsor funding entry is gone; #728 resolved that entry and removed it.
+- **C70**: the 41 errors were the four `extraTokens` specs' program. The whole tree has 415 errors in 152 files (reproduced), and 103 in 37 with the context typed `object`.
+- **F406**: #669 retires the stopgap itself and conflicts with dev, and no record says the owner parked it.
+- **F106**, dropped: since #619 a capped seed reads failed and offers Retry, so it no longer lasts until the next release.
+- **F119**, dropped: holdings-loading-sync replaced the indicator with skeleton rows and a scan-health line.
+
+A second verifier supported five of the six and failed L10's first rewrite, "only appends": a build rebuilds the type re-exports and keeps only the value globals. It also measured C33's red subtitle (3.56:1, added) and named C34's second pin, `send-check.test.ts` (added). A third supported the refined L10, C33 and C34, and F605 once it linked `harden-findings-remediation`: D lists an open item by the plan its entry links, and F605 is that plan's #284. The record keeps each line's last verdict, plus the two dropped lines' `unsupported` ones.
+
+Six supported lessons link only part of their evidence (L09, L11, L12, L14, L28, L31). `mining.jsonl` holds every candidate, and the budget cannot take the extra links.
+
+## Found on the way
+
+- `test:ci-gating`'s tree test failed on a home path written literally into `mine.test.ts`: the local-path rule reads every tracked file under this plan. The fixture now joins the path at runtime.
+- The plan tools sit outside Biome's `files.includes`, and a stdin run did not report the complexity errors a run on a real path inside the scope did. Linted that way, `mine.ts` had four functions over the cognitive budget and `mine.test.ts` one; each is split. `untrack.ts`'s `removedOnBranch` (16) is left to C, whose rewrite replaces it.
+- The 2026-09-30 nightly is red in `rows.test.ts`'s `backToHome` on both browsers. The likely cause (moderate confidence) is #719's wait for `tokens-empty-import-link`, which never appears because the artifact seeds default tokens. dev still has the wait, so the next nightly will likely fail too. Flagged to the owner; not this plan's scope.
+
+## Gate
+
+On the staged tree, before the commit:
+- `bun scripts/ci-cd/plans/check.ts`: 0 enforced. It reports 3 path tokens, the three code comments C rewrites.
+- `bun test implementations-plan/plans-scaffolding/tools/`: 13 pass. `classify.ts --check`: 270 rows, 0 problems. `mine.ts --verify`: 0 problems.
+- `bun run lint`: 0 errors. `bun run test:ci-gating`: 246 pass.
+- `lessons.md`: 7,862 B, 34 entries, each linking its evidence.

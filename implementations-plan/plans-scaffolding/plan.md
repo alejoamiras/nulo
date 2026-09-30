@@ -529,7 +529,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
 - Pass: exit 0, one row per top-level dir (`git ls-tree -d HEAD implementations-plan/` minus `archive`), 0 ambiguous rows, and both snapshots complete.
 - Layers: unit.
 
-### Phase 4: mining `lessons.md` and `follow-ups.md` (Arc J; the mining gate)
+### Phase 4: mining `lessons.md` and `follow-ups.md` (Arc J; the mining gate) ✓
 
 1. **Inventory and candidates.** `tools/mine.ts` writes data only.
    - **The inventory is keyed by plan, not by filename.** It has one entry per `closures.json` row (every classified dir, active and parked included) and per nested plan. Each names the dir's authoritative host, found in the Outcome host order (`plan.md`; the index line's `runbook.md`, `adoption-map.md`, `scope.md`, `README.md` or `seed.md`; the dir's `README.md`; none for a stub dir), plus its `lessons/**`, `STATUS.md`, `WRAP-UP.md`, ledger and follow-up files. Each file is mined, or skipped with a reason; a dir with no host is recorded `no-content`.
@@ -771,6 +771,14 @@ In order. No `/code-review`: `code_review` is `off`.
 | L15 | A dir's date and its drift skip mechanical commits: the import, #692, and this plan's own A, C and D squashes (by subject); drift counts commits, not a diff | Phase 3 | `git diff --quiet` from `closuresBase`: C's relocations would read as drift in every dir they touch | adopted |
 | L16 | A PR delivered a plan when its squash touched the dir (the snapshot's `mergeCommit`, else a trailing `(#N)`), or when the dir's line (else its host) names it and it merged after the dir's first commit. A PR merged into a stack branch, or up to 2 minutes before that commit in one stack merge, still counts | Phase 3 | Every merged `#N` in the text: 15 of 25 audited rows credited context PRs (`pre-#186`, `#718 left`) | adopted |
 | L17 | Ranges (`#400-#405`) are not expanded; the archive line keeps the range in its hook | Phase 3 | Expanding them: numbers inside a range can belong to other work | adopted |
+| L18 | A closure's follow-up id is covered by the entry whose line record names it (`followUp`), one entry per id; harden-findings-remediation carries two (the F-11 scope and the findings it surfaced), so the table has 11 | Phase 4 | Matching ids against entry text: wording drifts, and text cannot tell two entries of one plan apart | adopted |
+| L19 | passkey-e2e is `closed` with a `relocated` status: C moves its one file to `apps/extension/tests/e2e/`, so D neither archives nor stubs the dir, and `--check` accepts its absence | Phase 4 | A closed row with no host: D would stub a dir C empties, and `--check` would then report it missing | adopted |
+| L20 | transport-ready-handshake keeps a verbatim copy of its spec rows in `spec-rows.md`, each source linked by permalink at `9f11de70` | Phase 4 | Relative links into the closed sources: the parked plan's spec would live under `archive/`, which is evidence, never instructions | adopted |
+| L21 | A quote is one line's text, 20 to 200 characters, found byte for byte at `closuresBase`; line ids are unique across both files | Phase 4 | Multi-line quotes: readers' copies carried line numbers and rewrapping, and missed the bytes | adopted |
+| L22 | Sections: Bun & deps · CI & gates · Git & GitHub · Extension runtime · Aztec · Agent tooling. Release is dropped, Aztec added | Phase 4 | The planned Release section: its gotchas belong to the CLAUDE.md runbook (routed by F508), and the node and block-production lines had no home | adopted |
+| L23 | `lessons.md` leaves room for D's move: 7,862 B now, 8,150 B once 36 of its 38 links gain `archive/` (the other two point at tools-extraction, still active) | Phase 4 | Filling it to 8,192 B now: D's rewrite would break the budget it has to keep | adopted |
+| L24 | A gotcha a skill or doc already owns becomes a follow-up to write it there: F506 (e2e-testing), F508 (the release runbook, aztec-update, COMPOSITION-TESTS.md) | Phase 4 | Keeping them in `lessons.md`: CLAUDE.md routes a domain technique to its owning skill, and the budget cannot hold them. Editing the skills here: J's scope is the curated layer | adopted |
+| L25 | An unsupported line is rewritten from its own candidates when the verifier's evidence shows a true item or gotcha under a wrong detail, and a fresh verifier must then support the new text; a line with no supported rewrite is dropped | Phase 4 | Dropping every unsupported line: six of the eight were a wrong detail on a real open item or gotcha, and dropping them would lose the item | adopted |
 
 **Findings**
 
