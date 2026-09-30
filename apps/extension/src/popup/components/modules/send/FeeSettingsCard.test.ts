@@ -1636,7 +1636,7 @@ describe("FeeSettingsCard — Send: the fee source follows the transfer's origin
 			const held = mountSend({ network: mainnet })
 			await flushPromises()
 			expect(everEmittedSettings(held)).toEqual([])
-			expect(degradedText(held)).toBe("Couldn't load fee data — retrying in the background.")
+			expect(degradedText(held)).toBe("Couldn't load fee data. Retrying in the background.")
 			held.unmount()
 
 			mocks.getFpcs.mockResolvedValue([PRIVATE_FPC, SPONSOR])

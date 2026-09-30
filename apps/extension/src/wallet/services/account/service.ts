@@ -467,7 +467,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
 		// — never the master). A degraded session cannot ACCEPT new imported material: fail loud.
 		const dek = await this.profileService.getProfileDek(profileId)
-		if (!dek) throw new Error("Imported keys unavailable — unlock again")
+		if (!dek) throw new Error("Imported keys unavailable. Unlock again")
 		try {
 			const { signingKey, address: recomputed } = await this.decodeAccountExport(fileBody, password)
 			// The user CONFIRMED this exact address in the UI (the checksum authenticates nothing —
@@ -780,7 +780,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					const parsed = ImportedAccountKeySchema.parse(row)
 					if (parsed.address.trim().length === 0) throw new Error("empty imported-key address")
 					const ctx = contexts.get(parsed.profileId)
-					if (!ctx) throw new Error("no rewrap context for imported key — dropped to the orphan taxonomy")
+					if (!ctx) throw new Error("no rewrap context for imported key, so it was not restored")
 					let skBytes: Uint8Array<ArrayBuffer> | undefined
 					try {
 						skBytes = await unsealImportedSigningKeyV2(

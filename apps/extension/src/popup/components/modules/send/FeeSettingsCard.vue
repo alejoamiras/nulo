@@ -417,7 +417,7 @@ let isMounted = true
 // fixes a failed balance read, and the degraded state keeps the card
 // operable meanwhile (sponsored methods stay usable; self-paid methods stay
 // fail-closed until a read succeeds — see settingsForMethod).
-const FEE_DATA_UNAVAILABLE = "Couldn't load fee data — retrying in the background."
+const FEE_DATA_UNAVAILABLE = "Couldn't load fee data. Retrying in the background."
 const PRIVATE_GAS_UNCHECKED = "Couldn't check your private gas. Pick a fee source to continue."
 
 /** The info row's text. A hold with a healthy store is a read that came back without a balance —

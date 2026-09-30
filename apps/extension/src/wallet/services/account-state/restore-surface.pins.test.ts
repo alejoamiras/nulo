@@ -127,6 +127,6 @@ describe("restore() pins for the PR-b loop extraction", () => {
 			-5,
 		)
 		expect(pxe.registerSender).not.toHaveBeenCalled()
-		expect(result[0].restoreError).toBe("Skipped — ran out of time reaching the network (2 registration(s) not attempted)")
+		expect(result[0].restoreError).toBe("Skipped: ran out of time reaching the network (2 registration(s) not attempted)")
 	})
 })

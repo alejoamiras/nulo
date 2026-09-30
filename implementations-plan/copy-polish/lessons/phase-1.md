@@ -42,3 +42,13 @@
   `NewNetworkPopup.pins.test.ts:122` and `NewTokenPopup.test.ts:382`. From `apps/extension`:
   `bun --bun vitest run src/wallet/services/pxe/client.test.ts src/popup/components/popups/NewNetworkPopup.pins.test.ts src/popup/components/popups/NewTokenPopup.test.ts ../../packages/extension-messaging/src/errors.test.ts`
   → exit 0, 4 files, 49 passed. The guard lists 33.
+- **Lines, E14 to E21, E25 to E28, E44 to E46**: 15 strings plus the pins and input copies of the
+  table (`FeeSettingsCard.test.ts:1639`, `transfer-failure-copy.test.ts:35`,
+  `scope-mismatch.test.ts` ×3, `scope-follow.test.ts:251`, `useFullBackupImport.test.ts:1020` and
+  `:1032`, `full-backup-helpers.test.ts` ×3, `account-state/service.test.ts:343-344`,
+  `restore-surface.pins.test.ts:130`, `onboarding/pages/import.test.ts:150` and `:186`). From
+  `apps/extension`, those files plus the skip constants' consumers (`importChainSync.test.ts`,
+  `normalize.test.ts`) and E20's prefix (`service.integration.test.ts`) → exit 0, 12 files, 506
+  passed; from `packages/aztec-runtime`,
+  `bun --bun vitest run src/pxe/opfs-store.test.ts src/pxe/opfs-store-open.test.ts` → exit 0, 2
+  files, 17 passed. The guard lists 18.
