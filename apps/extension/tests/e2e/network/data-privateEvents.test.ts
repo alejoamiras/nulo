@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
-import { UNCLASSIFIED_ERROR_MESSAGE } from "@/wallet/services/wallet-sdk/error-envelope"
+import { SCOPE_VIOLATION_ENVELOPE } from "@/wallet/services/wallet-sdk/error-envelope"
 import { clickByTestId, test, type ExtensionContext } from "../fixtures/extension"
 import { readStoredCapability } from "../fixtures/dappSession"
 import {
@@ -25,13 +25,13 @@ const hasConfig = aztecConfig !== undefined
  * does. The call cannot tell the two apart: `data` alone grants no account, so the event scope the
  * playground sends (the token address) fails the account-scope check before any event is read,
  * and with private events Off the private-events scope check refuses it first. The wallet answers
- * both with its unclassified error, and neither opens a window.
+ * both with its scope refusal, and neither opens a window.
  */
 
 type Connected = ExtensionContext & { playgroundPage: Page }
 
 /** The playground records the SDK's error message, which is the wallet's error JSON-encoded. */
-const UNCLASSIFIED = { message: JSON.stringify(UNCLASSIFIED_ERROR_MESSAGE) }
+const SCOPE_REFUSED = { message: JSON.stringify(SCOPE_VIOLATION_ENVELOPE) }
 
 /** Request `data`, check private events start Off, set that switch, and return the answer's `data` entry. */
 async function grantData(ctx: Connected, privateEvents: boolean): Promise<Record<string, unknown> | undefined> {
@@ -54,7 +54,7 @@ async function expectRefusedSilently(ctx: Connected): Promise<void> {
 	const page = ctx.playgroundPage
 	const result = await callExpectingNoPopup(ctx, page, "getPrivateEvents", () => clickByTestId(page, "pg-btn-getPrivateEvents"))
 	expect(result.status).toBe("error")
-	expect(result.errorJson).toEqual(UNCLASSIFIED)
+	expect(result.errorJson).toEqual(SCOPE_REFUSED)
 }
 
 test.skipIf(!hasConfig)(

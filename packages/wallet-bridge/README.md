@@ -121,6 +121,26 @@ For other failures (network errors, simulation failures, etc.), the dApp
 receives `err.message` as a plain non-JSON string. The recipe's
 `try { info = JSON.parse(...) } catch { ... }` falls through gracefully.
 
+A request its stored grant does not cover (a contract, call, class, account
+or sender outside the grant, or a flag the grant does not set) is refused
+before any window opens or anything runs, with one envelope for every such
+refusal:
+
+```jsonc
+{
+  "code": 4100,                                  // EIP-1193 unauthorized
+  "message": "This request is outside the permissions you gave this app.",
+  "data": { "walletErrorCode": "SCOPE_VIOLATION" }
+}
+```
+
+The message is a constant and the envelope names no field and no value. A
+dApp reads the contracts, calls, classes and flags it holds from its own
+`requestCapabilities` answer, which is the stored grant, and asks again with a
+wider manifest. The answer lists the session's accounts only when the grant
+sets `canGet`. `createAuthWit` for a raw message hash is not a scope refusal
+(no grant can admit one) and answers the plain string.
+
 ## getAccounts before requestCapabilities
 
 `wallet.getAccounts()` throws `CapabilityNotGrantedError` (code `4100`,
@@ -168,12 +188,10 @@ other "unauthorized" surface the wallet might add later. The error message is
 a public contract — it must stay byte-for-byte stable across versions because
 some dApps will substring-match on it.
 
-Note: today the wallet only ever throws this for the `accounts` capability
-(from `dispatcher.handleGetAccounts`). Other capability-gated methods reject
-with the existing scope-enforcement error format. Widening the
-`CapabilityNotGrantedError` surface to other methods is a separate, deferred
-follow-up — it would change the error-string contract for those methods, so
-it needs its own audit cycle before any rollout.
+Every capability-gated method answers this when the session holds no grant
+of the method's capability type, with `capabilityType` naming that type. A
+method whose type is granted but whose request the grant does not cover gets
+the `SCOPE_VIOLATION` envelope instead (§ What other error shapes look like).
 
 ## Scripts
 

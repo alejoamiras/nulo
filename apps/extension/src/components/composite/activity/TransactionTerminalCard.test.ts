@@ -124,9 +124,10 @@ describe("composite/TransactionTerminalCard", () => {
 		expect(w.find(".layout-icon").attributes("data-icon")).toBe("zap")
 	})
 
-	test("testId attribute is 'tx-terminal-card' for e2e selectors", () => {
+	test("testIds 'tx-terminal-card' and 'tx-terminal-subtitle' for e2e selectors", () => {
 		const w = mountCard(FAILED)
 		expect(w.find('[data-testid="tx-terminal-card"]').exists()).toBe(true)
+		expect(w.find('[data-testid="tx-terminal-subtitle"]').text()).toBe("Network error")
 	})
 
 	test("`to` reaches the layout, which makes the row a link", () => {

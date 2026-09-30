@@ -185,6 +185,20 @@ export class CapabilityNotGrantedError extends WalletError {
 }
 
 /**
+ * A dApp request asked for a contract, call, class, account or flag its stored grant does not
+ * cover. Raised by the grant check before any window opens or anything runs. The message names the
+ * method and the scope field, never a request value, and never reaches a dApp: its envelope is a
+ * constant.
+ */
+export class ScopeViolationError extends WalletError {
+	public static readonly CODE = "SCOPE_VIOLATION"
+
+	public constructor(message: string) {
+		super(ScopeViolationError.CODE, message, undefined, "ScopeViolationError")
+	}
+}
+
+/**
  * Raised when a dApp's sendTx is refused because the per-(profileId, chainId)
  * execution lane is at capacity — either the dApp's own per-origin pending cap
  * or the coarse total-lane cap (see `ExecutionMutex`). Backpressure, NOT a
@@ -464,6 +478,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof UserRejectedError.CODE; message: string; details?: unknown }
 	| { code: typeof JobCancelledError.CODE; message: string; details?: { jobId?: string } }
 	| { code: typeof CapabilityNotGrantedError.CODE; message: string; details?: { capabilityType?: string } }
+	| { code: typeof ScopeViolationError.CODE; message: string; details?: unknown }
 	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
@@ -504,6 +519,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			// stable message wording so the popup-side / dApp-side instanceof check
 			// and substring-match contracts both survive the JSON boundary.
 			return new CapabilityNotGrantedError(known.details?.capabilityType ?? "unknown", known.message)
+		case ScopeViolationError.CODE:
+			return new ScopeViolationError(known.message)
 		case ValidationError.CODE:
 			return new ValidationError(known.message, known.details)
 		case InvalidPasswordError.CODE:

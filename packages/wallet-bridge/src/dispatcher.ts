@@ -96,6 +96,7 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { scopeViolation } from "./scope-violation"
 import {
 	authorizationsEffective,
 	coversAnyContract,
@@ -729,6 +730,13 @@ function dataAnswer(grantedCaps: unknown[]): Record<string, unknown> {
 		addressBook: stored?.addressBook === true,
 		...(stored?.privateEvents !== undefined ? { privateEvents: stored.privateEvents } : {}),
 	}
+}
+
+/** The stored grant of the request's type. Only a request that grants nothing reaches the answer
+ *  with none stored, so it answers for itself. */
+function storedGrantAnswer(grantedCaps: unknown[], requested: Record<string, unknown>): Record<string, unknown> {
+	const stored = grantedCaps.find((c) => (c as Record<string, unknown>).type === requested.type)
+	return (stored as Record<string, unknown> | undefined) ?? requested
 }
 
 /** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
@@ -1486,8 +1494,8 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef,
 	): Promise<Record<string, unknown>[]> {
 		const result: Record<string, unknown>[] = []
-		// The answer follows the request's order; accounts and data values come from the stored
-		// grant, since the person may have granted less than was asked.
+		// The answer follows the request's order, and every value in it is what the wallet stores and
+		// enforces: the person may have granted less than was asked, or already hold more.
 		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
 
 		for (const cap of requestedCaps) {
@@ -1523,7 +1531,7 @@ export class WalletSdkDispatcher {
 			} else if (cap.type === "data") {
 				result.push(dataAnswer(grantedCaps))
 			} else {
-				result.push(cap)
+				result.push(storedGrantAnswer(grantedCaps, cap))
 			}
 		}
 		return result
@@ -1771,7 +1779,7 @@ export class WalletSdkDispatcher {
 				return [network, resolved.account]
 			}
 			if (resolved.reason === "not-authorized") {
-				throw new Error(`Requested account ${requestedFrom} is not authorized for this dApp session`)
+				throw scopeViolation("Scope violation: requested account not authorized for this dApp session")
 			}
 			throw new Error("No authorized accounts found for this dApp session")
 		}
