@@ -93,6 +93,7 @@ const { seeded: arrivalsSeeded } = arrivals
 provide(ARRIVALS_KEY, arrivals)
 
 const intervalId = ref(null)
+const legalSheetShown = ref(false)
 
 const settingHandlers = {
 	theme(value) {
@@ -463,7 +464,7 @@ onBeforeUnmount(() => {
 			<GlobalLoader />
 			<MigrationBarrier />
 			<AccountIntegrityBarrier />
-			<LegalAcceptanceSheet />
+			<LegalAcceptanceSheet @visibility="legalSheetShown = $event" />
 		</div>
 
 		<Header />
@@ -487,7 +488,7 @@ onBeforeUnmount(() => {
 
 		<Navigation v-if="$route.meta.showBottomNav" />
 
-		<div id="toast" />
+		<div id="toast" :class="legalSheetShown && $style.toast_over_sheet" />
 	</Flex>
 </template>
 
@@ -502,6 +503,12 @@ onBeforeUnmount(() => {
 	overflow: clip;
 	min-width: 0;
 	min-height: 0;
+}
+
+/* While the Terms sheet (9000) shows, the snack draws over it, still under the loader and the barriers. */
+.toast_over_sheet {
+	position: relative;
+	z-index: 9500;
 }
 
 .retry {

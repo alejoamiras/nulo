@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, test, vi } from "vitest"
-import { flushPromises, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
 import { LEGAL_MANIFEST, type LegalStatus, RISK_POINTS } from "@nulo/legal"
+import { useToast } from "@/composables/toast"
 
 const TERMS = LEGAL_MANIFEST.terms.at(-1)?.version as string
 const { route, push, legal } = vi.hoisted(() => {
@@ -26,6 +27,10 @@ vi.mock("@/utils/core", () => ({ managers: { legal } }))
 vi.mock("@/utils/legal-links", () => ({ openLegalDocument: vi.fn() }))
 
 import LegalAcceptanceSheet from "./LegalAcceptanceSheet.vue"
+import ToastManager from "./ui/ToastManager.vue"
+
+// A mounted sheet registers with the snack's module-level registry; each test starts without one.
+enableAutoUnmount(afterEach)
 
 const STUBS = {
 	Flex: { template: '<div v-bind="$attrs"><slot /></div>', inheritAttrs: false },
@@ -39,8 +44,8 @@ const STUBS = {
 	},
 }
 
-const mountSheet = async () => {
-	const w = mount(LegalAcceptanceSheet, { global: { stubs: STUBS } })
+const mountSheet = async (attachTo?: HTMLElement) => {
+	const w = mount(LegalAcceptanceSheet, { global: { stubs: STUBS }, attachTo })
 	await flushPromises()
 	return w
 }
@@ -64,6 +69,12 @@ beforeEach(() => {
 			onChanged: { addListener: () => {}, removeListener: () => {} },
 		},
 	})
+})
+
+afterEach(() => {
+	vi.restoreAllMocks()
+	useToast().closeToast()
+	document.getElementById("toast")?.remove()
 })
 
 describe("LegalAcceptanceSheet", () => {
@@ -121,6 +132,39 @@ describe("LegalAcceptanceSheet", () => {
 		expect(sheet(w).exists()).toBe(false)
 		release("missing")
 		await flushPromises()
+		expect(sheet(w).exists()).toBe(true)
+	})
+
+	test("while it shows, its own footer places the snack from a 12px base, not the nav's", async () => {
+		route.meta = { isAuthRequired: true, showBottomNav: true }
+		vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(600)
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+			const notNow = this.firstElementChild?.getAttribute("data-testid") === "legal-sheet-not-now"
+			return DOMRect.fromRect({ y: notNow ? 560 : 0, width: 360, height: notNow ? 40 : 0 })
+		})
+		const toastRoot = document.body.appendChild(Object.assign(document.createElement("div"), { id: "toast" }))
+		mount(ToastManager, { attachTo: document.body })
+		await mountSheet(document.body)
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await flushPromises()
+		// 600 - 560 + 12. Unregistered, the sheet would leave the nav route's 76.
+		expect((toastRoot.firstElementChild as HTMLElement).style.bottom).toBe("52px")
+	})
+
+	test("tells the shell when it shows and when it goes", async () => {
+		const w = await mountSheet()
+		expect(w.emitted("visibility")).toEqual([[true]])
+		await w.get('[data-testid="stub-consent"]').trigger("click")
+		await flushPromises()
+		expect(w.emitted("visibility")).toEqual([[true], [false]])
+	})
+
+	test("a refused accept opens the error snack and the sheet stays", async () => {
+		legal.accept.mockRejectedValueOnce(new Error("storage refused the write"))
+		const w = await mountSheet()
+		await w.get('[data-testid="stub-consent"]').trigger("click")
+		await flushPromises()
+		expect(useToast().toast.value).toMatchObject({ kind: "error", label: "Could not record your acceptance. Try again." })
 		expect(sheet(w).exists()).toBe(true)
 	})
 })

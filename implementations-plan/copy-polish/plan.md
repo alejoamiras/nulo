@@ -734,7 +734,7 @@ Gate, from `apps/extension`: `bun --bun vitest run src/utils/glossary.test.ts sr
 green; `bun run lint` exit 0.
 Layers: lint, unit, component.
 
-### P3 · The snack over the Terms sheet (T)
+### P3 · The snack over the Terms sheet (T) ✓
 
 1. Red, in `components/LegalAcceptanceSheet.test.ts`:
    - with the sheet visible on a route whose meta shows the nav, a mounted `ToastManager`, the
