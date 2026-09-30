@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: artifact
 budget: ultracode
 status: approved 2026-09-25 (rev 3; the owner delegated the gate, see § Approval) — implementing
-base: dev @ ee66a233 (2026-09-25, #695)
+base: dev @ 910a4def (2026-09-30, #735); A0 and A merged as #696 and #698
 harden: not scheduled (Ask A12)
 ---
 
@@ -437,7 +437,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 - runs on a committed tree (codex C11): rerun checks re-run the tools after the first run is committed, and fresh-clone checks clone that commit;
 - measures the arc against its actual parent, written `$PARENT` below: the lower arc's branch while it is open, `origin/dev` once it merged (`gh stack view --json` names it). So `git diff --name-status -M $PARENT...HEAD | wc -l` < 3000. Only `untrack.ts --verify` stays cumulative from `origin/dev`, because every removal across the stack needs a manifest row.
 
-### Phase 0: rebase, refresh, coordinate (no PR)
+### Phase 0: rebase, refresh, coordinate (no PR) ✓
 
 1. `git fetch origin && git rebase origin/dev`, then record the base in front matter.
 2. List in-flight work: `git branch -a --list '*ux*' '*vitest-5*' 'feat/publishable-packages'` and `gh pr list --state open`.
@@ -474,7 +474,7 @@ Write `scripts/ci-cd/plans/{lib,links,structure,permalinks,check}.ts` and `perma
 
 **Arc A0 boundary:** codex loop → wave 1a (PR A0) → `gh stack add plans-scaffolding-untrack`.
 
-### Phase 2: hygiene, untrack, permalinks, policy (Arc A; one atomic change)
+### Phase 2: hygiene, untrack, permalinks, policy (Arc A; one atomic change) ✓
 
 0. **Before enforcement is switched on**, close codex A0 round 3's open finding: classify decoded values, not raw spellings.
    - Decode the discriminating attributes (`http-equiv`, …) before classifying. `http-equiv="ref&#114;esh"` is then `link-opaque`, like every meta refresh.
@@ -511,7 +511,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
 
 **Arc A boundary:** codex loop → wave 1b (PR A) → `gh stack add plans-scaffolding-closures`.
 
-### Phase 3: the closure table (Arc J)
+### Phase 3: the closure table (Arc J) ✓
 
 - `tools/classify.ts` ports the recon classifier. It reads a frozen snapshot committed beside it: `gh pr list --state all --limit 10000 --json …` and the same for issues (F21), plus the repository's `pullRequests.totalCount` and `issues.totalCount` from `gh api graphql`. `--check` fails unless each snapshot's length equals its total.
 - Fixtures:
@@ -525,7 +525,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
 - **Hard stop** on any AMBIGUOUS row or unanswered Ask.
 
 **Validation gate.**
-- Commands: `bun test implementations-plan/plans-scaffolding/tools/`, `bun implementations-plan/plans-scaffolding/tools/classify.ts --check closures.json`.
+- Commands: `bun test implementations-plan/plans-scaffolding/tools/`, `bun implementations-plan/plans-scaffolding/tools/classify.ts --check` (it reads this dir's `closures.json`).
 - Pass: exit 0, one row per top-level dir (`git ls-tree -d HEAD implementations-plan/` minus `archive`), 0 ambiguous rows, and both snapshots complete.
 - Layers: unit.
 
@@ -768,6 +768,9 @@ In order. No `/code-review`: `code_review` is `off`.
 | L12 | Per-arc pre-merge gates in a clean clone at the PR head; D regenerated on a refreshed base | final pass 5 | One shared re-run of `check.ts` and `untrack.ts --verify` | adopted |
 | L13 | Arc sizes and diffs against `$PARENT`; complete API enumeration for D | final pass 6 | `origin/dev...HEAD`, which counts unmerged lower arcs | adopted |
 | L14 | gh-stack squash rehearsal: local `--onto` rehearsal, GitHub sandbox only with owner consent | final pass 7 | Trusting the docs alone | adopted: local rehearsal only (A16, § Approval) |
+| L15 | A dir's date and its drift skip mechanical commits: the import, #692, and this plan's own A, C and D squashes (by subject); drift counts commits, not a diff | Phase 3 | `git diff --quiet` from `closuresBase`: C's relocations would read as drift in every dir they touch | adopted |
+| L16 | A PR delivered a plan when its squash touched the dir (the snapshot's `mergeCommit`, else a trailing `(#N)`), or when the dir's line (else its host) names it and it merged after the dir's first commit. A PR merged into a stack branch, or up to 2 minutes before that commit in one stack merge, still counts | Phase 3 | Every merged `#N` in the text: 15 of 25 audited rows credited context PRs (`pre-#186`, `#718 left`) | adopted |
+| L17 | Ranges (`#400-#405`) are not expanded; the archive line keeps the range in its hook | Phase 3 | Expanding them: numbers inside a range can belong to other work | adopted |
 
 **Findings**
 
