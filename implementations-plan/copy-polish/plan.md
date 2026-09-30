@@ -98,8 +98,9 @@ Excellent means:
    source string or text node with a clause dash outside a log call and off its reviewed list.
 2. **A snack raised while the Terms sheet is open is seen, and never covers Continue or "Not
    now".** A failed Accept shows its message over the sheet; an arrival snack on Send shows too;
-   the loader and the barriers still draw over the snack; the snack's host returns to its ordinary
-   layer once the sheet goes; a browser case on both engines proves it by hit-testing.
+   the loader and the barriers still draw over the snack, by their stacking values; the snack's
+   host returns to its ordinary layer once the sheet goes; a browser case on both engines proves
+   the card over the sheet by hit-testing and the return by computed style.
 
 Good enough: thrown developer text, log lines, the developer-mode journal box and dApp-facing
 messages keep their dashes (§ The string table, Leave); Add token still shows the PXE store's two
@@ -402,9 +403,11 @@ readers, and an unknown row's name says so since a Tab to it skips its sub-heade
   `utils/copy-dash-ban.test.ts`; `CLAUDE.md`.
 - **G**: `utils/glossary.ts`, its two tests.
 - **T**: `components/LegalAcceptanceSheet.vue`, `components/LegalAcceptanceSheet.test.ts`,
-  `popup/app.vue` (the host class), `tests/e2e/legal-acceptance.test.ts` (one case, and two
-  assertions in S4), `tests/e2e/fixtures/browser/index.ts`, `chrome.ts`, `firefox.ts` (one driver
-  method, § P5), and one line in `tests/e2e/FIREFOX.md`, whose table lists the driver's methods.
+  `popup/app.vue` (the host class, and a `toast-root` testid on `#toast` for the e2e reads, found
+  in the build), `tests/e2e/legal-acceptance.test.ts` (one case, and two assertions in S4),
+  `tests/e2e/helpers/legal-drivers.ts` (the refusal, the hit-test read, the layer wait),
+  `tests/e2e/fixtures/browser/index.ts`, `chrome.ts`, `firefox.ts` (one driver method, § P5), and
+  one line in `tests/e2e/FIREFOX.md`, whose table lists the driver's methods.
 - **A-27**: `components/composite/capabilities/DetailsTable.vue`, `DetailsTable.test.ts`.
 - **Plan**: `implementations-plan/copy-polish/`, one line in `implementations-plan/index.md`.
 
@@ -446,9 +449,10 @@ readers, and an unknown row's name says so since a Tab to it skips its sub-heade
   nothing on a card accepts anything. An arrival card carries a sender-chosen token symbol,
   sanitised and capped at 32 characters (`useArrivals.ts:363`); on the sheet it can say only
   "Received 5 <symbol>". The loader, the notification layer and the barriers still draw over both
-  the sheet and the card, the passkey dialog never shares a route with the sheet (Fact 14), and a
-  browser case checks the loader on Chrome. Once the sheet goes, the host drops back to its
-  ordinary layer, so no snack outlives the sheet above a menu or popover (P5).
+  the sheet and the card by their stacking values (a worker restart never draws the loader, P5),
+  and the passkey dialog never shares a route with the sheet (Fact 14). Once the sheet goes, the
+  host drops back to its ordinary layer, so no snack outlives the sheet above a menu or popover
+  (P5).
 - **A-27.** The spoken name reads the same sanitised, truncated address as the visible row
   (`DetailsTable.vue:49`), so no new dApp data enters the accessible name; an unknown row has no
   dApp-given name to read.
@@ -517,7 +521,9 @@ readers, and an unknown row's name says so since a Tab to it skips its sub-heade
     (`passkey/PasskeyCeremonyDialog.vue:101`), mounted only on routes the sheet never covers
     (`popup/pages/profile/new.vue`, `import.vue` and `auth.vue` are not auth-required, `:4`; the
     export route is never covered); `Tooltip` at 50000 (`packages/design/src/ui/Tooltip.vue:242`).
-    The loader shows while the background is disconnected (`GlobalLoader.vue:13`).
+    The loader shows while the background is disconnected (`GlobalLoader.vue:13`); found in the
+    build, a worker restart never draws it, since the port client reconnects inside its own
+    disconnect callback (`packages/extension-messaging/src/background/client.ts:94-97`).
 15. `GLOSSARY.authorization.where` is "Permission window · approval window"
     (`utils/glossary.ts:43-47`), rendered at `popup/pages/settings/glossary.vue:26`, pinned by
     `utils/glossary.test.ts:18-24` and `popup/pages/settings/glossary.test.ts:40`; the term is
@@ -671,7 +677,7 @@ no fix, test or question unless it says otherwise:
   the guard's roots, and its header says so.
 
 Realistic, and covered: the corrupt passkey-key restore (E44), the PXE store's errors on Add token
-(E45, E46), and a snack over the sheet from a background restart (the browser case).
+(E45, E46), and a snack over the sheet from a refused acceptance write (the browser case).
 
 ### Follow-ups
 
@@ -769,20 +775,26 @@ Layers: lint, component.
 
 1. **The driver method**: `evaluateInBackground(owner, body)` on `BrowserDriver`
    (`tests/e2e/fixtures/browser/index.ts`), Chrome through the service-worker target's worker,
-   Firefox through `evaluateInBackgroundPage` (`firefox.ts:372`). A browser difference lives on
-   the driver (`tests/e2e/FIREFOX.md`).
+   Firefox through `evaluateInBackgroundPage` (`firefox.ts:372`), whose frame script runs the body
+   in a sandbox with the event page's principal: through its Xrays `content.chrome` is undefined,
+   and the page's CSP blocks `eval` (found in the build). A browser difference lives on the
+   driver (`tests/e2e/FIREFOX.md`).
 2. **The browser case**, in `tests/e2e/legal-acceptance.test.ts`, red before P3's change on both
    engines: with the sheet showing and the consent box ticked, the background's
    `chrome.storage.local.set` is made to refuse the acceptance key once (Inference 2), and
    Continue is pressed. Then: the sheet is still visible; `elementFromPoint` at the card's centre
    lands in `snackbar`; the card's bottom is 12 px (±1) above Continue's row; `elementFromPoint`
    at Continue's centre and at "Not now"'s centre land on those buttons; a point in the card's row
-   beside the card lands in `legal-sheet`. Then, on Chrome only, with the sheet and the card still
-   up, the background is stopped and `elementFromPoint` at the card's centre lands in
-   `global-loader` (the reason key `backgroundKillUnderPage`, `fixtures/browser/index.ts:183`),
-   and the case waits for the loader to clear. Last, on both, Continue is pressed again (the
-   refusal was one-shot, and a restarted background holds none): the acceptance lands, the sheet
-   closes, and `#toast`'s computed `z-index` is `auto`.
+   beside the card lands in `legal-sheet`. Last, Continue is pressed again (the refusal was
+   one-shot): the acceptance lands, the sheet closes, and `#toast`'s computed `z-index` is `auto`.
+   **Amended in the build**: the planned Chrome-only step (stop the background, then hit
+   `global-loader` at the card's centre) is dropped, since a worker restart never draws the
+   loader. The port client reconnects inside its own disconnect callback
+   (`packages/extension-messaging/src/background/client.ts:94-97`), so `isBackgroundConnected`
+   goes false and true in one tick and the batched loader renders nothing, as the shell's own
+   comment says (`popup/app.vue:423-427`). The first run proved it: a mutation observer armed
+   before the stop saw no loader in 15 s (`lessons/phase-5.md`). The loader's and the barriers'
+   order over the raised host rests on their stacking values (Fact 14).
 3. **S4 gains two assertions** around its first decline (`declineFromSheet`): while the sheet
    shows, `#toast`'s computed `z-index` is `9500`; once the declined screen shows, `auto`. The
    existing cases keep proving that "Not now" takes a real pointer click.
