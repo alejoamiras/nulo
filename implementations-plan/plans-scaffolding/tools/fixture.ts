@@ -94,6 +94,12 @@ A paragraph about them.
 /** Git pairs an edited file with its rename only while half of it is unchanged, as the real hosts are. */
 export const PAD = `\n${"This paragraph pads the file, so git still pairs its rename once a block is added. ".repeat(20).trim()}\n`
 
+/** Long lines that each open with a rooted cite: mapping them leaves the file too unlike itself for git to pair. */
+const CITES = Array.from(
+	{ length: 6 },
+	(_, i) => `- See [the plan](implementations-plan/done/plan.md:${i + 1}), ${"then a long tail of prose ".repeat(12)}\n`,
+).join("")
+
 /**
  * One plan tree for the archive tools: closed dirs with no block, front matter, a partial block, a
  * complete one, a nested plan, no host, seed files; active and parked dirs; a row whose dir is gone; and
@@ -106,6 +112,7 @@ export function planTree(): { files: Record<string, string>; rows: Row[] } {
 			"# Follow-ups\n\n- **Fix the thing** — before launch ([plan](done/plan.md)).\n- A child's loose end. It links [the child](nest/child/plan.md).\n- **Live work** — see [live](live/plan.md).\n",
 		[`${P}/lessons.md`]: "# Lessons\n\n- A lesson. [Evidence](done/plan.md)\n",
 		[`${P}/done/plan.md`]: `# Done\n\nSee [the index](../index.md), [live](../live/plan.md), [code](../../apps/x.ts) and [fm](../fm/plan.md).\n\n\`\`\`\n/goal finish done\n\`\`\`\n${PAD}`,
+		[`${P}/done/cites.md`]: `# Cites\n\n${CITES}`,
 		[`${P}/fm/plan.md`]: `---\nplan: fm\ntier: light\n---\n\n# FM\n${PAD}`,
 		[`${P}/partial/plan.md`]:
 			"---\nplan: partial\n---\n\n## Outcome\n\n- **Date:** 2026-09-02. **Status:** closed.\n- **Shipped** on a branch.\n- **Seeds retired:** spent.\n\n# Partial\n",

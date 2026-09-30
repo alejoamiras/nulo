@@ -9,7 +9,9 @@
  * its mapped path, R100 unless an edit is planned for it; every planned edit's file equal to its
  * derivation; no addition but `archive/index.md` and the stubs; no modification outside
  * `plans-scaffolding/` without a planned edit; nothing deleted, copied or retyped; fewer than 3,000
- * changed files. Without `--date` the stamp is read back from the generated text.
+ * changed files. A planned edit git cannot pair (under 50% similar) passes as the deletion of its old path
+ * and the addition of its mapped one, with a note. Without `--date` the stamp is read back from the
+ * generated text.
  */
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -143,12 +145,33 @@ export function swapProblems(cwd: string, parent: string, swaps: readonly [strin
 	)
 }
 
+/**
+ * Planned edits that leave a moved file under git's 50% rename similarity, so the diff shows its old path
+ * deleted and its mapped path added. Only a planned edit qualifies: its text is still proved against the
+ * derivation, while an unedited file must pair at R100.
+ */
+export function unpairedEdits(changes: readonly Change[], d: Derivation): Map<string, string> {
+	const added = new Set(changes.flatMap((c) => (c.status === "A" ? c.paths : [])))
+	return new Map(
+		changes.flatMap((c) => {
+			const to = c.status === "D" ? d.renames.get(c.paths[0]) : undefined
+			return to !== undefined && added.has(to) && d.edits.has(to) ? [[c.paths[0], to] as const] : []
+		}),
+	)
+}
+
+function outsidePairs(changes: readonly Change[], unpaired: ReadonlyMap<string, string>): Change[] {
+	const targets = new Set(unpaired.values())
+	return changes.filter((c) => !(c.status === "D" && unpaired.has(c.paths[0])) && !(c.status === "A" && targets.has(c.paths[0])))
+}
+
 /** Every way HEAD departs from the derivation. */
 export function fidelityProblems(cwd: string, parent: string, d: Derivation, cap = MAX_CHANGED): string[] {
 	const changes = nameStatus(cwd, parent, "HEAD")
-	const j: Judge = { d, paired: new Set(), swaps: [] }
+	const unpaired = unpairedEdits(changes, d)
+	const j: Judge = { d, paired: new Set(unpaired.keys()), swaps: [] }
 	const problems = changes.length >= cap ? [`${changes.length} changed files, at or over the ${cap} cap`] : []
-	for (const c of changes) problems.push(...changeProblems(c, j))
+	for (const c of outsidePairs(changes, unpaired)) problems.push(...changeProblems(c, j))
 	problems.push(...swapProblems(cwd, parent, j.swaps, d.renames))
 	for (const from of d.renames.keys()) if (!j.paired.has(from)) problems.push(`${from}: no rename pairs it with ${d.renames.get(from)}`)
 	const head = commitView(cwd, "HEAD")
@@ -168,6 +191,12 @@ function stampFromHead(cwd: string): string | null {
 	return stampOf(docs.map((p) => head.read(p)))
 }
 
+/** Git's rename score for one pair at any similarity, `R0` when it will not pair them at all. */
+function similarity(cwd: string, parent: string, from: string, to: string): string {
+	const [code] = git(cwd, "diff", "--name-status", "-M1%", "-z", parent, "HEAD", "--", from, to).split("\0")
+	return code.startsWith("R") ? code : "R0"
+}
+
 function flag(argv: readonly string[], name: string): string | undefined {
 	const at = argv.indexOf(name)
 	return at === -1 ? undefined : argv[at + 1]
@@ -181,9 +210,14 @@ function verify(cwd: string, argv: readonly string[]): number {
 	const d = derive(cwd, parent, stamp)
 	const problems = fidelityProblems(cwd, parent, d)
 	for (const p of problems) console.log(p)
-	const changed = nameStatus(cwd, parent, "HEAD").length
+	const changes = nameStatus(cwd, parent, "HEAD")
+	const unpaired = unpairedEdits(changes, d)
+	for (const [from, to] of unpaired)
+		console.log(
+			`note: ${from} → ${to}: git pairs this planned edit only at ${similarity(cwd, parent, from, to)}, so the diff shows it deleted and added`,
+		)
 	console.log(
-		`archive-move --verify: ${d.renames.size} renames, ${d.edits.size} planned edits (${d.added.size} added), ${changed} changed files, ${problems.length} problem(s)`,
+		`archive-move --verify: ${d.renames.size} renames (${unpaired.size} unpaired by git), ${d.edits.size} planned edits (${d.added.size} added), ${changes.length} changed files, ${problems.length} problem(s)`,
 	)
 	return problems.length === 0 ? 0 : 1
 }

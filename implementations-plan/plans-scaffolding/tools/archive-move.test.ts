@@ -34,6 +34,9 @@ describe("archive-move", () => {
 		const { repo, head, run } = archived()
 		const verified = tool(repo, "archive-move", "--verify", "--parent", head)
 		expect(verified.out).toContain("0 problem(s)")
+		expect(verified.out).toMatch(
+			new RegExp(`note: ${P}/done/cites.md → ${P}/archive/done/cites.md: git pairs this planned edit only at R\\d+,`),
+		)
 		expect(verified.status).toBe(0)
 		for (const step of STEPS) run(step)
 		expect(git(repo, "status", "--short")).toBe("")
@@ -86,6 +89,10 @@ describe("archive-move", () => {
 		const append = (path: string) => () => appendFileSync(join(repo, path), "Stray.\n")
 		expect(fidelityProblems(repo, head, d)).toEqual([])
 		expect(probe(append(`${P}/archive/fm/plan.md`))).toContain(`${P}/archive/fm/plan.md: differs from its derivation`)
+		expect(probe(append(`${P}/archive/done/cites.md`))).toBe(`${P}/archive/done/cites.md: differs from its derivation`)
+		expect(probe(() => writeFiles(repo, { [`${P}/archive/stubbed/notes.md`]: "Rewritten past recognition.\n" }))).toContain(
+			`${P}/stubbed/notes.md: D, which the archive commits never make`,
+		)
 		expect(probe(append(`${P}/archive/stubbed/notes.md`))).toMatch(/stubbed\/notes\.md → .*: R\d+ with no planned edit/)
 		expect(probe(() => writeFiles(repo, { [`${P}/archive/fm/extra.md`]: "x\n" }))).toContain("extra.md: added, but neither")
 		expect(probe(append("apps/x.ts"))).toContain("apps/x.ts: modified with no planned edit")
