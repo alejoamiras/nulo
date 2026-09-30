@@ -24,7 +24,7 @@ const openToastMock = vi.fn()
 const allowMock = vi.fn().mockResolvedValue(undefined)
 const rejectMock = vi.fn().mockResolvedValue(undefined)
 
-const contractAddress = `0x${"ab".repeat(32)}`
+const contractAddress = `0x${"0a".repeat(32)}`
 
 // reactive() so the popup's `tokenSymbol` computed re-evaluates when a test
 // models a mid-RPC identity switch (mutating incomingTrust). A plain object
@@ -32,7 +32,7 @@ const contractAddress = `0x${"ab".repeat(32)}`
 const cacheStoreState: {
 	incomingTrust: {
 		tokenSymbol: string
-		tokenDecimals: number
+		tokenDecimals?: number
 		amountRaw: string
 		contract: string
 		allow: () => Promise<void>
@@ -59,9 +59,6 @@ vi.mock("@/composables/toast", () => ({
 	useToast: () => ({
 		openToast: openToastMock,
 	}),
-}))
-vi.mock("@/utils/amount.js", () => ({
-	balanceFormatted: (raw: string, _decimals: number, _max: number) => ({ value: raw }),
 }))
 vi.mock("@/utils/string", () => ({
 	trimAddress: (s: string, head: number, tail: number) => `${s.slice(0, head)}…${s.slice(-tail)}`,
@@ -114,7 +111,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 
 		const trimmed = w.find('[data-testid="incoming-trust-contract"]')
 		expect(trimmed.exists()).toBe(true)
-		expect(trimmed.text()).toBe(`0xabab…abab`)
+		expect(trimmed.text()).toBe(`0x0a0a…0a0a`)
 
 		const expandBtn = w.find('[data-testid="incoming-trust-contract-expand"]')
 		expect(expandBtn.exists()).toBe(true)
@@ -216,6 +213,20 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		// to prevent state bleed across separate pending contracts.
 		expect(w.find("#incoming-trust-contract-full").attributes("style") ?? "").toContain("display: none")
 		expect(w.find('[data-testid="incoming-trust-contract-expand"]').attributes("aria-expanded")).toBe("false")
+	})
+})
+
+describe("IncomingTrustPopup — the first-receive sentence names no amount", () => {
+	test.each([
+		["18 decimals", 18],
+		["decimals 255", 255],
+		["no decimals", undefined],
+	])("a receipt reported at %s reads the symbol alone", async (_name, tokenDecimals) => {
+		cacheStoreState.incomingTrust.tokenDecimals = tokenDecimals
+		const w = mount(IncomingTrustPopup, { props: { show: true }, global: { stubs: STUBS } })
+		await flushPromises()
+		expect(w.text()).toContain("You received TST from a contract you haven't seen before.")
+		cacheStoreState.incomingTrust.tokenDecimals = 18
 	})
 })
 

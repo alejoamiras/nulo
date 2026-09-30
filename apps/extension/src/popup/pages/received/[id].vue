@@ -43,7 +43,8 @@ import { usePrices } from "@/composables/usePrices"
 import { balanceFormatted } from "@/utils/amount.js"
 import { copyReceivedValue } from "./received-copy"
 import { trimAddress } from "@/utils/string"
-import { receivedLabel, resolveFromDisplay, resolveReceivedType } from "@/utils/received-display"
+import { receivedLabel, resolveFromDisplay, resolveReceivedType, tokenForReceipt } from "@/utils/received-display"
+import { knownDecimals } from "@/utils/token-amount"
 import { getTransactionExplorerUrl, BLOCK_EXPLORERS } from "@/wallet/constants/explorers"
 import { formatFeeJuice, feeToUsd, feeJuicePricingFromUsd } from "@/utils/fee-estimation"
 
@@ -93,16 +94,13 @@ const onReceiptDeleted = (rec) => {
 incomingTransferService.onIncomingTransferDeleted.add(onReceiptDeleted)
 
 /** Derived — token + amount */
-const token = computed(() => {
-	const inc = received.value
-	if (!inc) return undefined
-	return tokens.value.find((t) => (inc.tokenId !== undefined && t.id === inc.tokenId) || t.contract === inc.contract)
-})
+const token = computed(() => (received.value ? tokenForReceipt(tokens.value, received.value) : undefined))
 const tokenSymbol = computed(() => token.value?.symbol || "Token")
 const formattedAmount = computed(() => {
 	const inc = received.value
-	if (!inc) return null
-	return balanceFormatted(inc.amountRaw, token.value?.decimals || 0, 8).value
+	const decimals = knownDecimals(token.value)
+	if (!inc || decimals === null) return null
+	return balanceFormatted(inc.amountRaw, decimals, 8, { compact: true }).value
 })
 const amountFiat = computed(() => {
 	const inc = received.value
@@ -221,7 +219,7 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<Flex align="center" direction="column" gap="6">
+			<Flex v-if="formattedAmount" align="center" direction="column" gap="6">
 				<span :class="$style.amount_value">
 					+{{ formattedAmount }}
 					<span :class="$style.amount_symbol">{{ tokenSymbol }}</span>

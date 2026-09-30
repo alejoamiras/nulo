@@ -677,7 +677,7 @@ Gate:
 - Pass: both exit 0 (the plans check reads the new directory).
 - Layers: lint, CI-gating.
 
-### P1 · Activity amounts from known decimals (A1)
+### P1 · Activity amounts from known decimals (A1) ✓
 
 Assumptions: Facts 1 to 10, 18 to 21; Inferences 2, 4 and 5; O1 (a) and O4 (b), as answered.
 Addresses in every new or touched fixture are `0x` + `0a` × 32 style values below the field

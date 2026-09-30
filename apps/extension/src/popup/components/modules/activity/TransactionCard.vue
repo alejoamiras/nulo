@@ -11,10 +11,11 @@
 import TransactionCardLayout from "@/components/composite/activity/TransactionCardLayout.vue"
 
 /** Services */
-import { OriginType, TxStatus, TxExecutionResult } from "@/wallet/services/transaction/client"
+import { TxStatus, TxExecutionResult } from "@/wallet/services/transaction/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { txAmount } from "@/utils/tx-amount"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "@/composables/usePrices"
 import { getTransactionExplorerUrl } from "@/wallet/constants/explorers"
@@ -28,6 +29,8 @@ const props = defineProps({
 	tx: {
 		type: Object,
 	},
+	/** The profile and chain's tokens: a mint shows an amount only for a token in this list. */
+	tokens: { type: Array, default: () => [] },
 	/** The route the row opens. */
 	to: { type: String, default: undefined },
 })
@@ -35,28 +38,7 @@ const props = defineProps({
 const call = computed(() => getPrimaryCall(props.tx.calls))
 const type = computed(() => getTxCategory(props.tx.calls))
 const transfer = computed(() => (call.value?.transfers ? call.value.transfers[0] : null))
-const token = computed(() => transfer.value?.token)
-const transferAmount = computed(() => {
-	if (transfer.value) {
-		return balanceFormatted(transfer.value.amount || 0, token.value?.decimals || 0, 8).value
-	}
-
-	return 0
-})
-
-const mintAmount = computed(() => {
-	if (type.value !== "mint") return 0
-
-	const decimals = props.tx?.origin?.type === OriginType.UI ? 8 : 0
-	// Sum raw base units in bigint domain; format once at the end.
-	let amount = 0n
-	for (const c of props.tx.calls) {
-		const last = c.args?.at(-1)
-		if (last !== undefined && last !== null) amount += BigInt(last)
-	}
-
-	return balanceFormatted(amount, decimals, 8).value
-})
+const amount = computed(() => txAmount(props.tx.calls, props.tokens))
 
 const icon = computed(() => {
 	if (type.value === "transfer") return "arrow-narrow-up-right"
@@ -103,8 +85,7 @@ const txStatusAttr = computed(() => {
 })
 
 const title = computed(() => {
-	// For transfers, show token symbol instead of generic "Transfer"
-	if (type.value === "transfer" && token.value?.symbol) return token.value.symbol
+	if (type.value === "transfer" && amount.value?.symbol) return amount.value.symbol
 	return getTxTitle(props.tx.calls)
 })
 
@@ -125,27 +106,19 @@ const explorerUrl = computed(() => {
 	return getTransactionExplorerUrl(appStore.network.chainId, appStore.defaultExplorer, props.tx.hash)
 })
 
-/** The amount column shows transfer amount or mint amount; nothing for other tx types. */
-const displayAmount = computed(() => {
-	if (type.value === "transfer" && token.value) return transferAmount.value
-	if (type.value === "mint") return mintAmount.value
-	return null
-})
-const displayAmountSymbol = computed(() => {
-	if (type.value === "transfer" && token.value?.symbol) return token.value.symbol
-	return null
-})
+const amountStr = computed(() =>
+	amount.value ? balanceFormatted(amount.value.units, amount.value.decimals, 8, { compact: true }).value : null,
+)
+const displayAmountSymbol = computed(() => amount.value?.symbol || null)
 
-const amountStr = computed(() => (displayAmount.value !== null ? String(displayAmount.value) : null))
-
-/** D2: fiat under the amount for priced transfer rows (today's rate). */
+/** Fiat under the amount for priced transfer rows, at today's rate. */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const amountFiat = computed(() => {
-	if (type.value !== "transfer" || !transfer.value || !call.value?.contract) return null
+	if (type.value !== "transfer" || !amount.value || !call.value?.contract) return null
 	const label = prices.tokenFiatLabel(
-		{ chainId: appStore.network?.chainId, contract: call.value.contract, decimals: token.value?.decimals ?? 0 },
-		BigInt(transfer.value.amount || 0),
+		{ chainId: appStore.network?.chainId, contract: call.value.contract, decimals: amount.value.decimals },
+		amount.value.units,
 	)
 	return label ?? null
 })

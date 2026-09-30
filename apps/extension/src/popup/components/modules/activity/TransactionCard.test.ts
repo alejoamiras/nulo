@@ -105,16 +105,40 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		expect(w.text()).toContain("example.dapp.io")
 	})
 
-	test("a dApp's mint of one 18-decimal token, as the wire carries it, never reads as >999T", () => {
-		const oneToken = `0x${(10n ** 18n).toString(16).padStart(64, "0")}`
-		const w = mountCard({
+	describe("a dApp's mint, as the wire carries it", () => {
+		const field = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`
+		const TOKEN = `0x${"0a".repeat(32)}`
+		const RECIPIENT = `0x${"0c".repeat(32)}`
+		const tokens = [
+			{ id: 1, chainId: CHAIN_IDS.MAINNET, contract: TOKEN, name: "Test", symbol: "TST", decimals: 18, hasDecimals: true },
+		]
+		const mintTx = (...amounts: bigint[]) => ({
 			hash: "0xmint1",
 			status: TxStatus.Proposed,
-			calls: [{ contract: "0xtoken", method: "mint_to_public", args: [`0x${"ab".repeat(32)}`, oneToken] }],
+			calls: amounts.map((a) => ({ contract: TOKEN, method: "mint_to_public", args: [RECIPIENT, field(a)] })),
 			origin: { type: OriginType.DAPP, name: "example.dapp.io" },
 		})
-		expect(w.find(".amount").text()).not.toBe("")
-		expect(w.text()).not.toContain(">999T")
+
+		test("of a listed 18-decimal token reads 1 and its symbol", () => {
+			const w = mountCard(mintTx(10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("1")
+			expect(w.find(".symbol").text()).toBe("TST")
+		})
+
+		test("of an unlisted token shows no amount", () => {
+			const w = mountCard(mintTx(10n ** 18n))
+			expect(w.find(".amount").text()).toBe("")
+		})
+
+		test("of 1,234,567 tokens reads the compact form", () => {
+			const w = mountCard(mintTx(1_234_567n * 10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("1.23M")
+		})
+
+		test("with two mint calls shows no amount", () => {
+			const w = mountCard(mintTx(10n ** 18n, 10n ** 18n), { tokens })
+			expect(w.find(".amount").text()).toBe("")
+		})
 	})
 
 	test("`to` reaches the layout, and the explorer link is a named action opening a new tab", () => {

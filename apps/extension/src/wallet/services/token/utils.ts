@@ -8,6 +8,7 @@ export const getTokenInfo = (token: Token): TokenInfo => ({
 	name: token.name,
 	symbol: token.symbol,
 	decimals: token.decimals,
+	hasDecimals: !!token.getDecimalsFn,
 	hasPublicBalances: !!token.balanceOfPublicFn,
 	hasPublicTransfers: !!token.transferPublicFn,
 	hasPublicToPrivateTransfers: !!token.transferPublicToPrivateFn,

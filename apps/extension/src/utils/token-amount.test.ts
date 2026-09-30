@@ -1,5 +1,7 @@
 import { describe, expect, test, vi } from "vitest"
-import { MAX_DECIMALS, isValidDecimals, parseRawBalance, safeFiatOf } from "./token-amount"
+import type { Token } from "@/wallet/services/token/spec"
+import { getTokenInfo } from "@/wallet/services/token/utils"
+import { MAX_DECIMALS, isValidDecimals, knownDecimals, parseRawBalance, safeFiatOf } from "./token-amount"
 
 describe("parseRawBalance", () => {
 	test("sums both sides; an absent side is zero", () => {
@@ -28,6 +30,33 @@ describe("isValidDecimals", () => {
 		expect(isValidDecimals("18")).toBe(false)
 		expect(isValidDecimals(Number.NaN)).toBe(false)
 		expect(isValidDecimals(undefined)).toBe(false)
+	})
+})
+
+describe("knownDecimals", () => {
+	const row = (over: Partial<Token>): Token => ({
+		id: 1,
+		profileId: "p1",
+		chainId: 1,
+		contract: `0x${"0a".repeat(32)}`,
+		name: "Test",
+		symbol: "TST",
+		decimals: 18,
+		getDecimalsFn: { name: "decimals", impl: 0 },
+		...over,
+	})
+
+	test.each([
+		["a getter at 18", row({}), 18],
+		["a getter at 0", row({ decimals: 0 }), 0],
+		["no getter, stored 0", row({ decimals: 0, getDecimalsFn: undefined }), null],
+		["a getter at 255", row({ decimals: 255 }), null],
+	])("%s", (_name, token, expected) => {
+		expect(knownDecimals(getTokenInfo(token))).toBe(expected)
+	})
+
+	test("no token", () => {
+		expect(knownDecimals(undefined)).toBeNull()
 	})
 })
 

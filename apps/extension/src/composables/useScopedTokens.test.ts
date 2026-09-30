@@ -12,6 +12,7 @@ const token = (id: number, symbol: string): TokenInfo => ({
 	name: symbol,
 	symbol,
 	decimals: 18,
+	hasDecimals: true,
 	hasPublicBalances: true,
 	hasPublicTransfers: true,
 	hasPublicToPrivateTransfers: true,
