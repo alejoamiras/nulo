@@ -151,6 +151,7 @@ export class TransferExecutor {
 				? await this.fromReusedEstimate(reused, req, precomputedEstimateId, fence)
 				: await this.buildFresh(req, fence, transferTask)
 			const { token: activityToken, fnName: activityFnName, args: activityArgs } = activity
+			const submittedEndpointUrl = primaryEndpointUrl(network)
 
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
 			// `txCalls` from the build carries the FPC mutation (`pay_fee` for
@@ -169,6 +170,10 @@ export class TransferExecutor {
 				checkCancelled,
 				...fenceChecks(this.deps, fence),
 				markJournal: (patch) => markJournal(patch),
+				commitSubmitting: async (patch) => {
+					await this.deps.transitionJournal(created.journalId, { stage: "submitting", ...patch })
+				},
+				submittedEndpointUrl,
 				recordTransaction: (hash) =>
 					this.deps.addTransaction(
 						origin,
@@ -197,7 +202,7 @@ export class TransferExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
-						primaryEndpointUrl(network),
+						submittedEndpointUrl,
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 						fence,

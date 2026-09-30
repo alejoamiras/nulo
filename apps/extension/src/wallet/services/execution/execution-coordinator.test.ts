@@ -12,13 +12,17 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
+import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { TaskService, WrappedTask } from "@/wallet/services/task/service"
 import { DuplicateInitializationError, SessionEndedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
+import { IllegalTransitionError, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { LegalAdmission } from "@/wallet/services/legal/spec"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { ExecutionCoordinator, type ProveAndSendContext } from "./execution-coordinator"
 
 const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() } as unknown as WrappedTask
@@ -69,6 +73,10 @@ function makeHarness(overrides: Partial<ProveAndSendContext> = {}) {
 		markJournal: vi.fn(async (patch: { stage: string }) => {
 			calls.push(`journal:${patch.stage}`)
 		}),
+		commitSubmitting: vi.fn(async () => {
+			calls.push("journal:submitting")
+		}),
+		submittedEndpointUrl: "https://rpc.submit",
 		recordTransaction: vi.fn(async () => {
 			calls.push("record")
 		}),
@@ -160,6 +168,91 @@ describe("proveAndSend: frozen sequence", () => {
 		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toThrow("mempool full")
 		expect(calls).not.toContain("record")
 		expect(calls).not.toContain("journal:succeeded")
+	})
+})
+
+describe("proveAndSend: the submitting write is the send's precondition", () => {
+	test("submitting is committed with the hash and the context's endpoint, never through markJournal", async () => {
+		const { ctx } = makeHarness()
+		await makeCoordinator().proveAndSend(ctx)
+		expect(ctx.commitSubmitting).toHaveBeenCalledWith({ txHash: "0xhash", submittedEndpointUrl: "https://rpc.submit" })
+		expect(ctx.markJournal).not.toHaveBeenCalledWith(expect.objectContaining({ stage: "submitting" }))
+	})
+
+	/** A real journal row at `simulating`, bound the way the executors bind it: `markJournal`
+	 *  best-effort (a failed write is logged and swallowed), `commitSubmitting` not. */
+	async function journaled() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const journal = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		const services = new ServiceCollection()
+		services.add(journal)
+		await services.start()
+		const { id } = await journal.createOperation({ kind: "transfer", origin: "popup", profileId: "p1" })
+		await journal.transitionOperation(id, { stage: "simulating" })
+		const harness = makeHarness({
+			journalId: id,
+			markJournal: (patch) => journal.transitionOperation(id, patch).catch(() => undefined),
+			commitSubmitting: async (patch) => {
+				await journal.transitionOperation(id, { stage: "submitting", ...patch })
+			},
+		})
+		/** Every caller's catch: fail the row with the error. */
+		const failRow = (error: unknown) => journal.transitionOperation(id, { stage: "failed" }, normalizeError(error, "transfer"))
+		return { ...harness, api, journal, id, failRow }
+	}
+
+	test("a refused submitting write sends nothing, and the row then fails from proving", async () => {
+		const { ctx, node, api, journal, id, failRow } = await journaled()
+		const write = api.storage.local.set.bind(api.storage.local)
+		let refused = false
+		vi.spyOn(api.storage.local, "set").mockImplementation(async (entries) => {
+			const submitting = Object.values(entries).some((v) => typeof v === "string" && v.includes('"stage":"submitting"'))
+			if (submitting && !refused) {
+				refused = true
+				throw new Error("storage write failed")
+			}
+			return write(entries)
+		})
+		const error = await makeCoordinator()
+			.proveAndSend(ctx)
+			.catch((e: unknown) => e)
+		expect(error).toEqual(new Error("storage write failed"))
+		await failRow(error)
+		expect(node.sendTx).not.toHaveBeenCalled()
+		expect((await journal.getOperation(id))?.progress).toEqual({ stage: "failed", from: "proving" })
+	})
+
+	test("a row the reaper failed during the proof refuses the commit, and nothing is sent", async () => {
+		const { ctx, node, pxe, provedTx, journal, id } = await journaled()
+		;(pxe.proveTx as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+			await journal.transitionIfStage(
+				id,
+				["proving"],
+				{ stage: "failed" },
+				{ kind: "stuck_proving", message: "x", normalizedRaw: null },
+			)
+			return provedTx
+		})
+		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toBeInstanceOf(IllegalTransitionError)
+		expect(node.sendTx).not.toHaveBeenCalled()
+		expect((await journal.getOperation(id))?.progress).toEqual({ stage: "failed", from: "proving" })
+	})
+
+	test("a cancel that reaches the journal before the commit surfaces as the cancel", async () => {
+		const controller = new AbortController()
+		const { ctx, node, provedTx, journal, id } = await journaled()
+		ctx.checkCancelled = () => {
+			if (controller.signal.aborted) throw new JobCancelledSentinel(id)
+		}
+		provedTx.toTx.mockImplementationOnce(async () => {
+			await journal.transitionOperation(id, { stage: "cancelled" })
+			controller.abort()
+			return { getTxHash: () => ({ toString: () => "0xhash" }) }
+		})
+		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toBeInstanceOf(JobCancelledSentinel)
+		expect(node.sendTx).not.toHaveBeenCalled()
+		expect((await journal.getOperation(id))?.progress.stage).toBe("cancelled")
 	})
 })
 

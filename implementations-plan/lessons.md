@@ -6,14 +6,13 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 
 - Bun trusts a warm cache (1.4.2, 2026-09): it never re-checks the lockfile's sha512 against its cache, so a poisoned cached file survives `bun install --frozen-lockfile`; a job that produces release bytes restores no cache ([evidence](tools-extraction/lessons/phase-2.md)).
 - Under `bun test`, loading `@aztec/*` in process throws from `expect.addEqualityTesters` on a cold transpiler cache; run such checks in a `bun` subprocess ([evidence](tools-extraction/lessons/phase-2.md)).
-- Tests with a timing budget (`e2e/config` today) time out under the full parallel `test:all` / `audit:vue` load; rerun the file alone before treating it as breakage (2026-09) ([evidence](tools-extraction/lessons/phase-1.md)). A cold dynamic import in the timed body is one cause: `content-message-relay` and `presto/client` import in `beforeEach` instead, on the hook's default budget, never a raised one ([evidence](e2e-reliability-fixes/lessons/phase-2.md), [evidence](hygiene/lessons/phase-1.md)).
+- Timed tests (`e2e/config` today) time out under the parallel `test:all` / `audit:vue` load, so rerun the file alone before calling it breakage (2026-09); a cold dynamic import in the timed body is one cause, fixed by importing in `beforeEach` on the hook's default budget, as `content-message-relay` and `presto/client` do. [Evidence](tools-extraction/lessons/phase-1.md), [more](e2e-reliability-fixes/lessons/phase-2.md), [more](hygiene/lessons/phase-1.md)
 
 ## Cloudflare
 
 - A Pages project with many deployments cannot be deleted (error 8000076): purge its deployments with `?force=true` first; the active production one goes with the project (2026-09) ([evidence](tools-extraction/lessons/phase-2.md)).
 - wrangler reconciles custom domains only when `routes` lists one (4.129.1, 2026-09), and Workers Builds takes only user tokens: with a Workers-only build token, attach the domain outside the config and commit no `routes` ([evidence](tools-extraction/lessons/phase-2.md)).
-- Cloudflare Access protects a `workers.dev` host as a self-hosted app with no zone involved ([evidence](tools-extraction/lessons/phase-2.md)).
-- An agent session's permission layer refuses DNS and domain changes, and Pages project deletes, even with a token in hand: plan them as owner steps ([evidence](tools-extraction/lessons/phase-2.md)).
+- An agent session refuses DNS and domain changes and Pages project deletes, even with a token in hand: plan them as owner steps ([evidence](tools-extraction/lessons/phase-2.md)).
 
 ## CI & gates
 
@@ -36,6 +35,7 @@ Curated gotchas promoted out of closed plans, read at the start of every task so
 - A wire-shaped field fixture must stay below the BN254 modulus (`0x3064…`): `0x` + `aa` × 32 is above it, so the capability validator refuses it as malformed, while `0x` + `0a` × 32 passes. [Evidence](ux-feedback/b5-permissions/lessons/phase-6.md)
 - A lock section the watchdog force-released keeps running (`packages/wallet-core/src/utils/lock.ts`), and `nextNumericId` (max + 1) hands a purged top id to the next restore, so a late compensating delete by id can take a same-id successor's row. Gate it on `withLock`'s `isCurrent` where the row predates the deletion, whose purge then removes it; where the row may postdate the purge's snapshot, skipping the delete orphans it. [Evidence](wallet-safety-fixes/lessons/phase-6.md)
 - The local network's chain id is 0 (`CHAIN_IDS.SANDBOX`), so a truthiness guard on `chainId` skips the chain every network e2e runs on: History never named a received row's token there. Test for the network, or for `chainId === undefined`. [Evidence](ux-owner-picks/lessons/phase-2.md)
+- The node client retries a failed POST, not a node's refusal: a poller that must go quiet on lock needs a one-attempt client, and a refused retry can hide a send that landed (Aztec 5.2.0, 2026-09). [Evidence](failed-send-check/lessons/phase-7.md)
 
 ## Authorization checks
 

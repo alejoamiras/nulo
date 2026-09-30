@@ -1,6 +1,9 @@
 import {
+	CLIENT_DISCONNECTED_MESSAGE,
 	JobCancelledError,
 	OperationNotRecordedError,
+	RpcDisconnectedError,
+	RpcTimeoutError,
 	remoteErrorFromResponseContent,
 	TermsAcceptanceRequiredError,
 	WalletError,
@@ -9,7 +12,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { ref } from "vue"
 import type { ToastState } from "@/composables/toast"
 import { createScopeEpochHandlers } from "@/popup/scope-epoch"
-import { TRANSFER_FAILED_COPY, TRANSFER_NOT_STARTED_COPY, TRANSFER_TERMS_COPY } from "@/popup/utils/transfer-failure-copy"
+import {
+	TRANSFER_NOT_CONFIRMED_COPY,
+	TRANSFER_NOT_STARTED_COPY,
+	TRANSFER_NOTHING_SENT_COPY,
+	TRANSFER_STATUS_UNKNOWN_COPY,
+	TRANSFER_TERMS_COPY,
+} from "@/popup/utils/transfer-failure-copy"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { type SubmitDeps, submitTransfer, type TransferSnapshot } from "./send-submit"
 
@@ -37,15 +46,16 @@ function fromWire(error: Error, journalId?: string): Error {
 	return remoteErrorFromResponseContent({ error: error.message, errorPayload, journalId })
 }
 
-/** The record a failed send leaves: a terminal failed transfer in the snapshot's scope. */
+/** The record a send that failed before broadcast leaves: a terminal failed transfer in the
+ *  snapshot's scope, failed from `proving`. */
 function failedRecord(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
 		id: JOURNAL_ID,
 		kind: "transfer",
 		origin: "popup",
 		profileId: "p1",
-		progress: { stage: "failed" },
-		error: null,
+		progress: { stage: "failed", from: "proving" },
+		error: { kind: "transfer", message: "boom", normalizedRaw: null },
 		terminalAt: 2,
 		attempts: 0,
 		createdAt: 1,
@@ -95,6 +105,9 @@ function shell() {
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 const snack = (deps: SubmitDeps) => vi.mocked(deps.openToast).mock.calls[0]?.[0]
+const STATUS_UNKNOWN = { kind: "error", label: "Send status unknown", sub: TRANSFER_STATUS_UNKNOWN_COPY }
+/** A send that failed at `submitting` with its hash: it may have reached the node. */
+const MAYBE_SENT = { stage: "failed", from: "submitting", txHash: HASH, submittedEndpointUrl: "https://rpc.example" } as const
 
 /** Scope changes that end on the same ids under a new epoch. */
 const ROUND_TRIPS = [
@@ -164,13 +177,13 @@ describe("send-submit", () => {
 		expect(snack(deps)?.action).toBeUndefined()
 	})
 
-	test("rejected: this row removed, a red snack with the failure sentence, logged as an error, then settled", async () => {
+	test("rejected with no record named: this row removed, a status-unknown snack, logged as an error, then settled", async () => {
 		const { deps, settle } = harness()
 		const id = submitTransfer(deps, SNAP)
 		settle().reject(new Error("boom"))
 		await flush()
 		expect(deps.awaiting.remove).toHaveBeenCalledWith(id)
-		expect(deps.openToast).toHaveBeenCalledWith({ kind: "error", label: "Send failed", sub: TRANSFER_FAILED_COPY })
+		expect(deps.openToast).toHaveBeenCalledWith(STATUS_UNKNOWN)
 		expect(console.error).toHaveBeenCalledWith("[send] executeTransfer failed:", expect.any(Error))
 		expect(deps.onSettled).toHaveBeenCalledTimes(1)
 	})
@@ -249,7 +262,7 @@ describe("send-submit: Details on a failed send", () => {
 	})
 	afterEach(() => vi.restoreAllMocks())
 
-	test("a record named beside the failure and read back as this send's failed transfer: Details opens its page", async () => {
+	test("a record that failed before broadcast: Send failed, nothing was sent, and Details opens its page", async () => {
 		const { deps, settle } = harness()
 		vi.mocked(deps.readJournal).mockResolvedValue(failedRecord())
 		submitTransfer(deps, SNAP)
@@ -259,12 +272,57 @@ describe("send-submit: Details on a failed send", () => {
 		expect(deps.openToast).toHaveBeenCalledWith({
 			kind: "error",
 			label: "Send failed",
-			sub: TRANSFER_FAILED_COPY,
+			sub: TRANSFER_NOTHING_SENT_COPY,
 			action: { label: "Details", onSelect: expect.any(Function) },
 		})
 		snack(deps)?.action?.onSelect()
 		expect(deps.viewJournal).toHaveBeenCalledWith(JOURNAL_ID)
 		expect(deps.onSettled).toHaveBeenCalledTimes(1)
+	})
+
+	test.each([
+		["a failure of its own", "transfer"],
+		["a send the reaper declared lost", "stale_on_resume"],
+		["a first send the node answered as already initialized", "duplicate_initialization"],
+	])("a record that failed at submitting with its hash (%s): Send not confirmed, with Details", async (_name, kind) => {
+		const { deps, settle } = harness()
+		vi.mocked(deps.readJournal).mockResolvedValue(
+			failedRecord({ progress: MAYBE_SENT, error: { kind, message: "fetch failed", normalizedRaw: null } }),
+		)
+		submitTransfer(deps, SNAP)
+		settle().reject(fromWire(new Error("fetch failed"), JOURNAL_ID))
+		await flush()
+		expect(deps.openToast).toHaveBeenCalledWith({
+			kind: "error",
+			label: "Send not confirmed",
+			sub: TRANSFER_NOT_CONFIRMED_COPY,
+			action: { label: "Details", onSelect: expect.any(Function) },
+		})
+	})
+
+	test("a record whose session ended at the send line: nothing was sent", async () => {
+		const { deps, settle } = harness()
+		vi.mocked(deps.readJournal).mockResolvedValue(
+			failedRecord({ progress: MAYBE_SENT, error: { kind: "session_ended", message: "Session ended", normalizedRaw: null } }),
+		)
+		submitTransfer(deps, SNAP)
+		settle().reject(fromWire(new Error("Session ended"), JOURNAL_ID))
+		await flush()
+		expect(snack(deps)).toMatchObject({ label: "Send failed", sub: TRANSFER_NOTHING_SENT_COPY, action: { label: "Details" } })
+	})
+
+	test.each([
+		["the popup's deadline passed", () => new RpcTimeoutError("RPC 'executeTransfer' timed out after 3600000ms")],
+		["the port was gone at send time", () => new RpcDisconnectedError("RPC 'executeTransfer' aborted: port disconnected")],
+		["the port dropped while waiting", () => new Error(CLIENT_DISCONNECTED_MESSAGE)],
+	])("%s: Send status unknown, no Details, nothing read", async (_name, make) => {
+		const { deps, settle } = harness()
+		vi.mocked(deps.readJournal).mockResolvedValue(failedRecord({ progress: MAYBE_SENT }))
+		submitTransfer(deps, SNAP)
+		settle().reject(make())
+		await flush()
+		expect(deps.readJournal).not.toHaveBeenCalled()
+		expect(snack(deps)).toEqual(STATUS_UNKNOWN)
 	})
 
 	test("a Terms refusal after the record exists keeps the Terms copy and its debug level, and offers its own record", async () => {
@@ -279,10 +337,10 @@ describe("send-submit: Details on a failed send", () => {
 	})
 
 	test.each([
-		["a plain failure", () => new Error("boom"), TRANSFER_FAILED_COPY, "error"],
-		["a Terms refusal", () => new TermsAcceptanceRequiredError(), TRANSFER_TERMS_COPY, "debug"],
-		["a refusal before any record", () => new OperationNotRecordedError(), TRANSFER_NOT_STARTED_COPY, "error"],
-	] as const)("%s keeps its copy and log level with or without a record named beside it", async (_name, make, copy, level) => {
+		["a plain failure", () => new Error("boom"), "Send status unknown", TRANSFER_STATUS_UNKNOWN_COPY, "error"],
+		["a Terms refusal", () => new TermsAcceptanceRequiredError(), "Send failed", TRANSFER_TERMS_COPY, "debug"],
+		["a refusal before any record", () => new OperationNotRecordedError(), "Send failed", TRANSFER_NOT_STARTED_COPY, "error"],
+	] as const)("%s keeps its copy and log level when no record reads back", async (_name, make, label, copy, level) => {
 		for (const journalId of [undefined, JOURNAL_ID]) {
 			vi.mocked(console.error).mockClear()
 			vi.mocked(console.debug).mockClear()
@@ -290,7 +348,7 @@ describe("send-submit: Details on a failed send", () => {
 			submitTransfer(deps, SNAP)
 			settle().reject(fromWire(make(), journalId))
 			await flush()
-			expect(snack(deps)).toEqual({ kind: "error", label: "Send failed", sub: copy })
+			expect(snack(deps)).toEqual({ kind: "error", label, sub: copy })
 			expect(vi.mocked(level === "error" ? console.error : console.debug)).toHaveBeenCalledTimes(1)
 			expect(vi.mocked(level === "error" ? console.debug : console.error)).not.toHaveBeenCalled()
 		}
@@ -314,14 +372,14 @@ describe("send-submit: Details on a failed send", () => {
 		["an id of the right length that is a path", () => fromWire(new Error("boom"), "../settings/abcd")],
 		["an uppercase id", () => fromWire(new Error("boom"), "0123456789ABCDEF")],
 		["an id the error carries itself", () => Object.assign(new Error("boom"), { journalId: JOURNAL_ID })],
-	])("%s: no Details, and nothing is read", async (_name, make) => {
+	])("%s: no Details, nothing is read, and the status is unknown", async (_name, make) => {
 		const { deps, settle } = harness()
 		vi.mocked(deps.readJournal).mockResolvedValue(failedRecord())
 		submitTransfer(deps, SNAP)
 		settle().reject(make())
 		await flush()
 		expect(deps.readJournal).not.toHaveBeenCalled()
-		expect(snack(deps)).toEqual({ kind: "error", label: "Send failed", sub: TRANSFER_FAILED_COPY })
+		expect(snack(deps)).toEqual(STATUS_UNKNOWN)
 	})
 
 	const reads: Array<[string, () => Promise<OperationRecord | undefined>]> = [
@@ -338,15 +396,19 @@ describe("send-submit: Details on a failed send", () => {
 		["a dApp record", async () => failedRecord({ kind: "dapp_execute" })],
 		["another account's record", async () => failedRecord({ accountAddress: "0xother" })],
 		["another network's record", async () => failedRecord({ networkId: "n2" })],
+		[
+			"a failed record with no recorded stage, written before the stage was kept",
+			async () => failedRecord({ progress: { stage: "failed" } }),
+		],
 	]
-	test.each(reads)("%s: no Details, and the failure's snack alone", async (_name, read) => {
+	test.each(reads)("%s: no Details, and the status is unknown", async (_name, read) => {
 		const { deps, settle } = harness()
 		vi.mocked(deps.readJournal).mockImplementation(read)
 		submitTransfer(deps, SNAP)
 		settle().reject(fromWire(new Error("boom"), JOURNAL_ID))
 		await flush()
 		expect(deps.openToast).toHaveBeenCalledTimes(1)
-		expect(snack(deps)).toEqual({ kind: "error", label: "Send failed", sub: TRANSFER_FAILED_COPY })
+		expect(snack(deps)).toEqual(STATUS_UNKNOWN)
 		expect(console.error).toHaveBeenCalledTimes(1)
 	})
 

@@ -408,6 +408,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				beginJournal: (networkId, accountAddress, origin, calls, fence) =>
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
+				commitJournal: (journalId, progress) => this.lane.commitJournal(journalId, progress),
 			},
 			buildAndEstimateValidated: (op, feeSettings, fence, parentTask, signal) =>
 				this.buildAndEstimateTxRequest(op, feeSettings, fence, parentTask, signal),

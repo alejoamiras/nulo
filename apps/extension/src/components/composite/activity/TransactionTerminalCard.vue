@@ -1,31 +1,13 @@
 <script setup>
 /**
- * Terminal-state phase of an activity card for journal records that
- * ended WITHOUT producing an on-chain transaction.
+ * Terminal phase of the activity card for a journal record with no settled `TransactionService`
+ * row. It wraps `TransactionCardLayout`, so every field sits where the awaiting and settled cards
+ * put it and only the badge changes between phases. `subtitle`, `icon` and `color` come verbatim
+ * from `journalTerminalDisplay` (`@/utils/journal-state.ts`); every color it returns needs a
+ * `subtitle_<color>` rule below.
  *
- * Wraps `TransactionCardLayout` so field positions stay byte-identical
- * with `TransactionAwaitingCard` (in-flight phase) and `TransactionCard`
- * (settled on-chain phase). Visual difference is the badge slot: a
- * colored status icon (gray circle-minus / amber refresh-cw / red
- * close-circle) instead of the spinner or success-check.
- *
- * Three user-facing states the journal can land in without going
- * on-chain — see `@/utils/journal-state.ts` for the kind→state mapping:
- *
- *   - Cancelled (color="gray"):  user-initiated, neutral
- *   - Interrupted (color="amber"): wallet was interrupted (SW restart,
- *     prove stuck) — recoverable
- *   - Failed (color="red"):  real failure (network, simulation, prover, …)
- *
- * Caller pipes the mapped `subtitle` / `icon` / `color` straight from
- * `journalTerminalDisplay(op)`. The title row mirrors the in-flight
- * card's contract (token symbol for transfers; humanized op.title for
- * dapp_execute), so users see the same field stay put as the card flips
- * lifecycle phase.
- *
- * Sibling `TransactionAwaitingCard.vue` uses plain `<script setup>` (no
- * lang="ts") for parity with the slot-typing limitations of vue-tsc on
- * untyped child slot consumers; we match that convention here.
+ * Plain `<script setup>`, like `TransactionAwaitingCard.vue`: vue-tsc cannot type the slots of
+ * its untyped consumers.
  */
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
@@ -39,7 +21,7 @@ defineProps({
 	 *  "close-circle"). Mapped per-state by journalTerminalDisplay. */
 	icon: { type: String, required: true },
 	/** Status color. Drives the icon color + visual tone. One of
-	 *  "gray" | "amber" | "red". */
+	 *  "gray" | "amber" | "red" | "green". */
 	color: { type: String, required: true },
 	/** Activity-row icon (left of the badge). Same convention as the
 	 *  awaiting card: "arrow-narrow-up-right" for UI transfers, "zap" for
@@ -94,6 +76,9 @@ defineProps({
 }
 .subtitle_red {
 	color: var(--red);
+}
+.subtitle_green {
+	color: var(--green);
 }
 
 /* Title-trailing chip + separator. Mirrors the awaiting + settled cards

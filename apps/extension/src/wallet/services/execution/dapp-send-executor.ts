@@ -46,7 +46,7 @@ import type { AuthRegistryService } from "@/wallet/services/auth-registry/servic
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
-import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
+import { type ExecutionCoordinator, type ProveAndSendContext, fenceChecks } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
@@ -117,6 +117,7 @@ export interface DappSendExecutorLane {
 		fence?: ExecutionFence,
 	): Promise<string | undefined>
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
+	commitJournal(journalId: string | undefined, progress: JobProgress): Promise<void>
 }
 
 type AddTransactionArgs = Parameters<DappSendExecutorDeps["addTransaction"]>
@@ -223,6 +224,7 @@ export class DappSendExecutor {
 			journalId: string | undefined
 			checkCancelled: () => void
 			markJournal: (patch: JobProgress) => Promise<void>
+			commitSubmitting: ProveAndSendContext["commitSubmitting"]
 		}) => Promise<T>,
 	): Promise<T> {
 		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
@@ -255,6 +257,7 @@ export class DappSendExecutor {
 				journalId,
 				checkCancelled,
 				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
+				commitSubmitting: (patch) => this.deps.lane.commitJournal(journalId, { stage: "submitting", ...patch }),
 			})
 		} catch (error) {
 			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
@@ -571,7 +574,7 @@ export class DappSendExecutor {
 				fence,
 				getCalls: () => (primaryMethod ? [{ method: primaryMethod }] : undefined),
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				// Enter `simulating` BEFORE the build/estimate work — fee
 				// strategies inside the build run real simulateTx calls (can be
 				// several seconds), and leaving the journal at `pending` would
@@ -603,6 +606,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl: primaryEndpointUrl(network),
 					// grantPublicAuthwit routes here (kind: send_transaction), so this is where a granted
 					// authwit is recorded.
 					recordTransaction: this.sentTxRecorder({
@@ -668,7 +673,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
 					throw new Error("Invalid `opts.from`")
 				}
@@ -717,6 +722,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl: primaryEndpointUrl(network),
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
@@ -863,7 +870,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal, journalId }) => {
+			async ({ checkCancelled, markJournal, commitSubmitting, journalId }) => {
 				await markJournal({ stage: "simulating" })
 
 				const prepared = await this.prepareNoFrom(op, fence, parentTask)
@@ -880,6 +887,7 @@ export class DappSendExecutor {
 					parentTask,
 				)
 				await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1, txsLimits)
+				const submittedEndpointUrl = primaryEndpointUrl(network)
 
 				// Prove with account in scope
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
@@ -892,6 +900,8 @@ export class DappSendExecutor {
 					checkCancelled,
 					...fenceChecks(this.deps, fence),
 					markJournal,
+					commitSubmitting,
+					submittedEndpointUrl,
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
@@ -905,7 +915,7 @@ export class DappSendExecutor {
 							Fr.ZERO.toString(),
 							AccountFeePaymentMethodOptions.EXTERNAL,
 							hash,
-							primaryEndpointUrl(network),
+							submittedEndpointUrl,
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
 							fence,

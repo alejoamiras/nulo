@@ -113,6 +113,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 				claimOrCreateJournal: claimOrCreateJournal as never,
 				beginJournal: beginJournal as never,
 				markJournal: vi.fn(async () => {}),
+				commitJournal: vi.fn(async () => {}),
 			},
 			buildAndEstimateValidated: vi.fn(async () => ({
 				txRequest: { txContext: { gasSettings } },

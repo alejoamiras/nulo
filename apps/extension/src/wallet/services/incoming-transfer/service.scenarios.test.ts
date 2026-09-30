@@ -1181,6 +1181,40 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 		expect(trust.size).toBe(0)
 	})
 
+	test("a failed send's own note: a note whose hash matches a failed row of this scope → skip", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const failed = {
+			profileId: "p1",
+			accountAddress: "0xa",
+			networkId: "n1",
+			terminalAt: 1_000,
+			progress: { stage: "failed", from: "submitting", txHash: "0xtx1", check: "sent" },
+		}
+		// Filters as the journal does, so a query for non-terminal rows cannot see the failed one.
+		const journal = {
+			...makeJournalStub(),
+			getOperations: vi.fn(async (filter: { profileId?: string; isTerminal?: boolean; stage?: string } = {}) =>
+				[failed].filter(
+					(op) =>
+						(filter.profileId === undefined || op.profileId === filter.profileId) &&
+						(filter.isTerminal === undefined || (op.terminalAt !== null) === filter.isTerminal) &&
+						(filter.stage === undefined || op.progress.stage === filter.stage),
+				),
+			),
+		}
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ txHash: "0xtx1" })] })
+		const { service } = await bootService({ network, token, journal, note: noteSvc })
+
+		const pending = vi.fn()
+		service.onIncomingTransferPending.add(pending)
+
+		await scan(service)
+
+		expect(pending).not.toHaveBeenCalled()
+		expect([...records.values()]).toHaveLength(0)
+	})
+
 	test("token-removed (no matching tokens for contract) → scanContract no-ops", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([]) // No tokens registered.

@@ -514,3 +514,16 @@ describe("pre-claim wait heartbeat (N-07)", () => {
 		expect(deps.operationJournal.transitionOperation).toHaveBeenCalled()
 	})
 })
+
+describe("ExecutionLane.commitJournal", () => {
+	test("writes like markJournal, but a refused write or a missing id rejects instead of logging", async () => {
+		const { lane, transitions, deps } = makeLane()
+		await lane.commitJournal("j1", { stage: "submitting", txHash: "0xh", submittedEndpointUrl: "https://rpc" })
+		expect(transitions).toEqual([["j1", { stage: "submitting", txHash: "0xh", submittedEndpointUrl: "https://rpc" }]])
+		const refused = new Error("storage write failed")
+		;(deps.operationJournal.transitionOperation as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refused)
+		await expect(lane.commitJournal("j1", { stage: "submitting", txHash: "0xh" })).rejects.toBe(refused)
+		await expect(lane.commitJournal(undefined, { stage: "submitting", txHash: "0xh" })).rejects.toThrow()
+		expect(deps.logError).not.toHaveBeenCalled()
+	})
+})

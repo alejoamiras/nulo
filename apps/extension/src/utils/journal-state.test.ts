@@ -8,15 +8,19 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { KNOWN_JOB_ERROR_KINDS } from "@nulo/wallet-core/jobs"
+import { KNOWN_JOB_ERROR_KINDS, type SendCheckOutcome } from "@nulo/wallet-core/jobs"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import {
 	ACTIVITY_FEED_KINDS,
 	buildJournalTerminalCardProps,
+	type CategoricalFailureLabel,
 	categoricalLabel,
 	humanizeErrorKind,
+	type JournalTerminalDisplay,
 	journalTerminalDisplay,
+	type SendOutcome,
 	sanitizeJournalSubtitle,
+	sendOutcome,
 } from "./journal-state"
 
 function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
@@ -322,6 +326,138 @@ describe("buildJournalTerminalCardProps", () => {
 	})
 })
 
+// ── A failed send's outcome ───────────────────────────────────────────
+
+const SEND_HASH = `0x${"1f".repeat(32)}`
+const SEND_ENDPOINT = "https://rpc.testnet.example"
+
+/** Failed after its `submitting` record, so the node may hold it. */
+function maybeSent(check?: SendCheckOutcome): OperationRecord["progress"] {
+	return { stage: "failed", from: "submitting", txHash: SEND_HASH, submittedEndpointUrl: SEND_ENDPOINT, check }
+}
+
+function transferSend(progress: OperationRecord["progress"], kind = "transfer"): OperationRecord {
+	return transferRecord({ progress, error: { kind, message: "fetch failed", normalizedRaw: null } })
+}
+
+/** Shaped as the wallet records a dApp's `aztec_sendTx`, the app's own name in `subtitle`. */
+function dappSend(progress: OperationRecord["progress"], kind = "dapp_execute"): OperationRecord {
+	return recordWith({
+		kind: "dapp_execute",
+		title: "transfer_in_public",
+		subtitle: "playground.aztec.example",
+		accountAddress: `0x${"0c".repeat(32)}`,
+		networkId: "testnet",
+		progress,
+		error: { kind, message: "fetch failed", normalizedRaw: null },
+	})
+}
+
+const CHECKED: [SendOutcome, SendCheckOutcome | undefined, JournalTerminalDisplay, CategoricalFailureLabel][] = [
+	[
+		"checking",
+		undefined,
+		{ state: "checking", subtitle: "Not confirmed yet", icon: "clock-circle", color: "gray" },
+		{ label: "Not confirmed yet", context: "Your wallet is checking whether this reached the network. Don't send it again yet." },
+	],
+	[
+		"sent",
+		"sent",
+		{ state: "sent", subtitle: "Sent", icon: "check-circle", color: "green" },
+		{ label: "Went through", context: "The network confirmed this transaction." },
+	],
+	[
+		"reverted",
+		"reverted",
+		{ state: "failed", subtitle: "Reverted", icon: "close-circle", color: "red" },
+		{ label: "Reverted", context: "The network included this transaction, but it reverted. The fee was still paid." },
+	],
+	[
+		"unconfirmed",
+		"unconfirmed",
+		{ state: "unconfirmed", subtitle: "Unconfirmed", icon: "help", color: "amber" },
+		{
+			label: "Unconfirmed",
+			context: "Your wallet couldn't confirm this. It may still go through, so check History before sending it again.",
+		},
+	],
+]
+
+describe("a failed send that may have reached the network reads as its check's answer", () => {
+	test.each(CHECKED)("a transfer: %s", (outcome, check, display, category) => {
+		const op = transferSend(maybeSent(check))
+		expect(sendOutcome(op)).toBe(outcome)
+		expect(journalTerminalDisplay(op)).toEqual(display)
+		expect(categoricalLabel(op)).toEqual(category)
+		expect(buildJournalTerminalCardProps(op, TEST_CTX)).toMatchObject({ ...display, title: "USDC", amount: "1.5" })
+	})
+
+	test.each(CHECKED)("a dApp send: %s, under the app's own name", (outcome, check, display, category) => {
+		const op = dappSend(maybeSent(check))
+		expect(sendOutcome(op)).toBe(outcome)
+		expect(categoricalLabel(op)).toEqual(category)
+		expect(buildJournalTerminalCardProps(op, TEST_CTX)).toEqual({
+			...display,
+			title: "Transfer (public)",
+			activityIcon: "zap",
+			originLabel: "playground.aztec.example",
+			transferTypeLabel: null,
+			amount: null,
+			amountSymbol: null,
+		})
+	})
+
+	test.each(["stale_on_resume", "duplicate_initialization"])("a %s failure at the send line is checked like any other", (kind) => {
+		const [, , display, category] = CHECKED[0]
+		const op = transferSend(maybeSent(), kind)
+		expect(journalTerminalDisplay(op)).toEqual(display)
+		expect(categoricalLabel(op)).toEqual(category)
+	})
+})
+
+describe("a failed send its record proves never left the wallet", () => {
+	test.each([
+		["a transfer", transferSend({ stage: "failed", from: "proving" })],
+		["a dApp send", dappSend({ stage: "failed", from: "proving" })],
+	])("%s failed while proving reads 'Stopped before broadcast' and keeps its card", (_name, op) => {
+		expect(sendOutcome(op)).toBe("nothing_sent")
+		expect(categoricalLabel(op)).toEqual({
+			label: "Stopped before broadcast",
+			context: "Your wallet caught this before reaching the network. Often balance, fees, or invalid call.",
+		})
+		expect(journalTerminalDisplay(op)).toEqual({ state: "failed", subtitle: "Transaction failed", icon: "close-circle", color: "red" })
+	})
+
+	test.each([
+		["sw_restart_post_prove", "proving"],
+		["stale_on_resume", "simulating"],
+	] as const)("an interruption (%s) before the send line says nothing was sent and keeps its card", (kind, from) => {
+		const op = transferSend({ stage: "failed", from }, kind)
+		expect(categoricalLabel(op)).toEqual({
+			label: "Interrupted before sending",
+			context: "Your wallet stopped before sending this. Nothing was sent.",
+		})
+		expect(journalTerminalDisplay(op)).toEqual({
+			state: "interrupted",
+			subtitle: "Transaction was interrupted",
+			icon: "refresh-circle",
+			color: "amber",
+		})
+	})
+
+	test("a send the lock stopped at the send line keeps its copy", () => {
+		const op = transferSend(maybeSent(), "session_ended")
+		expect(sendOutcome(op)).toBe("nothing_sent")
+		expect(journalTerminalDisplay(op)).toEqual({
+			state: "failed",
+			subtitle: "Stopped — wallet was locked",
+			icon: "close-circle",
+			color: "red",
+		})
+		expect(categoricalLabel(op)).toEqual({ label: "Error", context: "Something went wrong with this transaction." })
+	})
+})
+
 // dApp-controlled `subtitle` is the origin/name stored at session-discover
 // time. The journal detail page renders it; if a malicious dApp set its
 // origin to an http(s) URL string, the bare value could be visually
@@ -460,6 +596,7 @@ describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
 })
 
 describe("categoricalLabel — B2 failure category + context for journal/[id].vue", () => {
+	/** No `from`: the record does not say which stage failed, so it proves neither outcome. */
 	function failed(kind: string): OperationRecord {
 		return recordWith({ progress: { stage: "failed" }, error: { kind, message: "", normalizedRaw: null } })
 	}
@@ -483,7 +620,7 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 			expect(categoricalLabel(failed(kind)).label).toBe("Stopped before broadcast")
 		}
 	})
-	test("sw_restart_post_prove / stale_on_resume → 'Interrupted mid-flight' + check explorer hint", () => {
+	test("sw_restart_post_prove / stale_on_resume with no recorded stage keep 'Interrupted mid-flight' + check explorer hint", () => {
 		for (const kind of ["sw_restart_post_prove", "stale_on_resume"]) {
 			const { label, context } = categoricalLabel(failed(kind))
 			expect(label).toBe("Interrupted mid-flight")
@@ -493,13 +630,14 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 	test("network → 'Network error'", () => {
 		expect(categoricalLabel(failed("network")).label).toBe("Network error")
 	})
-	test("transfer → 'Send failed', blaming no app and saying a submitted send may still go through", () => {
+	test("a transfer with no recorded stage keeps 'Send failed', saying a submitted send may still go through", () => {
+		expect(sendOutcome(failed("transfer"))).toBeNull()
 		expect(categoricalLabel(failed("transfer"))).toEqual({
 			label: "Send failed",
 			context: "Your wallet couldn't finish this send. If it was already submitted, it may still go through.",
 		})
 	})
-	test("dapp_execute → 'Reported by app'", () => {
+	test("a dApp send with no recorded stage keeps 'Reported by app'", () => {
 		expect(categoricalLabel(failed("dapp_execute"))).toEqual({
 			label: "Reported by app",
 			context: "The connected app reported an error.",

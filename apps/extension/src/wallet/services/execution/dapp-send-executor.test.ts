@@ -23,6 +23,7 @@ import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
 import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
+import type { ProveAndSendContext } from "./execution-coordinator"
 import { AUTHWITS_CHANGED_MESSAGE, ESTIMATE_INCOMPLETE_MESSAGE, PREVIEW_FOREIGN_MESSAGE, PreviewSnapshots } from "./preview-snapshots"
 import { ExecutionService } from "./service"
 
@@ -152,6 +153,7 @@ function makeHarness(
 			claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: new AbortController() })),
 			beginJournal: vi.fn(async () => "j1"),
 			markJournal: vi.fn(async () => {}),
+			commitJournal: vi.fn(async () => {}),
 		},
 		operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
 		previewSnapshots: new PreviewSnapshots(),
@@ -386,6 +388,7 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 				claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: aborted })),
 				beginJournal: vi.fn(),
 				markJournal: vi.fn(async () => {}),
+				commitJournal: vi.fn(async () => {}),
 			},
 		})
 		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toBeInstanceOf(
@@ -444,6 +447,37 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 		)) as { receipt?: unknown }
 		expect(waits.node.getTxReceipt).toHaveBeenCalledTimes(1)
 		expect(res2.receipt).toEqual({ status: "success" })
+	})
+})
+
+describe("DappSendExecutor: the submitting commit", () => {
+	const sendTransactionOp = {
+		kind: "send_transaction",
+		networkId: "net-1",
+		accountAddress: "0xacct",
+		feeSettings: { paymentMethod: { kind: "fj" } },
+		actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+	} as never
+	const noFromOp = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+
+	test.each([
+		["send_transaction", (e: DappSendExecutor) => e.executeSendTransaction(sendTransactionOp, ORIGIN, undefined, FENCE)],
+		["aztec_sendTx", (e: DappSendExecutor) => e.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)],
+		["default_entrypoint", (e: DappSendExecutor) => e.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, FENCE)],
+	])("%s commits submitting on its record with the submitting network's endpoint", async (_path, run) => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const { executor, deps, proveAndSend } = makeHarness()
+		proveAndSend.mockImplementationOnce(async (ctx) => {
+			const bound = ctx as unknown as ProveAndSendContext
+			await bound.commitSubmitting({ txHash: "0xhash", submittedEndpointUrl: bound.submittedEndpointUrl })
+			return { txHash: { toString: () => "0xhash" }, offchainOutput: {} }
+		})
+		await run(executor)
+		expect(deps.lane.commitJournal).toHaveBeenCalledWith("j1", {
+			stage: "submitting",
+			txHash: "0xhash",
+			submittedEndpointUrl: "https://rpc.submit",
+		})
 	})
 })
 
@@ -654,6 +688,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				}),
 				beginJournal: vi.fn(),
 				markJournal: vi.fn(async () => {}),
+				commitJournal: vi.fn(async () => {}),
 			},
 		})
 		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("claim broke")

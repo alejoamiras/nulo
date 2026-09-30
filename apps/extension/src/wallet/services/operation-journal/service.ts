@@ -1,7 +1,14 @@
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ValidationError } from "@nulo/extension-messaging/errors"
 import { validateParams } from "@nulo/extension-messaging/zod"
-import { type JobError, type JobProgress, assertCanTransition, isTerminal, type ProveBackend } from "@nulo/wallet-core/jobs"
+import {
+	type JobError,
+	type JobProgress,
+	type ProveBackend,
+	type SendCheckOutcome,
+	assertCanTransition,
+	isTerminal,
+} from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -356,7 +363,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		const now = Date.now()
 		const updated: OperationRecord = {
 			...existing,
-			progress,
+			progress: progress.stage === "failed" ? failedFrom(existing.progress) : progress,
 			error: error ?? null,
 			terminalAt: isTerminal(progress.stage) ? now : existing.terminalAt,
 			updatedAt: now,
@@ -364,6 +371,24 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		await this.storage.set(id, updated)
 		this.emit("onOperationUpdated", updated)
 		return updated
+	}
+
+	/**
+	 * Records the network's answer for a failed send, once. SW-internal, never an RPC. Writes only
+	 * while the row is still `failed` with this hash and no answer, and while `isLive()` holds
+	 * inside the lock; `false` means nothing was written.
+	 */
+	public async setSendCheck(id: string, txHash: string, check: SendCheckOutcome, isLive: () => boolean): Promise<boolean> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (existing?.progress.stage !== "failed") return false
+			if (existing.progress.txHash !== txHash || existing.progress.check !== undefined || !isLive()) return false
+			const updated: OperationRecord = { ...existing, progress: { ...existing.progress, check }, updatedAt: Date.now() }
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return true
+		})
 	}
 
 	/**
@@ -588,6 +613,13 @@ export class OperationJournalService extends Service<Methods, Events> implements
 }
 
 // ── Transition invariants (pure, throw ValidationError) ─────────────────
+
+/** A `failed` progress built from the row it replaces, so no caller can forget the carry or plant
+ *  a hash, a stage or an answer. `prior` is active: the FSM check has already run. */
+function failedFrom(prior: JobProgress): JobProgress {
+	if (prior.stage !== "submitting") return { stage: "failed", from: isTerminal(prior.stage) ? undefined : prior.stage }
+	return { stage: "failed", from: "submitting", txHash: prior.txHash, submittedEndpointUrl: prior.submittedEndpointUrl }
+}
 
 /** "error iff failed". */
 function assertErrorInvariant(progress: JobProgress, error: JobError | null | undefined): void {

@@ -55,6 +55,14 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		return createAztecNodeClient(rpcUrl, {}, makeFetchWithTimeout())
 	}
 
+	public createSingleAttemptNode(rpcUrl: string, timeoutMs: number): AztecNode {
+		const check = isAllowedRpcUrl(rpcUrl)
+		if (!check.ok) {
+			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
+		}
+		return createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+	}
+
 	public async probeChainId(rpcUrl: string, timeoutMs: number): Promise<number> {
 		const check = isAllowedRpcUrl(rpcUrl)
 		if (!check.ok) {

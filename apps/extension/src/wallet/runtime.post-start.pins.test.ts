@@ -1,10 +1,7 @@
 /**
- * Helper-seam pins (codex condition, round-2 plan 5): the post-start work fires
- * in the boot's exact order — deletion resume → reaper construct+start → GC
- * construct+start → storage probe → default-token seed resume — with ZERO awaits between them (the
- * instances `stop()` reads exist before the caller's next tick), and `stop()`
- * clears heartbeat → reaper → GC in that order. The runtime harness stops
- * pre-registration by design, so these are pinned at the helper seam.
+ * The post-start work runs with no await between its steps, so every instance `stop()` reads exists
+ * before the caller's next tick. The runtime harness stops before registration by design, so the
+ * order is pinned at this helper seam.
  */
 import { describe, expect, test, vi } from "vitest"
 
@@ -21,6 +18,20 @@ vi.mock("./services/operation-journal/reaper", () => ({
 		stop() {
 			log.push("reaper:stop")
 			return Promise.resolve()
+		}
+	},
+}))
+vi.mock("./services/operation-journal/send-check", () => ({
+	SendCheck: class {
+		constructor() {
+			log.push("check:new")
+		}
+		start() {
+			log.push("check:start")
+			return Promise.resolve()
+		}
+		stop() {
+			log.push("check:stop")
 		}
 	},
 }))
@@ -45,7 +56,7 @@ import { armPostStartWork, type RuntimeState, stopRuntime } from "./runtime"
 const noopLogger = { log: () => {} } as never
 
 describe("runtime post-start seam", () => {
-	test("resume → reaper new/start → gc new/start → probe, all before the caller's next microtask", async () => {
+	test("resume → reaper new/start → check new/start → gc new/start → probe, all before the caller's next microtask", async () => {
 		log.length = 0
 		const services = {
 			get: () => ({
@@ -79,13 +90,24 @@ describe("runtime post-start seam", () => {
 
 		const armed = armPostStartWork(services, deps, deletionCoordinator, 4242)
 		// Synchronous view — nothing has yielded yet.
-		expect(log).toEqual(["resume:4242", "reaper:new", "reaper:start", "gc:new", "gc:start", "probe:get", "seed:resume"])
+		expect(log).toEqual([
+			"resume:4242",
+			"reaper:new",
+			"reaper:start",
+			"check:new",
+			"check:start",
+			"gc:new",
+			"gc:start",
+			"probe:get",
+			"seed:resume",
+		])
 		expect(armed.reaper).toBeDefined()
+		expect(armed.sendCheck).toBeDefined()
 		expect(armed.journalGc).toBeDefined()
 		await Promise.resolve()
 	})
 
-	test("stopRuntime clears heartbeat → reaper → GC, and a second stop is a no-op", () => {
+	test("stopRuntime clears heartbeat → reaper → send check → GC, and a second stop is a no-op", () => {
 		log.length = 0
 		const clock = { clearInterval: (h: unknown) => log.push(`clearInterval:${String(h)}`) } as never
 		const stopper = (label: string) => ({
@@ -97,15 +119,17 @@ describe("runtime post-start seam", () => {
 		const state: RuntimeState = {
 			heartbeatHandle: 7 as never,
 			reaper: stopper("reaper:stop") as never,
+			sendCheck: stopper("check:stop") as never,
 			journalGc: stopper("gc:stop") as never,
 			retrySafe: false,
 		}
 		stopRuntime(state, clock, noopLogger)
-		expect(log).toEqual(["clearInterval:7", "reaper:stop", "gc:stop"])
+		expect(log).toEqual(["clearInterval:7", "reaper:stop", "check:stop", "gc:stop"])
 		expect(state.heartbeatHandle).toBeUndefined()
 		expect(state.reaper).toBeUndefined()
+		expect(state.sendCheck).toBeUndefined()
 		expect(state.journalGc).toBeUndefined()
 		stopRuntime(state, clock, noopLogger)
-		expect(log).toEqual(["clearInterval:7", "reaper:stop", "gc:stop"])
+		expect(log).toEqual(["clearInterval:7", "reaper:stop", "check:stop", "gc:stop"])
 	})
 })

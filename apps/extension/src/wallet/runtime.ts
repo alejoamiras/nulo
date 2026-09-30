@@ -41,6 +41,7 @@ import { NoteService } from "./services/note/service"
 import { OperationJournalService } from "./services/operation-journal/service"
 import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
+import { SendCheck } from "./services/operation-journal/send-check"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { AccountIntegrityCoordinator } from "./services/account-integrity/coordinator"
@@ -138,6 +139,7 @@ const UNINSTALL_URL = "https://nulo.sh"
 export type RuntimeState = {
 	heartbeatHandle: TimerHandle | undefined
 	reaper: JournalReaper | undefined
+	sendCheck: SendCheck | undefined
 	journalGc: JournalGC | undefined
 	retrySafe: boolean
 }
@@ -145,7 +147,13 @@ export type RuntimeState = {
 export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	const { clock, logger } = deps
 	const services = new ServiceCollection()
-	const state: RuntimeState = { heartbeatHandle: undefined, reaper: undefined, journalGc: undefined, retrySafe: true }
+	const state: RuntimeState = {
+		heartbeatHandle: undefined,
+		reaper: undefined,
+		sendCheck: undefined,
+		journalGc: undefined,
+		retrySafe: true,
+	}
 
 	const start = createSingleFlightStart(
 		() => bootRuntime(deps, services, state),
@@ -161,7 +169,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	}
 }
 
-/** `stop()` body: heartbeat → reaper → GC, each cleared from the state so a
+/** `stop()` body: heartbeat → reaper → send check → GC, each cleared from the state so a
  *  repeated stop is a no-op. Exported as a test seam for the order pin. */
 export function stopRuntime(state: RuntimeState, clock: WalletRuntimeDeps["clock"], logger: WalletRuntimeDeps["logger"]): void {
 	if (state.heartbeatHandle !== undefined) {
@@ -171,6 +179,10 @@ export function stopRuntime(state: RuntimeState, clock: WalletRuntimeDeps["clock
 	if (state.reaper !== undefined) {
 		state.reaper.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper stop failed", error))
 		state.reaper = undefined
+	}
+	if (state.sendCheck !== undefined) {
+		state.sendCheck.stop()
+		state.sendCheck = undefined
 	}
 	if (state.journalGc !== undefined) {
 		state.journalGc.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC stop failed", error))
@@ -245,6 +257,7 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
 
 	const armed = armPostStartWork(services, deps, deletionCoordinator, journalBootCutoff)
 	state.reaper = armed.reaper
+	state.sendCheck = armed.sendCheck
 	state.journalGc = armed.journalGc
 
 	// Wallet-sdk protocol handler (discovery, key exchange, encrypted channel).
@@ -599,18 +612,18 @@ export async function providePxeStoreKey(
  *  exact order and with ZERO awaits: the deletion-coordinator resume (F-B24;
  *  fire-and-forget, idempotent — the cutoff is the same pre-start instant as
  *  the journal's, so an import RPC racing startup is never touched), the
- *  durable-job reaper (construct → `start()`, adjacent), the terminal-record GC
- *  (same), then the boot-time storage-usage probe (races the sweeps, so its
+ *  durable-job reaper (construct → `start()`, adjacent), the send check (same), the
+ *  terminal-record GC (same), then the boot-time storage-usage probe (races the sweeps, so its
  *  count is the pre-cleanup snapshot — telemetry, not authoritative), then the
  *  default-token seed resume. Returns
- *  the two instances `stop()` reads. Exported as a test seam for the order pin. */
+ *  the three instances `stop()` reads. Exported as a test seam for the order pin. */
 export function armPostStartWork(
 	services: ServiceCollection,
 	deps: WalletRuntimeDeps,
 	deletionCoordinator: ProfileDeletionCoordinator,
 	journalBootCutoff: number,
-): { reaper: JournalReaper; journalGc: JournalGC } {
-	const { browserApi, logger } = deps
+): { reaper: JournalReaper; sendCheck: SendCheck; journalGc: JournalGC } {
+	const { browserApi, clock, logger } = deps
 	void deletionCoordinator
 		.resumePending(journalBootCutoff)
 		.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", error))
@@ -618,6 +631,16 @@ export function armPostStartWork(
 	const journalService = services.get(OperationJournalService.name) as OperationJournalService
 	const reaper = new JournalReaper(journalService, browserApi.alarms, logger, undefined, journalBootCutoff)
 	reaper.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper start failed", error))
+
+	const sendCheck = new SendCheck({
+		journal: journalService,
+		network: services.get(NetworkService.name) as NetworkService,
+		profile: services.get(ProfileService.name) as ProfileService,
+		balances: services.get(TokenBalanceService.name) as TokenBalanceService,
+		logger,
+		clock,
+	})
+	sendCheck.start().catch((error) => logger.log("wallet", LogLevel.Error, "SendCheck start failed", error))
 
 	const journalGc = new JournalGC(journalService, browserApi.alarms, logger)
 	journalGc.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC start failed", error))
@@ -641,7 +664,7 @@ export function armPostStartWork(
 	// so re-arming at every boot bounds a stranded retry to one alarm period.
 	const tokenService = services.get(TokenService.name) as TokenService
 	tokenService.resumeSeeding().catch((error) => logger.log("wallet", LogLevel.Debug, "seed resume skipped", error))
-	return { reaper, journalGc }
+	return { reaper, sendCheck, journalGc }
 }
 
 /** First liveness write — fire-and-forget so a flaky storage write can't

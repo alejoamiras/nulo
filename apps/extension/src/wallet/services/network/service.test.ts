@@ -423,6 +423,15 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
 	})
 
+	test("getSingleAttemptNodeForUrl pins the same way, through the factory's one-attempt client, one per URL", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.b": nodeInfoForChain(7) })
+		const node = await service.getSingleAttemptNodeForUrl("https://rpc.deleted")
+		expect(await service.getSingleAttemptNodeForUrl("https://rpc.deleted")).toBe(node)
+		expect(factory.singleAttempt).toEqual(["https://rpc.deleted"])
+		expect(factory.created.find((c) => c.node === node)?.rpcUrl).toBe("https://rpc.deleted")
+		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
+	})
+
 	test("reportEndpointFailure increments + evicts at threshold 3", () => {
 		const { service } = harness({})
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in

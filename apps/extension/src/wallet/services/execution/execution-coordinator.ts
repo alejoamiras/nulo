@@ -91,10 +91,7 @@ interface ProveAttempt {
 /** Journal patches the shared pipeline tail emits. Structural subset of
  *  the operation-journal patch shape — callers bind their own journal id
  *  (or a no-op) in the `markJournal` closure. */
-type ProveAndSendJournalPatch =
-	| { stage: "proving"; enteredProveAt: number }
-	| { stage: "submitting"; txHash: string }
-	| { stage: "succeeded"; txHash: string }
+type ProveAndSendJournalPatch = { stage: "proving"; enteredProveAt: number } | { stage: "succeeded"; txHash: string }
 
 /** Everything `proveAndSend` needs. Per-path variation is DATA here —
  *  scopes, journal binding, activity-record shape, offchain extraction —
@@ -124,6 +121,10 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	 *  stay in the caller's catch (per-path failure shaping is preserved
 	 *  divergent by design). */
 	markJournal: (patch: ProveAndSendJournalPatch) => Promise<unknown>
+	/** Writes `submitting`; rejects unless the row now durably holds it. The send never runs otherwise. */
+	commitSubmitting: (patch: { txHash: string; submittedEndpointUrl: string | undefined }) => Promise<void>
+	/** The primary endpoint of the network the tx was built against, recorded with `submitting`. */
+	submittedEndpointUrl: string | undefined
 	/** Offchain-output extraction hook. Runs BETWEEN prove and `toTx()` —
 	 *  the only point where `provedTx` is reachable. dApp paths use it;
 	 *  transfer paths omit it. */
@@ -318,8 +319,11 @@ export class ExecutionCoordinator {
 	 *
 	 *  Sequence (frozen):
 	 *    checkCancelled → journal(proving) → prove → checkCancelled →
-	 *    assertAuthorization → [offchain hook] → toTx → journal(submitting) →
+	 *    assertAuthorization → [offchain hook] → toTx → commit(submitting) →
 	 *    checkCancelled → assertLive + send → record → journal(succeeded)
+	 *
+	 *  The `submitting` commit is the one journal write the send depends on, so
+	 *  a row that failed before reaching `submitting` sent nothing.
 	 *
 	 *  A cancel between prove and send drops the proof artifact silently —
 	 *  that is the contract `cancel-mid-prove` pins end-to-end. The
@@ -339,7 +343,13 @@ export class ExecutionCoordinator {
 		const offchainOutput = ctx.wantOffchainOutput?.(provedTx)
 		const tx = await provedTx.toTx()
 		const txHash = tx.getTxHash()
-		await ctx.markJournal({ stage: "submitting", txHash: txHash.toString() })
+		await ctx
+			.commitSubmitting({ txHash: txHash.toString(), submittedEndpointUrl: ctx.submittedEndpointUrl })
+			.catch((error: unknown) => {
+				// A cancel that reached the journal first is what refused the write: report the cancel.
+				ctx.checkCancelled()
+				throw error
+			})
 		ctx.checkCancelled()
 		await this.sendTxTask(ctx.node, tx, ctx.assertLive, ctx.parentTask, ctx.initializesAccount)
 		await ctx.recordTransaction(txHash.toString())

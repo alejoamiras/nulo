@@ -12,6 +12,7 @@ import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, JournaledRejection, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
+import type { ProveAndSendContext } from "./execution-coordinator"
 import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
 
@@ -230,6 +231,29 @@ describe("TransferExecutor.execute", () => {
 			{ stage: "failed" },
 			expect.objectContaining({ kind: "transfer", message: expect.stringContaining("Insufficient fee payer balance") }),
 		)
+	})
+
+	test("submitting is committed on the record with the primary endpoint, and a refused write rejects", async () => {
+		const refused = new Error("storage write failed")
+		const { executor, deps, proveAndSend } = makeHarness({
+			transitionJournal: vi.fn(async (_id: string, progress: { stage: string }) => {
+				if (progress.stage === "submitting") throw refused
+				return {}
+			}) as never,
+		})
+		proveAndSend.mockImplementationOnce(async (ctx) => {
+			const bound = ctx as unknown as ProveAndSendContext
+			expect(bound.submittedEndpointUrl).toBe("http://primary")
+			await bound.commitSubmitting({ txHash: "0xhash", submittedEndpointUrl: bound.submittedEndpointUrl })
+			throw new Error("unreachable: the refused write must reject")
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toStrictEqual(new JournaledRejection(refused, "j1"))
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", {
+			stage: "submitting",
+			txHash: "0xhash",
+			submittedEndpointUrl: "http://primary",
+		})
+		expect(deps.logError).not.toHaveBeenCalledWith("Failed to update journal operation", refused)
 	})
 
 	test("recording the activity failing after the send: journal → failed as a transfer", async () => {

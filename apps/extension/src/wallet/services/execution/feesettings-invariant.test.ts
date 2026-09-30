@@ -38,6 +38,7 @@ function makeExecutor(): DappSendExecutor {
 			claimOrCreateJournal: unreachable as never,
 			beginJournal: unreachable as never,
 			markJournal: unreachable as never,
+			commitJournal: unreachable as never,
 		},
 		operationEstimateReuse: { tryConsume: unreachable, stash: unreachable, evict: unreachable } as never,
 		previewSnapshots: { stash: unreachable, evict: unreachable, take: unreachable } as never,

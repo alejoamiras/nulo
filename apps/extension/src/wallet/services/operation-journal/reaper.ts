@@ -40,7 +40,7 @@
  * that — it only reaps stuck records, not chain-removed ones.
  */
 
-import type { JobStage } from "@nulo/wallet-core/jobs"
+import type { ActiveStage } from "@nulo/wallet-core/jobs"
 import type { AlarmsPort } from "@nulo/wallet-core/ports"
 import { AlarmDispatcher } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
@@ -69,8 +69,6 @@ export const REAP_PERIOD_MINUTES = 1
  * - `submitting` is short: once the tx is broadcast the node returns
  *   the answer within seconds; 5 min is a safety margin for slow nodes.
  */
-type ActiveStage = Exclude<JobStage, "succeeded" | "failed" | "cancelled">
-
 const STAGE_GRACE_MS: Readonly<Record<ActiveStage, number>> = {
 	// Matches the wallet-sdk dApp-interaction popup timeout (INTERACTION_TIMEOUT_MS).
 	// A queued record that survives 10 minutes means background.ts either crashed
