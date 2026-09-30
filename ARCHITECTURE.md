@@ -194,7 +194,7 @@ Service startup is **phase-ordered**, not parallel: `ServiceCollection.start()` 
 
 - `EncryptionKey` — PBKDF2 + AES-GCM framed ciphertext.
 - `PasswordSecretBox` — password-based wrap around `EncryptionKey`. Stores `passhash` (a public, deterministic hash of the password's KDF output) so a session can be silently re-derived without re-prompting.
-- `PasskeyCredential` — WebAuthn PRF → HKDF master-secret. Cross-extension / cross-device portability is limited by browser PRF non-portability (see `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`).
+- `PasskeyCredential` — WebAuthn PRF → HKDF master-secret. Cross-extension / cross-device portability is limited by browser PRF non-portability (see `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`).
 
 All derivation chains are **vector-locked** by `apps/extension/src/wallet/crypto/key-vectors.test.ts`. Any change to wallet-crypto must keep those vectors passing byte-identically. The KDF rev-key (`ENCRYPTION_GUARD`) is a frozen constant: changing it bricks every existing wallet.
 

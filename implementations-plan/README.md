@@ -33,7 +33,7 @@ Single-file bug fixes do not need a plan. The PR description is enough. Name the
 ## Code and plans
 
 1. **Code comments never reference plans by milestone tag.** Not `M4.10`, `A11.1`, `phase 4b`, `PR-2`. Git history is in git; the milestone vocabulary lives here.
-2. **Code MAY reference a plan by path**, but only when the plan is the load-bearing source of truth for behavior the code depends on. Two such cross-references exist: `passkey-e2e/PRF-NON-PORTABLE.md` (a Chromium limitation tests rely on) and `network-test-triage/plan.md` (the skipped network e2e tests).
+2. **Code cites a live doc or a permalink, never a plan path**, because a plan is archived when it closes. A source that code depends on lives outside this tree: the Chromium PRF limitation the passkey e2e tests rely on is `apps/extension/tests/e2e/PRF-NON-PORTABLE.md`. An older comment that names a plan is repointed when its file is next edited.
 
 New code explains WHY and its invariants inline (see [`CLAUDE.md`](../CLAUDE.md) "Code-comment style").
 
