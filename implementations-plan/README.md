@@ -39,7 +39,7 @@ New code explains WHY and its invariants inline (see [`CLAUDE.md`](../CLAUDE.md)
 
 ## The gate
 
-`bun scripts/ci-cd/plans/check.ts` checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
+`bun run check:plans` (`scripts/ci-cd/plans/check.ts`) checks this tree from the git index; it runs inside `test:ci-gating`, so every PR's `quality-status` carries it. On a PR or a local run it fails on a tracked transcript, a missing or negated `.gitignore` line, a nested ignore file, a link to an untracked or missing file, a construct whose URL it cannot judge, a permalink outside the allowlist or off `dev`, a plan path in code or config that resolves neither at HEAD nor under `archive/` and sits in no allowlisted permalink, an oversize or unlinked `lessons.md` entry, or a home path in the curated files. A document's plan path that does not resolve at HEAD only reports until the archive split. On push, nightly and release it only reports. `--report` prints every finding and exits 0.
 
 ## Milestone vocabulary: key
 

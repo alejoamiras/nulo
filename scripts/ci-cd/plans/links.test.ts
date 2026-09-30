@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { checkTree } from "./check"
-import { cleanupRepos, findings, makeRepo, writeFiles } from "./fixture-repo"
-import { expandBraces, extract, pathTokens, resolveHref } from "./links"
+import { cleanupRepos, commitAll, findings, git, makeRepo, writeFiles } from "./fixture-repo"
+import { createCtx } from "./lib"
+import { expandBraces, extract, PATH_TOKEN_ALLOWLIST, pathTokenFindings, pathTokens, resolveHref } from "./links"
 
 afterAll(cleanupRepos)
 
@@ -358,5 +359,38 @@ describe("path-token", () => {
 	test("a brace token is checked alternative by alternative", () => {
 		const repo = makeRepo({ "CLAUDE.md": "implementations-plan/{a,b}/plan.md\n", "implementations-plan/a/plan.md": "a\n" })
 		expect(findings(repo, "path-token").map((f) => f.detail)).toEqual(["implementations-plan/b/plan.md does not resolve at HEAD"])
+	})
+
+	test("an allowlisted permalink pins its file and names no plan path; any other URL's path still does", () => {
+		const [allowed, other] = ["a".repeat(40), "b".repeat(40)]
+		const url = (ref: string) => `https://github.com/alejoamiras/nulo/blob/${ref}/implementations-plan/gone/audit-x.md`
+		const repo = makeRepo({
+			"scripts/ci-cd/plans/permalink-bases.json": JSON.stringify({ [allowed]: "a dev commit" }),
+			"src/a.ts": [`// ${url(allowed)}`, `// (${url(allowed)}#L3).`, `// ${url(other)}`, `// ${url("dev")}`, ""].join("\n"),
+			"docs/notes.md": `See [the audit](${url(allowed)}).\n`,
+		})
+		expect(findings(repo, "path-token").map((f) => `${f.file}:${f.line}`)).toEqual(["src/a.ts:3", "src/a.ts:4"])
+	})
+
+	test("the reference projects and the soak baselines record their paths and are not scanned", () => {
+		const stale = "// implementations-plan/gone/plan.md\n"
+		const repo = makeRepo({
+			"reference/p/gen.ts": stale,
+			"scripts/ci-cd/test-soak/baselines/bun/x.json": `{ "out": "implementations-plan/gone/full/x.json" }\n`,
+			"scripts/ci-cd/test-soak/cli.ts": stale,
+		})
+		expect(findings(repo, "path-token").map((f) => f.file)).toEqual(["scripts/ci-cd/test-soak/cli.ts"])
+	})
+
+	test("an allowlisted mention holds while its file is the recorded blob, and the first edit ends it", () => {
+		const text = "// implementations-plan/gone/plan.md\n"
+		const repo = makeRepo({ "src/a.ts": text, "src/b.ts": text })
+		const allowlist = [{ file: "src/a.ts", blob: git(repo, "rev-parse", ":src/a.ts"), token: "implementations-plan/gone/plan.md" }]
+		const flagged = () => pathTokenFindings(createCtx({ cwd: repo }), new Map(), allowlist).map((f) => f.file)
+		expect(flagged()).toEqual(["src/b.ts"])
+		writeFiles(repo, { "src/a.ts": `${text}// touched\n` })
+		commitAll(repo)
+		expect(flagged()).toEqual(["src/a.ts", "src/b.ts"])
+		expect(PATH_TOKEN_ALLOWLIST.length).toBeLessThanOrEqual(3)
 	})
 })

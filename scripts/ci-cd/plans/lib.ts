@@ -85,6 +85,8 @@ export interface Ctx {
 	dirs: Set<string>
 	/** Each tracked path's git mode: `REGULAR_MODES`, 120000 for a symlink, 160000 for a gitlink. */
 	modes: Map<string, string>
+	/** Each tracked path's staged object id. */
+	oids: Map<string, string>
 	git(...args: string[]): GitResult
 	/** The staged blob as text; "" for an untracked path, a symlink or a gitlink. */
 	read(path: string): string
@@ -161,6 +163,7 @@ export function createCtx(opts: { cwd?: string; env?: Env } = {}): Ctx {
 		tracked,
 		dirs: ancestorDirs(tracked),
 		modes: new Map([...entries].map(([path, entry]) => [path, entry.mode])),
+		oids: new Map([...entries].map(([path, entry]) => [path, entry.oid])),
 		git: (...args) => runGit(cwd, args),
 		load,
 		read(path) {
@@ -242,9 +245,8 @@ export function mode(env: Env = process.env): "enforce" | "report" {
 }
 
 /**
- * Rules whose findings fail an enforcing run. The others only report: `path-token` still has code
- * mentions of untracked files to repoint, and the index and archive rules have no active set until
- * the archive split.
+ * Rules whose findings fail an enforcing run wherever they are. The index and archive rules only
+ * report, having no active set until the archive split; `path-token` is `ENFORCED_IN_CODE`.
  */
 export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"tracked-artifact",
@@ -261,8 +263,11 @@ export const ENFORCED: ReadonlySet<RuleId> = new Set<RuleId>([
 	"local-path",
 ])
 
+/** Rules that fail an enforcing run in code and config; in a document they only report until the archive split. */
+export const ENFORCED_IN_CODE: ReadonlySet<RuleId> = new Set<RuleId>(["path-token"])
+
 export function isEnforced(f: Finding): boolean {
-	return ENFORCED.has(f.rule)
+	return ENFORCED.has(f.rule) || (ENFORCED_IN_CODE.has(f.rule) && !isDocument(f.file))
 }
 
 export function verdict(findings: readonly Finding[], env: Env): "pass" | "fail" {

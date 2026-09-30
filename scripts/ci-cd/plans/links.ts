@@ -21,6 +21,7 @@ import {
 	REGULAR_MODES,
 	safeDecodeUri,
 } from "./lib"
+import { BASES_FILE, type Bases, isAllowedPermalink } from "./permalinks"
 
 export type Section = { heading: string; text: string }
 /** A construct whose target the gate cannot judge, located in its file. */
@@ -38,15 +39,20 @@ const LIVE_DOCS = [
 	/^\.github\/README\.md$/,
 ]
 const HISTORY_DOCS = new Set(["CHANGELOG.md", "AUDIT.md"])
-/** Frozen research and audit trees are out of the path-token scan, like the release history; so are this gate's fixtures. */
+/**
+ * Frozen research, audit and reference trees are out of the path-token scan, like the release history;
+ * so are the soak baselines, which record the path each was written to, and this gate's fixtures.
+ */
 const PATH_TOKEN_EXCLUDES = [
 	":!implementations-plan",
 	":!audit",
 	":!architecture",
 	":!wallets-architecture-research",
+	":!reference",
 	":!CHANGELOG.md",
 	":!AUDIT.md",
 	":!scripts/ci-cd/plans",
+	":!scripts/ci-cd/test-soak/baselines",
 ]
 /** GitHub renders GFM autolink literals, so a bare `https://` or `www.` URL is a link there too. */
 function renderMarkdown(src: string): string {
@@ -298,31 +304,68 @@ function tokenResolves(ctx: Ctx, token: string, isCode: boolean): boolean {
 	return isCode && existsInIndex(ctx, `${ARCHIVE}${token.slice(PLANS.length)}`)
 }
 
-function hitFindings(ctx: Ctx, file: string, line: number, text: string): Finding[] {
-	const isCode = !isDocument(file)
+export type HeldMention = { file: string; blob: string; token: string }
+/**
+ * Shrink-only: code mentions of a plan asset that has left the tree, each held only while its file is
+ * the blob recorded here. The first edit to the file ends the hold, so that edit repoints the mention.
+ */
+export const PATH_TOKEN_ALLOWLIST: readonly HeldMention[] = [
+	{
+		file: "packages/wallet-crypto/src/account-derivation.ts",
+		blob: "a82c53635c0b12b989bc08367c20eab3a4eba582",
+		token: "implementations-plan/key-model-v2/reference",
+	},
+	{
+		file: "packages/wallet-crypto/src/mnemonic-master.ts",
+		blob: "a55c4fb314d3cf124b5f239d9049d598c6ed6eab",
+		token: "implementations-plan/key-model-v2/reference/vectors.json",
+	},
+	{
+		file: "packages/wallet-crypto/src/nulo-separators.ts",
+		blob: "cd11b6d5fdbc8418a8cb0796b9155c379ba827a4",
+		token: "implementations-plan/key-model-v2/reference",
+	},
+]
+
+const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[0-9a-f]{40}(?:\/[A-Za-z0-9._-]+)*(?:#L\d+)?/g
+
+/**
+ * An allowlisted permalink pins the commit it names, so a plan path inside it says nothing about HEAD.
+ * `isAllowedPermalink` judges each URL-shaped span whole, so a dot segment or an unlisted SHA keeps
+ * its tokens.
+ */
+function withoutPermalinks(text: string, bases: Bases): string {
+	return text.replace(PERMALINK_SPAN_RE, (url) => (isAllowedPermalink(url, bases) ? " " : url))
+}
+
+type Hit = { file: string; line: number; text: string }
+
+function hitFindings(ctx: Ctx, hit: Hit, bases: Bases, held: ReadonlySet<string>): Finding[] {
+	const isCode = !isDocument(hit.file)
 	const where = isCode ? "at HEAD or under archive/" : "at HEAD"
-	const { paths, overflow } = pathTokens(text)
-	const at = (detail: string, fix: string): Finding => ({ rule: "path-token", file, line, detail, fix })
+	const { paths, overflow } = pathTokens(withoutPermalinks(hit.text, bases))
+	const at = (detail: string, fix: string): Finding => ({ rule: "path-token", file: hit.file, line: hit.line, detail, fix })
 	return [
 		...overflow.map((raw) => at(`${raw} expands to more than ${BRACE_CAP} paths`, "spell the paths out")),
 		...[...new Set(paths)]
-			.filter((token) => !tokenResolves(ctx, token, isCode))
-			.map((token) => at(`${token} does not resolve ${where}`, "repoint it or link a permalink")),
+			.filter((token) => !tokenResolves(ctx, token, isCode) && !held.has(`${hit.file}\0${token}`))
+			.map((token) => at(`${token} does not resolve ${where}`, `repoint it, or cite a permalink at a SHA in ${BASES_FILE}`)),
 	]
 }
 
-export function pathTokenFindings(ctx: Ctx): Finding[] {
+export function pathTokenFindings(ctx: Ctx, bases: Bases, allowlist: readonly HeldMention[] = PATH_TOKEN_ALLOWLIST): Finding[] {
 	// `-a`: a NUL byte would otherwise make git skip the whole file as binary. `-z`: each name ends in a
 	// NUL and is never quoted, so a colon or a newline in it cannot shift the fields.
 	const grep = ctx.git("grep", "--cached", "-n", "-a", "-z", "-E", "implementations-plan/", "--", ".", ...PATH_TOKEN_EXCLUDES)
 	// Exit status 1 is "no match", not an error.
 	if (grep.status === 1) return []
 	if (!grep.ok) throw new Error(`git grep failed: ${grep.stderr.trim()}`)
+	const held = new Set(allowlist.filter((h) => ctx.oids.get(h.file) === h.blob).map((h) => `${h.file}\0${h.token}`))
 	const findings: Finding[] = []
 	const hit = /([^\0]*)\0(\d+)\0([^\n]*)\n/y
 	let at = 0
 	for (let m = hit.exec(grep.stdout); m; m = hit.exec(grep.stdout)) {
-		findings.push(...hitFindings(ctx, m[1], Number(m[2]), m[3]))
+		findings.push(...hitFindings(ctx, { file: m[1], line: Number(m[2]), text: m[3] }, bases, held))
 		at = hit.lastIndex
 	}
 	if (at !== grep.stdout.length) throw new Error(`git grep printed an unparsable record at byte ${at}`)
