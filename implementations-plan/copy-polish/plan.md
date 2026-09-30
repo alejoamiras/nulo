@@ -96,8 +96,9 @@ Excellent means:
    changed, except eleven the owner let the driver reword (§ The string table). A unit test that
    fails on the branch base listing exactly those 46 strings passes after, and fails on any new
    source string or text node with a clause dash outside a log call and off its reviewed list.
-2. **A snack raised while the Terms sheet is open is seen, and never covers Continue or "Not
-   now".** A failed Accept shows its message over the sheet; an arrival snack on Send shows too;
+2. **A snack raised while the Terms sheet is open is seen, and once in place never covers
+   Continue or "Not now"** (its 0.15 s rise crosses Continue's top 8 px; § Decision ledger).
+   A failed Accept shows its message over the sheet; an arrival snack on Send shows too;
    the loader and the barriers still draw over the snack, by their stacking values; the snack's
    host returns to its ordinary layer once the sheet goes; a browser case on both engines proves
    the card over the sheet by hit-testing and the return by computed style.
@@ -114,7 +115,7 @@ lines are not audited.
 |---|---|---|---|
 | 1 | The 46 strings of § The string table: 13 snacks, 15 field, card, dialog and error-log lines, 3 History and journal lines, 15 screen texts | split at the dash ("Profile imported — unlock to continue" → "Profile imported. Unlock to continue"), eleven reworded ("Couldn't estimate fee — retry." → "Couldn't estimate fee. Try again.") | O1 answered 2026-09-30: "Reword some (tell me which)", note: "Please, evaluate yourself, just don't over-use them. feel free to ask gpt sol". Blanket sign-off pending (P6) |
 | 2 | Settings → Glossary, Apps, "Authorization" | where-line "Permission window · approval window" → "Permission window · Connected apps" | O4 answered 2026-09-30: "Connected apps (Recommended)". Blanket sign-off pending (P6) |
-| 3 | The Terms sheet, while a snack is raised | the snack is drawn under the sheet's backdrop and is never seen → it shows over the sheet, 12 px above Continue's row at the end of the scroll; while shown it can cover the consent box's row | O2 answered 2026-09-30: "Show it over the sheet (Recommended)". Blanket sign-off pending (P6) |
+| 3 | The Terms sheet, while a snack is raised | the snack is drawn under the sheet's backdrop and is never seen → it shows over the sheet, 12 px above Continue's row at the end of the scroll; while shown it can cover the consent box's row, and for the 0.15 s it rises into place or drops away its lower edge covers Continue's top 8 px | O2 answered 2026-09-30: "Show it over the sheet (Recommended)". Blanket sign-off pending (P6) |
 | 4 | The permission window's Details rows, unknown contracts, for a screen reader | "0x0c1e…5a7f: simulate, add, transact" → "Unknown contract 0x0c1e…5a7f: simulate, add, transact". Nothing drawn changes | O3 answered 2026-09-30: "Unknown contract + address (Recommended)". Blanket sign-off pending (P6) |
 
 Nothing else a user sees changes.
@@ -661,6 +662,12 @@ no fix, test or question unless it says otherwise:
   the cap.
 - *A hostile token symbol in an arrival card over the sheet* can say only "Received 5 <symbol>",
   capped and sanitised, and approves nothing (§ Security).
+- *The card's rise over Continue* (codex, build round 1): every snack rises 20 px into place and
+  drops 20 px away, each over 0.15 s (`packages/design/src/ui/ToastManagerBase.vue:280-298`, none
+  under reduced motion), so for that moment its lower edge covers Continue's top 8 px. A tap there
+  lands on the card's padding, which runs nothing, and the card's controls sit centred, at least
+  13 px above its edge: a lost tap, never a misdirected one. The motion is the snack's on every
+  screen, so changing it for the sheet is its own owner UI call; the UI impact row says it.
 - *`FieldWarning.test.ts:50-51`* in `packages/design` and `BarrierOverlay.test.ts:74-94` use "—"
   in sample text for generic components; they pin no shipped string and stay.
 - *The PXE store's two errors* (E45, E46) are realistic: a retry after a stalled store open, or a

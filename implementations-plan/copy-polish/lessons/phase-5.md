@@ -113,3 +113,27 @@ Every row exits 0.
     cap-window's reduced-motion case, the suite's Chrome-only one (Firefox's BiDi session cannot
     emulate media features). snack-placement 3 of 3, cap-window 4 of 5.
 - `bun run e2e:reap` → exit 0, nothing left to reap. ✓
+
+## Codex, build round 1
+
+Session `01a0f35b-bdfa-7dc0-977c-9ffc6c1c54f2` (GPT-6 Astra, high, read-only) on `8b7b7421`:
+**changes requested**. It agreed with dropping the loader step (an integrity failure on a restored
+session can raise a barrier before the lock, and the barrier's `body` teleport at 10000 stays above
+the raised host), and found no path from a snack to the consent action and no raise that outlives
+the sheet. It scanned 684 files and found 40 reviewed hits, none open or stale.
+
+- **F1** (minor, material by its reading): every snack rises 20 px into place and drops 20 px away
+  over 0.15 s, so for that moment its lower edge covers Continue's top 8 px, and S11 reads only the
+  settled card. The geometry is right (`ToastManagerBase.vue:280-298`; the gap is 12 px).
+  **Rejected as a code change**: a tap in that band lands on the card's padding, which runs
+  nothing, and the card's controls sit centred at least 13 px above its edge, so the tap is lost
+  and never misdirected. The motion is the snack's on every screen, so changing it for the sheet is
+  an owner UI call. The plan's Outcome 2, UI impact row 3 and a Decision-ledger line now say so.
+- **F2** (minor, material): `CLAUSE_DASH` hits the empty-value glyph inside a label
+  ("Balance: — FJ"), and the reviewed list admitted only text no screen shows. **Accepted**,
+  `9b2d2c3c`: the list takes such a hit with a reason, a scanner case pins the match, and the
+  CLAUDE.md bullet says the same.
+- **F3** (nit): the header's "Every string this replaced had passed review" is history.
+  **Accepted**, `6e2c69ab`: deleted.
+
+After both fixes the guard runs 15 of 15, and Biome is clean.
