@@ -24,7 +24,8 @@ const SCAN_FILES = ["packages/aztec-runtime/src/pxe/opfs-store.ts"]
 const SCANNED = /\.(ts|js|vue)$/
 const SKIPPED = /\.(test|stories)\.[jt]s$|\.d\.ts$/
 
-/** A dash with text on both sides; the empty-value glyph ("—", "— FJ") has nothing before it. */
+/** A dash with text on both sides. The empty-value glyph alone ("—", "— FJ") has nothing before it;
+ *  one inside a label ("Balance: — FJ") matches, and takes a reviewed entry. */
 const CLAUSE_DASH = /\S\s*—\s*\S/
 const HOLE = "${…}"
 
@@ -44,7 +45,8 @@ type TemplateNode = Located & {
 }
 type Reviewed = { file: string; text: string; why: string }
 
-/** Every hit no screen shows, one entry per hit, matched by its exact text. */
+/** Every hit that joins no clauses where a person reads it (text no screen shows, or an empty value
+ *  inside a label), one entry per hit, matched by its exact text. */
 const REVIEWED: Reviewed[] = [
 	{
 		file: "apps/extension/src/wallet/services/restore-fence.ts",
@@ -368,7 +370,7 @@ describe("copy dash ban (static)", () => {
 		const open = review(scanTree()).open.map(({ file, line, text }) => `${file}:${line}  ${text}`)
 		expect(
 			open,
-			`Split each at the dash into two sentences, or add a reviewed entry if no screen shows it:\n${open.join("\n")}`,
+			`Split each at the dash into two sentences, or add a reviewed entry if it joins no clauses where a person reads it:\n${open.join("\n")}`,
 		).toEqual([])
 	})
 
@@ -389,6 +391,7 @@ describe("copy dash ban (static)", () => {
 		["a dialog.warn argument hits", "x.ts", "dialog.warn('Stale row — reopen')", 1],
 		["the empty-value glyph does not hit", "x.vue", "<template><span>—</span></template>", 0],
 		["the glyph with a unit does not hit", "x.ts", "const fee = '— FJ'", 0],
+		["the glyph inside a label hits", "x.ts", "const fee = 'Balance: — FJ'", 1],
 		["a label joiner in its own text node does not hit", "x.vue", "<template><b>{{ title }}</b><Text> — spender </Text></template>", 0],
 	])("%s", (_case, file, source, hits) => {
 		expect(scan(file, source)).toHaveLength(hits)
