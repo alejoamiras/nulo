@@ -752,7 +752,7 @@ Gate, from `apps/extension`: `bun --bun vitest run src/components/LegalAcceptanc
 green; `bun run lint` exit 0.
 Layers: lint, unit, component.
 
-### P4 · A-27's spoken name (A-27)
+### P4 · A-27's spoken name (A-27) ✓
 
 1. Red: the `test.todo` at `DetailsTable.test.ts:92` becomes a case expecting
    "Unknown contract 0x0c1e…5a7f: simulate, add, transact" and "Unknown contract 0x0643…15fd: add,

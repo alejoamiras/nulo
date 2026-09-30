@@ -56,12 +56,13 @@ const COLUMNS = [
 	["transact", (row: Row) => row.transact.length > 0],
 ] as const
 
-/** A row's target reads "{name}: {columns}", since the head is hidden from screen readers. An
- *  unknown row's name is its address as shown. */
-const spokenName = (entry: { row: Row; named: boolean }) =>
-	`${entry.named ? entry.row.name : shownAddress(entry.row.address)}: ${COLUMNS.filter(([, has]) => has(entry.row))
-		.map(([column]) => column)
-		.join(", ")}`
+/** A row's target reads "{name}: {columns}", since the head is hidden from screen readers, and an
+ *  unknown row's name says so, since a Tab to it skips its sub-header. */
+const spokenName = (entry: { row: Row; named: boolean }) => {
+	const name = entry.named ? entry.row.name : `Unknown contract ${shownAddress(entry.row.address)}`
+	const columns = COLUMNS.filter(([, has]) => has(entry.row)).map(([column]) => column)
+	return `${name}: ${columns.join(", ")}`
+}
 </script>
 
 <template>
