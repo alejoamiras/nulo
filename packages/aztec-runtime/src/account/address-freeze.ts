@@ -52,8 +52,8 @@ export type AddressRegime = {
  * Changing ANY line changes the digest and reds `address-freeze.test.ts`. The constructions
  * themselves live in `@nulo/wallet-crypto` (mnemonic-master.ts, passkey-credential.ts,
  * derive-account-seed.ts, account-derivation.ts, nulo-separators.ts) and are value-pinned by the
- * reference vectors in `implementations-plan/key-model-v2/reference/` (mnemonic chain) and
- * `implementations-plan/key-model-v2-hardening/reference/` (passkey master).
+ * reference vectors in `reference/key-model-v2/` (mnemonic chain) and
+ * `reference/key-model-v2-hardening/` (passkey master).
  */
 export const NULO_KDF_SPEC =
 	"nulo-account-kdf-v2\n" +

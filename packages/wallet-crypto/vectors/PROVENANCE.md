@@ -26,7 +26,7 @@ All 24 rows: 12-, 18-, and 24-word mnemonics; entropies from all-zero bytes thro
 plus pseudo-random ones. Every `seedTrezor` is the seed for passphrase **`"TREZOR"`**, which is the
 passphrase the published vectors use — production derives at passphrase `""`, so the KAT exercises
 the passphrase path and the production path is covered separately by the cross-implementation rows
-in `implementations-plan/key-model-v2/reference/vectors.json`.
+in `reference/key-model-v2/vectors.json`.
 
 ## Why this file earns its place
 

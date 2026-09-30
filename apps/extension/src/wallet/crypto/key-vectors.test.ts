@@ -12,7 +12,7 @@
  *       `@nulo/wallet-crypto`, the signing-key-root model adopted at
  *       Aztec 5.0.0; upstream's removed `deriveSigningKey` construction
  *       under the dedicated Nulo separator, reference-vectored in
- *       `implementations-plan/key-model-v2/reference/`).
+ *       `reference/key-model-v2/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
  * in `@aztec-labs/foundation` or `@aztec-labs/stdlib`, fails one of these tests
@@ -145,10 +145,10 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// Input PRF is 32 clean bytes base64-encoded; credentialId is a
 	// short base64 identifier mimicking a real WebAuthn credential.
 	// The expected value is REFERENCE-GENERATED, not captured from this
-	// implementation: implementations-plan/key-model-v2-hardening/reference/
-	// passkey-master-vector.ts recomputes it via node:crypto's HKDF (a
-	// different implementation than the wallet's WebCrypto), so a
-	// consistently mis-wired wallet HKDF cannot self-consistently pass.
+	// implementation: reference/key-model-v2-hardening/passkey-master-vector.ts
+	// recomputes it via node:crypto's HKDF (a different implementation than
+	// the wallet's WebCrypto), so a consistently mis-wired wallet HKDF cannot
+	// self-consistently pass.
 	// Never re-pin from deriveMasterSecret's own output.
 	const V3_PRF_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 	const V3_CREDENTIAL_ID_B64 = "dGVzdC1jcmVkZW50aWFsLWlk"
@@ -177,9 +177,9 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// it). The construction is upstream's removed `deriveSigningKey`
 	// under the dedicated Nulo separator —
 	// `sha512ToGrumpkinScalar([seed, NULO_SIGNING_ROOT_SEP])` — and is
-	// REFERENCE-VECTORED in `implementations-plan/key-model-v2/reference/`
+	// REFERENCE-VECTORED in `reference/key-model-v2/`
 	// (published-5.0.1-tarball provenance; the v1 predecessor vectors
-	// stay archived under `aztec-5.0.0-stable/reference/`). If this
+	// stay in `reference/aztec-5.0.0-stable/`). If this
 	// fails, the signing key of every wallet on disk just changed:
 	// stop, never re-pin from this implementation. AZTEC-SENSITIVE.
 	test("V7a — deriveSigningKeyFromSeed(fixedSeed) matches fixture", () => {
