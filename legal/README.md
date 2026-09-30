@@ -65,7 +65,7 @@ These came out of the two-round review and are **not** fixed by editing the docu
    bundled fonts are listed, each bound to its file by hash. **Stated limit:** the barretenberg and
    noir wasm are attributed to the projects that publish them, under their licences; what they
    compile in is not itemised, because upstream publishes no inventory (the notices file says so,
-   and `implementations-plan/third-party-notices/follow-ups.md` records what would reopen it).
+   and `implementations-plan/follow-ups.md` records what would reopen it).
 5. **Chrome trader disclosure — declared non-trader (2026-09-21).** The developer account answered
    Chrome's trader question as a non-trader (no revenue, no entity, no professional activity), so the
    listing shows no address or phone number. A natural person acting professionally can still be a
