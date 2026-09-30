@@ -203,7 +203,6 @@ const ambiguousReadings = computed(() => {
 	return [text.replace(",", ""), text.replace(",", ".")]
 })
 
-/** The conversion line's tooltip names the price's proxy, if any. */
 const conversionTitle = computed(() => (props.proxyTicker ? `Priced via ${props.proxyTicker}, at today's rate` : "At today's rate"))
 
 /** Corner balance segment: amount + symbol only — the From selector above

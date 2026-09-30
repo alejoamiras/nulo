@@ -25,8 +25,9 @@ function u128(arg: unknown): bigint | null {
 }
 
 /**
- * The amount a settled transaction record states, or null when the wallet cannot state it
- * exactly: a transfer from its own record, a standard mint from the listed token it names.
+ * The amount a settled transaction record states, or null: a transfer from its own record; a mint
+ * known only by its method's name and arity, in the decimals of the listed token it calls, whose
+ * contract the person already trusts to report its own balance and symbol.
  */
 export function txAmount(
 	calls: readonly TxCall[] | undefined,
