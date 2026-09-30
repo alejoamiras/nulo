@@ -214,6 +214,8 @@ const searchTerm = ref("")
 const recipientCandidates = computed(() => [...contacts.value, ...appStore.accounts])
 
 const amountTerm = ref()
+/** The card's own resting text, whose commas the validator reads as its grouping. */
+const amountRested = ref(null)
 
 const isValidAddress = computed(() => isValidHex(searchTerm.value))
 
@@ -231,6 +233,7 @@ const balanceRaw = computed(() => {
 const amountValidation = computed(() =>
 	validateSendAmount({
 		input: typeof amountTerm.value === "string" ? amountTerm.value : amountTerm.value?.toString(),
+		rested: amountRested.value,
 		tokenDecimals: activeToken.value?.decimals,
 		balanceRaw: balanceRaw.value,
 	}),
@@ -697,6 +700,7 @@ onBeforeUnmount(() => {
 					<AmountCard
 						ref="amountCardRef"
 						v-model="amountTerm"
+						v-model:rested="amountRested"
 						v-model:fiatMode="fiatMode"
 						v-model:fiatGuard="fiatGuard"
 						:token="activeToken"

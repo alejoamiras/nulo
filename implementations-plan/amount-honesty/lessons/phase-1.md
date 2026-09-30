@@ -30,9 +30,9 @@ marked new, and the surface tests above are their red proof.
 - `TokenInfo.hasDecimals` is required, so two typed test literals needed it
   (`composables/useScopedTokens.test.ts`, `utils/received-display.test.ts`); `vue-tsc` named
   exactly those two.
-- Biome's formatter rewrote the `‮` / `​` escapes of the hostile-symbol fixture into the
-  literal invisible characters. The fixture builds them with `String.fromCodePoint` instead, so the
-  source shows what the test feeds.
+- The hostile-symbol fixture builds its bidi override (U+202E) and zero-width space (U+200B) with
+  `String.fromCodePoint`: typed as escapes through the editing tool, they had landed in the file as
+  the literal invisible characters. Biome was not the cause, as first noted here.
 - Beyond the plan's cases, `TransactionsList.test.ts` and `RecentActivityView.test.ts` each assert
   that the settled card receives the parent's `tokens`: a dropped binding would silently leave every
   mint row without its figure.

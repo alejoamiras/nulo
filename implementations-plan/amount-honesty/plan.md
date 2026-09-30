@@ -695,7 +695,7 @@ modulus; `ONE` is `0x` + `(10n ** 18n)` as 64 hex digits.
      that is neither digits nor hex; a dApp transfer (no `transfers`);
    - a genuine 0-decimal token with a getter and amount `0x5` → units 5, decimals 0;
    - a UI transfer whose record says 18 decimals, with an empty list → its units and 18;
-   - a symbol `"US‮DC​"` → `"USDC"`.
+   - a symbol "US", U+202E, "DC", U+200B → `"USDC"`.
 3. Red, `TransactionCard.test.ts`: the #718 case "never reads as >999T" (`:108-118`) is rewritten
    on wire-valid fixtures (it used `0xtoken` and `"ab"` × 32): with the token listed, "1" and
    "TST"; without it, no amount; 1,234,567 tokens, "1.23M"; two mint calls, no amount.
@@ -717,7 +717,7 @@ Gate:
 - Pass: every command exits 0; each red case failed on the unfixed code (recorded).
 - Layers: typecheck, lint, unit, component.
 
-### P2 · The field never changes a magnitude unseen (A2)
+### P2 · The field never changes a magnitude unseen (A2) ✓
 
 Assumptions: Facts 11 to 17 and 22; Inferences 1 and 3; C1 as applied; O2 (a) and O3 (b) with
 the re-read, as answered.

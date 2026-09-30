@@ -1,15 +1,7 @@
-/**
- * Pure validation helper for the Send page's amount input. Owns the
- * "user-typed string + token decimals + raw balance → bigint or reason"
- * invariant so `send.vue` doesn't need to inline `BN.times(10 ** d)` at
- * multiple sites (the source of the QA-surfaced decimal-overflow bug).
- *
- * Returns a discriminated `ValidateSendAmount` result: callers either
- * get a usable `integerized: bigint` or a typed `reason` for the failure
- * (mappable to UI copy if we want inline error text later).
- */
+/** The Send page's one amount gate: the field's text, read whole, as base units the token can hold
+ *  and the balance covers, or the reason it cannot send. */
 
-import { parseAmountToBaseUnits } from "@/utils/amount"
+import { parseAmountToBaseUnits, readAmountText } from "@/utils/amount"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export type ValidateSendAmountReason = "empty" | "invalid" | "tooManyDecimals" | "belowMinimum" | "exceedsBalance" | "decimalsUnknown"
@@ -19,6 +11,8 @@ export type ValidateSendAmount = { valid: true; integerized: bigint } | { valid:
 export interface ValidateSendAmountInput {
 	/** Raw user-typed string (e.g. "1.5", "14.0234375"). */
 	input: string | undefined | null
+	/** The text the field last wrote at rest, whose commas are its own grouping; null otherwise. */
+	rested?: string | null
 	/** Token's `decimals` field. `undefined` means token list still loading. */
 	tokenDecimals: number | undefined
 	/** Account's available balance in base units (raw bigint or string). `undefined`
@@ -28,17 +22,14 @@ export interface ValidateSendAmountInput {
 
 const MIN_BASE_UNITS = 1n
 
-/** The grouped whole part `restingAmount` writes; keep the two in step. */
-const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/
-
 /** Result-shaped wrapper over `parseAmountToBaseUnits`: its throw is the only signal, and
  *  the too-many-decimals case gets its own user-facing reason. */
 function parseToBaseUnits(
-	trimmed: string,
+	plain: string,
 	tokenDecimals: number,
 ): { ok: true; value: bigint } | { ok: false; reason: "tooManyDecimals" | "invalid" } {
 	try {
-		return { ok: true, value: parseAmountToBaseUnits(trimmed, tokenDecimals) }
+		return { ok: true, value: parseAmountToBaseUnits(plain, tokenDecimals) }
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		return { ok: false, reason: msg.includes("too many decimals") ? "tooManyDecimals" : "invalid" }
@@ -46,15 +37,9 @@ function parseToBaseUnits(
 }
 
 export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendAmount {
-	const { input, tokenDecimals, balanceRaw } = opts
+	const { input, rested = null, tokenDecimals, balanceRaw } = opts
 
-	if (typeof input !== "string" || input.trim() === "") {
-		return { valid: false, reason: "empty" }
-	}
-	const raw = input.trim()
-	// Dropping every comma anywhere else would read stray commas as another amount.
-	const trimmed = GROUPED.test(raw) ? raw.replaceAll(",", "") : raw.replace(",", "")
-	if (trimmed === "" || trimmed === ".") {
+	if (typeof input !== "string" || input.trim() === "" || input.trim() === ".") {
 		return { valid: false, reason: "empty" }
 	}
 
@@ -62,7 +47,12 @@ export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendA
 		return { valid: false, reason: "decimalsUnknown" }
 	}
 
-	const parsed = parseToBaseUnits(trimmed, tokenDecimals)
+	const read = readAmountText(input, { rested })
+	if (!read.ok) {
+		return { valid: false, reason: "invalid" }
+	}
+
+	const parsed = parseToBaseUnits(read.plain, tokenDecimals)
 	if (!parsed.ok) {
 		return { valid: false, reason: parsed.reason }
 	}

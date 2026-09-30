@@ -7,6 +7,7 @@ import {
 	normalizeAmount,
 	parseAmountToBaseUnits,
 	purgeNumber,
+	readAmountText,
 } from "./amount"
 
 /** Locale-pinned defaults so the tests don't depend on ambient locale.
@@ -222,6 +223,58 @@ describe("amount/normalizeAmount", () => {
 	test("returns undefined for valid passthrough inputs", () => {
 		expect(normalizeAmount("1.5")).toBeUndefined()
 		expect(normalizeAmount("100")).toBeUndefined()
+	})
+})
+
+describe("amount/readAmountText", () => {
+	const NBSP = String.fromCodePoint(0xa0)
+	const NNBSP = String.fromCodePoint(0x202f)
+	const THIN = String.fromCodePoint(0x2009)
+
+	test.each([
+		["1234.56", {}, "1234.56"],
+		["1.", {}, "1."],
+		[".5", {}, ".5"],
+		[" 12.5 ", {}, "12.5"],
+		["1.234", {}, "1.234"],
+		["12.345", {}, "12.345"],
+		["0,001", {}, "0.001"],
+		["1,5", {}, "1.5"],
+		[",5", {}, ".5"],
+		["12,50", {}, "12.50"],
+		["1,2345", {}, "1.2345"],
+		["0,123", {}, "0.123"],
+		["1,234.56", {}, "1234.56"],
+		["1,234,567", {}, "1234567"],
+		["1.234,56", {}, "1234.56"],
+		["1.234.567", {}, "1234567"],
+		["1 234,56", {}, "1234.56"],
+		[`1${NNBSP}234,56`, {}, "1234.56"],
+		[`1${NBSP}234.5`, {}, "1234.5"],
+		["1 234", {}, "1234"],
+		[`12${THIN}345${THIN}678`, {}, "12345678"],
+		["$12.50", { currency: "$" as const }, "12.50"],
+		["1,234", { rested: "1,234" }, "1234"],
+		["1,000", { rested: "1,000" }, "1000"],
+		["1,234", {}, "ambiguous"],
+		["12,345", {}, "ambiguous"],
+		["123,456", {}, "ambiguous"],
+		["1,000", {}, "ambiguous"],
+		["1e5", {}, "unreadable"],
+		["1E5", {}, "unreadable"],
+		["1e-7", {}, "unreadable"],
+		["1.5e3", {}, "unreadable"],
+		["12,34.5", {}, "unreadable"],
+		["1,5,", {}, "unreadable"],
+		["1.234,5,", {}, "unreadable"],
+		["1,234,5", {}, "unreadable"],
+		["1.234,5,678901", {}, "unreadable"],
+		["12.5 USDC", {}, "unreadable"],
+		["$5", {}, "unreadable"],
+		["-1", {}, "unreadable"],
+	])("%j %j reads as %s", (text, opts, expected) => {
+		const read = readAmountText(text, opts)
+		expect(read.ok ? read.plain : read.reason).toBe(expected)
 	})
 })
 

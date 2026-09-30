@@ -215,6 +215,7 @@ declare global {
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
+  const readAmountText: typeof import('../utils/amount').readAmountText
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readLiveness: typeof import('../utils/background-liveness').readLiveness
   const readonly: typeof import('vue').readonly
@@ -460,7 +461,7 @@ declare global {
   export type { ActivityRowTx, ActivityRowJournal, ActivityRowIncoming, ActivityRow, BuildActivityRowsParams } from '../utils/activity-rows'
   import('../utils/activity-rows')
   // @ts-ignore
-  export type { FormatBaseUnitsOpts } from '../utils/amount'
+  export type { AmountRead, FormatBaseUnitsOpts } from '../utils/amount'
   import('../utils/amount')
   // @ts-ignore
   export type { CopyToastSpec } from '../utils/clipboard'
@@ -745,6 +746,7 @@ declare module 'vue' {
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
+    readonly readAmountText: UnwrapRef<typeof import('../utils/amount')['readAmountText']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readLiveness: UnwrapRef<typeof import('../utils/background-liveness')['readLiveness']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>

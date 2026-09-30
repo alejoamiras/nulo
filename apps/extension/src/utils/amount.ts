@@ -29,6 +29,35 @@ export const normalizeAmount = (target: string): string | undefined => {
 	if (Number.parseFloat(purgeNumber(target)) >= 9_999_999_999_999) return "9999999999999"
 }
 
+/** What an amount text reads as: its plain form (digits and at most one "."), or why it has none. */
+export type AmountRead = { ok: true; plain: string } | { ok: false; reason: "ambiguous" | "unreadable" }
+
+/** The grouped whole part the Send field writes at rest (`restingAmount`); keep the two in step. */
+const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/
+const SPACE = /[\u0020\u00a0\u202f\u2009]/g
+const SPACE_GROUPED = /^[1-9]\d{0,2}(?:[\u0020\u00a0\u202f\u2009]\d{3})+(?:[.,]\d*)?$/
+const UNREADABLE: AmountRead = { ok: false, reason: "unreadable" }
+
+/**
+ * The one amount a text reads as, or none: a "." is the decimal point, and a comma or space is read
+ * as grouping or as the decimal only where the form allows one reading ("1,234" allows two).
+ * `rested` is the field's own resting text, whose commas are the wallet's grouping; `currency: "$"`
+ * drops one leading "$".
+ */
+export function readAmountText(text: string, { rested = null, currency }: { rested?: string | null; currency?: "$" } = {}): AmountRead {
+	let t = text.trim()
+	if (currency === "$" && t.startsWith("$")) t = t.slice(1)
+	if (!/\d/.test(t)) return UNREADABLE
+	if (text === rested && GROUPED.test(t)) return { ok: true, plain: t.replaceAll(",", "") }
+	if (/^\d*\.?\d*$/.test(t)) return { ok: true, plain: t }
+	if (/^[1-9]\d{0,2},\d{3}$/.test(t)) return { ok: false, reason: "ambiguous" }
+	if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?$/.test(t)) return { ok: true, plain: t.replaceAll(",", "") }
+	if (/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d*)?$/.test(t)) return { ok: true, plain: t.replaceAll(".", "").replace(",", ".") }
+	if (SPACE_GROUPED.test(t)) return { ok: true, plain: t.replace(SPACE, "").replace(",", ".") }
+	if (/^\d*,\d*$/.test(t)) return { ok: true, plain: t.replace(",", ".") }
+	return UNREADABLE
+}
+
 const COMPACT_SUFFIXES = ["K", "M", "B", "T"] as const
 
 /**
