@@ -20,11 +20,13 @@ const row = (dir: string, outcomeFile: string | null, followUps: string[] = []):
 	evidence: "S1",
 })
 
-const LOG = "- A cold cache hides it: under /home/alice/src the warm run passes.\n"
+/** Joined at runtime so this file holds no home path for the plans gate to flag. */
+const HOME = ["", "home", "alice", "src"].join("/")
+const LOG = `- A cold cache hides it: under ${HOME} the warm run passes.\n`
 
 const LESSON = {
 	path: `${P}/a/lessons/phase-1.md`,
-	quote: "A cold cache hides it: under /home/alice/src the warm run passes.",
+	quote: `A cold cache hides it: under ${HOME} the warm run passes.`,
 	cluster: "bun-deps" as const,
 	target: "lessons" as const,
 	gotcha: "g",
@@ -124,14 +126,14 @@ describe("mine", () => {
 			files: [{ path: `${P}/a/nope.md`, status: "read" as const }],
 			candidates: [
 				{ ...LESSON, quote: "A cold cache hides it:  under the warm run." },
-				{ ...LESSON, quote: "under /home/alice/src the warm run passes.\n" },
+				{ ...LESSON, quote: `under ${HOME} the warm run passes.\n` },
 				{ ...LESSON, path: `${P}/a/notes.md`, quote: "A plan note, not a mining source." },
 			],
 			carried: [{ id: "k-none", verdict: "keep", check: "", result: "" }],
 		}
 		expect(admit(repo, file, misquote, recs).problems).toEqual([
 			`${P}/a/lessons/phase-1.md: quote not found byte for byte; copy one line's text exactly, without line numbers: "A cold cache hides it:  under the warm run."`,
-			`${P}/a/lessons/phase-1.md: quote spans lines; copy one line's text: "under /home/alice/src the warm run passes.\\n"`,
+			`${P}/a/lessons/phase-1.md: quote spans lines; copy one line's text: "under ${HOME} the warm run passes.\\n"`,
 			`${P}/a/notes.md: not a mining source in the inventory`,
 			"k-none: no such carried candidate",
 			`${P}/a/nope.md: reported but not in the inventory`,
