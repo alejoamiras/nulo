@@ -1,7 +1,8 @@
 /**
  * Send's token card: while the page's tokens load it is an inert, busy row that a tap or a key
  * cannot open, with a skeleton only after a noticeable wait; loaded, it opens the token picker, or
- * the import popup when there is no token, from a tap, Enter or Space.
+ * the import popup when there is no token, from a tap, Enter or Space; after a failed load it
+ * offers a Retry instead.
  */
 import { createTestingPinia } from "@pinia/testing"
 import { mount } from "@vue/test-utils"
@@ -103,5 +104,47 @@ describe("send/SelectTokenCard", () => {
 		expect(w.text()).toContain("Import token")
 		await trigger(w).trigger("click")
 		expect(popupStore.open).toHaveBeenCalledWith("new_token")
+	})
+})
+
+describe("send/SelectTokenCard — a load that failed", () => {
+	test("the error and a Retry, in the Tab path; a tap, Enter and Space retry and never open the import popup", async () => {
+		const { w, popupStore } = mountCard({ failed: true })
+		expect(trigger(w).attributes()).toMatchObject({ "data-state": "failed", role: "button", tabindex: "0" })
+		expect(trigger(w).attributes("aria-busy")).toBeUndefined()
+		expect(w.text()).toContain("Couldn't load tokens")
+		expect(w.text()).toContain("Retry")
+		expect(w.text()).not.toContain("No available tokens")
+		for (const act of ["click", "keydown.enter", "keydown.space"]) await trigger(w).trigger(act)
+		expect(w.emitted("retry")).toHaveLength(3)
+		expect(popupStore.open).not.toHaveBeenCalled()
+	})
+
+	test("after a Retry that failed again, a held or composing Enter or Space retries nothing", async () => {
+		const { w } = mountCard({ failed: true })
+		await trigger(w).trigger("keydown.enter")
+		await w.setProps({ loading: true })
+		await w.setProps({ loading: false })
+		for (const init of [{ repeat: true }, { isComposing: true }]) {
+			await trigger(w).trigger("keydown.enter", init)
+			await trigger(w).trigger("keydown.space", init)
+		}
+		expect(w.emitted("retry")).toHaveLength(1)
+	})
+
+	test("loading wins over failed, and is inert; a token wins over both", async () => {
+		const { w, popupStore } = mountCard({ failed: true, loading: true })
+		expect(trigger(w).attributes("data-state")).toBe("loading")
+		await trigger(w).trigger("click")
+		expect(w.emitted("retry")).toBeUndefined()
+		expect(popupStore.open).not.toHaveBeenCalled()
+
+		await w.setProps({ token: TOKEN })
+		expect(trigger(w).attributes("data-state")).toBe("ready")
+		await w.setProps({ loading: false })
+		expect(trigger(w).attributes("data-state")).toBe("ready")
+		await trigger(w).trigger("click")
+		expect(popupStore.open).toHaveBeenCalledWith("select_token")
+		expect(w.emitted("retry")).toBeUndefined()
 	})
 })

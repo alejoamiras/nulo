@@ -48,6 +48,7 @@ function makeDeps(overrides: Partial<TransferExecutorDeps>): TransferExecutorDep
 		isFenceLive: vi.fn(() => true),
 		getNetwork: vi.fn(async () => ({}) as never),
 		getNode: vi.fn(async () => ({}) as never),
+		readPublicStorageOnce: vi.fn() as never,
 		getPXE: vi.fn(() => ({}) as never),
 		getAccountContract: vi.fn(async () => ({}) as never),
 		getPendingForAccount: vi.fn(() => []),

@@ -220,3 +220,62 @@ describe("OperationCard — the sponsor a wire-shaped transaction defaults to", 
 		expect(savedKeys()).not.toContain(FEE_PICKS_KEY)
 	})
 })
+
+describe("OperationCard — a sponsor that can't cover a wire-shaped transaction's fee", () => {
+	const SPONSOR_AT = field(0x0a11ce5c0ffeen)
+	const NULO_ROW = { ...NULO_SPONSOR, address: SPONSOR_AT }
+	const withVerdict = (funded: boolean) => ({ ...ESTIMATE, sponsorFunding: { fpcId: "s1", address: SPONSOR_AT, funded } })
+	const NO_PAYER = "The sponsor can't cover this fee right now."
+	const notice = (w: VueWrapper) => w.find('[data-testid="fee-sponsor-short"]')
+
+	test("short: the card withdraws the sponsor and says why, and the pick that replaces it is what it hands the window", async () => {
+		mocks.getFpcs.mockResolvedValue([NULO_ROW])
+		const w = await mountCard(sendTx())
+		expect(lastSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		await w.setProps({ feeEstimate: withVerdict(false) })
+		await flushPromises()
+		expect(w.emitted<[number, unknown]>("updateFeeSettings")?.at(-1)).toEqual([0, undefined])
+		expect(w.get('[data-testid="send-fee-method-trigger"]').text()).toContain("Select method")
+		expect(notice(w).text()).toBe(NO_PAYER)
+		expect(w.get('[data-testid="send-fee-method-sponsored"]').attributes("disabled")).toBeDefined()
+		expect(fee(w).attributes("data-sponsor-funding")).toBe("short")
+
+		await w.get('[data-testid="send-fee-method-public"]').trigger("click")
+		await flushPromises()
+		expect(lastSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		expect(notice(w).exists()).toBe(false)
+	})
+
+	test("an app's name, call arguments and payload fields shaped like a verdict move neither the verdict nor the notice", async () => {
+		mocks.getFpcs.mockResolvedValue([NULO_ROW])
+		const lure = { fpcId: "s1", address: SPONSOR_AT, funded: false }
+		const op = sendTx({
+			calls: [
+				{
+					name: "sponsor_unconditionally",
+					to: SPONSOR_AT,
+					selector: "0x3a4b5c6d",
+					type: "public",
+					isStatic: false,
+					hideMsgSender: false,
+					args: [SPONSOR_AT, field(0n)],
+				},
+			],
+			sponsorFunding: lure,
+		})
+		const w = await mountCard(
+			{ ...op, sponsorFunding: lure, opts: { ...op.opts, sponsorFunding: lure } },
+			{ name: "The sponsor can't cover this fee right now, so Evil pays it." },
+		)
+		await w.setProps({ feeEstimate: withVerdict(true) })
+		await flushPromises()
+		expect(fee(w).attributes("data-sponsor-funding")).toBe("funded")
+		expect(notice(w).exists()).toBe(false)
+		expect(lastSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+		await w.setProps({ feeEstimate: withVerdict(false) })
+		await flushPromises()
+		expect(notice(w).text()).toBe(NO_PAYER)
+	})
+})

@@ -342,6 +342,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
+			readPublicStorageOnce: (network, contract, slot, timeoutMs) =>
+				this.networkService.readPublicStorageOnce(network, contract, slot, timeoutMs),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
@@ -395,6 +397,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			isFenceLive: (fence) => this.profileService.isFenceLive(fence),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
+			readPublicStorageOnce: (network, contract, slot, timeoutMs) =>
+				this.networkService.readPublicStorageOnce(network, contract, slot, timeoutMs),
 			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),

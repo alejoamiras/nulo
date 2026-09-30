@@ -1,4 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
+import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -39,6 +41,7 @@ import {
 	NetworkMethodSchemas,
 	NodeStatus,
 	NetworkRowSchema,
+	primaryEndpointUrl,
 } from "./spec"
 
 export * from "./spec"
@@ -770,6 +773,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			return node
 		})
+	}
+
+	/** One bounded, silent storage read at `network`'s primary endpoint (see
+	 *  `NodeFactory.readPublicStorageOnce`). Background-only: not an RPC method. */
+	public async readPublicStorageOnce(network: Network, contract: AztecAddress, slot: Fr, timeoutMs: number): Promise<Fr> {
+		const rpcUrl = primaryEndpointUrl(network)
+		if (!rpcUrl) throw new Error(`Network ${network.id} has no primary endpoint`)
+		return this.nodeFactory.readPublicStorageOnce(rpcUrl, contract, slot, timeoutMs)
 	}
 
 	/**

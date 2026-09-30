@@ -18,6 +18,9 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { Fr } from "@aztec/foundation/curves/bn254"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
@@ -60,6 +63,13 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 	finalizeGasLimits: vi.fn(async () => {}),
 }))
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
+
+// The balance slot's poseidon2 runs Barretenberg WASM, which crashes under jsdom; the slot itself is
+// pinned in fee-juice-balance.test.ts.
+vi.mock("@aztec/protocol-contracts/fee-juice", async (importOriginal) => {
+	const { Fr } = await import("@aztec/foundation/curves/bn254")
+	return { ...(await importOriginal<object>()), computeFeePayerBalanceStorageSlot: vi.fn(async () => new Fr(0x51n)) }
+})
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
 const FENCE = { profileId: "p1", epoch: 0, session: 1 }
@@ -171,6 +181,7 @@ function makeHarness(
 		addTransaction: vi.fn(async () => ({}) as never),
 		recordPendingAuthwits: vi.fn(async () => {}),
 		logDebug: vi.fn(),
+		readPublicStorageOnce: vi.fn(async () => new Fr(0n)),
 		...overrides,
 	}
 	return {
@@ -1478,5 +1489,85 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 			// written: the store never receives a snapshot for this attempt.
 			expect(stash).not.toHaveBeenCalled()
 		})
+	})
+})
+
+describe("DappSendExecutor.estimateOperationFee sponsor funding", () => {
+	const SPONSOR = AztecAddress.fromNumberUnsafe(0x5f)
+	const FPC_SETTINGS = { paymentMethod: { kind: "fpc", fpcId: "fpc-9" } } as never
+	const FORGED = { fpcId: "fpc-9", address: SPONSOR.toString(), funded: true }
+
+	/** A sponsor-paid build with a real `GasSettings` (fee limit 2 × 100 + 3 × 200 = 800) and a
+	 *  node whose storage read must never be the probe's. */
+	function sponsorHarness(opts: { named?: boolean; balance?: bigint | Error } = {}) {
+		const readPublicStorageOnce = vi.fn(async () => {
+			if (opts.balance instanceof Error) throw opts.balance
+			return new Fr(opts.balance ?? 799n)
+		})
+		const h = makeHarness({
+			readPublicStorageOnce,
+			planner: {
+				processAztecJsPayload: vi.fn(async () => ({
+					actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+					feePaymentMethod: undefined,
+					feeOptions: { sponsorFunding: FORGED },
+				})),
+			} as never,
+		})
+		const node = { ...h.node, getPublicStorageAt: vi.fn() }
+		const gasSettings = new GasSettings(new Gas(100, 200), new Gas(10, 20), new GasFees(2n, 3n), new GasFees(0n, 0n))
+		Object.assign(h.built, {
+			node,
+			txRequest: { authWitnesses: [], txContext: { gasSettings } },
+			...(opts.named === false ? {} : { sponsor: { fpcId: "fpc-9", address: SPONSOR } }),
+		})
+		return { ...h, readPublicStorageOnce, node }
+	}
+
+	/** An operation whose own fields claim the sponsor is funded. */
+	function forgingOp() {
+		return makeAztecOp({
+			feeSettings: FPC_SETTINGS,
+			sponsorFunding: FORGED,
+			opts: { from: addr("0xacct"), additionalScopes: [], wait: "NO_WAIT", sponsorFunding: FORGED },
+		})
+	}
+
+	test("a build naming a sponsor carries the probe's verdict, never the dApp's, read through the one-shot reader", async () => {
+		const { executor, deps, built, readPublicStorageOnce, node } = sponsorHarness({ balance: 0n })
+
+		const result = await executor.estimateOperationFee(forgingOp(), FPC_SETTINGS)
+
+		expect(result.sponsorFunding).toEqual({ fpcId: "fpc-9", address: SPONSOR.toString(), funded: false })
+		expect(result.estimateId).toBeDefined()
+		expect(readPublicStorageOnce).toHaveBeenCalledTimes(1)
+		expect((readPublicStorageOnce.mock.calls[0] as unknown[])[0]).toBe(built.network)
+		expect(node.getPublicStorageAt).not.toHaveBeenCalled()
+		expect(deps.logDebug).toHaveBeenCalledWith("sponsor probe", { outcome: "short" })
+	})
+
+	test.each([
+		{ build: "a build naming no sponsor", named: false, balance: 0n, reads: 0 },
+		{ build: "a failed read", named: true, balance: new Error("Request to https://rpc.example timed out"), reads: 1 },
+	])("$build: no sponsorFunding key, whatever the dApp's payload carries", async ({ named, balance, reads }) => {
+		const { executor, readPublicStorageOnce } = sponsorHarness({ named, balance })
+
+		const result = await executor.estimateOperationFee(forgingOp(), FPC_SETTINGS)
+
+		expect(result).not.toHaveProperty("sponsorFunding")
+		expect(result.estimateId).toBeDefined()
+		expect(readPublicStorageOnce).toHaveBeenCalledTimes(reads)
+	})
+
+	test("a cancel landing during the probe rejects and stashes nothing", async () => {
+		const controller = new AbortController()
+		const { executor, deps, readPublicStorageOnce } = sponsorHarness()
+		readPublicStorageOnce.mockImplementation(async () => {
+			controller.abort()
+			return new Fr(800n)
+		})
+
+		await expect(executor.estimateOperationFee(forgingOp(), FPC_SETTINGS, controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
 	})
 })

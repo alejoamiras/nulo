@@ -35,10 +35,12 @@ export interface FeeMethodOption {
 	 *  in place of `spend` (e.g. "no balance"). The testid is still derived
 	 *  from `subtitle`, so this is display-only. */
 	disabledReason?: string
+	/** A sponsor a short verdict set aside on this card: selected only when the person picks it. */
+	setAside?: boolean
 	/** What the method can spend, for the menu's right column: a balance, "— FJ" while
 	 *  balances are unknown, "free" for Nulo's own sponsor, "—" for one added by hand. */
 	spend?: string
-	fpc?: { id: string; type: FpcType; name?: string; isProtocol?: boolean } | null
+	fpc?: { id: string; type: FpcType; name?: string; isProtocol?: boolean; address?: string } | null
 }
 
 /** Fee Juice balances surfaced from `executionService.getGasBalances` —
@@ -72,6 +74,7 @@ export interface RegisteredFpc {
 	type: FpcType
 	name?: string
 	isProtocol?: boolean
+	address?: string
 }
 
 /**
@@ -157,11 +160,19 @@ export function resolveSavedSelection(
 			const fpcId = saved.fpc?.id
 			if (!fpcId) return undefined
 			const match = freshMethods.find((m) => m.type === "fpc" && m.fpc?.id === fpcId)
-			return match ?? undefined
+			return match && !match.disabled && !match.setAside ? match : undefined
 		}
 		default:
 			return undefined
 	}
+}
+
+export interface FeeMethodsOptions {
+	allowSponsored?: boolean
+	/** Sponsors a verdict found short on the current transaction: their rows are disabled. */
+	shortSponsorIds?: ReadonlySet<string>
+	/** Sponsors a verdict found short on this card: their rows are set aside. */
+	setAsideSponsorIds?: ReadonlySet<string>
 }
 
 /**
@@ -179,7 +190,7 @@ export function resolveSavedSelection(
 export function buildFeeMethods(
 	registeredFpcs: RegisteredFpc[],
 	gasBalances?: GasBalances,
-	options?: { allowSponsored?: boolean },
+	options?: FeeMethodsOptions,
 ): FeeMethodOption[] {
 	const allowSponsored = options?.allowSponsored ?? true
 	// Only the protocol-derived PrivateFPC may pay privately; a same-typed row at any other
@@ -195,15 +206,25 @@ export function buildFeeMethods(
 		if (fpc.type === FpcType.DefaultSponsoredFpc) {
 			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
 			if (!allowSponsored) continue
-			// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
-			// sponsorship conditional on a call from the account and then spend a token
-			// authorization the account granted it earlier.
-			const spend = fpc.isProtocol === true ? "free" : "—"
-			base.push({ type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc })
+			base.push(sponsorOption(fpc, options))
 		}
 	}
 
 	return base
+}
+
+function sponsorOption(fpc: RegisteredFpc, options: FeeMethodsOptions | undefined): FeeMethodOption {
+	// Only the sponsor Nulo ships is promised free: a contract added by hand can make its
+	// sponsorship conditional on a call from the account and then spend a token
+	// authorization the account granted it earlier.
+	const spend = fpc.isProtocol === true ? "free" : "—"
+	const option: FeeMethodOption = { type: "fpc", title: fpc.name || "Sponsored", subtitle: "sponsored", spend, fpc }
+	if (options?.shortSponsorIds?.has(fpc.id)) {
+		option.disabled = true
+		option.disabledReason = "can't pay now"
+	}
+	if (options?.setAsideSponsorIds?.has(fpc.id)) option.setAside = true
+	return option
 }
 
 /** The fee menu's rows: Nulo's sponsor before hand-added ones, which keep their order. Only the menu
@@ -215,10 +236,10 @@ export function menuOrder(methods: FeeMethodOption[]): FeeMethodOption[] {
 	return [...methods.filter((m) => m.type !== "fpc"), ...nulo, ...handAdded]
 }
 
-/** The only sponsor a card picks unasked: Nulo's own, chosen by its derived identity, not by whether
- *  it can pay. */
+/** The only sponsor a card picks unasked: Nulo's own, by its derived identity. One a verdict set
+ *  aside reads as missing. */
 export function defaultSponsor(methods: FeeMethodOption[]): FeeMethodOption | undefined {
-	return methods.find((m) => m.type === "fpc" && m.fpc?.isProtocol === true)
+	return methods.find((m) => m.type === "fpc" && m.fpc?.isProtocol === true && !m.disabled && !m.setAside)
 }
 
 /** `undefined` (balances not known yet) and `null` (the leg's read failed) are never printed as a

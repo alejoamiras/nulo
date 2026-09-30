@@ -27,6 +27,7 @@ export type {
 	FpcPaymentMethod,
 	GasBalances,
 	PriorityLevel,
+	SponsorFunding,
 	TransferFeeEstimate,
 	DiscoveredAuthwit,
 	OperationAuthwitPreview,

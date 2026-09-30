@@ -16,6 +16,8 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { Fr } from "@aztec/foundation/curves/bn254"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
@@ -1311,6 +1313,53 @@ describe("NetworkService.probeNodeStatus (bounded probe)", () => {
 		const network = await service.addNetwork("Seven", "https://rpc.example.com")
 		await expect(service.probeNodeStatus(network.id, 999_999)).rejects.toThrow()
 		await expect(service.probeNodeStatus(network.id, 1)).rejects.toThrow()
+	})
+})
+
+describe("NetworkService.readPublicStorageOnce", () => {
+	test("reads at the passed row's primary endpoint, never another network's or the active profile's row for that chain", async () => {
+		const { service, factory } = setupServiceWithStorage({})
+		const chainOf: Record<string, number> = {
+			"https://a.example": 7,
+			"https://a2.example": 7,
+			"https://b.example": 9,
+			"https://p2.example": 7,
+		}
+		const storageAt = new Map<string, ReturnType<typeof vi.fn>>()
+		for (const [i, [url, chainId]] of Object.entries(chainOf).entries()) {
+			const read = vi.fn(async () => new Fr(BigInt(100 + i)))
+			storageAt.set(url, read)
+			factory.setOverrides(url, {
+				getNodeInfo: vi.fn().mockResolvedValue(nodeInfoForChain(chainId)) as unknown as AztecNode["getNodeInfo"],
+				getPublicStorageAt: read as unknown as AztecNode["getPublicStorageAt"],
+			})
+		}
+		const a = await service.addNetwork("A", "https://a.example")
+		const second = await service.addEndpoint(a.id, "Two", "https://a2.example")
+		const row = await service.setPrimaryEndpoint(a.id, second.id)
+		await service.addNetwork("B", "https://b.example")
+		// Another profile's row on the same chain: the active profile's own row for chain 7 is `row`.
+		const foreign: Network = {
+			...row,
+			id: "net-p2",
+			profileId: "p2",
+			endpoints: [{ id: "ep-p2", rpcUrl: "https://p2.example" }],
+			primaryEndpointId: "ep-p2",
+		}
+		const once = vi.spyOn(factory, "readPublicStorageOnce")
+		const contract = AztecAddress.fromNumberUnsafe(5)
+		const slot = new Fr(9n)
+
+		expect((await service.readPublicStorageOnce(row, contract, slot, 5_000)).toBigInt()).toBe(101n)
+		expect((await service.readPublicStorageOnce(foreign, contract, slot, 5_000)).toBigInt()).toBe(103n)
+
+		expect(once.mock.calls).toEqual([
+			["https://a2.example", contract, slot, 5_000],
+			["https://p2.example", contract, slot, 5_000],
+		])
+		expect(storageAt.get("https://a2.example")).toHaveBeenCalledWith("latest", contract, slot)
+		expect(storageAt.get("https://a.example")).not.toHaveBeenCalled()
+		expect(storageAt.get("https://b.example")).not.toHaveBeenCalled()
 	})
 })
 

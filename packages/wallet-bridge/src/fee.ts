@@ -73,6 +73,17 @@ export type TransferFeeEstimate = {
 	 *  dApp `aztec_sendTx`. Omitted where confirm adds none (`send_transaction`,
 	 *  the Send page). */
 	readonly discoveredAuthwits?: readonly DiscoveredAuthwit[]
+	/** Set only when the sponsor row's own contract, at `address`, pays and its balance was read;
+	 *  absent means unknown, which must never disable a sponsor, since a failed read is not an
+	 *  empty one. */
+	readonly sponsorFunding?: SponsorFunding
+}
+
+/** `funded`: the sponsor's public Fee Juice covers the estimate's fee limit. */
+export type SponsorFunding = {
+	readonly fpcId: string
+	readonly address: string
+	readonly funded: boolean
 }
 
 /** One private authorization discovered by simulation: the call it authorizes,

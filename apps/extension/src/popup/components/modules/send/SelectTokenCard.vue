@@ -2,10 +2,14 @@
 /** Components */
 import { Skeleton } from "@nulo/design"
 
+/** Composables */
+import { isRepeatOrComposing } from "@/composables/usePopupEntity"
+
 /** Store */
 import { usePopupStore } from "@/stores/popup.store"
 const popupStore = usePopupStore()
 
+const emit = defineEmits(["retry"])
 const props = defineProps({
 	token: {
 		type: Object,
@@ -15,11 +19,20 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	/** The page's last load was refused: the card offers a Retry in place of the empty state. */
+	failed: {
+		type: Boolean,
+		default: false,
+	},
 })
 
 /** A token handed in is always drawn: the page passes one only once its tokens have loaded. */
 const isLoading = computed(() => props.loading && !props.token)
-const state = computed(() => (props.token ? "ready" : isLoading.value ? "loading" : "empty"))
+const state = computed(() => {
+	if (props.token) return "ready"
+	if (isLoading.value) return "loading"
+	return props.failed ? "failed" : "empty"
+})
 
 const isTokenRestricted = computed(() => {
 	if (!props.token) return
@@ -36,11 +49,18 @@ let skeletonTimer
 
 const handleSelectToken = () => {
 	if (isLoading.value) return
-	if (!props.token) {
-		popupStore.open("new_token")
-	} else {
+	if (props.token) {
 		popupStore.open("select_token")
+	} else if (props.failed) {
+		emit("retry")
+	} else {
+		popupStore.open("new_token")
 	}
+}
+
+/** A held key repeats its keydown, which would retry again as soon as a quick refusal lands. */
+const handleKey = (e) => {
+	if (!isRepeatOrComposing(e)) handleSelectToken()
 }
 
 watch(
@@ -64,8 +84,8 @@ onBeforeUnmount(() => {
 <template>
 	<Flex
 		@click="handleSelectToken"
-		@keydown.enter.prevent="handleSelectToken"
-		@keydown.space.prevent="handleSelectToken"
+		@keydown.enter.prevent="handleKey"
+		@keydown.space.prevent="handleKey"
 		align="center"
 		justify="between"
 		:class="[$style.wrapper, isLoading && $style.wrapper_loading]"
@@ -101,6 +121,11 @@ onBeforeUnmount(() => {
 					<Skeleton :width="84" :height="9" />
 				</Flex>
 			</template>
+		</Flex>
+
+		<Flex v-else-if="state === 'failed'" wide align="center" justify="between">
+			<span :class="$style.empty_label">Couldn't load tokens</span>
+			<span :class="$style.import_link">Retry</span>
 		</Flex>
 
 		<Flex v-else wide align="center" justify="between">

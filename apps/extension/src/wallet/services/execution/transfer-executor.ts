@@ -33,12 +33,14 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
+import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
 import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
+import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintBaseFee, fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 
@@ -78,6 +80,8 @@ export interface TransferExecutorDeps {
 	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<AztecNode>
+	/** The sponsor probe's read: bounded and silent, unlike the build's retrying `node`. */
+	readPublicStorageOnce: PublicStorageReader
 	getPXE(network: Network): IPXE
 	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<IAccountContract>
 	getPendingForAccount(account: string): Tx[]
@@ -351,13 +355,12 @@ export class TransferExecutor {
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
 		checkCancelled()
 
-		const {
-			txRequest,
-			network,
-			nonce,
-			feePaymentMethod,
-			initializesAccount: builtInitializes,
-		} = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
+		const built = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
+		const { txRequest, network, nonce, feePaymentMethod, initializesAccount: builtInitializes } = built
+		checkCancelled()
+		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
+			this.deps.logDebug(msg, data),
+		)
 		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
@@ -374,8 +377,7 @@ export class TransferExecutor {
 				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 				if (primary) {
 					// Fingerprint the EXACT fee the txRequest was built with —
-					// not a fresh fetch after the fact (codex audit
-					// SHOULD-FIX #3). Both FJ and FPC strategies finalize
+					// not a fresh fetch after the fact. Both FJ and FPC strategies finalize
 					// `maxFeesPerGas = predictedWorstMinFees * multiplier`, so
 					// on consume we compare against the same live product.
 					const builtFees = txRequest.txContext.gasSettings.maxFeesPerGas
@@ -422,6 +424,7 @@ export class TransferExecutor {
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 			estimateId,
+			...(sponsorFunding ? { sponsorFunding } : {}),
 		}
 	}
 }

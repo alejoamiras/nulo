@@ -56,6 +56,9 @@ const fakeNodeFactory: NodeFactory = {
 	createNode: () => ({ getL1ContractAddresses: async () => ({ rollupAddress: undefined }) }) as never,
 	createSingleAttemptNode: () => ({}) as never,
 	probeChainId: async () => 0,
+	readPublicStorageOnce: async () => {
+		throw new Error("not read here")
+	},
 }
 
 const fakeNetwork = { profileId: "p", chainId: 31337, rpcUrl: "http://node.local" }

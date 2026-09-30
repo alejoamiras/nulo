@@ -771,6 +771,32 @@ describe("execute window — approval envelope", () => {
 		expect(feeMapInstances[1]!.api.handoffAll).toHaveBeenCalledTimes(1)
 	})
 
+	test("a fee choice the card withdraws disables Confirm, and the pick that replaces it is what approval sends", async () => {
+		resolvable()
+		payloadToLoad = payload()
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { handleFeeUpdate: (index: number, value: unknown) => void }
+		const confirm = () => w!.find('[data-testid="execute-confirm-btn"]')
+		vm.handleFeeUpdate(0, { paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		await flushPromises()
+		expect(confirm().attributes("disabled")).toBeUndefined()
+
+		vm.handleFeeUpdate(0, undefined)
+		await flushPromises()
+		expect((vm.operations[0] as { feeSettings?: unknown }).feeSettings).toBeUndefined()
+		expect(confirm().attributes("disabled")).toBeDefined()
+		await vm.approve()
+		expect(approveInteractionMock).not.toHaveBeenCalled()
+
+		vm.handleFeeUpdate(0, { paymentMethod: { kind: "fj" } })
+		await flushPromises()
+		expect(confirm().attributes("disabled")).toBeUndefined()
+		await vm.approve()
+		const deltas = (approveInteractionMock.mock.calls[0] as unknown[] | undefined)?.[1] as Array<{ feeSettings?: unknown }>
+		expect(deltas[0]?.feeSettings).toEqual({ paymentMethod: { kind: "fj" } })
+	})
+
 	test("the preview is scheduled at init for default_entrypoint operations only, and both slots estimate by reference", async () => {
 		resolvable()
 		payloadToLoad = payload()
