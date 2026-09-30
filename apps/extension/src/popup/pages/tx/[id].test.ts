@@ -53,27 +53,30 @@ const settled = (origin: { type: OriginType; name?: string }, calls: unknown[]) 
 	origin,
 	calls,
 })
-const sentTransfer = settled({ type: OriginType.UI }, [
-	{
-		contract: TOKEN,
-		method: "transfer_private_to_private",
-		args: [ACCOUNT, ACCOUNT, (10n ** 18n).toString(), "0"],
-		transfers: [
-			{
-				token: { name: "Test", symbol: "TST", decimals: 18 },
-				type: TransferType.Private,
-				from: ACCOUNT,
-				to: ACCOUNT,
-				amount: (10n ** 18n).toString(),
-			},
-		],
-	},
-])
+/** A sent transfer's record; a restored backup can carry any `symbol`. */
+const transferRecord = (symbol: unknown = "TST") =>
+	settled({ type: OriginType.UI }, [
+		{
+			contract: TOKEN,
+			method: "transfer_private_to_private",
+			args: [ACCOUNT, ACCOUNT, (10n ** 18n).toString(), "0"],
+			transfers: [
+				{
+					token: { name: "Test", symbol, decimals: 18 },
+					type: TransferType.Private,
+					from: ACCOUNT,
+					to: ACCOUNT,
+					amount: (10n ** 18n).toString(),
+				},
+			],
+		},
+	])
+const sentTransfer = transferRecord()
 const dappMint = settled({ type: OriginType.DAPP, name: "example.dapp.io" }, [
 	{ contract: TOKEN, method: "mint_to_public", args: [ACCOUNT, field(10n ** 18n)] },
 ])
 
-async function mountPage(tx: unknown, tokens: Promise<unknown[]>) {
+async function mountPage(tx: unknown, tokens: Promise<unknown[]>, stubs: Record<string, unknown> = {}) {
 	mocks.store.transactions = [tx]
 	mocks.getTokens.mockReturnValue(tokens)
 	const w = mount(TxDetail, {
@@ -87,6 +90,7 @@ async function mountPage(tx: unknown, tokens: Promise<unknown[]>) {
 				AddressDisplay: true,
 				Icon: true,
 				Flex: { inheritAttrs: false, template: "<div v-bind='$attrs'><slot /></div>" },
+				...stubs,
 			},
 		},
 	})
@@ -106,6 +110,12 @@ describe("the transaction page's amount", () => {
 		const w = await mountPage(dappMint, Promise.resolve([listed]))
 		expect(amountBlock(w).text()).toMatch(/^1\s+TST$/)
 		expect(w.find("[class*='amount_caption']").text()).toBe("Mint amount")
+	})
+
+	test("a restored transfer whose symbol is not text still shows the missing-token banner", async () => {
+		const banner = { template: "<div data-testid='missing-banner'><slot name='title' /></div>" }
+		const w = await mountPage(transferRecord(42), Promise.resolve([]), { Banner: banner })
+		expect(w.get("[data-testid='missing-banner']").text()).toBe("is missing")
 	})
 
 	test("a dApp mint of an unlisted token renders no amount block", async () => {

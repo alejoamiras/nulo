@@ -21,8 +21,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
-import { txAmount } from "@/utils/tx-amount"
-import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+import { displaySymbol, txAmount } from "@/utils/tx-amount"
 import { copyWithToast } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import {
@@ -78,7 +77,7 @@ const transferTypeLabel = computed(() => {
 })
 const tokens = ref([])
 const token = computed(() => tokens.value.find((t) => call.value?.contract === t.contract))
-const transferSymbol = computed(() => sanitizeWireString(transfer.value?.token?.symbol ?? "", 32))
+const transferSymbol = computed(() => displaySymbol(transfer.value?.token?.symbol))
 
 const amount = computed(() => txAmount(tx.value?.calls, tokens.value))
 const formattedAmount = computed(() =>

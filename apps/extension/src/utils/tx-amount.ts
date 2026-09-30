@@ -10,11 +10,12 @@ export type TxAmount = { units: bigint; decimals: number; symbol: string }
 const STANDARD_MINTS: ReadonlySet<string> = new Set(["mint_to_public", "mint_to_private", "mint_to_commitment"])
 const U128_BOUND = 2n ** 128n
 
-const symbolOf = (symbol: unknown): string => sanitizeWireString(typeof symbol === "string" ? symbol : "", 32)
+/** A symbol a contract or a restored record set, fit to show; anything but text shows as none. */
+export const displaySymbol = (symbol: unknown): string => sanitizeWireString(typeof symbol === "string" ? symbol : "", 32)
 
 function fromTransfer({ amount, token }: TxTransfer): TxAmount | null {
 	if (!isValidDecimals(token?.decimals) || typeof amount !== "string" || !/^\d{1,80}$/.test(amount)) return null
-	return { units: BigInt(amount), decimals: token.decimals, symbol: symbolOf(token.symbol) }
+	return { units: BigInt(amount), decimals: token.decimals, symbol: displaySymbol(token.symbol) }
 }
 
 function u128(arg: unknown): bigint | null {
@@ -42,5 +43,5 @@ export function txAmount(
 	const decimals = knownDecimals(token)
 	const units = u128(primary.args[1])
 	if (!token || decimals === null || units === null) return null
-	return { units, decimals, symbol: symbolOf(token.symbol) }
+	return { units, decimals, symbol: displaySymbol(token.symbol) }
 }
