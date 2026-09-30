@@ -712,10 +712,10 @@ describe("composite/AmountCard — the field reads its text whole", () => {
 		expect(w.get("[data-testid='send-amount-fiat-label']").text()).toBe("1 TST ≈ $1.00")
 	})
 
-	test('a paste of "1,234" names both readings at once', async () => {
+	test('a paste of "1,234" is held, and the line under it says so at once', async () => {
 		const w = mountCard({ token: TOKEN, modelValue: "" })
 		await paste(w, "1,234")
-		expect(w.get("[data-testid='send-amount-ambiguous-hint']").text()).toBe("Is that 1234 or 1.234? Type the one you mean.")
+		expect(w.get("[data-testid='send-amount-ambiguous-hint']").text()).toBe("Type it without the comma.")
 	})
 
 	test.each([

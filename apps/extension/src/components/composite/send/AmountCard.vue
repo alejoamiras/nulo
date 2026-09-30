@@ -195,14 +195,6 @@ const tokenModeFiatLabel = computed(() => {
 	return `≈ ${formatUsdMicro(micro)}`
 })
 
-/** The two amounts the field's ambiguous text can be ("1,234": 1234 or 1.234), named from it. */
-const ambiguousReadings = computed(() => {
-	const text = String((fiatMode.value ? fiatTerm.value : model.value) ?? "")
-		.trim()
-		.replace(/^\$/, "")
-	return [text.replace(",", ""), text.replace(",", ".")]
-})
-
 const conversionTitle = computed(() => (props.proxyTicker ? `Priced via ${props.proxyTicker}, at today's rate` : "At today's rate"))
 
 /** Corner balance segment: amount + symbol only — the From selector above
@@ -456,7 +448,7 @@ const handleFiatBalanceAction = (divisor) => {
 				Not an amount. Type it like 1234.56
 			</span>
 			<span v-else-if="readHint === 'ambiguous'" :class="$style.clamp_hint" data-testid="send-amount-ambiguous-hint">
-				Is that {{ ambiguousReadings[0] }} or {{ ambiguousReadings[1] }}? Type the one you mean.
+				Type it without the comma.
 			</span>
 			<span v-else-if="wasClamped && tokenDecimals !== undefined" :class="$style.clamp_hint" data-testid="send-amount-clamp-hint">
 				{{ token.symbol || "Token" }} supports {{ tokenDecimals }} decimal{{ tokenDecimals === 1 ? "" : "s" }}
