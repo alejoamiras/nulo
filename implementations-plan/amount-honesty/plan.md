@@ -10,6 +10,42 @@ worktree: .claude/worktrees/amount-honesty
 base: dev after stack #729 lands (the tree at `0f37ab78`)
 ---
 
+## Outcome
+
+- **Date:** 2026-09-30. **Status:** delivered on `fix/amount-honesty`, with `dev` at `9d984244`
+  merged in. The owner answered O1 to O4 and signed off P3's screenshots that day with one change,
+  the held paste's line, built as P2 step 7 (P4). The driver opens the PR and merges it once its
+  required checks are green.
+- **Shipped:** A1. The activity card, the transaction page and the received page state an amount
+  only in decimals the wallet knows (`hasDecimals`, `knownDecimals`, one `txAmount` per record), or
+  show none: a listed token's standard mint reads its minted amount, compact past 8 characters, fee
+  calls left out; an unlisted token's mint, a second mint call, another shape and unusable decimals
+  show no figure; a sent transfer's page reads its own record; a symbol shows sanitized, and one
+  that is not text as none (`displaySymbol`). The first-receive prompt names no amount (O4). A2.
+  The Send amount field reads its text whole (`readAmountText`, `nextAmountText`): a typed comma
+  is the decimal point, re-read as grouping by a following "."; a paste that reads one way keeps
+  its text and rests in the wallet's form; one that reads two ways ("1,234") or none ("1e5") is
+  kept, blocks Send, says why under the field and leaves the USD line at the unit rate; Max marks
+  its text as the wallet's rest; the USD field takes the same rules. The token input is bound one
+  way, so a real keystroke reads its own prior text, and a rewrite keeps the caret where the person
+  typed (`caretAfter`). A3 needed nothing: #725 had deleted `comma`.
+- **Gates at delivery:** on `8f41bdcf`: lint, `typecheck:all`, `test:all`, `test:ci-gating` and
+  `build` exit 0; smoke green at retry 0 in three shards per browser, Chrome 165 passed and 7
+  skipped of 172, Firefox 161 and 11, every skip the suite's own; the five network files green at
+  retry 0 in one run per browser (Chrome prover on, Firefox proverless), 6 of 6 each, and
+  `send-amount-exact` 3 of 3 per browser; the native paste read as `insertFromPaste` on both. Red
+  first: P1 and P2 in vitest; the one-way binding in Chrome and vitest; the caret in Chrome and
+  vitest; the symbol, the caret's two later fixes and the owner's line in vitest. Codex
+  (`/codex high`): changes-requested in each of three rounds; every material finding was fixed
+  red first or triaged in § Decision ledger, and the cap left round 3's fix with no codex pass of
+  its own (`lessons/phase-3.md`).
+- **Dropped:** an exact reading of a paste into the field's own rest, which needs the paste's
+  selection; the owner kept it as built. The comma point overtyped with ".", as not realistic.
+- **Open items:** FU-1 to FU-5 are in `follow-ups.md`, FU-4 in § Wallet safety and the rest in
+  § Amounts, sends and fees. The lesson went to the `e2e-testing` skill (§ What to assert), since
+  `lessons.md` is at its budget.
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # Amounts that read as another number
 
 Two places in the wallet can show a number that is not the amount, and one of them can send it.
