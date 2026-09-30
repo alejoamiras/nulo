@@ -575,6 +575,8 @@ test.skipIf(!hasConfig)(
 		await sendPublic(config, account, 10n ** 38n, hostileToken)
 		const record = await waitForNewRecord(page, account, before, hostileToken)
 		await waitForRow(page, record.id)
+		// The chip lands after the row: it waits on the arrival claim and the token lookup.
+		await page.waitForFunction(() => !!document.querySelector('[data-testid="balance-arrival-chip"]'), { timeout: 10_000 })
 		const chip = await page.$eval(sel("balance-arrival-chip"), (el) => {
 			const r = el.getBoundingClientRect()
 			const style = getComputedStyle(el)

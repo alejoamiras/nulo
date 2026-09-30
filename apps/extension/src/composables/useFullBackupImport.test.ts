@@ -1047,9 +1047,11 @@ describe("useFullBackupImport — Retry the networks that did not restore", () =
 		})
 		return { promise, resolve }
 	}
-	/** Real macrotask turns, so the flow's WebCrypto and mocked RPCs settle while fake timers hold. */
+	/** Real macrotask turns, so the flow's WebCrypto and mocked RPCs settle while fake timers hold,
+	 *  bounded by real time: WebCrypto finishes on the clock, not within a count of turns. */
 	async function until(cond: () => boolean) {
-		for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setImmediate(r))
+		const deadline = performance.now() + 5_000
+		while (!cond() && performance.now() < deadline) await new Promise((r) => setImmediate(r))
 		expect(cond()).toBe(true)
 	}
 
