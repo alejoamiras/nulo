@@ -671,8 +671,8 @@ O3 (a), O4 (a) and O5 (b), then wrote: "Okei, ive answered everything on the art
 page's blanket button was left unclicked, so the driver asked in chat: "#724 layout-polish: its
 page's final sign-off button wasn't clicked. It covers B1 (activity rows 10px apart on Home, a
 token's page and History) and B2 (History's and Settings' big titles 10px under the header, as
-drawn), both built and green. Sign them off?" The owner answered **"Sign off B1 + B2"**: "Rows
-10px apart and titles at their drawn height, as pictured on the page, as built." Every row of
+drawn), both built and green. Sign them off?" The owner picked **"Sign off B1 + B2"** (the option
+read: rows 10px apart and titles at their drawn height, as pictured on the page, as built). Every row of
 § UI impact now carries the owner's own answer.
 
 1. For each answer other than the recommendation, build it on the branch with its test:

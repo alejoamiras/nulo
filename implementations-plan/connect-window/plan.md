@@ -863,8 +863,8 @@ F-1 to F-3 moved at delivery, and F-4 to F-7 after the panel, to
 ## Approval
 
 The final fresh codex pass: conditional approve, its seven conditions applied (Z1 to Z7).
-The owner approved scope and tier with their answers on 2026-09-30: "I just want this to be
-merged in general." **Delivery
+On 2026-09-30 the owner answered O1, O2 and the blanket sign-off themselves (quoted in P8)
+and asked for the program to land: "I just want this to be merged in general." **Delivery
 boundary**: the PR opens and CI runs while the owner's answers are pending; it merges only once
 the owner's own answers to O1, O2 and the blanket sign-off are quoted in P8. The panel's
 delegated decisions there do not count as those answers.
