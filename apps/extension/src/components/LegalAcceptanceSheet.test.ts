@@ -136,7 +136,7 @@ describe("LegalAcceptanceSheet", () => {
 	})
 
 	test("while it shows, its own footer places the snack from a 12px base, not the nav's", async () => {
-		route.meta = { isAuthRequired: true, showBottomNav: true }
+		Object.assign(route, { meta: { isAuthRequired: true, showBottomNav: true } })
 		vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(600)
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
 			const notNow = this.firstElementChild?.getAttribute("data-testid") === "legal-sheet-not-now"
