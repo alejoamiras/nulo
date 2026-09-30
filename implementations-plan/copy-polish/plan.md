@@ -176,7 +176,7 @@ wallet no longer writes.
 | E7 | `popup/pages/auth.vue:134` | Unlock timed out — please try again | Unlock timed out. Please try again | none |
 | E8 | `popup/pages/settings/security/reset.vue:71` | Couldn't delete profile — try again | Couldn't delete profile. Try again | none |
 | E9 | `popup/pages/settings/networks/[id].vue:113` | Last endpoint — delete the chain instead. | Last endpoint. Delete the chain instead. | none |
-| E10 | `popup/components/popups/NewTokenPopup.vue:243` | Token added — balance will appear in a moment | Token added. Balance will appear in a moment | prefix: `tests/e2e/fixtures/helpers.ts:947` |
+| E10 | `popup/components/popups/NewTokenPopup.vue:243` | Token added — balance will appear in a moment | Token added. Balance will appear in a moment | prefix: `tests/e2e/fixtures/helpers.ts:947`; substring: `NewTokenPopup.test.ts:382`, whose case-sensitive "balance will appear" becomes "Balance will appear" (found in the build) |
 | E11 | `NewTokenPopup.vue:247` | Token added. Couldn't load balance — we'll retry automatically. | Token added. Couldn't load balance. We'll retry automatically. | substring: `NewTokenPopup.test.ts:356` |
 | E12 | `popup/components/popups/NewNetworkPopup.vue:124` | Network added, but the switch didn't confirm — reopen the popup to verify | Network added, but the switch didn't confirm. Reopen the popup to verify | `NewNetworkPopup.pins.test.ts:122` |
 | E13 | `composables/useNetworkActivation.ts:32` | Couldn't confirm the network switch — reopen the popup to verify | Couldn't confirm the network switch. Reopen the popup to verify | none |
@@ -393,9 +393,9 @@ readers, and an unknown row's name says so since a Tab to it skips its sub-heade
   `popup/pages/settings/security/export/full.vue`, `popup/pages/profile/new.vue`,
   `DappSessionVerification.vue`, `popup/windows/execute/OperationCard.vue`,
   `packages/extension-messaging/src/errors.ts`, `packages/aztec-runtime/src/pxe/opfs-store.ts`);
-  the 15 test files whose pins or input copies change (`errors.test.ts`, `pxe/client.test.ts`,
-  `NewNetworkPopup.pins.test.ts`, `FeeSettingsCard.test.ts`, `transfer-failure-copy.test.ts`,
-  `scope-mismatch.test.ts`, `scope-follow.test.ts`, `journal-state.test.ts`,
+  the 16 test files whose pins or input copies change (`errors.test.ts`, `pxe/client.test.ts`,
+  `NewNetworkPopup.pins.test.ts`, `NewTokenPopup.test.ts`, `FeeSettingsCard.test.ts`,
+  `transfer-failure-copy.test.ts`, `scope-mismatch.test.ts`, `scope-follow.test.ts`, `journal-state.test.ts`,
   `useFullBackupImport.test.ts`, `full-backup-helpers.test.ts`, `account-state/service.test.ts`,
   `restore-surface.pins.test.ts`, `onboarding/pages/import.test.ts`, `AccountIntegrityBarrier.test.ts`
   in place of `BarrierOverlay.test.ts`, `ImportContactsPopup.test.ts`); new

@@ -228,7 +228,7 @@ const onActiveProfileChanged = async (profile) => {
  *  service deliberately does NOT block the profile (export must stay reachable); this toast and the
  *  Home banner (`ProfileInfo.recoveryMode`) are the signals. */
 const onImportedKeysDegraded = () => {
-	openToast({ kind: "error", label: "Wallet keys need recovery — export a backup and restore it" })
+	openToast({ kind: "error", label: "Wallet keys need recovery. Export a backup and restore it" })
 }
 
 /** How the boot-time session check ended when it could NOT decide: "unreachable" (the service

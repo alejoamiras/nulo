@@ -379,7 +379,7 @@ describe("NewTokenPopup", () => {
 
 		expect(openToastMock).toHaveBeenCalled()
 		const [opts] = openToastMock.mock.calls[0]
-		expect(opts.label).toMatch(/balance will appear/)
+		expect(opts.label).toMatch(/Balance will appear/)
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 

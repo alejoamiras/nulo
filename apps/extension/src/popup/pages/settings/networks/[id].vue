@@ -110,7 +110,7 @@ const handleDeleteEndpoint = (endpoint) => {
 			if (msg.includes("PRIMARY_ENDPOINT")) {
 				openToast({ kind: "error", label: "Make another endpoint primary first." })
 			} else if (msg.includes("LAST_ENDPOINT")) {
-				openToast({ kind: "error", label: "Last endpoint — delete the chain instead." })
+				openToast({ kind: "error", label: "Last endpoint. Delete the chain instead." })
 			} else {
 				openToast({ kind: "error", label: "Failed to delete endpoint" })
 			}

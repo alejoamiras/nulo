@@ -119,7 +119,7 @@ describe("NewNetworkPopup — activation outcomes", () => {
 		activateGuardedMock.mockResolvedValueOnce("unconfirmed")
 		const w = await mountFilled()
 		await submit(w)
-		expect(trace).toEqual(["toast:Network added, but the switch didn't confirm — reopen the popup to verify", "getNetworks", "close"])
+		expect(trace).toEqual(["toast:Network added, but the switch didn't confirm. Reopen the popup to verify", "getNetworks", "close"])
 		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" }))
 	})
 

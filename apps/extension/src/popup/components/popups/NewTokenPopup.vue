@@ -240,11 +240,11 @@ const handleAddToken = async () => {
 				emit("onClose")
 				break
 			case "timeout":
-				openToast({ kind: "success", label: "Token added — balance will appear in a moment" })
+				openToast({ kind: "success", label: "Token added. Balance will appear in a moment" })
 				emit("onClose")
 				break
 			case "error":
-				openToast({ kind: "success", label: "Token added. Couldn't load balance — we'll retry automatically." })
+				openToast({ kind: "success", label: "Token added. Couldn't load balance. We'll retry automatically." })
 				emit("onClose")
 				break
 			case "aborted":

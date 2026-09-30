@@ -68,7 +68,7 @@ const handleReset = async () => {
 		isResetting.value = false
 		clearTimeout(slowDeleteTimer)
 		isSlowDelete.value = false
-		openToast({ kind: "error", label: "Couldn't delete profile — try again" })
+		openToast({ kind: "error", label: "Couldn't delete profile. Try again" })
 		return
 	}
 	isResetting.value = false

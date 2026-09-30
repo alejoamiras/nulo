@@ -366,7 +366,7 @@ const {
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
-		openToast({ kind: "error", label: "Couldn't estimate fee — retry." })
+		openToast({ kind: "error", label: "Couldn't estimate fee. Try again." })
 	},
 })
 const isSending = ref(false)

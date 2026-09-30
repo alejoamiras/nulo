@@ -26,3 +26,19 @@
   `full.vue:543` (`:544`), E39 `RevokeAuthwitsPopup.vue:155` (`:156`), E40 `:162` (`:164`).
 - `dev` had not moved past the stack (the merge at P0 carried no change), so no hit needed
   classifying.
+
+## The strings, one commit per group
+
+- Each group's edits go through a scratch script that replaces exact text and refuses any edit
+  whose match count differs from the expected one.
+- **A pin the plan missed**: the snacks' first run failed
+  `popup/components/popups/NewTokenPopup.test.ts:382`, which matches `/balance will appear/`
+  case-sensitively (E10), the same class as E22's `journal-state.test.ts:627`. It became
+  `/Balance will appear/`, and the plan's E10 row and change map now list it. A sweep then searched
+  every test, e2e and playground file for the words after each of the 46 dashes, which the split
+  capitalises: every other match is in the Pin column or a generic fixture the plan keeps, and the
+  e2e helpers match only prefixes or comments.
+- **Snacks, E1 to E13**: 13 strings plus the pins `errors.test.ts:89`, `pxe/client.test.ts:57`,
+  `NewNetworkPopup.pins.test.ts:122` and `NewTokenPopup.test.ts:382`. From `apps/extension`:
+  `bun --bun vitest run src/wallet/services/pxe/client.test.ts src/popup/components/popups/NewNetworkPopup.pins.test.ts src/popup/components/popups/NewTokenPopup.test.ts ../../packages/extension-messaging/src/errors.test.ts`
+  → exit 0, 4 files, 49 passed. The guard lists 33.

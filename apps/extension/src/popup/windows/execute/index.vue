@@ -151,7 +151,7 @@ const {
 	debounceMs: 500,
 	onError: (key, err) => {
 		console.error(`[Execute] Fee estimation failed for op ${key}:`, err)
-		openToast({ kind: "error", label: "Couldn't estimate fee — retry." })
+		openToast({ kind: "error", label: "Couldn't estimate fee. Try again." })
 	},
 })
 
@@ -174,7 +174,7 @@ const {
 	debounceMs: 0,
 	onError: (key, err) => {
 		console.error(`[Execute] Authorization preview failed for op ${key}:`, err)
-		openToast({ kind: "error", label: "Couldn't preview authorizations — retry." })
+		openToast({ kind: "error", label: "Couldn't preview authorizations. Try again." })
 	},
 })
 

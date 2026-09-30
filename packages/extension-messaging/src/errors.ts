@@ -456,7 +456,7 @@ export class DuplicateWalletError extends WalletError {
  */
 export class RecoveryModeError extends WalletError {
 	public static readonly CODE = "RECOVERY_MODE"
-	public static readonly MESSAGE = "Wallet keys need recovery — export a backup and restore it"
+	public static readonly MESSAGE = "Wallet keys need recovery. Export a backup and restore it"
 
 	public constructor(message: string = RecoveryModeError.MESSAGE, details?: unknown) {
 		super(RecoveryModeError.CODE, message, details, "RecoveryModeError")
