@@ -63,3 +63,53 @@ were built and copied to `dist/red-chrome` and `dist/red-firefox`, then deleted 
 - The e2e tree is outside every tsconfig. A probe config over the five touched e2e files (deleted)
   reported only the `…PerTest` fixture-typing errors that S1 to S3 and S7 already carry.
 - The e2e reads of `#toast` select by a new `data-testid="toast-root"` (CLAUDE.md § testid).
+
+## The card's settled read
+
+`readSnackOverSheet` first read the card once `waitUntilStill` saw it hold still. Its pending check
+matches `[class*="-enter-from"]`, which the card's CSS-module enter class (`_enter_from_…`) never
+matches, so a throttled frame could hold the card mid-rise through three equal reads. The read now
+waits for opacity 1 and no running animation on the card, as `network/snack-placement.test.ts`'s
+`settledCard` does (`3ec1bb40`). The Chrome smoke parts had loaded the helper before that change;
+every other run below carries it, the Chrome flake bar included.
+
+## Gates
+
+Every row exits 0.
+
+- **Local**, on `4a341223` (test and docs commits followed):
+  - `bun run lint` → 1,944 files, 28 warnings and 3 infos (the base's), complexity-baseline OK.
+  - `bun run typecheck:all` → every workspace.
+  - `bun run test:all` → 14 workspace scripts; the extension 625 files passed and 3 skipped,
+    8,461 tests passed, 4 skipped, 7 todo. The known `useFullBackupImport` flake did not fire.
+  - `bun run test:ci-gating` → 244 passed, 2 skipped, 0 failed (246 tests, 17 files).
+  - `bun run build`, and `bun run --cwd apps/extension build-storybook`.
+- **Smoke**, armed builds, three parallel parts per browser (`dist/<browser>`, `dist/smoke2`,
+  `dist/smoke3`, each its own `EXTENSION_PATH`, `NULO_E2E_MIGRATION_FIXTURE=1`). The config's
+  retry 2 stood, and no case needed it: no part printed a `PASSED ON RETRY` line.
+
+  | Browser | Part | Files passed / skipped | Tests passed / skipped |
+  |---|---|---|---|
+  | Chrome | 1/3 | 13 / 2 | 52 / 2 |
+  | Chrome | 2/3 | 13 / 1 | 43 / 4 |
+  | Chrome | 3/3 | 14 / 0 | 71 / 1 |
+  | Chrome | sum | 40 / 3 of 43 | 166 / 7 of 173 |
+  | Firefox | 1/3 | 14 / 1 | 53 / 1 |
+  | Firefox | 2/3 | 13 / 1 | 43 / 4 |
+  | Firefox | 3/3 | 14 / 0 | 66 / 6 |
+  | Firefox | sum | 41 / 2 of 43 | 162 / 11 of 173 |
+
+  `legal-acceptance.test.ts` ran 14 of 14 and `imported-account-lifecycle.test.ts` 1 of 1 on
+  both. The skips are the suite's own: `store-captures` (opt-in), `_probe-console-capture`,
+  `action-popup-layout` on Chrome, one `appearance` case, one or two `sw-resilience` cases, and on
+  Firefox four `import-dead-rpc` cases; none is in a file this plan touched.
+- **Flake bar**, `legal-acceptance.test.ts --retry=0` on the armed dist, three consecutive runs per
+  browser: Chrome 14 of 14 each (S11 11.7 s, 11.6 s, 10.6 s); Firefox 14 of 14 each (S11 15.0 s,
+  15.1 s, 16.0 s).
+- **Network**, `NODE_OPTIONS=--dns-result-order=ipv4first bun run e2e:agent
+  tests/e2e/network/snack-placement.test.ts tests/e2e/network/cap-window.test.ts --retry=0`:
+  - Chrome, prover on → 2 files, 8 of 8 passed, 0 skipped (cap-window 5, snack-placement 3).
+  - Firefox, `NULO_E2E_BROWSER=firefox NULO_E2E_PROVERLESS=1` → 2 files, 7 of 8 passed, 1 skipped:
+    cap-window's reduced-motion case, the suite's Chrome-only one (Firefox's BiDi session cannot
+    emulate media features). snack-placement 3 of 3, cap-window 4 of 5.
+- `bun run e2e:reap` → exit 0, nothing left to reap. ✓

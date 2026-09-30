@@ -771,7 +771,7 @@ Gate, from `apps/extension`: `bun --bun vitest run src/components/composite/capa
 green, 0 todo; `bun run lint` exit 0.
 Layers: lint, component.
 
-### P5 · Browser proof and the arc gate
+### P5 · Browser proof and the arc gate ✓
 
 1. **The driver method**: `evaluateInBackground(owner, body)` on `BrowserDriver`
    (`tests/e2e/fixtures/browser/index.ts`), Chrome through the service-worker target's worker,
