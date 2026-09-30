@@ -10,6 +10,7 @@ import {
 	feeLine,
 	formatGasBalance,
 	menuOrder,
+	resolveSavedSelection,
 	settingsForMethod,
 } from "./fee-helpers"
 
@@ -287,6 +288,39 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, second]))).toBeUndefined()
 		expect(defaultSponsor(buildFeeMethods([PRIVATE]))).toBeUndefined()
 		expect(defaultSponsor(buildFeeMethods([NULO_SPONSOR], undefined, { allowSponsored: false }))).toBeUndefined()
+	})
+})
+
+describe("fee-helpers — sponsors a verdict found short", () => {
+	const NULO_SPONSOR = { id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsored", isProtocol: true }
+	const HAND_ADDED = { id: "s2", type: FpcType.DefaultSponsoredFpc, name: "Dev sponsor", isProtocol: false }
+	const FUNDED = { publicFeeJuice: "9", privateFeeJuice: "9" }
+	const build = (options?: Parameters<typeof buildFeeMethods>[2]) => buildFeeMethods([NULO_SPONSOR, HAND_ADDED], FUNDED, options)
+	const sponsor = (methods: FeeMethodOption[], id: string) => methods.find((m) => m.fpc?.id === id)
+
+	test("a short row is disabled with its reason, a set-aside row is marked, and every other row is as built", () => {
+		const plain = build()
+		const marked = build({ shortSponsorIds: new Set(["s1"]), setAsideSponsorIds: new Set(["s1"]) })
+		expect(sponsor(marked, "s1")).toEqual({ ...sponsor(plain, "s1"), disabled: true, disabledReason: "can't pay now", setAside: true })
+		expect(marked.filter((m) => m.fpc?.id !== "s1")).toEqual(plain.filter((m) => m.fpc?.id !== "s1"))
+
+		const setAside = build({ setAsideSponsorIds: new Set(["s2"]) })
+		expect(sponsor(setAside, "s2")).toEqual({ ...sponsor(plain, "s2"), setAside: true })
+		expect(setAside.filter((m) => m.fpc?.id !== "s2")).toEqual(plain.filter((m) => m.fpc?.id !== "s2"))
+	})
+
+	test.each([
+		["short", { shortSponsorIds: new Set(["s1", "s2"]), setAsideSponsorIds: new Set(["s1", "s2"]) }],
+		["set aside", { setAsideSponsorIds: new Set(["s1", "s2"]) }],
+	])("%s: never the default sponsor, and a saved pick of it resolves to nothing", (_case, verdicts) => {
+		expect(defaultSponsor(build())?.fpc?.id).toBe("s1")
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s2" } }, build())?.fpc?.id).toBe("s2")
+
+		const methods = build(verdicts)
+		expect(defaultSponsor(methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s1" } }, methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fpc", fpc: { id: "s2" } }, methods)).toBeUndefined()
+		expect(resolveSavedSelection({ type: "fj" }, methods)?.type).toBe("fj")
 	})
 })
 

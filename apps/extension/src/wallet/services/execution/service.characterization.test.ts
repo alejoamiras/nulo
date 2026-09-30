@@ -136,6 +136,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			isFenceLive: vi.fn(() => true),
 			getNetwork: vi.fn() as never,
 			getNode: vi.fn() as never,
+			readPublicStorageOnce: vi.fn() as never,
 			getPXE: vi.fn() as never,
 			getAccountContract: vi.fn() as never,
 			getPendingForAccount: vi.fn(() => []) as never,

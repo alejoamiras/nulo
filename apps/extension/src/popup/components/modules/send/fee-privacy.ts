@@ -7,8 +7,15 @@ export type { TransferSide }
  *  loading preview; a pick is resolved by `fpc.id` against fresh rows, never by name. */
 export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: string; name?: string } | null }
 
-/** The committed snapshot the card holds. `undefined` balances = the gas read failed. */
-export type FeeKnowledge = { fpcs: RegisteredFpc[]; balances: GasBalances | undefined; allowSponsored: boolean }
+/** The committed snapshot the card holds. `undefined` balances = the gas read failed. The id sets are
+ *  the card's sponsor verdicts, as `buildFeeMethods` takes them. */
+export type FeeKnowledge = {
+	fpcs: RegisteredFpc[]
+	balances: GasBalances | undefined
+	allowSponsored: boolean
+	shortSponsorIds?: ReadonlySet<string>
+	setAsideSponsorIds?: ReadonlySet<string>
+}
 
 export type SendSelection =
 	/** No committed snapshot for the live identity yet. `preview` is display-only and never yields settings. */
@@ -31,7 +38,7 @@ export function isEligible(method: FeeMethodOption, know: FeeKnowledge): boolean
 		case "private_fpc":
 			return Boolean(method.fpc) && canPay(know.balances?.privateFeeJuice)
 		case "fpc":
-			return Boolean(method.fpc)
+			return Boolean(method.fpc) && !method.disabled && !method.setAside
 		default:
 			return false
 	}
@@ -107,7 +114,11 @@ export function previewForPick(
 
 /** A saved pick wins when its row still exists and is eligible; otherwise the default walk. */
 export function resolveSendSelection(origin: TransferSide, know: FeeKnowledge, pick: SavedRecord | undefined): SendSelection {
-	const methods = buildFeeMethods(know.fpcs, know.balances, { allowSponsored: know.allowSponsored })
+	const methods = buildFeeMethods(know.fpcs, know.balances, {
+		allowSponsored: know.allowSponsored,
+		shortSponsorIds: know.shortSponsorIds,
+		setAsideSponsorIds: know.setAsideSponsorIds,
+	})
 	const picked = eligibleOrUndefined(rowForPick(pick, methods), know)
 	if (picked) return selected(picked)
 	const payers = payersOf(methods)

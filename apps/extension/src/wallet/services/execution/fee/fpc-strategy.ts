@@ -72,9 +72,11 @@
 
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { GasSettings } from "@aztec/stdlib/gas"
+import type { TxSimulationResult } from "@aztec/stdlib/tx"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
+import { sameFieldAddress } from "@nulo/wallet-bridge"
 import type { Fpc } from "@/wallet/services/fpc/fpc"
 import { FpcType } from "@/wallet/services/fpc/service"
 import type { Action } from "../spec"
@@ -88,6 +90,16 @@ import {
 	startEstimateTask,
 	suggestGasLimits,
 } from "./fee-strategy"
+
+/** The row as the estimate's sponsor, only when the kernel of the path's final simulation names
+ *  the row's own address as fee payer: a hand-added row is accepted on its function's name and
+ *  signature alone, so its `sponsor_unconditionally` may make another contract the payer. */
+function sponsorOf(fpc: Fpc, simulatedTx: TxSimulationResult): Pick<FeeEstimate, "sponsor"> {
+	const info = fpc.infoData
+	const payer = simulatedTx.publicInputs?.feePayer
+	if (info?.type !== FpcType.DefaultSponsoredFpc || !payer || !sameFieldAddress(payer.toString(), info.address)) return {}
+	return { sponsor: { fpcId: info.id, address: payer } }
+}
 
 export class FpcStrategy implements FeeStrategy {
 	public readonly kind = "fpc" as const
@@ -182,7 +194,7 @@ export class FpcStrategy implements FeeStrategy {
 				built.txsLimits,
 			)
 			task.complete()
-			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL, ...sponsorOf(fpc, simulatedTx) }
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -287,7 +299,7 @@ export class FpcStrategy implements FeeStrategy {
 				built.txsLimits,
 			)
 			task.complete()
-			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL, ...sponsorOf(fpc, simulatedTx) }
 		} catch (error) {
 			task.fail(error)
 			throw error

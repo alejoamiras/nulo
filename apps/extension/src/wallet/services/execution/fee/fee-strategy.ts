@@ -71,6 +71,9 @@ export const DEFAULT_FEE_MULTIPLIER: number =
  *  silent-transposition hazard. */
 export interface FeeEstimate extends BuiltStandardTx {
 	feePaymentMethod: AccountFeePaymentMethodOptions
+	/** Set only when a sponsor row pays and the final simulation's kernel names that row's own
+	 *  address as fee payer: the account whose Fee Juice the node's admission check reads. */
+	sponsor?: { fpcId: string; address: AztecAddress }
 }
 
 /** Simulate callback — facade owns the TaskService wrapping so that

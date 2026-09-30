@@ -1,3 +1,5 @@
+import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 
 /**
@@ -38,4 +40,12 @@ export interface NodeFactory {
 	 * timeout, refusal, or a non-Aztec endpoint.
 	 */
 	probeChainId(rpcUrl: string, timeoutMs: number): Promise<number>
+
+	/**
+	 * One public-storage read at the latest block, under `probeChainId`'s contract: one
+	 * non-retrying attempt whose abort at `timeoutMs` also covers the body read, so nothing
+	 * outlives the call. The client logs nothing: the SDK's warnings carry the reply body and the
+	 * endpoint URL. Throws on timeout, refusal, or a reply that is not a field.
+	 */
+	readPublicStorageOnce(rpcUrl: string, contract: AztecAddress, slot: Fr, timeoutMs: number): Promise<Fr>
 }

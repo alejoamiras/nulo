@@ -45,6 +45,7 @@ import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transa
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
+import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import { type ExecutionCoordinator, type ProveAndSendContext, fenceChecks } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
@@ -52,6 +53,7 @@ import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./oper
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { toDiscoveredAuthwit } from "./discovered-authwit"
+import { probeSponsorFunding } from "./sponsor-funding"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
@@ -157,6 +159,8 @@ export interface DappSendExecutorDeps {
 	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<FeeEstimate["node"]>
+	/** The sponsor probe's read: bounded and silent, unlike the build's retrying `node`. */
+	readPublicStorageOnce: PublicStorageReader
 	getPXE(network: Network): FeeEstimate["pxe"]
 	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<FeeEstimate["account"]>
 	getPendingForAccount(account: string): { hash: string }[]
@@ -326,6 +330,10 @@ export class DappSendExecutor {
 		)
 		const { txRequest } = built
 		checkCancelled()
+		const sponsorFunding = await probeSponsorFunding(built, this.deps.readPublicStorageOnce, (msg, data) =>
+			this.deps.logDebug(msg, data),
+		)
+		checkCancelled()
 
 		const identity = fingerprintInputFor(operation, feeSettings, detectedFee, preDiscoveryActions)
 		const discoveredHashes = discovered.map((d) => d.messageHash)
@@ -344,6 +352,7 @@ export class DappSendExecutor {
 			estimateId,
 			previewId,
 			...(bound ? { discoveredAuthwits: discovered } : {}),
+			...(sponsorFunding ? { sponsorFunding } : {}),
 		}
 	}
 

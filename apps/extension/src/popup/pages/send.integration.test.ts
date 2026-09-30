@@ -540,6 +540,66 @@ describe("send page with the real fee card — transitions", () => {
 	})
 })
 
+describe("send page with the real fee card — a sponsor that can't cover the fee", () => {
+	const SPONSOR_AT = `0x${"0a".repeat(32)}`
+	const PICKED_SPONSOR: Funding = {
+		gas: { publicFeeJuice: HELD, privateFeeJuice: "0" },
+		fpcs: [PRIVATE_FPC, { ...SPONSOR, address: SPONSOR_AT }],
+		storage: { [SEND_PICKS]: { [ACCOUNT]: { private: { type: "fpc", fpc: { id: "s1" } } } } },
+	}
+	const ESTIMATE = { maxFee: "1000", maxFeeFormatted: "0.000000000000001", gasDetails: {} }
+	const SHORT = { ...ESTIMATE, sponsorFunding: { fpcId: "s1", address: SPONSOR_AT, funded: false } }
+	const notice = (w: W) => w.find('[data-testid="fee-sponsor-short"]')
+	/** The menu item is unresolved here, so its `disabled` prop lands as an attribute. */
+	const offered = (w: W, subtitle: "public" | "sponsored") => {
+		const item = w.get(`[data-testid="send-fee-method-${subtitle}"]`)
+		return item.attributes("disabled") === undefined && item.attributes("aria-disabled") !== "true"
+	}
+
+	/** The picked sponsor's first estimate, held until `release`. */
+	async function heldEstimate() {
+		vi.useFakeTimers()
+		const held = deferred<unknown>()
+		mocks.estimateTransferFee.mockReturnValueOnce(held.promise).mockResolvedValue(ESTIMATE)
+		const mounted = await mountSend(PICKED_SPONSOR)
+		await fillForm(mounted.w)
+		await vi.advanceTimersByTimeAsync(800)
+		expect(mocks.estimateTransferFee).toHaveBeenCalledTimes(1)
+		expect(feeTrigger(mounted.w)).toBe("sponsored")
+		const release = async () => {
+			held.resolve(SHORT)
+			await vi.advanceTimersByTimeAsync(0)
+			await flushPromises()
+		}
+		return { ...mounted, release }
+	}
+
+	test("its verdict lands: the sponsor is set aside, the account's Fee Juice pays, and the send goes through review", async () => {
+		const { w, release } = await heldEstimate()
+		await release()
+		expect(notice(w).text()).toBe("The sponsor can't cover this fee right now, so Public Fee Juice pays it.")
+		expect(feeTrigger(w)).toBe("public")
+		expect(offered(w, "sponsored")).toBe(false)
+		expect(settled(w)).toMatchObject({ you: "exposed", action: "review" })
+		w.unmount()
+	})
+
+	test.each([
+		["profile", { profile: { id: "p2" } }],
+		["account", { account: { address: "0xother" } }],
+		["network", { network: { id: "n2", chainId: TOKEN.chainId } }],
+	])("the %s switched while its estimate was out: no notice, and both rows offered", async (_case, identity) => {
+		const { w, appStore, release } = await heldEstimate()
+		Object.assign(appStore, identity)
+		await flushPromises()
+		await release()
+		expect(notice(w).exists()).toBe(false)
+		expect(offered(w, "sponsored")).toBe(true)
+		expect(offered(w, "public")).toBe(true)
+		w.unmount()
+	})
+})
+
 describe("send page with the real fee card — the review sheet's fee", () => {
 	test("repeats the card's dollars, never the page's own quote", async () => {
 		mocks.estimateTransferFee.mockResolvedValue({ maxFee: HELD, maxFeeFormatted: "1", gasDetails: {} })

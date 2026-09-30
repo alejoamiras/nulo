@@ -10,6 +10,7 @@ import {
 	recordOf,
 	resolveSendSelection,
 	type SendSelection,
+	type TransferSide,
 } from "./fee-privacy"
 
 const PRIVATE_FPC: RegisteredFpc = { id: "pfpc", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
@@ -190,6 +191,44 @@ describe("resolveSendSelection — picks", () => {
 			"private_fpc",
 		)
 		expect(outcome(resolveSendSelection("public", know([PRIVATE_FPC], balances("9", "0")), { type: "private_fpc" }))).toBe("fj")
+	})
+})
+
+describe("resolveSendSelection — Nulo's sponsor found short", () => {
+	const SHORT = { shortSponsorIds: new Set(["spon"]), setAsideSponsorIds: new Set(["spon"]) }
+	const SET_ASIDE = { setAsideSponsorIds: new Set(["spon"]) }
+	const PICK = { type: "fpc", fpc: { id: "spon" } } as const
+	const resolve = (origin: TransferSide, k: FeeKnowledge, pick?: Parameters<typeof resolveSendSelection>[2]) =>
+		outcome(resolveSendSelection(origin, k, pick))
+	const knowing = (b: GasBalances, verdicts?: Partial<FeeKnowledge>): FeeKnowledge => ({
+		...know([PRIVATE_FPC, SPONSOR], b),
+		...verdicts,
+	})
+
+	test("the public walk with no gas of its own: none once both balances read zero, hold while one is unread", () => {
+		expect(resolve("public", knowing(balances("0", "0")))).toBe("fpc:spon")
+		expect(resolve("public", knowing(balances("0", "0"), SHORT))).toBe("none")
+		expect(resolve("public", knowing(balances("0", null), SHORT))).toBe("hold")
+		expect(resolve("public", knowing(balances(null, "0"), SHORT))).toBe("hold")
+	})
+
+	test("the private walk with private gas unread holds", () => {
+		expect(resolve("private", knowing(balances("9", null)))).toBe("fpc:spon")
+		expect(resolve("private", knowing(balances("9", null), SHORT))).toBe("hold")
+	})
+
+	test("a saved pick of it, public Fee Juice funded: Fee Juice, on either origin", () => {
+		const funded = balances("9", "0")
+		expect([resolve("private", knowing(funded), PICK), resolve("public", knowing(funded), PICK)]).toEqual(["fpc:spon", "fpc:spon"])
+		expect([resolve("private", knowing(funded, SHORT), PICK), resolve("public", knowing(funded, SHORT), PICK)]).toEqual(["fj", "fj"])
+	})
+
+	test("set aside but offered again: neither the walk nor its old pick selects it", () => {
+		const k = knowing(balances("0", "0"), SET_ASIDE)
+		for (const origin of ["private", "public"] as const) {
+			expect(resolve(origin, k)).toBe("none")
+			expect(resolve(origin, k, PICK)).toBe("none")
+		}
 	})
 })
 

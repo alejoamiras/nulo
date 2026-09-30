@@ -15,6 +15,8 @@
  * the production adapter for those paths.
  */
 
+import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import { walletChainId } from "@/utils/chain-ids"
@@ -54,6 +56,12 @@ export class FakeNodeFactory implements NodeFactory {
 		const node = this.createNode(rpcUrl)
 		this.singleAttempt.push(rpcUrl)
 		return node
+	}
+
+	/** Mirrors the production single read against the same per-URL stubs; `timeoutMs` is not
+	 *  enforced, as for `probeChainId`. */
+	public async readPublicStorageOnce(rpcUrl: string, contract: AztecAddress, slot: Fr, _timeoutMs: number): Promise<Fr> {
+		return this.createNode(rpcUrl).getPublicStorageAt("latest", contract, slot)
 	}
 
 	public createNode(rpcUrl: string): AztecNode {

@@ -90,12 +90,14 @@ tokenService.onTokenAdded.add(onTokenAdded)
 tokenService.onTokenDeleted.add(onTokenDeleted)
 let tokenAddedDuringLoad = false
 /** Fires for any profile's or chain's add, so it re-reads the current identity's tokens rather
- *  than appending one; an add during an identity fetch makes that fetch read them again. */
+ *  than appending one; an add during an identity fetch makes that fetch read them again, and one
+ *  after a refused fetch retries it, since its balances and contacts are missing too. */
 function onTokenAdded() {
 	if (tokensLoading.value) {
 		tokenAddedDuringLoad = true
 		return
 	}
+	if (tokensFailed.value) return retryTokens()
 	reloadTokens().catch(onReadFailed)
 }
 /** Bumped by each token re-read and identity fetch; a re-read lands only if none began after it. */
@@ -129,6 +131,8 @@ function onTokenDeleted(token) {
 const tokens = ref([])
 /** True while the current identity's tokens are being read; the token card waits on it. */
 const tokensLoading = ref(true)
+/** The current identity's fetch was refused; the token card offers a Retry. */
+const tokensFailed = ref(false)
 const activeToken = computed(() => tokens.value?.find((t) => t.id === cacheStore.activeTokenIdx))
 const isBlockedTransfer = computed(() => !activeToken.value?.hasPrivateTransfers && !activeToken.value?.hasPublicTransfers)
 
@@ -314,6 +318,11 @@ const transferType = computed(() => {
 	if (selectedSendType.value === "public" && selectedReceiverType.value === "public") return TransferType.Public
 	return undefined
 })
+
+/** The transfer the fee is for, less its fee settings: the transaction a sponsor verdict describes. */
+const feeTxShape = computed(() =>
+	JSON.stringify([activeToken.value?.id, transferType.value, searchTerm.value, amountValidation.value.integerized?.toString()]),
+)
 
 const executionService = new ExecutionServiceClient()
 // B-30: executionService opens a live SW port as soon as fee estimation runs
@@ -523,7 +532,8 @@ function applyQueryContact() {
 	searchTerm.value = preselected.address
 }
 
-// A newer identity fetch supersedes an older one, and only the current fetch ends `tokensLoading`.
+// A newer identity fetch supersedes an older one, and only the current fetch ends `tokensLoading`
+// or marks the fetch failed.
 // `activeTokenIdx` is global (cache store): a new token set without it moves it to the first token,
 // or `activeToken` resolves to nothing. The send and receiver types are then re-validated for it.
 let identityFetchSeq = 0
@@ -531,6 +541,7 @@ async function refetchIdentityScopedState() {
 	const mySeq = ++identityFetchSeq
 	const isCurrent = () => mySeq === identityFetchSeq
 	tokenReadSeq++
+	tokensFailed.value = false
 	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) {
 		if (isCurrent()) {
 			tokens.value = []
@@ -562,15 +573,38 @@ async function refetchIdentityScopedState() {
 		tokens.value = t
 		tokenBalances.value = tb
 		contacts.value = c
+		// The tokens watch makes the first token added to an empty list the active one. A refused
+		// load must not arm it, or the Retry's list would lose the active or requested token.
+		awaitingNewToken.value = t.length === 0
 		applyQueryContact()
 		if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
 			cacheStore.activeTokenIdx = t[0]?.id ?? undefined
 		}
+		applyQueryToken()
 		initSendType()
 		initReceiverType()
+	} catch (error) {
+		if (isCurrent()) tokensFailed.value = true
+		throw error
 	} finally {
 		if (isCurrent()) tokensLoading.value = false
 	}
+}
+
+/** The token card's Retry: all three reads again, since the page cannot send without any of them. */
+function retryTokens() {
+	refetchIdentityScopedState().catch(onReadFailed)
+}
+
+// `?tokenId=` survives the unmount of tokens/[id], which clears `activeTokenIdx`. It is consumed by
+// the first load that succeeds, matching or not: a cold tab's identity settles after mount, and a
+// refused first load leaves it to the Retry.
+let queryTokenApplied = false
+function applyQueryToken() {
+	if (queryTokenApplied) return
+	queryTokenApplied = true
+	const id = route.query.tokenId ? Number(route.query.tokenId) : null
+	if (id && tokens.value.some((tok) => tok.id === id)) cacheStore.activeTokenIdx = id
 }
 
 watch(
@@ -587,22 +621,8 @@ onMounted(async () => {
 	void legal.refresh()
 	// Route mount fetch through the shared refetch so it inherits the
 	// sequence guard AND the null-triple defense AND the
-	// activeTokenIdx-rebind logic. A refused read leaves the page as an empty load does.
+	// activeTokenIdx-rebind logic.
 	await refetchIdentityScopedState().catch(onReadFailed)
-
-	// Query-param preselect survives the unmount of tokens/[id] (which clears
-	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
-	// whatever activeTokenIdx may still be set, then to tokens[0].
-	const queryTokenId = route.query.tokenId ? Number(route.query.tokenId) : null
-	if (queryTokenId && tokens.value.some((tok) => tok.id === queryTokenId)) {
-		cacheStore.activeTokenIdx = queryTokenId
-		initSendType()
-		initReceiverType()
-	}
-
-	if (!tokens.value.length) {
-		awaitingNewToken.value = true
-	}
 })
 
 onBeforeUnmount(() => {
@@ -668,7 +688,7 @@ onBeforeUnmount(() => {
 						<span :class="$style.section_label">Select Asset</span>
 						<span :class="$style.section_meta">Network: {{ getChainName(appStore.network?.chainId) }}</span>
 					</Flex>
-					<SelectTokenCard :token="activeToken" :loading="tokensLoading" />
+					<SelectTokenCard :token="activeToken" :loading="tokensLoading" :failed="tokensFailed" @retry="retryTokens" />
 				</div>
 
 				<!-- Section: Transaction Amount -->
@@ -705,6 +725,7 @@ onBeforeUnmount(() => {
 						:originPrivacy="selectedSendType"
 						:destinationPrivacy="selectedReceiverType"
 						:payerNoticeShape="facts.noticeShape"
+						:txShape="feeTxShape"
 						v-model="feeSettings"
 						v-model:needsFeeJuice="needsFeeJuice"
 						v-model:payer="payer"
