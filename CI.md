@@ -219,7 +219,7 @@ Composite actions (step-level reuse):
 ## Known limitations
 
 - **Extension smoke e2e is required on both `dev` and `main`** (as `extension-smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
-- **Extension network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
+- **Extension network e2e quarantines nothing.** Every skip in `tests/e2e/network/` is a `skipIf` on the test's own precondition, such as an Aztec config, a local network or a behaviour only one browser has (`CHROME_ONLY` and `FIREFOX_ONLY` in `apps/extension/tests/e2e/fixtures/browser/index.ts` carry each browser reason). Open flake fingerprints live in the `e2e-testing` skill's flake ledger.
 - **Store publishing has run on Chrome only**: the Chrome job uploaded v0.28.0 on 2026-09-23; the Firefox job has not run yet (the first AMO submission was manual). Both jobs need their GitHub environments (`chrome-web-store`, `firefox-add-ons`: reviewer = owner, `main` only) and an existing item on each store (see § `release.yml`). Nulo V6 reuses both items, renamed. The Firefox `gecko.id`, `wallet@nulo.sh`, is final.
 
 ## See also
