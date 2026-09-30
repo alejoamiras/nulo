@@ -43,7 +43,16 @@ export interface SnackOverSheet {
 export async function readSnackOverSheet(page: Page): Promise<SnackOverSheet> {
 	await page.$eval(sel("legal-sheet-body"), (body) => body.scrollTo({ top: body.scrollHeight, behavior: "instant" }))
 	await waitUntilStill(page, sel("legal-continue"), false)
-	await waitUntilStill(page, sel("snackbar"), false)
+	// The card rises as it fades in, and its CSS-module enter class escapes `waitUntilStill`'s
+	// `-enter-from` match, so a throttled frame can hold it mid-rise through three equal reads.
+	await page.waitForFunction(
+		(s) => {
+			const card = document.querySelector(s)
+			return card !== null && getComputedStyle(card).opacity === "1" && card.getAnimations().length === 0
+		},
+		{ timeout: 10_000 },
+		sel("snackbar"),
+	)
 	return page.evaluate((layers) => {
 		const box = (testid: string) => {
 			const el = document.querySelector(`[data-testid="${testid}"]`)
