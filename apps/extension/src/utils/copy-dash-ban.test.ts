@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest"
 
 /**
  * Static ban: no em dash joins two clauses in text a person reads; a full stop does, and the
- * empty-value "—" stays. Every string this replaced had passed review, so the rule runs here.
+ * empty-value "—" stays.
  *
  * Limits: it reads source strings and template text, not what a screen renders, so each reviewed
  * entry is a person's judgement of where that text goes. It cannot see a dash built by
