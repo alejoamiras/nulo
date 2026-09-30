@@ -1,4 +1,4 @@
-import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
+import { TxHash } from "@aztec/stdlib/tx"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -24,12 +24,12 @@ import {
 	type LocalTxOrigin,
 	type TxCall,
 	TxStatus,
-	TxExecutionResult,
 	type Methods,
 	type Events,
 	TxSchema,
 	TxConfirmationTimeoutError,
 } from "./spec"
+import { executionResultFromReceipt, txStatusFromReceipt } from "./receipt-status"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
 export * from "./spec"
@@ -453,8 +453,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 			throw err
 		}
-		const status = this.getTxStatus(receipt.status)
-		const executionResult = this.getTxExecutionResult(receipt.executionResult)
+		const status = txStatusFromReceipt(receipt.status)
+		const executionResult = executionResultFromReceipt(receipt.executionResult)
 
 		// DROPPED also means "this replica has never seen the hash" (see the constants'
 		// doc block) — debounce it for a still-pending tx.
@@ -503,40 +503,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
 		})
-	}
-
-	private getTxStatus(status: AztecTxStatus): TxStatus {
-		switch (status) {
-			case AztecTxStatus.PENDING:
-				return TxStatus.Pending
-			case AztecTxStatus.DROPPED:
-				return TxStatus.Dropped
-			case AztecTxStatus.PROPOSED:
-				return TxStatus.Proposed
-			case AztecTxStatus.CHECKPOINTED:
-				return TxStatus.Checkpointed
-			case AztecTxStatus.PROVEN:
-				return TxStatus.Proven
-			case AztecTxStatus.FINALIZED:
-				return TxStatus.Finalized
-			default:
-				throw new Error("unknown tx status")
-		}
-	}
-
-	private getTxExecutionResult(result: AztecTxExecutionResult | undefined): TxExecutionResult | undefined {
-		if (!result) return undefined
-		switch (result) {
-			case AztecTxExecutionResult.SUCCESS:
-				return TxExecutionResult.Success
-			// 5.0 collapsed the three revert variants (app-logic / teardown / both) into one
-			// REVERTED. Map it to AppLogicReverted as the catch-all "reverted" label; the Nulo
-			// enum's TeardownReverted/BothReverted are now unreachable (follow-up: collapse + UI review).
-			case AztecTxExecutionResult.REVERTED:
-				return TxExecutionResult.AppLogicReverted
-			default:
-				return undefined
-		}
 	}
 
 	public async backup(): Promise<Tx[] | undefined> {

@@ -115,7 +115,7 @@ vi.mock("vue-router", () => ({
 }))
 
 import { REVIEW_ARM_MS } from "@/composables/useSendReview"
-import { TRANSFER_FAILED_COPY, TRANSFER_TERMS_COPY } from "@/popup/utils/transfer-failure-copy"
+import { TRANSFER_STATUS_UNKNOWN_COPY, TRANSFER_TERMS_COPY } from "@/popup/utils/transfer-failure-copy"
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
@@ -343,7 +343,7 @@ describe("send page — the submit tail", () => {
 		w.unmount()
 	})
 
-	test("rejected: exactly this awaiting row is removed and the failure toast is red", async () => {
+	test("rejected with no record named: exactly this awaiting row is removed and the toast says the status is unknown", async () => {
 		const { w, appStore } = await mountSend()
 		await fillForm(w)
 		appStore.addAwaitingTransaction({ id: "other", account: ACCOUNT, destination: DESTINATION, contract: TOKEN.contract })
@@ -353,7 +353,7 @@ describe("send page — the submit tail", () => {
 		transfer.reject(new Error("boom"))
 		await flushPromises()
 		expect(awaitingIds(appStore)).toEqual(["other"])
-		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: "Send failed", sub: TRANSFER_FAILED_COPY })
+		expect(mocks.openToast).toHaveBeenCalledWith({ kind: "error", label: "Send status unknown", sub: TRANSFER_STATUS_UNKNOWN_COPY })
 		expect(console.error).toHaveBeenCalledWith("[send] executeTransfer failed:", expect.any(Error))
 		expect(mocks.executionDisconnect).toHaveBeenCalledTimes(1)
 		w.unmount()

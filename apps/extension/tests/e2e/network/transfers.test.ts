@@ -74,6 +74,18 @@ test.skipIf(!hasConfig)(
 			console.log("✓ Public → Public submitted")
 			await waitForTxConfirmation(page, { amount: "10", fromType: "public", toType: "public" })
 			console.log("✓ Tx confirmed")
+			// A lower bound on how long the popup waited for `executeTransfer`: past 60 s, only the popup's
+			// longer deadline for it keeps a send that lands from reading as failed.
+			const recordMs = await page.evaluate(async () => {
+				type Row = { kind?: string; progress?: { stage?: string }; createdAt?: number; terminalAt?: number | null }
+				const rows = Object.entries(await chrome.storage.local.get(null)).flatMap(([key, raw]) =>
+					key.startsWith("nulo:journal@") ? [(typeof raw === "string" ? JSON.parse(raw) : raw) as Row] : [],
+				)
+				const sends = rows.filter((row) => row.kind === "transfer" && row.progress?.stage === "succeeded")
+				const last = sends.sort((a, b) => (b.terminalAt ?? 0) - (a.terminalAt ?? 0))[0]
+				return last?.terminalAt != null && last.createdAt != null ? last.terminalAt - last.createdAt : null
+			})
+			console.log(`[transfers] public → public record: terminalAt - createdAt = ${recordMs} ms`)
 			await page.close()
 		}
 

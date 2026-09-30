@@ -2,6 +2,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { EventHandler, Lock } from "@nulo/wallet-core/utils"
+import { isTerminal } from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
@@ -2399,13 +2400,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
+	/** The scope's own sends: rows in flight, and failed rows, which may still have reached the network. */
 	private async collectInflightTxHashes(profileId: string, networkId: string, accountAddress: string): Promise<Set<string>> {
 		try {
-			const ops = await this.operationJournalService.getOperations({ profileId, isTerminal: false })
+			const ops = await this.operationJournalService.getOperations({ profileId })
 			const hashes = new Set<string>()
 			for (const op of ops) {
 				if (op.accountAddress !== accountAddress) continue
 				if (op.networkId !== networkId) continue
+				if (isTerminal(op.progress.stage) && op.progress.stage !== "failed") continue
 				const txHash = (op.progress as { txHash?: string })?.txHash
 				if (txHash) hashes.add(txHash)
 			}

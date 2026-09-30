@@ -15,7 +15,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { OperationJournalService } from "./service"
-import type { NewOperationInput } from "./spec"
+import { type NewOperationInput, type OperationRecord, isSendCheckable, wasNeverSent } from "./spec"
 
 const VALID_INPUT: NewOperationInput = {
 	kind: "transfer",
@@ -753,5 +753,127 @@ describe("OperationJournalService", () => {
 		await Promise.allSettled([a, b])
 		const final = await service.getOperation(rec.id)
 		expect(["simulating", "cancelled"]).toContain(final?.progress.stage)
+	})
+})
+
+describe("a failed send's record: the carry, the answer, the predicates", () => {
+	const HASH = `0x${"ab".repeat(32)}`
+	const URL = "https://rpc.example"
+	const LOST = { kind: "transfer", message: "lost", normalizedRaw: null }
+	let service: OperationJournalService
+
+	beforeEach(async () => {
+		;({ service } = await started())
+	})
+
+	async function atStage(stage: "simulating" | "proving" | "submitting"): Promise<string> {
+		const { id } = await service.createOperation(VALID_INPUT)
+		await service.transitionOperation(id, { stage: "simulating" })
+		if (stage === "simulating") return id
+		await service.transitionOperation(id, { stage: "proving", enteredProveAt: 1 })
+		if (stage === "proving") return id
+		await service.transitionOperation(id, { stage: "submitting", txHash: HASH, submittedEndpointUrl: URL })
+		return id
+	}
+
+	async function failedFromSubmitting(): Promise<string> {
+		const id = await atStage("submitting")
+		await service.transitionOperation(id, { stage: "failed" }, LOST)
+		return id
+	}
+
+	test("a row failed at submitting keeps its hash and endpoint, and the stage it failed from", async () => {
+		const id = await failedFromSubmitting()
+		expect((await service.getOperation(id))?.progress).toEqual({
+			stage: "failed",
+			from: "submitting",
+			txHash: HASH,
+			submittedEndpointUrl: URL,
+		})
+	})
+
+	test("a row failed before submitting records only the stage it left", async () => {
+		const id = await atStage("proving")
+		const failed = await service.transitionOperation(id, { stage: "failed" }, LOST)
+		expect(failed.progress).toEqual({ stage: "failed", from: "proving" })
+	})
+
+	test("what a caller puts on a failed progress is discarded", async () => {
+		const id = await atStage("simulating")
+		const planted = { stage: "failed", from: "submitting", txHash: HASH, submittedEndpointUrl: URL, check: "sent" } as const
+		const failed = await service.transitionOperation(id, planted, LOST)
+		expect(failed.progress).toEqual({ stage: "failed", from: "simulating" })
+	})
+
+	test("the reaper's conditional transition carries the same fields", async () => {
+		const id = await atStage("submitting")
+		const reaped = await service.transitionIfStage(id, ["submitting"], { stage: "failed" }, { ...LOST, kind: "stale_on_resume" })
+		expect(reaped.outcome === "transitioned" && reaped.record.progress).toEqual({
+			stage: "failed",
+			from: "submitting",
+			txHash: HASH,
+			submittedEndpointUrl: URL,
+		})
+	})
+
+	test("setSendCheck writes the answer once on the matching failed row, and emits it", async () => {
+		const id = await failedFromSubmitting()
+		const seen = vi.fn()
+		service.onOperationUpdated.add(seen)
+		expect(await service.setSendCheck(id, HASH, "sent", () => true)).toBe(true)
+		const answered = await service.getOperation(id)
+		expect(answered?.progress).toEqual({ stage: "failed", from: "submitting", txHash: HASH, submittedEndpointUrl: URL, check: "sent" })
+		expect(seen).toHaveBeenCalledWith(answered)
+		expect(await service.setSendCheck(id, HASH, "reverted", () => true)).toBe(false)
+		expect((await service.getOperation(id))?.progress).toMatchObject({ check: "sent" })
+	})
+
+	test("setSendCheck writes nothing to a missing row, another hash, a live row, or once the guard fails", async () => {
+		const failed = await failedFromSubmitting()
+		const live = await atStage("submitting")
+		expect(await service.setSendCheck("absent", HASH, "sent", () => true)).toBe(false)
+		expect(await service.setSendCheck(failed, `0x${"cd".repeat(32)}`, "sent", () => true)).toBe(false)
+		expect(await service.setSendCheck(live, HASH, "sent", () => true)).toBe(false)
+		expect(await service.setSendCheck(failed, HASH, "sent", () => false)).toBe(false)
+		expect((await service.getOperation(failed))?.progress).not.toHaveProperty("check")
+		expect((await service.getOperation(live))?.progress.stage).toBe("submitting")
+	})
+
+	function failedRecord(progress: OperationRecord["progress"], kind: string): OperationRecord {
+		return {
+			id: "j1",
+			kind: "transfer",
+			origin: "popup",
+			profileId: "p1",
+			progress,
+			error: { kind, message: "", normalizedRaw: null },
+			terminalAt: 1,
+			attempts: 0,
+			createdAt: 0,
+			updatedAt: 1,
+		}
+	}
+
+	test.each([
+		["transfer", "submitting", true, false],
+		["dapp_execute", "submitting", true, false],
+		["stale_on_resume", "submitting", true, false],
+		["duplicate_initialization", "submitting", true, false],
+		["session_ended", "submitting", false, true],
+		["transfer", "proving", false, true],
+		["dapp_execute", "simulating", false, true],
+		["stale_on_resume", "pending", false, true],
+		["session_ended", "queued", false, true],
+	] as const)("%s from %s: checkable %s, never sent %s", (kind, from, checkable, neverSent) => {
+		const txHash = from === "submitting" ? HASH : undefined
+		const op = failedRecord({ stage: "failed", from, txHash, submittedEndpointUrl: txHash && URL }, kind)
+		expect(isSendCheckable(op)).toBe(checkable)
+		expect(wasNeverSent(op)).toBe(neverSent)
+	})
+
+	test("a failed row with no recorded stage is neither checkable nor proven unsent", () => {
+		const op = failedRecord({ stage: "failed" }, "transfer")
+		expect(isSendCheckable(op)).toBe(false)
+		expect(wasNeverSent(op)).toBe(false)
 	})
 })

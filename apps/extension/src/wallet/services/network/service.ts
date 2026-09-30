@@ -6,6 +6,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "@nulo/aztec-runtime/utils"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
@@ -197,6 +198,8 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	private readonly nodes = new Map<number, AztecNode>()
 	/** URL-keyed transient cache for pending-tx polling pin. */
 	private readonly transientNodes = new Map<string, { node: AztecNode; failures: number }>()
+	/** Never evicted: the keys are only the endpoints failed sends went through. */
+	private readonly singleAttemptNodes = new Map<string, AztecNode>()
 	private readonly lock: Lock
 	private readonly nodeFactory: NodeFactory
 
@@ -798,6 +801,19 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		if (entry) return entry.node
 		const created = this.nodeFactory.createNode(url)
 		this.transientNodes.set(url, { node: created, failures: 0 })
+		return created
+	}
+
+	/**
+	 * {@link getNodeForUrl}'s pinning for a caller that retries on its own schedule: every call
+	 * through the returned client is one attempt, so nothing leaves after the caller stops.
+	 */
+	public async getSingleAttemptNodeForUrl(url: string): Promise<AztecNode> {
+		await this.ensureInitialized()
+		const cached = this.singleAttemptNodes.get(url)
+		if (cached) return cached
+		const created = this.nodeFactory.createSingleAttemptNode(url, DEFAULT_REQUEST_TIMEOUT_MS)
+		this.singleAttemptNodes.set(url, created)
 		return created
 	}
 

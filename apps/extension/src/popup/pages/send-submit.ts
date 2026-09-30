@@ -1,7 +1,7 @@
 import { journalIdOf } from "@nulo/extension-messaging/errors"
 import type { ToastAction, ToastOptions } from "@/composables/toast"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
-import { transferFailureCopy, transferFailureLogLevel } from "@/popup/utils/transfer-failure-copy"
+import { transferFailureLogLevel, transferFailureSnack } from "@/popup/utils/transfer-failure-copy"
 import { formatSnackAmount } from "@/utils/snack-amount"
 import { trimAddress } from "@/utils/string"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
@@ -90,8 +90,12 @@ export function submitTransfer(deps: SubmitDeps, snap: TransferSnapshot): string
 			if (transferFailureLogLevel(err) === "debug") console.debug("[send] executeTransfer refused:", err)
 			else console.error("[send] executeTransfer failed:", err)
 			if (!deps.isCurrent(snap.epoch)) return
-			const action = await detailsAction(deps, snap, journalIdOf(err))
-			if (deps.isCurrent(snap.epoch)) deps.openToast({ kind: "error", label: "Send failed", sub: transferFailureCopy(err), action })
+			const id = journalIdOf(err)
+			const record = await ownRecord(deps, snap, id)
+			if (!deps.isCurrent(snap.epoch)) return
+			const { label, sub, details } = transferFailureSnack(err, record)
+			const action = details && record && id !== null ? { label: "Details", onSelect: () => deps.viewJournal(id) } : undefined
+			deps.openToast({ kind: "error", label, sub, action })
 		})
 		.finally(deps.onSettled)
 
@@ -109,16 +113,15 @@ function viewAction(deps: SubmitDeps, hash: string): ToastAction | undefined {
 	return { label: "View", onSelect: () => deps.viewTransaction(hash) }
 }
 
-/** Details only for the record the wallet named beside this failure, read back as this send's
- *  failed transfer. Any doubt, a failed read included, leaves the snack without it. */
-async function detailsAction(deps: SubmitDeps, snap: TransferSnapshot, id: string | null): Promise<ToastAction | undefined> {
+/** The record the wallet named beside this failure, read back as this send's failed transfer. Any
+ *  doubt, a failed read included, is no record. */
+async function ownRecord(deps: SubmitDeps, snap: TransferSnapshot, id: string | null): Promise<OperationRecord | undefined> {
 	if (id === null || !JOURNAL_ID.test(id)) return undefined
 	const record = await deps.readJournal(id).catch(() => {
 		console.debug("[send] Details withheld: the journal read failed")
 		return undefined
 	})
-	if (!record || !isFailedTransferOf(record, snap)) return undefined
-	return { label: "Details", onSelect: () => deps.viewJournal(id) }
+	return record && isFailedTransferOf(record, snap) ? record : undefined
 }
 
 function isFailedTransferOf(record: OperationRecord, snap: TransferSnapshot): boolean {

@@ -24,6 +24,12 @@ export interface NodeFactory {
 	createNode(rpcUrl: string): AztecNode
 
 	/**
+	 * A client whose every call is ONE non-retrying attempt, aborted at `timeoutMs`: for a caller
+	 * that retries on its own schedule and must send nothing once it stops.
+	 */
+	createSingleAttemptNode(rpcUrl: string, timeoutMs: number): AztecNode
+
+	/**
 	 * Bounded connectivity probe: ONE non-retrying `getNodeInfo` attempt whose
 	 * AbortController fires at `timeoutMs`, returning the composed chain id
 	 * (`(l1ChainId ^ rollupVersion) >>> 0`). Unlike `createNode(...)` calls —

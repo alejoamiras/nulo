@@ -54,6 +54,7 @@ const createPXEMock = vi.mocked(createPXE)
 
 const fakeNodeFactory: NodeFactory = {
 	createNode: () => ({ getL1ContractAddresses: async () => ({ rollupAddress: undefined }) }) as never,
+	createSingleAttemptNode: () => ({}) as never,
 	probeChainId: async () => 0,
 }
 

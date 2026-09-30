@@ -25,7 +25,8 @@ import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { JobCancelledError, JournaledRejection, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
+import { buildJournalTerminalCardProps, sendOutcome } from "@/utils/journal-state"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
@@ -43,6 +44,7 @@ import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { LegalAcceptanceService } from "@/wallet/services/legal/service"
 import { TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { SEND_CHECK_TICK_MS, SendCheck } from "@/wallet/services/operation-journal/send-check"
 import { TaskService } from "@/wallet/services/task/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ProofGate } from "@/e2e/proof-gate"
@@ -106,7 +108,7 @@ async function makeHarness() {
 	const sendTx = vi.fn(async () => {})
 	// proveTx returns a stub TxProvingResult whose `toTx` is spied: the post-prove
 	// cancel checkpoint must drop the proof BEFORE `toTx`, so `toTx` proves submission.
-	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }))
+	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: (): string => "0xhash" }) }))
 	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
 	const proveTx = vi.fn(async () => ({ toTx }))
 	const fakeIPXE = { proveTx } as unknown as ReturnType<PxeServiceClient["getPXE"]>
@@ -163,6 +165,8 @@ async function makeHarness() {
 		if (!live) throw new Error("Wallet locked")
 		return { profileId: live.profileId, epoch: deletionState.capture(live.profileId), session: live.serial }
 	}
+	const isFenceLive = (fence: ExecutionFence) =>
+		live?.serial === fence.session && live.profileId === fence.profileId && deletionState.isCurrent(fence.profileId, fence.epoch)
 	const session = {
 		setActive: (profileId: string | undefined) => {
 			lastSerial += 1
@@ -183,10 +187,7 @@ async function makeHarness() {
 				if (live?.serial !== fence.session || live.profileId !== fence.profileId) throw new SessionEndedError()
 				deletionState.assertCurrent(fence.profileId, fence.epoch)
 			},
-			isFenceLive: (fence: ExecutionFence) =>
-				live?.serial === fence.session &&
-				live.profileId === fence.profileId &&
-				deletionState.isCurrent(fence.profileId, fence.epoch),
+			isFenceLive,
 			peekLiveSerial: () => live?.serial,
 			setExpiryDeferral: (predicate: (profileId: string) => Promise<boolean>) => {
 				expiryDeferral = predicate
@@ -286,6 +287,7 @@ async function makeHarness() {
 		toTx,
 		getJournalId: () => journalId,
 		captureExecutionFence,
+		isFenceLive,
 		session,
 		getNetwork,
 		accountOwners,
@@ -1037,5 +1039,95 @@ describe("ExecutionService composition — nothing is broadcast without a curren
 		expect(h.sendTx).not.toHaveBeenCalled()
 		expect(h.stages).not.toContain("succeeded")
 		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("failed")
+	})
+})
+
+describe("ExecutionService composition — a send whose answer was lost is checked on the network", () => {
+	test("sendTx reached the node, its answer did not: the row fails from submitting, then the check reads it sent", async () => {
+		const h = await makeHarness()
+		const hash = `0x${"1e".repeat(32)}`
+		h.toTx.mockResolvedValueOnce({ getTxHash: () => ({ toString: () => hash }) })
+		h.sendTx.mockRejectedValueOnce(new TypeError("fetch failed"))
+		const getTxReceipt = vi.fn(async (_hash: { toString(): string }) => ({
+			txHash: hash,
+			status: "proven",
+			executionResult: "success",
+			transactionFee: 1234n,
+			blockNumber: 42,
+		}))
+		const network = { getSingleAttemptNodeForUrl: vi.fn(async (_url: string) => ({ getTxReceipt }) as never) }
+		const balances = { refreshAccountBalances: vi.fn(async (_account: string) => {}) }
+		const clock = new MockClock(Date.now())
+		const check = new SendCheck({
+			journal: h.journal,
+			network,
+			profile: { captureExecutionFence: h.captureExecutionFence, isFenceLive: h.isFenceLive },
+			balances,
+			logger: new LoggerStore(new ConfigStore()),
+			clock,
+		})
+		await check.start()
+
+		const p = h.service
+			.executeTransfer(
+				h.req.networkId,
+				h.req.accountAddress,
+				h.req.tokenId,
+				h.req.transferType,
+				h.req.recipientAddress,
+				h.req.amount,
+				h.req.feeSettings,
+				h.estimateId,
+			)
+			.catch((e) => e)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		expect(await p).toStrictEqual(recorded(h, expect.any(TypeError)))
+
+		expect(h.sendTx).toHaveBeenCalledTimes(1)
+		const failed = await h.journal.getOperation(h.getJournalId())
+		expect(failed?.progress).toEqual({ stage: "failed", from: "submitting", txHash: hash, submittedEndpointUrl: "http://fake" })
+
+		clock.advance(SEND_CHECK_TICK_MS)
+		await waitFor(() => balances.refreshAccountBalances.mock.calls.length > 0)
+
+		expect(network.getSingleAttemptNodeForUrl).toHaveBeenCalledWith("http://fake")
+		expect(getTxReceipt.mock.calls[0]?.[0].toString()).toBe(hash)
+		const answered = await h.journal.getOperation(h.getJournalId())
+		expect(answered?.progress).toEqual({ ...failed?.progress, check: "sent" })
+		const card = answered && buildJournalTerminalCardProps(answered, { tokenById: () => undefined })
+		expect(card).toMatchObject({ state: "sent", subtitle: "Sent", color: "green" })
+		expect(balances.refreshAccountBalances).toHaveBeenCalledWith(h.req.accountAddress)
+		expect(h.sendTx).toHaveBeenCalledTimes(1)
+		check.stop()
+	})
+
+	test("a sendTx the node refused reads 'Not confirmed yet' too: a retried POST can come back refused after an accepted attempt", async () => {
+		const h = await makeHarness()
+		const hash = `0x${"2f".repeat(32)}`
+		h.toTx.mockResolvedValueOnce({ getTxHash: () => ({ toString: () => hash }) })
+		// As the SDK client throws a node's per-call JSON-RPC error: an HTTP 200, so never retried itself.
+		const refusal = "Invalid tx: Insufficient fee payer balance"
+		h.sendTx.mockRejectedValueOnce(new Error(refusal, { cause: { code: -32702, message: refusal } }))
+
+		const p = h.service
+			.executeTransfer(
+				h.req.networkId,
+				h.req.accountAddress,
+				h.req.tokenId,
+				h.req.transferType,
+				h.req.recipientAddress,
+				h.req.amount,
+				h.req.feeSettings,
+				h.estimateId,
+			)
+			.catch((e) => e)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		expect(await p).toStrictEqual(recorded(h, expect.any(Error)))
+
+		const failed = await h.journal.getOperation(h.getJournalId())
+		expect(failed?.progress).toEqual({ stage: "failed", from: "submitting", txHash: hash, submittedEndpointUrl: "http://fake" })
+		expect(failed && sendOutcome(failed)).toBe("checking")
 	})
 })

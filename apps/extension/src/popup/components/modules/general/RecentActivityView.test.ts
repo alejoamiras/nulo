@@ -151,7 +151,8 @@ vi.mock("@/wallet/services/task/spec", () => ({
 	TaskStatus: H.TaskStatus,
 }))
 
-vi.mock("@/wallet/services/transaction/spec", () => ({
+vi.mock("@/wallet/services/transaction/spec", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/wallet/services/transaction/spec")>()),
 	OriginType: H.OriginType,
 	TxStatus: H.TxStatus,
 }))
