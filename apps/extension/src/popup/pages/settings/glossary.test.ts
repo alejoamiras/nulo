@@ -37,7 +37,7 @@ describe("settings/glossary", () => {
 		["public-fee-juice", "Public Fee Juice", "Paying a fee with it shows your address.", "Home · fee menu"],
 		["private-fee-juice", "Private Fee Juice", "Paying a fee with it keeps your address hidden.", "Home · fee menu"],
 		["sponsored", "Sponsored", "Someone else pays the network fee for you.", "Fee menu"],
-		["authorization", "Authorization", "Lets a contract do one specific thing for you, once.", "Permission window · approval window"],
+		["authorization", "Authorization", "Lets a contract do one specific thing for you, once.", "Permission window · Connected apps"],
 		["name-for-this-app", "Name for this app", "A private name for this account visible only to this app.", "Permission window"],
 		[
 			"proving",

@@ -55,7 +55,7 @@ export class ChainStoreWedgedError extends Error {
 	public readonly isChainStoreWedged = true as const
 	public constructor(dir: string) {
 		super(
-			`openChainStore: an open for ${dir} is already in flight or a prior one wedged (its OPFS worker never released its lock). Refusing to start a second worker — restart the offscreen document to recover.`,
+			`openChainStore: an open for ${dir} is already in flight or a prior one wedged (its OPFS worker never released its lock). Refusing to start a second worker. Restart the offscreen document to recover.`,
 		)
 	}
 }
@@ -219,7 +219,7 @@ export async function initStoreVersionStamp(store: AztecSQLiteOPFSStore, rollupA
 		if (mismatch) {
 			// REFUSE, do not wipe (D-B2v3). The store's bytes are preserved for the operator.
 			log.warn("PXE store version mismatch — refusing to open (preserving data)", { detail: mismatch })
-			throw new PxeStoreVersionMismatch(`PXE store version mismatch — refusing to open (preserving data): ${mismatch}`)
+			throw new PxeStoreVersionMismatch(`PXE store version mismatch. Refusing to open (preserving data): ${mismatch}`)
 		}
 	}
 	await dbVersion.set(target.toBuffer().toString("utf-8"))

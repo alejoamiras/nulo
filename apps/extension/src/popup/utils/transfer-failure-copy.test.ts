@@ -32,7 +32,7 @@ describe("transferFailureSnack", () => {
 		const overTheWire = walletErrorFromPayload(new OperationNotRecordedError().toPayload())
 		expect(transferFailureSnack(overTheWire, undefined)).toMatchObject({
 			label: "Send failed",
-			sub: "Couldn't start this transaction. Nothing was sent — try again.",
+			sub: "Couldn't start this transaction. Nothing was sent. Try again.",
 		})
 	})
 

@@ -29,7 +29,7 @@ export function useNetworkActivation(options: UseNetworkActivationOptions) {
 		if (result === "blocked") {
 			openToast({ kind: "error", label: "Finish or cancel your pending transaction first" })
 		} else if (result === "unconfirmed") {
-			openToast({ kind: "error", label: "Couldn't confirm the network switch — reopen the popup to verify" })
+			openToast({ kind: "error", label: "Couldn't confirm the network switch. Reopen the popup to verify" })
 		}
 		// "stale" — the profile changed while this activation waited; the view that asked is gone.
 		return result

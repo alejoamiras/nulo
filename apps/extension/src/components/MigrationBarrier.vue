@@ -23,11 +23,11 @@ const blockedCopy = computed(() => {
 	return blocked.value.terminal
 		? {
 				title: "UPDATE FAILED",
-				sub: "Your funds are safe — your secret phrase still recovers your accounts. Reinstall the extension to start clean.",
+				sub: "Your funds are safe. Your secret phrase still recovers your accounts. Reinstall the extension to start clean.",
 			}
 		: {
 				title: "UPDATE INTERRUPTED",
-				sub: "Your funds are safe. Tap Retry update — the wallet restarts and retries.",
+				sub: "Your funds are safe. Tap Retry update to restart the wallet and try again.",
 			}
 })
 const retryRequested = ref(false)
@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
 		</BarrierOverlay>
 
 		<div v-else-if="state === 'degraded'" :class="$style.banner" data-testid="migration-degraded">
-			<span :class="$style.bannerText">Part of the last update didn't apply — some data may look outdated.</span>
+			<span :class="$style.bannerText">Part of the last update didn't apply. Some data may look outdated.</span>
 			<button type="button" :class="$style.bannerDismiss" data-testid="migration-degraded-dismiss" @click="dismissDegraded">✕</button>
 		</div>
 	</Teleport>

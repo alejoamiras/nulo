@@ -600,10 +600,10 @@ describe("remapNetworkIdByChain — rows bind to the seeded network of their cha
 describe("collectRestoreErrors — account-state top-level records (skip/violation shapes)", () => {
 	it("collects an item-level restoreError even when every child is clean", () => {
 		const result = collectRestoreErrors("account-state", [
-			{ networkId: "n1", senders: [], contracts: [], restoreError: "Skipped — couldn't reach the network" },
+			{ networkId: "n1", senders: [], contracts: [], restoreError: "Skipped: couldn't reach the network" },
 			{ networkId: "n2", senders: [{ address: "ok" }], contracts: [] },
 		])
-		expect(result).toEqual([{ networkId: "n1", contracts: [], senders: [], restoreError: "Skipped — couldn't reach the network" }])
+		expect(result).toEqual([{ networkId: "n1", contracts: [], senders: [], restoreError: "Skipped: couldn't reach the network" }])
 	})
 
 	it("carries the item-level error ALONGSIDE failed children", () => {
@@ -612,7 +612,7 @@ describe("collectRestoreErrors — account-state top-level records (skip/violati
 				networkId: "n1",
 				senders: [{ address: "s", restoreError: "boom" }],
 				contracts: [],
-				restoreError: "Skipped — ran out of time reaching the network (3 registration(s) not attempted)",
+				restoreError: "Skipped: ran out of time reaching the network (3 registration(s) not attempted)",
 			},
 		])
 		expect(result).toHaveLength(1)

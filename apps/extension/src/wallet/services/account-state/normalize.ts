@@ -36,9 +36,9 @@ export const ACCOUNT_STATE_CAPS = {
 } as const
 
 /** Constant skip/violation copy — never derived from slice content. */
-export const ACCOUNT_STATE_SKIP_UNREACHABLE = "Skipped — couldn't reach the network"
-export const ACCOUNT_STATE_SKIP_WRONG_NETWORK = "Skipped — this endpoint serves a different network"
-export const ACCOUNT_STATE_SKIP_DEADLINE = "Skipped — ran out of time reaching the network"
+export const ACCOUNT_STATE_SKIP_UNREACHABLE = "Skipped: couldn't reach the network"
+export const ACCOUNT_STATE_SKIP_WRONG_NETWORK = "Skipped: this endpoint serves a different network"
+export const ACCOUNT_STATE_SKIP_DEADLINE = "Skipped: ran out of time reaching the network"
 
 export interface NormalizedAccountStateItem {
 	networkId: string

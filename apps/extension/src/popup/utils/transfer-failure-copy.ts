@@ -1,7 +1,7 @@
 import { OperationNotRecordedError, TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { isSendCheckable, type OperationRecord, wasNeverSent } from "@/wallet/services/operation-journal/spec"
 
-export const TRANSFER_NOT_STARTED_COPY = "Couldn't start this transaction. Nothing was sent — try again."
+export const TRANSFER_NOT_STARTED_COPY = "Couldn't start this transaction. Nothing was sent. Try again."
 /** The Send banner's own words: the acceptance lapsed between the form and the broadcast line. */
 export const TRANSFER_TERMS_COPY = "Accept the Terms to send"
 export const TRANSFER_NOTHING_SENT_COPY = "Nothing was sent. You can try again."

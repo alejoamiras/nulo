@@ -68,7 +68,7 @@ const handleSave = async () => {
 	} catch (err) {
 		const msg = errorMessageFromUnknown(err)
 		if (msg.includes("ENDPOINT_CHAIN_MISMATCH")) {
-			errorText.value = `Wrong chain — this network is chain ${network.value.chainId}.`
+			errorText.value = `Wrong chain. This network is chain ${network.value.chainId}.`
 		} else if (msg.includes("DUPLICATE_ENDPOINT")) {
 			errorText.value = "Another endpoint of this network uses that URL."
 		} else if (msg === "Failed to fetch node info") {

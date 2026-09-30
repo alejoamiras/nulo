@@ -77,7 +77,7 @@ const completeImport = async (profile) => {
 		openToast({ kind: "success", label: "Profile imported" })
 		router.push("/popup/general")
 	} else {
-		openToast({ kind: "success", label: "Profile imported — unlock to continue" })
+		openToast({ kind: "success", label: "Profile imported. Unlock to continue" })
 		router.push("/popup/auth")
 	}
 }

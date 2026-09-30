@@ -83,13 +83,11 @@ describe("composite/capabilities/DetailsTable", () => {
 		expect(spoken(w, 3)).toBe("Any contract: simulate")
 	})
 
-	test("an unknown row's target is named for what it lists too, after its address", async () => {
+	test("an unknown row's target says it is unknown, then its address as shown and what it lists", async () => {
 		const w = await opened()
-		expect(spoken(w, 1)).toMatch(/^0x\S+: simulate, add, transact$/)
-		expect(spoken(w, 2)).toMatch(/^0x\S+: add, transact$/)
+		expect(spoken(w, 1)).toBe("Unknown contract 0x0c1e…5a7f: simulate, add, transact")
+		expect(spoken(w, 2)).toBe("Unknown contract 0x0643…15fd: add, transact")
 	})
-
-	test.todo("an unknown row's spoken address: which form of it is read out is the owner's call")
 
 	test("a row opens on its native button and lists the functions the app sent", async () => {
 		const w = await opened()

@@ -4,6 +4,7 @@ import { managers } from "@/utils/core"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { vSnackFooter, vSnackSheet } from "@/composables/snackInset"
 
 /** Utils */
 import { type LegalAcceptanceRecord, RISK_POINTS, currentVersion, pendingTermsVersions } from "@nulo/legal"
@@ -11,12 +12,16 @@ import { openLegalDocument } from "@/utils/legal-links"
 import { LEGAL_DECLINED_PATH, LEGAL_DISMISSED_KEY, shouldShowLegalSheet } from "@/utils/legal-sheet"
 import { useLegalAcceptance } from "@/composables/useLegalAcceptance"
 
+const emit = defineEmits<{ visibility: [shown: boolean] }>()
+
 const { openToast } = useToast()
 
 const route = useRoute()
 const router = useRouter()
 
 const termsVersion = currentVersion("terms").version
+/** Above any Popup's `displaceIdx`: while the sheet shows, only its own footers place the snack. */
+const SNACK_SHEET_ORDER = Number.MAX_SAFE_INTEGER
 const dismissedVersion = ref<unknown>(undefined)
 const record = ref<LegalAcceptanceRecord | null>(null)
 const busy = ref(false)
@@ -64,6 +69,8 @@ const onSessionChanged = (changed: Record<string, chrome.storage.StorageChange>,
 	if (area === "session" && LEGAL_DISMISSED_KEY in changed) dismissedVersion.value = changed[LEGAL_DISMISSED_KEY]?.newValue
 }
 
+watch(visible, (shown) => emit("visibility", shown))
+
 onBeforeMount(async () => {
 	chrome.storage.onChanged.addListener(onSessionChanged)
 	dismissedVersion.value = (await chrome.storage.session.get(LEGAL_DISMISSED_KEY))[LEGAL_DISMISSED_KEY]
@@ -78,7 +85,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<div v-if="visible" :class="$style.backdrop" data-testid="legal-sheet" :data-variant="isReacceptance ? 'changed' : 'review'">
+	<div
+		v-if="visible"
+		v-snack-sheet="SNACK_SHEET_ORDER"
+		:class="$style.backdrop"
+		data-testid="legal-sheet"
+		:data-variant="isReacceptance ? 'changed' : 'review'"
+	>
 		<Flex direction="column" :class="$style.sheet" role="dialog" aria-modal="true" aria-labelledby="legal-sheet-title">
 			<!-- Everything to read, then the control that agrees to it, in one scroll. -->
 			<Flex direction="column" gap="16" :class="$style.body" data-testid="legal-sheet-body">
@@ -103,7 +116,7 @@ onBeforeUnmount(() => {
 			</Flex>
 
 			<!-- Outside the scroll: declining is always one visible tap away. -->
-			<Flex justify="center" :class="$style.footer">
+			<Flex v-snack-footer justify="center" :class="$style.footer">
 				<button type="button" :class="$style.later" :disabled="busy" data-testid="legal-sheet-not-now" @click="handleNotNow">Not now</button>
 			</Flex>
 		</Flex>

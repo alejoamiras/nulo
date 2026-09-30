@@ -143,14 +143,14 @@ describe("journalTerminalDisplay — Failed state (catch-all + per-kind subtitle
 
 	test("(N-15) error.kind === 'duplicate_initialization' → the honest init-race subtitle", () => {
 		const op = recordWith({ error: { kind: "duplicate_initialization", message: "...", normalizedRaw: null } })
-		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized — retry after sync")
+		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized. Retry after sync")
 	})
 
-	test("error.kind === 'session_ended' → 'Stopped — wallet was locked'", () => {
+	test("error.kind === 'session_ended' → 'Stopped when the wallet locked'", () => {
 		const op = recordWith({ error: { kind: "session_ended", message: "...", normalizedRaw: null } })
 		expect(journalTerminalDisplay(op)).toEqual({
 			state: "failed",
-			subtitle: "Stopped — wallet was locked",
+			subtitle: "Stopped when the wallet locked",
 			icon: "close-circle",
 			color: "red",
 		})
@@ -450,7 +450,7 @@ describe("a failed send its record proves never left the wallet", () => {
 		expect(sendOutcome(op)).toBe("nothing_sent")
 		expect(journalTerminalDisplay(op)).toEqual({
 			state: "failed",
-			subtitle: "Stopped — wallet was locked",
+			subtitle: "Stopped when the wallet locked",
 			icon: "close-circle",
 			color: "red",
 		})
@@ -624,7 +624,7 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 		for (const kind of ["sw_restart_post_prove", "stale_on_resume"]) {
 			const { label, context } = categoricalLabel(failed(kind))
 			expect(label).toBe("Interrupted mid-flight")
-			expect(context).toContain("check the explorer")
+			expect(context).toContain("Check the explorer")
 		}
 	})
 	test("network → 'Network error'", () => {

@@ -93,6 +93,7 @@ const { seeded: arrivalsSeeded } = arrivals
 provide(ARRIVALS_KEY, arrivals)
 
 const intervalId = ref(null)
+const legalSheetShown = ref(false)
 
 const settingHandlers = {
 	theme(value) {
@@ -228,7 +229,7 @@ const onActiveProfileChanged = async (profile) => {
  *  service deliberately does NOT block the profile (export must stay reachable); this toast and the
  *  Home banner (`ProfileInfo.recoveryMode`) are the signals. */
 const onImportedKeysDegraded = () => {
-	openToast({ kind: "error", label: "Wallet keys need recovery — export a backup and restore it" })
+	openToast({ kind: "error", label: "Wallet keys need recovery. Export a backup and restore it" })
 }
 
 /** How the boot-time session check ended when it could NOT decide: "unreachable" (the service
@@ -463,7 +464,7 @@ onBeforeUnmount(() => {
 			<GlobalLoader />
 			<MigrationBarrier />
 			<AccountIntegrityBarrier />
-			<LegalAcceptanceSheet />
+			<LegalAcceptanceSheet @visibility="legalSheetShown = $event" />
 		</div>
 
 		<Header />
@@ -487,7 +488,7 @@ onBeforeUnmount(() => {
 
 		<Navigation v-if="$route.meta.showBottomNav" />
 
-		<div id="toast" />
+		<div id="toast" data-testid="toast-root" :class="legalSheetShown && $style.toast_over_sheet" />
 	</Flex>
 </template>
 
@@ -502,6 +503,12 @@ onBeforeUnmount(() => {
 	overflow: clip;
 	min-width: 0;
 	min-height: 0;
+}
+
+/* While the Terms sheet (9000) shows, the snack draws over it, still under the loader and the barriers. */
+.toast_over_sheet {
+	position: relative;
+	z-index: 9500;
 }
 
 .retry {

@@ -121,7 +121,7 @@ function toastNonActivatedOutcome(result) {
 	const label =
 		result === "blocked"
 			? "Network added. Finish or cancel your pending transaction to switch to it"
-			: "Network added, but the switch didn't confirm — reopen the popup to verify"
+			: "Network added, but the switch didn't confirm. Reopen the popup to verify"
 	openToast({ kind: "error", label })
 }
 

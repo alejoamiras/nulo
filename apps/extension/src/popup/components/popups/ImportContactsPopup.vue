@@ -175,7 +175,7 @@ watch(
 							<Text color="primary" weight="700">{{ appStore.network.name }}</Text>.
 						</Text>
 						<Text v-else-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
-							No active network — sender registrations will be skipped.
+							No active network. Sender registrations will be skipped.
 						</Text>
 					</Flex>
 

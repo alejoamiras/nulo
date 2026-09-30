@@ -131,7 +131,7 @@ const handleUnlockError = (error, activeProfileId) => {
 		// live and a "try again" toast would race a successful
 		// navigation. Otherwise the wait genuinely expired: say so.
 		if (appStore.isLogined && appStore.profile?.id !== activeProfileId) return
-		openToast({ kind: "error", label: "Unlock timed out — please try again" })
+		openToast({ kind: "error", label: "Unlock timed out. Please try again" })
 		return
 	}
 	if (error instanceof BootstrapFailedError) {
@@ -287,7 +287,7 @@ watch(
 
 				<Transition name="fade">
 					<span v-if="isTornImport" :class="$style.error_text" role="alert" data-testid="auth-restore-torn">
-						This profile's import didn't finish — delete it below and re-import your backup.
+						This profile's import didn't finish. Delete it below and re-import your backup.
 					</span>
 				</Transition>
 

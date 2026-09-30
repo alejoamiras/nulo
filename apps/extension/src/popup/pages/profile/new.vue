@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
 		<div v-else :class="$style.section_last">
 			<span :class="$style.section_label">Passkey</span>
 			<Text size="13" height="150" color="body">
-				No password required. Your new profile will be linked to your passkey, so you can sign in securely and effortlessly — no memorizing, no typing, just one tap.
+				No password required. Your new profile will be linked to your passkey, so you can sign in securely and effortlessly. No memorizing, no typing, just one tap.
 			</Text>
 		</div>
 

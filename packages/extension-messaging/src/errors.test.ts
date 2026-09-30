@@ -86,7 +86,7 @@ describe("walletErrorFromPayload", () => {
 		const rebuilt = walletErrorFromPayload(new RecoveryModeError().toPayload())
 		expect(rebuilt).toBeInstanceOf(RecoveryModeError)
 		expect(rebuilt.code).toBe(RecoveryModeError.CODE)
-		expect(rebuilt.message).toBe("Wallet keys need recovery — export a backup and restore it")
+		expect(rebuilt.message).toBe("Wallet keys need recovery. Export a backup and restore it")
 	})
 
 	test("CapabilityNotGrantedError round-trips with capabilityType + exact stable message", () => {

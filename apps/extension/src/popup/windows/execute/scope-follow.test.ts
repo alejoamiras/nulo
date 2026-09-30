@@ -248,7 +248,7 @@ describe("execute window — the scope banner", () => {
 		await action().trigger("click")
 		expect(banner().attributes("data-state")).toBe("account-declined")
 		expect(bannerText().body).toBe(
-			"Your wallet stays on Savings. This still executes — you just won't see it in your balances or activity.",
+			"Your wallet stays on Savings. This still executes. You just won't see it in your balances or activity.",
 		)
 		expect(action().text()).toBe("Switch after confirming")
 

@@ -282,7 +282,7 @@ export async function reseedNetworksStage(
 	for (const [slice, ordinals] of Object.entries(dropped)) {
 		io.appendErrors(
 			slice,
-			capRecords(ordinals.map((row) => ({ row, restoreError: "Skipped — its network is not one of the built-in networks" }))),
+			capRecords(ordinals.map((row) => ({ row, restoreError: "Skipped: its network is not one of the built-in networks" }))),
 		)
 	}
 	return { kind: "proceed", seeded }
