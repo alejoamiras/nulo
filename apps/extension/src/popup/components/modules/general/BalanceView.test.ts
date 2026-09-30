@@ -92,13 +92,14 @@ vi.mock("@/wallet/services/config/client", () => ({
 
 // Controllable price feed: tests set `mockQuotes`.
 let mockQuotes: Record<string, unknown> = {}
+let answerQuotes: () => Promise<Record<string, unknown>> = async () => mockQuotes
 vi.mock("@/wallet/services/price/client", () => ({
 	PriceServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
 			onQuotesUpdated: { add: vi.fn(), remove: vi.fn() },
 			onConnected: { add: vi.fn(), remove: vi.fn() },
-			refreshIfStale: vi.fn().mockImplementation(async () => mockQuotes),
+			refreshIfStale: vi.fn().mockImplementation(() => answerQuotes()),
 		}
 	}),
 }))
@@ -206,6 +207,7 @@ afterEach(() => {
 	configHandler = undefined
 	connectedHandler = undefined
 	mockQuotes = {}
+	answerQuotes = async () => mockQuotes
 	mockShowFiat = true
 	seedRows = SEED
 	fetchRows = async () => seedRows
@@ -520,6 +522,65 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 		expect(isSkeleton(wrapper)).toBe(false)
 		expect(amount(wrapper).text()).toContain("AAA")
 		expect(amount(wrapper).attributes("aria-busy")).toBeUndefined()
+	})
+
+	test("a price-mapped holding waits for the first price answer: a skeleton, never $0.00, then the figure", async () => {
+		let answer: (quotes: Record<string, unknown>) => void = () => {}
+		answerQuotes = () =>
+			new Promise((resolve) => {
+				answer = resolve
+			})
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toBe("")
+		expect(isSkeleton(wrapper)).toBe(true)
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+
+		answer(FRESH())
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
+	test("a failed first price answer ends the wait in $0.00 with 'priced assets only'", async () => {
+		let fail: (error: Error) => void = () => {}
+		answerQuotes = () =>
+			new Promise((_resolve, reject) => {
+				fail = reject
+			})
+		const { wrapper } = await mountView()
+		expect(amount(wrapper).text()).toBe("")
+
+		fail(new Error("offline"))
+		await flushPromises()
+		expect(amount(wrapper).text()).toContain("$0.00")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
+
+	test("an empty wallet and an unpriced-only wallet never wait for prices", async () => {
+		answerQuotes = () => new Promise(() => {})
+		const zeroMapped = [{ ...SEED[0], publicBalance: "0", privateBalance: "0" }]
+		for (const rows of [[], zeroMapped]) {
+			seedRows = rows as typeof SEED
+			const empty = await mountView()
+			expect(amount(empty.wrapper).text()).toContain("$0.00")
+			expect(empty.wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+			empty.wrapper.unmount()
+		}
+
+		seedRows = [SEED[1]] as typeof SEED
+		const unpriced = await mountView()
+		expect(amount(unpriced.wrapper).text()).toContain("$0.00")
+		expect(unpriced.wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
+
+	test("the 12 s cap ends a price wait that never answers", async () => {
+		answerQuotes = () => new Promise(() => {})
+		const { wrapper } = await mountView()
+		await vi.advanceTimersByTimeAsync(CAP_MS - 1)
+		expect(amount(wrapper).text()).toBe("")
+		await vi.advanceTimersByTimeAsync(1)
+		expect(amount(wrapper).text()).toContain("$0.00")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
 	})
 })
 

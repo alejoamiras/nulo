@@ -7,6 +7,7 @@ import GasBalanceCard from "./GasBalanceCard.vue"
 /** Services */
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
+import { getPriceMapEntry } from "@/wallet/services/price/price-map"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
@@ -209,7 +210,20 @@ function restartCap() {
 		capElapsed.value = true
 	}, HERO_PENDING_CAP_MS)
 }
-const heroPending = computed(() => isTotalUnsettled.value && !capElapsed.value)
+/** A price-mapped holding counts as $0.00 until its quote lands, so a wallet holding one waits for
+ *  the first price answer; an empty or unpriced wallet has none to wait for. */
+const awaitingQuotes = computed(
+	() =>
+		showFiatValues.value &&
+		!prices.settled.value &&
+		tokenBalances.value.some(
+			(tb) =>
+				typeof tb.token?.contract === "string" &&
+				(parseRawBalance(tb) ?? 0n) > 0n &&
+				getPriceMapEntry(tb.token.chainId, tb.token.contract) !== undefined,
+		),
+)
+const heroPending = computed(() => (isTotalUnsettled.value || awaitingQuotes.value) && !capElapsed.value)
 /** After the cap one question decides the figure: did ANY snapshot succeed for this scope? A loaded
  *  empty list is a real $0.00; a list that never loaded is unknown. */
 const isTotalKnown = computed(() => balancesState.value === "loaded")

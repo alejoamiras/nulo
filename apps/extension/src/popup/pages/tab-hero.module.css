@@ -1,0 +1,60 @@
+/* Zero height so the hero starts where drawn; the label paints the bar and owns its hits. */
+.page_title_bar {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+
+	display: block;
+	height: 0;
+
+	opacity: 0;
+	pointer-events: none;
+
+	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.page_title_bar_visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.page_title_label {
+	display: block;
+
+	padding: 12px 24px;
+
+	background: var(--app-bg);
+
+	font-family: var(--font-headline);
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--txt-primary);
+
+	text-decoration: underline;
+	text-decoration-color: var(--nulo-accent);
+	text-decoration-thickness: 2px;
+	text-underline-offset: 4px;
+}
+
+.hero {
+	padding: 10px 24px 28px;
+}
+
+.hero_title {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--txt-primary);
+	line-height: 1;
+	margin: 0;
+}
+
+.hero_bar {
+	width: 24px;
+	height: 1px;
+	background: var(--nulo-accent);
+}

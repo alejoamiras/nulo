@@ -172,12 +172,12 @@ onBeforeUnmount(() => {
 		:data-active-account="appStore.account?.address"
 	>
 		<div :class="[$style.page_title_bar, !heroVisible && $style.page_title_bar_visible]">
-			<span :class="$style.page_title_label">HISTORY</span>
+			<span :class="$style.page_title_label" data-testid="page-title-bar">HISTORY</span>
 		</div>
 
 		<div ref="heroRef">
-			<Flex direction="column" align="center" gap="16" :class="$style.hero">
-				<h1 :class="$style.hero_title">HISTORY</h1>
+			<Flex direction="column" align="center" gap="16" :class="$style.hero" data-testid="page-hero">
+				<h1 :class="$style.hero_title" data-testid="page-hero-title">HISTORY</h1>
 				<div :class="$style.hero_bar" />
 			</Flex>
 		</div>
@@ -215,61 +215,27 @@ onBeforeUnmount(() => {
 }
 
 .page_title_bar {
-	position: sticky;
-	top: 0;
-	z-index: 5;
-
-	display: flex;
-	align-items: center;
-
-	padding: 12px 24px;
-
-	background: var(--app-bg);
-
-	opacity: 0;
-	pointer-events: none;
-
-	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
+	composes: page_title_bar from "./tab-hero.module.css";
 }
 
 .page_title_bar_visible {
-	opacity: 1;
-	pointer-events: auto;
+	composes: page_title_bar_visible from "./tab-hero.module.css";
 }
 
 .page_title_label {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	text-decoration: underline;
-	text-decoration-color: var(--nulo-accent);
-	text-decoration-thickness: 2px;
-	text-underline-offset: 4px;
+	composes: page_title_label from "./tab-hero.module.css";
 }
 
 .hero {
-	padding: 0 24px 32px 24px;
+	composes: hero from "./tab-hero.module.css";
 }
 
 .hero_title {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-	line-height: 1;
-	margin: 0;
+	composes: hero_title from "./tab-hero.module.css";
 }
 
 .hero_bar {
-	width: 24px;
-	height: 1px;
-	background: var(--nulo-accent);
+	composes: hero_bar from "./tab-hero.module.css";
 }
 
 .content {

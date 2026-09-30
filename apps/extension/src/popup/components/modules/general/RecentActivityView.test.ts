@@ -533,6 +533,30 @@ describe("RecentActivityView — rows link to their detail routes", () => {
 	})
 })
 
+describe("RecentActivityView — its header", () => {
+	test("the account feed reads 'Recent activity' with a 'View history' that opens History; the empty token feed keeps the title", async () => {
+		H.store.current.transactions = [{ hash: "0xh1", account: ACCT_A, chainId: 1, updatedAt: 3000, calls: [] } as never]
+		const router = makeRouter()
+		const feed = mount(RecentActivityView, { shallow: true, global: { plugins: [router], stubs: { SectionLabel: false } } })
+		await flushPromises()
+		expect(feed.text()).toContain("Recent activity")
+		const link = feed.find('[data-testid="activity-view-all"]')
+		expect(link.text()).toBe("View history")
+		await link.trigger("click")
+		await flushPromises()
+		expect(router.currentRoute.value.fullPath).toBe("/popup/activity")
+
+		const empty = mount(RecentActivityView, {
+			shallow: true,
+			props: { token: { contract: "0xtok", symbol: "TOK" } },
+			global: { plugins: [makeRouter()], stubs: { SectionLabel: false } },
+		})
+		await flushPromises()
+		expect(empty.text()).toContain("NOTHING HERE YET")
+		expect(empty.text()).toContain("Recent activity")
+	})
+})
+
 describe("RecentActivityView — one feed block for token and account views", () => {
 	const TOKEN = { contract: "0xtok", symbol: "TOK" }
 	const mountFeed = (props: Record<string, unknown> = {}) =>

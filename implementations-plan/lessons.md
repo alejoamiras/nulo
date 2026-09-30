@@ -27,8 +27,9 @@ Curated gotchas from closed plans, read at the start of every task so no dead en
 ## E2E
 
 - One Puppeteer `waitForFunction` is one protocol call, so `protocolTimeout` caps it whatever its own `timeout` (300 s in `apps/extension/tests/e2e/fixtures/browser/`): a longer wait fails as `Runtime.callFunctionOn timed out`. Poll in short reads (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
-- A held key is a second `keyboard.down`: Chrome (CDP) and Firefox (BiDi) both deliver it with `repeat: true`, and both browsers' native buttons activate on it. Firefox's repeat lands 40 to 50 ms after the press, so an action that ends sooner has already swapped the page. Record `repeat` and the target in the page, so a driver that stops sending it, or a repeat that misses the control, fails the step (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md), [Firefox](keyboard-guards/lessons/phase-3.md)
+- A held key is a second `keyboard.down`, with `repeat: true` on CDP and BiDi alike, and native buttons activate on it; Firefox's lands 40 to 50 ms late, after a quick action has swapped the page. Record `repeat` and the target in the page so a lost or stray repeat fails the step (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md), [Firefox](keyboard-guards/lessons/phase-3.md)
 - Enter in a form field clicks the form's default button; when that click's handler disables the button, Vue re-renders before the activation, so no `submit` fires on Chrome or Firefox: count clicks on the default button, not submits (Vue 3.5, 2026-09). [Evidence](keyboard-guards/lessons/phase-3.md)
+- `navigateByHash` returns before the router swaps the page, so a read right after can see the old page's rows: wait for them to detach. [Evidence](layout-polish/lessons/phase-2.md)
 
 ## Extension runtime
 

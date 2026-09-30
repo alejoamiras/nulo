@@ -53,14 +53,12 @@ function terminalCardProps(op) {
 
 <template>
 	<Flex direction="column" gap="24">
-		<Flex v-for="group in groupedRows" :key="group.date" direction="column" gap="4">
-			<!-- Date separator -->
+		<Flex v-for="group in groupedRows" :key="group.date" direction="column" gap="10">
 			<Flex align="center" gap="12" :class="$style.date_separator">
-				<span :class="$style.date_label">{{ group.date }}</span>
+				<span :class="$style.date_label" data-testid="activity-date-label">{{ group.date }}</span>
 				<div :class="$style.separator_line" />
 			</Flex>
 
-			<!-- Rows for this date — branch on type. -->
 			<template v-for="row in group.rows" :key="row.key">
 				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" :to="`/popup/tx/${row.tx.hash}`" />
 				<TransactionIncomingCard
@@ -81,7 +79,7 @@ function terminalCardProps(op) {
 
 <style module>
 .date_separator {
-	padding-bottom: 8px;
+	padding-bottom: 2px;
 }
 
 .date_label {
