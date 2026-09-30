@@ -1682,7 +1682,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 	})
 })
 
-describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () => {
+describe("IncomingTransferService — deletion races and timestamp backfill", () => {
 	const network = () => makeNetworkStub([{ id: "n1", chainId: 1 }])
 
 	test("(High #1) scan started BEFORE delete bails via the !token guard on token-snapshot lookup", async () => {
@@ -2251,7 +2251,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 	})
 
 	test("(LR13 profile switch invalidates in-flight scan) → no records persisted post-switch", async () => {
-		// Codex post-impl audit High #1: an A→B profile switch must bump
+		// An A→B profile switch must bump
 		// serviceEpoch so a scan for profile A parked on getNotesRaw can't
 		// resume and emit Added events for A under B's identity. The fix
 		// moves bumpServiceEpoch() into hydrateSchedulers() so every caller

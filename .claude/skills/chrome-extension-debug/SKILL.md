@@ -15,11 +15,14 @@ chrome-extension://<ID>/src/popup/index.html
 Get extension ID from `chrome://extensions`.
 
 Full-page mode is not the toolbar popup. Chrome closes the toolbar popup on an Escape the page leaves
-unhandled (not `defaultPrevented`) and a tab does nothing, so read a key's fate from a `window` keydown
-listener, which runs after every `document` listener. A unit test cannot stand in: for a real key
-event the browser runs microtasks between listeners, so a Vue flush started by one listener can
-remove a later one before its turn (why `DropdownRoot` marks its own Escape handled); a
-script-dispatched event runs none.
+unhandled (not `defaultPrevented`) and a tab does nothing, so read a key's fate the way `pressEscape`
+does (`apps/extension/tests/e2e/helpers/pointer-probes.ts`): a `window` capture listener added before
+the press, reading `defaultPrevented` in a `setTimeout(0)`. A bubble-phase `window` listener never
+hears a key a capture listener stopped, and an open Tooltip stops Escape at `window` capture
+(`packages/design/src/ui/Tooltip.vue:132-139`, added at `:160` only while it is open). A unit test
+cannot stand in: for a real key event the browser runs microtasks between listeners, so a Vue flush
+started by one listener can remove a later one before its turn (why `DropdownRoot` marks its own
+Escape handled); a script-dispatched event runs none.
 
 ## Logger
 

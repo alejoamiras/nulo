@@ -301,7 +301,7 @@ describe("DSL define-time validation rejects ambiguous or non-idempotent transfo
 		).not.toThrow()
 	})
 
-	test("accessor smuggling is rejected: a getter on the transform is NOT pure data (codex post-impl finding)", () => {
+	test("accessor smuggling is rejected: a getter on the transform is NOT pure data", () => {
 		// A frozen accessor still executes on every read — per-row arbitrary
 		// code behind an intact brand. The canonicalizer must throw on it.
 		const withGetter = {}

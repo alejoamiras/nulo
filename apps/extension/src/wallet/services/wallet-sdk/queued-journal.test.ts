@@ -1,9 +1,6 @@
 /**
  * Unit tests for `tryCreateQueuedJournal` — message-arrival queued-record
  * creation with cap + pre-auth gates.
- *
- * Plan v6 §Tests #13-#16 (queued-record creation, cap behaviour) +
- * post-impl review fix for atomic-cap under burst (codex + opus F1).
  */
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { beforeEach, describe, expect, test, vi } from "vitest"

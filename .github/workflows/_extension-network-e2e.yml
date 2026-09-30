@@ -123,7 +123,7 @@ jobs:
       # `true && ''` returns `''` (right operand), and then `'' || '1'`
       # falls through to `'1'` because empty string is falsy. So the inverted
       # form would resolve to `'1'` in BOTH branches, completely defeating
-      # the disable flag (codex post-impl audit finding #1).
+      # the disable flag.
       # Presto-required ONLY when not disabled AND not proverless (proverless
       # ⊥ presto — the offscreen would FATAL on both). Same short-circuit
       # shape as the disable flag (`(A && B) && '1' || ''` → '1' iff both true).

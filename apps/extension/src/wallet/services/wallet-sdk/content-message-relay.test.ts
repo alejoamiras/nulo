@@ -12,8 +12,7 @@ type Listener = (message: unknown, sender: unknown) => undefined
 let chromeListeners: Listener[]
 let relay: typeof import("./content-message-relay")
 
-// The import is loading, not behaviour, so it runs here on its own budget: under host load a cold
-// import alone can outlast a test's 5 s, and the hook's 10 s default too.
+// Loading is not the behaviour under test, so it runs in the hook, not on a test's own budget.
 beforeEach(async () => {
 	vi.resetModules()
 	vi.useRealTimers()
@@ -24,7 +23,7 @@ beforeEach(async () => {
 		runtime: { onMessage: { addListener: (fn: Listener) => chromeListeners.push(fn) } },
 	})
 	relay = await import("./content-message-relay")
-}, 30_000)
+})
 
 function freshRelay() {
 	relay.registerContentMessageRelay()

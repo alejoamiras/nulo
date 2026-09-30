@@ -288,7 +288,7 @@ Service-bound visual components (Header, AddressDisplay, GlobalLoader, Notificat
 - Colocate `<Name>.test.ts` next to `<Name>.vue`. No `__tests__/` dirs.
 - Mount via `@vue/test-utils`'s `mount`; stub auto-registered children (`Spinner`, `Icon`, etc.) via `global.stubs`.
 - For store consumers, `createTestingPinia()` from `@pinia/testing`.
-- `chrome.*` is stubbed globally in `tests/vitest.setup.ts` — no per-test setup needed.
+- `tests/vitest.setup.ts` stubs `chrome` before every test with working `runtime` ports and message listeners, but `storage` is an empty object: a test whose code reads or writes storage stubs `chrome` itself (`vi.stubGlobal`).
 
 **Coverage minimums:**
 
@@ -499,7 +499,7 @@ Plans under [`implementations-plan/`](./implementations-plan/README.md) are comm
 
 | When | Command |
 |---|---|
-| After any code change | `bun run lint` + `bun run typecheck` (or let the pre-commit hook do it). |
+| After any code change | `bun run lint` + `bun run typecheck:all` (the pre-commit hook lints staged files; it does not typecheck). |
 | Before opening any UI PR | `bun run audit:vue` (typecheck ∥ unit + component tests ∥ lint, then build). |
 | When editing the popup, contracts, or anything user-visible | `bun run test:e2e` (smoke; no Aztec sandbox). |
 | When touching dApp / network / PXE behavior | `bun run e2e:agent` (network suite; owns anvil + aztec + playground per worktree — parallel-safe). |

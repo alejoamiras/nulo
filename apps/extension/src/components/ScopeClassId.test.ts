@@ -62,7 +62,7 @@ describe("ScopeClassId", () => {
 		expect(openToast).toHaveBeenCalledWith(expect.objectContaining({ kind: "success", label: "Class id is copied" }))
 	})
 
-	test("clipboard payload is stripped of invisible/control chars (codex post-impl §3)", async () => {
+	test("clipboard payload is stripped of invisible/control chars", async () => {
 		// Same defense as ScopeAddress — a hostile dApp could embed
 		// zero-width chars in a class id so the user copies a different
 		// value than they verified. Strip without truncate.

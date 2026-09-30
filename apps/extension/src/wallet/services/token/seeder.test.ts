@@ -288,7 +288,7 @@ describe("TokenSeeder — tombstones vs purges", () => {
 	})
 })
 
-describe("TokenSeeder — marker write safety (codex post-impl M7)", () => {
+describe("TokenSeeder — marker write safety", () => {
 	test("a deletion landing MID-seed-pass is never clobbered — and the token is NOT re-persisted", async () => {
 		let seederRef: TokenSeeder = null as never
 		const preview = vi.fn(async (): Promise<SeedPreview> => {

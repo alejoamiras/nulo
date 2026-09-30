@@ -86,7 +86,7 @@ export function defineRowMapMigration(def: RowMapMigrationDef): Migration {
 	// row, the exact hole the DSL exists to close). Detectable accessors are
 	// REJECTED; anything exotic that lies its way past detection is DEFUSED,
 	// because the interpreter only ever sees this plain-literal clone, built
-	// exactly once here (codex post-impl audit, finding 1).
+	// exactly once here.
 	if (
 		typeof def.version !== "number" ||
 		typeof def.description !== "string" ||

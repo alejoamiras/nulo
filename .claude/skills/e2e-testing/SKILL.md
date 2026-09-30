@@ -239,6 +239,10 @@ as a substitute for closing through the UI). `waitForPopup` matches a NEW `#/win
 URL because every interaction URL carries a unique `requestId`; `callExpectingNoPopup` diffs targets
 by identity because plain popup pages change URL under a lock redirect.
 
+`clickByTestId` calls `el.click()` in the page (`fixtures/extension.ts:1450`), which an SVG element
+does not have, so an icon-only `<Icon>` target throws inside the wait and times out: press it with
+`pointerClick`.
+
 **`waitForFunction` with page-function arguments needs a non-empty options object.** `patchPagePolling`
 finds the options argument by looking for a `timeout` or `polling` key. A bare `{}` has neither, so the
 wrapper splices its own options in at index 1 and your `{}` becomes the page function's FIRST argument
@@ -261,7 +265,10 @@ whatever appears. Every read of the page goes through `readSendView` + `assertPu
 asserted the other two. The sheet's CTA arms after a delay: wait on `send-review-submit[data-ready]`
 (`waitForReviewReady`), never on a sleep. Closing the sheet goes through `waitForReviewClosed`, which
 finishes a stuck leave transition for that popup only (`settleClosedPopup`) — `closeStuckPopup` would
-clear the whole `#popup` layer, including a popup that must stay open beneath.
+clear the whole `#popup` layer, including a popup that must stay open beneath. `settleClosedPopup`'s
+`true` means only that the popup was still in the DOM once its leave began
+(`fixtures/popup-leave.ts:25-31`), which is the normal state straight after a close, not a stuck
+transition.
 
 **Focus after a close is waited for, never read.** focus-trap hands focus back to the opener on a
 0 ms timer after the release (`delayReturnFocus`), and CDP round-trips on this pipe are shorter than
@@ -445,6 +452,49 @@ the pattern.
   mint_and_pay_fee`); credit (`pay_fee`) is deployed-only. The FPC debits MAX gas cost, so assert the
   credit DECREASED, never that it equals the receipt fee.
 
+### Harness behaviours that look like product bugs
+
+- **Chrome's created windows keep the launch size.** The launch passes `--window-size=400,600`
+  (`fixtures/browser/chrome.ts:40`); under it `windows.create` honours `left` and `top` but not
+  `width` or `height` (popups 400×600, normal windows 500×600), while `windows.update` honours
+  sizes. A spec that measures a created window launches with `fixedWindowSize: false`
+  (`network/window-placement.test.ts:46`). Headless Chrome also moves focus only when it creates a
+  window: `windows.update({ focused: true })` and `bringToFront()` fire no `onFocusChanged`. Firefox
+  honours sizes and focus.
+- **An approval window's page can have no viewport.** `waitForPopup` wraps approval windows with
+  `target.asPage()` (`fixtures/popups.ts:53`). On that path the page is created by
+  `CdpTarget.asPage`'s fallback with a `null` viewport (puppeteer-core 25.8.0, `cdp/Target.js:54-70`;
+  a target whose page already exists returns that page instead), so it renders at the window's
+  native size; `browser.newPage()` pages get the 800×600 default.
+- **`protocolTimeout` is set in two places**, Chrome's launch (`fixtures/browser/chrome.ts:59`) and
+  Firefox's `puppeteer.connect` (`fixtures/browser/bidi-attach.ts:30`), both 300 s. Change them
+  together: Firefox once ran on Puppeteer's 180 s default and cut `sendTransfer`'s 300 s wait short.
+- **`inject(key)` returns `undefined` for a key no global setup provided; it never throws**
+  (vitest 4.1.10). The smoke setup provides no `playgroundUrl`, so a module-level value built from
+  it broke every smoke file at import. Read an injected value when it is used, and fall back with
+  `??`.
+- **A resting pointer hovers what opens under it.** On Chrome a card that appears under a still
+  pointer matches `:hover` and gets `pointerover`, `pointerenter`, `mouseover` and `mouseenter`,
+  with no `pointermove` or `mousemove` (Firefox unprobed). A hover assertion moves the pointer onto
+  its target first.
+- **A page a failed test left open keeps its subscriptions.** On a file-scoped browser it can take
+  the next test's events first (an arrivals coordinator claimed the next test's receipt). Close
+  every page a test opens when the test ends, pass or fail:
+  `onTestFinished(() => page.close().catch(() => undefined))`
+  (`network/incoming-arrival.test.ts:92`).
+- **A hash change right after the popup opens can lose to its start-up navigation**, which lands
+  later and takes the page back to Home. Wait for `#/popup/general` first; a deep hash straight
+  after a reload can still bounce, so reach a Settings page through the nav.
+- **`page.waitForSelector` with a plain CSS selector resolves to `null`, never a handle.**
+  `patchPagePolling` swaps it for a `waitForFunction` poll (`fixtures/extension.ts:1073-1077`),
+  so a probe that reads a box from its result reads nothing: take the element with `page.$`
+  after the wait.
+- **The e2e price seed covers `usd-coin` only**, while the wallet also asks for `aztec`
+  (`allCoingeckoIds`), so wherever CoinGecko answers, `refreshIfStale` or the 3-minute alarm
+  replaces the $1 seed mid-test and every fiat figure moves. Wait for a priced figure, never
+  for an exact one carried across a remount
+  (`implementations-plan/hygiene/lessons/post-impl.md`).
+
 ## 3. Kill or restart the background
 
 There is ONE helper: `stopBackground(ext)` from `fixtures/browser` — a driver method, since the two
@@ -530,8 +580,8 @@ Always release in `finally`.
 ### Reproduce like CI
 
 ```bash
-cd apps/extension
-taskset -c 0,1 bun run test:e2e --retry=0 tests/e2e/<file>.test.ts                       # smoke, ×N rounds
+# From the repo root; e2e:agent resolves file paths from apps/extension.
+taskset -c 0,1 bun run --cwd apps/extension test:e2e --retry=0 tests/e2e/<file>.test.ts   # smoke, ×N rounds
 NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 taskset -c 0,1 bun run e2e:agent tests/e2e/network/<file>.test.ts
 NULO_E2E_RETRY=0 taskset -c 0,1 bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts   # prover-ON
 ```
@@ -649,7 +699,7 @@ the sanctioned response.
 | 40 | `expected 'nothing' to be 'tx-card'` at the icon press in `rows.test.ts`'s Home first-activity-row test, Chrome smoke (1 of 164 at a load average near 475); the file passes alone | Home's token card settles after the activity row shows: until its balances land it is its 32px header (the ghost rows wait 300 ms), and settled empty it is 139px, which pushes the row down 107px. The back helper returned once `tx-card` was visible, `centreOf` read the icon's centre and a later evaluate hit-tested that point, so balances landing in between put the point on the card's empty state, whose text has no testid ancestor. A probe that held `getTokenBalances` across the measurement reproduced it on both browsers | `backToHome` also waits for `tokens-empty-import-link`, which only the settled empty card draws, so every position read after it sees the settled layout. Rule: before measuring on Home, wait for what only its settled token card draws, not for the row alone (`implementations-plan/e2e-reliability-fixes/lessons/phase-7.md`) | fixed, `e2e-reliability-fixes` (2026-09-28) |
 | 41 | `BiDi socket ws://127.0.0.1:10080/session/… failed to open` (`fixtures/browser/bidi-attach.ts`) while Firefox logged `WebDriver BiDi listening on ws://127.0.0.1:10080` (Firefox smoke, `onboarding-tab.test.ts`, 1 of 164) | `reservePort` drew uniformly from its static window, [10000, the ephemeral floor − 512), which holds one Fetch bad port, 10080, so about 1 draw in 22k landed on it. Node's WebSocket (undici) refuses a bad port before opening any TCP connection: a raw listener on 10080 saw none, on 10079 and 10081 one each. Browsers (Chrome's `ERR_UNSAFE_PORT`) and undici's fetch refuse bad ports too, so a node, anvil or playground port drawn there fails the same way | `reservePort` skips every port on Fetch's bad-port list, which it keeps as a named set equal to the Fetch standard's table; a unit test drives every draw onto 10080 and fails if any bind tries it, which stays red when another process holds 10080 (`implementations-plan/e2e-reliability-fixes/lessons/phase-8.md`) | fixed, `e2e-reliability-fixes` (2026-09-29) |
 | 42 | `network/transfers.test.ts` step 2, `Waiting failed: 300000ms exceeded` in `waitForToast` after "✓ Initial balance", Firefox prover-ON run locally (the canary leg); the popup shows "Send failed · Simulation failed, transaction not sent" at +60 s | the popup's `ExecutionServiceClient` keeps the 60 s default RPC timeout (`DEFAULT_RPC_TIMEOUT_MS`, `packages/extension-messaging/src/background/client.ts`), and `executeTransfer` answers only after proving and sending. Without Presto, Firefox proves in the browser, 86 to 94 s for this transfer on the build host, so the popup rejects with `RpcTimeoutError` while the transfer goes on to succeed (its journal row reaches `succeeded`); ux-feedback's batch 1 read the same wait as WASM proving past 300 s. CI's Firefox canary proves through `presto-server`, so it stays green there, until `NULO_E2E_DISABLE_PRESTO=1` | none yet: a product fix (a per-method timeout for the popup's long-running execution calls, as the offscreen client has for `proveTx`), which the owner folded into the failed-send check on 2026-09-29 (`implementations-plan/follow-ups.md` § Amounts, sends and fees). Reproduced on the pre-branch base commit (`implementations-plan/e2e-reliability-fixes/lessons/phase-6.md`). Until then, a local Firefox canary run is red on this file | open, pre-existing (2026-09-29) |
-| 43 | `expected [ '$1,046.00', '$1,052.00' ] to deeply equal [ '$0.00', '$1,052.00' ]` at the last assertion of `expectCalmArrival` in `network/incoming-arrival`, on its second call (Chrome under emulated reduced motion), one Chrome network shard on CI (run 36583649490, job 109461436679, shard 2/5) | likely, read in the code and not reproduced: `setAnimationsDisabled` returns to Home through `waitForHomeTotal`, which waits only for the hero's skeleton (`balance-hero-loading`) to go. The remounted hero then values a holding with no quote yet at $0.00 (`usePrices` starts empty and fetches its quotes after mount), so `heroBefore` read "$0.00" and the sampler's first value was the priced $1,046.00, before the receipt's $1,052.00. The first call, after "Disable animations", has the same exposure. The shard passed on re-run with no code change, which fits this settle race | the hygiene follow-up | open (2026-09-29) |
+| 43 | `expected [ '$1,046.00', '$1,052.00' ] to deeply equal [ '$0.00', '$1,052.00' ]` at the last assertion of `expectCalmArrival` in `network/incoming-arrival`, on its second call (Chrome under emulated reduced motion), one Chrome network shard on CI (run 36583649490, job 109461436679, shard 2/5) | read in the code and reproduced with the price replies held: `setAnimationsDisabled` returns to Home through `waitForHomeTotal`, which waits only for the hero's skeleton (`balance-hero-loading`) to go. The remounted hero then values a holding with no quote yet at $0.00 (`usePrices` starts empty and fetches its quotes after mount), so `heroBefore` read "$0.00" and the sampler's first value was the priced $1,046.00, before the receipt's $1,052.00. The first call, after "Disable animations", has the same exposure. The shard passed on re-run with no code change, which fits this settle race | `expectCalmArrival` reads the hero only once it shows a priced figure, a dollar amount other than $0.00, on both calls. With the price replies held across the read, the old check failed and the new one passed on both browsers (`implementations-plan/hygiene/lessons/phase-3.md`, `implementations-plan/hygiene/lessons/post-impl.md`). Rule: on Home, a fiat figure is settled only once the quotes have landed, not when the skeleton goes | fixed, `hygiene` (2026-09-29) |
 
 ## 6. Editing the harness
 

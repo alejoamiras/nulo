@@ -24,7 +24,7 @@
     "lint:actions": "actionlint",
     "format": "biome format --write",
     "check": "biome check",
-    "typecheck": "vue-tsc --project apps/extension/tsconfig.json --noEmit",
+    "typecheck": "bun run --cwd apps/extension typecheck",
     "typecheck:all": "bun run --filter '@nulo/*' typecheck",
     "test:all": "bun run --filter '@nulo/*' --if-present test",
     "test:release": "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 bun test scripts/release/ scripts/publish/",

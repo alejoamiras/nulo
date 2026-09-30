@@ -321,7 +321,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// `onProfileDeleted` sub here would run un-awaited AFTER the coordinator
 		// releases the id, re-introducing the exact race D7 removed (audit H3/D7).
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		// Account lifecycle (codex post-impl audit C3): without these, a newly
+		// Account lifecycle: without these, a newly
 		// added account stays unscanned until SW restart (or the user adds a
 		// token), and a deleted account keeps polling PXE indefinitely — both
 		// wasted PXE calls and a privacy footgun (PXE keeps querying for an
@@ -409,7 +409,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// Wipes records belonging to the deleted account per-contract.
 		// Trust rows are contract-scoped (not account-scoped) → survive.
 		//
-		// Codex post-impl audit High #2: use `account.profileId` (NOT
+		// Use `account.profileId` (NOT
 		// `getActiveProfile()`). The chain-purge + profile-delete paths
 		// fire onAccountDeleted for inactive profiles; using the active
 		// profile id would wipe rows from the wrong profile.
@@ -907,11 +907,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  Bumps `serviceEpoch` because the rebuild changes the schedulable
 	 *  contracts surface — any in-flight scan that captured its epoch
 	 *  before this rebuild MUST bail (it may be scanning under a profile
-	 *  / network / contract set that no longer applies). Codex post-impl
-	 *  audit High #1: `onActiveProfileChanged` calls hydrateSchedulers
-	 *  without other lifecycle hooks; placing the bump inside the rebuild
-	 *  covers EVERY hydrate caller (init, profile-change, account-add,
-	 *  clearProfile, clearChain).
+	 *  / network / contract set that no longer applies). `onActiveProfileChanged`
+	 *  calls hydrateSchedulers without other lifecycle hooks; placing the bump
+	 *  inside the rebuild covers EVERY hydrate caller (init, profile-change,
+	 *  account-add, clearProfile, clearChain).
 	 */
 	private async hydrateSchedulers(): Promise<void> {
 		this.bumpServiceEpoch()
@@ -1512,7 +1511,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 */
 	public async replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): Promise<void> {
 		await this.ensureInitialized()
-		// Visibility gate (codex post-impl audit C2): if the user toggled
+		// Visibility gate: if the user toggled
 		// incoming-transfers OFF, the replay-on-(re)connect path must NOT
 		// surface prompts — same privacy promise as the Pending emit in
 		// `scanContract`. PopupManager owns the false→true flip replay, so

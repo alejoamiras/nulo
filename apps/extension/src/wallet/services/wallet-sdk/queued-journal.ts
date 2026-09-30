@@ -14,7 +14,7 @@
  *   - Skip ONLY for `sendTx` messages — caller is responsible for routing.
  *   - Cap enforcement is atomic via `queuedCreationLock` — without this,
  *     concurrent arrivals all see a stale count and the cap is advisory
- *     rather than protective (codex + opus post-impl F1).
+ *     rather than protective.
  */
 import type { WalletMessage } from "@aztec/wallet-sdk/types"
 import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
@@ -36,8 +36,8 @@ export const MAX_QUEUED_PER_SESSION = 8
 /** Global queued-record cap across all sessions. Coarser DoS backstop. */
 export const MAX_QUEUED_GLOBAL = 32
 
-/** Module-level lock around count + create. Closes the burst-bypass race
- *  flagged by codex + opus in the post-impl review. */
+/** Module-level lock around count + create, so a burst cannot all read one
+ *  count and pass the cap together. */
 export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
 
 /**

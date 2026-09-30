@@ -121,8 +121,7 @@ describe("composite/TransactionAwaitingCard", () => {
 		expect(dapp.text()).toContain("example.dapp.io")
 	})
 
-	// Phase 2 follow-up: Cancel surface.
-	describe("Cancel button (Phase 2)", () => {
+	describe("Cancel button", () => {
 		test("renders Cancel button when cancellable + jobId + stage != submitting", () => {
 			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "proving" })
 			expect(w.find('[data-testid="tx-awaiting-cancel"]').exists()).toBe(true)

@@ -48,17 +48,13 @@ const props = defineProps({
 
 const router = useRouter()
 
-/** Phase 2 follow-up v4: terminal journal records (cancelled / interrupted /
- *  failed) stay visible in the recent-activity area until browser exit —
- *  same lifetime as settled chain txs. Previously a 5-min window aged them
- *  out, which user QA found confusing ("what the hell, why did it disappear?").
+/** Terminal journal records (cancelled / interrupted / failed) have no age
+ *  cutoff: like settled chain txs, they persist across browser restarts.
  *
- *  Row budget: total visible rows cap at 5. Codex post-impl audit caught
- *  that v4 v1 capped settled txs separately + rendered structurally
- *  (awaiting → all terminals → settled), which let 6+ terminals push out
- *  every settled row. Fixed below via `recentActivityRows` chronological
- *  merge — terminals + settled compete fairly for the remaining slots
- *  after awaiting cards. */
+ *  Row budget: 5, counting the in-flight cards, which always render, so the
+ *  preview can exceed it. Terminal records, settled txs and incoming
+ *  transfers share whatever slots remain, newest first, with none reserved
+ *  for any kind (`recentActivityRows`). */
 const ROW_BUDGET = 5
 
 const filteredRecentTransactions = computed(() => {
@@ -91,7 +87,7 @@ const recentActivityRows = computed(() => {
 	// (`awaitingAccountTxs` / `isTokenAwaitingTx` generic card) is suppressed
 	// by the template when ANY journal card or orphan executing task is on
 	// screen — counting it in that window would undercount remaining settled
-	// slots by 1 (codex post-impl catch). Mirror the template's `v-else-if`
+	// slots by 1. Mirror the template's `v-else-if`
 	// chain here so the math matches the DOM.
 	const journalCount = renderedInFlightOps.value.length
 	const orphanCount = hasOrphanExecutingTask.value ? 1 : 0
@@ -294,8 +290,8 @@ const inFlightJournalOps = computed(() =>
 )
 
 /** Terminal journal records (cancelled / failed) in scope, sorted newest-first.
- *  No time window — they stay visible until browser exit, same lifetime
- *  as the chain settled txs they sit alongside. */
+ *  No time window: like the settled chain txs beside them, they persist
+ *  across browser restarts. */
 const recentlyTerminalJournalOps = computed(() => {
 	return journalOps.value
 		.filter((op) => {
@@ -411,10 +407,9 @@ function journalTerminalCardProps(op) {
  *  `isMatchingTask` is kind-only for `dapp_execute` and kind+tokenId for
  *  `transfer`. Two concurrent same-token transfers (or any two dapp_execute
  *  ops) would both match the same executingTask. Broadcasting the subtask
- *  label to both cards would attribute progress to the wrong op — codex
- *  post-impl catch. When the match is ambiguous (≥ 2 cards match), every
- *  card falls back to the bare FSM-stage label so we never lie about
- *  which op the subtask belongs to. */
+ *  label to both cards would attribute progress to the wrong op. When the
+ *  match is ambiguous (≥ 2 cards match), every card falls back to the bare
+ *  FSM-stage label so we never lie about which op the subtask belongs to. */
 function cardSubtitleFor(op) {
 	if (!op) return "Processing..."
 	// Backend evidence outranks the task label: the label only says a proof is
@@ -454,16 +449,15 @@ const hasOrphanExecutingTask = computed(() => {
 })
 
 /**
- * Phase 2 follow-up v4: when a journal record turns terminal and matches
+ * When a journal record turns terminal and matches
  * the current executingTask, clear executingTask in the same tick so the
  * stale awaiting card disappears immediately alongside the terminal card
  * appearing. Without this, TaskService's eventual onTaskUpdated (after
  * the SW's catch block runs) leaves a brief duplicate-render window.
  *
- * Two call shapes — codex post-impl review caught a HARD regression in
- * the original v1 (scan-all) implementation: with terminals living forever,
- * any OLD cancelled record matching by kind+tokenId would false-clear a
- * fresh executingTask. Narrowed:
+ * Two call shapes, because terminal records never age out and a scan of
+ * all of them would let an old cancelled record matching by kind+tokenId
+ * clear a fresh executingTask:
  *
  * - **Event path** (`onJournalAdded`/`Updated`): we already know which op
  *   just changed; check only that op. No scan; can't false-match an

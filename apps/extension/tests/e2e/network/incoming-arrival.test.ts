@@ -308,10 +308,22 @@ async function armHeroSampler(page: Page): Promise<void> {
 	})
 }
 
+/** Home's hero once its quotes have landed: until then a holding without one counts as $0.00. */
+async function waitForPricedHero(page: Page): Promise<string> {
+	await page.waitForFunction(
+		() => {
+			const text = document.querySelector('[data-testid="balance-amount"]')?.textContent?.trim() ?? ""
+			return text.startsWith("$") && text !== "$0.00"
+		},
+		{ timeout: 30_000, polling: 100 },
+	)
+	return page.$eval(sel("balance-amount"), (el) => el.textContent?.trim() ?? "")
+}
+
 /** A calm arrival on Home: the row glows in place, the chip fades, and the hero never counts. */
 async function expectCalmArrival(page: Page, config: Config, account: string): Promise<void> {
 	const before = new Set((await storedRecords(page, account)).map((r) => r.id))
-	const heroBefore = await page.$eval(sel("balance-amount"), (el) => el.textContent?.trim() ?? "")
+	const heroBefore = await waitForPricedHero(page)
 	await armRecorder(page)
 	await armHeroSampler(page)
 	await sendPublic(config, account, 6n * D)

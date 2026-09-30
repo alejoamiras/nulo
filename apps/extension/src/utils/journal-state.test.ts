@@ -406,7 +406,7 @@ describe("sanitizeJournalSubtitle — URL-shape defense", () => {
 // switch in this file + reaper.ts emissions + execution/service.ts normalizeError
 // call sites. `stuck_queued` is critical — the reaper emits it on queued-record
 // time-out and pinning it here ensures the raw kind never leaks into the
-// "Reason" row on the journal-detail page (codex post-impl audit H2 + opus C1).
+// "Reason" row on the journal-detail page.
 describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
 	test("network → 'Network'", () => {
 		expect(humanizeErrorKind("network")).toBe("Network")
@@ -436,9 +436,9 @@ describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
 		expect(humanizeErrorKind("stuck_proving")).toBe("Stuck proving")
 	})
 	test("(REGRESSION PIN) stuck_queued → 'Stuck queued'", () => {
-		// reaper emits this on queued-record time-out (reaper.ts:192,
-		// reaper.test.ts:102 + :136). Pre-fix it leaked the raw kind into
-		// the UI. Codex post-impl audit H2 + opus C1.
+		// reaper emits this on queued-record time-out (reaper.ts `classifyReapKind`,
+		// reaper.test.ts:102 + :136). Unmapped, the raw kind would reach
+		// the UI.
 		expect(humanizeErrorKind("stuck_queued")).toBe("Stuck queued")
 	})
 	test("user_rejected → 'User rejected'", () => {

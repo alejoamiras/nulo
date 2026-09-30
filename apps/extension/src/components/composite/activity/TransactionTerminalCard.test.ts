@@ -1,13 +1,6 @@
 /**
- * TransactionTerminalCard — colocated unit tests (Phase 2 follow-up).
- *
- * Mirrors the `TransactionAwaitingCard.test.ts` pattern: stub the layout
- * + atoms, mount the card with various prop combinations, assert that
- * the props flow through to the right slots / classes / data attrs.
- *
- * No journal-state mapping logic here — the card is presentational only;
- * `@/utils/journal-state.ts` owns the kind → display mapping and has its
- * own test suite. This file pins the *rendering* contract.
+ * The card is presentational: `@/utils/journal-state.ts` owns the kind → display mapping and has
+ * its own suite, so this file pins only the rendering contract.
  */
 
 import { mount } from "@vue/test-utils"

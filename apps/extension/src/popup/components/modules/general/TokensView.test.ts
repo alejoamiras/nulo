@@ -188,7 +188,7 @@ describe("TokensView — section refresh dot", () => {
 	test("a completed refresh can't strand the dot across an A→B→A scope round-trip (stale-snapshot regression)", async () => {
 		// The mount-time task snapshot must be MAINTAINED: fetchTokenBalances re-derives isUpdating
 		// from it on every scope change, so a finished task lingering in the snapshot would
-		// resurrect isUpdating and strand the section dot ON (post-impl audit, Medium).
+		// resurrect isUpdating and strand the section dot ON.
 		H.getTasks.mockResolvedValue([balanceTask("t1", 1)])
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()
