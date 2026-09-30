@@ -160,7 +160,7 @@ onBeforeUnmount(() => {
 
 		<template #bottom>
 			<Text v-if="isSlowDelete" size="12" color="secondary" data-testid="reset-wait-hint">
-				Waiting for an in-flight operation to finish — this can take up to ~30 minutes while a
+				Waiting for an in-flight operation to finish. This can take up to ~30 minutes while a
 				transaction is proving. Keep this window open.
 			</Text>
 			<Button @click="handleReset" :disabled="!isReadyToReset || isResetting" variant="cta_destructive" data-testid="reset-submit-btn">

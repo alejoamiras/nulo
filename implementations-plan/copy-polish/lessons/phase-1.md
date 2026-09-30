@@ -56,3 +56,11 @@
   subtitles (`:149`, `:153`, `:453`), and E22's case-sensitive `toContain` at `:627`. From
   `apps/extension`, `bun --bun vitest run src/utils/journal-state.test.ts` → exit 0, 91 passed.
   The guard lists 15.
+- **Screens, E29 to E43**: E29's exact pin went into `AccountIntegrityBarrier.test.ts`'s
+  presented-profile case first, beside its existing assertions, and ran red on the old copy
+  (exit 1, 1 failed, 9 passed; expected and received differ only at the dash). Then 15 strings
+  plus `ImportContactsPopup.test.ts:121`. From `apps/extension`, every colocated test of the
+  changed screens (the two barriers, the passkey dialog, Import contacts, Revoke authwits, auth,
+  profile new, the full export and its passkey pins, three OperationCard files), the generic
+  `BarrierOverlay.test.ts` and the guard → exit 0, 14 files, 122 passed. **The guard is green**: no
+  open hit, no stale entry.

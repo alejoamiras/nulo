@@ -510,7 +510,7 @@ onBeforeUnmount(() => {
 						<p :class="$style.status_subtitle">
 							{{
 								backupStatus === "encrypting"
-									? "Sealing the file with your password — only you can open it."
+									? "Sealing the file with your password. Only you can open it."
 									: "Gathering your wallet data into your backup file."
 							}}
 						</p>
@@ -541,7 +541,7 @@ onBeforeUnmount(() => {
 						<template #description>
 							<Text color="secondary" height="140">
 								This profile is in recovery mode, so its registered custom contracts and senders were
-								left out. After the restore, register them again — until then their private notes
+								left out. After the restore, register them again. Until then their private notes
 								stay undiscovered, since a network sync cannot rebuild that material.
 							</Text>
 						</template>

@@ -153,7 +153,7 @@ usePopupEntity(() => props.show, {
 					<template #title>No need to revoke authwits</template>
 					<template #description>
 						Since Authwits Registry is currently disabled for this account, all issued authwits are already blocked and cannot be executed. 
-						You don’t need to spend gas or send a transaction to revoke them — but you can still do it if you want.
+						You don’t need to spend gas or send a transaction to revoke them, but you can still do it if you want.
 					</template>
 				</Banner>
 				<Banner v-else-if="chunksCount > 1" direction="vertical">
@@ -161,7 +161,7 @@ usePopupEntity(() => props.show, {
 					<template #description>
 						{{ `Due to Aztec protocol limits, only ${MAX_REVOKES_PER_TX} authwits can be revoked in a single transaction. 
 						Your authwits have been split into the minimum number of required transactions. 
-						Alternatively, you may disable Authwits Registry instead — this will block execution 
+						Alternatively, you may disable Authwits Registry instead. This will block execution 
 						of all current authwits until the registry is enabled again. 
 						You can still proceed with revocation if you prefer.` }}
 					</template>
