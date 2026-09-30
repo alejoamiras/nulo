@@ -70,6 +70,7 @@ describe("composite/send/caretAfter", () => {
 		["a point re-read at the end leaves the caret at the end", "1.234.", 6, "1234.", 5],
 		["a key typed before the point of the rest 1,234.56 keeps the caret before the point", "1,2340.56", 6, "12340.56", 5],
 		['a key typed before the point of "$12.34" keeps the caret before the point', "$125.34", 4, "125.34", 3],
+		["a key typed before the kept comma of 1 234,56 keeps the caret before the comma", "1 2340,56", 6, "12340,56", 5],
 	])("%s", (_name, value, caret, text, at) => {
 		expect(caretAfter(value, caret, text)).toBe(at)
 	})

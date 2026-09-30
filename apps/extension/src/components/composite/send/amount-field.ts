@@ -85,14 +85,16 @@ function settle(text: string, edit: AmountEdit, pasteLike: boolean): { text: str
 }
 
 /** Where the caret goes once the input's `value`, its caret at `caret`, shows `text` instead: before
- *  as many digits and points as followed it, so the next key lands where the person typed the last,
- *  on the same side of the point. */
+ *  as many digits and separators as followed it, so the next key lands where the person typed the
+ *  last, on the same side of the point. A rewrite drops a text's commas all at once (the rest's
+ *  grouping) or none, so commas count only where the text still has one. */
 export function caretAfter(value: string, caret: number, text: string): number {
-	let kept = value.slice(caret).replace(/[^\d.]/g, "").length
+	const kept = text.includes(",") ? /[\d.,]/ : /[\d.]/
+	let count = [...value.slice(caret)].filter((c) => kept.test(c)).length
 	let at = text.length
-	while (at > 0 && kept > 0) {
+	while (at > 0 && count > 0) {
 		at -= 1
-		if (/[\d.]/.test(text[at])) kept -= 1
+		if (kept.test(text[at])) count -= 1
 	}
 	return at
 }
