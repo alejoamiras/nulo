@@ -704,7 +704,7 @@ Assumptions: none beyond Fact 2.
 Gate: `bun run lint`, `bun scripts/ci-cd/plans/check.ts` exit 0.
 Layers: lint, CI-gating.
 
-### P1 · The 46 strings, and the guard (E)
+### P1 · The 46 strings, and the guard (E) ✓
 
 1. Write `apps/extension/src/utils/copy-dash-ban.test.ts` (§ E · The guard) with its 40 reviewed
    entries and its scanner cases. Red on the branch base: it lists exactly the 46 strings of the

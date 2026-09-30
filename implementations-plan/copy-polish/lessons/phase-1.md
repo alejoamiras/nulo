@@ -64,3 +64,22 @@
   profile new, the full export and its passkey pins, three OperationCard files), the generic
   `BarrierOverlay.test.ts` and the guard → exit 0, 14 files, 122 passed. **The guard is green**: no
   open hit, no stale entry.
+- **CLAUDE.md** gains one bullet in § UI changes need explicit owner sign-off: no em dash joins two
+  clauses in user-facing copy, a full stop does, the empty-value "—" stays, and the guard fails on
+  the forms it reads while its header lists the ones it cannot.
+
+## Gate
+
+- From `apps/extension`: the guard and every pin file of the table in one run (20 files: the
+  guard, `errors.test.ts`, `pxe/client.test.ts`, `NewNetworkPopup.pins.test.ts`,
+  `NewTokenPopup.test.ts`, `FeeSettingsCard.test.ts`, `transfer-failure-copy.test.ts`,
+  `scope-mismatch.test.ts`, `scope-follow.test.ts`, `service.integration.test.ts`,
+  `useFullBackupImport.test.ts`, `full-backup-helpers.test.ts`, `account-state/service.test.ts`,
+  `restore-surface.pins.test.ts`, `onboarding/pages/import.test.ts`, `journal-state.test.ts`,
+  `AccountIntegrityBarrier.test.ts`, `MigrationBarrier.test.ts`, `ImportContactsPopup.test.ts`,
+  `OperationCard.createAuthwit.test.ts`) → exit 0, 660 passed.
+- From the root: `bun run lint` → exit 0 (28 warnings, 3 infos, the base's; complexity-baseline
+  OK); `bun run typecheck:all` → exit 0; `bun run test:all` → exit 0 (extension 625 files passed,
+  3 skipped; 8458 tests passed, 4 skipped, 8 todo; every other workspace green, aztec-runtime 257
+  passed and 2 skipped); `bun run test:ci-gating` → exit 0 (244 pass, 2 skip, 0 fail). The known
+  `useFullBackupImport.test.ts` Retry flake did not occur. ✓

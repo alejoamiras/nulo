@@ -61,6 +61,7 @@ Any change to what a user sees — a screen's layout, its copy, which rows it sh
 - **Sign-off is explicit and recorded** — a message from the owner naming the surface, quoted in the plan or the PR body. A codex/fable audit `approve` is not a sign-off; a passing test is not a sign-off.
 - **Wire-shaped fixtures for dApp-facing surfaces.** A component test for anything that renders dApp data (the execute / connect / sign windows) feeds at least one fixture shaped as the wire carries it — `aztec_sendTx` arguments are `0x` + 64 hex fields, never `5n` — so a rendering that only works on friendly test values cannot pass.
 - **Screenshots close the loop.** A PR that changes a popup surface attaches a screenshot or artifact of the result; the smoke e2e counts rows, it does not read them.
+- **No em dash joins two clauses in user-facing copy.** A full stop does; the empty-value "—" stays. `apps/extension/src/utils/copy-dash-ban.test.ts` fails on the forms it can read (string and template literals, template text and attributes, outside log calls), and its header lists the ones it cannot; text no screen shows goes on its reviewed list with a reason.
 
 ## Tooltips and the glossary
 
