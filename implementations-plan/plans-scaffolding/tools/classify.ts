@@ -37,6 +37,8 @@ const ISSUES_FILE = `${HERE}/gh-issues.json`
 const IMPORT = "5ee8ec1351cca0088118ec1008a0bfc15ccd9781"
 const IMPORT_DATE = "2026-05-19"
 export const HISTORICAL = `historical — pre-open-source import (${IMPORT_DATE})`
+/** A closed dir whose files all moved out of the plan tree; it has nothing left to archive. */
+export const RELOCATED = "relocated"
 /** Commits that edited many plans at once without changing any; a dir's date skips them. */
 const MECHANICAL_SUBJECTS = [
 	/^chore: open-source initial import$/,
@@ -55,6 +57,7 @@ export const ANSWERS: Readonly<Record<string, Answer>> = {
 	"v3-followups": done("S1", ["v3-followups-p2"]),
 	"any-erc20-bridge": done("S1", ["any-erc20-bridge-p10"]),
 	"playwright-migration": { class: "closed", status: "abandoned — Puppeteer retained", ask: "S2" },
+	"passkey-e2e": { class: "closed", status: `${RELOCATED} — its one file now lives in apps/extension/tests/e2e/`, ask: "S2" },
 	"authwit-lifecycle-and-execution-followups": done("S3"),
 	"aztec-5.0-upgrade": done("S3"),
 	"execution-decomposition": done("S3"),
@@ -83,7 +86,7 @@ export const ANSWERS: Readonly<Record<string, Answer>> = {
 	"profile-flow-dedup-q2": done("S7"),
 	"release-dev-to-main": done("S7"),
 	"aztec-5.0.0-stable": { class: "closed", status: "superseded by aztec-5.2.0-js-line", ask: "S8" },
-	"harden-findings-remediation": done("S9", ["harden-f11-scope"]),
+	"harden-findings-remediation": done("S9", ["harden-f11-scope", "harden-surfaced-findings"]),
 	"light-theme-fix": done("S10"),
 	"token-identity": done("S10"),
 	"bridge-permit2-recipient-commitment": done("S11"),
@@ -288,7 +291,7 @@ export function checkClosures(cwd: string, file: Closures, upto = "HEAD"): { pro
 	for (const row of file.rows) {
 		if (seen.has(row.dir)) problems.push(`${row.dir}: two rows`)
 		seen.add(row.dir)
-		if (!live.has(row.dir)) problems.push(`${row.dir}: no such dir`)
+		if (!live.has(row.dir) && !row.status.startsWith(RELOCATED)) problems.push(`${row.dir}: no such dir`)
 		if (row.class === "ambiguous") problems.push(`${row.dir}: ambiguous (${row.status})`)
 	}
 	problems.push(...driftProblems(cwd, file, upto))

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { checkClosures, deriveRows, HISTORICAL, type Pr } from "./classify"
+import { checkClosures, deriveRows, HISTORICAL, type Pr, RELOCATED } from "./classify"
 import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
 
@@ -77,7 +77,8 @@ describe("classify", () => {
 
 	test("--check stops on an ambiguous row, a short snapshot or substantive drift, and a row-less dir stays active", () => {
 		const { repo, imported, prs } = planTree()
-		const rows = deriveRows({ cwd: repo, prs, importSha: imported }).filter((r) => r.dir !== "dup")
+		const derived = deriveRows({ cwd: repo, prs, importSha: imported }).filter((r) => r.dir !== "dup")
+		const rows = [...derived, { ...derived[0], dir: "gone" }, { ...derived[0], dir: "moved", status: `${RELOCATED} — to x` }]
 		const closuresBase = git(repo, "rev-parse", "HEAD")
 		writeFiles(repo, { [`${P}/check-names/assets/moved.md`]: "x\n" })
 		commitAll(repo, "chore(plans): relocate plan-dir assets that code and ci read")
@@ -91,6 +92,7 @@ describe("classify", () => {
 			problems: [
 				`${P}/plans-scaffolding/gh-issues.json: 1 items of 2`,
 				"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
+				"gone: no such dir",
 				`release-cut: changed since ${base}; re-answer it and regenerate`,
 			],
 			rowless: ["dup"],
