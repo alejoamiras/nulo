@@ -49,6 +49,10 @@ export interface WindowPort {
 	/** Focus / restore a window by id. Rejects if it is already closed. */
 	update(windowId: number, options: UpdateWindowOptions): Promise<void>
 
+	/** Load `url` in the window's tab. Rejects when the window or its tab is gone. The browser's
+	 *  error can carry the URL: callers never log or surface it. */
+	navigate(windowId: number, url: string): Promise<void>
+
 	/** Bounds of the last-focused NORMAL window (never a popup), or `undefined`
 	 *  when there is none or the lookup fails. Never throws. */
 	getLastFocused(): Promise<WindowBounds | undefined>

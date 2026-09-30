@@ -2,7 +2,7 @@ import { expect, inject } from "vitest"
 import { clickByTestId, test, openPopup, waitForHash } from "../fixtures/extension"
 import { lockWallet, ensureUnlocked } from "../fixtures/helpers"
 import { openPlayground } from "../fixtures/playground"
-import { waitForPopup, approveDiscover, approveVerify } from "../fixtures/popups"
+import { waitForPopup, approveConnect, approveVerify } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -39,10 +39,7 @@ test.skipIf(!hasConfig)(
 		// Unlock — drains the queue, fires the discover popup
 		await ensureUnlocked(popupPage)
 
-		const discoverPage = await discoverP
-		await approveDiscover(discoverPage)
-
-		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
+		const verifyPage = await approveConnect(registeredExtensionPerTest, await discoverP)
 		await approveVerify(verifyPage)
 
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })

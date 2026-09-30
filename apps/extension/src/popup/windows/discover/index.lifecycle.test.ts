@@ -196,13 +196,15 @@ const STUBS = {
 	Text: { template: "<span><slot /></span>" },
 	Icon: { template: "<i />" },
 	Tooltip: { template: "<div><slot /></div>" },
+	// As the real primitive: only `disabled` sets the attribute; `loading` alone does not.
 	Button: {
 		props: ["disabled", "loading"],
 		emits: ["click"],
 		template: `
 			<button
 				:data-testid="$attrs['data-testid']"
-				:disabled="disabled || loading"
+				:disabled="disabled"
+				:data-loading="String(loading)"
 				@click="$emit('click', $event)"
 			>
 				<slot />
@@ -397,5 +399,38 @@ describe("discover window — shell lifecycle frozen oracle", () => {
 		handler(undefined)
 		await flushPromises()
 		expect(rejectViaInteractionServiceMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("discover window — after a resolved Allow", () => {
+	const approve = () => {
+		if (!w) throw new Error("mount the window first")
+		return (w.vm as unknown as { approve: () => Promise<void> }).approve()
+	}
+
+	test("the beforeunload listener is removed and the window is not closed: it shows the emoji check next", async () => {
+		w = factory()
+		await completeInit()
+		callLog.length = 0
+		await approve()
+		await flushPromises()
+		expect(callLog).toEqual(["removeEventListener:beforeunload"])
+		window.dispatchEvent(new Event("beforeunload"))
+		expect(rejectViaInteractionServiceMock).not.toHaveBeenCalled()
+	})
+
+	test.each([
+		["a profile switch", { id: "p-other" }],
+		["a lock", undefined],
+	])("%s while it connects closes the window", async (_, next) => {
+		w = factory()
+		const handler = onActiveProfileChangedAddMock.mock.calls[0][0] as (p?: { id: string }) => void
+		await completeInit({ id: "p1" })
+		await approve()
+		await flushPromises()
+		expect(windowsRemoveMock).not.toHaveBeenCalled()
+		handler(next)
+		await flushPromises()
+		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)
 	})
 })

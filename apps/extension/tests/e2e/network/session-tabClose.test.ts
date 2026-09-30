@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { openPlayground } from "../fixtures/playground"
-import { waitForPopup, approveDiscover, approveVerify } from "../fixtures/popups"
+import { waitForPopup, approveConnect, approveVerify } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -29,8 +29,7 @@ test.skipIf(!hasConfig)(
 		const dappPage = await openPlayground(registeredExtensionPerTest)
 		const discoverP = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 30_000 })
 		await clickByTestId(dappPage, "pg-btn-connect")
-		await approveDiscover(await discoverP)
-		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
+		const verifyPage = await approveConnect(registeredExtensionPerTest, await discoverP)
 		await approveVerify(verifyPage)
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 

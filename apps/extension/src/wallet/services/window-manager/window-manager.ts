@@ -216,6 +216,18 @@ export class WindowManager {
 		this.stopWatching(handle)
 	}
 
+	/** Settle with `value(windowId)` and give the window to the caller: it is neither watched nor
+	 *  removed. `windowId` is `undefined` while the window's creation is still in flight, and that
+	 *  window is then closed on arrival like any other the handle no longer owns. */
+	public handOver<T>(handleId: string, value: (windowId: number | undefined) => T): void {
+		const handle = this.handles.get(handleId)
+		if (!handle || handle.settled) return
+		handle.settled = true
+		this.handles.delete(handleId)
+		this.stopWatching(handle)
+		handle.resolve(value(handle.windowId))
+	}
+
 	private createWindow(opts: OpenAndAwaitOpts, anchor: WindowBounds | undefined, stillWanted: () => boolean): Promise<CreatedWindow> {
 		const options = { type: "popup" as const, url: opts.url, width: opts.width, height: opts.height }
 		if (opts.placement === "center") return this.windows.create({ ...options, ...centerOn(anchor, opts.width, opts.height) })

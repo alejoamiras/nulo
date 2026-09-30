@@ -375,6 +375,49 @@ describe("WindowManager", () => {
 		handles.delete(handleId)
 	})
 
+	describe("handOver", () => {
+		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test", placement: "top-right" as const }
+
+		it("resolves with value(windowId), leaves the window open, and nothing settles the handle again", async () => {
+			const removeSpy = vi.spyOn(browser.windows, "remove")
+			const { handleId, promise } = manager.openAndAwait<{ windowId?: number }>(OPTS)
+			await flushCreate()
+
+			manager.handOver(handleId, (windowId) => ({ windowId }))
+
+			await expect(promise).resolves.toEqual({ windowId: FIRST_WINDOW_ID })
+			fakeWindows.closeByUser(FIRST_WINDOW_ID)
+			clock.advance(TIMEOUT_MS * 2)
+			manager.settle(handleId, { windowId: -1 })
+			manager.cancel(handleId, "late")
+			expect(removeSpy).not.toHaveBeenCalled()
+			expect(clock.pendingCount).toBe(0)
+		})
+
+		it("a hand-over before the window's creation resolved gives no id, and the window is closed on arrival", async () => {
+			const removeSpy = vi.spyOn(browser.windows, "remove")
+			const realCreate = browser.windows.create.bind(browser.windows)
+			let release!: () => void
+			const parked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			browser.windows.create = (async (opts: unknown) => {
+				await parked
+				return realCreate(opts as never)
+			}) as typeof browser.windows.create
+
+			const { handleId, promise } = manager.openAndAwait<{ windowId?: number }>(OPTS)
+			await flushCreate()
+			manager.handOver(handleId, (windowId) => ({ windowId }))
+			await expect(promise).resolves.toEqual({ windowId: undefined })
+
+			release()
+			await flushCreate()
+			await flushCreate()
+			expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
+		})
+	})
+
 	describe("positioning on the last-focused window", () => {
 		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test", placement: "top-right" as const }
 		/** Test-only surface of FakeWindowsAdapter. */

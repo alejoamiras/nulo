@@ -29,6 +29,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 			discovery: discoveryAt("r1", Date.now() - 61_000), // expired by the decision point
 			sessionId: "S1",
 			approverProfileId: "prof-A",
+			attemptOpen: () => true,
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -50,6 +51,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 			discovery: discoveryAt("r1", Date.now() - 61_000),
 			sessionId: "S1",
 			approverProfileId: "prof-A",
+			attemptOpen: () => true,
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -68,6 +70,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 			discovery: discoveryAt("r1", Date.now() - 5_000), // well within the window
 			sessionId: "S1",
 			approverProfileId: "prof-A",
+			attemptOpen: () => true,
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -94,6 +97,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 			discovery: discoveryAt("r1", Date.now() - 5_000), // fresh — reaches the approve branch
 			sessionId: "S1",
 			approverProfileId: "prof-A",
+			attemptOpen: () => true,
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -105,5 +109,30 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		expect(h.approve).toHaveBeenCalledWith("r1")
 		expect(h.pv.size).toBe(0) // scheduled entry rolled back
 		expect(h.reject).not.toHaveBeenCalled() // nothing to reject — it's already gone
+	})
+
+	test("an attempt abandoned while the writes ran is rolled back: no marker, no approval", async () => {
+		const h = harness()
+		const log = vi.fn()
+		const approved = await approveOrRollbackDiscoverySession({
+			discovery: discoveryAt("r1", Date.now() - 5_000),
+			sessionId: "S1",
+			approverProfileId: "prof-A",
+			attemptOpen: () => false,
+			approveDiscovery: h.approve,
+			rejectDiscovery: h.reject,
+			deleteSession: h.del,
+			pendingVerification: h.pv,
+			logger: { log },
+		})
+
+		expect(approved).toBe(false)
+		expect(h.del).toHaveBeenCalledWith("S1")
+		expect(h.reject).toHaveBeenCalledWith("r1")
+		expect(h.approve).not.toHaveBeenCalled()
+		expect(h.pv.size).toBe(0)
+		const lines = log.mock.calls.map((call) => String(call[2]))
+		expect(lines.some((line) => line.includes("abandoned"))).toBe(true)
+		expect(lines.some((line) => line.includes("expired"))).toBe(false)
 	})
 })

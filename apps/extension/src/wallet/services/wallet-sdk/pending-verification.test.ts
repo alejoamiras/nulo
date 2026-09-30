@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest"
 import {
+	cancelPendingVerification,
+	consumePendingVerification,
 	deletePendingVerificationForTab,
+	isPendingVerificationDead,
 	isPendingVerificationStale,
 	PENDING_VERIFICATION_STALE_MS,
 	type PendingVerificationEntry,
@@ -36,5 +39,42 @@ describe("pending-verification marker", () => {
 		// entry regardless of deletion (new requestId) — this deletion is pure
 		// hygiene so a closed tab's approval doesn't linger for the 90 s TTL.
 		expect(markers.get("r1")).toBeUndefined()
+	})
+
+	test("cancelling tombstones an existing marker in place and creates none for an absent id", () => {
+		const fresh = entry()
+		const markers = new Map<string, PendingVerificationEntry>([["r1", fresh]])
+		cancelPendingVerification(markers, "r1")
+		cancelPendingVerification(markers, "absent")
+		expect(markers.get("r1")).toBe(fresh)
+		expect(fresh.cancelled).toBe(true)
+		expect([...markers.keys()]).toEqual(["r1"])
+	})
+
+	test("a cancelled or stale marker is dead; a fresh one is not", () => {
+		const now = 1_000_000 + PENDING_VERIFICATION_STALE_MS
+		expect(isPendingVerificationDead(entry(), now)).toBe(false)
+		expect(isPendingVerificationDead(entry({ cancelled: true }), now)).toBe(true)
+		expect(isPendingVerificationDead(entry(), now + 1)).toBe(true)
+	})
+
+	test("consuming deletes a live or stale marker and keeps a tombstone", () => {
+		const markers = new Map<string, PendingVerificationEntry>([
+			["live", entry()],
+			["stale", entry({ at: 0 })],
+			["dead", entry({ cancelled: true })],
+		])
+		for (const id of ["live", "stale", "dead", "absent"]) consumePendingVerification(markers, id)
+		expect([...markers.keys()]).toEqual(["dead"])
+	})
+
+	test("tab teardown deletes the tab's tombstones too", () => {
+		const markers = new Map<string, PendingVerificationEntry>([
+			["r1", entry()],
+			["r2", entry({ tabId: 9 })],
+		])
+		cancelPendingVerification(markers, "r1")
+		deletePendingVerificationForTab(markers, 7)
+		expect([...markers.keys()]).toEqual(["r2"])
 	})
 })

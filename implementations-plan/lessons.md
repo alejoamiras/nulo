@@ -21,6 +21,7 @@ Curated gotchas from closed plans, read at the start of every task so no dead en
 - Under `vi.useFakeTimers()` a natively dispatched event runs only the first Vue listener it reaches, since runtime-dom skips listeners attached no earlier than the event's `_vts`: dispatch with `wrapper.trigger`, which stamps `_vts` 1 ms ahead, or advance time 1 ms first (Vue 3.5.41, 2026-09). [Evidence](ux-feedback/b3-tooltips-glossary/lessons/phase-1.md), [more](ux-feedback/b3-tooltips-glossary/lessons/phase-4.md)
 - A second `@vue/test-utils` `mount` in one test drops the first wrapper's stubs: VTU installs its stub transform through Vue's process-global `transformVNodeArgs` and replaces it on every mount, so the first tree re-renders with real components and its failed unmount leaks document listeners into later tests. Show the second tree in a plain `createApp` (VTU 2.4.11, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-1.md)
 - vitest 4.1.10 never re-runs a fixture setup that threw: every retry gets a test-scoped fixture as `undefined` and a file-scoped one's first error, so one setup failure reads as a second bug (2026-09). [Evidence](e2e-reliability-fixes/lessons/phase-3.md)
+- A test that something never happens proves nothing until its fixture can make it happen: pair it with a success-path control in the same fixture. [Evidence](connect-window/lessons/post-impl.md)
 
 ## E2E
 

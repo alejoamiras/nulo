@@ -207,6 +207,18 @@ describe("useDappApprovalWindow", () => {
 		expect(reject).not.toHaveBeenCalled()
 	})
 
+	test("completeInteraction() detaches the exact registered listener and closes nothing", async () => {
+		const { shell, resolveInit, reject } = makeShell()
+		void shell.start()
+		resolveInit()
+		await flushPromises()
+		shell.completeInteraction()
+		expect(beforeunloadRemoves()).toBe(1)
+		expect(windowsRemoveMock).not.toHaveBeenCalled()
+		window.dispatchEvent(new Event("beforeunload"))
+		expect(reject).not.toHaveBeenCalled()
+	})
+
 	test("onActiveProfileChanged — undefined or different id rejects; same id is a no-op", () => {
 		const { shell, profile, reject } = makeShell()
 		profile.value = { id: "p1" } as ProfileInfo

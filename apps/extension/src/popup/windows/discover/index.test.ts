@@ -153,13 +153,14 @@ const STUBS = {
 	Text: { template: "<span><slot /></span>" },
 	Icon: { template: "<i />" },
 	Tooltip: { template: "<div><slot /></div>" },
+	// As the real primitive: only `disabled` sets the attribute; `loading` alone does not.
 	Button: {
 		props: ["disabled", "loading"],
 		emits: ["click"],
 		template: `
 			<button
 				:data-testid="$attrs['data-testid']"
-				:disabled="disabled || loading"
+				:disabled="disabled"
 				:data-loading="String(loading)"
 				@click="$emit('click', $event)"
 			>
@@ -167,7 +168,10 @@ const STUBS = {
 			</button>
 		`,
 	},
-	DappStatusStrip: { template: '<div data-testid="status-strip" />', props: ["accountName", "networkName", "status"] },
+	DappStatusStrip: {
+		template: '<div data-testid="status-strip" :data-status="status" />',
+		props: ["accountName", "networkName", "status"],
+	},
 	DappIdentityBlock: {
 		template: '<div data-testid="identity-block" />',
 		props: ["dapp", "hostname", "hostnameSuspicious", "actionLabel", "hostnameTestId", "nameTestId"],
@@ -373,5 +377,68 @@ describe("discover popup — isReady race fix", () => {
 		await flushPromises()
 		expect(w.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
 		expect(w.find('[data-testid="error-text"]').exists()).toBe(false)
+	})
+})
+
+describe("discover popup — the revoke line", () => {
+	test("names the settings screen that lists connections", () => {
+		const text = factory().text()
+		expect(text).toContain("You can revoke this connection any time from Settings → Connected Apps.")
+		expect(text).not.toContain("General → Sessions")
+	})
+})
+
+describe("discover popup — after Allow the window waits for its emoji check", () => {
+	/** Mounted with init complete, so Allow is enabled. */
+	const ready = async () => {
+		const w = factory()
+		await flushPromises()
+		getActiveProfilePromiseResolve?.({ id: "p1" })
+		await flushPromises()
+		loadPromiseResolve?.()
+		await flushPromises()
+		return w
+	}
+	const approve = (w: ReturnType<typeof factory>) => (w.vm as unknown as { approve: () => Promise<void> }).approve()
+	// biome-ignore lint/suspicious/noExplicitAny: chrome runtime stub for tests
+	const windowsRemove = () => (globalThis as any).chrome.windows.remove as ReturnType<typeof vi.fn>
+
+	test("a resolved Allow keeps the window open, Allow spinning and disabled, Deny disabled, the strip loading", async () => {
+		const w = await ready()
+		await approve(w)
+		await flushPromises()
+		expect(windowsRemove()).not.toHaveBeenCalled()
+		expect(allow(w).attributes("data-loading")).toBe("true")
+		expect(isDisabled(allow(w))).toBe(true)
+		expect(isDisabled(deny(w))).toBe(true)
+		expect(w.find('[data-testid="status-strip"]').attributes("data-status")).toBe("loading")
+	})
+
+	test("the connect step bar shows step 1 before Allow and while it connects", async () => {
+		const w = await ready()
+		expect(w.get('[data-testid="connect-step-bar"]').attributes("data-step")).toBe("1")
+		await approve(w)
+		await flushPromises()
+		expect(w.get('[data-testid="connect-step-bar"]').attributes("data-step")).toBe("1")
+	})
+
+	test("a second Allow while it connects (a repeated Enter) sends nothing and sets no error", async () => {
+		const w = await ready()
+		await approve(w)
+		await approve(w)
+		await flushPromises()
+		expect(resolveInteractionMock).toHaveBeenCalledTimes(1)
+		expect(w.find('[data-testid="error-text"]').exists()).toBe(false)
+	})
+
+	test("a failed Allow leaves the waiting state: Allow stops spinning, Deny is enabled, the window stays", async () => {
+		resolveInteractionMock.mockRejectedValueOnce(new Error("boom"))
+		const w = await ready()
+		await approve(w)
+		await flushPromises()
+		expect(allow(w).attributes("data-loading")).toBe("false")
+		expect(isDisabled(deny(w))).toBe(false)
+		expect(w.find('[data-testid="error-text"]').exists()).toBe(true)
+		expect(windowsRemove()).not.toHaveBeenCalled()
 	})
 })

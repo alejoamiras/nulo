@@ -314,7 +314,7 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
  *   1) Open the playground (?test=1 disables HMR + persistence)
  *   2) Click `pg-btn-connect` — fires `WalletManager.getAvailableWallets`
  *   3) Approve at `/windows/discover` (testid `discover-allow-btn`)
- *   4) After ECDH key exchange, approve at `/windows/verify`
+ *   4) After ECDH key exchange, approve the emoji check the same window shows
  *   5) Wait for the playground status pill to flip to `connected`
  *
  * Returns the dApp Page so the caller can keep driving it; the caller is
@@ -325,7 +325,7 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
  */
 export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
-	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
+	const { waitForPopup, approveConnect, approveVerify } = await import("./popups")
 
 	// Internal phase-tag so the outer `[dappConnectedExtensionPerTest:connectPlayground]`
 	// error tells us WHICH step inside this function fails. Without this we
@@ -353,16 +353,7 @@ export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	await step("clickConnect", () => clickByTestId(dappPage, "pg-btn-connect"))
 
 	const discoverPage = await step("awaitDiscoverPopup", () => discoverP)
-	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
-	// create the verify window. Codex audit caught: approveDiscover only
-	// clicks (popups.ts:126), doesn't wait for close. If verify opens
-	// faster than the next waitForPopup, the snapshot at popups.ts:32
-	// treats the already-existing target as preExisting and ignores it —
-	// the test then hangs for 30s waiting for a NEW verify target that
-	// never appears. Race confirmed deterministic on shard 5.
-	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
-	await step("approveDiscover", () => approveDiscover(discoverPage))
-	const verifyPage = await step("awaitVerifyPopup", () => verifyP)
+	const verifyPage = await step("approveConnect", () => approveConnect(ctx, discoverPage))
 	await step("approveVerify", () => approveVerify(verifyPage))
 
 	await step("waitForConnectedStatus", () =>
