@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils"
-import { afterEach, describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { nextTick } from "vue"
 import {
 	FACT_SENTENCES,
 	noticeBodyFor,
@@ -275,5 +276,36 @@ describe("modules/send/SendReviewSheet", () => {
 		expect(w.emitted("close")).toHaveLength(1)
 		w.findComponent({ name: "Popup" }).vm.$emit("onClose")
 		expect(w.emitted("close")).toHaveLength(2)
+	})
+})
+
+// jsdom has no layout: a stand-in font measures the amount line at its full 30 px (digits and
+// letters 15 px, separators 6 px), and `room` is the summary's width.
+let room = 10_000
+const standInWidth = (text: string) => [...text.replace(/\s/g, "")].reduce((w, c) => w + (c === "," || c === "." ? 6 : 15), 0)
+vi.mock("@/utils/hero-ruler", () => ({
+	heroRoom: () => room,
+	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
+}))
+
+describe("modules/send/SendReviewSheet — the amount line fits", () => {
+	let w: W | undefined
+	afterEach(() => {
+		w?.unmount()
+		room = 10_000
+	})
+
+	// "1,235,567.123456789012345678" and "TST": 28 digits and letters, 3 separators, 438 px at 30 px.
+	test.each([
+		["keeps 30 px when it fits", 10_000, "1"],
+		["shrinks to the largest scale that fits one line", 300, "0.68"],
+		["stops at 60%, where the line wraps", 200, "0.6"],
+	])("a long amount %s", async (_, width, scale) => {
+		room = width
+		w = mountSheet({ amount: "1,235,567.123456789012345678", symbol: "TST" })
+		await nextTick()
+		const line = w.get('[data-testid="send-review-amount"]')
+		expect((line.element as HTMLElement).style.getPropertyValue("--hero-scale")).toBe(scale)
+		expect(line.text()).toBe("1,235,567.123456789012345678TST")
 	})
 })

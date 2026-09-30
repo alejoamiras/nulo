@@ -22,9 +22,11 @@ declare global {
   const FEE_JUICE_DECIMALS: typeof import('../utils/fee-estimation').FEE_JUICE_DECIMALS
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const FIRST_PROFILE_NAME: typeof import('../utils/profile-name').FIRST_PROFILE_NAME
+  const FULL_SIZE: typeof import('../utils/hero-fit').FULL_SIZE
   const FileTooLargeError: typeof import('../utils/files').FileTooLargeError
   const GLOSSARY: typeof import('../utils/glossary').GLOSSARY
   const GLOSSARY_SECTIONS: typeof import('../utils/glossary').GLOSSARY_SECTIONS
+  const HERO_MIN_SCALE: typeof import('../utils/hero-fit').HERO_MIN_SCALE
   const HOME_TOKEN_ROWS: typeof import('../utils/token-order').HOME_TOKEN_ROWS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS
@@ -81,7 +83,6 @@ declare global {
   const classifyRow: typeof import('../utils/token-order').classifyRow
   const coalesce: typeof import('../utils/coalesce').coalesce
   const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
-  const comma: typeof import('../utils/amount').comma
   const compareTokenRows: typeof import('../utils/token-order').compareTokenRows
   const completeImportWithRecovery: typeof import('../composables/completeImportWithRecovery').completeImportWithRecovery
   const compressData: typeof import('../utils/files').compressData
@@ -105,8 +106,10 @@ declare global {
   const effectScope: typeof import('vue').effectScope
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
+  const fiatHeroCandidates: typeof import('../utils/hero-fit').fiatHeroCandidates
   const findMintSignature: typeof import('../utils/token-transfer-vocabulary').findMintSignature
   const findTransferSignature: typeof import('../utils/token-transfer-vocabulary').findTransferSignature
+  const fitHero: typeof import('../utils/hero-fit').fitHero
   const foldLabel: typeof import('../utils/token-fold').foldLabel
   const forChain: typeof import('../utils/token-order').forChain
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
@@ -135,11 +138,14 @@ declare global {
   const h: typeof import('vue').h
   const hasInFlightSend: typeof import('../utils/in-flight-send').hasInFlightSend
   const hasReachedPresto: typeof import('../utils/presto-ui-state').hasReachedPresto
+  const heroRoom: typeof import('../utils/hero-ruler').heroRoom
+  const holdHeroFit: typeof import('../utils/hero-fit').holdHeroFit
   const humanizeErrorKind: typeof import('../utils/journal-state').humanizeErrorKind
   const humanizeMethodName: typeof import('../utils/tx-enrichment').humanizeMethodName
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
+  const inputRoom: typeof import('../utils/hero-ruler').inputRoom
   const isAmountAboveDustThreshold: typeof import('../utils/incoming-dust').isAmountAboveDustThreshold
   const isApprovedSendInFlight: typeof import('../utils/in-flight-send').isApprovedSendInFlight
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
@@ -238,6 +244,7 @@ declare global {
   const restoreTokensStage: typeof import('../composables/full-backup-restore').restoreTokensStage
   const rollbackCreatedProfile: typeof import('../composables/full-backup-restore').rollbackCreatedProfile
   const rowDescriptionFor: typeof import('../utils/presto-ui-state').rowDescriptionFor
+  const rulerWidth: typeof import('../utils/hero-ruler').rulerWidth
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
   const runRestoreFailurePath: typeof import('../composables/full-backup-restore').runRestoreFailurePath
   const safeFiatOf: typeof import('../utils/token-amount').safeFiatOf
@@ -264,6 +271,7 @@ declare global {
   const toRestoreError: typeof import('../utils/restore-error').toRestoreError
   const toValue: typeof import('vue').toValue
   const tokenForReceipt: typeof import('../utils/received-display').tokenForReceipt
+  const tokenHeroCandidates: typeof import('../utils/hero-fit').tokenHeroCandidates
   const transferLabel: typeof import('../utils/token-transfer-vocabulary').transferLabel
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
@@ -478,6 +486,9 @@ declare global {
   export type { NetworkActivationResult } from '../utils/guarded-network-activation'
   import('../utils/guarded-network-activation')
   // @ts-ignore
+  export type { HeroFit, HeroWidthAt } from '../utils/hero-fit'
+  import('../utils/hero-fit')
+  // @ts-ignore
   export type { InFlightScope } from '../utils/in-flight-send'
   import('../utils/in-flight-send')
   // @ts-ignore
@@ -534,9 +545,11 @@ declare module 'vue' {
     readonly FEE_JUICE_DECIMALS: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_DECIMALS']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly FIRST_PROFILE_NAME: UnwrapRef<typeof import('../utils/profile-name')['FIRST_PROFILE_NAME']>
+    readonly FULL_SIZE: UnwrapRef<typeof import('../utils/hero-fit')['FULL_SIZE']>
     readonly FileTooLargeError: UnwrapRef<typeof import('../utils/files')['FileTooLargeError']>
     readonly GLOSSARY: UnwrapRef<typeof import('../utils/glossary')['GLOSSARY']>
     readonly GLOSSARY_SECTIONS: UnwrapRef<typeof import('../utils/glossary')['GLOSSARY_SECTIONS']>
+    readonly HERO_MIN_SCALE: UnwrapRef<typeof import('../utils/hero-fit')['HERO_MIN_SCALE']>
     readonly HOME_TOKEN_ROWS: UnwrapRef<typeof import('../utils/token-order')['HOME_TOKEN_ROWS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
     readonly IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS']>
@@ -593,7 +606,6 @@ declare module 'vue' {
     readonly classifyRow: UnwrapRef<typeof import('../utils/token-order')['classifyRow']>
     readonly coalesce: UnwrapRef<typeof import('../utils/coalesce')['coalesce']>
     readonly collectRestoreErrors: UnwrapRef<typeof import('../utils/full-backup-helpers')['collectRestoreErrors']>
-    readonly comma: UnwrapRef<typeof import('../utils/amount')['comma']>
     readonly compareTokenRows: UnwrapRef<typeof import('../utils/token-order')['compareTokenRows']>
     readonly completeImportWithRecovery: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['completeImportWithRecovery']>
     readonly compressData: UnwrapRef<typeof import('../utils/files')['compressData']>
@@ -617,8 +629,10 @@ declare module 'vue' {
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
+    readonly fiatHeroCandidates: UnwrapRef<typeof import('../utils/hero-fit')['fiatHeroCandidates']>
     readonly findMintSignature: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['findMintSignature']>
     readonly findTransferSignature: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['findTransferSignature']>
+    readonly fitHero: UnwrapRef<typeof import('../utils/hero-fit')['fitHero']>
     readonly foldLabel: UnwrapRef<typeof import('../utils/token-fold')['foldLabel']>
     readonly forChain: UnwrapRef<typeof import('../utils/token-order')['forChain']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
@@ -647,11 +661,14 @@ declare module 'vue' {
     readonly h: UnwrapRef<typeof import('vue')['h']>
     readonly hasInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['hasInFlightSend']>
     readonly hasReachedPresto: UnwrapRef<typeof import('../utils/presto-ui-state')['hasReachedPresto']>
+    readonly heroRoom: UnwrapRef<typeof import('../utils/hero-ruler')['heroRoom']>
+    readonly holdHeroFit: UnwrapRef<typeof import('../utils/hero-fit')['holdHeroFit']>
     readonly humanizeErrorKind: UnwrapRef<typeof import('../utils/journal-state')['humanizeErrorKind']>
     readonly humanizeMethodName: UnwrapRef<typeof import('../utils/tx-enrichment')['humanizeMethodName']>
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
+    readonly inputRoom: UnwrapRef<typeof import('../utils/hero-ruler')['inputRoom']>
     readonly isAmountAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isAmountAboveDustThreshold']>
     readonly isApprovedSendInFlight: UnwrapRef<typeof import('../utils/in-flight-send')['isApprovedSendInFlight']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
@@ -748,6 +765,7 @@ declare module 'vue' {
     readonly restoreTokensStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreTokensStage']>
     readonly rollbackCreatedProfile: UnwrapRef<typeof import('../composables/full-backup-restore')['rollbackCreatedProfile']>
     readonly rowDescriptionFor: UnwrapRef<typeof import('../utils/presto-ui-state')['rowDescriptionFor']>
+    readonly rulerWidth: UnwrapRef<typeof import('../utils/hero-ruler')['rulerWidth']>
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
     readonly runRestoreFailurePath: UnwrapRef<typeof import('../composables/full-backup-restore')['runRestoreFailurePath']>
     readonly safeFiatOf: UnwrapRef<typeof import('../utils/token-amount')['safeFiatOf']>
@@ -774,6 +792,7 @@ declare module 'vue' {
     readonly toRestoreError: UnwrapRef<typeof import('../utils/restore-error')['toRestoreError']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly tokenForReceipt: UnwrapRef<typeof import('../utils/received-display')['tokenForReceipt']>
+    readonly tokenHeroCandidates: UnwrapRef<typeof import('../utils/hero-fit')['tokenHeroCandidates']>
     readonly transferLabel: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['transferLabel']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>

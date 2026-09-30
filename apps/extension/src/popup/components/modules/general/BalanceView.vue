@@ -17,8 +17,8 @@ import { aggregateFiat } from "@/utils/token-aggregate"
 import { forChain } from "@/utils/token-order"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { createBalanceCount } from "./balance-count"
-import { FULL_SIZE, fiatHeroCandidates, fitHero, holdHeroFit, tokenHeroCandidates } from "./hero-fit"
-import { heroRoom, rulerWidth } from "./hero-ruler"
+import { FULL_SIZE, fiatHeroCandidates, fitHero, holdHeroFit, tokenHeroCandidates } from "@/utils/hero-fit"
+import { heroRoom, rulerWidth } from "@/utils/hero-ruler"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"

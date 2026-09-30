@@ -8,6 +8,7 @@
  * newer, equally-valid quote; both are ~$1 for USDC).
  */
 
+import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import { reloadExtensionPage } from "../fixtures/browser"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
@@ -16,6 +17,22 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+
+/** A viewport point 1 px inside the amount row's top edge, over the middle or the right end of `testid`. */
+async function rowTopEdge(page: Page, testid: string, over: "middle" | "right"): Promise<{ x: number; y: number }> {
+	return page.evaluate(
+		(id: string, at: string) => {
+			const row = document.querySelector('[data-testid="send-amount-row"]')
+			const el = document.querySelector(`[data-testid="${id}"]`)
+			if (!row || !el) throw new Error(`rowTopEdge: send-amount-row or ${id} is missing`)
+			row.scrollIntoView({ block: "center" })
+			const box = el.getBoundingClientRect()
+			return { x: at === "middle" ? box.left + box.width / 2 : box.right - 2, y: row.getBoundingClientRect().top + 1 }
+		},
+		testid,
+		over,
+	)
+}
 
 test.skipIf(!hasConfig)(
 	"priced sandbox token: row + header fiat render, fiat typing derives the send amount",
@@ -66,9 +83,17 @@ test.skipIf(!hasConfig)(
 		const balanceSeg = await page.$eval('[data-testid="send-amount-balance"]', (el) => el.textContent?.trim() ?? "")
 		expect(balanceSeg).toMatch(/\d/)
 
-		// Flip to USD and type dollars.
-		await clickByTestId(page, "send-amount-fiat-toggle")
+		// Flip to USD with a press on the switch at the amount row's top edge: the switch takes a press
+		// anywhere in the row's height. A press on the field's right end, beside the switch, still
+		// lands in the field.
+		const onSwitch = await rowTopEdge(page, "send-amount-fiat-toggle", "middle")
+		await page.mouse.click(onSwitch.x, onSwitch.y)
 		await page.waitForSelector('[data-testid="send-amount-fiat-input"]', { visible: true, timeout: 10_000 })
+		const fiatFocused = () => page.$eval('[data-testid="send-amount-fiat-input"]', (el) => el === document.activeElement)
+		expect(await fiatFocused()).toBe(false)
+		const onField = await rowTopEdge(page, "send-amount-fiat-input", "right")
+		await page.mouse.click(onField.x, onField.y)
+		expect(await fiatFocused()).toBe(true)
 		await page.type('[data-testid="send-amount-fiat-input"]', "2")
 
 		// Debounced derivation lands: the secondary line shows the TOKEN

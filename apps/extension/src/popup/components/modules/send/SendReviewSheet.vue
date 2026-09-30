@@ -3,7 +3,7 @@
  * What this send publishes, for the sender to read before it goes. Everything shown is a prop and
  * every action an emit: the page owns the popup slot, the facts and the send.
  */
-import { computed } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue"
 import { vSnackFooter } from "@/composables/snackInset"
 import { maskAddress } from "@/components/composite/send/masked-address"
 import {
@@ -18,6 +18,8 @@ import {
 	UNVOUCHED_FEE_SENTENCE,
 } from "@/components/composite/send/publish-facts"
 import mark from "@/components/composite/send/publish-mark.module.css"
+import { fitHero, HERO_MIN_SCALE } from "@/utils/hero-fit"
+import { heroRoom, rulerWidth } from "@/utils/hero-ruler"
 import { FEE_JUICE_BRIDGE_URL } from "./fee-helpers"
 
 const props = defineProps<{
@@ -69,10 +71,29 @@ const rows = computed(() =>
 	}),
 )
 
+const summary = useTemplateRef<HTMLElement>("summary")
+const amountRuler = useTemplateRef<HTMLElement>("amountRuler")
+/** The amount line's type as a fraction of its 30 px: the largest that fits one line, never
+ *  under 60%, where the line wraps instead. */
+const amountScale = ref(1)
+
 // The button's disabled look mirrors this; the guard is what a programmatic click meets.
 const handleSend = () => {
 	if (sendable.value) emit("send")
 }
+
+function fitAmount() {
+	const line = summary.value
+	const form = amountRuler.value
+	if (!line || !form) return
+	const fit = fitHero(1, (_, scale) => rulerWidth(form, scale), heroRoom(line))
+	amountScale.value = Math.max(fit.scale, HERO_MIN_SCALE)
+}
+
+// The sheet's content mounts with the popup, so its ref is watched with what it shows.
+watch([summary, () => props.amount, () => props.symbol], fitAmount, { flush: "post" })
+onMounted(() => document.fonts?.addEventListener("loadingdone", fitAmount))
+onBeforeUnmount(() => document.fonts?.removeEventListener("loadingdone", fitAmount))
 </script>
 
 <template>
@@ -87,9 +108,13 @@ const handleSend = () => {
 				</PopupHeader>
 
 				<Flex direction="column" gap="14" :class="$style.body">
-					<div :class="$style.summary">
-						<span :class="$style.amount" data-testid="send-review-amount">
+					<div ref="summary" :class="$style.summary">
+						<span :class="$style.amount" :style="{ '--hero-scale': amountScale }" data-testid="send-review-amount">
 							{{ amount || "—" }}<small v-if="amount && symbol">{{ symbol }}</small>
+						</span>
+						<!-- The fit's ruler: it holds what the line holds, in the line's classes, or the two widths part. -->
+						<span aria-hidden="true" :class="$style.amount_ruler">
+							<span ref="amountRuler" :class="$style.amount">{{ amount || "—" }}<small v-if="amount && symbol">{{ symbol }}</small></span>
 						</span>
 						<span :class="$style.to" data-testid="send-review-recipient">{{ toLine }}</span>
 					</div>
@@ -168,6 +193,7 @@ const handleSend = () => {
 }
 
 .summary {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
@@ -178,14 +204,32 @@ const handleSend = () => {
 
 .amount {
 	font-family: var(--font-headline);
-	font-size: 30px;
+	font-size: calc(30px * var(--hero-scale, 1));
 	font-weight: 700;
 	letter-spacing: -0.02em;
 	line-height: 1;
 	color: var(--txt-primary);
+	/* Wraps only when even 60% is too wide for one line. */
+	overflow-wrap: anywhere;
 }
 
+.amount_ruler {
+	position: absolute;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.amount_ruler > span {
+	position: absolute;
+	white-space: nowrap;
+}
+
+/* Atomic, so a wrapping line breaks before the symbol, never inside it. */
 .amount small {
+	display: inline-block;
 	margin-left: 4px;
 
 	font-family: var(--font-mono);

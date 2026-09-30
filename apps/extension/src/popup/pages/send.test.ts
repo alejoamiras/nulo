@@ -302,6 +302,27 @@ describe("send page — the submit tail", () => {
 		w.unmount()
 	})
 
+	test("a grouped amount of a million or more is what the review shows and what is sent", async () => {
+		mocks.getTokenBalances.mockResolvedValue([{ ...BALANCE, privateBalance: "2000000000000" }])
+		const { w } = await mountSend()
+		await fillForm(w)
+		await w.get('[data-testid="stub-amount"]').setValue("1,234,567.123456")
+		await strip(w).trigger("click")
+		expect(w.get('[data-testid="send-review-amount"]').text()).toBe("1,234,567.123456TST")
+		await sendNow(w).trigger("click")
+		expect(mocks.executeTransfer).toHaveBeenCalledWith(
+			"n1",
+			ACCOUNT,
+			TOKEN.id,
+			TransferType.Private,
+			DESTINATION,
+			1_234_567_123_456n,
+			SPONSOR.settings,
+			undefined,
+		)
+		w.unmount()
+	})
+
 	test("two activations in the same tick, before the button is patched disabled, send once", async () => {
 		const { w } = await mountSend()
 		await fillForm(w)
@@ -673,6 +694,8 @@ describe("send page — the sheet on the popup stack", () => {
 		cacheStore.activeTokenIdx = other.id
 		await nextTick()
 		expect(sheetOpen(w)).toBe(false)
+		// The amount goes with the token, so no amount is read with another token's decimals.
+		expect((w.get('[data-testid="stub-amount"]').element as HTMLInputElement).value).toBe("")
 		w.unmount()
 	})
 

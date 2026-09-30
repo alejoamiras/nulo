@@ -8,36 +8,6 @@ export const getThousandSeparator = (): string => {
 	return s.substring(1, s.length - 3)
 }
 
-export const comma = (target: unknown, symbol = ",", fixed = 2): string | number => {
-	if (!target) return 0
-
-	let num: string | number = Number.parseFloat(target as string)
-
-	if ((num as number) % 1 === 0) {
-		num = (num as number).toFixed(0)
-	} else {
-		num = (num as number).toFixed(fixed)
-	}
-
-	if (num.includes(".")) {
-		while (num[num.length - 1] === "0") {
-			num = num.slice(0, num.length - 1)
-		}
-		if (num[num.length - 1] === ".") {
-			num = num.slice(0, num.length - 1)
-		}
-	}
-
-	if (num.split(".").length > 1 && fixed !== 2) {
-		return `${num
-			.split(".")[0]
-			.toString()
-			.replace(/\B(?=(\d{3})+(?!\d))/g, symbol)}.${num.split(".")[1]}`
-	}
-
-	return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, symbol)
-}
-
 export const purgeNumber = (target: string): string => {
 	if (/^(0|[1-9]\d*)(\.\d+)?$/.test(target)) return target
 	return target.replace(/[^0-9.]/g, "")

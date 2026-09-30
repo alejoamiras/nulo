@@ -6,8 +6,9 @@ const meta: Meta<typeof AmountCard> = {
 	component: AmountCard,
 	tags: ["autodocs"],
 	args: {
-		token: { symbol: "USDC" },
+		token: { symbol: "USDC", decimals: 6 },
 		tokenBalanceByType: 1000,
+		balanceRawByType: "1000000000",
 		selectedSendType: "private",
 		modelValue: "",
 	},
@@ -23,5 +24,5 @@ type Story = StoryObj<typeof AmountCard>
 
 export const Default: Story = {}
 export const WithValue: Story = { args: { modelValue: "12.5" } }
-export const NoBalance: Story = { args: { tokenBalanceByType: 0 } }
+export const NoBalance: Story = { args: { tokenBalanceByType: 0, balanceRawByType: "0" } }
 export const PublicSend: Story = { args: { selectedSendType: "public" } }

@@ -27,8 +27,8 @@ function largestFit(widthAt: HeroWidthAt, index: number, room: number, floor: nu
 
 /**
  * The first of `count` forms, longest first, that fits `room` at `HERO_MIN_SCALE` or more, at the
- * largest hundredth that fits. When none does, which only a symbol too long for the line can
- * cause, the shortest form takes whatever scale fits. A `room` of 0 is a line not laid out yet.
+ * largest hundredth that fits. When none does, the shortest form takes whatever scale fits. A
+ * `room` of 0 is a line not laid out yet.
  */
 export function fitHero(count: number, widthAt: HeroWidthAt, room: number): HeroFit {
 	if (!(room > 0) || count < 1) return FULL_SIZE

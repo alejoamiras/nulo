@@ -1,5 +1,7 @@
-import { describe, expect, test, beforeEach, vi } from "vitest"
+import { afterEach, describe, expect, test, beforeEach, vi } from "vitest"
 import { mount } from "@vue/test-utils"
+import { nextTick } from "vue"
+import { parseAmountToBaseUnits } from "@/utils/amount"
 import AmountCard from "./AmountCard.vue"
 
 const STUBS = {
@@ -56,12 +58,31 @@ describe("composite/AmountCard", () => {
 		expect(w.find("[data-testid='send-amount-max']").exists()).toBe(true)
 	})
 
-	test("clicking Use Maximum sets the model value to tokenBalanceByType", async () => {
-		const w = mountCard({ tokenBalanceByType: 250, modelValue: "" })
+	test.each([
+		["1123456789012345678", "1.123456789012345678"],
+		["99876543210987654321", "99.876543210987654321"],
+		["100000000000", "0.0000001"],
+	])("token-mode Max fills the raw balance %s exactly, as %s", async (raw, filled) => {
+		const w = mountCard({
+			token: { symbol: "TST", decimals: 18 },
+			tokenBalanceByType: Number(raw) / 10 ** 18,
+			balanceRawByType: raw,
+			modelValue: "",
+		})
 		await w.find("[data-testid='send-amount-max']").trigger("click")
-		const emits = w.emitted("update:modelValue")
-		expect(emits).toBeTruthy()
-		expect(emits?.[emits.length - 1]).toEqual([250])
+		const emits = w.emitted("update:modelValue") ?? []
+		const last = emits[emits.length - 1]?.[0]
+		expect(last).toBe(filled)
+		expect(parseAmountToBaseUnits(String(last), 18)).toBe(BigInt(raw))
+	})
+
+	test.each([
+		["no raw balance", { token: { symbol: "TST", decimals: 18 }, balanceRawByType: null }],
+		["no decimals", { token: { symbol: "TST" }, balanceRawByType: "250" }],
+	])("token-mode Max with %s fills nothing", async (_name, props) => {
+		const w = mountCard({ tokenBalanceByType: 250, modelValue: "", ...props })
+		await w.find("[data-testid='send-amount-max']").trigger("click")
+		expect(w.emitted("update:modelValue")).toBeUndefined()
 	})
 
 	test("Use Maximum is a no-op when tokenBalanceByType is 0/falsy (disabled balance)", async () => {
@@ -78,14 +99,33 @@ describe("composite/AmountCard", () => {
 
 	test("corner balance segment: amount + symbol only — no privacy dot/word (the From selector owns that)", () => {
 		const w = mountCard({
-			token: { symbol: "USDC" },
+			token: { symbol: "USDC", decimals: 6 },
 			tokenBalanceByType: 42,
+			balanceRawByType: "42000000",
 		})
 		const seg = w.find("[data-testid='send-amount-balance']")
 		expect(seg.exists()).toBe(true)
 		expect(seg.text()).toBe("42 USDC")
 		expect(seg.text()).not.toContain("PRIVATE")
 		expect(seg.text()).not.toContain("PUBLIC")
+	})
+
+	test.each([
+		["124457554400000000000000000", "124,457,554.4 TST"],
+		["1123456789012345678", "1.12345678 TST"],
+		["1000000000", "0 TST"],
+	])("the balance beside Max reads the raw balance %s as %s: exact, cut at 8 places", (raw, text) => {
+		const w = mountCard({ token: { symbol: "TST", decimals: 18 }, tokenBalanceByType: Number(raw) / 10 ** 18, balanceRawByType: raw })
+		expect(w.get("[data-testid='send-amount-balance']").text()).toBe(text)
+	})
+
+	test.each([
+		["a zero balance", { tokenBalanceByType: 0, balanceRawByType: "0" }],
+		["no raw balance", { tokenBalanceByType: 42, balanceRawByType: null }],
+		["no decimals", { token: { symbol: "TST" }, tokenBalanceByType: 42, balanceRawByType: "42" }],
+	])("no balance beside Max with %s", (_name, props) => {
+		const w = mountCard({ token: { symbol: "TST", decimals: 18 }, ...props })
+		expect(w.find("[data-testid='send-amount-balance']").exists()).toBe(false)
 	})
 
 	test("quoteless: no fiat line at all — no fake $0.00, no warning noise", () => {
@@ -124,6 +164,17 @@ describe("composite/AmountCard", () => {
 		expect(hint.text()).toContain("6 decimal")
 	})
 
+	test("a paste past the decimals keeps only digits and the point, then is clamped at once", async () => {
+		const w = mountCard({ modelValue: "", "onUpdate:modelValue": () => {}, token: { symbol: "USDC", decimals: 6 } })
+		const input = w.find("input[data-testid='send-amount-input']")
+		;(input.element as HTMLInputElement).value = "1.234,5678901"
+		await input.trigger("input", { inputType: "insertFromPaste" })
+		expect((input.element as HTMLInputElement).value).toBe("1.234567")
+		const emits = w.emitted("update:modelValue")
+		expect(emits?.[emits.length - 1]).toEqual(["1.234567"])
+		expect(w.find("[data-testid='send-amount-clamp-hint']").exists()).toBe(true)
+	})
+
 	test("does NOT render the inline hint when input fits within decimals", async () => {
 		const w = mountCard({
 			tokenBalanceByType: 100,
@@ -147,6 +198,13 @@ describe("composite/AmountCard", () => {
 		await w.setProps({ token: { symbol: "USDC", decimals: 4 } })
 		const emits = w.emitted("update:modelValue") ?? []
 		expect(emits[emits.length - 1]?.[0]).toBe("1.1234")
+	})
+
+	test("a grouped amount re-clamps on the fraction alone when the decimals drop", async () => {
+		const w = mountCard({ modelValue: "1,234,567.123456789", token: { symbol: "ETH", decimals: 18 } })
+		await w.setProps({ token: { symbol: "USDC", decimals: 6 } })
+		const emits = w.emitted("update:modelValue") ?? []
+		expect(emits[emits.length - 1]?.[0]).toBe("1,234,567.123456")
 	})
 
 	test("clamps to 0 decimals (token with no fractional units strips the dot)", async () => {
@@ -265,9 +323,13 @@ describe("composite/AmountCard — C3 fiat input", () => {
 		vi.useFakeTimers()
 		try {
 			const moved = { usd: 1.2, fetchedAt: Date.now() }
-			const w = mountFiat({
+			// The page owns the guard, so a write reads back only once the page has re-rendered.
+			const w: ReturnType<typeof mountFiat> = mountFiat({
 				fiatMode: true,
 				fiatGuard: { frozenUsd: QUOTE.usd, frozenAt: Date.now(), converting: false },
+				"onUpdate:fiatGuard": (v: unknown) => {
+					void w.setProps({ fiatGuard: v })
+				},
 				liveQuote: moved,
 			})
 			const input = w.find("input[data-testid='send-amount-fiat-input']")
@@ -450,5 +512,104 @@ describe("composite/AmountCard — fiat mode", () => {
 		await w.find("[data-testid='send-amount-max']").trigger("click")
 		const input = w.find("input[data-testid='send-amount-fiat-input']")
 		expect((input.element as HTMLInputElement).value).toBe("1250")
+	})
+})
+
+// jsdom has no layout: a stand-in font measures the field's amount at its full 40 px (digits 20 px,
+// separators 10 px), and `room` is the width the field gives its text.
+let room = 10_000
+const standInWidth = (text: string) => [...text].reduce((w, c) => w + (c === "," || c === "." ? 10 : 20), 0)
+vi.mock("@/utils/hero-ruler", () => ({
+	inputRoom: () => room,
+	rulerWidth: (el: Element, scale: number) => standInWidth(el.textContent ?? "") * scale,
+}))
+
+describe("composite/AmountCard — the field at rest shows the whole amount", () => {
+	// Attached and really focused: the fit asks which element has the focus.
+	const mountField = (props: Record<string, unknown> = {}) =>
+		mount(AmountCard, {
+			props: { tokenBalanceByType: 100, modelValue: "", token: { symbol: "TST", decimals: 18 }, ...props },
+			global: { stubs: STUBS },
+			attachTo: document.body,
+		})
+	type Field = ReturnType<typeof mountField>
+	const fieldOf = (w: Field) => w.get("[data-testid='send-amount-input']").element as HTMLInputElement
+	const scaleOf = (w: Field) => fieldOf(w).style.getPropertyValue("--hero-scale")
+	// "1,234,567.123456789012345678": 25 digits and 3 separators, 530 px at full size.
+	const LONG = "1234567.123456789012345678"
+
+	beforeEach(() => {
+		vi.restoreAllMocks()
+		room = 200
+	})
+	afterEach(() => {
+		room = 10_000
+	})
+
+	test("a long amount, once left, draws at the largest scale that shows all of it; focus brings back 40 px", async () => {
+		const w = mountField()
+		await w.get("[data-testid='send-amount-input']").setValue(LONG)
+		expect(scaleOf(w)).toBe("1")
+		fieldOf(w).blur()
+		await nextTick()
+		expect(fieldOf(w).value).toBe("1,234,567.123456789012345678")
+		expect(scaleOf(w)).toBe("0.37")
+		fieldOf(w).focus()
+		await nextTick()
+		expect(scaleOf(w)).toBe("1")
+		w.unmount()
+	})
+
+	test("a press on Max leaves the field at rest, grouped and fitted at once: the focus is not taken back", async () => {
+		// The page owns the model, so a write reads back only once the page has re-rendered.
+		const w: Field = mountField({
+			tokenBalanceByType: 1234567,
+			balanceRawByType: "1234567123456789012345678",
+			"onUpdate:modelValue": (v: unknown) => {
+				void w.setProps({ modelValue: v })
+			},
+		})
+		// The field takes the focus on mount; a pointer press on Max, a span, takes it off first.
+		fieldOf(w).blur()
+		await w.get("[data-testid='send-amount-max']").trigger("click")
+		await nextTick()
+		expect(w.emitted("update:modelValue")).toEqual([["1,234,567.123456789012345678"]])
+		expect(document.activeElement).not.toBe(fieldOf(w))
+		expect(fieldOf(w).value).toBe("1,234,567.123456789012345678")
+		expect(scaleOf(w)).toBe("0.37")
+		w.unmount()
+	})
+
+	test("an amount that fits keeps 40 px at rest", async () => {
+		const w = mountField()
+		await w.get("[data-testid='send-amount-input']").setValue("12.5")
+		fieldOf(w).blur()
+		await nextTick()
+		expect(scaleOf(w)).toBe("1")
+		w.unmount()
+	})
+
+	test("a font load, or the fiat toggle taking width, fits the field again; unmounting stops listening", async () => {
+		const fonts = new EventTarget()
+		const stopListening = vi.spyOn(fonts, "removeEventListener")
+		Object.defineProperty(document, "fonts", { value: fonts, configurable: true })
+		try {
+			const w = mountField()
+			await w.get("[data-testid='send-amount-input']").setValue(LONG)
+			fieldOf(w).blur()
+			await nextTick()
+			expect(scaleOf(w)).toBe("0.37")
+			room = 150
+			fonts.dispatchEvent(new Event("loadingdone"))
+			await nextTick()
+			expect(scaleOf(w)).toBe("0.28")
+			room = 100
+			await w.setProps({ liveQuote: { usd: 1, fetchedAt: Date.now() } })
+			expect(scaleOf(w)).toBe("0.18")
+			w.unmount()
+			expect(stopListening).toHaveBeenCalledWith("loadingdone", expect.any(Function))
+		} finally {
+			Reflect.deleteProperty(document, "fonts")
+		}
 	})
 })

@@ -26,7 +26,7 @@ const sponsoredSentence = computed(() => {
 		<span :class="$style.fee_label">You pay</span>
 		<span :class="$style.fee_value"><span :class="$style.skeleton" /></span>
 	</Flex>
-	<Flex v-else-if="estimate" direction="column" gap="4" :class="$style.detail_row">
+	<Flex v-else-if="estimate" direction="column" gap="4" :class="$style.detail_row" data-testid="fee-estimate">
 		<span :class="$style.fee_label" :aria-hidden="payer === 'sponsor' ? 'true' : undefined">You pay</span>
 		<span v-if="payer === 'sponsor'" :class="$style.fee_value">
 			<span aria-hidden="true">

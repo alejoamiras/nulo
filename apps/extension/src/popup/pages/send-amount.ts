@@ -28,6 +28,9 @@ export interface ValidateSendAmountInput {
 
 const MIN_BASE_UNITS = 1n
 
+/** The grouped whole part `restingAmount` writes; keep the two in step. */
+const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/
+
 /** Result-shaped wrapper over `parseAmountToBaseUnits`: its throw is the only signal, and
  *  the too-many-decimals case gets its own user-facing reason. */
 function parseToBaseUnits(
@@ -48,7 +51,9 @@ export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendA
 	if (typeof input !== "string" || input.trim() === "") {
 		return { valid: false, reason: "empty" }
 	}
-	const trimmed = input.trim().replace(",", "")
+	const raw = input.trim()
+	// Dropping every comma anywhere else would read stray commas as another amount.
+	const trimmed = GROUPED.test(raw) ? raw.replaceAll(",", "") : raw.replace(",", "")
 	if (trimmed === "" || trimmed === ".") {
 		return { valid: false, reason: "empty" }
 	}
