@@ -279,3 +279,23 @@ Verdict: **approve**, confidence high, no new findings. Codex mounted the commit
 memory (six component scenarios, fifteen caret checks, four paste controls): the round-3 case
 reads 123400.56 in both fields, with exact base units and USD conversion, and every earlier caret
 case holds.
+
+## Copy-polish merged in
+
+`origin/dev` at `c3d6afd5` (#734) came in through a signed `--no-ff` merge, `7fea21ce`. One
+conflict: the plans index, where both closed plans added their line after backup-import's; both
+lines stay, copy-polish's first. The merge was checked to add exactly what dev added: 73 files,
+the four this branch also touched (the e2e skill, `send.vue`, `follow-ups.md` and the index) with
+the same added and removed lines, the other 69 byte for byte. `send.vue` gained only E2's line,
+and the line FU-1 cites in `journal-state.ts` did not move.
+
+| Command on `7fea21ce` | Result |
+|---|---|
+| `bun run lint` | exit 0; 28 warnings, 3 infos; complexity-baseline check OK |
+| `bun run typecheck:all` | exit 0 |
+| `bun run test:all` | exit 0; extension 628 files passed, 3 skipped; 8599 tests passed, 4 skipped, 7 todo; every other workspace 0 failed |
+| `bun run test:ci-gating` | exit 0; 244 pass, 2 skip, 0 fail |
+| `bun run build` | exit 0; the tree stays clean |
+
+The em dash guard (`copy-dash-ban.test.ts`, 15 tests) passes alone as well: none of this
+branch's strings joins two clauses with an em dash. The e2e suites are left to the PR's CI.

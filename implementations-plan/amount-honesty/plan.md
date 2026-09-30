@@ -12,10 +12,10 @@ base: dev after stack #729 lands (the tree at `0f37ab78`)
 
 ## Outcome
 
-- **Date:** 2026-09-30. **Status:** delivered on `fix/amount-honesty`, with `dev` at `9d984244`
-  merged in. The owner answered O1 to O4 and signed off P3's screenshots that day with one change,
-  the held paste's line, built as P2 step 7 (P4). The driver opens the PR and merges it once its
-  required checks are green.
+- **Date:** 2026-09-30. **Status:** delivered on `fix/amount-honesty`, with `dev` at `c3d6afd5`
+  (#734, copy-polish) merged in. The owner answered O1 to O4 and signed off P3's screenshots that
+  day with one change, the held paste's line, built as P2 step 7 (P4). The driver opens the PR and
+  merges it once its required checks are green.
 - **Shipped:** A1. The activity card, the transaction page and the received page state an amount
   only in decimals the wallet knows (`hasDecimals`, `knownDecimals`, one `txAmount` per record), or
   show none: a listed token's standard mint reads its minted amount, compact past 8 characters, fee
@@ -33,8 +33,9 @@ base: dev after stack #729 lands (the tree at `0f37ab78`)
   `build` exit 0; smoke green at retry 0 in three shards per browser, Chrome 165 passed and 7
   skipped of 172, Firefox 161 and 11, every skip the suite's own; the five network files green at
   retry 0 in one run per browser (Chrome prover on, Firefox proverless), 6 of 6 each, and
-  `send-amount-exact` 3 of 3 per browser; the native paste read as `insertFromPaste` on both. Red
-  first: P1 and P2 in vitest; the one-way binding in Chrome and vitest; the caret in Chrome and
+  `send-amount-exact` 3 of 3 per browser; the native paste read as `insertFromPaste` on both. With
+  copy-polish merged in (`7fea21ce`), the five step-1 commands exit 0 again, its em dash guard
+  included; the e2e suites run in the PR's CI. Red first: P1 and P2 in vitest; the one-way binding in Chrome and vitest; the caret in Chrome and
   vitest; the symbol, the caret's two later fixes and the owner's line in vitest. Codex
   (`/codex high`): changes-requested in each of three rounds, every material finding fixed red
   first or triaged in § Decision ledger; then a narrow fourth round over round 3's fix: approve
