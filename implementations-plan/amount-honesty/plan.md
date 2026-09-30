@@ -36,9 +36,9 @@ base: dev after stack #729 lands (the tree at `0f37ab78`)
   `send-amount-exact` 3 of 3 per browser; the native paste read as `insertFromPaste` on both. Red
   first: P1 and P2 in vitest; the one-way binding in Chrome and vitest; the caret in Chrome and
   vitest; the symbol, the caret's two later fixes and the owner's line in vitest. Codex
-  (`/codex high`): changes-requested in each of three rounds; every material finding was fixed
-  red first or triaged in § Decision ledger, and the cap left round 3's fix with no codex pass of
-  its own (`lessons/phase-3.md`).
+  (`/codex high`): changes-requested in each of three rounds, every material finding fixed red
+  first or triaged in § Decision ledger; then a narrow fourth round over round 3's fix: approve
+  (§ Plan audit ledger, `lessons/phase-3.md`).
 - **Dropped:** an exact reading of a paste into the field's own rest, which needs the paste's
   selection; the owner kept it as built. The comma point overtyped with ".", as not realistic.
 - **Open items:** FU-1 to FU-5 are in `follow-ups.md`, FU-4 in § Wallet safety and the rest in
@@ -593,6 +593,13 @@ with the exact copy (P4 quotes them).
 | G1 | codex | minor | A pasted ".5" in the USD field no longer reaches today's leading-dot fix, and `parseUsdToMicro` refuses ".5" (`convert.ts:101-103`), so Send stays off | accepted: § A2 keeps the fix (`AmountCard.vue:202-204`) after the reader; P2 step 4 adds the ".5" paste (red) and keeps the typed case (pin) |
 | G2 | codex | minor | "1.234,56" at 2 decimals needs no clamp, so it cannot re-rest; two expectations are already green; "the same pastes" in USD mode is unclear | accepted: the re-rest case uses "1.234,567", "1.234,56" is a pin; "1,000" with `rested` and the received page's "+1" after loading are labelled pins; the USD case names which pastes convert and which clear |
 | G3 | codex | minor | The comma point's lifecycle is not pinned | accepted: parent-bound sequences for blur and return, a replacing paste and a removed comma point, and card cases for the USD re-read and `insertReplacementText` |
+
+- `/codex high` (GPT-6 Astra), the post-implementation loop over the branch's diff, session
+  `01a0f35a-44b9-73e3-a994-b0eb094bc012`: rounds 1 to 3 **changes-requested**, each material
+  finding fixed red first, triaged by realism or asked of the owner (§ Decision ledger;
+  `lessons/phase-3.md`). Round 4, narrow, over round 3's fix `3b74c649` against its parent:
+  **approve**, confidence high, no new findings. It fixes the round-3 finding in both fields and
+  breaks no caret case the earlier rounds fixed.
 
 ### Decision ledger
 

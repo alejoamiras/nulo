@@ -265,3 +265,17 @@ The field group's 48 captures were re-taken at this commit, and row 15's three h
 replaced P3's under the same names. Pixel by pixel, the other 45 differ from P3's only in the
 header's account address (a fresh account per run), the fee row's loading shimmer and single
 pixels on the card's edge: none of the codex loop's fixes changes a captured screen.
+
+## Codex round 4, narrow
+
+The loop's cap left `3b74c649`, round 3's fix, with no codex pass of its own, and the merge needs a
+converged review, so the driver asked for a fourth round over that commit alone. The same session,
+resumed at high on the same account, got two questions: does `3b74c649` fix the round-3 finding in
+both fields, and does it break a caret case rounds 1 and 2 fixed, on any rewrite path that can
+drop, keep or add a comma after the caret. Findings were limited to what that commit fixes
+incompletely or causes.
+
+Verdict: **approve**, confidence high, no new findings. Codex mounted the commit's own card in
+memory (six component scenarios, fifteen caret checks, four paste controls): the round-3 case
+reads 123400.56 in both fields, with exact base units and USD conversion, and every earlier caret
+case holds.
