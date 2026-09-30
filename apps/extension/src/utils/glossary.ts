@@ -43,7 +43,7 @@ export const GLOSSARY = {
 	authorization: {
 		term: "Authorization",
 		definition: "Lets a contract do one specific thing for you, once.",
-		where: "Permission window · approval window",
+		where: "Permission window · Connected apps",
 	},
 	"name-for-this-app": {
 		term: "Name for this app",

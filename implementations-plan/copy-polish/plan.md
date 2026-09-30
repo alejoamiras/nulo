@@ -724,7 +724,7 @@ each pin file of the table green; from the root: `bun run lint`, `bun run typech
 `bun run test:ci-gating` exit 0.
 Layers: lint, typecheck, unit, component, CI-gating.
 
-### P2 · The glossary's `where` (G)
+### P2 · The glossary's `where` (G) ✓
 
 1. Red: `utils/glossary.test.ts` and `popup/pages/settings/glossary.test.ts` expect the new line.
 2. `utils/glossary.ts:46`.
