@@ -11,6 +11,44 @@ worktree: a harness-created agent worktree (lessons/phase-0.md records it)
 base: dev @ 94ef1b11 (stack #729 landed; the same tree as `0f37ab78`, where the Facts were read)
 ---
 
+## Outcome
+
+- **Date:** 2026-09-30. **Status:** closed, awaiting archive: delivered on `chore/copy-polish` and
+  pushed; the driver opens the PR. The owner's blanket sign-off is quoted in P6 and the codex loop
+  has converged, so it merges once every required check is green on the head.
+- **Shipped**, P0 to P5:
+  - E: the 46 strings split at the dash, eleven reworded under O1's delegation (E1, E2, E3, E24,
+    E25 to E28, E31, E39, E44), each pin moved with its string, one the plan missed included
+    (`NewTokenPopup.test.ts:382`). `apps/extension/src/utils/copy-dash-ban.test.ts` fails on a new
+    clause dash in the forms it reads, with 40 reviewed hits, and CLAUDE.md states the rule.
+  - G: the glossary's Authorization `where` reads "Permission window · Connected apps" (O4 (a)).
+  - T: while the Terms sheet shows, `#toast` draws at 9500, over the sheet and under the loader
+    and the barriers, and the card sits 12 px above Continue's row (O2 (a)). S11 and two S4
+    assertions in `legal-acceptance.test.ts` prove it on both browsers, through the driver's new
+    `evaluateInBackground`.
+  - A-27: a screen reader hears an unknown contract's Details row as "Unknown contract <address>:
+    <columns>" (O3 (b)); nothing drawn changes.
+- **Gates at delivery:** on `bf355a86`, with `dev` at `9cbe4862` merged in (`dev`'s docs-only
+  `9d984244`, merged after, and the close-out commits change no code): lint, `typecheck:all`,
+  `test:all`, `test:ci-gating`, `build`, `build-storybook` and the plans gate exit 0; smoke green
+  in three parts per browser, Chrome 166 passed and 7 skipped of 173, Firefox 162 and 11, every
+  skip the suite's own; the flake bar 14 of 14 three times per browser at retry 0;
+  `snack-placement` and `cap-window` at retry 0, Chrome 8 of 8, Firefox 7 of 8 with the suite's
+  Chrome-only reduced-motion case skipped (`lessons/phase-5.md`).
+- **Red first:** the guard listed exactly the 46 strings on the base; E29's pin, the glossary, the
+  sheet's inset and emit, and A-27's name in vitest; S11 on Chrome and Firefox before P3's change
+  (`lessons/phase-1.md` to `phase-5.md`).
+- **Codex** (GPT-6 Astra, high, one session): changes requested, two findings fixed and one
+  rejected with its reasons in § Decision ledger; then approve, with no new material finding
+  (`lessons/phase-5.md`).
+- **Dropped:** P5's Chrome-only loader step, since a worker restart never draws the loader
+  (`lessons/phase-5.md`).
+- **Open items:** Add token's PXE store errors (E45, E46) are in `follow-ups.md` § Copy. The
+  build's one new gotcha, a CSS-module transition class escaping the stillness check's
+  `-enter-from` match, went to the `e2e-testing` skill, which owns flake root causes; `lessons.md`
+  gains no line (8,131 of its 8,192 bytes, and nothing here supersedes an entry).
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 # Copy polish
 
 Four owner-decision follow-ups about what the popup says and shows, from
@@ -113,10 +151,10 @@ lines are not audited.
 
 | # | Surface | Before → after | Sign-off |
 |---|---|---|---|
-| 1 | The 46 strings of § The string table: 13 snacks, 15 field, card, dialog and error-log lines, 3 History and journal lines, 15 screen texts | split at the dash ("Profile imported — unlock to continue" → "Profile imported. Unlock to continue"), eleven reworded ("Couldn't estimate fee — retry." → "Couldn't estimate fee. Try again.") | O1 answered 2026-09-30: "Reword some (tell me which)", note: "Please, evaluate yourself, just don't over-use them. feel free to ask gpt sol". Blanket sign-off pending (P6) |
-| 2 | Settings → Glossary, Apps, "Authorization" | where-line "Permission window · approval window" → "Permission window · Connected apps" | O4 answered 2026-09-30: "Connected apps (Recommended)". Blanket sign-off pending (P6) |
-| 3 | The Terms sheet, while a snack is raised | the snack is drawn under the sheet's backdrop and is never seen → it shows over the sheet, 12 px above Continue's row at the end of the scroll; while shown it can cover the consent box's row, and for the 0.15 s it rises into place or drops away its lower edge covers Continue's top 8 px | O2 answered 2026-09-30: "Show it over the sheet (Recommended)". Blanket sign-off pending (P6) |
-| 4 | The permission window's Details rows, unknown contracts, for a screen reader | "0x0c1e…5a7f: simulate, add, transact" → "Unknown contract 0x0c1e…5a7f: simulate, add, transact". Nothing drawn changes | O3 answered 2026-09-30: "Unknown contract + address (Recommended)". Blanket sign-off pending (P6) |
+| 1 | The 46 strings of § The string table: 13 snacks, 15 field, card, dialog and error-log lines, 3 History and journal lines, 15 screen texts | split at the dash ("Profile imported — unlock to continue" → "Profile imported. Unlock to continue"), eleven reworded ("Couldn't estimate fee — retry." → "Couldn't estimate fee. Try again.") | O1 answered 2026-09-30: "Reword some (tell me which)", note: "Please, evaluate yourself, just don't over-use them. feel free to ask gpt sol". Blanket sign-off given 2026-09-30, as built (P6) |
+| 2 | Settings → Glossary, Apps, "Authorization" | where-line "Permission window · approval window" → "Permission window · Connected apps" | O4 answered 2026-09-30: "Connected apps (Recommended)". Blanket sign-off given 2026-09-30, as built (P6) |
+| 3 | The Terms sheet, while a snack is raised | the snack is drawn under the sheet's backdrop and is never seen → it shows over the sheet, 12 px above Continue's row at the end of the scroll; while shown it can cover the consent box's row, and for the 0.15 s it rises into place or drops away its lower edge covers Continue's top 8 px | O2 answered 2026-09-30: "Show it over the sheet (Recommended)". Blanket sign-off given 2026-09-30, as built (P6) |
+| 4 | The permission window's Details rows, unknown contracts, for a screen reader | "0x0c1e…5a7f: simulate, add, transact" → "Unknown contract 0x0c1e…5a7f: simulate, add, transact". Nothing drawn changes | O3 answered 2026-09-30: "Unknown contract + address (Recommended)". Blanket sign-off given 2026-09-30, as built (P6) |
 
 Nothing else a user sees changes.
 
@@ -124,7 +162,7 @@ Nothing else a user sees changes.
 
 The owner answered in chat (AskUserQuestion), before the builds, from text mocks with the exact
 copy. Each answer is the option label picked, verbatim, with any note typed. The blanket sign-off
-stays open until the PR's screenshots (P6).
+waited for the PR's screenshots and came on 2026-09-30 (§ P6).
 
 - **O1 · The clause-joining em dashes (46 on the stacked tree: the 44 plus two PXE store errors the
   Add token screen can show)** → "Reword some (tell me which)", note: "Please, evaluate yourself,
@@ -589,8 +627,8 @@ readers, and an unknown row's name says so since a Tab to it skips its sub-heade
 "Please, evaluate yourself, just don't over-use them. feel free to ask gpt sol"; O2 "Show it over
 the sheet (Recommended)"; O3 "Unknown contract + address (Recommended)"; O4 "Connected apps
 (Recommended)". **The blanket sign-off** over the built result (the table as built, the barrier
-copy, O2 to O4 as built, and the sheet's unchanged layer against menus and popovers) stays open
-until the PR's screenshots (P6).
+copy, O2 to O4 as built, and the sheet's unchanged layer against menus and popovers) waited for
+the PR's screenshots and was given on 2026-09-30 (§ P6).
 
 **Codex** (round 1, then the final fresh pass)
 
@@ -690,8 +728,8 @@ Realistic, and covered: the corrupt passkey-key restore (E44), the PXE store's e
 
 - **Add token shows the PXE store's developer errors verbatim** (`packages/aztec-runtime/src/pxe/opfs-store.ts:58`,
   `:222`, through `apps/extension/src/popup/components/popups/NewTokenPopup.vue:334`); mapping
-  them to user copy is an owner copy decision. Moved to `implementations-plan/follow-ups.md` when
-  the plan closes.
+  them to user copy is an owner copy decision. Moved to `implementations-plan/follow-ups.md`
+  § Copy.
 
 ## Approval
 
@@ -699,7 +737,8 @@ The final fresh codex pass conditionally approved (confidence high); its three c
 applied in this revision. The owner answered O1 to O4 on 2026-09-30 (§ UI asks). Cleared to build.
 The delivery boundary (the same rule in P6 and Delivery): the PR opens and CI runs before the
 blanket sign-off; it merges once the blanket sign-off is quoted in this plan, every required check
-is green on the head, and the codex loop has converged.
+is green on the head, and the codex loop has converged. The owner gave the blanket sign-off on
+2026-09-30 (§ P6).
 
 ## Phases
 
@@ -826,7 +865,7 @@ such on Firefox.
 Layers: typecheck, lint, unit, component, CI-gating, build, Storybook build, e2e,
 e2e-live-network.
 
-### P6 · The blanket sign-off
+### P6 · The blanket sign-off ✓
 
 No alternative is built: O1 to O4 are answered (§ UI asks). This phase captures the built result
 for the blanket sign-off.
@@ -850,7 +889,17 @@ for the blanket sign-off.
    blanket sign-off.
 3. Record the blanket sign-off here, quoted.
 
-Blanket sign-off: pending.
+Captured on 2026-09-30, every row of the table, from the branch's e2e builds; E25 to E28 and E44
+also scrolled to each line's end, since the viewer scrolls sideways. The files and their index are
+with the driver, for the owner's page.
+
+**The owner's blanket sign-off, 2026-09-30.** On the sign-off page
+(https://claude.ai/artifact/QpooE2sKVW9Ch3WZCGNMMc), at 18:07 UTC, the owner picked "Sign off
+both, and don't wait on me", saved as `{mode: "delegate", changes: ["preview-line"], note: ""}`.
+That option covers every screen on the page, any fix the last review round makes to those
+screens, and any wording or layout call such a fix needs in this PR. Its one change,
+`preview-line`, is amount-honesty's, and the note is empty: the 35 bare splits, the eleven
+rewordings, O2, O3 and O4 are signed off as built. Each row of § UI impact now carries it.
 
 Gate: the delivery boundary (§ Approval): the PR may open before this gate; it does not merge until
 the blanket sign-off is quoted in this plan.

@@ -137,3 +137,46 @@ the sheet. It scanned 684 files and found 40 reviewed hits, none open or stale.
   **Accepted**, `6e2c69ab`: deleted.
 
 After both fixes the guard runs 15 of 15, and Biome is clean.
+
+## Codex, build round 2
+
+The same session, resumed with the fix diff (`8b7b7421..50f8e684`), the F1 rejection's reasons
+and both rules: **approve**, no new material finding and no comment nit, confidence high. F2 and
+F3 are "right and complete"; the F1 rejection "holds": both buttons stay outside the 8 px band,
+the card runs nothing on a tap, and the guarantee is narrowed to the settled card. The loop
+converged in two rounds.
+
+## The final gate
+
+`dev` moved to `9cbe4862` (three test and plan commits); it was merged in with a signed merge
+commit (`bf355a86`), and the guard found no new hit. Every row below ran on `bf355a86` and exits 0.
+`dev`'s docs-only `9d984244` (CLAUDE.md, the plans README) was merged after (`810231c1`), so the
+code the rows ran is the head's; lint, the plans gate and `test:ci-gating` ran again on the head.
+
+- `bun run lint` → 1,944 files, 28 warnings and 3 infos (the base's), complexity-baseline OK.
+- `bun run typecheck:all` → every workspace.
+- `bun run test:all` → 14 workspace scripts; the extension 625 files passed and 3 skipped, 8,462
+  tests passed, 4 skipped, 7 todo (the new scanner case is the one more). The known
+  `useFullBackupImport` flake did not fire, and `dev`'s fix for it is merged.
+- `bun run test:ci-gating` → 244 passed, 2 skipped, 0 failed (246 tests, 17 files).
+- `bun run build`, and `bun run --cwd apps/extension build-storybook`.
+- **Smoke**, armed builds, three parallel parts per browser, the same counts as P5's, no
+  `PASSED ON RETRY` line, `legal-acceptance.test.ts` 14 of 14 and
+  `imported-account-lifecycle.test.ts` 1 of 1 on both:
+
+  | Browser | Part | Files passed / skipped | Tests passed / skipped |
+  |---|---|---|---|
+  | Chrome | 1/3 | 13 / 2 | 52 / 2 |
+  | Chrome | 2/3 | 13 / 1 | 43 / 4 |
+  | Chrome | 3/3 | 14 / 0 | 71 / 1 |
+  | Chrome | sum | 40 / 3 of 43 | 166 / 7 of 173 |
+  | Firefox | 1/3 | 14 / 1 | 53 / 1 |
+  | Firefox | 2/3 | 13 / 1 | 43 / 4 |
+  | Firefox | 3/3 | 14 / 0 | 66 / 6 |
+  | Firefox | sum | 41 / 2 of 43 | 162 / 11 of 173 |
+
+- **Flake bar**, three consecutive retry-0 runs per browser: Chrome 14 of 14 each (S11 12.1 s,
+  12.0 s, 10.7 s); Firefox 14 of 14 each (S11 15.6 s, 16.3 s, 14.4 s).
+- **Network**, the same command as P5's: Chrome, prover on → 2 files, 8 of 8 passed; Firefox,
+  proverless → 2 files, 7 of 8 passed, 1 skipped (cap-window's reduced-motion case, Chrome-only).
+- `bun run e2e:reap` → exit 0, nothing to reap.
