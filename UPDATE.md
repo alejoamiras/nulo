@@ -114,7 +114,7 @@ Current line: **`@aztec-labs/*` and `@aztec-foundation/*` = 6.0.0-rc.1**, with `
 
 The any-ERC-20 bridge's Aztec couplings moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed): hub ↔ factory, `tokenClassId` ↔ the standards `Token` artifact, hub → `ContractInstanceRegistry`, the split JS/Noir toolchain, token-list origin ↔ CSP, the `txe-server` lockfile and per-token wallet grants, plus the PrivateFPC deploy descriptor, its node-compat map and the deploy-intent tooling. Until unleashed is populated, read them in [`UPDATE.md` at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/UPDATE.md).
 
-The wallet's testnet USDC seed (`default-tokens.ts`, `price-map.ts`) mirrors unleashed's `tokens[].l2Token` for its current testnet generation, and the `aztec-update` skill's reset step re-points it; changing a seed is an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off).
+The wallet's testnet seeds (`TESTNET_TOKENS` in `default-tokens.ts`, which `price-map.ts` prices from) mirror unleashed's `tokens[].l2Token` for its current testnet generation, one per token, and the `aztec-update` skill's reset step re-points every one; changing a seed is an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off).
 
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
