@@ -103,6 +103,7 @@ describe("untrack", () => {
 		expect(status[`${P}/a/audit-x.md`]).toBe("R100")
 		expect(status[`${P}/a/shuffled.ts`]).toBe("R100")
 		expect(status[`${P}/a/edited.txt`]).toMatch(/^R0\d\d$/)
+		writeManifest(repo, [])
 		expect(verify({ cwd: repo, promotions: [] })).toEqual([
 			`${P}/a/audit-x.md leaves the tree without a row`,
 			`${P}/a/edited.txt leaves the tree without a row`,
