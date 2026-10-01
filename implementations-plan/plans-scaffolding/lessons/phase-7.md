@@ -109,6 +109,13 @@ A fresh session over `80663b61..3551372e`, asked for seams, duplication and plan
 
 J moved to `df2de6ad`, C to `fc2492a6` (its fixture fix on J's), and D's tools stage onto it; D was then regenerated.
 
+## Cross-arc pass, round 2
+
+Every round-1 fix held. Two findings:
+
+- **Y7, rejected.** An emptied or trimmed manifest still verifies, since the branch removes nothing once A has merged. The manifest only indexes: each link to an untracked file is a permalink the gate pins to an allowlisted, ancestry-checked commit, so a lost row loses no reachable evidence, and the verify belongs to a tool CI never runs. E's gate checks its own move instead: every rename in its move commit keeps its blob and mode. The plan's "append-only" now reads as what holds: `record` only appends.
+- **Y8, adopted.** § Data & control flow, § Security's guard line, the A9 answer (annotated, not rewritten), the merge command (`--squash`) and both seeds still described E then F, or the guard narrowing in A.
+
 ## For E
 
 - `mine.ts --verify` passes on D (L56). E's rewrite of `lessons.md` ends it as a gate: from then on the mining record is evidence of J's curation.

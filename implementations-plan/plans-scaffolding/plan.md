@@ -150,7 +150,7 @@ export function checkTree(): Finding[]
 
 **`check.ts`** exits 1 with one line per finding; `--report` exits 0. **`tree.test.ts`** asserts `[]` in enforce mode.
 
-**`plans-scaffolding/untrack-manifest.json`** is the evidence index. It holds `{path, sha, blob}` per path removed or promoted away, recorded before any mutation, and is append-only.
+**`plans-scaffolding/untrack-manifest.json`** is the evidence index. It holds `{path, sha, blob}` per path removed or promoted away, recorded before any mutation; `record` only appends to it.
 
 ### Data & control flow (critical path)
 
@@ -159,7 +159,7 @@ export function checkTree(): Finding[]
 3. **J**: classifier → owner answers → `closures.json` → miner (inventory, quoted candidates) → cluster subagents → driver-written lines → fresh verifier → `lessons.md`, `follow-ups.md`, `mining.jsonl` → spec lift.
 4. **C**: asset `git mv`; repoint the executable consumers; repair the 6 broken mentions; `path-token` on.
 5. **D**: Outcome generator (in place, own commit) → archive mover (own commit) → index splitter → map-driven link repairer → `archive-move.ts --verify`.
-6. **After D merges**: E (this plan's closing steps 1-3), then F (its move).
+6. **On top of D**: E closes this plan and moves it into the archive, one PR that lands with the stack (L58).
 
 ### File-level change map
 
@@ -309,7 +309,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 **Path leaks.**
 - **Untrack set:** 64 files hold home paths (945 macOS-prefix and 199 homelab occurrences). Untracking removes them from HEAD only: they stay public at 9f11de70, and the permalinks point there by design (O1). Removing them would take a history rewrite, which is a hard limit and blocked on `dev`.
 - **Kept files:** 23 hold 148 more, which A4 scrubs.
-- **The guard:** `check-no-local-paths.sh` misses `/mnt/<volume>/<user>`, runs only as a hook, and exempts all of `implementations-plan`. A extends it after proving 0 hits and narrows the exemption to `archive/**`.
+- **The guard:** `check-no-local-paths.sh` misses `/mnt/<volume>/<user>`, runs only as a hook, and exempts all of `implementations-plan`. With A4 deferred, A left it as it was: E narrows the exemption to `archive/**` (L57), and CI's `local-path` rule, which also reads `/mnt/` paths, covers the live plan files.
 - **In CI:** `local-path` covers the curated files, the indexes and active plan dirs, `mining.jsonl` included.
 
 **Destructive pulls.** Pulling A deletes the ~640 files from every other checkout, the owner's main clone included. The A11 notice, the permalinks and the bundle cover this.
@@ -412,7 +412,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 - **A6. The 66 comment mentions.** Default: leave them, repair the 6 broken ones, and add a "clean up on touch" line to `follow-ups.md`. Alternative: permalink all 66 (digest-safe, F15), which adds ~52 files to C.
 - **A7. `PRF-NON-PORTABLE.md` → `apps/extension/tests/e2e/`.** Default yes. The CLAUDE.md rule becomes: new code cites a live doc or a permalink, never a plan path. Existing mentions stay until touched (A6).
 - **A8. Link-check scope as in Mechanics.** Default yes.
-- **A9. Delivery.** Default: 5 stacked squash PRs, then E and F after D merges. A0 and A each open when their own loop converges; J, C and D open after the final pass.
+- **A9. Delivery.** Default: 5 stacked squash PRs, then E and F after D merges (superseded by L58: E is one close-out PR on top of D). A0 and A each open when their own loop converges; J, C and D open after the final pass.
   - Opening A0 and A early is a recorded exception to the blueprint's "no PR before every loop" rule.
   - Both audits asked for it, so that A lands before the blueprint race and #669 widen. The final pass agrees, on two conditions the plan adopts: each opens only after its own loop, soak (A14) and bundle (A13); and a later finding that affects a merged arc blocks every further delivery until a fix-forward PR lands.
 - **A10. Baselines.** Default: relocate to #669's destination if #669 has not landed.
@@ -707,7 +707,7 @@ In order. No `/code-review`: `code_review` is `off`.
    - `check-no-local-paths.sh`'s exemption narrowed to `archive/` (L57);
    - in its own commit, `git mv implementations-plan/plans-scaffolding implementations-plan/archive/plans-scaffolding`;
    - then `repair-links.ts`'s repairs with a one-row map (the dir's own relative links gain a level, and the links into it from the curated files, indexes and live docs are re-pointed), and its index line → `archive/index.md` in the generated format;
-   - E's pre-merge gate (the table above). `gh stack merge` on E lands the stack and E together, so the merge that lands the work closes the plan.
+   - E's pre-merge gate (the table above). `gh stack merge --squash` on E's PR lands the stack and E together, so the merge that lands the work closes the plan.
    - Then suggest `agent-worktree done plans-scaffolding`.
 
 **No-over-engineering rule** (verbatim in every post-impl codex prompt): *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
@@ -751,6 +751,7 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc D codex loop, round 2 (2026-10-01): changes needed** (high confidence, 2 blocking and 2 non-blocking findings). All 4 adopted (D6-D9; L50 and L52 restated). It confirmed every round-1 repro failing, all 270 index targets passing, no false positive from the second grep now or after a simulated archive of this plan, and the revised inventory rules accepting all 1,724 local PR records.
 - **Arc D codex loop, round 3 (2026-10-01): approve** (high confidence, no findings). It reproduced the plain-target rule (literal, encoded, double-encoded and escaped decoys refused; all 270 real targets pass; across 512 accepted probes the rendered href and opened path equal the text) and the move-map mode check (identical blobs' cross-pairings pass, traded modes fail, six injected changes caught), and an in-memory archive of this plan raised no finding.
 - **Cross-arc pass (`/codex high`, a fresh session over `80663b61..3551372e`), round 1 (2026-10-01): changes needed** (high confidence, 3 P2 and 3 P3 findings). All 6 adopted (Y1-Y6, ledger L54-L59), Y4's narrowing in E (L57). It found the 42 relocated assets' blobs, the wallet-crypto non-test source, the dependencies and the workflow permissions unchanged, parked and new plans active, and E's one-directory repair working in memory.
+- **Cross-arc pass, round 2 (2026-10-01): changes needed** (high confidence, 1 P2 and 1 P3 finding). Y8 adopted; Y7 rejected with its reason (§ Findings). It confirmed Y1-Y6: missing and duplicate rows fail while the real table passes, `OWN` resolves in copied and archived layouts and from another checkout, all 679 rows verify from a simulated archive, the L30 verdicts match their subject, the guard's 18 and 0 hits, and the generated diff byte-identical.
 
 ---
 
@@ -894,6 +895,8 @@ In order. No `/code-review`: `code_review` is `off`.
 | Y4 | The guard's exemption never narrowed, and the plan still splits E and F | adopted, the narrowing in E | L57, L58 |
 | Y5 | `closed.ts` duplicates the gate's blob reader, already without its timeout | adopted | L59 |
 | Y6 | Two comments cite the plan | adopted | They state the rule |
+| Y7 | An emptied or trimmed manifest still verifies: once A merged, the branch removes nothing | rejected | The manifest is a secondary index: every link to an untracked file is a permalink the gate pins and ancestry-checks, so a dropped row loses no reachable evidence, and CI never runs the verify; E's gate proves its own move exact. § The manifest now says what holds: `record` only appends |
+| Y8 | Four passages and two seeds still split E and F or give A the guard, and the merge command omits `--squash` | adopted | § Data & control flow, § Security, A9 (annotated), § Post-implementation, § Seeds |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).
@@ -910,7 +913,7 @@ ELI5 Artifact: https://claude.ai/artifact/6LvTf3eV89sd63NLThX5DD (`eli5_mode: ar
 **Recommended: `/goal`.** Completion shows in the transcript: gate outputs, `gh stack view`.
 
 ```
-/goal All phases 0–7 marked ✓ in implementations-plan/plans-scaffolding/plan.md (the phase headers in the file, not the chat or task list), each ✓ backed by that phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/plans-scaffolding/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged at each of the 5 arc boundaries (A0 gate, A untrack, J judgement, C repoints, D archive) and in the final fresh-context cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the owner's S1–S17 and A1–A16 answers are recorded in plan.md before Phase 3 ran; PRs A0 and A were each opened only after their own arc loop converged and PRs J, C, D only after the final cross-arc pass (`gh stack view` output in the transcript); `git ls-files -ci --exclude-standard -- implementations-plan` printed nothing, and `bun scripts/ci-cd/plans/check.ts`, `untrack.ts --verify`, `archive-move.ts --verify`, `bun run test:ci-gating`, `bun run test:all` and `bun run lint` all reported exit 0 in the transcript. Never purge or rewrite dev's history; merge only under § Approval's rule (codex loop converged, every required check green, plain `gh pr merge --squash`, A only after the A14 soak and the A13 bundle); never write this plan's own Outcome block (that is close-out PR E, after D merges).
+/goal All phases 0–7 marked ✓ in implementations-plan/plans-scaffolding/plan.md (the phase headers in the file, not the chat or task list), each ✓ backed by that phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/plans-scaffolding/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged at each of the 5 arc boundaries (A0 gate, A untrack, J judgement, C repoints, D archive) and in the final fresh-context cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the owner's S1–S17 and A1–A16 answers are recorded in plan.md before Phase 3 ran; PRs A0 and A were each opened only after their own arc loop converged and PRs J, C, D only after the final cross-arc pass (`gh stack view` output in the transcript); `git ls-files -ci --exclude-standard -- implementations-plan` printed nothing, and `bun scripts/ci-cd/plans/check.ts`, `untrack.ts --verify`, `archive-move.ts --verify`, `bun run test:ci-gating`, `bun run test:all` and `bun run lint` all reported exit 0 in the transcript. Never purge or rewrite dev's history; merge only under § Approval's rule (codex loop converged, every required check green, plain `gh pr merge --squash`, A only after the A14 soak and the A13 bundle); never write this plan's own Outcome block (that is close-out PR E, on top of D).
 ```
 
 **Alternative: `/loop`.** Use exactly one per session; they do not compose.
@@ -923,6 +926,6 @@ ELI5 Artifact: https://claude.ai/artifact/6LvTf3eV89sd63NLThX5DD (`eli5_mode: ar
 4. Stuck, or facing a decision you'd bring to me? `/codex high` with full context until you reach a defensible decision; log consult + verdict in lessons/phase-N.md. Never crossed: an unanswered S/A Ask (Phase 3 hard stop: surface and hold), `gh stack sync`, purge or history rewrite of dev, merging outside § Approval's rule, required-check or workflow-permission changes, new dependencies, scope beyond plan.md, writing this plan's own Outcome (PR E only).
 5. Same step failed 5 times? Stop, reassess with codex, continue on the agreed path.
 6. Phase green = its validation gate in plan.md passes (commit first; commands + pass criteria). Paste the result, mark ✓, write the lessons entry, print `LESSONS_FILE=…/phase-N.md`, `agent-worktree status plans-scaffolding "phase N green: <next>"`. Arc boundary (after phases 1, 2, 4, 5, 7)? Run the codex loop on the arc diff (`/codex high`, arc map, adversarial + arc-specific asks, the plan's no-over-engineering and comment-quality rules, resume until no material findings; no /code-review: code_review is off). After A0 and A: wave-1 delivery (`gh stack submit --auto`, `gh pr edit` body, `gh pr checks --watch`). Then `gh stack add <next-arc-branch>`.
-7. All phases ✓? Final cross-arc pass: FRESH `/codex high` session over the net diff A0–D (stat + filtered diffs), cross-arc ask + both rules, loop until clean. Then wave-2 delivery per plan.md: Stack operations 1-3, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Wrap-up: what shipped, every contested decision codex and I debated (ELI5: question, options, why ours), open items, the pre-merge re-run and the post-merge close-out (PRs E, F). Surface and stop.
+7. All phases ✓? Final cross-arc pass: FRESH `/codex high` session over the net diff A0–D (stat + filtered diffs), cross-arc ask + both rules, loop until clean. Then wave-2 delivery per plan.md: Stack operations 1-3, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Wrap-up: what shipped, every contested decision codex and I debated (ELI5: question, options, why ours), open items, the pre-merge re-run and close-out PR E. Surface and stop.
 Keep the native task list current (TaskUpdate); plan.md stays the source of truth.
 ```
