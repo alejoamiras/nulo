@@ -2,12 +2,17 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<title>Nulo V5 — screenshot frame</title>
+		<title>Nulo V6 screenshot frame</title>
 		<style>
 			@font-face {
 				font-family: "Space Grotesk";
 				font-weight: 300 700;
 				src: url("{{font}}") format("woff2");
+			}
+			@font-face {
+				font-family: "JetBrains Mono";
+				font-weight: 400 700;
+				src: url("{{mono}}") format("woff2");
 			}
 			html,
 			body {
@@ -17,47 +22,75 @@
 				overflow: hidden;
 			}
 			body {
-				background: #0a0908;
+				position: relative;
+				background: radial-gradient(circle at 76% 50%, rgba(255, 85, 0, 0.11), transparent 42%), #0a0908;
 				color: #f5f0e6;
 				font-family: "Space Grotesk", sans-serif;
 				display: grid;
-				grid-template-columns: 1fr 360px;
+				grid-template-columns: 1fr 432px;
 				align-items: center;
-				padding: 0 120px 0 140px;
+				padding: 0 128px 0 132px;
 				box-sizing: border-box;
-				column-gap: 100px;
+				column-gap: 88px;
+			}
+			.brand {
+				position: absolute;
+				top: 48px;
+				left: 132px;
+				display: flex;
+				align-items: center;
+				gap: 12px;
+				font-family: "JetBrains Mono", monospace;
+				font-size: 14px;
+				font-weight: 500;
+				letter-spacing: 0.2em;
+				color: #999187;
+			}
+			.brand .ring {
+				width: 18px;
+				height: 18px;
+				border: 3px solid #f5f0e6;
+				border-radius: 50%;
+				box-sizing: border-box;
+			}
+			.brand .version {
+				color: #ff5500;
 			}
 			.copy h1 {
-				margin: 0 0 22px;
+				margin: 0 0 24px;
 				font-size: 52px;
 				font-weight: 600;
-				line-height: 1.08;
+				line-height: 1.06;
 				letter-spacing: -0.01em;
+				text-wrap: balance;
 			}
 			.copy p {
 				margin: 0;
 				font-size: 22px;
 				font-weight: 400;
 				line-height: 1.45;
-				color: #a39d94;
-				max-width: 520px;
+				color: #999187;
+				max-width: 500px;
 			}
 			.shot {
-				width: 360px;
-				height: 600px;
-				border-radius: 18px;
+				width: 432px;
+				height: 720px;
+				border-radius: 22px;
 				overflow: hidden;
-				box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-				border: 1px solid #2a2724;
+				border: 1px solid rgba(245, 240, 230, 0.14);
+				box-shadow:
+					0 40px 120px rgba(0, 0, 0, 0.8),
+					0 0 90px rgba(255, 85, 0, 0.1);
 			}
 			.shot img {
 				display: block;
-				width: 360px;
-				height: 600px;
+				width: 432px;
+				height: 720px;
 			}
 		</style>
 	</head>
 	<body>
+		<div class="brand"><span class="ring"></span><span>NULO <span class="version">V6</span></span></div>
 		<div class="copy">
 			<h1>{{title}}</h1>
 			<p>{{caption}}</p>
