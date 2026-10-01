@@ -22,6 +22,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID } from "@/utils/chain-ids"
+import { TESTNET_RPC_URL } from "@/wallet/constants/network-endpoints"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -93,7 +94,7 @@ export const LOCAL_NETWORK_RPC_URL: string = (import.meta.env.VITE_LOCAL_NETWORK
 const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Testnet",
-		rpcUrl: "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702daoH37vEsR8YYxjmVXwXgc",
+		rpcUrl: TESTNET_RPC_URL,
 		chainId: CHAIN_IDS.TESTNET, // (TESTNET_L1_CHAIN_ID ^ TESTNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		l1ChainId: TESTNET_L1_CHAIN_ID,
 		kind: "testnet",
