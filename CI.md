@@ -213,7 +213,7 @@ The reusables today are:
 
 Composite actions (step-level reuse):
 - `setup-bun` — checkout + bun + lockfile cache + `bun install --frozen-lockfile`
-- `setup-aztec` — Foundry + Aztec CLI matching the declared version, cached
+- `setup-aztec` — Foundry + Aztec CLI matching the declared version, cached; the installer script, its `versions` manifest and the noir tarball are SHA-256-pinned (`installer-pins.sha256`)
 - `setup-puppeteer` — `~/.cache/puppeteer` cache
 
 ## Known limitations
