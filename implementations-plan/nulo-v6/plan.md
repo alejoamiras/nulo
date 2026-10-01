@@ -13,6 +13,48 @@ worktree: .claude/worktrees/nulo-v6
 base: origin/dev at 910a4def
 ---
 
+## Outcome
+
+- **Date:** 2026-10-01. **Status:** closed. Arc A merged in #736 and shipped as 0.29.0, and the
+  npm packages are at 0.2.0. Arc C (P8) and the store upload (P9) moved to follow-ups.
+- **Shipped:**
+  - **Arc A, #736** (squash `80663b61`, P1 to P5). The wallet runs on Aztec 6.0.0-rc.1: the
+    `@aztec-labs/*` and `@aztec-foundation/*` scopes, exact-pinned, with Presto's SDK, Aztec
+    Standards and private-fee-juice on the same line. Accounts derive under the new `nulo-v6`
+    regime, and V5 backups are refused. The V6 testnet is the one public network, beside Local
+    Network, and Alpha V5 is retired with no migration. The product is named "Nulo V6", and Terms
+    1.0 is edited in place (A2). The PrivateFPC (`0x0b3bc795…3c08`) and the SponsoredFPC
+    (`0x06a9…924b`) are re-pinned from the reviewed rc.1 artifacts. The harness, CI and the
+    network suite run on V6, and release bytes restore no Bun cache (D25). Both execution canaries
+    passed prover-ON on Chrome and Firefox, and the owner signed off every changed screen (P5
+    step 10).
+  - **npm 0.2.0** (P6, run `36872399302`): `@alejoamiras/nulo-wallet-crypto`,
+    `-wallet-sdk-schema-patch` and `-resolve-asset`, peering exactly on `@aztec-labs/*@6.0.0-rc.1`,
+    with signatures and provenance verified and the published bytes equal to the dry run's. The V6
+    facts went to unleashed's session, which pinned 0.2.0 and the same PrivateFPC.
+  - **0.29.0** (P7): promote #737, release PR #738, tag `v0.29.0` with both zips and
+    `SHASUMS256.txt` (publish run `36875297262`), sync #739. After the landing's production
+    build was re-run, nulo.sh links `v0.29.0` and serves every `_headers` header, which closed
+    the tools extraction's P1 follow-up.
+- **Owner calls during delivery:** the hands-on run on both browsers was waived ("I trust the vast
+  amount of tests we have"); the driver dispatched the npm real run, compared its digests and
+  merged #737, #738 and #739 on the owner's word, and the owner approved `npm-publish`. Each is
+  quoted in `lessons/phase-6.md` and `lessons/phase-7.md`.
+- **Codex:** arc A converged after three fix rounds and a fourth verification round on `12cf1fac`
+  ("No material findings"), logged in `lessons/phase-5.md`. No later arc ran, so there was no
+  cross-arc pass.
+- **Moved to follow-ups:** P8, because unleashed's testnet manifest still names the V5 generation
+  (`walletChainId 1816023401`); P9, because the owner did not call the store upload. Each keeps
+  its steps here as the spec, in `follow-ups.md` § Aztec V6, with the plan's other follow-ups.
+  The e2e mint guard among them was fixed in arc A (`10aa5acc`). The V5 dRPC key's retirement
+  (P7 step 6) was not confirmed by close-out, and the owner dropped it from the follow-ups:
+  "Remove the retiring v5 drpc key as follow-up please" (2026-10-01).
+- **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
+  import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
+  renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
+  the `aztec-update` skill (§ Gotchas), since `lessons.md` is at its budget (`lessons/phase-10.md`).
+- **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+
 ## Phase 0 (answered by the owner, 2026-09-30)
 
 The ask: "Can we blueprint updating the wallet to Aztec V6?", with a V6 RPC, Aztec Standards at
@@ -1033,13 +1075,16 @@ phase installs nothing.
   - The owner's sign-off for arc A is quoted in this plan.
 - Layers: all but live.
 
-### P6 · Publish the V6-line packages (after arc A merges)
+### P6 · Publish the V6-line packages (after arc A merges) ✓
 
 1. Dispatch the dry run: `gh workflow run publish-packages.yml --ref dev -f version=0.2.0` (a dry run
    by default). Record its head SHA and its `pack` job's digests, and review the staged manifests'
    peers.
 2. The owner dispatches the real run (`-f dry_run=false`). Before approving `npm-publish`, the owner
    checks that its `pack` digests equal the dry run's. Any difference means stop and re-review.
+   **Done 2026-10-01:** the driver dispatched it on the owner's word ("Regarding the npm run, also:
+   can't you do it yourself? Im explicitly authorizing you") and found the digests equal, and the
+   owner approved `npm-publish` (`lessons/phase-6.md`).
 3. Give the owner the V6 facts for unleashed:
    - the node URL, chainId `2904119610` and rollupVersion;
    - the canonical PrivateFPC (`0x0b3bc795…3c08`, initializerless, so its V6 bridge targets it with
@@ -1057,7 +1102,7 @@ phase installs nothing.
   published digests equal the dry run's.
 - Layers: supply chain.
 
-### P7 · Release 0.29.0 (after arc A merges)
+### P7 · Release 0.29.0 (after arc A merges) ✓
 
 P6 and P7 may run in either order. Neither waits for unleashed (Fact 27, A7).
 
@@ -1075,11 +1120,14 @@ P6 and P7 may run in either order. Neither waits for unleashed (Fact 27, A7).
    - connect the playground (`bun run --cwd apps/playground dev`) and approve one request it makes.
 
    The token send and the Private Fee Juice payment come with arc C (P8). Record each step and the
-   tx hashes in lessons.
+   tx hashes in lessons. **Waived by the owner, 2026-10-01:** "regarding (1) I trust the vast amount
+   of tests we have." What stands in for it is in `lessons/phase-7.md`.
 3. Read `BEFORE-LAUNCH.md` and complete what is due "on every later promote".
 4. Open `release: promote dev → main (aztec v6: nulo v6 on the v6 testnet)`; the owner merges it as a
    merge commit. release-please then opens `chore(main): release 0.29.0`. Review its CHANGELOG; the
    owner merges it. Auto-unstick tags `v0.29.0` and the publish chain runs, with no store flags.
+   **Done 2026-10-01:** the driver merged #737, #738 and the sync #739 on the owner's word, quoted
+   in `lessons/phase-7.md`.
 5. After the release:
    - confirm the three assets;
    - the owner merge-commits `chore: sync main → dev`;
@@ -1088,16 +1136,19 @@ P6 and P7 may run in either order. Neither waits for unleashed (Fact 27, A7).
    - `curl -s https://nulo.sh` links `releases/tag/v0.29.0`, and `curl -sI https://nulo.sh` returns
      every header in `apps/landing/public/_headers`. This closes follow-up P1.
 6. The owner retires the V5 dRPC key (A5).
+   **Not tracked, 2026-10-01:** unconfirmed at close-out, and the owner dropped it from the
+   follow-ups, quoted in `lessons/phase-7.md`.
 
 **Validation gate.**
 - Commands: step 1's checks, `gh release view v0.29.0 --json assets -q '[.assets[].name]'`,
   `gh run view <id>` for the publish run, and the landing checks.
 - Pass: the node, the sponsor preflight and the floor are as stated; each browser's hands-on run has
-  every step passing, with the tx hashes in lessons; both zips and `SHASUMS256.txt` are attached;
+  every step passing, with the tx hashes in lessons (waived by the owner, step 2); both zips and
+  `SHASUMS256.txt` are attached;
   the publish run is green; nulo.sh links `v0.29.0`.
 - Layers: live, release.
 
-### P8 · Arc C: unleashed's V6 generation (when it lands)
+### P8 · Arc C: unleashed's V6 generation (when it lands), moved to follow-ups
 
 Entry: unleashed's testnet manifest names its V6 generation (`walletChainId 2904119610`). This is not
 a 0.29.0 prerequisite. If it has not landed by P10, this phase moves to follow-ups with these steps
@@ -1129,7 +1180,7 @@ as its spec.
   passing, with the tx hashes recorded; the owner's sign-off is quoted here.
 - Layers: unit, smoke e2e, live.
 
-### P9 · Store upload (optional, on the owner's call)
+### P9 · Store upload (optional, on the owner's call), moved to follow-ups
 
 Entry: the owner calls it, after 0.29.0 or a later release (D27). If it is not called by P10, this
 phase moves to follow-ups with these steps as its spec. A6's dashboard steps stand either way.
@@ -1186,7 +1237,7 @@ phase moves to follow-ups with these steps as its spec. A6's dashboard steps sta
   - The owner's sign-off is quoted here.
 - Layers: lint, unit, smoke e2e on both browsers (captures included), landing build, live, release.
 
-### P10 · Close-out
+### P10 · Close-out ✓
 
 A docs-only PR off `dev`, after 0.29.0's sync, and after P8 and P9 if they ran (D19):
 1. The `## Outcome` block, after the front matter.

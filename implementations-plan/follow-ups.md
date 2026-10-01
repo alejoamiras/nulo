@@ -2,8 +2,18 @@
 
 Open follow-ups lifted out of closing plans, one entry each, or a pointer to the GitHub issue that owns it. Read when planning; delete an entry when it resolves. A plan never closes while it still owns an open follow-up.
 
-- **P1, the first release after the tools extraction** (from [tools-extraction](tools-extraction/plan.md), 2026-09-28). The next `release: promote dev → main` carries the tools removal, #711 and #713 to `main`, and with them the first production build of `nulo-landing` from `main` with the routes-free config. After `attach-assets`, re-run that build in the Cloudflare dashboard, confirm it succeeded, and check that `curl -s https://nulo.sh` links `releases/tag/v<version>` and that `curl -sI` returns every header in `apps/landing/public/_headers`. Delete this entry when it passes.
-- **The gas link and USDC on mainnet** (owner UI calls, 2026-09-28). The fee card's get-gas link opens unleashed's testnet app on every network, on its `workers.dev` host; the mainnet USDC seed is the retired bridge's token. Revisit when unleashed has its own domain or a public mainnet bridge.
+- **The gas link** (owner UI call, 2026-09-28). The fee card's get-gas link opens unleashed's testnet app on its `workers.dev` host on every network, and that app serves the V5 generation until unleashed's V6 one lands ([nulo-v6](nulo-v6/plan.md) § P8 step 3). Revisit when unleashed has its own domain or a public mainnet bridge.
+
+## Aztec V6
+
+- **Arc C: unleashed's V6 Test USDC and the bridge link.** It starts when unleashed's testnet manifest names its V6 generation (`walletChainId 2904119610`); at close-out it still named the V5 one (`1816023401`). On 2026-10-01 unleashed's V6 work pinned `@alejoamiras/nulo-*@0.2.0` and the same PrivateFPC, and its V6 manifest was to come with its generation deploy, which waited on the owner's V6 toolchain install. [nulo-v6](nulo-v6/plan.md) § P8 is the spec: the PrivateFPC address check, the Test USDC seed with live pins, the bridge URL, the owner's hands-on run with the token and Private Fee Juice, and the owner's sign-off.
+- **The store upload, on the owner's call.** [nulo-v6](nulo-v6/plan.md) § P9 is the spec: the NULO V6 art, the listing and remote-code notes, the Terms' store URLs, the in-place update check in Firefox, the decision page, `store-check`, the dashboards and the publish dispatch.
+- **A V6 mainnet seed and its fee policy**, when a V6 mainnet exists. From [nulo-v6](nulo-v6/plan.md).
+- **The Aztec installer in `setup-aztec` stays `curl | bash`, unpinned.** `install.aztec.network` answers 301 to `install.aztec-labs.com`, a second origin to trust, and its npm resolution bypasses the age gate. From [nulo-v6](nulo-v6/plan.md), F19.
+- **An automated live-transaction smoke**, if wanted: the live layer is read-only preflights plus the owner's hands-on run, which the owner waived for 0.29.0. From [nulo-v6](nulo-v6/plan.md), D21.
+- **`presto-banners` 1.2.0.** Held at 1.1.0, since it has no V6 coupling. From [nulo-v6](nulo-v6/plan.md), D11.
+- **`call-decoder.test.ts`'s "a selector is the truth" passes vacuously under jsdom**: hashing throws there, so every name misses. From [nulo-v6](nulo-v6/lessons/phase-1.md).
+- **The standard Token's private transfer shows decoded rows.** `transfer_private_to_private` takes `_nonce`, which the transfer vocabulary never corroborates, so the card shows the decoded call instead of the transfer row; the same on 5.2.0. An owner UI call. From [nulo-v6](nulo-v6/lessons/phase-1.md).
 
 ## Grants and scopes
 

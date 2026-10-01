@@ -5,7 +5,7 @@ Curated gotchas from closed plans, read at the start of every task so no dead en
 ## Tooling
 
 - Bun trusts a warm cache (1.4.2, 2026-09): it never re-checks the lockfile's sha512 against its cache, so a poisoned cached file survives `bun install --frozen-lockfile`; a job that produces release bytes restores no cache ([evidence](tools-extraction/lessons/phase-2.md)).
-- Under `bun test`, loading `@aztec/*` in process throws from `expect.addEqualityTesters` on a cold transpiler cache; run such checks in a `bun` subprocess ([evidence](tools-extraction/lessons/phase-2.md)).
+- Under `bun test`, loading `@aztec-labs/*` in process throws from `expect.addEqualityTesters` on a cold transpiler cache; run such checks in a `bun` subprocess ([evidence](tools-extraction/lessons/phase-2.md)).
 - Timed tests (`e2e/config` today) time out under the parallel `test:all` / `audit:vue` load, so rerun the file alone before calling it breakage (2026-09); a cold dynamic import in the timed body is one cause, fixed by importing in `beforeEach` on the hook's default budget, as `content-message-relay` and `presto/client` do. [Evidence](tools-extraction/lessons/phase-1.md), [more](e2e-reliability-fixes/lessons/phase-2.md), [more](hygiene/lessons/phase-1.md)
 
 ## Cloudflare
@@ -37,8 +37,8 @@ Curated gotchas from closed plans, read at the start of every task so no dead en
 - A wire-shaped field fixture must stay below the BN254 modulus (`0x3064…`): `0x` + `aa` × 32 is above it, so the capability validator refuses it as malformed, while `0x` + `0a` × 32 passes. [Evidence](ux-feedback/b5-permissions/lessons/phase-6.md)
 - A lock section the watchdog force-released keeps running (`packages/wallet-core/src/utils/lock.ts`), and `nextNumericId` (max + 1) reuses a purged top id on the next restore, so a late compensating delete by id can hit a successor's row. Gate it on `withLock`'s `isCurrent` where the row predates the deletion, whose purge removes it; skipping it orphans a row that may postdate the purge's snapshot. [Evidence](wallet-safety-fixes/lessons/phase-6.md)
 - The local network's chain id is 0 (`CHAIN_IDS.SANDBOX`), so a truthiness guard on `chainId` skips the chain every network e2e runs on: History never named a received row's token there. Test for the network, or for `chainId === undefined`. [Evidence](ux-owner-picks/lessons/phase-2.md)
-- The node client retries a failed POST, not a node's refusal: a poller that must go quiet on lock needs a one-attempt client, and a refused retry can hide a send that landed (Aztec 5.2.0, 2026-09). [Evidence](failed-send-check/lessons/phase-7.md)
-- `@aztec/protocol-contracts/fee-juice` loads a 570 KB artifact at import, with no `sideEffects: false`: imported by a module the `@/wallet/utils` barrel re-exports, it ships a second copy to every popup. Keep it out of the barrel (5.2.0, 2026-09). [Evidence](send-states/lessons/phase-1.md)
+- The node client retries a failed POST, not a node's refusal: a poller that must go quiet on lock needs a one-attempt client, and a refused retry can hide a send that landed (Aztec 6.0.0-rc.1, 2026-10). [Evidence](failed-send-check/lessons/phase-7.md)
+- `@aztec-labs/protocol-contracts/fee-juice` loads a 700 KB artifact at import, with no `sideEffects: false`: imported by a module the `@/wallet/utils` barrel re-exports, it ships a second copy to every popup. Keep it out of the barrel (6.0.0-rc.1, 2026-10). [Evidence](send-states/lessons/phase-1.md)
 
 ## Authorization checks
 
