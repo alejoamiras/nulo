@@ -29,8 +29,7 @@ export async function readActivityScope(page: Page): Promise<ActivityScope> {
 	}, profileId)
 	const seed = seedsForChain(chainId).find((s) => getPriceMapEntry(chainId, s.contract))
 	if (!seed) throw new Error(`the price map prices no default token seed on chain ${chainId}`)
-	// Every shipped seed has 6 decimals (`seed-preflight-metadata.ts`); seeds pin no decimals.
-	const token = { contract: seed.contract, name: seed.displayName, symbol: seed.expectedSymbol, decimals: 6 }
+	const token = { contract: seed.contract, name: seed.displayName, symbol: seed.expectedSymbol, decimals: seed.expectedDecimals }
 	return { profileId, networkId, chainId, account, token }
 }
 

@@ -6,8 +6,9 @@ import { TOKEN_SEEDS_KEY } from "@/e2e/chrome-storage-token-seeds"
  * (`VITE_NULO_E2E_TOKEN_SEEDS` + `_CONFIRM`, set by `scripts/e2e/agent.sh`).
  *
  * Call this BEFORE the trigger under test: the seeder reads the list once per
- * pass, so a later write is simply missed. `expectedSymbol` is deliberately not
- * a parameter — the reader pins it, so a test cannot weaken the symbol check.
+ * pass, so a later write is simply missed. `expectedSymbol` and `expectedDecimals`
+ * are deliberately not parameters — the reader pins them, so a test cannot weaken
+ * either check.
  */
 export async function seedSandboxDefaultToken(extensionPage: Page, token: { address: string; classId: string }): Promise<void> {
 	await extensionPage.evaluate(

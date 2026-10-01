@@ -14,9 +14,9 @@
  *   the upstream sample Token's layout decodes garbage; that mismatch shipped
  *   a wrong "cUSD" pin that hard-skipped the token on every unlock). Chain
  *   metadata disagreeing with the pin means we should not silently seed it.
- * - decimals cannot be captured without a live simulation, so it is
- *   bounds-checked (0..18) at seed time and recorded in the seed marker for
- *   manual QA confirmation, not equality-pinned.
+ * - `expectedDecimals`: the chain's decimals, read by
+ *   `scripts/seed-preflight-metadata.ts` with the symbol. Every amount the
+ *   row shows and every send scales by it, so it is equality-pinned too.
  */
 
 import { CHAIN_IDS } from "@/utils/chain-ids"
@@ -43,6 +43,8 @@ export type DefaultTokenSeed = {
 	expectedClassId: string
 	/** Product-intent pin: chain symbol must match exactly. */
 	expectedSymbol: string
+	/** Chain decimals must match exactly: a wrong one rescales every amount shown and sent. */
+	expectedDecimals: number
 	/** Compiled-in label for the row shown BEFORE the chain has answered. Never
 	 *  persisted and never compared: the token row carries the chain's own name. */
 	displayName: string
@@ -54,6 +56,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		contract: TESTNET_TOKENS.USDC,
 		expectedClassId: TESTNET_TOKEN_CLASS_ID,
 		expectedSymbol: "USDC",
+		expectedDecimals: 6,
 		displayName: "Test USDC",
 	},
 	{
@@ -61,6 +64,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		contract: TESTNET_TOKENS.USDT,
 		expectedClassId: TESTNET_TOKEN_CLASS_ID,
 		expectedSymbol: "USDT",
+		expectedDecimals: 6,
 		displayName: "Test USDT",
 	},
 	{
@@ -68,6 +72,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		contract: TESTNET_TOKENS.EURC,
 		expectedClassId: TESTNET_TOKEN_CLASS_ID,
 		expectedSymbol: "EURC",
+		expectedDecimals: 6,
 		displayName: "Test EURC",
 	},
 	{
@@ -75,6 +80,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		contract: TESTNET_TOKENS.GBPC,
 		expectedClassId: TESTNET_TOKEN_CLASS_ID,
 		expectedSymbol: "GBPC",
+		expectedDecimals: 6,
 		displayName: "Test GBPC",
 	},
 ]
