@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Renders the store art from `store/templates/` with Puppeteer: the 440×280 promo tile and one
 // 1280×800 frame per popup capture in `store/captures/` (written by the opt-in
-// `tests/e2e/store-captures.test.ts`). Local only; the PNGs are committed.
+// `tests/e2e/network/store-captures.test.ts`). Local only; the PNGs are committed.
 //
 // Usage (from apps/extension): `bun scripts/store-art.ts`
 
@@ -79,7 +79,7 @@ for (const [index, { capture, title, caption }] of FRAMES.entries()) {
 	const png = resolve(STORE, "captures", `${capture}.png`)
 	if (!existsSync(png)) {
 		console.error(
-			`[store-art] missing ${png.slice(ROOT.length + 1)} — run STORE_CAPTURES=1 … bun run test:e2e -- tests/e2e/store-captures.test.ts`,
+			`[store-art] missing ${png.slice(ROOT.length + 1)} — from the repo root, run STORE_CAPTURES=1 NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/store-captures.test.ts`,
 		)
 		process.exit(1)
 	}

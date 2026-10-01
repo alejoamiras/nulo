@@ -62,14 +62,16 @@ The **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`, `
 
 ### Store captures (opt-in)
 
-`tests/e2e/store-captures.test.ts` is collected by the smoke config and skipped unless
-`STORE_CAPTURES=1`. It writes the three 360×600 popup captures `scripts/store-art.ts` frames for the
-store listings, against a production build in artifact mode:
+`tests/e2e/network/store-captures.test.ts` is skipped unless `STORE_CAPTURES=1`, and always on
+Firefox. It stages a wallet on the sandbox through the UI (a "Testnet"-named network, USD Coin and
+Fee Juice, a contact, two receipts and a private send) and writes the popup captures
+`scripts/store-art.ts` frames for the store listings into `store/captures/`: `home`, `send`,
+`history`, `security` and `approve`, at 360×600 and 2× (720×1200 PNGs). Proverless is enough, since
+no frame shows a proof:
 
 ```bash
-cd apps/extension && bun run build:chrome
-STORE_CAPTURES=1 NULO_E2E_ARTIFACT_RUN=1 EXTENSION_PATH="$PWD/dist/chrome" bun run test:e2e -- tests/e2e/store-captures.test.ts
-bun scripts/store-art.ts
+STORE_CAPTURES=1 NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/store-captures.test.ts
+cd apps/extension && bun scripts/store-art.ts
 ```
 
 ## Running multiple agents in parallel
