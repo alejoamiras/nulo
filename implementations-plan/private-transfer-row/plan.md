@@ -623,6 +623,7 @@ diff): *"approve"*, no new material findings. The loop converged in two rounds
 | D8 | A transfer or mint row's title comes from the confirmed decoded name. | Keep the dApp's label: it lies on request, and the alias would extend that to the standard Token (Fact 21). |
 | D9 | The selector table is static in the popup bundle, recomputed by a node test. | Hash in the popup: bb.js in the popup bundle, and jsdom cannot run it. The background sends the canonical selector: the wire change D1 rejects. |
 | D10 | A2, the decoded rows' relabel vector, is neither fixed nor filed (the owner, 2026-10-01: "Very niche case. let's get to it when somebody asks for it."). | F in this plan, or a follow-up entry: both declined by the owner. |
+| D11 | P5 moves this plan into `archive/` in the PR, its index line into `archive/index.md`. | `closed, awaiting archive`, the rule this plan was written under: the archive split landed on `dev` (#743, #746) before delivery, and CLAUDE.md now asks for the move. |
 
 ### Follow-ups (opened at close-out, not before)
 
@@ -835,10 +836,11 @@ reason.
 3. `implementations-plan/follow-ups.md`: delete the "standard Token's private transfer" entry under
    § Aztec V6; add the entries in Follow-ups above that the owner kept, each one line with its
    evidence. Reconcile the file against `origin/dev` first: another branch may be editing § Aztec V6.
-4. `implementations-plan/index.md`: this plan's line reads `closed, awaiting archive` (the archive
-   move waits for the archive split, CLAUDE.md § Implementation plans).
-- **Validation gate.** `bun scripts/ci-cd/plans/check.ts` and `bun run lint` exit 0, and
-  `git show --stat` of the close-out commit is quoted in the transcript. Layers: lint.
+4. The move (D11): `git mv` of this directory to `implementations-plan/archive/private-transfer-row`
+   in its own commit, the relative links one level deeper repaired, and this plan's line moved
+   from `index.md` to `archive/index.md` (CLAUDE.md § Implementation plans).
+- **Validation gate.** `bun run check:plans` and `bun run lint` exit 0, and `git show --stat` of
+  each close-out commit is quoted in the transcript. Layers: lint.
 
 ## Post-implementation (read by the implementing session)
 
