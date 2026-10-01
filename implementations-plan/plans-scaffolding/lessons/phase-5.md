@@ -190,3 +190,10 @@ Round 1 (`/codex high`, 2026-10-01, on `f2d064c5` against `737d1faf`): changes n
 - **K5: CI.md.** The smoke suite is 43 files and 173 tests, with 2 unconditional skips (`appearance.test.ts:79`, `sw-resilience.test.ts:137`). The network suite is 108 files and quarantines nothing.
 
 At `0907d3c1`, these exit 0: `lint`, `check:plans`, the tools tests (18), `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify` (679 rows, 0 problems) and `test:ci-gating` (249 pass). `typecheck:all`, the fee tests (72) and `check-no-local-paths.sh` passed on the same content before Biome re-wrapped two lines of `links.test.ts`.
+
+Round 2 (on `8ea9fe02`): changes needed, 2 blocking and 1 non-blocking. All three reproduced and adopted:
+- **K6: brackets inside a permalink.** The span stopped at the first bracket, so `plan.md(x)/%2e%2e/...` or `plan.md[x]/...` after an allowlisted SHA was judged only up to `plan.md`. The span now keeps inner brackets, and `urlOf` drops only the sentence punctuation and unbalanced closers after the URL, as GitHub's autolinker does. A link in `(…)` or `[…](…)` still blanks.
+- **K7: a `>` followed by text.** Round 1 stripped only a trailing `>`, so `…/a.md>tail` and `<…/a.md><…/b.md>` still read as templates. `TOKEN_RE` now takes `<` and `>` only as a `<name>` placeholder, so any other `>` ends the path, and the round-1 strip is gone.
+- **K8: CI.md** named both skipped smoke tests flakes; `sw-resilience.test.ts:120` records functional blockers. The line now names the navigation flake and the blocked strict-mode test.
+
+Each new test case fails against round 1's `links.ts` (3 missing findings in each). At `8318b9bb`, `lint`, `check:plans` and `test:ci-gating` (249 pass) exit 0.
