@@ -85,7 +85,7 @@ Every surface below changes what a user sees, so each needs the owner's recorded
 |---|---|---|---|
 | Extension name (browser extension list, toolbar tooltip, window and page titles) | Nulo V5 | Nulo V6 | A |
 | Networks page and network picker on a fresh install | Alpha V5 (active, green), Testnet, Local Network | Testnet (active), Local Network | A |
-| Header network pill on a fresh install | "Alpha V5", green | "Testnet", neutral-mint (as Testnet looks today) | A |
+| Header network pill on a fresh install | "Alpha V5", green | "Testnet", green: the square is the connection status on every network (U1) | A |
 | Home on a fresh install on Testnet | the V5 "Test USDC" row (V5 testnet) | no default token row until arc C | A |
 | Fee card on Testnet | Nulo's sponsor default | unchanged; the Alpha-only Private Fee Juice default disappears with Alpha | A |
 | Settings → About | Aztec 5.2.0; "Alpha Testing" | Aztec 6.0.0-rc.1; the stage label per U6 | A |
@@ -98,12 +98,15 @@ Every surface below changes what a user sees, so each needs the owner's recorded
 
 ### UI asks for the owner (at most five per page, each option shown as it will look)
 
-Arc A's page: U1, U2, U4, U6, U7, and U5, since the explorer check failed in P4. The optional store
-arc's page: U3.
+Arc A's page: U1, U2, U4, U6, U7, and U5, since the explorer check failed in P4. U1 settled without
+a call in P5, so the page as built carries U2, U4, U5, U6 and U7. The optional store arc's page: U3.
 
 - **U1 (arc A).** The default network's pill stays Testnet's neutral-mint (recommended, confidence
   moderate: it is what Testnet looks like today and it signals "not real value"), or takes Alpha's
-  green.
+  green. **Settled in P5 without a call:** the pill's square is the connection status
+  (`Header.vue` `.status_dot`, `--green` when active), the same on every network, and
+  `getChainColor` has no caller, so no surface draws a per-network colour. Only the label changes.
+  U1 moves into the "sign off as built" row.
 - **U2 (arc A).** A fresh V6 wallet shows no default token until unleashed's V6 Test USDC exists
   (recommended: showing a V5 token is wrong, and a placeholder is worse).
 - **U3 (store, optional).** The regenerated tile and screenshots with the NULO V6 wordmark.
@@ -961,8 +964,9 @@ phase installs nothing.
    - `aztec-private-fpc-bridge.ts`: `FeeJuicePortalAbi` from `@aztec-foundation/l1-artifacts`.
 5. Re-premise the network specs with the smallest change each:
    - `networks.test.ts`: two defaults;
-   - `backup-import-stalled-network.test.ts`: a stalled user-added network beside Local, in place of
-     Alpha;
+   - `backup-import-stalled-network.test.ts`: a stalled Testnet beside Local, in place of Alpha. A
+     backup carries no networks and a popup import starts from the seeds, so the Testnet seed is the
+     only public network an import can restore into; a user-added one cannot exist yet;
    - the canary file comment that names "frozen 5.0.1 account bytecode". Touch
      `canary-expectations.json` only if a title changes.
 6. Diff both built manifests against `dev`'s build after normalising content hashes and chunk slugs
