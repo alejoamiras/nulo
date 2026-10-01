@@ -7,8 +7,7 @@ import type { TokenFnDescriptor, TokenFnKind } from "./types"
  * Descriptor table — the data-driven replacement for the 9 copy-paste token-function
  * modules. Each entry reproduces its module's `abi()` literal, `getCandidates` predicate,
  * `points()` scoring, `getDefault` names, `buildArgs`, and `unpackResult` VERBATIM — pinned
- * by `token-functions.characterization.test.ts` + `registry-equivalence.test.ts`. Do not
- * "improve" while transcribing (see the module headers for the accepted loose predicates).
+ * by `token-functions.characterization.test.ts`.
  *
  * ONE deliberate divergence from the verbatim pin: struct-path matching is crate-prefix
  * tolerant (`matchesStructPath`). Noir namespaces ABI struct paths by the artifact's import
@@ -18,9 +17,6 @@ import type { TokenFnDescriptor, TokenFnKind } from "./types"
  * every balance/transfer kind resolve to zero candidates on such artifacts — a token that
  * imports as "incomplete" with no interface. Pinned against the real installed artifact by
  * `descriptors-real-artifact.test.ts`.
- *
- * Migration status: kinds are added here one at a time, each proven equivalent to its old
- * module before the old module is deleted (Q-12 phasing). All 9 kinds present (5 read + 4 transfer).
  */
 
 const AZTEC_ADDRESS_PATH = "aztec::protocol_types::address::aztec_address::AztecAddress"
@@ -233,7 +229,12 @@ export const getDecimalsDescriptor: TokenFnDescriptor = metadataDescriptor({
 // ── Transfer kinds (fnType "call" — no unpackResult) ─────────────────────────────────
 // Two variant shapes recur: a 4-param `(from, to, amount, authwit_nonce)` and a 2-param
 // `(to, amount)` (PRIVATE only). Predicates are LOOSE on amount (kind "integer", not width)
-// and accept `authwit_nonce` OR `_nonce` while the abi emits `authwit_nonce` — preserved verbatim.
+// and accept either nonce name while the abi emits `authwit_nonce`.
+
+/** The names the authwit nonce parameter goes by: aztec-nr's sample Token spells it
+ *  `authwit_nonce`, the aztec-standards Token `_nonce`. */
+export const AUTHWIT_NONCE_NAMES: readonly string[] = ["authwit_nonce", "_nonce"]
+
 const addressParam = (name: string) => ({
 	name,
 	type: { fields: [{ name: "inner", type: { kind: "field" as const } }], kind: "struct" as const, path: AZTEC_ADDRESS_PATH },
@@ -276,7 +277,7 @@ const transfer4Predicate = (fn: FunctionAbi, functionType: FunctionType): boolea
 	matchesStructPath((fn.parameters[1].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 	fn.parameters[2].name === "amount" &&
 	fn.parameters[2].type.kind === "integer" &&
-	(fn.parameters[3].name === "authwit_nonce" || fn.parameters[3].name === "_nonce") &&
+	AUTHWIT_NONCE_NAMES.includes(fn.parameters[3].name) &&
 	fn.parameters[3].type.kind === "field" &&
 	returnsNothing(fn)
 const transfer2Predicate = (fn: FunctionAbi): boolean =>

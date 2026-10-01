@@ -9,6 +9,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { describe, expect, test, vi } from "vitest"
 import AddressDisplay from "@/components/AddressDisplay.vue"
 import { trimAddress } from "@/utils/string"
+import { vocabularySelector } from "@/utils/token-transfer-vocabulary"
 import type { TokenInfo } from "@/wallet/services/token/client"
 import OperationCard from "./OperationCard.vue"
 
@@ -22,6 +23,10 @@ const TOKEN = `0x${"c".repeat(64)}`
 /** An `Fr` as the wire carries it. */
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
 const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
+/** The selector the vocabulary's own signature dispatches on, as an honest call carries it. */
+const sel = (fn: string, arity: number): string => vocabularySelector(fn, arity) ?? "0x00000000"
+const TRANSFER = sel("transfer", 2)
+const TRANSFER_IN_PRIVATE = sel("transfer_in_private", 4)
 
 const sendTx = (calls: unknown[], extra: Record<string, unknown> = {}) => ({
 	kind: "aztec_sendTx" as const,
@@ -70,7 +75,7 @@ const one = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testi
 
 describe("OperationCard — the vocabulary reading", () => {
 	test("transfer(to, amount) on a registered token from the account: 'From: this account', a trimmed recipient, the amount in token units", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5_000_000n)] }]), {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, selector: TRANSFER, args: [TO, field(5_000_000n)] }]), {
 			decodedCalls: [abi("transfer", ["to", "amount"])],
 		})
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("transfer")
@@ -85,7 +90,7 @@ describe("OperationCard — the vocabulary reading", () => {
 	})
 
 	test("the same call on a contract the wallet has not registered as a token takes the decode, never the vocabulary", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TO, args: [OWNER, field(5n)] }]), {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TO, selector: TRANSFER, args: [OWNER, field(5n)] }]), {
 			tokens: [],
 			decodedCalls: [
 				decoded("transfer", [
@@ -100,7 +105,7 @@ describe("OperationCard — the vocabulary reading", () => {
 	})
 
 	test("a registered token whose ABI orders transfer(amount, to) is read by the ABI, never by position", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [field(1n), TO] }]), {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, selector: TRANSFER, args: [field(1n), TO] }]), {
 			decodedCalls: [
 				decoded("transfer", [
 					{ name: "amount", value: { kind: "integer", value: "1" } },
@@ -115,7 +120,10 @@ describe("OperationCard — the vocabulary reading", () => {
 
 	test("the same call under default_entrypoint renders 'Caller: none'", async () => {
 		const w = await mountCard(
-			sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)] }], { executionMode: "default_entrypoint", opts: {} }),
+			sendTx([{ name: "transfer", to: TOKEN, selector: TRANSFER, args: [TO, field(5n)] }], {
+				executionMode: "default_entrypoint",
+				opts: {},
+			}),
 			{ decodedCalls: [abi("transfer", ["to", "amount"])] },
 		)
 		const sender = one(w, "execute-op-transfer-sender")
@@ -127,8 +135,8 @@ describe("OperationCard — the vocabulary reading", () => {
 	test("an explicit from and a non-zero nonce are shown, a zero nonce is not, and a known token labels the amount", async () => {
 		const w = await mountCard(
 			sendTx([
-				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(9n)] },
-				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(0n)] },
+				{ name: "transfer_in_private", to: TOKEN, selector: TRANSFER_IN_PRIVATE, args: [OWNER, TO, field(5_000_000n), field(9n)] },
+				{ name: "transfer_in_private", to: TOKEN, selector: TRANSFER_IN_PRIVATE, args: [OWNER, TO, field(5_000_000n), field(0n)] },
 			]),
 			{
 				tokens: [USDC],
@@ -146,9 +154,12 @@ describe("OperationCard — the vocabulary reading", () => {
 	})
 
 	test("mint_to_private(to, amount) is a mint: recipient and amount, no sender row", async () => {
-		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500_000_000n)] }]), {
-			decodedCalls: [abi("mint_to_private", ["to", "amount"])],
-		})
+		const w = await mountCard(
+			sendTx([{ name: "mint_to_private", to: TOKEN, selector: sel("mint_to_private", 2), args: [TO, field(500_000_000n)] }]),
+			{
+				decodedCalls: [abi("mint_to_private", ["to", "amount"])],
+			},
+		)
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("mint")
 		expect(one(w, "execute-op-structured-args").text()).toContain("Mint to:")
 		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)
@@ -156,15 +167,32 @@ describe("OperationCard — the vocabulary reading", () => {
 		expect(one(w, "execute-op-unverified-args").exists()).toBe(false)
 	})
 
+	test("a payload whose label names another function is titled by the function its selector runs", async () => {
+		const lie = {
+			name: "transfer_private_to_private",
+			to: TOKEN,
+			selector: sel("transfer_in_public", 4),
+			args: [OWNER, TO, field(5n), field(0n)],
+		}
+		const w = await mountCard(sendTx([lie]), { decodedCalls: [abi("transfer_in_public", ["from", "to", "amount", "authwit_nonce"])] })
+		const row = one(w, "execute-op-payload-row")
+		expect(row.attributes("data-intent-kind")).toBe("transfer")
+		expect(row.text()).toContain("Transfer (public)")
+		expect(row.text()).not.toContain("private")
+	})
+
 	test("a 2-arg transfer that hides its msg_sender never claims the account: it takes the ABI decode", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)], hideMsgSender: true }]), {
-			decodedCalls: [
-				decoded("transfer", [
-					{ name: "to", value: { kind: "address", value: TO } },
-					{ name: "amount", value: { kind: "integer", value: "5" } },
-				]),
-			],
-		})
+		const w = await mountCard(
+			sendTx([{ name: "transfer", to: TOKEN, selector: TRANSFER, args: [TO, field(5n)], hideMsgSender: true }]),
+			{
+				decodedCalls: [
+					decoded("transfer", [
+						{ name: "to", value: { kind: "address", value: TO } },
+						{ name: "amount", value: { kind: "integer", value: "5" } },
+					]),
+				],
+			},
+		)
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
 		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)
 		expect(w.text()).not.toContain("this account")

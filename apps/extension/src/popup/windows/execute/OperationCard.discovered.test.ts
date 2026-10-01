@@ -99,6 +99,56 @@ describe("OperationCard — discovered authorizations", () => {
 		expect(html).not.toContain("‮")
 	})
 
+	test("on a registered token a standard transfer opens to the transfer row, its nonce trimmed above the inner hash; another function's selector keeps the decoded rows", async () => {
+		const TOKEN = `0x${"0c".repeat(32)}`
+		const FROM = `0x${"0a".repeat(32)}`
+		const DEX = `0x${"0d".repeat(32)}`
+		const NONCE = "0x0f3c7a91e24b6d08c5f1a39e7b2d40c86e9a1f53b7d20c4e8a6f91b3d5c07e2a"
+		const usdc = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 }
+		const at = (selector: string, messageHash: string) => ({
+			consumer: TOKEN,
+			caller: DEX,
+			selector,
+			args: [FROM, DEX, `0x${5_000_000n.toString(16).padStart(64, "0")}`, NONCE],
+			innerHash: INNER,
+			messageHash,
+		})
+		const decoded = {
+			kind: "decoded",
+			contract: "Token",
+			fn: "transfer_private_to_public",
+			params: [
+				{ name: "from", value: { kind: "address", value: FROM } },
+				{ name: "to", value: { kind: "address", value: DEX } },
+				{ name: "amount", value: { kind: "integer", value: "5000000" } },
+				{ name: "_nonce", value: { kind: "field", value: NONCE } },
+			],
+		}
+		// The twin carries transfer_private_to_commitment's selector under the same decode.
+		const w = mountCard(sendTx({ calls: [] }), {
+			tokens: [usdc],
+			feeEstimate: estimate([at("0xaf28c76f", "0xmsgh"), at("0x638d3f00", "0xmsgt")]),
+			decodedAuthwits: new Map([
+				["0xmsgh", decoded],
+				["0xmsgt", decoded],
+			]),
+		})
+		const [honest, twin] = w.findAll('[data-testid="execute-op-discovered-authwit"]')
+		await honest!.find('[data-testid="execute-discovered-authwit-toggle"]').trigger("click")
+		const details = honest!.find('[data-testid="execute-discovered-authwit-details"]')
+		const rows = details.find('[data-testid="execute-discovered-authwit-structured-args"]')
+		expect(rows.attributes("data-intent-kind")).toBe("transfer")
+		expect(rows.find('[data-testid="execute-discovered-authwit-transfer-sender"]').attributes("data-sender-kind")).toBe("explicit")
+		expect(rows.find('[data-testid="execute-discovered-authwit-amount"]').text()).toContain("USDC")
+		const nonce = rows.find('[data-testid="execute-discovered-authwit-transfer-nonce"]')
+		expect(nonce.text()).toContain("0x0f3c7a91..c07e2a")
+		expect(nonce.find("[title]").attributes("title")).toBe(NONCE)
+		expect(details.html().indexOf(NONCE)).toBeLessThan(details.html().indexOf(INNER))
+		await twin!.find('[data-testid="execute-discovered-authwit-toggle"]').trigger("click")
+		expect(twin!.find('[data-testid="execute-discovered-authwit-decoded-args"]').exists()).toBe(true)
+		expect(twin!.find('[data-testid="execute-discovered-authwit-structured-args"]').exists()).toBe(false)
+	})
+
 	test("zero entries render nothing; without an estimate nothing renders either", () => {
 		expect(
 			mountCard(sendTx({ calls: [] }), { feeEstimate: estimate([]) })
