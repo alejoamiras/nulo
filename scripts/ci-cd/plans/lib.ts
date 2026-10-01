@@ -10,6 +10,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
+import { posix } from "node:path"
 
 export type RuleId =
 	| "tracked-artifact"
@@ -219,11 +220,17 @@ export function parseIndex(src: string): { entries: IndexEntry[]; malformed: num
 	return { entries, malformed }
 }
 
+/** The plan dir an index target names once normalized; null unless it names a path inside one dir beside the index. */
+export function entryDir(target: string): string | null {
+	const [dir, ...rest] = posix.normalize(target).split("/")
+	return dir === "" || dir === "." || dir === ".." || rest.length === 0 ? null : dir
+}
+
 /** Top-level plan dirs the active index lists, or null before the archive split, when there is no active set yet. */
 export function activePlanDirs(ctx: Ctx): Set<string> | null {
 	if (!ctx.tracked.has(ARCHIVE_INDEX)) return null
 	const { entries } = parseIndex(ctx.read(ACTIVE_INDEX))
-	return new Set(entries.map((e) => e.target.split("/")[0]))
+	return new Set(entries.flatMap((e) => entryDir(e.target) ?? []))
 }
 
 /** Names of the directories directly below `parent` that hold tracked files. */

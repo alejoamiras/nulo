@@ -118,6 +118,20 @@ describe("index-structure", () => {
 		])
 	})
 
+	test("a target is judged by its normalized path: `./` names its dir, `..` cannot hide one", () => {
+		const repo = makeRepo({
+			...split,
+			"implementations-plan/index.md": ["- [a](./a/plan.md) — active — a", "- [b](b/../README.md) — active — b"].join("\n"),
+			"implementations-plan/README.md": "# Plans\n",
+			"implementations-plan/a/plan.md": "# A\n",
+			"implementations-plan/b/plan.md": `# B\n\n${OUTCOME}`,
+		})
+		expect(findings(repo, "index-structure").map((f) => f.detail)).toEqual([
+			"b has no line in index.md",
+			"b/../README.md names no file inside a plan dir",
+		])
+	})
+
 	test("an Outcome and the closing status go together", () => {
 		const repo = makeRepo({
 			...split,
@@ -162,6 +176,19 @@ describe("archive-structure", () => {
 			"implementations-plan/archive/b/plan.md",
 			"implementations-plan/archive/c/plan.md",
 			"implementations-plan/archive/d",
+		])
+	})
+
+	test("a line cannot lend another dir's Outcome: `..` names the dir it lands in, and a second line fails", () => {
+		const repo = makeRepo({
+			"implementations-plan/archive/index.md": [line("a"), line("a"), "- [b](b/../a/plan.md) — completed — b"].join("\n"),
+			"implementations-plan/archive/a/plan.md": `# A\n\n${OUTCOME}`,
+			"implementations-plan/archive/b/plan.md": "# B\n",
+		})
+		expect(findings(repo, "archive-structure").map((f) => `${f.file}:${f.line} ${f.detail}`)).toEqual([
+			"implementations-plan/archive/b:1 b has no line in archive/index.md",
+			"implementations-plan/archive/index.md:2 a is listed twice",
+			"implementations-plan/archive/index.md:3 a is listed twice",
 		])
 	})
 })

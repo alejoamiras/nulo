@@ -11,6 +11,7 @@ import {
 	type Ctx,
 	CURATED_FILES,
 	childDirs,
+	entryDir,
 	type Finding,
 	INDEX_FILES,
 	type IndexEntry,
@@ -145,11 +146,11 @@ function indexHost(indexFile: string, entry: IndexEntry): string {
 
 function judgeActiveEntry(ctx: Ctx, docs: ReadonlyMap<string, Doc>, entry: IndexEntry, seen: Set<string>): Finding[] {
 	const host = indexHost(ACTIVE_INDEX, entry)
-	const dir = entry.target.split("/")[0]
+	const dir = entryDir(entry.target)
 	const at = (detail: string, fix: string) => finding("index-structure", ACTIVE_INDEX, entry.line, detail, fix)
+	if (dir === null) return [at(`${entry.target} names no file inside a plan dir`, "point the line at the plan's host file")]
 	const out: Finding[] = []
-	if (host.startsWith(`${ARCHIVE}/`) || dir === "archive")
-		out.push(at(`${entry.name} points into archive/`, "move the line to archive/index.md"))
+	if (dir === "archive") out.push(at(`${entry.name} points into archive/`, "move the line to archive/index.md"))
 	if (seen.has(dir)) out.push(at(`${dir} is listed twice`, "keep one line per plan"))
 	seen.add(dir)
 	if (!ctx.tracked.has(host)) return [...out, at(`${entry.target} is not in the git index`, "point the line at the plan's host file")]
@@ -181,6 +182,27 @@ export function indexStructureFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>)
 	return findings
 }
 
+function judgeArchiveEntry(ctx: Ctx, docs: ReadonlyMap<string, Doc>, entry: IndexEntry, listed: Set<string>): Finding[] {
+	const host = indexHost(ARCHIVE_INDEX, entry)
+	const dir = entryDir(entry.target)
+	const at = (detail: string, fix: string) => finding("archive-structure", ARCHIVE_INDEX, entry.line, detail, fix)
+	if (dir === null) return [at(`${entry.target} names no file inside an archived plan dir`, "point the line at the Outcome host")]
+	const out = listed.has(dir) ? [at(`${dir} is listed twice`, "keep one line per plan")] : []
+	listed.add(dir)
+	if (!ctx.tracked.has(host)) return [...out, at(`${entry.target} is not in the git index`, "point the line at the Outcome host")]
+	if (outcomeState(docs.get(host)) !== "complete")
+		out.push(
+			finding(
+				"archive-structure",
+				host,
+				1,
+				"no complete `## Outcome` (Date, Status, Shipped|Delivered, Seeds retired)",
+				"generate the Outcome block",
+			),
+		)
+	return out
+}
+
 export function archiveStructureFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc>): Finding[] {
 	const dirs = childDirs(ctx, ARCHIVE)
 	if (dirs.length === 0 && !ctx.tracked.has(ARCHIVE_INDEX)) return []
@@ -188,34 +210,11 @@ export function archiveStructureFindings(ctx: Ctx, docs: ReadonlyMap<string, Doc
 	const findings = malformed.map((line) =>
 		finding("archive-structure", ARCHIVE_INDEX, line, "not `- [name](target) — status — hook`", "reformat the line"),
 	)
-	const listed = new Set(entries.map((e) => e.target.split("/")[0]))
+	const listed = new Set<string>()
+	for (const entry of entries) findings.push(...judgeArchiveEntry(ctx, docs, entry, listed))
 	for (const dir of dirs) {
 		if (!listed.has(dir))
 			findings.push(finding("archive-structure", `${ARCHIVE}/${dir}`, 1, `${dir} has no line in archive/index.md`, "add its line"))
-	}
-	for (const entry of entries) {
-		const host = indexHost(ARCHIVE_INDEX, entry)
-		if (!ctx.tracked.has(host)) {
-			findings.push(
-				finding(
-					"archive-structure",
-					ARCHIVE_INDEX,
-					entry.line,
-					`${entry.target} is not in the git index`,
-					"point the line at the Outcome host",
-				),
-			)
-		} else if (outcomeState(docs.get(host)) !== "complete") {
-			findings.push(
-				finding(
-					"archive-structure",
-					host,
-					1,
-					"no complete `## Outcome` (Date, Status, Shipped|Delivered, Seeds retired)",
-					"generate the Outcome block",
-				),
-			)
-		}
 	}
 	return findings
 }
