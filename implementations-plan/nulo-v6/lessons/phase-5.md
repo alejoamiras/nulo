@@ -49,6 +49,60 @@
   differ from `dev`'s build in `name` only. `version` is still `0.28.0` on both sides, so it shows
   no difference until release-please bumps it.
 
+## Step 7 · The local network runs at retry 0
+
+- **Chrome, proverless, full suite** (`AZTEC_HOME` on the rc.1 toolchain cache,
+  `NODE_OPTIONS=--dns-result-order=ipv4first`, `NULO_E2E_PROVERLESS=1`, `NULO_E2E_RETRY=0`): built
+  and run at `feef31af`, 04:53Z to 06:08Z, exit 0. 108 files: 105 passed, 3 skipped; 165 tests:
+  160 passed, 5 skipped, 0 failed. Every skip is gated by design and gated the same way in CI:
+  two Firefox-only specs (`firefox-background-restart`, the window-refocus case of
+  `window-placement`), and three opt-in flags no workflow sets (`NULO_E2E_STANDARD_CONTRACTS` for
+  `tx-sendTx-delegated-authwit`, `NULO_E2E_REORG` for `stale-anchor-recovery`, the warm-up probe's
+  own flag). The commits after `feef31af` touch docs, the preflight scripts, two additive runtime
+  exports and the mint guard below; the Firefox run covers all of them.
+- **The mint guard went live after the Chrome run** (`10aa5acc`): `mintPublicTokens` and
+  `transferPublicTokens` unwrap the `SimulationResult` before reading the balance. rc.1's `send()`
+  waits for the `CHECKPOINTED` receipt by default (`aztec.js` `utils/node.js`, timeout 300 s), as
+  5.2.0's did, so the follow-up public read sees the mint and the guard fires only on a mint that
+  really failed. The e2e type probe loses its TS2367 and gains no error.
+- **Firefox, proverless, full suite**, same settings: built and run at `10aa5acc`, 06:10Z to 07:38Z,
+  exit 0. 108 files: 104 passed, 4 skipped; 165 tests: 156 passed, 9 skipped, 0 failed. The skips
+  are the same three opt-in flags, the two whole files on the `CHROME_ONLY` list
+  (`backup-import-stalled-network`, the hanging request; `backup-restore-sw-restart`, the
+  background killed under an open page) and `cap-window`'s reduced-motion case, which BiDi cannot
+  emulate. The Firefox-only specs ran and passed. The live mint guard checked 77 mints, each with a
+  real balance, and fired on none.
+- **The first Chrome canary run failed on infrastructure, not execution** (07:38Z, `10aa5acc`).
+  Both canaries stopped at their first real-proof transaction (`grantPublicAuthwit`: "The wallet
+  could not process the request."). presto-server had no bb for rc.1 and could not fetch one:
+  `Failed to download bb version=6.0.0-rc.1 error=Cannot verify bb v6.0.0-rc.1: digest fetch
+  failed: GitHub API returned 403 Forbidden (anonymous GitHub API calls are capped at 60/hour per
+  address — set GITHUB_TOKEN)`. The host's anonymous budget stood at 0 of 60 until 07:57:24Z;
+  the address is shared, so who spent it is unknown. Two prove requests, no proof; the required-mode
+  build refused the WASM fallback, as it must. CI never meets this: `_extension-network-e2e.yml`
+  hands presto-server the workflow token (`PRESTO_GITHUB_API_TOKEN`) for exactly this lookup.
+  - The rerun gives presto-server a private `PRESTO_HOME` on real disk (its own warning: a second
+    instance must not share the default version cache) and, before any test, waits for the budget
+    and sends one dummy prove carrying only `x-aztec-version`, so bb is downloaded and verified
+    once. A failed warm-up exits before the suite, so an infrastructure miss cannot read as a
+    canary result. No personal token was handed to the server: that would be a keyed run.
+  - `presto-server --help` ignores the flag and starts serving on 59833; it was stopped at once.
+  - Every run, the green ones included, logs `[aztec-node] Error: Address already in use` while
+    the node still comes up; it is noise.
+- **Chrome canaries, prover-ON** (rerun, `10aa5acc`, 07:47Z to 08:01Z, exit 0). The warm-up found
+  60 of 60 at 07:57:38Z and fetched `barretenberg-amd64-linux.tar.gz` for v6.0.0-rc.1 (9,320,781
+  bytes, digest `a03fae96…7b0e`, "Download integrity verified", "bb cached successfully"); its
+  dummy body then made bb abort, as expected (HTTP 500). Both canaries passed: the frozen-account
+  canary in 75 s, the passkey canary in 67 s. presto-server logged 6 real prove requests and 6
+  `Proving succeeded`.
+- **Firefox canaries, prover-ON** (`10aa5acc`, 08:03Z to 08:07Z, exit 0). The first attempt stopped
+  at the warm-up (exit 93, before any test): its check expected "Download complete" or a cached
+  message, and a cache hit logs neither. It goes straight from "Requested Aztec version" to
+  "Starting bb prove", which is now the readiness check. The rerun proved from the bb the Chrome
+  run cached, without touching the API budget (57 of 60). Both canaries passed: the frozen-account
+  canary in 76 s, the passkey canary in 85 s, 6 real prove requests and 6 `Proving succeeded`. The
+  run left no process group and no registry row.
+
 ## Step 8 · Docs and the sweeps
 
 - The runbooks, the dependency policy and the package READMEs name both scopes. The npm READMEs
@@ -116,14 +170,25 @@
 
 ## Validation gate (2026-10-01)
 
-Run on `e1f00915` while the Chrome suite ran, since none of these touch `apps/extension/dist`:
+The whole gate, in order, at `10aa5acc` after the step 7 runs (a partial pass on `e1f00915`, run
+while the Chrome suite ran, agreed):
 
-- `bun run lint`: exit 0. `bun run lint:actions`: exit 0.
-- `bun run typecheck:all`: exit 0.
-- `bun run test:ci-gating`: exit 0, 249 tests across 17 files.
+- `bun install --frozen-lockfile --force`, `bun run lint`, `bun run typecheck:all` and
+  `bun run lint:actions`: exit 0.
+- `bun run test:all`: exit 0. `@nulo/extension` 8,604 passed, 4 skipped and 7 todo;
+  `@nulo/aztec-runtime` 259 passed and 2 skipped; the other ten workspaces 1,703 passed.
+- `bun run test:ci-gating`: 247 pass, 2 skip.
 - `bun run test:release`: three `zip-reproducible` cases fail on this host, which has no `zip`, as
   in P1. With Info-ZIP 3.0 (`zip_3.0-13ubuntu0.2`, extracted into scratch and on `PATH` for that
   one command): 162 pass, 6 skip, 0 fail, exit 0.
+- `build:chrome` and `build:firefox`, each followed by its notices floor (`check-minimum.ts`): 37
+  of 37 expected components. The playground and landing builds: exit 0.
+- The smoke recipe at retry 0. Chrome: 40 files passed and 3 skipped, 166 tests passed and 7
+  skipped, the same as P4's green run. Firefox: 41 files passed and 2 skipped, 162 tests passed
+  and 11 skipped, also the same as P4's.
+- The sweeps, re-run on this tree: the same files and counts as Step 8 classified, apart from 11
+  new hits in this plan's own files.
+- Step 7's four runs, above.
 
 ## Arc A codex loop
 
