@@ -25,7 +25,6 @@ const NONCE = "0x0f3c7a91e24b6d08c5f1a39e7b2d40c86e9a1f53b7d20c4e8a6f91b3d5c07e2
 const textOf = (page: Page, selector: string) => page.$eval(selector, (el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
 const senderKind = (page: Page, testid: string) => page.$eval(sel(testid), (el) => el.getAttribute("data-sender-kind"))
 
-/** Click `button` on the playground and resolve the execute window it opens, rendered. */
 async function openWindow(ctx: ExtensionContext, page: Page, button: string): Promise<Page> {
 	const opened = waitForPopup(ctx, "execute", { timeout: 60_000 })
 	await clickByTestId(page, button)
@@ -73,13 +72,11 @@ test.skipIf(!hasConfig)(
 		expect(await textOf(auth, sel("execute-authwit-function"))).toBe("Transfer (public)")
 		expect(await senderKind(auth, "execute-authwit-transfer-sender")).toBe("explicit")
 		expect(await textOf(auth, sel("execute-authwit-amount"))).toBe("5 TST")
-		const nonce = await auth.$eval(sel("execute-authwit-transfer-nonce"), (el) => ({
-			text: el.textContent ?? "",
-			titles: [...el.querySelectorAll("[title]")].map((t) => t.getAttribute("title")),
+		const nonce = await auth.$eval(sel("execute-authwit-transfer-nonce-value"), (el) => ({
+			text: (el.textContent ?? "").trim(),
+			title: el.getAttribute("title"),
 		}))
-		expect(nonce.text).toContain("0x0f3c7a91..c07e2a")
-		expect(nonce.text).not.toContain(NONCE)
-		expect(nonce.titles).toContain(NONCE)
+		expect(nonce).toEqual({ text: "0x0f3c7a91..c07e2a", title: NONCE })
 		await shotSend(auth, "transfer-row-authwit", "execute-authwit-structured-args")
 		await rejectExecute(auth)
 		expect((await waitForPgResult(page, "createAuthWit", authSeq, 30_000)).status).toBe("error")

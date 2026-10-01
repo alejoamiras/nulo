@@ -93,12 +93,9 @@ const ROLE_KIND: Readonly<Record<string, DecodedValue["kind"]>> = {
 const vocabularyRoles = (name: string, arity: number): readonly string[] | undefined =>
 	findTransferSignature(name, arity)?.params ?? findMintSignature(name, arity)?.params
 
-/** The vocabulary reads arguments by position, so the call must prove the signature: its selector,
- *  which is what runs, is the one the vocabulary's own signature hashes to (an interface a dApp
- *  registers can put a transfer's name on another function's selector), and the ABI spells that
- *  signature, the same roles in the same order and of the same kinds; a kind is looked up by the
- *  role, since the nonce's second name has no entry of its own. Registration says a contract is a
- *  token, not that its `transfer` takes `(to, amount)`. */
+/** The vocabulary reads arguments by position, so the call must prove the signature: the selector
+ *  that runs is the vocabulary's own (an interface a dApp registers can name any selector), and the
+ *  ABI spells its roles in order; a kind is looked up by role, since `_nonce` has no entry. */
 const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>, selector: unknown): boolean => {
 	const arity = decoded.params.length
 	const roles = vocabularyRoles(decoded.fn, arity)

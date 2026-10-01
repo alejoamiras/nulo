@@ -119,10 +119,9 @@ describe("OperationCard — aztec_createAuthWit", () => {
 				],
 			},
 		)
-		const row = w.find('[data-testid="execute-authwit-transfer-nonce"]')
-		expect(row.text()).toContain("0x0f3c7a91..c07e2a")
-		expect(row.text()).not.toContain(nonce)
-		expect(row.find("[title]").attributes("title")).toBe(nonce)
+		const value = w.find('[data-testid="execute-authwit-transfer-nonce-value"]')
+		expect(value.text()).toBe("0x0f3c7a91..c07e2a")
+		expect(value.attributes("title")).toBe(nonce)
 	})
 
 	test("the Function row names the function the selector runs when the intent's label lies or is missing", () => {

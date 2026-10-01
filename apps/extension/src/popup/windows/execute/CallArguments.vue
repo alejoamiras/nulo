@@ -69,7 +69,15 @@ const nonce = computed(() =>
 		</Flex>
 		<Flex v-if="nonce" :data-testid="`${prefix}-transfer-nonce`" justify="between" :class="$style.row">
 			<Text size="11" color="secondary">Authwit nonce:</Text>
-			<Text size="11" color="primary" :mono="nonce.kind === 'field'" :title="valueTitle(nonce)">{{ valueText(nonce) }}</Text>
+			<Text
+				:data-testid="`${prefix}-transfer-nonce-value`"
+				size="11"
+				color="primary"
+				:mono="nonce.kind === 'field'"
+				:title="valueTitle(nonce)"
+			>
+				{{ valueText(nonce) }}
+			</Text>
 		</Flex>
 	</Flex>
 
