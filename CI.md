@@ -34,7 +34,7 @@ The `quality-status` aggregator at the end is the required check on `main` / `de
 
 ### `pr-extension-smoke-e2e.yml`
 
-Runs the smoke e2e suite (`vitest.e2e.config.ts`, 43 files / 173 tests, 2 quarantined for known flakes). No Aztec sandbox; just puppeteer driving the popup UI.
+Runs the smoke e2e suite (`vitest.e2e.config.ts`, 43 files / 173 tests; 2 stay skipped until a fix lands: a navigation flake and a blocked strict-mode test). No Aztec sandbox; just puppeteer driving the popup UI.
 
 Triggers:
 - **Always** on PRs to `main`
