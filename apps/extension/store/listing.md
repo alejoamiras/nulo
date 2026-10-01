@@ -15,20 +15,39 @@ user approves interact with those accounts. (The full statement: `legal/privacy.
 
 ### Long description
 
-Nulo is a self-custody wallet for the Aztec network.
+Nothing to see. Everything to own.
 
-Your keys stay on your device. A password profile is protected by a password-derived key; a passkey
-profile is protected by your authenticator and has no recovery phrase. Nulo has no server, no
-account system and no telemetry. The extension talks to the Aztec node you configure, to the price
-service you can turn off, to the public hosts that serve proving parameters, to a local proving
-application if you install one, and to the applications you approve — and to nothing else.
+Nulo is a wallet for Aztec, a blockchain where your balance and your payments are private unless
+you decide otherwise. Everything is recorded. What can be read is up to you.
 
-Aztec transactions can be private. Nulo proves them in your browser, or through an optional local
-proving application on your own machine when one is installed. Nothing about a private transaction
-is sent to anyone except the node that includes it, in the form the protocol defines.
+PRIVATE BY DEFAULT, PUBLIC WHEN YOU SAY SO
+Payments are private unless you choose to make one public. Before you send, Nulo shows exactly what
+stays hidden and what the network will see. Your history marks each payment as private or public,
+so you always know which is which.
 
-Connected applications see what you approve: an account address, and the details of each action you
-confirm. Settings → Connected Apps shows every grant and lets you revoke it.
+YOUR MONEY STAYS WITH YOU
+Nulo is self-custody: nobody holds your funds for you. Your keys live on your device, protected by
+your password or your passkey. There is no Nulo server, no account to create and no telemetry.
+Export a backup whenever you want.
+
+APPS HAVE TO ASK
+When a website wants to connect, or to do something with your wallet, Nulo shows you exactly what it
+wants, in plain words, before anything happens. You say yes or no. Settings → Connected Apps lists
+every permission and lets you take it back.
+
+PROOFS MADE ON YOUR MACHINE
+Aztec proves private transactions before they are sent. Nulo makes those proofs right in your
+browser, or faster with Presto, an optional prover you can install on your own computer. Nothing
+about a private transaction is sent to anyone except the node that includes it, in the form the
+protocol defines.
+
+WHAT NULO TALKS TO
+The Aztec node you choose, a price service you can turn off, the public hosts that serve proving
+parameters, the optional local prover, and the apps you approve. Nothing else.
+
+A PREVIEW ON THE AZTEC TESTNET
+Nulo V6 runs on the Aztec testnet with test funds. It is a preview and hasn't been audited yet, so
+tell us what breaks.
 
 Open source, Apache-2.0: https://github.com/alejoamiras/nulo
 
@@ -69,8 +88,10 @@ private file system and grows with use; the default quota would evict it.
 
 #### `alarms`
 
-Schedules the background balance refresh and the session auto-lock timer while the wallet is
-unlocked (`wallet/index.ts:96`, `wallet/services/profile/session-manager.ts:75`).
+Schedules three jobs: the token-price refresh while the wallet is unlocked and fiat display is on,
+the session auto-lock timer, and the activity journal's upkeep, which settles operations left in
+flight and prunes old records (`wallet/index.ts:96-97`, `wallet/services/profile/session-manager.ts:78`,
+`wallet/runtime.ts:632`, `:645`).
 
 #### `offscreen`
 
@@ -81,7 +102,7 @@ Firefox hosts the same page as a frame of the background page and does not decla
 #### `sidePanel`
 
 Chrome only. Lets the user open the wallet in the browser's side panel instead of the popup
-(`popup/app.vue:73`). Every call is feature-gated; Firefox does not declare it.
+(`popup/app.vue:113`). Every call is feature-gated; Firefox does not declare it.
 
 #### `downloads`
 
@@ -120,7 +141,7 @@ unrelated to the wallet: no. Used for creditworthiness or lending: no.
 | Field | Value |
 |---|---|
 | Title | Nulo V6 |
-| Summary | User-friendly self-custody wallet for Aztec network, preserving your privacy and revealing the power of account abstraction. |
+| Summary | A wallet for Aztec: your balance and payments stay private unless you decide otherwise. Your keys stay on your device. |
 | Category | Tools |
 | Language | English |
 | Privacy policy URL | https://nulo.sh/privacy |
@@ -156,7 +177,7 @@ match them.
 | Field | Value |
 |---|---|
 | Name | Nulo V6 |
-| Summary | Self-custody wallet for the Aztec network. Keys stay on your device; private transactions are proven in your browser. |
+| Summary | Nothing to see. Everything to own. A wallet for Aztec, where your balance and payments stay private unless you decide otherwise. Your keys stay on your device, and apps have to ask before they do anything with your wallet. |
 | Categories | Privacy & Security (AMO's "Other" is "My add-on doesn't fit into any of the categories", exclusive of the rest) |
 | License | Apache-2.0 |
 | Support email | hello@nulo.sh |
@@ -189,36 +210,37 @@ handling as well and so ticks more boxes; the two differ by design.
 The block between the two markers is sent as `approval_notes` with every version.
 
 <!-- reviewer-notes:start -->
-Testing without funds: install, choose "Create profile", set a password. The wallet opens on
-mainnet with a zero balance; Settings → Networks switches to Testnet. Every screen is reachable
-without a transaction. A funded flow needs Aztec test tokens from a faucet on Testnet.
+Testing without funds: install, choose "Create profile", set a password. The wallet opens on the
+Aztec testnet, its only public network, with a zero balance. Every screen is reachable without a
+transaction.
 
 Build: the add-on is bundled (Vite). Source is attached to this version as a `git archive` of the
 tagged commit. `apps/extension/store/SOURCE-BUILD.md` inside it names the exact Bun version and the
 one script to run; the output must match `dist/firefox` byte for byte.
 
 Modifications to third-party code, stated exactly:
-- `@aztec-foundation/noir-noirc_abi` and `@aztec-foundation/noir-acvm_js` (two versions each, `patches/`): the
+- `@aztec-foundation/noir-noirc_abi` and `@aztec-foundation/noir-acvm_js` (one version each, 6.0.0-rc.1, `patches/`): the
   `package.json` `module` entry is replaced with an `exports` map so bundlers pick the web build.
   Only package resolution metadata changes; no JavaScript or WASM is altered.
-- `detect-node` is aliased to a module that exports `false` (`apps/extension/vite.config.ts:54-58`)
+- `detect-node` is aliased to a module that exports `false` (`apps/extension/vite.config.ts:55-59`)
   so `@aztec-labs/foundation`'s logger uses its browser transport.
 - `function-bind` is aliased to a stub that delegates to the native `Function.prototype.bind`
-  (`vite.config.ts:61-76`); the upstream package builds a function from a string, which the
+  (`vite.config.ts:62-77`); the upstream package builds a function from a string, which the
   extension's CSP forbids.
-- `@aztec-foundation/bb.js`'s browser `fetch_code` module is replaced by a shim that `fetch()`es the bundled
-  WASM asset (`vite.config.ts:96-111`); upstream uses a dynamic `import()` that MV3 service
-  workers forbid.
-- The bundled contract artifacts (`apps/extension/vite.shared.ts:43-46`) have their `debug_symbols` blanked
-  (`vite.config.ts:92`, `scripts/strip-artifact-debug-info.ts`); this removes source snippets from
-  error traces and changes no bytecode.
+- `@aztec-foundation/bb.js`'s browser `fetch_code` module is replaced at build time by a shim that
+  `fetch()`es the bundled WASM asset (`apps/extension/scripts/bb-fetch-code-shim.ts`,
+  `apps/extension/src/shims/bb-fetch-code.ts`), and the build fails if the upstream loader survives;
+  upstream uses a dynamic `import()` that MV3 service workers forbid.
+- The bundled contract artifacts (`apps/extension/vite.shared.ts:51-54`) have their `debug_symbols`
+  and `file_map` blanked (`vite.config.ts:93`, `scripts/strip-artifact-debug-info.ts`); this removes
+  the embedded Noir sources and changes no bytecode.
 
 Linter warnings and their origin: `innerHTML` is assigned by Vue's
-runtime (`insertStaticContent`) and by the `@alejoamiras/presto` banner element, which renders its
+runtime (`insertStaticContent`) and by the `@alejoamiras/presto-banners` banner element, which renders its
 own template (its link is normalized to an http(s) URL; variant and state come from fixed lists).
-`Function` and `eval` appear in zod's eval-capability probe and msgpackr's record decoder, both inside
-try/catch with a non-evaluating fallback, and in get-intrinsic's intrinsics table, which references
-`eval` without calling it; the extension CSP (`script-src 'self' 'wasm-unsafe-eval'`) forbids
+`Function` and `eval` appear in zod's eval-capability probe, msgpackr's record decoder and
+get-intrinsic's constructor probe, each inside try/catch with a non-evaluating fallback, and in
+get-intrinsic's intrinsics table, which references `eval` without calling it; the extension CSP (`script-src 'self' 'wasm-unsafe-eval'`) forbids
 evaluating strings, so none of them evaluates one. `UNSUPPORTED_API` is `chrome.offscreen` and
 `chrome.sidePanel`, both feature-gated and never called on Firefox.
 

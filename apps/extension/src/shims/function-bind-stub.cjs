@@ -3,7 +3,7 @@
  *
  * Why this exists:
  * - MV3 service workers reject `'unsafe-eval'`. Our CSP at
- *   `manifest/manifest.config.ts:35-37` only permits `'wasm-unsafe-eval'`.
+ *   `manifest/manifest.config.ts` only permits `'wasm-unsafe-eval'`.
  * - The upstream `function-bind` package (a transitive dep of `get-intrinsic`,
  *   `call-bind`, and many others — including in the Aztec graph) builds
  *   a bound function from a dynamically-constructed string to preserve

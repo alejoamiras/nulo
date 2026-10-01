@@ -64,7 +64,7 @@ export default defineConfig({
 			// function from a dynamic string to preserve `f.length`, which MV3
 			// rejects under our `script-src 'self' 'wasm-unsafe-eval'` policy.
 			// Native `Function.prototype.bind` does the same thing without
-			// dynamic code construction; the stub is a 22-line CJS module that
+			// dynamic code construction; the stub is a small CJS module that
 			// just delegates. Aliased BOTH `function-bind` (the package entry)
 			// and `function-bind/implementation` (some upstream consumers
 			// import the implementation entry directly). Anchored regex so
@@ -77,8 +77,8 @@ export default defineConfig({
 			},
 		],
 		// Force Vite to resolve these WASM-binding packages to a single copy.
-		// Multiple nested versions exist in node_modules (rc.2 in simulator/pxe,
-		// rc.4 hoisted). Without dedup, initAbi() and abiEncode() end up in
+		// Nested copies of these packages have been installed side by side before.
+		// Without dedup, initAbi() and abiEncode() can end up in
 		// different module scopes, so the WASM instance variable is never shared.
 		dedupe: ["@aztec-foundation/noir-noirc_abi", "@aztec-foundation/noir-acvm_js"],
 	},
