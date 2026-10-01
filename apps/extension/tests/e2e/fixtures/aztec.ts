@@ -215,9 +215,11 @@ export async function mintPublicTokens(
 	// Verify the mint is visible by reading the balance from the test wallet's PXE.
 	// This ensures the state has settled before the extension tries to read it.
 	const to = AztecAddress.fromStringUnsafe(toAddress)
-	const balance = await token.methods
-		.balance_of_public(to)
-		.simulate({ from: AztecAddress.fromStringUnsafe(minterAddress), fee: { gasSettings: E2E_FEE_GAS } })
+	const balance = unwrapSimulated(
+		await token.methods
+			.balance_of_public(to)
+			.simulate({ from: AztecAddress.fromStringUnsafe(minterAddress), fee: { gasSettings: E2E_FEE_GAS } }),
+	)
 	console.log(`[mintPublicTokens] Verified on-chain public balance: ${balance}`)
 	if (balance === 0n) {
 		throw new Error(`Mint appeared to succeed but balance_of_public returned 0 for ${toAddress}`)
@@ -257,13 +259,8 @@ export async function mintPrivateTokens(
 	}
 
 	const token = await TokenContract.at(addr, wallet)
-	// `wait: { timeout: 120 }` blocks until the tx is mined; without it the
-	// returned SentTx isn't a thenable and the outer `await` resolves
-	// immediately (mintPublicTokens hides this via a follow-up
-	// `balance_of_public.simulate` that implicitly forces a chain query —
-	// no such barrier for the private path). Worth fixing here rather than
-	// at the call site so future callers don't repeat the trap. Waiting also
-	// gives us a mined `receipt.txHash` to return.
+	// `send()` waits for the checkpointed receipt by default (300 s); this bounds it at 120 s, and the
+	// receipt's `txHash` is what callers correlate.
 	const sent = await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
 		fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
 		from: AztecAddress.fromStringUnsafe(minterAddress),
@@ -323,9 +320,11 @@ export async function transferPublicTokens(
 	await token.methods
 		.transfer_public_to_public(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
 		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
-	const balance = await token.methods
-		.balance_of_public(AztecAddress.fromStringUnsafe(toAddress))
-		.simulate({ from, fee: { gasSettings: E2E_FEE_GAS } })
+	const balance = unwrapSimulated(
+		await token.methods
+			.balance_of_public(AztecAddress.fromStringUnsafe(toAddress))
+			.simulate({ from, fee: { gasSettings: E2E_FEE_GAS } }),
+	)
 	console.log(`[transferPublicTokens] recipient on-chain public balance: ${balance}`)
 }
 
