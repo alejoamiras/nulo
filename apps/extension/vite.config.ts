@@ -11,6 +11,7 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { bbFetchCodeShim } from "./scripts/bb-fetch-code-shim"
 import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
 import { PAGES_OPTIONS } from "./scripts/pages-options"
 import { parseLimitGuard } from "./scripts/parse-limit-guard"
@@ -92,23 +93,7 @@ export default defineConfig({
 		stripArtifactDebugInfo(debugStrippedArtifacts),
 		parseLimitGuard(),
 		chunkCycleGuard(),
-		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
-		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
-		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
-		// graph only — node and node-cjs trees keep their stock fetcher.
-		{
-			name: "bb-fetch-code-shim",
-			enforce: "pre",
-			resolveId(source, importer) {
-				if (
-					importer?.includes("@aztec-foundation/bb.js/dest/browser/") &&
-					source.includes("fetch_code/browser") &&
-					source.endsWith("index.js")
-				) {
-					return fileURLToPath(new URL("./src/shims/bb-fetch-code.ts", import.meta.url))
-				}
-			},
-		},
+		bbFetchCodeShim(),
 		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
 		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
