@@ -2,13 +2,13 @@
 import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, posix } from "node:path"
-import { lib } from "./gate"
+import { lib, OWN } from "./gate"
 
 export const PLANS = lib.PLANS
 export const PERMALINK_PREFIX = "https://github.com/alejoamiras/nulo/blob/"
 /** The untrack base the plan pins first; a later merge-base with `origin/dev` covers what landed after it. */
 export const UNTRACK_BASE = "9f11de70b13933be2d54c3eb79622b1ff2719aba"
-export const MANIFEST = `${PLANS}/plans-scaffolding/untrack-manifest.json`
+export const MANIFEST = `${OWN}/untrack-manifest.json`
 export const BASES_FILE = "scripts/ci-cd/plans/permalink-bases.json"
 export const DEV_REF = "refs/remotes/origin/dev"
 
@@ -95,6 +95,17 @@ export function rowsByPath(rows: readonly Row[]): Map<string, Row> {
 
 export function permalink(row: Pick<Row, "path" | "sha">): string {
 	return `${PERMALINK_PREFIX}${row.sha}/${row.path}`
+}
+
+const RAW_META_RE = /^:\d{6} \d{6} ([0-9a-f]{40}) ([0-9a-f]{40}) ([ACDMRTUX])(\d*)$/
+
+/**
+ * One meta field of `git diff --raw --no-abbrev -z`. `same` is byte identity, which R100 is not: git scores
+ * a rename by its lines, so a file moved with its lines reordered still pairs at 100.
+ */
+export function rawMeta(field: string): { status: string; score: number; same: boolean } | null {
+	const m = field.match(RAW_META_RE)
+	return m ? { status: m[3], score: Number(m[4]) || 0, same: m[1] === m[2] } : null
 }
 
 /** Blob ids for `<rev>:<path>` specs, one `git cat-file --batch-check` for all of them; null where absent. */

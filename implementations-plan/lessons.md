@@ -1,50 +1,55 @@
 # Lessons
 
-Curated gotchas from closed plans, read at the start of every task so no dead end is walked twice. One line per entry, each linking its evidence: an archived lessons log or a permalink. The budget is 8 KiB: a new entry deduplicates, retires what it supersedes, and dates anything tied to a tool version.
+Gotchas from closed plans, read before every task. One line each, linking its evidence; under 8 KiB, so a new entry dedupes, retires what it supersedes, and dates what a tool version ties it to.
 
-## Tooling
+## Bun & deps
 
-- Bun trusts a warm cache (1.4.2, 2026-09): it never re-checks the lockfile's sha512 against its cache, so a poisoned cached file survives `bun install --frozen-lockfile`; a job that produces release bytes restores no cache ([evidence](tools-extraction/lessons/phase-2.md)).
-- Under `bun test`, loading `@aztec-labs/*` in process throws from `expect.addEqualityTesters` on a cold transpiler cache; run such checks in a `bun` subprocess ([evidence](tools-extraction/lessons/phase-2.md)).
-- Timed tests (`e2e/config` today) time out under the parallel `test:all` / `audit:vue` load, so rerun the file alone before calling it breakage (2026-09); a cold dynamic import in the timed body is one cause, fixed by importing in `beforeEach` on the hook's default budget, as `content-message-relay` and `presto/client` do. [Evidence](tools-extraction/lessons/phase-1.md), [more](e2e-reliability-fixes/lessons/phase-2.md), [more](hygiene/lessons/phase-1.md)
-
-## Cloudflare
-
-- wrangler reconciles custom domains only when `routes` lists one (4.129.1, 2026-09), and Workers Builds takes only user tokens: with a Workers-only build token, attach the domain outside the config and commit no `routes` ([evidence](tools-extraction/lessons/phase-2.md)).
-- An agent session refuses DNS and domain changes and Pages project deletes, even with a token in hand: plan them as owner steps ([evidence](tools-extraction/lessons/phase-2.md)).
+- Bun never re-checks a warm cache against the lockfile's sha512, so a poisoned cached file survives a frozen install: a job making release bytes restores no cache (1.4.2, 2026-09). [Evidence](tools-extraction/lessons/phase-2.md)
+- An incremental `bun install` leaves a removed dependency on disk, so a leftover import passes locally and fails on CI: prove removals on a fresh install (1.4.2, 2026-09). [Evidence](vitest-vite8-dedupe/lessons/phase-2.md)
+- When one `bun run --parallel` leg fails, Bun SIGINTs the rest, so `audit:vue` can exit 130: the cause is the leg that printed `Exited with code N` (1.4.2, 2026-09). [Evidence](isolated-linker-store/lessons/phase-1.md)
+- `@aztec/*` in `bun test` throws from `expect.addEqualityTesters` on a cold cache (use a `bun` subprocess); under jsdom bb.js throws `std::bad_cast` (use `// @vitest-environment node`; 5.2.0, 2026-09). [Evidence](tools-extraction/lessons/phase-2.md), [more](harden-2026-09-remediation/lessons/b4.md)
 
 ## CI & gates
 
-- In a `gh stack` the plans gate runs on every arc head, so an arc cannot link a plan file a later arc adds: name it as text, and let the arc that adds it restore the link. [Evidence](ux-feedback/lessons/final-pass.md)
-- Unlike the build, the extension's unit vitest auto-imports only `vue` and `vue-router` and registers no components: an auto-imported composable or store throws "is not defined" and a bare tag stays unresolved, so import them or pass `global.components`. [Evidence](ux-feedback/b5-permissions/lessons/phase-7.md), [more](ux-feedback/b4-snackbar-rows-arrivals/lessons/phase-3.md)
-- `apps/extension/src/types/`'s tracked declarations regenerate only when Vite builds or serves (vitest has `dts: false`), so local gates pass on a stale copy and CI's build fails on the diff: build before committing a new auto-imported export or component. [Evidence](ux-feedback/b5-permissions/lessons/phase-4.md), [more](ux-feedback/b3-tooltips-glossary/lessons/phase-3.md)
-- Under `vi.useFakeTimers()` a natively dispatched event runs only the first Vue listener it reaches (runtime-dom skips any attached no earlier than the event's `_vts`): use `wrapper.trigger`, or advance time 1 ms first (Vue 3.5.41, 2026-09). [Evidence](ux-feedback/b3-tooltips-glossary/lessons/phase-1.md), [more](ux-feedback/b3-tooltips-glossary/lessons/phase-4.md)
-- A second `@vue/test-utils` `mount` in one test resets the process-global `transformVNodeArgs`, so the first tree loses its stubs and its failed unmount leaks document listeners: show the second in a plain `createApp` (VTU 2.4.11, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-1.md)
-- vitest 4.1.10 never re-runs a fixture setup that threw: every retry gets a test-scoped fixture as `undefined` and a file-scoped one's first error, so one setup failure reads as a second bug (2026-09). [Evidence](e2e-reliability-fixes/lessons/phase-3.md)
-- A test that something never happens proves nothing until its fixture can make it happen: pair it with a success-path control in the same fixture. [Evidence](connect-window/lessons/post-impl.md)
-- Under a parent's `v-model`, a `defineModel` write reads back only once the parent re-renders, so a second write built on `model.value` restores the old value; a test with no `onUpdate:*` misses it (Vue 3.5, 2026-09). [Evidence](send-amount-exact/lessons/phase-12.md)
+- The root `test`, so `audit:vue`, runs only `apps/extension`; CI also runs `test:all`, `test:release` and `test:ci-gating`: run them for changes elsewhere. [Evidence](harden-2026-09-remediation/lessons/b1.md)
+- `bun run lint` prints Biome's first 20 of 31 standing diagnostics, so a new error can hide behind `Found 1 error`: rerun on the changed files (2.5.13, 2026-09). [Evidence](wallet-error-resilience/lessons/phase-1.md)
+- `vue-tsc` never checks an SFC whose script lacks `lang="ts"`, 149 of the extension's 205 (2026-09), so a bad prop or field there passes `typecheck:all`. [Evidence](storage-migration-backup/lessons/phase-6.md)
+- The unit vitest auto-imports only `vue` and `vue-router` and no components: import what a test uses, and stub `@nulo/design`'s `Button`, which recurses if registered. [Evidence](ux-feedback/b5-permissions/lessons/phase-7.md)
+- `src/types/auto-imports.d.ts` regenerates only when Vite builds or serves, and keeps a removed export's global: build before committing an auto-import, delete that line by hand (unplugin-auto-import 21.1.0, 2026-09). [Evidence](send-amount-exact/lessons/phase-8.md)
+- Vue test traps (3.5.41, VTU 2.4.11, 2026-09): fake timers run only a native event's first listener, a second `mount` strips the first's stubs, a `defineModel` write reads back late. [Evidence](ux-feedback/b3-tooltips-glossary/lessons/phase-1.md)
+- A test that something never happens, or that accepts `ok` or `error`, passes code that always fails: pair it with a success-path control. [Evidence](connect-window/lessons/post-impl.md)
+- `describe.skipIf` still runs its body at collection, so a top-level read of build output fails the file where nothing was built: read it inside `it` or a hook. [Evidence](swap-fuel/lessons/phase-6.md)
+- Timed tests (`e2e/config`) time out under parallel `test:all` load: rerun the file alone first; a cold dynamic import in a timed body is one cause. [Evidence](e2e-reliability-fixes/lessons/phase-2.md)
 
-## E2E
+## Git & GitHub
 
-- One Puppeteer `waitForFunction` is one protocol call, so `protocolTimeout` caps it whatever its own `timeout` (300 s in `apps/extension/tests/e2e/fixtures/browser/`): a longer wait fails as `Runtime.callFunctionOn timed out`. Poll in short reads (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md)
-- A held key is a second `keyboard.down`, with `repeat: true` on CDP and BiDi alike, and native buttons activate on it; Firefox's lands 40 to 50 ms late, after a quick action has swapped the page. Record `repeat` and the target in the page so a lost or stray repeat fails the step (Puppeteer 25.8, 2026-09). [Evidence](wallet-safety-fixes/lessons/phase-6.md), [Firefox](keyboard-guards/lessons/phase-3.md)
-- Enter in a form field clicks the form's default button; when that click's handler disables the button, Vue re-renders before the activation, so no `submit` fires on Chrome or Firefox: count clicks on the default button, not submits (Vue 3.5, 2026-09). [Evidence](keyboard-guards/lessons/phase-3.md)
-- `navigateByHash` returns before the router swaps the page, so a read right after can see the old page's rows: wait for them to detach. [Evidence](layout-polish/lessons/phase-2.md)
+- A `pull_request` run takes workflows from the merge ref but builds `head.sha`, so a fix `dev` gained after the branch point is absent: merge `dev` before debugging. [Evidence](dedup-ledger/README.md)
+- A job needing a skipped job is skipped unless its `if` calls a status function, and `always()` also runs after a cancel: guard side effects with `always() && !cancelled()`. [Evidence](release-pipeline-hardening/lessons/phase-1.md)
+- A `gh stack` runs the plans gate on every arc head, so an arc cannot link a file a later arc adds; after its squash merge, merging `dev` into a branch on its old head is add/add. [Evidence](ux-feedback/lessons/final-pass.md), [more](amount-honesty/lessons/phase-3.md)
 
 ## Extension runtime
 
-- A deep-reactive ref reads rows back as proxies, so a `Set` of the stored rows never `has` one: compare with `toRaw` (Vue 3.5, 2026-09). [Evidence](backup-import/lessons/phase-3.md)
-- A wire-shaped field fixture must stay below the BN254 modulus (`0x3064…`): `0x` + `aa` × 32 is above it, so the capability validator refuses it as malformed, while `0x` + `0a` × 32 passes. [Evidence](ux-feedback/b5-permissions/lessons/phase-6.md)
-- A lock section the watchdog force-released keeps running (`packages/wallet-core/src/utils/lock.ts`), and `nextNumericId` (max + 1) reuses a purged top id on the next restore, so a late compensating delete by id can hit a successor's row. Gate it on `withLock`'s `isCurrent` where the row predates the deletion, whose purge removes it; skipping it orphans a row that may postdate the purge's snapshot. [Evidence](wallet-safety-fixes/lessons/phase-6.md)
-- The local network's chain id is 0 (`CHAIN_IDS.SANDBOX`), so a truthiness guard on `chainId` skips the chain every network e2e runs on: History never named a received row's token there. Test for the network, or for `chainId === undefined`. [Evidence](ux-owner-picks/lessons/phase-2.md)
-- The node client retries a failed POST, not a node's refusal: a poller that must go quiet on lock needs a one-attempt client, and a refused retry can hide a send that landed (Aztec 6.0.0-rc.1, 2026-10). [Evidence](failed-send-check/lessons/phase-7.md)
-- `@aztec-labs/protocol-contracts/fee-juice` loads a 700 KB artifact at import, with no `sideEffects: false`: imported by a module the `@/wallet/utils` barrel re-exports, it ships a second copy to every popup. Keep it out of the barrel (6.0.0-rc.1, 2026-10). [Evidence](send-states/lessons/phase-1.md)
+- A popup-to-background call rejects after 60 s unless its client overrides `getRequestTimeoutMs`, so a call that waits on a proof fails while the send lands. [Evidence](e2e-reliability-fixes/lessons/phase-6.md)
+- `PopupManager` mounts every registry popup at start, locked or not, and never unmounts one: setup work must wait for `show` or sit behind a `v-if`. [Evidence](home-holdings-pin/lessons/post-impl-arc-B.md)
+- `EventHandler.invoke` drops an async handler's promise: awaiting it waits for nothing, a rejection escapes, and cleanup chained on an event is fire-and-forget. [Evidence](backup-restore-corruption-fix/lessons/phase-5.md)
+- Moving a span into an awaited helper, as complexity fixes tend to, adds a microtask that breaks a span which must finish in one tick: keep it inline. [Evidence](approval-scope-follow/lessons/phase-5.md)
+- A typed error survives only hops that name it: `walletErrorFromPayload` and `classifyOperationCatch` pass listed codes, `viaPxe` rethrows `Error`: register the code. [Evidence](harden-2026-09-remediation/lessons/b3.md)
+- EntityStorage hides a row it cannot decode from `getAll()`, so a purge, dedupe or max+1 id over decoded rows misses it: key off `getKeys()`. [Evidence](backup-restore-security-hardening/lessons/phase-1.md)
+- The local network's chain id is 0, so a truthiness guard on `chainId` skips the chain every network e2e runs on: test `chainId === undefined`. [Evidence](ux-owner-picks/lessons/phase-2.md)
+- An error message carries text the log redactor never sees (`JSON.parse` quotes its input): log a fixed failure category, never the message. [Evidence](backup-log-hygiene/lessons/arc-3-call-sites.md)
+- Classify a dApp call by address, selector and arguments, never its dApp-written name; validate both sides before comparing normalised keys, or `key(a) === key(b)` matches two bad inputs. [Evidence](dapp-preexisting-fee/lessons/phase-1.md), [more](grant-check-address-case/lessons/phase-1.md)
+- A MAC binds only what it names, and a row's stored `id` moves with the row: anchor it on the storage key, and on a MAC failure refuse, never self-heal. [Evidence](mac-identity-binding/lessons/phase-1.md)
 
-## Authorization checks
+## Aztec
 
-- Validate both sides before comparing normalised keys: `key(a) === key(b)`, where `key` returns `undefined` for bad input, matches two bad inputs, and plain string equality let a malformed listed contract match an identical call target ([red run](grant-check-address-case/lessons/phase-1.md)).
+- Aztec 5 mints a block only when a tx is pending, so a helper that waits N blocks or makes one with `.simulate()` hangs on a quiet sandbox: send a real tx. [Evidence](aztec-5.0-upgrade/lessons/phase-6.md)
+- Blocks above the proven tip can be pruned, and a symbolic tag can name a different fork on each call: pin reads to one block hash, and reconcile what was recorded above the tip. [Evidence](incoming-public-transfers/lessons/phase-5.md)
+- The node client retries a failed POST but not a refusal, so a refused retry can hide a send that landed; it also resolves `null` as `undefined` (5.2.0, 2026-09). [Evidence](failed-send-check/lessons/phase-7.md)
 
-## Popup UI
+## Agent tooling
 
-- Space Grotesk's default digits are proportional (weight 700: "1" 452 units, "0" 648), so a figure re-fitted to its line on every frame of a count pulses: while it counts, let the fit only shrink, then fit the next figure afresh. The font has `tnum`, but tabular digits change every figure's look, an owner call. [Evidence](ux-owner-picks/lessons/phase-1.md)
-- A bare `<button>` shows no focus ring, since `@nulo/design`'s base.css sets `button { outline: none; }`, and onboarding's active method tab draws its accent outline on an accent fill. Look at a capture before it claims a ring. Picture a refused key with its action enabled, or validation passes for the guard. [Evidence](keyboard-guards/lessons/phase-4.md)
+- The agent's Bash tool evals each command left of an `&&`, where zsh ignores `set -e`; a pipe returns its last stage's status, `$FILES` stays one word. Redirect, then test each exit code (5.9, 2026-09). [Evidence](stable-release-0.27.0/lessons/phase-3.md)
+- `pgrep -f` matches the agent's `zsh -c` wrapper, so a teardown can kill itself: signal your launcher's pgid or an orphan in your worktree, not `$$`/`$PPID`. [Evidence](harden-findings-remediation/lessons/phase-F.md)
+- Agents sharing a worktree share one index: one's reset or checkout wipes the others' edits, and `git add -A` commits them: one worktree per editor. [Evidence](dedup-bridge-conductors/lessons/phase-2.md)
+- A scripted edit whose anchor is gone does nothing and says nothing (`str.replace`): check it applied before claiming it. [Evidence](deflake-round-2/lessons/phase-4-5.md)
+- Take a red/green proof's old copy from the base SHA, never `HEAD`, and rerun a red that looks environmental on the base commit before blaming the box. [Evidence](firefox-first-class-spike/lessons/phase-10.md), [more](aztec-5.0.1-line/lessons/phase-p2.md)

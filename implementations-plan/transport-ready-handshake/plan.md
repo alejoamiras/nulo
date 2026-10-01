@@ -26,6 +26,8 @@ resurrection risk).
   frozen-account-canary stage-5 fake-kill entry and the
   crash-before-provision delete-refusal entry. Neither is re-dispositioned by
   the parking — they remain accurate statements of open debt.
+- **A verbatim copy of those rows and entries** lives in [spec-rows.md](spec-rows.md),
+  so the spec stays with this plan when its closed sources move to `archive/`.
 - **Recon completed and is preserved** in [recon.md](recon.md): four scouts
   over the transport, callers/noise-filters, profile/PXE lifecycle, and e2e
   harness surfaces, consolidated with exact file:line maps (at dev

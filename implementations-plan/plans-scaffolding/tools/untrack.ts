@@ -9,7 +9,7 @@
  * `--verify` proves every row against its commit, every commit against `dev`, and that every path the
  * branch deletes or promotes away has a row. `--dry-run` prints what record and apply would do.
  */
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
 	BASES_FILE,
@@ -210,6 +210,7 @@ export function removedOnBranch(cwd: string, promotions: readonly Promotion[] = 
 
 export function verify(opts: Options): string[] {
 	const { cwd } = opts
+	if (!existsSync(join(cwd, MANIFEST))) return [`${MANIFEST} is missing, so no row can be verified`]
 	const rows = readManifest(cwd)
 	const known = rowsByPath(rows)
 	const removed = removedOnBranch(cwd, opts.promotions)

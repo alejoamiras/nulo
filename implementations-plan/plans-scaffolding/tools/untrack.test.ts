@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
-import { BASES_FILE, readManifest, writeManifest } from "./common"
+import { BASES_FILE, MANIFEST, readManifest, writeManifest } from "./common"
 import { cleanupRepos, commitAll, git, P, planRepo, tracked, writeFiles } from "./fixture"
 import { promote } from "./promote"
 import { apply, record, verify } from "./untrack"
@@ -47,7 +47,7 @@ describe("untrack", () => {
 		expect(tracked(repo)).toEqual([`${P}/.gitignore`, `${P}/a/lessons/audit-y.md`, `${P}/a/plan.md`])
 	})
 
-	test("verify proves every row and covers every deleted or promoted-away path", () => {
+	test("verify proves every row, covers every deleted or promoted-away path, and refuses a missing manifest", () => {
 		const promotions = [{ dir: "p", from: "plan-v2.md" }]
 		const { repo, base } = planRepo(
 			{
@@ -76,6 +76,9 @@ describe("untrack", () => {
 			`${P}/p/notes.md leaves the tree without a row`,
 			`${P}/p/plan.md leaves the tree without a row`,
 		])
+
+		rmSync(join(repo, MANIFEST))
+		expect(verify({ cwd: repo, promotions })).toEqual([`${MANIFEST} is missing, so no row can be verified`])
 	})
 
 	test("a path whose bytes in the base being untracked differ from its row is refused, before untracking and in verify", () => {

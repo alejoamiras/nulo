@@ -37,7 +37,7 @@ export const PRE_SPLIT_ACTIVE: readonly string[] = ["plans-scaffolding"]
 export const LESSONS_BUDGET = 8192
 export const CLOSING_STATUS = "closed, awaiting archive"
 /** A home segment counts only where a path starts; the lookbehind keeps URL and relative paths out. */
-const LOCAL_PATH_RE = /(?<![\w.-])(?:\/(?:Users|home)\/\w|\/mnt\/[\w.-]+\/\w|\/root(?![\w.-]))|\b[A-Za-z]:\\{1,2}[Uu]sers\\{1,2}\w/
+export const LOCAL_PATH_RE = /(?<![\w.-])(?:\/(?:Users|home)\/\w|\/mnt\/[\w.-]+\/\w|\/root(?![\w.-]))|\b[A-Za-z]:\\{1,2}[Uu]sers\\{1,2}\w/
 const REPO_ISSUE_RE = /^https:\/\/github\.com\/alejoamiras\/nulo\/(?:issues|pull)\/\d+(?:#[\w-]+)?$/
 const OUTCOME_FIELDS = [/\bDate\s*:/, /\bStatus\s*:/, /\b(?:Shipped|Delivered)\s*:/, /\bSeeds retired\s*:/i]
 const NON_REGULAR: Readonly<Record<string, string>> = { "120000": "a symlink", "160000": "a gitlink" }
