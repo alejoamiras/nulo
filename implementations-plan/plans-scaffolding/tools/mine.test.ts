@@ -65,7 +65,7 @@ function minedTree(): { repo: string; file: Closures } {
 		[`${P}/b/README.md`]: "# B\n",
 		[`${P}/c/shot.png`]: "png",
 		[`${P}/lessons.md`]: "# Lessons\n\n- A warm cache hides a cold-cache crash ([evidence](a/lessons/phase-1.md)).\n",
-		[`${P}/follow-ups.md`]: "# Follow-ups\n\n- **Rerun on a cold cache.** [Record](a/plan.md)\n",
+		[`${P}/follow-ups.md`]: `# Follow-ups\n\n- **Rerun on a cold cache.** [Record](a/plan.md), \`${P}/a/plan.md\`\n`,
 	})
 	const file: Closures = {
 		closuresBase: git(repo, "rev-parse", "HEAD"),
@@ -218,13 +218,15 @@ describe("mine", () => {
 		])
 	})
 
-	test("--verify holds a clean run, keeps an entry whose links moved under archive/, and names each gap", () => {
+	test("--verify holds a clean run, keeps an entry whose links and paths moved under archive/, and names each gap", () => {
 		const { repo, file } = minedTree()
 		const recs = cleanRun(repo, file)
 		writeRecords(repo, recs)
 		expect(verify(repo)).toEqual([])
 		const lessons = join(repo, P, "lessons.md")
+		const followUps = join(repo, P, "follow-ups.md")
 		writeFileSync(lessons, readFileSync(lessons, "utf8").replace("](a/", "](archive/a/"))
+		writeFileSync(followUps, readFileSync(followUps, "utf8").replaceAll("a/plan.md", "archive/a/plan.md"))
 		expect(verify(repo)).toEqual([])
 
 		writeFileSync(lessons, `${readFileSync(lessons, "utf8")}## Skip release checks\n- An entry nobody mined.\n`)
@@ -267,8 +269,8 @@ describe("mine", () => {
 		)
 		expect(verify(repo).map((p) => p.replace(/([ck])-[0-9a-f]{10}/, "$1-…"))).toEqual([
 			"c-…: its quote is not at closuresBase",
-			"k-…: not an entry the curated files held",
 			`k-…: ${P}/lessons.md is not a mining source`,
+			"k-…: not an entry the curated files held",
 			"L1: its currency check judged another version of the line",
 			"L1: the verifier judged another version of the line",
 			"follow-ups.md: the verifier judged another frame",
