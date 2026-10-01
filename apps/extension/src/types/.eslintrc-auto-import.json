@@ -216,6 +216,7 @@
     "VOCABULARY_SELECTORS": true,
     "ValidateOptions": true,
     "WritableComputedRef": true,
+    "abiNameFitsRole": true,
     "activateNetworkGuarded": true,
     "aggregateFiat": true,
     "applyOutcome": true,

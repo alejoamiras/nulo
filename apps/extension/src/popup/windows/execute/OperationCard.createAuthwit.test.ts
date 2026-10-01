@@ -16,6 +16,7 @@ const DELEGATE = `0x${"0d".repeat(32)}`
 const TOKEN = `0x${"0c".repeat(32)}`
 const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
 const CONSUMER = `0x${"0e".repeat(32)}`
+const THIRD = `0x${"0b".repeat(32)}`
 const INNER = `0x${"0f".repeat(32)}`
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
 
@@ -161,6 +162,52 @@ describe("OperationCard — aztec_createAuthWit", () => {
 		})
 		expect(decoded.findAll('[data-testid="execute-authwit-decoded-param"]')).toHaveLength(1)
 		expect(decoded.text()).not.toContain("this account")
+	})
+
+	test("a standard transfer intent names its from, not the delegate or the signing account", () => {
+		const call = { to: TOKEN, name: "transfer_public_to_public", selector: "0xc47adea0", args: [THIRD, DELEGATE, field(5n), field(0n)] }
+		const w = mountCard(createAuthWit({ caller: DELEGATE, call }), {
+			tokens: [USDC],
+			decodedCalls: [
+				{
+					kind: "decoded",
+					contract: "Token",
+					fn: "transfer_public_to_public",
+					params: [
+						{ name: "from", value: { kind: "address", value: THIRD } },
+						{ name: "to", value: { kind: "address", value: DELEGATE } },
+						{ name: "amount", value: { kind: "integer", value: "5" } },
+						{ name: "_nonce", value: { kind: "field", value: field(0n) } },
+					],
+				},
+			],
+		})
+		const sender = w.find('[data-testid="execute-authwit-transfer-sender"]')
+		expect(sender.attributes("data-sender-kind")).toBe("explicit")
+		expect(sender.text()).toContain(THIRD)
+		expect(sender.text()).not.toContain(OWNER)
+		expect(sender.text()).not.toContain(DELEGATE)
+	})
+
+	test("a two-argument transfer intent on a registered token keeps the decoded rows: there is no caller to name", () => {
+		const call = { to: TOKEN, name: "transfer", selector: "0x754fb767", args: [DELEGATE, field(5n)] }
+		const w = mountCard(createAuthWit({ caller: DELEGATE, call }), {
+			tokens: [USDC],
+			decodedCalls: [
+				{
+					kind: "decoded",
+					contract: "Token",
+					fn: "transfer",
+					params: [
+						{ name: "to", value: { kind: "address", value: DELEGATE } },
+						{ name: "amount", value: { kind: "integer", value: "5" } },
+					],
+				},
+			],
+		})
+		expect(w.findAll('[data-testid="execute-authwit-decoded-param"]')).toHaveLength(2)
+		expect(w.find('[data-testid="execute-authwit-structured-args"]').exists()).toBe(false)
+		expect(w.find('[data-testid="execute-authwit-transfer-sender"]').exists()).toBe(false)
 	})
 
 	test("an inner-hash intent renders the consumer, the trimmed hash and the opaque warning; no delegate row", () => {

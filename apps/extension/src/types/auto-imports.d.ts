@@ -59,6 +59,7 @@ declare global {
   const TRANSFER_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').TRANSFER_SIGNATURES
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
   const VOCABULARY_SELECTORS: typeof import('../utils/token-transfer-vocabulary').VOCABULARY_SELECTORS
+  const abiNameFitsRole: typeof import('../utils/token-transfer-vocabulary').abiNameFitsRole
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
   const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
   const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
@@ -592,6 +593,7 @@ declare module 'vue' {
     readonly TRANSFER_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_SIGNATURES']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>
     readonly VOCABULARY_SELECTORS: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['VOCABULARY_SELECTORS']>
+    readonly abiNameFitsRole: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['abiNameFitsRole']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
     readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
     readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>

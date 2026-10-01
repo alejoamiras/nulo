@@ -8,7 +8,7 @@
  * + PXE code) into every popup bundle that only needs names and arities.
  */
 
-import { TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions/descriptors"
+import { AUTHWIT_NONCE_NAMES, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions/descriptors"
 import type { TokenFnKind } from "@/wallet/services/token/functions/types"
 
 export type TransferKind = Extract<TokenFnKind, `transfer${string}`>
@@ -75,6 +75,11 @@ export const MINT_SIGNATURES: ReadonlyMap<string, readonly MintSignature[]> = ne
 
 export const findMintSignature = (name: string, arity: number): MintSignature | undefined =>
 	MINT_SIGNATURES.get(name)?.find((s) => s.params.length === arity)
+
+/** Whether an interface's parameter `name` fills the vocabulary's `role`: the same name, or for the
+ *  nonce role either of the nonce's names, as the descriptors' predicate accepts them. */
+export const abiNameFitsRole = (role: string, name: string): boolean =>
+	name === role || (AUTHWIT_NONCE_NAMES.includes(role) && AUTHWIT_NONCE_NAMES.includes(name))
 
 /**
  * The selector each shape dispatches on, keyed `name/arity`: its name over the descriptors' own

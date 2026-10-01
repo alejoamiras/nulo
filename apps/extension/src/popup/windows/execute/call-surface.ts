@@ -10,7 +10,7 @@ import type { DecodedCall, DecodedParam, DecodedValue, UndecodedReason } from "@
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { formatBaseUnits } from "@/utils/amount"
 import { trimAddress } from "@/utils/string"
-import { findMintSignature, findTransferSignature, vocabularySelector } from "@/utils/token-transfer-vocabulary"
+import { abiNameFitsRole, findMintSignature, findTransferSignature, vocabularySelector } from "@/utils/token-transfer-vocabulary"
 import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { parseTransferIntent, projectArgument, smallFieldDecimal } from "@/utils/transfer-intent"
 import { safeWire } from "./humanize"
@@ -96,8 +96,9 @@ const vocabularyRoles = (name: string, arity: number): readonly string[] | undef
 /** The vocabulary reads arguments by position, so the call must prove the signature: its selector,
  *  which is what runs, is the one the vocabulary's own signature hashes to (an interface a dApp
  *  registers can put a transfer's name on another function's selector), and the ABI spells that
- *  signature, the same roles in the same order and of the same kinds. Registration says a contract
- *  is a token, not that its `transfer` takes `(to, amount)`. */
+ *  signature, the same roles in the same order and of the same kinds; a kind is looked up by the
+ *  role, since the nonce's second name has no entry of its own. Registration says a contract is a
+ *  token, not that its `transfer` takes `(to, amount)`. */
 const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>, selector: unknown): boolean => {
 	const arity = decoded.params.length
 	const roles = vocabularyRoles(decoded.fn, arity)
@@ -106,7 +107,7 @@ const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>, select
 		roles !== undefined &&
 		expected !== undefined &&
 		selector === expected &&
-		decoded.params.every((p, i) => p.name === roles[i] && p.value.kind === ROLE_KIND[p.name])
+		decoded.params.every((p, i) => abiNameFitsRole(roles[i], p.name) && p.value.kind === ROLE_KIND[roles[i]])
 	)
 }
 

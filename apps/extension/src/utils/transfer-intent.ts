@@ -2,9 +2,10 @@
  * "Do not guess" reader of a dApp call's arguments for the approval card.
  *
  * A call is a transfer or a mint only when its name AND arity match a shape in the wallet's
- * vocabulary; the recipient, amount, optional sender and optional authwit nonce are then read by ABI
- * parameter name. Everything else is `unverified`, and the card chooses between an ABI decode and the
- * raw fields. A name-plus-arity match is a display vocabulary, not proof of the contract's semantics.
+ * vocabulary; the recipient, amount, optional sender and optional authwit nonce are then read at that
+ * shape's role positions, whatever the contract names its parameters. Everything else is
+ * `unverified`, and the card chooses between an ABI decode and the raw fields. A name-plus-arity match
+ * is a display vocabulary, not proof of the contract's semantics.
  */
 
 import { findMintSignature, findTransferSignature } from "./token-transfer-vocabulary"

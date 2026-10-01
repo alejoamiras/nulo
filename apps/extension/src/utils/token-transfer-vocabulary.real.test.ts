@@ -10,13 +10,23 @@ import { TokenContractArtifact as StandardToken } from "@aztec-foundation/aztec-
 import { TokenContractArtifact as SampleToken } from "@aztec-labs/noir-contracts.js/Token"
 import { type ContractArtifact, type FunctionAbi, FunctionSelector } from "@aztec-labs/stdlib/abi"
 import { TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions/descriptors"
-import { MINT_SIGNATURES, TRANSFER_SIGNATURES, VOCABULARY_SELECTORS, vocabularySelector } from "./token-transfer-vocabulary"
+import {
+	MINT_SIGNATURES,
+	TRANSFER_SIGNATURES,
+	VOCABULARY_SELECTORS,
+	abiNameFitsRole,
+	findMintSignature,
+	findTransferSignature,
+	vocabularySelector,
+} from "./token-transfer-vocabulary"
 
 type Shape = Pick<FunctionAbi, "name" | "parameters">
 
 const selectorOf = async (fn: Shape): Promise<string> => (await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toString()
 const keyOf = (fn: Shape): string => `${fn.name}/${fn.parameters.length}`
 const functionsOf = (artifact: ContractArtifact): FunctionAbi[] => [...artifact.functions, ...artifact.nonDispatchPublicFunctions]
+const rolesOf = (fn: Shape): readonly string[] =>
+	(findTransferSignature(fn.name, fn.parameters.length) ?? findMintSignature(fn.name, fn.parameters.length))?.params ?? []
 
 /** Every shape as the descriptors' builder emits it; a mint takes the two-argument transfer's types. */
 const vocabularyShapes = (): Shape[] => {
@@ -45,14 +55,15 @@ const SAMPLE_IN_VOCABULARY = [
 	"transfer_to_private/2",
 	"transfer_to_public/4",
 ]
-/** The standard Token's other `(from, …, _nonce)` functions: a commitment is not a recipient. */
-const STANDARD_OUTSIDE = [
-	"burn_private",
-	"burn_public",
-	"transfer_private_to_commitment",
-	"transfer_public_to_commitment",
-	"transfer_private_to_public_with_commitment",
-]
+/** The standard Token's other `(from, …, _nonce)` functions at their selectors: a commitment is not a
+ *  recipient. The card's jsdom tests stand these values in for the hash. */
+const STANDARD_OUTSIDE = new Map([
+	["burn_private", "0xc282ed79"],
+	["burn_public", "0xc611b0c5"],
+	["transfer_private_to_commitment", "0x638d3f00"],
+	["transfer_public_to_commitment", "0xd427610c"],
+	["transfer_private_to_public_with_commitment", "0x398c27b4"],
+])
 
 describe("the vocabulary's selector table", () => {
 	test("every entry is the real hash of the vocabulary's own signature", async () => {
@@ -73,18 +84,29 @@ describe("the vocabulary's selector table", () => {
 	test.each([
 		["aztec-standards", StandardToken, STANDARD_IN_VOCABULARY],
 		["sample", SampleToken, SAMPLE_IN_VOCABULARY],
-	] as const)("the %s Token's transfers and mints sit at their entries", async (_label, artifact, expected) => {
-		const inVocabulary = functionsOf(artifact).filter((fn) => vocabularySelector(fn.name, fn.parameters.length) !== undefined)
-		expect(inVocabulary.map(keyOf).sort()).toEqual(expected)
-		for (const fn of inVocabulary) expect(await selectorOf(fn), keyOf(fn)).toBe(vocabularySelector(fn.name, fn.parameters.length))
-	})
+	] as const)(
+		"the %s Token's transfers and mints sit at their entries, their parameters named for the roles",
+		async (_label, artifact, expected) => {
+			const inVocabulary = functionsOf(artifact).filter((fn) => vocabularySelector(fn.name, fn.parameters.length) !== undefined)
+			expect(inVocabulary.map(keyOf).sort()).toEqual(expected)
+			for (const fn of inVocabulary) {
+				expect(await selectorOf(fn), keyOf(fn)).toBe(vocabularySelector(fn.name, fn.parameters.length))
+				const roles = rolesOf(fn)
+				expect(
+					fn.parameters.every((p, i) => abiNameFitsRole(roles[i], p.name)),
+					keyOf(fn),
+				).toBe(true)
+			}
+		},
+	)
 
-	test("the standard Token's burns and commitment transfers sit at none of them", async () => {
+	test("the standard Token's burns and commitment transfers sit at their own selectors, none of them an entry", async () => {
 		const table = new Set(VOCABULARY_SELECTORS.values())
-		for (const name of STANDARD_OUTSIDE) {
+		for (const [name, selector] of STANDARD_OUTSIDE) {
 			const fn = functionsOf(StandardToken).find((f) => f.name === name)
 			if (!fn) throw new Error(`the standard Token has no ${name}`)
-			expect(table.has(await selectorOf(fn)), name).toBe(false)
+			expect(await selectorOf(fn), name).toBe(selector)
+			expect(table.has(selector), name).toBe(false)
 		}
 	})
 })

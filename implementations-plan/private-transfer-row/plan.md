@@ -719,7 +719,7 @@ Build the O2 answer the approval records, and only that one.
   `bun run typecheck:all`, `bun run lint`, `bun run --cwd apps/extension build-storybook`: all exit
   0. Layers: typecheck · lint · unit · component · build.
 
-### P3 · The standard Token's transfers read as the transfer row
+### P3 · The standard Token's transfers read as the transfer row ✓
 
 Every value that goes through the real decoder is field-valid (`0x00` + 62 hex digits): `Fr`
 refuses a value at or above the modulus, and the decode would fall to the raw fields for the wrong

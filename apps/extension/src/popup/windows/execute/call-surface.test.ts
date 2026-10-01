@@ -21,7 +21,7 @@ const RLO = String.fromCharCode(0x202e)
 const value = (role: string): DecodedValue =>
 	role === "amount"
 		? { kind: "integer", value: "0" }
-		: role === "authwit_nonce"
+		: role === "authwit_nonce" || role === "_nonce"
 			? { kind: "field", value: field(0n) }
 			: { kind: "address", value: TO }
 /** A token ABI that spells the vocabulary's signature; the values are irrelevant to the reading. */
@@ -237,6 +237,66 @@ describe("a wire alias cannot outrank the decoded name; hover text is complete",
 		const long = "x".repeat(100)
 		expect(valueText({ kind: "string", value: long }).length).toBeLessThan(100)
 		expect(valueTitle({ kind: "string", value: long })).toBe(long)
+	})
+})
+
+describe("the aztec-standards Token names its nonce `_nonce`", () => {
+	const STANDARD = [
+		"transfer_private_to_private",
+		"transfer_public_to_public",
+		"transfer_private_to_public",
+		"transfer_public_to_private",
+	]
+	const ROLES = ["from", "to", "amount", "_nonce"]
+	const call = (fn: string, nonce: bigint, extra: Record<string, unknown> = {}) => ({
+		name: fn,
+		to: TOKEN,
+		selector: sel(fn, 4),
+		args: [OWNER, TO, field(5n), field(nonce)],
+		...extra,
+	})
+
+	test.each(STANDARD)("%s reads as the transfer row from its explicit sender; a zero nonce is no row, another is", (fn) => {
+		expect(callSurface(ctx, call(fn, 0n), abi(fn, ROLES), true)).toEqual({
+			kind: "transfer",
+			fn,
+			to: TO,
+			amount: "5",
+			sender: { kind: "explicit", address: OWNER },
+		})
+		expect(callSurface(ctx, call(fn, 7n), abi(fn, ROLES), true)).toMatchObject({ kind: "transfer", nonce: "7" })
+	})
+
+	test("a hidden msg_sender keeps the explicit from", () => {
+		const fn = "transfer_public_to_public"
+		expect(callSurface(ctx, call(fn, 0n, { hideMsgSender: true }), abi(fn, ROLES), true)).toMatchObject({
+			kind: "transfer",
+			sender: { kind: "explicit", address: OWNER },
+		})
+	})
+
+	test("the alias fills the nonce role only: anything else about the call keeps the decoded rows", () => {
+		const fn = "transfer_public_to_public"
+		const reads = (c: Parameters<typeof callSurface>[1], decoded: ReturnType<typeof abi>, tokenKnown = true) =>
+			callSurface(ctx, c, decoded, tokenKnown).kind
+		expect(reads(call(fn, 0n), abi(fn, ROLES), false)).toBe("decoded")
+		expect(reads(call(fn, 0n), abi(fn, ["from", "to", "_nonce", "amount"]))).toBe("decoded")
+		const integerNonce = {
+			...abi(fn, ROLES),
+			params: abi(fn, ROLES).params.map((p) => (p.name === "_nonce" ? { ...p, value: { kind: "integer" as const, value: "0" } } : p)),
+		}
+		expect(reads(call(fn, 0n), integerNonce)).toBe("decoded")
+		expect(reads(call(fn, 0n), abi(fn, ["from", "to", "amount", "nonce"]))).toBe("decoded")
+		// An address under the nonce's name fails on the name alone: the alias never fills `to`.
+		const nonceAsRecipient = {
+			...abi("transfer", ["to", "amount"]),
+			params: [{ name: "_nonce", value: value("to") }, ...abi("transfer", ["amount"]).params],
+		}
+		expect(reads({ name: "transfer", selector: sel("transfer", 2), args: [TO, field(5n)] }, nonceAsRecipient)).toBe("decoded")
+		const burn = { name: "burn_public", to: TOKEN, selector: "0xc611b0c5", args: [OWNER, field(5n), field(0n)] }
+		expect(reads(burn, abi("burn_public", ["from", "amount", "_nonce"]))).toBe("decoded")
+		const withCommitment = { ...call(fn, 0n), name: "transfer_private_to_public_with_commitment", selector: "0x398c27b4" }
+		expect(reads(withCommitment, abi("transfer_private_to_public_with_commitment", ROLES))).toBe("decoded")
 	})
 })
 
