@@ -88,9 +88,9 @@ Every surface below changes what a user sees, so each needs the owner's recorded
 | Header network pill on a fresh install | "Alpha V5", green | "Testnet", green: the square is the connection status on every network (U1) | A |
 | Home on a fresh install on Testnet | the V5 "Test USDC" row (V5 testnet) | no default token row until arc C | A |
 | Fee card on Testnet | Nulo's sponsor default | unchanged; the Alpha-only Private Fee Juice default disappears with Alpha | A |
-| Settings → About | Aztec 5.2.0; "Alpha Testing" | Aztec 6.0.0-rc.1; the stage label per U6 | A |
-| Onboarding "Fees on Aztec", card 01 | "The only way to get fee juice today is to burn $AZTEC on L1…" | testnet wording (U7) | A |
-| Explorer links on Testnet | testnet.aztecscan.xyz | hidden: P4 found Aztecscan still indexing the V5 testnet (U5) | A |
+| Settings → About | Aztec 5.2.0; "Alpha Testing" | Aztec 6.0.0-rc.1; "Testnet" (U6) | A |
+| Onboarding "Fees on Aztec", card 01 | "The only way to get fee juice today is to burn $AZTEC on L1…" | unchanged: the owner kept the Alpha wording (U7) | A |
+| Explorer links on Testnet | testnet.aztecscan.xyz | unchanged, though it 404s V6 transactions until Aztecscan indexes V6 (U5) | A |
 | Store tile, 7 screenshots, listing text (Chrome and AMO) | NULO V5 wordmark, "ALPHA V5" pill, "opens on mainnet" notes | NULO V6, Testnet, testnet reviewer notes | store (optional) |
 | Terms (draft) | 1.0: "connects to Aztec mainnet by default", real-value wording | 1.0 edited in place (A2): testnet default, testnet-value wording; no version bump, no re-acceptance sheet. Its store URLs change only with the optional store upload | A |
 | Home on Testnet | none | the V6 "Test USDC" row (unleashed's V6 token), priced at $1 | C |
@@ -1002,6 +1002,16 @@ phase installs nothing.
    shows it. Then `README.md:8`, `BEFORE-LAUNCH.md`, `legal/README.md:31` and `CI.md:223`.
 10. Build arc A's decision page: U1, U2, U4, U6, U7, and U5 if the explorer check failed. Every
     option is shown as it will look. Quote the owner's sign-off here.
+
+    **Owner sign-off, 2026-10-01**, picked on the decision page between 09:37Z and 09:39Z and
+    confirmed in chat ("ive answered everything on the page"):
+    - U2: "Ship it with no default token". As built.
+    - U4: "Approve the three passages as written". As built.
+    - U5: "Keep linking to Aztecscan". The testnet mapping returns (`c712d5c2`).
+    - U6: "Say "Testnet" instead". About reads "Wallet version - X - Testnet" (`d5311f31`).
+    - U7: "Use other wording", with the note "Keep the copies as we'd be on Alpha." Card 01 keeps
+      dev's text (`222870b3`).
+    - As built: "Sign off all of it as built".
 
 **Validation gate (arc A).**
 - Commands:
