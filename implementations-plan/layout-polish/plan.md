@@ -47,6 +47,7 @@ base: dev @ 85c4d20f (#719 merged; Facts were read at f32b1e0a, the same tree as
   owner's call on a failed first price fetch. `lessons.md` § E2E carries one: `navigateByHash`
   returns before the router swaps the page.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #724, #730.
 
 # Layout polish
 

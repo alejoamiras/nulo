@@ -1,5 +1,7 @@
 # The driving /goal (paste-ready; handed to the owner 2026-09-02)
 
+> Seeds retired (2026-10-01): the `/goal` and `/loop` seeds in this file are spent and must never be pasted.
+
 ```
 /goal Round 3 of nulo's complexity residue + the two round-1 bug pins — sequential plans, squash-merged green PRs into dev, every plan through blueprint AND the codex iteration loop.
 

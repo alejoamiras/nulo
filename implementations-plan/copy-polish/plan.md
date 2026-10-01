@@ -48,6 +48,7 @@ base: dev @ 94ef1b11 (stack #729 landed; the same tree as `0f37ab78`, where the 
   `-enter-from` match, went to the `e2e-testing` skill, which owns flake root causes; `lessons.md`
   gains no line (8,131 of its 8,192 bytes, and nothing here supersedes an entry).
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #734.
 
 # Copy polish
 

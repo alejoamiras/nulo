@@ -41,6 +41,7 @@ base: dev @ 624117cd
 - **Open items:** none left here. F-1 to F-7 are in `follow-ups.md` § Wallet safety, and four
   lessons are in `lessons.md` (§ CI & gates, § E2E, § Extension runtime).
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #717.
 
 # Wallet safety fixes
 

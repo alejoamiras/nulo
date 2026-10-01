@@ -55,6 +55,7 @@ base: dev @ 85c4d20f
   `lessons.md` carries three. In § E2E: the held-key entry, extended with Firefox, and the
   implicit-submission one. In § Popup UI: the focus-ring one.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #720.
 
 # Keyboard guards
 

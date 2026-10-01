@@ -60,6 +60,7 @@ base: dev after #719 @ 85c4d20f
   rule is the e2e-testing skill's. That skill gains one trap: the fixtures' `waitForSelector`
   resolves `null`.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #722.
 
 # dApp grants: what a refusal tells the log, the journal and the dApp
 

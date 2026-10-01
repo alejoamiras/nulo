@@ -59,6 +59,7 @@ base: dev @ 85c4d20f (#719 merged; the drafts and round-1 audits read 48a97f4a, 
   copy-polish). `lessons.md` gains one entry in § Extension runtime, the deep-reactive proxies, and
   two older entries in § CI & gates are shortened so the file does not grow.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #726.
 
 # Backup import: one slow public node cannot stall it
 

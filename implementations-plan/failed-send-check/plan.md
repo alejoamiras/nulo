@@ -44,6 +44,7 @@ base: 85c4d20f (dev after #719; code read at f32b1e0a, and #719 touched no cited
 - **Open items:** none left here; `follow-ups.md` § Amounts, sends and fees holds F-1 to F-10.
   `lessons.md` § Extension runtime carries one, the node transport's retry.
 - **Seeds retired:** the `/goal` and `/loop` seeds below are spent; nothing to resume.
+- **Shipped**: #721.
 
 # Failed send check
 

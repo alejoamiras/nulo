@@ -39,6 +39,7 @@ repos: alejoamiras/nulo (this repo) · alejoamiras/unleashed (empty, public, pro
   - N4's redirect Worker (decision 26: dark names instead).
   - GATE-U's Send, which the owner waived because testnet moved to v6.
 - **Seeds retired**: the `/goal` and `/loop` seeds in the ELI5 (§ Seeds) are spent; nothing to resume.
+- **Shipped**: #690, #691, #692, #693, #694, #695, #697, #706, #707, #708, #709, #710, #711, #713, #714.
 
 Nulo becomes wallet-only (extension, playground, landing, their packages). `apps/tools`, `packages/bridge-core`, `contracts/bridge`, their CI, runbooks and plans move to `alejoamiras/unleashed` with history. Both repos leave Cloudflare Pages for Workers static assets deployed by Workers Builds.
 
