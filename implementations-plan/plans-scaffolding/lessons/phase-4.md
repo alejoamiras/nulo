@@ -136,3 +136,19 @@ Arc C's first codex round then found that git scores a rename by its lines, so a
 ## Restack onto `80663b61` (#736, nulo v6)
 
 `git rebase --onto 80663b61 910a4def` took J from `737d1faf` to `1054e7fb` with no conflict, every commit signed. Under `implementations-plan/`, #736 added `nulo-v6/` and its `index.md` line and changed no closed dir, so `closures.json` stays derived at `910a4def` and `classify.ts --check` reads `nulo-v6` as active (no row). On `1054e7fb` these exit 0: `check.ts` (the same 3 reports, 0 enforced), the plans tests (94 pass), the tools tests (17 pass), `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify` (679 rows, 0 problems), `check-no-local-paths.sh`, `bun run lint` and `bun run test:ci-gating` (247 pass, 2 skipped).
+
+## Restack onto `3452ac3b` (0.29.0 and #740)
+
+`dev` moved twice after the cross-arc pass converged: to `d7da8e62`, the 0.29.0 release (`CHANGELOG.md`, the release-please manifests and two `package.json` versions), then to `3452ac3b`, #740, nulo-v6's close-out. `git rebase --onto d7da8e62 80663b61`, then `git rebase --onto 3452ac3b d7da8e62`, took J from `df2de6ad` to this head, every commit signed.
+
+#740 had edited the old curated files. In `follow-ups.md` it deleted the P1 entry, rewrote the gas-link entry and added an Aztec V6 section; git merged those into J's rewrite cleanly, and J keeps them. In `lessons.md` it re-stamped three entries on 6.0.0-rc.1; J's rewrite had replaced all three, so that file is J's, and E's prune re-stamps J's two matching entries (J retired the third, the fee-juice import, which `fee-juice-balance.ts`'s header carries). `mine.ts --verify` now reports 12 problems, every one #740's: the new heading breaks the recorded frame, nine entries have no line, and the two lines #740 replaced (C01, C02) are no longer entries. The check admits only text present at `closuresBase`, so the owner retired it as a gate here (2026-10-01, L60); it stays the record of J's own curation.
+
+#740 changed no closed dir. nulo-v6, first seen after `closuresBase`, has no row and stays active (Mechanics § Concurrency); its line reads `closed, awaiting archive` over a complete Outcome, which `index-structure` accepts.
+
+## Restack onto `7c2425ca` (#745)
+
+`dev` moved once more, to #745, which added a `## Releases` section with two entries to the old `follow-ups.md`. `git rebase 7c2425ca` stopped at the curated rewrite, the one commit that rewrites the file. It resolved as J's rewrite with #745's two entries, verbatim, at the end of J's `## Release` section rather than in a second section of the same name. `mine.ts --verify` reports 14 problems, the two new ones #745's lines.
+
+## Restack onto `fe597a1d` (#747)
+
+`dev` moved again, to #747, which hash-pins `setup-aztec`'s installer and edited three of #740's entries in the old `follow-ups.md`: it rewrote the installer entry, extended the `presto-banners` one and deleted the `call-decoder.test.ts` one it resolved. `git rebase --onto fe597a1d 7c2425ca` merged all three into J's rewrite with no conflict, every commit signed, and J's tree differs from its previous head by #747's diff alone. `mine.ts --verify` reports 13 problems; the deleted entry's went with it. J's mined `setup-aztec` entry asks for the pin #747 shipped, so E's prune resolves it.
