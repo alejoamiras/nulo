@@ -2,13 +2,15 @@
  * A full-backup import where one public network stalls costs only that network's row.
  *
  * The funded wallet's backup keeps its local-chain account-state item, which gains a fresh sender,
- * and carries a copy of that item relabelled to Alpha V5, first in the slice, with Alpha V5 as the
+ * and carries a copy of that item relabelled to Testnet, first in the slice, with Testnet as the
  * active network: the production shape, where the restored wallet opens on a public network. The
- * fresh extension reroutes the public dRPC origin to a stub that answers Alpha V5's identity probe
- * and blackholes every other call, so Alpha V5's PXE boot hangs while the local network restores.
+ * fresh extension reroutes the Testnet seed's origin to a stub that answers Testnet's identity probe
+ * and blackholes every other call, so Testnet's PXE boot hangs while the local network restores.
+ * A backup carries no networks (the built-ins reseed on import), so the seed is the only public
+ * network an import can restore into.
  *
  * Only a restore or the Senders page registers a sender, and no balance read does, so the sender
- * read back before Continue is what proves the local network restored while Alpha V5 hung. The
+ * read back before Continue is what proves the local network restored while Testnet hung. The
  * balance read after Continue shows the wallet works there, nothing more.
  */
 import { mkdtempSync, rmSync } from "node:fs"
@@ -16,7 +18,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { Page } from "puppeteer"
 import { describe, expect, inject } from "vitest"
-import { CHAIN_IDS, MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION } from "@/utils/chain-ids"
+import { CHAIN_IDS, TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION } from "@/utils/chain-ids"
+import { TESTNET_RPC_URL } from "@/wallet/constants/network-endpoints"
 import { ACCOUNT_STATE_SKIP_DEADLINE } from "@/wallet/services/account-state/normalize"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { type ArmedInterception, CHROME_ONLY, interceptRpc, isFirefox } from "../fixtures/browser"
@@ -40,22 +43,22 @@ import { nodeInfoResult, startStub } from "../helpers/rpc-stub"
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
-/** The origin both public seeds dial (`DEFAULT_SEEDS` in the network service). */
-const PUBLIC_RPC_ORIGIN = "https://lb.drpc.live"
+/** The origin the Testnet seed dials. */
+const PUBLIC_RPC_ORIGIN = new URL(TESTNET_RPC_URL).origin
 const SENDERS_HASH = "#/popup/settings/advanced/account-state/senders"
 const FUNDED_PUBLIC_RAW = (1000n * 10n ** 18n).toString()
 
 type AccountStateItem = { networkId?: string; chainId?: number; senders?: Array<{ address: string }> }
 type ErrorRow = { networkId?: unknown; restoreError?: unknown }
 
-/** The funded chain's item with `sender` added, preceded by its copy relabelled to Alpha V5. */
-function stalledAlphaBackup(backup: PlainBackup, funded: string, tokenAddress: string, sender: string): string {
+/** The funded chain's item with `sender` added, preceded by its copy relabelled to Testnet. */
+function stalledTestnetBackup(backup: PlainBackup, funded: string, tokenAddress: string, sender: string): string {
 	keepChainAccountState(backup.data, accountChainId(backup, funded), tokenAddress)
 	const [local, ...rest] = backup.data["account-state"] as AccountStateItem[]
 	expect(rest, "one account-state item on the funded chain").toEqual([])
 	local.senders = [...(local.senders ?? []), { address: sender }]
-	backup.data["account-state"] = [{ ...structuredClone(local), networkId: "alpha-v5", chainId: CHAIN_IDS.MAINNET }, local]
-	backup["active-chain-id"] = CHAIN_IDS.MAINNET
+	backup.data["account-state"] = [{ ...structuredClone(local), networkId: "testnet", chainId: CHAIN_IDS.TESTNET }, local]
+	backup["active-chain-id"] = CHAIN_IDS.TESTNET
 	return writeBackupToTemp(sealPlainBackup(backup))
 }
 
@@ -96,10 +99,10 @@ async function readViewedErrorLog(page: Page): Promise<Record<string, ErrorRow[]
 	return log
 }
 
-function expectOnlyAlphaDeadline(log: Record<string, ErrorRow[]>, alphaId: string): void {
+function expectOnlyStalledDeadline(log: Record<string, ErrorRow[]>, stalledId: string): void {
 	expect(log).toEqual({
 		"account-state": [
-			expect.objectContaining({ networkId: alphaId, restoreError: expect.stringContaining(ACCOUNT_STATE_SKIP_DEADLINE) }),
+			expect.objectContaining({ networkId: stalledId, restoreError: expect.stringContaining(ACCOUNT_STATE_SKIP_DEADLINE) }),
 		],
 	})
 }
@@ -154,17 +157,17 @@ describe.skipIf(isFirefox)(CHROME_ONLY.hangingRequest, () => {
 	})
 
 	test.skipIf(!hasConfig)(
-		"a stalled Alpha V5 costs only its own row while the local network restores, and a Retry keeps that one row",
+		"a stalled Testnet costs only its own row while the local network restores, and a Retry keeps that one row",
 		{ timeout: 900_000 },
 		async ({ tokenReadyExtension }) => {
 			const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 			const sender = (await AztecAddress.random()).toString()
 			const funded = tokenReadyExtension.accountAddress
 			const tokenAddress = aztecConfig!.tokenAddress
-			const filePath = stalledAlphaBackup(await exportPlainBackup(tokenReadyExtension), funded, tokenAddress, sender)
+			const filePath = stalledTestnetBackup(await exportPlainBackup(tokenReadyExtension), funded, tokenAddress, sender)
 
 			const stub = await startStub((method) =>
-				method === "aztec_getNodeInfo" ? nodeInfoResult(MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION) : undefined,
+				method === "aztec_getNodeInfo" ? nodeInfoResult(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION) : undefined,
 			)
 			const profileDir = mkdtempSync(join(tmpdir(), "nulo-stalled-network-"))
 			let ctx2: ExtensionContext | undefined
@@ -180,16 +183,16 @@ describe.skipIf(isFirefox)(CHROME_ONLY.hangingRequest, () => {
 					async () =>
 						`no errors screen (hash ${await page.evaluate(() => window.location.hash)}, stage ${await readStage(page)})`,
 				)
-				const alphaId = await networkIdOfChain(page, CHAIN_IDS.MAINNET)
+				const testnetId = await networkIdOfChain(page, CHAIN_IDS.TESTNET)
 				const firstLog = await readViewedErrorLog(page)
 				// Soft, so wrong error rows still report whether the local network restored.
 				expect.soft(await localNetworkListsSender(ctx2, sender), "the local network's restored sender, before Continue").toBe(true)
-				expectOnlyAlphaDeadline(firstLog, alphaId)
+				expectOnlyStalledDeadline(firstLog, testnetId)
 				await page.bringToFront()
 
-				// Alpha V5 still hangs, so the Retry runs out of time again and leaves the same one row.
+				// Testnet still hangs, so the Retry runs out of time again and leaves the same one row.
 				expect(await retryOnce(page)).toEqual({ label: "Retrying…", continueDisabled: true, viewErrorsDisabled: true })
-				expectOnlyAlphaDeadline(await readViewedErrorLog(page), alphaId)
+				expectOnlyStalledDeadline(await readViewedErrorLog(page), testnetId)
 
 				await clickByTestId(page, "import-full-backup-continue-btn")
 				await waitForHash(page, POPUP_IMPORT_SHELL.successHash, 60_000)
@@ -206,7 +209,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.hangingRequest, () => {
 					timeoutMs: 150_000,
 				})
 
-				// Alpha V5 reached registration: its PXE boot dialed the node after the answered probe.
+				// Testnet reached registration: its PXE boot dialed the node after the answered probe.
 				const firstProbe = stub.methods.indexOf("aztec_getNodeInfo")
 				const seen = `stub saw: [${stub.methods.join(", ")}]`
 				expect(firstProbe, seen).toBeGreaterThanOrEqual(0)

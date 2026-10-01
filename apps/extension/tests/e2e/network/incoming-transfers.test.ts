@@ -110,8 +110,8 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 	// The seed MUST use the ACTIVE network — the one the popup resolves via
 	// `appStore.network.id` and passes to `replayPendingPrompts` (filtered at
 	// service.ts:712). Taking the first `nulo:core:networks@*` key picks the
-	// first-SEEDED network (Alpha Mainnet), not the active one (Testnet), so the
-	// pending-trust filter found 0 rows and the prompt never fired. Read the
+	// first-SEEDED network, which need not be the active one, and then the
+	// pending-trust filter finds 0 rows and the prompt never fires. Read the
 	// per-profile active-network pointer instead.
 	const network = await seedPage.evaluate(async (profileId: string) => {
 		const activeKey = `nulo:core:active-network@${profileId}`
