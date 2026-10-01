@@ -61,7 +61,7 @@ onBeforeUnmount(() => legal.dispose())
 				<Text size="13" weight="600" color="primary"> Nulo </Text>
 				<Flex align="start" direction="column" gap="4" wide>
 					<Text @click="handleCopy(version)" size="12" weight="500" color="support" class="copyable">
-						Wallet version - {{ version }} - Alpha Testing
+						Wallet version - {{ version }} - Testnet
 					</Text>
 					<Text @click="handleCopy(aztecVersion)" size="12" weight="500" color="support" class="copyable">
 						Aztec version - {{ aztecVersion }}
