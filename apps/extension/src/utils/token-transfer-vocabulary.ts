@@ -75,3 +75,31 @@ export const MINT_SIGNATURES: ReadonlyMap<string, readonly MintSignature[]> = ne
 
 export const findMintSignature = (name: string, arity: number): MintSignature | undefined =>
 	MINT_SIGNATURES.get(name)?.find((s) => s.params.length === arity)
+
+/**
+ * The selector each shape dispatches on, keyed `name/arity`: its name over the descriptors' own
+ * parameter types (AztecAddress, u128, Field). The selector is what runs, and an interface a dApp
+ * registers can put any name on it, so a reading keyed on the decoded name checks it here. Static
+ * because hashing needs bb.js, which the popup does not load; a node test recomputes every entry.
+ */
+export const VOCABULARY_SELECTORS: ReadonlyMap<string, string> = new Map([
+	["transfer_private_to_private/2", "0x1851e9ca"],
+	["transfer_private_to_private/4", "0xedc09d49"],
+	["transfer/2", "0x754fb767"],
+	["transfer/4", "0x49b80d25"],
+	["transfer_in_private/2", "0xe4e546d1"],
+	["transfer_in_private/4", "0xd73354bc"],
+	["transfer_public_to_public/4", "0xc47adea0"],
+	["transfer_in_public/4", "0x8c9e5472"],
+	["transfer_private_to_public/4", "0xaf28c76f"],
+	["transfer_to_public/4", "0xe74559c9"],
+	["transfer_public_to_private/2", "0xc88a9e82"],
+	["transfer_public_to_private/4", "0x32c5dcf8"],
+	["transfer_to_private/2", "0x89758b40"],
+	["transfer_to_private/4", "0xd3a2b436"],
+	["mint_to_private/2", "0xf8f84119"],
+	["mint_to_public/2", "0x451b5fae"],
+])
+
+/** The selector `name` dispatches on with `arity` arguments, as `FunctionSelector.toString()` prints it. */
+export const vocabularySelector = (name: string, arity: number): string | undefined => VOCABULARY_SELECTORS.get(`${name}/${arity}`)

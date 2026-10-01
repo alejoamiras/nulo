@@ -62,7 +62,7 @@ describe("OperationCard — aztec_createAuthWit", () => {
 		const w = mountCard(
 			createAuthWit({
 				caller: DELEGATE,
-				call: { to: TOKEN, name: "transfer_in_private", args: [OWNER, DELEGATE, field(5n), field(1n)] },
+				call: { to: TOKEN, name: "transfer_in_private", selector: "0xd73354bc", args: [OWNER, DELEGATE, field(5n), field(1n)] },
 			}),
 			{
 				tokens: [USDC],
@@ -92,6 +92,26 @@ describe("OperationCard — aztec_createAuthWit", () => {
 		expect(structured.find('[data-testid="execute-authwit-amount"]').text()).toContain("5")
 		expect(structured.find('[data-testid="execute-authwit-transfer-nonce"]').text()).toContain("1")
 		expect(w.find('[data-testid="execute-authwit-opaque-warning"]').exists()).toBe(false)
+	})
+
+	test("the Function row names the function the selector runs when the intent's label lies or is missing", () => {
+		const decoded = {
+			kind: "decoded",
+			contract: "Token",
+			fn: "transfer_in_public",
+			params: [
+				{ name: "from", value: { kind: "address", value: OWNER } },
+				{ name: "to", value: { kind: "address", value: DELEGATE } },
+				{ name: "amount", value: { kind: "integer", value: "5" } },
+				{ name: "authwit_nonce", value: { kind: "field", value: field(1n) } },
+			],
+		}
+		for (const name of ["transfer_in_private", undefined]) {
+			const call = { to: TOKEN, name, selector: "0x8c9e5472", args: [OWNER, DELEGATE, field(5n), field(1n)] }
+			const w = mountCard(createAuthWit({ caller: DELEGATE, call }), { tokens: [USDC], decodedCalls: [decoded] })
+			expect(w.find('[data-testid="execute-authwit-structured-args"]').exists()).toBe(true)
+			expect(w.find('[data-testid="execute-authwit-function"]').text()).toBe("Transfer (public)")
+		}
 	})
 
 	test("an unrecognized intent waits for the decode, then renders named parameters; a 2-arg transfer never claims a sender", () => {

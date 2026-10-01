@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { trimAddress } from "@/utils/string"
+import { vocabularySelector } from "@/utils/token-transfer-vocabulary"
 import type { DecodedValue } from "@/wallet/services/execution/client"
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { amountLabel, callName, callSurface, rawRows, tokenAt, valueText, valueTitle } from "./call-surface"
@@ -9,6 +10,9 @@ const TO = `0x${"b".repeat(64)}`
 const TOKEN = `0x${"c".repeat(64)}`
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
 const ctx = { accountAddress: OWNER, noFrom: false }
+/** The selector the vocabulary's own signature dispatches on, as an honest call carries it. */
+const sel = (fn: string, arity: number): string => vocabularySelector(fn, arity) ?? "0x00000000"
+const FOUR = ["from", "to", "amount", "authwit_nonce"]
 const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
 const BEL = String.fromCharCode(7)
 const RLO = String.fromCharCode(0x202e)
@@ -28,40 +32,57 @@ const abi = (fn: string, roles: string[]) => ({
 })
 
 describe("callSurface", () => {
-	test("on a registered token whose ABI spells the signature, the vocabulary reads by position and names the sender the call omits", () => {
-		expect(callSurface(ctx, { name: "transfer", to: TOKEN, args: [TO, field(5n)] }, abi("transfer", ["to", "amount"]), true)).toEqual({
+	test("on a registered token whose call proves the signature, the vocabulary reads by position and names the sender the call omits", () => {
+		const transfer = { name: "transfer", to: TOKEN, selector: sel("transfer", 2), args: [TO, field(5n)] }
+		expect(callSurface(ctx, transfer, abi("transfer", ["to", "amount"]), true)).toEqual({
 			kind: "transfer",
+			fn: "transfer",
 			to: TO,
 			amount: "5",
 			sender: { kind: "account", address: OWNER },
 		})
-		expect(
-			callSurface({ ...ctx, noFrom: true }, { name: "transfer", args: [TO, field(5n)] }, abi("transfer", ["to", "amount"]), true),
-		).toMatchObject({
+		expect(callSurface({ ...ctx, noFrom: true }, transfer, abi("transfer", ["to", "amount"]), true)).toMatchObject({
 			sender: { kind: "none" },
 		})
-		const tip = abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"])
-		expect(callSurface(ctx, { name: "transfer_in_private", args: [OWNER, TO, field(5n), field(3n)] }, tip, true)).toEqual({
+		const tip = abi("transfer_in_private", FOUR)
+		const tipCall = { name: "transfer_in_private", selector: sel("transfer_in_private", 4), args: [OWNER, TO, field(5n), field(3n)] }
+		expect(callSurface(ctx, tipCall, tip, true)).toEqual({
 			kind: "transfer",
+			fn: "transfer_in_private",
 			to: TO,
 			amount: "5",
 			sender: { kind: "explicit", address: OWNER },
 			nonce: "3",
 		})
-		expect(callSurface(ctx, { name: "mint_to_public", args: [TO, field(5n)] }, abi("mint_to_public", ["to", "amount"]), true)).toEqual({
+		const mint = { name: "mint_to_public", selector: sel("mint_to_public", 2), args: [TO, field(5n)] }
+		expect(callSurface(ctx, mint, abi("mint_to_public", ["to", "amount"]), true)).toEqual({
 			kind: "mint",
+			fn: "mint_to_public",
 			to: TO,
 			amount: "5",
 		})
 	})
 
 	test("the ABI, not the app's name, picks the vocabulary entry", () => {
-		const call = { name: "claim_lie", selector: "0x11223344", args: [TO, field(5n)] }
+		const call = { name: "claim_lie", selector: sel("transfer", 2), args: [TO, field(5n)] }
 		expect(callSurface(ctx, call, abi("transfer", ["to", "amount"]), true)).toMatchObject({ kind: "transfer", to: TO, amount: "5" })
 	})
 
+	test("the vocabulary needs the call's own selector to be its signature's: another function's, none, or a non-string reads decoded", () => {
+		const args = [OWNER, TO, field(5n), field(0n)]
+		const reads = (fn: string, selector: unknown) => callSurface(ctx, { name: fn, selector, args }, abi(fn, FOUR), true).kind
+		// transfer_public_to_commitment's and burn_public's selectors on the standard Token, under a
+		// decode a searched interface could produce for them.
+		expect(reads("transfer_public_to_public", "0xd427610c")).toBe("decoded")
+		expect(reads("transfer_in_public", "0xc611b0c5")).toBe("decoded")
+		expect(reads("transfer_in_public", undefined)).toBe("decoded")
+		expect(reads("transfer_in_public", Number(sel("transfer_in_public", 4)))).toBe("decoded")
+		expect(reads("transfer_in_public", [sel("transfer_in_public", 4)])).toBe("decoded")
+		expect(reads("transfer_in_public", sel("transfer_in_public", 4))).toBe("transfer")
+	})
+
 	test("without corroboration the vocabulary never applies: unregistered contract, swapped roles, a wrong kind, or no decode yet", () => {
-		const call = { name: "transfer", to: TOKEN, args: [TO, field(5n)] }
+		const call = { name: "transfer", to: TOKEN, selector: sel("transfer", 2), args: [TO, field(5n)] }
 		expect(callSurface(ctx, call, abi("transfer", ["to", "amount"]), false)).toMatchObject({ kind: "decoded", fn: "transfer" })
 		const swapped = abi("transfer", ["amount", "to"])
 		expect(callSurface(ctx, { ...call, args: [field(5n), TO] }, swapped, true)).toEqual({
@@ -86,12 +107,12 @@ describe("callSurface", () => {
 
 	test("a hidden msg_sender or a missing caller context falls through to the decode instead of claiming a sender", () => {
 		const two = abi("transfer", ["to", "amount"])
-		expect(callSurface(ctx, { name: "transfer", args: [TO, field(5n)], hideMsgSender: true }, two, true)).toMatchObject({
-			kind: "decoded",
-		})
-		expect(callSurface(undefined, { name: "transfer", args: [TO, field(5n)] }, two, true)).toMatchObject({ kind: "decoded" })
-		const tip = abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"])
-		expect(callSurface(undefined, { name: "transfer_in_private", args: [OWNER, TO, field(5n), field(0n)] }, tip, true)).toMatchObject({
+		const call = { name: "transfer", selector: sel("transfer", 2), args: [TO, field(5n)] }
+		expect(callSurface(ctx, { ...call, hideMsgSender: true }, two, true)).toMatchObject({ kind: "decoded" })
+		expect(callSurface(undefined, call, two, true)).toMatchObject({ kind: "decoded" })
+		const tip = abi("transfer_in_private", FOUR)
+		const tipCall = { name: "transfer_in_private", selector: sel("transfer_in_private", 4), args: [OWNER, TO, field(5n), field(0n)] }
+		expect(callSurface(undefined, tipCall, tip, true)).toMatchObject({
 			kind: "transfer",
 			sender: { kind: "explicit", address: OWNER },
 		})
@@ -124,6 +145,17 @@ describe("callSurface", () => {
 		// A third-party `claim` is not the fee-juice claim, decoded or app-named.
 		expect(callName({ name: "claim", to: TO, args: [] }, { kind: "pending" })).toBe("Claim")
 		expect(callName(call, { kind: "decoded", fn: "claim", params: [] })).toBe("Claim")
+	})
+
+	test("a transfer row is titled by the function its selector runs, whatever the app labels it", () => {
+		const args = [OWNER, TO, field(5n), field(0n)]
+		const selector = sel("transfer_in_public", 4)
+		for (const name of ["transfer_in_private", undefined]) {
+			const call = { name, to: TOKEN, selector, args }
+			const surface = callSurface(ctx, call, abi("transfer_in_public", FOUR), true)
+			expect(surface.kind).toBe("transfer")
+			expect(callName(call, surface)).toBe("Transfer (public)")
+		}
 	})
 })
 
@@ -172,9 +204,16 @@ describe("rawRows, tokenAt, amountLabel, valueText, valueTitle", () => {
 
 describe("a wire alias cannot outrank the decoded name; hover text is complete", () => {
 	test("a `method` alias on the call is ignored: the vocabulary entry is the decoded function's", () => {
-		const call = { name: "transfer", method: "mint_to_public", to: TOKEN, args: [TO, field(5n)] } as Parameters<typeof callSurface>[1]
+		const call = {
+			name: "transfer",
+			method: "mint_to_public",
+			to: TOKEN,
+			selector: sel("transfer", 2),
+			args: [TO, field(5n)],
+		} as Parameters<typeof callSurface>[1]
 		expect(callSurface(ctx, call, abi("transfer", ["to", "amount"]), true)).toEqual({
 			kind: "transfer",
+			fn: "transfer",
 			to: TO,
 			amount: "5",
 			sender: { kind: "account", address: OWNER },

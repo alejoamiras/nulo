@@ -663,7 +663,7 @@ runs use the workspace scripts, never `bunx`.
 - **Validation gate.** `bun scripts/ci-cd/plans/check.ts` and `bun run lint`, both exit 0. Layers:
   lint.
 
-### P1 · The vocabulary row answers to the selector
+### P1 · The vocabulary row answers to the selector ✓
 
 No honest call of either installed Token reads differently after this phase (Fact 19); a call
 whose label lies is titled by its function instead, and a token whose transfer takes another
