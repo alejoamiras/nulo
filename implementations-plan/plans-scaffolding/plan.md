@@ -749,6 +749,7 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc J codex loop, round 2 (2026-10-01): changes needed** (high confidence, 5 findings). All 5 adopted (J9-J13, ledger L32-L36), J12 by one tree diff instead of the suggested first-parent merge diffs. It confirmed that an edited text or reordered candidates void a verdict and that nested hosts and carried slices are checked, and found no false positive on real data.
 - **Arc J codex loop, round 3 (2026-10-01): changes needed** (high confidence, 2 medium findings, both blocking). Both adopted (J14-J15, ledger L37-L38). It found that every line shape `entriesOf` and `frameOf` could disagree on fails verification, that drift catches moves between plan dirs, quoted names, deletions, mode and type changes, and that a move out and back leaves no drift. Round 3 is the loop's cap, so the fixes went to the owner before another pass.
 - **Arc J verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to round 3's diff: both bypasses are closed, `mining.jsonl` changed only its 364 subject hashes, and nothing regressed. Arc C's first codex round then found that R100 is not byte identity, which J's drift rule shared (J16, ledger L39).
+- **Arc C codex loop (`/codex high`), round 1 (2026-10-01): changes needed** (high confidence, 3 blocking and 2 non-blocking findings). All 5 adopted (K1-K5, ledger L39-L41). It found all 42 moves byte-identical by blob ID, the freeze pins and the npm-staged crypto inputs unchanged, every added permalink target present, and no unexplained scope across C's 12 commits.
 
 ---
 
@@ -797,6 +798,8 @@ In order. No `/code-review`: `code_review` is `off`.
 | L37 | A subject hashes its fields as one JSON array | Arc J codex J14 | NUL-joined fields: a NUL inside a line's text reads as a field boundary, so moving a candidate id into the text kept the subject | adopted |
 | L38 | Each closed plan's host must exist at `upto`, so a byte-identical move of the host out of the tree is a loss, not a move | Arc J codex J15 | Leaving it to D's `outcome.ts`, which throws on a missing host, but only at D, after J and C have merged | adopted; narrows L34 |
 | L39 | A move is byte-identical only when git's raw diff shows the same blob on both sides | Arc C codex, shared by J's drift rule (J16) | Trusting R100: git scores a rename by its lines, so a file moved with its lines reordered pairs at 100 | adopted; narrows L34 |
+| L40 | An allowlisted permalink hides the plan paths inside it only when the whole URL, to its last character, passes `isAllowedPermalink` | Arc C codex K2 | Judging the URL's prefix: an allowlisted SHA followed by encoded `..` segments resolved to `blob/dev` and hid its path | adopted |
+| L41 | A `>` ends a path token unless a `<` precedes it in the token, so `<implementations-plan/x>` is read as a path and `<plan>` stays a template | Arc C codex K3 | Reading every `>` as a template: an autolinked plan path produced no finding | adopted |
 
 **Findings**
 
@@ -848,6 +851,11 @@ In order. No `/code-review`: `code_review` is `off`.
 | J14 | A subject's NUL-joined fields are ambiguous | adopted | L37 |
 | J15 | A closed plan's host can leave the tree unnoticed | adopted | L38 |
 | J16 | R100 is not byte identity (found in arc C's review) | adopted | L39 |
+| K1 | `untrack --verify` exempts a move out of the tree on R100 alone | adopted | L39 |
+| K2 | The permalink blanker judges a URL's prefix | adopted | L40 |
+| K3 | An autolinked plan path reads as a template | adopted | L41 |
+| K4 | The fee-cap comment cites a plan path, which the citation rule forbids | adopted | A permalink at `9f11de70` to `plan-v2.md`, which holds the reasoning; the audit provenance dropped |
+| K5 | CI.md's quarantine statements contradict each other | adopted | Both suites' sizes restated from the tree; the network suite's stale quarantine clause dropped |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).

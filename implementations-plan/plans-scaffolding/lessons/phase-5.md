@@ -170,6 +170,7 @@ Each restack was `git rebase --onto <J tip> <previous J tip>`. Every replayed co
 | `20de6e05` | `7bb11cb6`, round 1 | the plan-tree checks |
 | `aa45f6b0` | `a2758473`, round 2 | Phase 5's full gate, below |
 | `ed03e1b8` | `4b5b4fd9`, round 3 | the plan-tree checks: J's round 3 touched only `implementations-plan/plans-scaffolding/` |
+| `f2d064c5` | `737d1faf`, J's blob-identity fix | the plan-tree checks, rerun at `0907d3c1` with codex round 1's fixes on top |
 
 The plan-tree checks are `check:plans`, the tools tests, `classify.ts --check`, `mine.ts --verify` and `untrack.ts --verify`. They exit 0 on each tip.
 
@@ -178,3 +179,14 @@ Phase 5's gate on `aa45f6b0`, against `a2758473`:
 - **Smoke:** CI's smoke build, then `bun run test:e2e --shard=i/5` in five parallel shards, each with its own copy of `dist/chrome` as `EXTENSION_PATH`, since the global setup kills Chrome by its `--load-extension` path. 40 files pass and 3 skip, with 166 tests passing and 7 skipped. It took 441 s against 1,203 s unsharded, and `e2e:reap` found nothing left.
 - **Exit 0:** `test:all`, `typecheck:all`, `test:ci-gating`, `lint`, `lint:actions`, `phantom-sweep.ts`, the soak tests, `check:plans`, the tools tests, `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify`, `check-no-local-paths.sh` and `audit:vue`.
 - **Exit 1:** `test:release`, with the same 3 `zip-reproducible` failures as before (`zip` is not on this machine's PATH).
+
+## Codex loop
+
+Round 1 (`/codex high`, 2026-10-01, on `f2d064c5` against `737d1faf`): changes needed, 3 blocking and 2 non-blocking. Each was reproduced, and all five are adopted:
+- **K1: R100 is not byte identity.** A file moved out of the tree with its lines reversed still paired at R100, and `untrack --verify` exempted it. `untrack.ts` now reads `git diff --raw --no-abbrev -z` and exempts a move only when its two blob IDs match, through J's `rawMeta`. The fixture adds the reversed move.
+- **K2: the permalink blanker judged a prefix.** Its span stopped at the first character outside `[A-Za-z0-9._-]`, so `%2e%2e` segments after an allowlisted SHA fell outside the judged span, and that URL resolves to `blob/dev`. The span now runs to the URL's end, less trailing sentence punctuation, and is judged whole.
+- **K3: an autolink read as a template.** `<implementations-plan/gone/plan.md>` produced no finding, because the token kept its `>` and the template test skipped it. A `>` with no `<` before it in the token is now stripped as a closer. The same fix catches an autolinked `blob/dev` URL.
+- **K4: the fee-cap comment** cites a permalink at `9f11de70` to `plan-v2.md`, the revision that holds the reasoning (at that SHA, `plan.md` is the superseded v1). The audit provenance is gone.
+- **K5: CI.md.** The smoke suite is 43 files and 173 tests, with 2 unconditional skips (`appearance.test.ts:79`, `sw-resilience.test.ts:137`). The network suite is 108 files and quarantines nothing.
+
+At `0907d3c1`, these exit 0: `lint`, `check:plans`, the tools tests (18), `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify` (679 rows, 0 problems) and `test:ci-gating` (249 pass). `typecheck:all`, the fee tests (72) and `check-no-local-paths.sh` passed on the same content before Biome re-wrapped two lines of `links.test.ts`.
