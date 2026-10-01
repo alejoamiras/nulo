@@ -8,10 +8,10 @@ declaration ("No remote code", on both stores) rests on a stated mechanism rathe
 ## What arrives
 
 An application connected over the wallet-sdk channel can register a contract: an **instance**
-(address preimage) and, optionally, an **artifact** (`packages/wallet-bridge/src/dispatcher.ts:1448-1455`).
-The artifact is a JSON document — an ABI plus, per function, ACIR bytecode and Brillig bytecode
-(`@aztec-labs/stdlib/src/abi/abi.ts:273-274`). The wallet parses it against a schema before storing it
-(`packages/aztec-runtime/src/pxe/service.ts:438-463`) and derives the contract address from the
+(address preimage) and, optionally, an **artifact** (`packages/wallet-bridge/src/dispatcher.ts:1660-1667`).
+The artifact is a JSON document: an ABI plus, per function, one ACIR program with any Brillig code
+inside it (`@aztec-labs/stdlib/src/abi/abi.ts:273-274`). The wallet parses it against a schema before storing it
+(`packages/aztec-runtime/src/pxe/service.ts:439-464`) and derives the contract address from the
 preimage, refusing a mismatch. The artifact is **data**: it is never evaluated as JavaScript, never
 injected into a page, never loaded as a script.
 
@@ -19,7 +19,7 @@ injected into a page, never loaded as a script.
 
 Contract functions run inside the Aztec PXE, hosted in a hidden extension document (Chrome's
 offscreen document, or a frame of the background page on Firefox,
-`apps/extension/src/wallet/utils/offscreen.ts:36-42`). The PXE feeds each function's bytecode to
+`apps/extension/src/wallet/utils/offscreen.ts:36-43`). The PXE feeds each function's bytecode to
 the ACVM, a virtual machine compiled to WebAssembly and bundled in the package
 (`@aztec-labs/simulator/src/private/acvm_wasm.ts:89-97`;
 `@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution.ts:48`). That the WASM is
@@ -28,11 +28,13 @@ the bundled copy is a property of the loaders, not of the policy: the ACVM glue 
 Vite emits next to it), and the prover's loader is replaced by a shim that fetches
 `/assets/barretenberg.wasm.gz` from the extension's own origin
 (`apps/extension/src/shims/bb-fetch-code.ts:15-18`). The content security policy,
-`script-src 'self' 'wasm-unsafe-eval'` (`apps/extension/manifest/manifest.config.ts:46-48`), forbids
-remote scripts, `eval` and `Function()` — the one upstream package that built a function from a
-string is replaced by a stub for that reason (`apps/extension/src/shims/function-bind-stub.cjs:1-28`)
-— but `'wasm-unsafe-eval'` permits compiling WASM bytes from any source and the policy sets no
-`connect-src`, so it does not by itself prove where the bytes came from; the loaders above do.
+`script-src 'self' 'wasm-unsafe-eval'` (`apps/extension/manifest/manifest.config.ts:47-49`), forbids
+remote scripts, `eval` and `Function()`. The one upstream package that built a function from a
+string with no fallback, `function-bind`, is replaced by a stub for that reason
+(`apps/extension/src/shims/function-bind-stub.cjs:1-28`); the others that try (zod, msgpackr,
+get-intrinsic) catch the refusal and fall back. But `'wasm-unsafe-eval'` permits compiling WASM
+bytes from any source and the policy sets no `connect-src`, so it does not by itself prove where
+the bytes came from; the loaders above do.
 
 ## What the bytecode can reach
 
@@ -43,40 +45,43 @@ it is given and nothing else (`@aztec-labs/pxe/src/contract_function_simulator/o
 
 **Through the oracle, the calls it serves.** Utility functions get the methods of
 `@aztec-labs/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts` (the public
-methods from `:200` on: random fields, key validation, membership witnesses, block headers, contract
+methods from `:200` on, among them random fields, key validation, membership witnesses, block headers, contract
 instances, auth witnesses, the caller's own notes and nullifiers, capsules and fact collections,
 logging, nested utility calls). Private functions add the methods of
-`@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution_oracle.ts` (from `:117`:
-context inputs, note creation and nullification notices, tagging secrets, hash preimages, log
+`@aztec-labs/pxe/src/contract_function_simulator/oracle/private_execution_oracle.ts` (from `:117`, among
+them context inputs, note creation and nullification notices, tagging secrets, hash preimages, log
 emission). Some of those answers are fetched from the Aztec node the user configured — for example
 a public-storage read (`@aztec-labs/pxe/src/contract_function_simulator/oracle/utility_execution_oracle.ts:547-558`) becomes
 `getPublicStorageAt` requests, and membership witnesses become the corresponding node queries
 (`:264`, `:291`, `:321`, `:343`, `:361`, `:389`, `:518`). So a contract function **can cause
-requests to leave the device, to one fixed endpoint it does not choose**, carrying the addresses and
-slots it reads. It cannot name a host, send a body of its choosing, or read the response of
+requests to leave the device, to one fixed endpoint it does not choose**, carrying what it
+queries: addresses, storage slots, hashes and log tags. It cannot name a host, send a body of its choosing, or read the response of
 anything but the typed query the oracle made on its behalf.
 
 **What it cannot reach:** extension APIs (`chrome.*`), the DOM of any page, the popup, storage
 outside the PXE database, the network by any path other than the oracle above, and any host other
 than the configured node. The host document itself talks to the service worker over
-`chrome.runtime` messaging (`apps/extension/src/offscreen/index.ts:108`) and exposes no page-facing
+`chrome.runtime` messaging (`apps/extension/src/offscreen/index.ts:109`) and exposes no page-facing
 surface.
 
 ## When it runs without a click
 
 A connected application's calls go through the interaction service. `isConfirmationNeeded`
-(`apps/extension/src/wallet/services/dapp-interaction/service.ts:658-687`) shows the confirmation
-popup when the call's access level reaches the session's confirmation level, when a send has no
-embedded fee payment, and always for token registration; the wallet-sdk session is created at
-`AccessLevel.Transactions` (`apps/extension/src/wallet/services/wallet-sdk/background.ts:992`), so
-sends and auth-witness creation prompt, while simulations and utility calls at lower levels run
-silently for a session the user already approved (`apps/extension/src/wallet/services/dapp-interaction/service.ts:405-406`). A silent utility call can
+(`apps/extension/src/wallet/services/dapp-interaction/service.ts:685-714`) shows the confirmation
+popup when the call's access level reaches the session's confirmation level, when a send spends the
+account's own Fee Juice (it names no fee payer, or pays itself), and always for token registration; the wallet-sdk session is created at
+`AccessLevel.Transactions` (`apps/extension/src/wallet/services/wallet-sdk/background.ts:1081`), so
+sends prompt. Auth-witness creation prompts too, unless the user let that application sign, without
+asking, the authorizations its granted scopes cover: a consent stored on the session
+(`packages/wallet-bridge/src/dispatcher.ts:1171-1195`). Simulations and utility calls at lower
+levels run silently for a session the user already approved
+(`apps/extension/src/wallet/services/dapp-interaction/service.ts:429-430`). A silent utility call can
 therefore execute application-supplied bytecode and, through the oracle, cause node reads, with no
 per-request window. What it cannot do is any of the things listed above.
 
 ## What this bears on
 
-`legal/privacy.md` says in § 13 "The extension loads no remote code" (`legal/privacy.md:343-344`).
+`legal/privacy.md` says in § 13 "The extension loads no remote code" (`legal/privacy.md:346-347`).
 That sentence is true under the reading above — code is what the browser executes as script or
 WASM, and the package bundles all of it. § 2 credits the content security policy only with what it
 delivers, "forbids loading remote scripts" (`legal/privacy.md:48-49`): `script-src 'self'` forbids

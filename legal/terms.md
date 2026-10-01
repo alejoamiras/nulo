@@ -30,8 +30,8 @@ individual.
 
 Contact: **hello@nulo.sh**. Any additional publisher disclosures required by the applicable
 extension store are available at
-https://chromewebstore.google.com/detail/nulo-v5/jlmiaokmjoicmclelpiiocdhncddkdmc and
-https://addons.mozilla.org/firefox/addon/nulo-v5/.
+https://chromewebstore.google.com/detail/jlmiaokmjoicmclelpiiocdhncddkdmc and
+https://addons.mozilla.org/firefox/addon/3077967/.
 
 In these Terms, "**Nulo**" means the Nulo browser extension distributed for Chrome and Firefox.
 These Terms do not govern separate applications or websites. The [Privacy Policy](privacy.md)
