@@ -1,9 +1,9 @@
 /**
  * Preflight companion to seed-preflight.ts: capture a seed token's
  * symbol/name/decimals pins by reading public storage directly from the node
- * (bb-free — no PXE, no simulation). Exits 1 when a field has no slot in the
- * layout, a read fails, or a value does not decode, so only chain truth
- * becomes a pin.
+ * (bb-free — no PXE, no simulation). Exits 1 on a node that is not the pinned
+ * Testnet, when a field has no slot in the layout, a read fails, or a value
+ * does not decode, so only chain truth becomes a pin.
  *
  * Uses the AZTEC-STANDARDS Token storage layout — the class every seed pins.
  * The upstream `@aztec-labs/noir-contracts.js/Token` sample artifact puts
@@ -15,10 +15,11 @@
  * Run from apps/extension: bun run scripts/seed-preflight-metadata.ts <tokenAddress> [nodeUrl]
  * — the node defaults to the Testnet seed's endpoint.
  */
-import { createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
+import { scrubUrls } from "../src/utils/scrub-urls"
 import { TESTNET_RPC_URL } from "../src/wallet/constants/network-endpoints"
+import { createPreflightNodeClient, readPinnedTestnetIdentity } from "./seed-preflight-node"
 
 /** The seeder's own bound: a token outside it is never seeded. */
 const MAX_DECIMALS = 18n
@@ -33,9 +34,21 @@ if (!target) {
 const layout = (TokenContract.artifact as any).storageLayout as Record<string, { slot: { toString(): string } }>
 console.log("standards storageLayout keys:", Object.keys(layout ?? {}).join(", "))
 
-const node = createAztecNodeClient(url)
+const node = createPreflightNodeClient(url)
 const addr = AztecAddress.fromStringUnsafe(target)
-const block = await node.getBlockNumber()
+let block: Awaited<ReturnType<typeof node.getBlockNumber>>
+try {
+	const identity = await readPinnedTestnetIdentity(node)
+	if (!identity.matches) {
+		console.log(`${identity.line} MISMATCH`)
+		process.exit(1)
+	}
+	console.log(`${identity.line} OK`)
+	block = await node.getBlockNumber()
+} catch (err) {
+	console.log(`node ${new URL(url).origin}: ${scrubUrls(err instanceof Error ? err.message : String(err))}`)
+	process.exit(1)
+}
 console.log(`node: ${new URL(url).origin} block: ${block}\ntoken: ${target}`)
 
 /** Standards CompressedString: ASCII bytes big-endian-packed into one field, zero-padded. Any
@@ -73,7 +86,7 @@ for (const key of ["name", "symbol", "decimals"]) {
 		)
 	} catch (err) {
 		failed = true
-		console.log(`${key}: read failed — ${err instanceof Error ? err.message : String(err)}`)
+		console.log(`${key}: read failed — ${scrubUrls(err instanceof Error ? err.message : String(err))}`)
 	}
 }
 process.exit(failed ? 1 : 0)

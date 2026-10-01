@@ -1,15 +1,16 @@
 /**
  * Live seed preflight: prove a contract exists at the given address on the Testnet and capture its
- * TOFU pin (the contract class id). Exits 1 on a chain-id mismatch, a missing contract, a class id
- * other than the expected one, or any error, so a stale pin cannot pass as a printout.
+ * TOFU pin (the contract class id). Exits 1 on a node that is not the pinned Testnet, a missing
+ * contract, a class id other than the expected one, or any error, so a stale pin cannot pass as a
+ * printout.
  *
  * Run from apps/extension: bun run scripts/seed-preflight.ts <address> [expectedClassId] [nodeUrl]
  * — the node defaults to the Testnet seed's endpoint; another URL must serve the same chain.
  */
-import { createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
-import { CHAIN_IDS } from "../src/utils/chain-ids"
+import { scrubUrls } from "../src/utils/scrub-urls"
 import { TESTNET_RPC_URL } from "../src/wallet/constants/network-endpoints"
+import { createPreflightNodeClient, readPinnedTestnetIdentity } from "./seed-preflight-node"
 
 const [target, expectedClassId, url = TESTNET_RPC_URL] = process.argv.slice(2)
 if (!target) {
@@ -25,12 +26,13 @@ const fail = (line: string) => {
 
 console.log(`=== Testnet (${new URL(url).origin}) ===`)
 try {
-	const node = createAztecNodeClient(url)
-	const info = await node.getNodeInfo()
-	const chainId = (info.l1ChainId ^ info.rollupVersion) >>> 0
-	const chainLine = `nodeInfo: nodeVersion=${info.nodeVersion} l1ChainId=${info.l1ChainId} rollupVersion=${info.rollupVersion} → chainId=${chainId} (expected ${CHAIN_IDS.TESTNET})`
-	if (chainId === CHAIN_IDS.TESTNET) console.log(`${chainLine} OK`)
-	else fail(`${chainLine} MISMATCH`)
+	const node = createPreflightNodeClient(url)
+	const identity = await readPinnedTestnetIdentity(node)
+	if (!identity.matches) {
+		fail(`${identity.line} MISMATCH`)
+		process.exit(1)
+	}
+	console.log(`${identity.line} OK`)
 
 	const contract = await node.getContract(AztecAddress.fromStringUnsafe(target))
 	if (!contract) {
@@ -45,6 +47,6 @@ try {
 		else fail(`currentContractClassId: ${classId} (expected ${expectedClassId}) MISMATCH`)
 	}
 } catch (err) {
-	fail(`ERROR: ${err instanceof Error ? err.message : String(err)}`)
+	fail(`ERROR: ${scrubUrls(err instanceof Error ? err.message : String(err))}`)
 }
 process.exit(failed ? 1 : 0)
