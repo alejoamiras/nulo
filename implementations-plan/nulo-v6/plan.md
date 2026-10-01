@@ -90,7 +90,7 @@ Every surface below changes what a user sees, so each needs the owner's recorded
 | Fee card on Testnet | Nulo's sponsor default | unchanged; the Alpha-only Private Fee Juice default disappears with Alpha | A |
 | Settings → About | Aztec 5.2.0; "Alpha Testing" | Aztec 6.0.0-rc.1; the stage label per U6 | A |
 | Onboarding "Fees on Aztec", card 01 | "The only way to get fee juice today is to burn $AZTEC on L1…" | testnet wording (U7) | A |
-| Explorer links on Testnet | testnet.aztecscan.xyz | the same, if Aztecscan indexes V6; otherwise hidden (checked in P4) | A |
+| Explorer links on Testnet | testnet.aztecscan.xyz | hidden: P4 found Aztecscan still indexing the V5 testnet (U5) | A |
 | Store tile, 7 screenshots, listing text (Chrome and AMO) | NULO V5 wordmark, "ALPHA V5" pill, "opens on mainnet" notes | NULO V6, Testnet, testnet reviewer notes | store (optional) |
 | Terms (draft) | 1.0: "connects to Aztec mainnet by default", real-value wording | 1.0 edited in place (A2): testnet default, testnet-value wording; no version bump, no re-acceptance sheet. Its store URLs change only with the optional store upload | A |
 | Home on Testnet | none | the V6 "Test USDC" row (unleashed's V6 token), priced at $1 | C |
@@ -98,7 +98,7 @@ Every surface below changes what a user sees, so each needs the owner's recorded
 
 ### UI asks for the owner (at most five per page, each option shown as it will look)
 
-Arc A's page: U1, U2, U4, U6, U7, and U5 only if the explorer check fails. The optional store
+Arc A's page: U1, U2, U4, U6, U7, and U5, since the explorer check failed in P4. The optional store
 arc's page: U3.
 
 - **U1 (arc A).** The default network's pill stays Testnet's neutral-mint (recommended, confidence
@@ -882,7 +882,7 @@ phase installs nothing.
   verdict is in lessons.
 - Layers: lint, types, unit, builds, supply chain.
 
-### P4 · Chain identity and the network cutover
+### P4 · Chain identity and the network cutover ✓
 
 1. `chain-ids.ts`:
    - TESTNET pair → `11155111 / 2914217885`, with the live-verified date and node version in the
@@ -1096,6 +1096,10 @@ as its spec.
    from `seed-preflight.ts` and `seed-preflight-metadata.ts` against the live node: class, symbol,
    name, decimals. `default-tokens.test.ts` returns to the non-empty set equality: the bundled
    Standards rc.1 Token class equals the seed's live class. If it is red: HOLD, owner (I10).
+   - If the price map's placeholder Testnet row goes, `tests/e2e/helpers/activity-seeds.ts` moves
+     to the seed's contract in the same commit: the smoke rows price through that row.
+   - Artifact-mode smoke has no dRPC block (P4 lessons), so with a shipped seed each of its profiles
+     calls dRPC. Decide whether that is acceptable before the release smoke runs it.
 3. `FEE_JUICE_BRIDGE_URL` (`fee-helpers.ts:302-303`) opens unleashed's V6 app. If unleashed's V6 app
    lives elsewhere, the new URL is a UI change the owner signs off in step 5.
 4. The owner's hands-on run, once per browser, on zips built from the arc C tip: get Test USDC from
