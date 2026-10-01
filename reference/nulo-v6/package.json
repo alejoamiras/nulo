@@ -1,0 +1,14 @@
+{
+	"name": "nulo-v6-reference-vectors",
+	"private": true,
+	"type": "module",
+	"description": "Self-contained NULO-ACCOUNT-KDF v2 reference project for the nulo-v6 account regime. Run: bun install && bun derive-vectors.ts > vectors.json — from THIS directory. Imports ONLY the published 6.0.0-rc.1 packages plus node:crypto (a deliberately DIFFERENT PBKDF2 implementation than the wallet's WebCrypto, for cross-implementation verification); never the repo's own helpers.",
+	"dependencies": {
+		"@aztec-labs/accounts": "6.0.0-rc.1",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/constants": "6.0.0-rc.1",
+		"@aztec-labs/foundation": "6.0.0-rc.1",
+		"@aztec-labs/pxe": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1"
+	}
+}
