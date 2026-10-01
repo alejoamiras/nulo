@@ -190,6 +190,18 @@ while the Chrome suite ran, agreed):
   new hits in this plan's own files.
 - Step 7's four runs, above.
 
+## Arc A PR #736 CI (2026-10-01)
+
+- Opened at `65c2b8b9` at 08:57Z and labelled after opening. By 09:27Z every check was green,
+  both browsers' canaries included, and the PR was mergeable.
+- Two jobs failed in `setup-aztec` before any test ran, each after three HTTP 500s from a GitHub
+  release download: the Chrome lane's fee-methods job (Foundry v1.4.1's attestation file) and the
+  Firefox lane's canary (noir v1.0.0-rc.3's tarball). GitHub's status page showed no incident.
+  Each passed when the failed jobs were re-run.
+- **The first CI run on a new Aztec line has no toolchain cache**, so every job downloads the
+  CLI's pieces from GitHub releases, and one 500 fails its job. The run saves
+  `Linux-aztec-6.0.0-rc.1-v2` (09:01Z), and the re-runs restored from it.
+
 ## Arc A codex loop
 
 ### Round 1 (2026-10-01, `/codex high`, read-only, at `e1f00915`)
