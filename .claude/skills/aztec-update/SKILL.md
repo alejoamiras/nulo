@@ -180,7 +180,9 @@ Then Branch A's delivery gates.
   exist on this wallet` — those are three different upstream steps you'd be re-implementing;
   don't, use the provider.
 - **`tests/e2e` is outside the tsconfig graph** — fixture breakage never shows in
-  `typecheck:all`. The network suite is the only detector.
+  `typecheck:all`. The network suite is the only detector. 6.0.0-rc.1's `.simulate()` answers
+  `{ result, … }`, not the bare value, so a guard that compares the raw answer (`balance === 0n`)
+  never fires and no gate shows its TS2367: unwrap `.result`.
 - **Clear `<app>/node_modules/.vite` after a dependency-line swap**, before the first e2e run.
   Stale dep-optimizer caches make dev-served apps fail with `.vite/deps/*.js does not exist`,
   which surfaces as a page that never loads and a test that times out far from the cause.
@@ -211,6 +213,22 @@ Then Branch A's delivery gates.
   Aztec line whose install resolved a fixed snappy; it is gone. The class recurs through any un-pinned
   transitive: diagnose via publish-time correlation + a bare local `npm install` repro (fresh install
   in a scratch HOME, then `node -e "require('<pkg>')"` against the version dir) before rerunning CI.
+- **The first CI run on a new line has no toolchain cache.** Every job downloads the Aztec CLI's
+  pieces from GitHub releases, so one HTTP 500 fails a job before any test (6.0.0-rc.1: Foundry's
+  attestation file, the noir tarball). Once the run has saved `Linux-aztec-<pin>-v2`,
+  `gh run rerun <id> --failed`.
+- **Two steps call the GitHub API with no token**: presto-server's bb fetch, which checks bb's
+  digest through the API, and the landing prebuild's `fetch-latest-release.ts`. On a host whose
+  60-an-hour anonymous budget other agents share, either returns 403 for up to an hour, so read
+  `api.github.com/rate_limit` before reading it as code. For local prover-ON canaries, give
+  presto-server a private `PRESTO_HOME` and send one warm-up prove once the budget has room, so a
+  missing bb fails before the suite instead of as a canary result. CI hands the server the
+  workflow token (`PRESTO_GITHUB_API_TOKEN`); a personal token would make it a keyed run.
+- **Upstream's JSON-RPC client prints the node URL**: in its debug fetch line, its error-level
+  retry line and the errors it throws (`Error fetching from host <url>`). The Testnet endpoint
+  carries its API key in the path, so a script that reads it goes through the silent single-read
+  client (`createPreflightNodeClient` in `apps/extension/scripts/seed-preflight-node.ts`) and
+  prints origins only.
 
 - **Standards/token package swaps: noir struct paths are NOT stable across dep graphs.** The same
   `AztecAddress` param can arrive as `aztec::protocol_types::…::AztecAddress` from one compile and
