@@ -213,3 +213,11 @@ Verification pass (the owner's call at the cap, limited to `9b8e4455`): clean. A
 #736 also rescoped the imports of `account-derivation.ts` and `mnemonic-master.ts`, so their blobs moved and their path-token holds lapsed: `check:plans` failed both. F15 keeps `packages/wallet-crypto/src` free of non-test edits, so the holds re-pin to the new blobs (`d6e853ce`, ledger L42) rather than repointing the comments. #736 added and removed no e2e file and changed no test count, so CI.md's suite sizes hold.
 
 Phase 5's gate on `d6e853ce`, against `1054e7fb`, exits as on `aa45f6b0`: smoke in five shards (40 files pass and 3 skip; 166 tests pass and 7 skip; 487 s), `test:all`, `typecheck:all`, `test:ci-gating`, `lint`, `lint:actions`, `phantom-sweep.ts`, the soak tests, `check:plans` (0 findings), the tools tests, `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify`, `check-no-local-paths.sh` and `audit:vue` exit 0; the JSON row exits 1 on `biome.json`'s one line (step 2), and `test:release` on the 3 `zip-reproducible` cases (`zip` is not on this machine's PATH). C then moved onto J's restack log (`315d9797`) by `git rebase --onto`, which touched only `implementations-plan/plans-scaffolding/lessons/phase-4.md`.
+
+## Restack onto the 0.29.0 base and nulo-v6's close-out
+
+`dev` moved to `d7da8e62` (the 0.29.0 release: `CHANGELOG.md`, the release-please manifests and two `package.json` versions) and then to `3452ac3b` (#740, nulo-v6's close-out: its plan dir, the aztec-update skill and the curated files) after the cross-arc pass converged. J moved onto both (`lessons/phase-4.md`); `git rebase --onto` took C from `fc2492a6` onto J with no conflict, every commit signed. Neither move touched a `packages/wallet-crypto/src` file or a file C edits, so both path-token holds still match their blobs: `check:plans` reports 0 findings, and `classify.ts --check` reads no drift.
+
+Then `dev` moved to `7c2425ca` (#745, two release entries in `follow-ups.md`, which C does not edit), J took them (`lessons/phase-4.md`), and C replayed onto J again with no conflict.
+
+Last, `dev` moved to `fe597a1d` (#747, the hash-pinned `setup-aztec` installer, whose one `CI.md` line sits outside C's three hunks there), J moved onto it (`lessons/phase-4.md`), and C replayed with no conflict, its diff against J unchanged.
