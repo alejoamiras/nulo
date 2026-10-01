@@ -208,7 +208,7 @@ export function checkTree(): Finding[]
 - **Complete blocks** (Date, Status, Shipped|Delivered, Seeds retired) are left alone; that covers `send-publish-ledger`. An incomplete block gets its missing fields appended inside it, never a duplicate block.
 - **Not hosts:** the 36 other exact-heading files (4 `STATUS.md`, 32 lessons logs; F10). The 4 `STATUS.md` blocks feed the classifier as evidence.
 - **Placement (A15):** with byte-0 YAML front matter the block goes directly after the closing `---`, before the H1 (the owner's rule); without front matter, at byte 0, before the H1 (the one extension that reads the same for every file).
-- **The exemplar.** `send-publish-ledger/plan.md` reads front matter → H1 (L13) → Outcome (L15), so it does not meet that rule. A15 settles it explicitly; the default grandfathers it by path in `outcome.ts --verify`, the only placement exception, since its block is complete and generated blocks never touch a complete one.
+- **The exemplar.** `send-publish-ledger/plan.md` reads front matter → H1 (L13) → Outcome (L15), so it does not meet that rule. A15 settles it explicitly; the default grandfathers it by path in `outcome.ts --verify`, since its block is complete and generated blocks never touch a complete one. D grandfathers two more hosts whose block sits under the title the same way, `grant-check-address-case` and `tools-extraction` (L44); `tools-extraction` gains only its missing `Shipped` field.
 - **Hosts, in order:**
   1. `plan.md`;
   2. the index line's non-plan target (`runbook.md`, `adoption-map.md`, `scope.md` ×2, `README.md`, `seed.md`);
@@ -239,14 +239,14 @@ export function checkTree(): Finding[]
 - After A merges, D's inexact candidates are only its ~330 edited files: ~110k pairs. The draft's "887 inexact sources" counted A's 640 deletions.
 - The smallest Outcome host is 1,705 B (F17), so a ≤ 1 KiB block keeps every host ≥ 63% similar, above the 50% default.
 
-`archive-move.ts --verify` checks the real diff:
-- every path under a closed dir is `R<score>` to its mapped path;
-- R100 unless the path is in the planned-edit set;
-- every edited pair satisfies `generate(oldBlob) == newBlob`;
+`archive-move.ts --verify --parent <tools tip>` checks the real diff of the generated commits against their actual parent, the last commit of D's hand-written tools stage:
+- every path under a closed dir is `R<score>` to its mapped path, except that a planned edit git cannot pair (under 50% similar) shows as its old path deleted and its mapped path added, with a note (L46);
+- the blob and the mode unchanged unless the path is in the planned-edit set (L39, L46);
+- every edited file satisfies `generate(oldBlob) == newBlob`;
 - the only additions are `archive/index.md` and the stubs;
-- fewer than 3,000 files, measured against D's actual parent (the lower arc's branch, or `dev` once the lower arcs merged), never `origin/dev...HEAD`, which counts unmerged lower arcs.
+- fewer than 3,000 files. PR D's own count is measured against `$PARENT` (the lower arc's branch, or `dev` once the lower arcs merged), never `origin/dev...HEAD`, which counts unmerged lower arcs.
 
-GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on the PR-files API ("List pull requests files"). D (~1,460) is reviewed locally, and once PR D is open its pre-merge gate enumerates the API's file list completely (`gh api --paginate`) and reconciles it with the move map: the same count as the local diff, every `renamed` row mapped, every `modified` row in the planned-edit set, the only `added` rows `archive/index.md` and the stubs. **Split fallback:** if `--verify` finds an unpaired D or A, or the API pairs a file differently or nears the cap, the Outcome commit becomes its own PR before a pure-move D (R100 pairs are exact renames).
+GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on the PR-files API ("List pull requests files"). D (~1,720) is reviewed locally, and once PR D is open its pre-merge gate enumerates the API's file list completely (`gh api --paginate`) and reconciles it with `git diff -M --name-status $PARENT HEAD`: the same count; every `renamed` row in the move map; every `modified` row a planned edit or a tools-stage file (`git diff --name-status $PARENT <tools tip>`); the only `added` rows `archive/index.md`, the stubs, the tools stage's new files and the mapped path of each planned edit `--verify` notes as unpaired; the only `removed` rows those edits' old paths. **Split fallback:** if the API pairs any other file differently from the local diff, or nears the cap, the Outcome commit becomes its own PR before D. An unpaired planned edit is no trigger: `--verify` still proves its text, and D's one (`execution-decomposition/drafts/contradiction-codex.md`, R027) is a link repair, which a split would not pair (L46).
 
 **Link repair via an explicit old→new map** built from `closures.json`.
 - Each kept file, moved or not, resolves every relative link from its old location, maps the target, and re-relativizes from its new location.
@@ -257,7 +257,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 - A dir with no row (first seen after `closuresBase`) is ACTIVE and stays.
 - A closed dir whose content changed since `closuresBase` (`git diff --quiet <closuresBase> <refreshed base> -- <dir>` fails) goes back to the owner; nothing merges until the answer is in `closures.json`.
 - Index lines added by other branches are kept verbatim when their dir is active.
-- **D is regenerated, never rebased across upstream edits.** After any base refresh the session resets D to its refreshed parent and re-runs `outcome.ts`, `archive-move.ts`, `split-index.ts` and `repair-links.ts` (all idempotent). `git diff --stat <old D head> <new D head>` must be explained by the drift report, line for line. So a resumed plan's new content can never ride into `archive/` under a closed Outcome, and generated edits never mix with upstream ones.
+- **D is regenerated, never rebased across upstream edits.** After any base refresh the session drops D's generated commits, replays its hand-written tools stage onto the refreshed parent and re-runs `outcome.ts`, `archive-move.ts`, `split-index.ts` and `repair-links.ts` (all idempotent). `git diff --stat <old D head> <new D head>` must be explained by the drift report, line for line. So a resumed plan's new content can never ride into `archive/` under a closed Outcome, and generated edits never mix with upstream ones.
 
 **"Closed, awaiting archive" (final pass 2).** The owner's closing standard writes the Outcome in the delivery PR and moves the dir only after it merges, because a running `/loop` still reads the live path. The gate models that state:
 - An `index.md` line whose status field is exactly `closed, awaiting archive` must target a host with a complete Outcome; every other active line must target a host without one.
@@ -595,7 +595,7 @@ The network e2e runs as the PR's required check. Pass: all exit 0, and `git diff
 3. `tools/outcome.ts` writes the top-level and nested Outcomes, the seed lines and the stubs, and repairs incomplete blocks.
 
 **Validation gate.** Commit, then run:
-- `bun implementations-plan/plans-scaffolding/tools/outcome.ts --verify`: every closed host has one complete, real `## Outcome` placed per A15 (the exemplar per A15's answer), and no ACTIVE or PARKED dir changed;
+- `bun implementations-plan/plans-scaffolding/tools/outcome.ts --verify`: every closed host has one complete, real `## Outcome` placed per A15 (the `GRANDFATHERED` hosts excepted, L44), and no ACTIVE or PARKED dir changed;
 - `outcome.ts` again, then `git status --short` (empty);
 - `git diff $PARENT -- implementations-plan/send-publish-ledger/plan.md`: empty under A15's default or (c); under (b), only the block's move;
 - `bun scripts/ci-cd/plans/check.ts`, `bun run test:ci-gating`, `bun run lint`.
@@ -605,7 +605,7 @@ Pass: all exit 0. Layers: unit, repo-integrity.
 ### Phase 7: archive move, index split, repairs (Arc D)
 
 1. `tools/archive-move.ts`: `git mv` every closed dir, in its own commit with no content edits.
-2. `tools/split-index.ts`: `index.md` keeps its header, format line and active lines verbatim (tools-extraction, transport-ready-handshake PARKED, plans-scaffolding, anything newer). `archive/index.md` is generated.
+2. `tools/split-index.ts`: `index.md` keeps its header, format line and active lines verbatim (transport-ready-handshake PARKED, plans-scaffolding, anything newer); tools-extraction closes with the split (L43). `archive/index.md` is generated.
 3. `tools/repair-links.ts`: apply the map to the moved files, `lessons.md`, `follow-ups.md`, the audit and research links, and the live docs:
    - CLAUDE.md L49, 71, 75, 86, 104, 109, 114, 137, 215, 517, 540 and 577;
    - `CI.md`, `ARCHITECTURE.md`, `SECURITY.md`, `UPDATE.md`;
@@ -614,7 +614,7 @@ Pass: all exit 0. Layers: unit, repo-integrity.
 4. Turn on strict `path-token` for docs, `index-structure` (with its "closed, awaiting archive" rule), `archive-structure`, and the full `link-missing` check for active plan dirs.
 
 **Validation gate.** Commit, then run:
-- `bun implementations-plan/plans-scaffolding/tools/archive-move.ts --verify` (fidelity proof);
+- `bun implementations-plan/plans-scaffolding/tools/archive-move.ts --verify --parent <tools tip>` (fidelity proof);
 - `bun run check:plans`, `bun run test:ci-gating`, `bun run lint`, `./scripts/check-no-local-paths.sh`;
 - `bun implementations-plan/plans-scaffolding/tools/untrack.ts --verify` (evidence re-proof);
 - `split-index.ts` and `repair-links.ts` again, then `git status --short` (empty).
@@ -662,7 +662,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 | A | Phase 2's gate, fresh clone included; the soak (A14) and the bundle (A13) confirmed |
 | J | `check.ts`, `untrack.ts --verify`, `classify.ts --check` with the drift check against the refreshed base (owner adjudication for any drifted dir), `mine.ts --verify` |
 | C | Phase 5's gate against `$PARENT`, then `check.ts` and `untrack.ts --verify` |
-| D | D regenerated on the refreshed parent (Mechanics § Concurrency); the drift check and any owner adjudication; `mine.ts --verify`; `outcome.ts --verify`; `archive-move.ts --verify` against `$PARENT`; the complete API enumeration reconciled with the move map; `check.ts`; `untrack.ts --verify` |
+| D | D regenerated on the refreshed parent (Mechanics § Concurrency); the drift check and any owner adjudication; `mine.ts --verify`; `outcome.ts --verify`; `archive-move.ts --verify` against the tools tip; the complete API enumeration reconciled with `$PARENT`'s diff (Mechanics § Archive-move fidelity); `check.ts`; `untrack.ts --verify` |
 | E | `check.ts` (the "closed, awaiting archive" line included), `bun run lint` |
 | F | `repair-links.ts` for the moved dir, then `check.ts`, `untrack.ts --verify` from its archived path, `bun run test:ci-gating` |
 
@@ -753,6 +753,7 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc C codex loop, round 2 (2026-10-01): changes needed** (high confidence, 2 blocking and 1 non-blocking finding). All 3 adopted (K6-K8; L40 and L41 restated). It confirmed K1 and K4 closed, the round-1 repros failing, `%2E`, `%252e`, backslash, `;` parameter, fragment and Markdown-title variants rejected, and the 42 moves, freeze pins, crypto inputs and permalink targets unchanged.
 - **Arc C codex loop, round 3 (2026-10-01): changes needed** (high confidence, 1 blocking finding). Adopted (K9; L40 restated): round 2's span left `)**` after a bold link and `)|` after a table cell, so a valid permalink failed. It confirmed K6-K8 closed and no false positive on the tree. Round 3 is the loop's cap, so the fix went to the owner before another pass.
 - **Arc C verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to `9b8e4455`. A URL whose last character is a literal `_`, `*`, `~` or `|` still reads as formatting; none of the tree's 177 permalinks ends with one.
+- **Arc D codex loop (`/codex high`), round 1 (2026-10-01): changes needed** (high confidence, 2 blocking and 3 non-blocking findings). All 5 adopted (D1-D5, ledger L50-L53). It reproduced the archive, Outcome, plan-tree, closure-table and untrack verifications, found no closed dir left behind and the three active and parked dirs unchanged, no content-fidelity bypass, and no new dependency, crypto or permission surface, and judged accepting the R027 repair sound.
 
 ---
 
@@ -811,6 +812,10 @@ In order. No `/code-review`: `code_review` is `off`.
 | L47 | `untrack.ts --verify` reads an archive-path addition paired with its source's deletion as a non-exact rename into the archive | Arc D, Phase 7 | A removal (a false finding), or an exact move (it would exempt a transcript) | adopted |
 | L48 | `mine.ts` reads `implementations-plan/archive/` as `implementations-plan/` when it matches an entry to its mined line | Arc D, Phase 7 | Re-verifying each entry the split re-points | adopted |
 | L49 | Phase 7 step 4's enforcement is a tools-stage commit, before generation; after generation only `plans-scaffolding/` changes | Arc D, Phase 7 | Committing it after generation: `--verify --parent <tools tip>` refuses any later edit outside `plans-scaffolding/` | adopted |
+| L50 | An index line names its plan dir by its normalized target: a target that names no file inside one plan dir fails, and so does a second archive line for a dir | Arc D codex D1 | The first raw path segment: `x/../y/plan.md` lent `y`'s Outcome to `x`, `./x/plan.md` left `x` unlisted | adopted |
+| L51 | `path-token` also scans the indexes and the curated files, code spans included; other plan prose stays history | Arc D codex D3 | Leaving them to `link-missing`, which reads only links | adopted |
+| L52 | Archive verify compares each move's modes as well as its blob, an unpaired planned edit's included | Arc D codex D4 | Blob identity alone, which a mode flip passes | adopted |
+| L53 | PR D's API inventory is reconciled with `$PARENT`'s diff, which includes the tools stage; an unpaired planned edit is no split trigger | Arc D codex D2 | The move map alone, which rejects the tools stage's files and the R027 repair | adopted; restates L46's fallback |
 
 **Findings**
 
@@ -871,6 +876,11 @@ In order. No `/code-review`: `code_review` is `off`.
 | K7 | A closing `>` followed by text, or two adjacent autolinks, read as a template | adopted | L41 |
 | K8 | CI.md calls both skipped smoke tests flakes | adopted | It names the navigation flake and the blocked strict-mode test |
 | K9 | A permalink in bold text or a table cell fails after K6 | adopted | L40 |
+| D1 | An index target's `..` lends another dir's Outcome, `./` misreads its dir, and a second archive line passes | adopted | L50 |
+| D2 | The documented API reconciliation rejects PR D: the tools stage's files and the unpaired repair | adopted | L53; Phases 6-7 restate L43 and L44 |
+| D3 | A plan path in an index hook or a curated file evades `path-token` | adopted | L51 |
+| D4 | Archive verify passes a mode change | adopted | L52 |
+| D5 | `outcome.ts`'s comments cite A15 and misstate where missing fields go | adopted | They state the rule |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).

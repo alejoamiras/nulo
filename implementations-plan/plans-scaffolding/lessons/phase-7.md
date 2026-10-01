@@ -65,6 +65,18 @@ An earlier tools tip moved tools-extraction's Outcome above its title (Phase 6, 
 
 `bunx vitest` from the repo root fetched vitest 5.0.3, published the day before. Under the isolated linker the root's `node_modules/.bin` holds only root devDependencies, so `bunx` fell through to npm `@latest`, outside the lockfile and the 7-day `minimumReleaseAge`. It died at config load; its cache dir was deleted. The tests run through the workspace scripts (`bun run test:ci-gating`) or a workspace's own binary.
 
+## Codex round 1 (`/codex high`)
+
+Changes needed, high confidence. All five findings reproduced and adopted (D1-D5, ledger L50-L53).
+
+1. **Blocking: an index line could lend another dir's Outcome.** The gate took a line's dir from the first raw segment of its target, so `tools-extraction/../send-publish-ledger/plan.md` listed tools-extraction while judging send-publish-ledger's Outcome, `nulo-v6/../README.md` hid an active plan's Outcome, `./nulo-v6/plan.md` read as the dir `.`, and a second archive line passed. `entryDir` normalizes the target and returns null unless it names a file inside one plan dir; both index rules use it, and the archive rule refuses a dir listed twice (L50).
+2. **Blocking: the documented API reconciliation could not accept PR D.** PR D's diff against C holds 1,716 records, the tools stage's files among them, and the R027 repair shows as a deletion and an addition. The plan now reconciles the API with `$PARENT`'s diff, tools stage included, and an unpaired planned edit is no split trigger (L53). Phases 6 and 7 now record the grandfathered hosts and tools-extraction's closure.
+3. **Plan paths in the indexes and curated files were never token-checked.** The scan excludes `implementations-plan/`, and `link-missing` reads links, not code spans. A second grep covers the three indexes and the two curated files (L51); the old head and the tools tip both pass it.
+4. **A mode flip passed archive verify.** `rawMeta` returns both modes, and a rename, a planned edit's modification and an unpaired move must each keep theirs (L52). The real move changes no mode.
+5. **`outcome.ts`'s comments** cited A15 and put missing fields "at its end". They now state the placement rule, and that the fields extend the list the block opens with, else follow its last text line.
+
+Each new test fails on the code before its fix.
+
 ## For E
 
 - `mine.ts --verify` stays at the reworded lesson until E rewrites `lessons.md`; from then on the mining record is evidence of J's curation, not a gate.
