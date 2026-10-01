@@ -27,3 +27,8 @@
   "before" side serves the base revision's copies of the four changed modules (`git show
   <base>:<path>`) through a Vite `load` hook, so both sides render the same request. The pictures
   went to the owner on the as-built Artifact.
+- **Sign-off.** The owner signed off the as-built pictures on 2026-10-01, relayed by the
+  coordinating session, verbatim: "regarding the questions of private row: A2: drop. Playground:
+  follow-up. And the artfiact looks great. singed-off". I4 becomes a follow-up; the
+  more-than-32-fields test is dropped. Quoted in `plan.md` (UI impact). P4's gate holds: both
+  suites exit 0 at retry 0 with their SHAs above, and the sign-off is quoted.

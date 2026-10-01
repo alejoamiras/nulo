@@ -105,7 +105,16 @@ design CSS at the window's width, in a throwaway harness; they are on the ELI5 A
 ### UI asks for the owner (each option shown as it will look)
 
 Answered on 2026-10-01 (Approval): O1 yes, O2 (b), the title from the function. The as-built row
-waits for P4's pictures.
+was signed off the same day on P4's pictures (the as-built Artifact,
+`https://claude.ai/artifact/8Dv9yEESnFZwzmK5pR7A3a`), relayed by the coordinating session. The
+owner's message, verbatim:
+
+> "regarding the questions of private row: A2: drop. Playground: follow-up. And the artfiact looks
+> great. singed-off"
+
+Read as: the as-built rows are signed off; I4, the playground's multicall nonces, becomes a
+follow-up; the more-than-32-fields test is dropped ("A2: drop" answers that question; the plan's
+own A2 was declined before, D10).
 
 - **O1.** The four standard transfers read as the transfer row (recommended, confidence high: it is
   what the sample Token's transfers already show, and the amount in the token's units is the one
@@ -627,9 +636,10 @@ diff): *"approve"*, no new material findings. The loop converged in two rounds
 
 ### Follow-ups (opened at close-out, not before)
 
-- I4, the playground's multicall nonces, if the owner wants it tracked.
+- I4, the playground's multicall nonces: kept by the owner on 2026-10-01, filed in `follow-ups.md`
+  at close-out as inferred, not run.
 - A test that an undecoded discovered authorization of more than 32 fields lists every field (the
-  untouched raw path), if the owner wants it tracked.
+  untouched raw path): dropped by the owner on 2026-10-01, not tracked.
 
 ## Approval
 
@@ -788,7 +798,7 @@ reason.
   `bun run audit:vue` at the root (alone, never beside an e2e run): all exit 0. If the build rewrote
   `src/types/auto-imports.d.ts`, commit it. Layers: typecheck · lint · unit · component · build.
 
-### P4 · End to end, the as-built pictures, and the owner's sign-off
+### P4 · End to end, the as-built pictures, and the owner's sign-off ✓
 
 1. `tests/e2e/network/tx-transfer-row.test.ts`: one test on
    `dappConnectedExtensionWithTransactionCap`, by testid only, timeout 360 s:
