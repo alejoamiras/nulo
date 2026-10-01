@@ -1,3 +1,3 @@
-export { makeFetchWithTimeout, DEFAULT_REQUEST_TIMEOUT_MS } from "./fetch"
+export { makeFetchWithTimeout, makeSingleAttemptFetch, DEFAULT_REQUEST_TIMEOUT_MS } from "./fetch"
 export { assertLiveChainIdentity, chainInfoFrom } from "./chain-identity"
 export type { LiveNodeChainInfo, SelectedNetworkChainInfo } from "./chain-identity"

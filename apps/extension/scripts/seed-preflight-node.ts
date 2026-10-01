@@ -1,15 +1,23 @@
-import { makeFetch } from "@aztec-labs/foundation/json-rpc/client"
 import { type AztecNode, createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
+import { DEFAULT_REQUEST_TIMEOUT_MS, makeSingleAttemptFetch } from "@nulo/aztec-runtime/utils"
 import packageJson from "../package.json"
 import { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION } from "../src/utils/chain-ids"
+import { scrubUrls } from "../src/utils/scrub-urls"
 
 /** The Aztec line the wallet is built against; a node on any other version is a hold, never a pass. */
 const AZTEC_VERSION = packageJson.dependencies["@aztec-labs/pxe"]
 
-/** A node client that never retries: upstream's retry logger prints the whole endpoint URL, and the
- *  Testnet endpoint carries its API key in the path. */
+/** The wallet's single-attempt transport, its errors reduced to the endpoint's origin: upstream's
+ *  fetch, retry and client loggers print whole URLs, and the Testnet endpoint carries its API key
+ *  in the path. */
 export function createPreflightNodeClient(url: string): AztecNode {
-	return createAztecNodeClient(url, { fetch: makeFetch([], false) })
+	const once = makeSingleAttemptFetch(DEFAULT_REQUEST_TIMEOUT_MS)
+	return createAztecNodeClient(url, {
+		fetch: (host, ...rest) =>
+			once(host, ...rest).catch((err: unknown) => {
+				throw new Error(scrubUrls(err instanceof Error ? err.message : String(err)))
+			}),
+	})
 }
 
 /**
