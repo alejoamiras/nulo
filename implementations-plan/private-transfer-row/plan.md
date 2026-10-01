@@ -104,6 +104,9 @@ design CSS at the window's width, in a throwaway harness; they are on the ELI5 A
 
 ### UI asks for the owner (each option shown as it will look)
 
+Answered on 2026-10-01 (Approval): O1 yes, O2 (b), the title from the function. The as-built row
+waits for P4's pictures.
+
 - **O1.** The four standard transfers read as the transfer row (recommended, confidence high: it is
   what the sample Token's transfers already show, and the amount in the token's units is the one
   figure a person must check), or they keep the decoded rows.
@@ -239,7 +242,8 @@ ones; the codex loop judges them.
   before the gate sees it. The gate reads the wire call's own selector, so a non-string fails it
   whatever the decode request made of it: the request stringifies it (`display-calls.ts:13-26`),
   and a one-element array holding the canonical string decodes, then reads decoded. An absent
-  selector fails the gate even when the decoder found the function by name. The wire's `FunctionCall` schema always carries a selector (Fact 23).
+  selector fails the gate even when the decoder found the function by name. The wire's
+  `FunctionCall` schema always carries a selector (Fact 23).
 - **Why a static table.** Hashing needs bb.js: the popup does not load it, and jsdom cannot run it
   (recon §3). Sixteen constants recomputed by a node test from the descriptors' builder cost
   nothing at run time and fail on any drift: a new vocabulary name, a changed type, a hashing
@@ -277,7 +281,8 @@ ones; the codex loop judges them.
   only for classes the wallet compiles in, and it changes interface resolution in the background
   for every known class. The selector check pins every registered token's call to the selector the
   vocabulary's own signature produces (what the token runs there is the token's: Security, residual
-  risks), in the popup, with no resolution change. F stays A2's fix for the decoded rows. D7.
+  risks), in the popup, with no resolution change. F would be A2's fix for the decoded rows, which
+  the owner declined (D10). D7.
 
 ## Security & Adversarial Considerations
 
@@ -308,8 +313,8 @@ standard Token offers targets: its commitment transfers take `(from, commitment,
 whose second argument is a partial-note commitment, not an address, so relabeled they would read
 "To: <commitment>". The selector check closes this for the structured rows of any token compiled
 from the vocabulary's signatures: the call's selector must be the canonical one for the decoded
-name, and on both installed Tokens only that function sits there (Fact 19). The check closes the same hole for the sample Token's transfers and mints,
-which had it before this plan.
+name, and on both installed Tokens only that function sits there (Fact 19). The check closes the
+same hole for the sample Token's transfers and mints, which had it before this plan.
 
 **The title.** Today a transfer or mint row's title is the dApp's label, so a public transfer
 labelled `transfer_private_to_private` reads "Transfer (private)" over truthful rows (Fact 21). The
@@ -357,7 +362,7 @@ much: it only tells otherwise identical authorizations apart.
   token the person chose to register and a dApp allowed to register interfaces; neither installed
   Token is shaped so.
 - The decoded rows of any class, and their title, can be relabeled by an interface a dApp
-  registers (A2).
+  registers (A2, declined by the owner: D10).
 - The simulation, profiling and utility windows title their calls by the dApp's label
   (`OperationCard.vue:450`, `:465`). Those requests submit nothing, though simulation and profiling
   build the account's payload signature internally (`view-executor.ts:318`, `:406`, through the
@@ -508,18 +513,18 @@ credential.
 
 ### Asks
 
-- **A1 (the owner, UI).** O1, O2, the title line and the as-built row (UI impact). Working
-  assumption: O1 yes, O2 (b), the title from the function, as-built signed off. P2 builds whichever
-  O2 answer the approval names.
+- **A1 (the owner, UI).** O1, O2, the title line and the as-built row (UI impact). Answered:
+  O1 yes, O2 (b), the title from the function (Approval); the as-built row is signed off from
+  P4's pictures.
 - **A2 (the owner, scope).** The decoded rows' relabel vector. With the selector check, an interface
   a dApp registers can no longer put the transfer or mint row on a function its signature does not
   name (Security keeps one contrived residual case); it can still rename the decoded
   rows of any class whose interface it may register, and their title, the standard Token's burns
   and commitment transfers included (Facts 15, 16, 20). The fix is F (Trade-offs): resolve a
   compiled-in class's display interface from the wallet's own copy (the `byClassId` seam exists,
-  recon row 10). Working assumption: a follow-up, opened at close-out, because it changes interface
-  resolution in the background for every known class and needs its own threat model; this plan
-  leaves the decoded rows exactly as they are today.
+  recon row 10). Declined by the owner (Approval, D10): not in this plan and not filed as a
+  follow-up, to revisit only when someone asks. This plan leaves the decoded rows exactly as they
+  are today.
 
 ### Plan audit ledger
 
@@ -604,17 +609,28 @@ unchanged-reading claim is about honest calls, since a lying label's title chang
 | D7 | The structured rows require the call's selector to equal the vocabulary's own for the decoded name. | F, known-first resolution: compiled-in classes only, and a background resolution change (A2). Stricter type checks on the decoded parameters: the popup receives no widths, and a check on a supplied interface authenticates nothing. Leaving the hole: both audits rated it a blocker or a condition. |
 | D8 | A transfer or mint row's title comes from the confirmed decoded name. | Keep the dApp's label: it lies on request, and the alias would extend that to the standard Token (Fact 21). |
 | D9 | The selector table is static in the popup bundle, recomputed by a node test. | Hash in the popup: bb.js in the popup bundle, and jsdom cannot run it. The background sends the canonical selector: the wire change D1 rejects. |
+| D10 | A2, the decoded rows' relabel vector, is neither fixed nor filed (the owner, 2026-10-01: "Very niche case. let's get to it when somebody asks for it."). | F in this plan, or a follow-up entry: both declined by the owner. |
 
 ### Follow-ups (opened at close-out, not before)
 
-- A2's decoded-row relabel vector, unless the owner folds it in.
 - I4, the playground's multicall nonces, if the owner wants it tracked.
 - A test that an undecoded discovered authorization of more than 32 fields lists every field (the
   untouched raw path), if the owner wants it tracked.
 
 ## Approval
 
-Pending. The gate, to paste back with the answers:
+Approved by the owner on 2026-10-01, relayed by the coordinating session. The owner's message,
+verbatim:
+
+> "01 yes, 02 b, T from the function the call runs. A2: Don't add as follow-up, but do not
+> implement either. Very niche case. let's get to it when somebody asks for it."
+
+Read as: O1 yes; O2 (b), the trimmed hex with the whole value on hover; T yes, a transfer or mint
+row's title names the function the selector runs; A2 declined outright, neither in this plan nor
+in `follow-ups.md`, to revisit only when someone asks (D10). The as-built row and the verdict
+line were not answered separately: the as-built sign-off comes from P4's pictures, before any PR.
+
+The gate as it was put to the owner:
 
 ```
 private-transfer-row (mid), as planned in implementations-plan/private-transfer-row/plan.md
@@ -636,7 +652,7 @@ run each e2e suite under the host's e2e lock, one suite at a time; local runs cl
 `~/.agents/ports.md` and reap only what they own (AGENTS.md § Run isolation). Unit and component
 runs use the workspace scripts, never `bunx`.
 
-### P0 · The plan in the tree
+### P0 · The plan in the tree ✓
 
 1. `git branch -m fix/private-transfer-row`; confirm `git status` is clean and `HEAD` is the
    approved plan commit.
@@ -651,8 +667,8 @@ runs use the workspace scripts, never `bunx`.
 
 No honest call of either installed Token reads differently after this phase (Fact 19); a call
 whose label lies is titled by its function instead, and a token whose transfer takes another
-amount type loses the row, as UI impact says. It closes the relabel and
-title holes for the rows that exist today (the sample Token's transfers and both mints).
+amount type loses the row, as UI impact says. It closes the relabel and title holes for the rows
+that exist today (the sample Token's transfers and both mints).
 
 1. `token-transfer-vocabulary.ts`: the table of 16 selectors (Fact 19) and `vocabularySelector`.
 2. `call-surface.ts`: `corroborates(decoded, selector)` requires `vocabularySelector`'s entry and a

@@ -30,3 +30,20 @@
   4 and 8 on a real network; P4's e2e drives the same button on an imported token. The transfer
   row needs the token registered on the chain: a capture that never imports it keeps the decoded
   rows after the fix too.
+
+## P0 · The plan in the tree (2026-10-01)
+
+- **Approval.** The owner approved on 2026-10-01 through the coordinating session; the message is
+  quoted verbatim in plan.md § Approval. O1 yes, O2 (b), T yes; A2 declined outright, neither built
+  nor filed (D10). The as-built row waits for P4's pictures.
+- **Base.** `origin/dev` had moved to `fe597a1d` (#745, #747). The coordinator directed a rebase
+  instead of P0's signed merge: the branch was unpushed and held one commit. The rebase was clean
+  and the rebased plan commit is signed. #747 touched no file the plan changes; it made
+  `call-decoder.test.ts` a node test because poseidon2 throws under jsdom, which is recon §3's
+  reason for the static selector table. Facts 1, 2, 9, 10, 19 and 21 cite files #745 and #747
+  left untouched, so they hold at `fe597a1d`. `index.md` was unchanged on dev; `follow-ups.md`
+  gained the Releases section and F19's rewrite, and still holds this plan's entry for P5 to delete.
+- **Branch.** Renamed to `fix/private-transfer-row`. `bun install --frozen-lockfile`: exit 0, no
+  changes.
+- **Gate.** `bun scripts/ci-cd/plans/check.ts`: 0 enforced findings (3 report-only path tokens in
+  files this plan does not touch). `bun run lint`: exit 0, its warnings all pre-existing.
