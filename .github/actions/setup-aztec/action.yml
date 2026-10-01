@@ -7,12 +7,12 @@ description: |
   Trust posture: the per-version installer, its `versions` manifest and the noir release tarball
   that manifest names are SHA-256-pinned in `installer-pins.sha256` and checked before use; the
   installer runs from the verified file, never from a pipe, and takes the verified manifest and
-  noir binaries through its `INSTALL_URI` and `NARGO` inputs, so it fetches neither itself. Two
-  fetches stay unpinned because the installer has no input for them: Foundry's `curl
-  https://foundry.paradigm.xyz | bash`, and the npm tree of `@aztec-labs/aztec` and
-  `@aztec-labs/cli-wallet`, resolved with no lockfile and held to a 7-day release age outside the
-  `@aztec-labs/*` and `@aztec-foundation/*` scopes. A version with no pin, or bytes that differ
-  from one, fails the install step.
+  noir binaries through its `INSTALL_URI` and `NARGO` inputs. A version with no pin, or bytes that
+  differ from one, fails the install step. Two download chains stay unpinned, because the
+  installer has no input for them: Foundry (`curl https://foundry.paradigm.xyz | bash`, then
+  foundryup, then Foundry's binaries) and the lockfile-less npm tree of `@aztec-labs/aztec` and
+  `@aztec-labs/cli-wallet`, whose release-age gate delays a compromised third-party publisher but
+  trusts the registry and exempts the Aztec scopes.
 
 inputs:
   skip_cli:
@@ -59,8 +59,8 @@ runs:
         path: ~/.aztec/versions/${{ steps.detect.outputs.version }}
         key: ${{ runner.os }}-aztec-${{ steps.detect.outputs.version }}-${{ hashFiles('.github/actions/setup-aztec/installer-pins.sha256') }}-v3
 
-    # Every download is hashed against installer-pins.sha256 before it is used, and the installer
-    # runs from the file that was hashed. The npm settings reach the installer's `npm install`,
+    # Each of the three downloads below is hashed against installer-pins.sha256 before it is used,
+    # and the installer runs from the file that was hashed. The npm settings reach the installer's `npm install`,
     # whose tree has no lockfile; min-release-age-exclude needs npm 11.17.0, and an npm without
     # these settings only warns and resolves ungated.
     - name: Install Aztec CLI
