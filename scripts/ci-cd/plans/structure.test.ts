@@ -179,16 +179,25 @@ describe("archive-structure", () => {
 		])
 	})
 
-	test("a line cannot lend another dir's Outcome: `..` names the dir it lands in, and a second line fails", () => {
+	test("a line cannot lend another dir's Outcome: `..`, encoded or not, names the dir the link lands in", () => {
 		const repo = makeRepo({
-			"implementations-plan/archive/index.md": [line("a"), line("a"), "- [b](b/../a/plan.md) — completed — b"].join("\n"),
+			"implementations-plan/archive/index.md": [
+				line("a"),
+				line("a"),
+				"- [b](b/../a/plan.md) — completed — b",
+				"- [c](c/%2e%2e/a/plan.md) — completed — c",
+			].join("\n"),
 			"implementations-plan/archive/a/plan.md": `# A\n\n${OUTCOME}`,
 			"implementations-plan/archive/b/plan.md": "# B\n",
+			"implementations-plan/archive/c/plan.md": "# C\n",
+			"implementations-plan/archive/c/%2e%2e/a/plan.md": `# Decoy\n\n${OUTCOME}`,
 		})
 		expect(findings(repo, "archive-structure").map((f) => `${f.file}:${f.line} ${f.detail}`)).toEqual([
 			"implementations-plan/archive/b:1 b has no line in archive/index.md",
+			"implementations-plan/archive/c:1 c has no line in archive/index.md",
 			"implementations-plan/archive/index.md:2 a is listed twice",
 			"implementations-plan/archive/index.md:3 a is listed twice",
+			"implementations-plan/archive/index.md:4 a is listed twice",
 		])
 	})
 })

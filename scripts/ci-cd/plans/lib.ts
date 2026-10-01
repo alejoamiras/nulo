@@ -220,9 +220,13 @@ export function parseIndex(src: string): { entries: IndexEntry[]; malformed: num
 	return { entries, malformed }
 }
 
-/** The plan dir an index target names once normalized; null unless it names a path inside one dir beside the index. */
+/**
+ * The plan dir an index target names, read as its link resolves: query and fragment dropped, decoded
+ * (a browser reads `%2e%2e` as `..`), normalized. Null unless it names a path inside one dir beside the index.
+ */
 export function entryDir(target: string): string | null {
-	const [dir, ...rest] = posix.normalize(target).split("/")
+	const bare = safeDecodeUri(target.trim().replace(/[?#].*$/, ""))
+	const [dir, ...rest] = posix.normalize(bare).split("/")
 	return dir === "" || dir === "." || dir === ".." || rest.length === 0 ? null : dir
 }
 
