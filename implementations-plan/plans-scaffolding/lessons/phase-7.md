@@ -116,10 +116,29 @@ Every round-1 fix held. Two findings:
 - **Y7, rejected.** An emptied or trimmed manifest still verifies, since the branch removes nothing once A has merged. The manifest only indexes: each link to an untracked file is a permalink the gate pins to an allowlisted, ancestry-checked commit, so a lost row loses no reachable evidence, and the verify belongs to a tool CI never runs. E's gate checks its own move instead: every rename in its move commit keeps its blob and mode. The plan's "append-only" now reads as what holds: `record` only appends.
 - **Y8, adopted.** § Data & control flow, § Security's guard line, the A9 answer (annotated, not rewritten), the merge command (`--squash`) and both seeds still described E then F, or the guard narrowing in A.
 
+## Cross-arc pass, round 3
+
+Approve, high confidence, no findings. Codex accepted Y7's decline (a lost row leaves git history and every pinned link intact, and the historical manifest stays recoverable) and confirmed Y8: what still reads E then F is history. Its one note is for E: the move check compares each file's source and destination blob ids and modes, because R100 with an unchanged mode does not prove byte identity (L39). The cross-arc pass converged here.
+
+## Restacks onto 0.29.0, #740, #745 and #747
+
+`dev` moved to `d7da8e62` (the 0.29.0 release: `CHANGELOG.md`, the release-please manifests and two `package.json` versions) after the pass converged. J moved to `d1307f35` and C to `e43f2ae8`, each with no conflict. `git rebase --onto e43f2ae8 fc2492a6` replayed the tools stage from `000b467a` to `e2dd894b`, 28 commits, every one signed. Regenerated there, the generated delta is byte-identical to `000b467a..69e0fafc` (`git diff -M --raw --no-abbrev`: the same 1,697 records).
+
+`dev` then moved to `3452ac3b`, #740, which closed nulo-v6 and edited `SKILL.md`, `index.md`, `lessons.md` and `follow-ups.md`. J moved to `b541e579`, keeping #740's `follow-ups.md` edits (`lessons/phase-4.md`), and C to `79af0797`, with no conflict. `git rebase --onto 79af0797 e43f2ae8` replayed the tools stage to `dbbfefea`, 29 commits, every one signed. Regenerated there, the delta keeps its 1,697 paths, and three blobs differ from the 0.29.0 run: `SKILL.md` and `index.md` carry #740's text around the same repaired lines, and `follow-ups.md` no longer repairs P1, which #740 deleted. No repair touches nulo-v6. It is newer than `closuresBase`, so it stays active, its line reading `closed, awaiting archive` over a complete Outcome, which the gate accepts.
+
+Then `dev` moved to `7c2425ca`, #745, two release entries in `follow-ups.md`. J placed them in its `## Release` section (`lessons/phase-4.md`), C replayed without a conflict, and `git rebase --onto bd5efaed 79af0797` replayed the tools stage, 29 commits, every one signed. Regenerated there, the delta again keeps its 1,697 paths; only `follow-ups.md`'s blob differs, by #745's two entries, which link nothing, around the same 282 repaired lines.
+
+Last, `dev` moved to `fe597a1d`, #747, which hash-pins `setup-aztec`'s installer and edits `SKILL.md`, `.github/README.md`, `CI.md` and three of #740's entries in `follow-ups.md`. J and C replayed it without a conflict (`lessons/phase-4.md`, `lessons/phase-5.md`), and `git rebase --onto 8cd6f20f bd5efaed` replayed the tools stage, 29 commits, every one signed. Regenerated there, the delta keeps its 1,697 paths and every repaired line; the blobs of those four files differ, by #747's text around the repairs, which links no moved plan.
+
+This entry then moved the tools tip once more, and D was regenerated on it.
+
 ## For E
 
-- `mine.ts --verify` passes on D (L56). E's rewrite of `lessons.md` ends it as a gate: from then on the mining record is evidence of J's curation.
+- E's move commit is checked file by file: each source's blob id and mode at the parent equal its destination's at the commit (L39).
+- `mine.ts --verify` no longer gates (L60): it reports 13 problems on J, all from text `dev` added after `closuresBase` (#740, #745, #747), and its record stays evidence of J's curation.
 - E narrows `check-no-local-paths.sh`'s exemption to `archive/` (L57): on D's generated tree the narrowed guard finds nothing, on its tools stage 18 unmoved plan files.
-- The tools now read their data through `OWN` (L55), so `untrack.ts --verify` runs from the archived path, and refuses to run without a manifest.
+- E deletes `tools/` in its own commit before the move (L61). `untrack.ts --verify` would read that deletion as files leaving without a row, so it runs at E's last commit before it, and the repairs run from a checkout of D's head.
 - The R100-frozen texts C left (`reference/aztec-5.0.0-stable/regime-a-vectors.ts:5`, `PRF-NON-PORTABLE.md`'s `packages/extension/` paths) and the three held crypto-source mentions are E's follow-ups.
 - `follow-ups.md`'s plans-scaffolding/ux-feedback entry is resolved by this arc: the move archived ux-feedback and fixed both design scripts' depth.
+- J's mined `setup-aztec` entry asks for the installer pin #747 shipped, so it is resolved too; #747's rewritten V6 entry keeps what stays unpinned.
+- nulo-v6's move goes to `follow-ups.md`: this arc does not edit that plan.

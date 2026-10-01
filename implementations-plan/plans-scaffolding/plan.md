@@ -170,7 +170,7 @@ export function checkTree(): Finding[]
 | J | `closures.json`, `mining.jsonl`, `gh-{prs,issues}.json`; `tools/{classify,mine}.ts` + tests; `transport-ready-handshake/spec-rows.md` | `lessons.md`; `follow-ups.md`; `index.md` (2 lines); this `plan.md` (answers) | — |
 | C | — | 4-5 KAT imports; `test-soak/cli.ts:39`; the 6 broken mentions; stale texts and asset cites (Phase 5 steps 4-5); `package.json` | `git mv`: 3 `reference/` projects (15 files), `phantom-sweep.ts`, `PRF-NON-PORTABLE.md`, 25 baselines (unless #669 did) |
 | D | `archive/index.md` (never stubbed in A: its existence switches the gate's archive-split scope on); ~23 stub `plan.md`; `tools/{outcome,archive-move,split-index,repair-links}.ts` + tests | ~330 moved files (Outcomes, seed lines, links); `index.md`; curated-file links; live docs (Phase 7 step 3); `audit/bugs/2026-08-22-production-ready/adjudication-2026-08-24.md:64-65` | `git mv` ~250 closed dirs (~1,400 files) → `archive/` |
-| E | — | `plans-scaffolding/plan.md` (its Outcome); `lessons.md`; `follow-ups.md`; `index.md` → `archive/index.md` (1 line); `check-no-local-paths.sh` (L57); the links into this dir | `git mv plans-scaffolding archive/` |
+| E | — | `plans-scaffolding/plan.md` (its Outcome); `lessons.md`; `follow-ups.md`; `index.md` → `archive/index.md` (1 line); `check-no-local-paths.sh` (L57); the links into this dir | `tools/` (L61); `git mv plans-scaffolding archive/` |
 
 ### Non-obvious mechanics
 
@@ -638,7 +638,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 | J judgement | 3-4 | `plans-scaffolding-closures` | wave 2 | `docs(plans): record plan closures and seed lessons.md and follow-ups.md` | 14 (owner reads 5) | none: `quality-status` only |
 | C repoints | 5 | `plans-scaffolding-repoints` | wave 2 | `chore(plans): relocate plan-dir assets that code and ci read` | 65 (≈40 if #669 moved the baselines) | core-foundation, aztec-runtime, extension, landing (`legal/**`), root-config → builds + **smoke and network e2e** (≈25 min) + advisory Firefox |
 | D archive | 6-7 | `plans-scaffolding-archive` | wave 2 | `chore(plans): archive closed plans with outcome blocks and split the index` | 1,460 (≈1,400 R, ≈330 edited) | none: `quality-status` only |
-| E close | — | `plans-scaffolding-close` | wave 2, on top of D; merges with the stack | `docs(plans): close plans-scaffolding and move it into the archive` | ≈45 (37 R) | none: `quality-status`, and actionlint for the guard script |
+| E close | — | `plans-scaffolding-close` | wave 2, on top of D; merges with the stack | `docs(plans): close plans-scaffolding and move it into the archive` | ≈45 (16 R, 22 deleted) | none: `quality-status`, and actionlint for the guard script |
 
 **Why two waves (A9).**
 - A0 needs to soak before A enforces.
@@ -659,10 +659,10 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 |---|---|
 | A0 | `bun test scripts/ci-cd/plans/`, `bun run test:ci-gating`, `bun run lint`, `bun scripts/ci-cd/plans/check.ts --report` (no `untrack.ts` exists yet) |
 | A | Phase 2's gate, fresh clone included; the soak (A14) and the bundle (A13) confirmed |
-| J | `check.ts`, `untrack.ts --verify`, `classify.ts --check` with the drift check against the refreshed base (owner adjudication for any drifted dir), `mine.ts --verify` |
+| J | `check.ts`, `untrack.ts --verify`, `classify.ts --check` with the drift check against the refreshed base (owner adjudication for any drifted dir); `mine.ts --verify` as evidence only (L60) |
 | C | Phase 5's gate against `$PARENT`, then `check.ts` and `untrack.ts --verify` |
-| D | D regenerated on the refreshed parent (Mechanics § Concurrency); the drift check and any owner adjudication; `mine.ts --verify`; `outcome.ts --verify`; `archive-move.ts --verify` against the tools tip; the complete API enumeration reconciled with `$PARENT`'s diff (Mechanics § Archive-move fidelity); `check.ts`; `untrack.ts --verify` |
-| E | `repair-links.ts`'s repairs for the moved dir, then `check.ts`, `untrack.ts --verify` from its archived path, `./scripts/check-no-local-paths.sh`, `bun run lint`, `bun run test:ci-gating`; E rewrites `lessons.md`, so `mine.ts --verify` gates nothing from here |
+| D | D regenerated on the refreshed parent (Mechanics § Concurrency); the drift check and any owner adjudication; `mine.ts --verify` as evidence only (L60); `outcome.ts --verify`; `archive-move.ts --verify` against the tools tip; the complete API enumeration reconciled with `$PARENT`'s diff (Mechanics § Archive-move fidelity); `check.ts`; `untrack.ts --verify` |
+| E | `untrack.ts --verify` at the last commit before `tools/` leaves (L61); the deletion is exactly `tools/`; every rename in the move commit keeps its blob id and mode (L39); `repair-links.ts`'s repairs for the moved dir; then `check.ts`, `./scripts/check-no-local-paths.sh`, `bun run lint`, `bun run test:ci-gating` |
 
 The owner merges only on a green re-run. Merging is always the owner's call.
 
@@ -705,8 +705,9 @@ In order. No `/code-review`: `code_review` is `off`.
    - this plan's `## Outcome`, directly after its front matter, listing the stack's PRs;
    - its generalizable gotchas → `lessons.md` (deduplicated, within budget), its open items → `follow-ups.md`;
    - `check-no-local-paths.sh`'s exemption narrowed to `archive/` (L57);
+   - in its own commit, `tools/` deleted (L61): the data files stay as evidence, and the code stays readable in D's squash on `dev`;
    - in its own commit, `git mv implementations-plan/plans-scaffolding implementations-plan/archive/plans-scaffolding`;
-   - then `repair-links.ts`'s repairs with a one-row map (the dir's own relative links gain a level, and the links into it from the curated files, indexes and live docs are re-pointed), and its index line → `archive/index.md` in the generated format;
+   - then `repair-links.ts`'s repairs, run from a checkout of D's head, with a one-row map (the dir's own relative links gain a level, and the links into it from the curated files, indexes and live docs are re-pointed), and its index line → `archive/index.md` in the generated format;
    - E's pre-merge gate (the table above). `gh stack merge --squash` on E's PR lands the stack and E together, so the merge that lands the work closes the plan.
    - Then suggest `agent-worktree done plans-scaffolding`.
 
@@ -752,6 +753,7 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc D codex loop, round 3 (2026-10-01): approve** (high confidence, no findings). It reproduced the plain-target rule (literal, encoded, double-encoded and escaped decoys refused; all 270 real targets pass; across 512 accepted probes the rendered href and opened path equal the text) and the move-map mode check (identical blobs' cross-pairings pass, traded modes fail, six injected changes caught), and an in-memory archive of this plan raised no finding.
 - **Cross-arc pass (`/codex high`, a fresh session over `80663b61..3551372e`), round 1 (2026-10-01): changes needed** (high confidence, 3 P2 and 3 P3 findings). All 6 adopted (Y1-Y6, ledger L54-L59), Y4's narrowing in E (L57). It found the 42 relocated assets' blobs, the wallet-crypto non-test source, the dependencies and the workflow permissions unchanged, parked and new plans active, and E's one-directory repair working in memory.
 - **Cross-arc pass, round 2 (2026-10-01): changes needed** (high confidence, 1 P2 and 1 P3 finding). Y8 adopted; Y7 rejected with its reason (§ Findings). It confirmed Y1-Y6: missing and duplicate rows fail while the real table passes, `OWN` resolves in copied and archived layouts and from another checkout, all 679 rows verify from a simulated archive, the L30 verdicts match their subject, the guard's 18 and 0 hits, and the generated diff byte-identical.
+- **Cross-arc pass, round 3 (2026-10-01): approve** (high confidence, no findings). It accepted Y7's decline, since a lost row leaves git history and every pinned link intact, and confirmed Y8 across the delivery text, the `local-path` scope § Security states, and the generated delta unchanged. For E's move check it asked for each file's blob ids and modes, since R100 with an unchanged mode does not prove byte identity (L39).
 
 ---
 
@@ -820,6 +822,8 @@ In order. No `/code-review`: `code_review` is `off`.
 | L57 | E, not D, narrows `check-no-local-paths.sh`'s exemption to `archive/` | Cross-arc codex Y4 | Narrowing it in D's tools stage: the hook scans the whole index, and D's tools and Outcome commits still hold 18 unmoved plan files with home paths | adopted |
 | L58 | E is one close-out PR on top of D: Outcome, curated files, the guard, then the move in its own commit and its repairs | The owner, 2026-10-01: "then do the archive move + clean up / prune also the lessons on that PR, make the docs PR + merge please" | E then F after E merges (L9's two-step closure) | adopted |
 | L59 | The archive tools read blobs and ancestor dirs through `lib.ts`'s exports | Cross-arc codex Y5 | Copies in `closed.ts`, one already without the reader's 120 s timeout | adopted |
+| L60 | `mine.ts --verify` stops gating at J's restack onto `3452ac3b`; the mining record stays evidence of J's curation | The owner, 2026-10-01 ("Let's do your two recommendations please"), after #740 rewrote nine `follow-ups.md` entries J keeps and the verify reported 12 problems | Re-mining #740's text through `mine.ts --decide`, or dropping #740's edits at J | adopted |
+| L61 | E deletes `tools/` in its own commit before the move; the data files stay, and the code stays readable in D's squash on `dev` | The owner, 2026-10-01, the same message | Archiving the tools with the plan: code nothing runs, kept resolvable by the gate | adopted |
 
 **Findings**
 
