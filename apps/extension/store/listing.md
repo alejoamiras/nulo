@@ -119,7 +119,7 @@ unrelated to the wallet: no. Used for creditworthiness or lending: no.
 
 | Field | Value |
 |---|---|
-| Title | Nulo V5 |
+| Title | Nulo V6 |
 | Summary | User-friendly self-custody wallet for Aztec network, preserving your privacy and revealing the power of account abstraction. |
 | Category | Tools |
 | Language | English |
@@ -155,7 +155,7 @@ match them.
 
 | Field | Value |
 |---|---|
-| Name | Nulo V5 |
+| Name | Nulo V6 |
 | Summary | Self-custody wallet for the Aztec network. Keys stay on your device; private transactions are proven in your browser. |
 | Categories | Privacy & Security (AMO's "Other" is "My add-on doesn't fit into any of the categories", exclusive of the rest) |
 | License | Apache-2.0 |
