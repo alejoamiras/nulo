@@ -2,7 +2,7 @@
  * Static price mapping: which CoinGecko id prices which asset, per chain.
  *
  * Aztec-native tokens are too new to be indexed anywhere, so each entry
- * maps to an Ethereum-side proxy ticker (cUSD → USDC, Fee Juice → AZTEC).
+ * maps to an Ethereum-side proxy ticker (Test USDC → USDC, Fee Juice → AZTEC).
  * The wallet always fetches the FULL id set in one batched request — the
  * query never varies with holdings, so the request reveals nothing about
  * what the user owns.
@@ -14,6 +14,7 @@
  */
 
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 export type PriceMapEntry = {
 	coingeckoId: string
@@ -33,11 +34,6 @@ export const FEE_JUICE_ENTRY: PriceMapEntry = {
 	sanity: { min: 0.000_1, max: 100 },
 }
 
-/** Alpha V5's cUSD address, which no V6 token is expected to occupy. Its testnet row only keeps the
- *  USDC id in the batched query and its sanity band (the e2e sandbox rule prices as USDC) until a
- *  V6 token is mapped here. */
-const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-
 /**
  * E2E-ONLY sandbox rule: with `VITE_NULO_E2E_PRICE_MAP=1` (set exclusively by
  * the network-e2e agent build), EVERY contract on the sandbox chain (id 0)
@@ -48,8 +44,9 @@ const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5
  */
 const E2E_SANDBOX_PRICE_MAP = (import.meta.env.VITE_NULO_E2E_PRICE_MAP ?? "") === "1"
 
-/** (chainId, lowercase contract address) → price-map entry. */
-const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([[`${CHAIN_IDS.TESTNET}:${CUSD_CONTRACT}`, USDC]])
+/** (chainId, lowercase contract address) → price-map entry. The e2e sandbox rule above prices
+ *  through the USDC row too: `allCoingeckoIds()` and `getSanityBand()` read ids and bands here. */
+const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([[`${CHAIN_IDS.TESTNET}:${TESTNET_TOKENS.USDC.toLowerCase()}`, USDC]])
 
 export function getPriceMapEntry(chainId: number, contract: string): PriceMapEntry | undefined {
 	if (E2E_SANDBOX_PRICE_MAP && chainId === 0) {

@@ -14,7 +14,7 @@ describe("default-token seeds", () => {
 	// bundled artifact. Hold the pin (aztec-update skill); the seeds' class is what the chain serves.
 	test("every seed runs the aztec-standards Token class the wallet bundles", async () => {
 		const bundled = (await getContractClassFromArtifact(loadContractArtifact(WonderlandTokenJson))).id.toString()
-		for (const seed of DEFAULT_TOKEN_SEEDS) expect(seed.expectedClassId).toBe(bundled)
+		expect(new Set(DEFAULT_TOKEN_SEEDS.map((seed) => seed.expectedClassId))).toEqual(new Set([bundled]))
 		expect((await getBundledTokenClassId()).toString()).toBe(bundled)
 	})
 })

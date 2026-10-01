@@ -5,18 +5,11 @@
  */
 import type { Page } from "puppeteer"
 import { getPriceMapEntry } from "@/wallet/services/price/price-map"
+import { seedsForChain } from "@/wallet/services/token/default-tokens"
 import { captureSoleProfileId, getAccountAddress } from "../fixtures/helpers"
 
-/** The contract the price map prices on the Testnet. The V6 line seeds no default token yet, so the
- *  rows borrow the price map's one Testnet row, Alpha V5's cUSD address. */
-const PRICED_TOKEN = {
-	contract: "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6",
-	name: "Compressed USD",
-	symbol: "cUSD",
-	decimals: 6,
-}
-
-/** The active profile, network and account, and a token the price map prices on that chain. */
+/** The active profile, network and account, and the chain's first default token the price map
+ *  prices. */
 export type ActivityScope = {
 	profileId: string
 	networkId: string
@@ -34,8 +27,11 @@ export async function readActivityScope(page: Page): Promise<ActivityScope> {
 		const network = JSON.parse(all[`nulo:core:networks@${networkId}`] as string) as { chainId: number }
 		return { networkId, chainId: network.chainId }
 	}, profileId)
-	if (!getPriceMapEntry(chainId, PRICED_TOKEN.contract)) throw new Error(`the price map prices no fixture token on chain ${chainId}`)
-	return { profileId, networkId, chainId, account, token: PRICED_TOKEN }
+	const seed = seedsForChain(chainId).find((s) => getPriceMapEntry(chainId, s.contract))
+	if (!seed) throw new Error(`the price map prices no default token seed on chain ${chainId}`)
+	// Every shipped seed has 6 decimals (`seed-preflight-metadata.ts`); seeds pin no decimals.
+	const token = { contract: seed.contract, name: seed.displayName, symbol: seed.expectedSymbol, decimals: 6 }
+	return { profileId, networkId, chainId, account, token }
 }
 
 export type TransferSeed = {

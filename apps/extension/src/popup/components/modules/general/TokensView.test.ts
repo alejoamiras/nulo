@@ -10,6 +10,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
 import { installChromeStorage } from "../../../../../tests/helpers/chrome-storage-mock"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -240,8 +241,8 @@ describe("TokensView — section refresh dot", () => {
 })
 
 describe("TokensView — Home order and cap", () => {
-	// cUSD is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
-	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	// Test USDC is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
+	const TEST_USDC = TESTNET_TOKENS.USDC
 	const CHAIN = CHAIN_IDS.TESTNET
 
 	beforeEach(() => {
@@ -253,7 +254,7 @@ describe("TokensView — Home order and cap", () => {
 		H.quotes.current = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		H.getTokenBalances.mockResolvedValue([
 			namedRow(3, "ZED", { chainId: CHAIN }),
-			namedRow(1, "PRICED", { contract: CUSD, chainId: CHAIN }),
+			namedRow(1, "PRICED", { contract: TEST_USDC, chainId: CHAIN }),
 			namedRow(4, "EMPTY", { chainId: CHAIN, publicBalance: "0" }),
 			namedRow(2, "ALPHA", { chainId: CHAIN }),
 		])
