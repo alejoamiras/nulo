@@ -78,8 +78,9 @@ export const FONT_ASSET = /\.(woff2?|ttf|otf|eot)$/i
 
 export const FONT_ALLOWED: ReadonlySet<string> = new Set(["OFL-1.1", "Apache-2.0"])
 
-const AZTEC_TAG = "https://github.com/AztecProtocol/aztec-packages/blob/v5.2.0"
-const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/75061fab15986eedee4e7d9104ff87dd9fa4ca10"
+const AZTEC_NODE_TAG = "https://github.com/aztec-labs-eng/aztec-node/blob/v6.0.0-rc.1"
+const AZTEC_PACKAGES_TAG = "https://github.com/AztecProtocol/aztec-packages/blob/v6.0.0-rc.1"
+const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/5a7ee9bf5ed8973076df7bb0d2b723024db09ae7"
 const SQLITE3MC_TAG = "https://github.com/utelle/SQLite3MultipleCiphers/blob/v2.3.5"
 
 const SQLITE3MC_NOTE =
@@ -109,40 +110,48 @@ export const OVERRIDES: readonly Override[] = [
 			"@aztec-labs/stdlib",
 			"@aztec-labs/wallet-sdk",
 		],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "Apache-2.0",
-		source: `${AZTEC_TAG}/LICENSE`,
-		texts: ["aztec-packages.Apache-2.0.txt"],
-		note: "Published from the aztec-packages monorepo with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree these packages are built from.",
+		source: `${AZTEC_NODE_TAG}/LICENSE`,
+		texts: ["aztec-node.Apache-2.0.txt"],
+		note: "Published from the aztec-node repository with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree these packages are built from.",
 	},
 	{
 		names: ["@aztec-foundation/bb.js"],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "Apache-2.0",
 		declared: "MIT",
-		source: `${AZTEC_TAG}/barretenberg/LICENSE`,
+		source: `${AZTEC_PACKAGES_TAG}/barretenberg/LICENSE`,
 		texts: ["barretenberg.Apache-2.0.txt"],
 		note: "The package manifest declares MIT but ships no licence file; the barretenberg tree it and its wasm are built from carries the Apache-2.0 text reproduced here. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
+		names: ["@aztec-foundation/l1-artifacts"],
+		reviewedVersion: "6.0.0-rc.1",
+		license: "Apache-2.0",
+		source: `${AZTEC_PACKAGES_TAG}/LICENSE`,
+		texts: ["aztec-packages.Apache-2.0.txt"],
+		note: "Published from the aztec-packages monorepo with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree it is built from.",
+	},
+	{
 		names: ["@aztec-foundation/noir-acvm_js"],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "MIT",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
+		note: "Built from the noir submodule commit aztec-packages v6.0.0-rc.1 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
 		names: ["@aztec-foundation/noir-noirc_abi"],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "(MIT OR Apache-2.0)",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt", "noir.Apache-2.0.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
+		note: "Built from the noir submodule commit aztec-packages v6.0.0-rc.1 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
 		names: ["@aztec-labs/sqlite3mc-wasm"],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "MIT",
 		source: `${SQLITE3MC_TAG}/LICENSE`,
 		texts: SQLITE3MC_TEXTS,
@@ -183,6 +192,19 @@ export const VENDORED: readonly Vendored[] = [
 				source: "https://github.com/feross/ieee754/blob/v1.2.1/LICENSE",
 				texts: ["ieee754.BSD-3-Clause.txt"],
 				note: "A dependency of buffer, compiled into the same shim.",
+			},
+		],
+	},
+	{
+		trigger: { package: "@aztec-foundation/l1-artifacts", reviewedVersion: "6.0.0-rc.1" },
+		components: [
+			{
+				name: "@aztec/l1-contracts",
+				version: "0.1.0",
+				license: "Apache-2.0",
+				source: `${AZTEC_PACKAGES_TAG}/LICENSE`,
+				texts: ["aztec-packages.Apache-2.0.txt"],
+				note: "The aztec-packages l1-contracts tree, carried inside @aztec-foundation/l1-artifacts under its own manifest, which declares Apache-2.0. @aztec-labs/ethereum reads its L1 network defaults from it (scripts/network-defaults.json, byte-identical to the file at the release tag). The tree has no licence file of its own; the repository root LICENSE carries the text.",
 			},
 		],
 	},

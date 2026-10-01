@@ -30,6 +30,7 @@ comlink
 @aztec-foundation/bb.js
 @aztec-foundation/noir-acvm_js
 @aztec-foundation/noir-noirc_abi
+@aztec-foundation/l1-artifacts
 @aztec-labs/sqlite3mc-wasm
 hash.js
 
@@ -38,6 +39,7 @@ vite-plugin-node-polyfills
 buffer
 base64-js
 ieee754
+@aztec/l1-contracts
 
 # compiled into sqlite3.wasm
 sha2 by Olivier Gay
