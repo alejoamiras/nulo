@@ -11,15 +11,15 @@
  * `fee-privacy.test.ts` and the "by knowledge state" cases in `FeeSettingsCard.test.ts` — and the
  * funded shapes are covered against a real chain in `network/fee-methods.test.ts`.
  *
- * The smoke build pins the active network to Testnet; its RPC origin is refused inside the
- * browser, so the run does not depend on the public endpoint being up or down.
+ * Every build seeds Testnet as the active network; its RPC origin is refused inside the browser, so
+ * the run does not depend on the public endpoint being up or down.
  */
 import { describe, expect } from "vitest"
+import { TESTNET_RPC_URL } from "@/wallet/constants/network-endpoints"
 import { interceptRpc } from "./fixtures/browser"
 import { clickByTestId, openPopup, test, waitForHash } from "./fixtures/extension"
 
-/** Origin of the Testnet seed (`DEFAULT_SEEDS` in the network service). */
-const TESTNET_RPC_ORIGIN = "https://lb.drpc.live"
+const TESTNET_RPC_ORIGIN = new URL(TESTNET_RPC_URL).origin
 
 /** The card has settled once it either shows a method or explains why it shows none. Before that —
  *  a fresh profile has no saved pick to preview — neither is present, so no assertion below can pass

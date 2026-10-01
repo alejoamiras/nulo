@@ -196,7 +196,7 @@ test("encrypted full backup: export → wrong password rejects → decrypt → r
 		// imported profile is usable (store re-opened under the derived key), never
 		// stranded on a dead-end "Finishing…" screen.
 		// CONVERGENCE wait, not a snapshot read: post-import account setup races against the active
-		// network's RPC latency (Alpha mainnet's public RPC is slow; the old Testnet default masked it).
+		// network's RPC latency.
 		await waitForActiveAccount(page2, addressBefore)
 
 		// Store-reopen cycle: lock (drop the in-memory master, as a worker restart
