@@ -132,3 +132,7 @@ Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), 
 Round 4, a verification pass the owner asked for at the cap (same session): clean. Both bypasses are closed, `mining.jsonl` changed only its 364 subject hashes, and the 17 tool tests, `classify.ts --check`, `mine.ts --verify` and `check.ts` pass.
 
 Arc C's first codex round then found that git scores a rename by its lines, so a file moved with its lines reordered still pairs at R100. J's drift rule took R100 for byte identity. The classifier now reads `--raw --no-abbrev` and exempts a move out of the tree only when both blob ids match (ledger L39). `rawMeta` sits in `common.ts`, so C's and D's tools read the same field. Regenerated at the base, `closures.json` is byte-identical. Test 3 now also moves a closed dir's file out with its lines reordered, and the R100-only mutant fails it.
+
+## Restack onto `80663b61` (#736, nulo v6)
+
+`git rebase --onto 80663b61 910a4def` took J from `737d1faf` to `1054e7fb` with no conflict, every commit signed. Under `implementations-plan/`, #736 added `nulo-v6/` and its `index.md` line and changed no closed dir, so `closures.json` stays derived at `910a4def` and `classify.ts --check` reads `nulo-v6` as active (no row). On `1054e7fb` these exit 0: `check.ts` (the same 3 reports, 0 enforced), the plans tests (94 pass), the tools tests (17 pass), `classify.ts --check`, `mine.ts --verify`, `untrack.ts --verify` (679 rows, 0 problems), `check-no-local-paths.sh`, `bun run lint` and `bun run test:ci-gating` (247 pass, 2 skipped).
