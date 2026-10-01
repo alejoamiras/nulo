@@ -2,9 +2,9 @@
  * The vendored Schnorr account artifact — a frozen input to Nulo account addresses.
  *
  * Account addresses embed this artifact's contract class id. Upstream rebuilds its artifacts on
- * any toolchain or bytecode change, which shifts class ids across `@aztec/*` bumps and would
+ * any toolchain or bytecode change, which shifts class ids across Aztec bumps and would
  * strand every stored account behind an address the wallet can no longer re-derive. The
- * address-bearing copy is therefore vendored in-repo (never bumped with the `@aztec/*` line) and
+ * address-bearing copy is therefore vendored in-repo (never bumped with the Aztec line) and
  * pinned by digest + class id in `artifact-freeze.test.ts`; provenance lives in
  * `artifacts/PROVENANCE.md`.
  *

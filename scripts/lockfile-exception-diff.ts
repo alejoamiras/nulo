@@ -4,7 +4,7 @@
  *
  * Usage: bun scripts/lockfile-exception-diff.ts <old-lock> <new-lock>
  * Output: JSON — { aztecScope: [...], exceptions: [...], removed: [...], added: [...] }.
- * "aztecScope" = moves of the Aztec line's own packages (@aztec/*, @aztec-labs/*,
+ * "aztecScope" = moves of the Aztec line's own packages (the retired @aztec scope, @aztec-labs/*,
  * @aztec-foundation/*, @alejoamiras/*), judged by the resolved package, not the lock key, so a
  * third-party package nested under an Aztec one is still an exception. Everything else lands in
  * "exceptions"/"added"/"removed" and must be dispositioned in the bump's lessons file.
@@ -15,8 +15,9 @@ if (!oldPath || !newPath) throw new Error("usage: bun scripts/lockfile-exception
 type Resolution = { name: string; version: string }
 type Resolutions = Map<string, Resolution>
 
-// The 6.x line moved every `@aztec/*` package but viem to these scopes. Mapping old keys onto them
-// pairs a move with its old entry, so nested third-party packages are compared, not dropped.
+// The 6.x line moved every package of the retired `@aztec` scope but viem to these scopes. Mapping
+// old keys onto them pairs a move with its old entry, so nested third-party packages are compared,
+// not dropped.
 const FOUNDATION = new Set(["bb.js", "l1-artifacts", "noir-acvm_js", "noir-noir_codegen", "noir-noirc_abi", "noir-types"])
 const toCurrentScope = (key: string) =>
 	key.replace(/@aztec\/(?!viem(?:\/|$))([^/]+)/g, (_, pkg: string) => `${FOUNDATION.has(pkg) ? "@aztec-foundation" : "@aztec-labs"}/${pkg}`)

@@ -18,7 +18,7 @@
  * in `@aztec-labs/foundation` or `@aztec-labs/stdlib`, fails one of these tests
  * before it bricks every existing wallet on disk.
  *
- * On upgrading `@aztec/*` — the ritual
+ * On upgrading the Aztec line — the ritual
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
  * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
@@ -46,7 +46,7 @@
  *   4. Document the decision in the commit message.
  *
  * Aztec-independent vectors (V1, V2, V6, V8, V9, P1) survive any
- * `@aztec/*` bump — they exercise Web Crypto or constants only.
+ * Aztec bump — they exercise Web Crypto or constants only.
  *
  * Break-it-to-prove-it
  * --------------------

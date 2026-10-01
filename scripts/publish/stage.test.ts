@@ -4,9 +4,9 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import vectors from "../../implementations-plan/key-model-v2/reference/vectors.json"
 import { PACKAGES, type PublishedPackage } from "./packages"
-import { packageNameOf, REPO_ROOT, STAGING_MARKER, stagePackage } from "./stage"
+import { EXACT_PIN_RE, packageNameOf, REPO_ROOT, STAGING_MARKER, stagePackage } from "./stage"
 
-// Nothing that loads @aztec/* runs in this process. Under `bun test` every module sees a bare
+// Nothing that loads an Aztec package runs in this process. Under `bun test` every module sees a bare
 // `expect`, and @aztec-labs/foundation calls `expect.addEqualityTesters` at load when it does; Bun's
 // `expect` has no such method, and only a transpile cached by an earlier non-test run hides that.
 // Such checks run in `bun` or `node` child processes instead (CHECK_SCRIPT, CROSS_SCRIPT).
@@ -28,7 +28,7 @@ const ALLOWED_FILES: Record<string, string[]> = {
 }
 
 /**
- * Every import each bundle keeps. `@aztec/*` and `zod` must stay bare: inlined Aztec code would still
+ * Every import each bundle keeps. The Aztec packages and `zod` must stay bare: inlined Aztec code would still
  * pass the vectors while handing consumers a second `Fr` class that no identity check can see.
  */
 const BUNDLE_IMPORTS: Record<string, string[]> = {
@@ -38,7 +38,7 @@ const BUNDLE_IMPORTS: Record<string, string[]> = {
 	"dist/register.js": ["./apply.js", "@aztec-labs/aztec.js/wallet"],
 }
 
-/** A few times today's sizes, far below what an inlined `@aztec/*` module would add. */
+/** A few times today's sizes, far below what an inlined Aztec module would add. */
 const MAX_BUNDLE_BYTES: Record<string, number> = {
 	"dist/public.js": 8192,
 	"dist/index.js": 8192,
@@ -339,7 +339,7 @@ describe("staged packages", () => {
 		}
 	})
 
-	test("manifests: public, exact @aztec peers equal to the workspace pins, exports that exist, provenance required", () => {
+	test("manifests: public, exact Aztec peers equal to the workspace pins, exports that exist, provenance required", () => {
 		for (const { pkg, manifest, files } of packed) {
 			expect(manifest).not.toHaveProperty("private")
 			expect(manifest).not.toHaveProperty("scripts")
@@ -348,14 +348,14 @@ describe("staged packages", () => {
 			const pins = workspaceManifest(pkg.dir).dependencies ?? {}
 			for (const [name, version] of Object.entries((manifest.peerDependencies ?? {}) as Record<string, string>)) {
 				expect({ name, version }).toEqual({ name, version: pins[name] ?? "undeclared" })
-				expect(version).toMatch(/^\d+\.\d+\.\d+$/)
+				expect(version).toMatch(EXACT_PIN_RE)
 			}
 			for (const target of Object.values(manifest.exports as Record<string, Record<string, string>>).flatMap(Object.values)) {
 				expect(files).toContain(target.replace(/^\.\//, ""))
 			}
 		}
-		expect(byDir("wallet-crypto").manifest.peerDependencies).toEqual({ "@aztec-labs/accounts": "5.2.0", "@aztec-labs/foundation": "5.2.0" })
-		expect(byDir("wallet-sdk-schema-patch").manifest.peerDependencies).toEqual({ "@aztec-labs/aztec.js": "5.2.0", "@aztec-labs/stdlib": "5.2.0" })
+		expect(byDir("wallet-crypto").manifest.peerDependencies).toEqual({ "@aztec-labs/accounts": "6.0.0-rc.1", "@aztec-labs/foundation": "6.0.0-rc.1" })
+		expect(byDir("wallet-sdk-schema-patch").manifest.peerDependencies).toEqual({ "@aztec-labs/aztec.js": "6.0.0-rc.1", "@aztec-labs/stdlib": "6.0.0-rc.1" })
 		expect(byDir("wallet-sdk-schema-patch").manifest.dependencies).toEqual({
 			zod: workspaceManifest("wallet-sdk-schema-patch").dependencies?.zod,
 		})

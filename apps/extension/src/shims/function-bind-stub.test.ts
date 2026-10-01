@@ -9,7 +9,7 @@
  *   - `bind.apply(...)` works (some consumers go through it)
  *
  * Failure here means the shim drift from the real `function-bind` and
- * something in the @aztec/* graph (or another transitive dep) will silently
+ * something in the Aztec graph (or another transitive dep) will silently
  * break under MV3 CSP.
  */
 

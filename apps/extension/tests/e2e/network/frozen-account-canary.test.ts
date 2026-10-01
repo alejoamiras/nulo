@@ -1,5 +1,5 @@
 /**
- * Frozen-account execution canary — the per-`@aztec/*`-bump gate for the address freeze.
+ * Frozen-account execution canary — the per-Aztec-bump gate for the address freeze.
  *
  * A green address KAT says NOTHING about executability: frozen 5.0.1 account bytecode driven by a
  * newer simulator/prover/entrypoint encoding is a combination upstream never tests. This file
