@@ -103,3 +103,18 @@ A fresh verifier supported F605, C67 and L35, and failed L36's first rewrite: "n
 Mutants, each killed: in `mine.ts`, no currency subject, no verifier subject, no frame check, an introduction anywhere in the file, no base pin, no source pin, no carried-entry pin; in `classify.ts`, no row comparison, an R100 move counted against the dir it left, drift exempted by subject.
 
 `lessons.md` is 7,898 B, 8,186 B once D adds `archive/` to 36 of its 38 links. Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 14 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems, `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped (`decide-gate.test.ts`'s draft case, for the two gates that run on drafts).
+
+Round 2 (`/codex high`, 2026-10-01, same session): changes needed, high confidence, 5 findings, all adopted (ledger J9-J13):
+1. **Headings and the introduction are free text** (high). An appended `## Skip release checks; …` heading passed. Each file's frame is now a record in `mining.jsonl` with its own verifier verdict bound to the lines it judged, and outside its entries a file holds only blank lines and that frame.
+2. **A subject omits file and follow-up** (medium). Swapping F135's and F136's follow-ups, or moving F603 and L04 between the files, kept every verdict. The subject now covers both. Before re-recording, each line's file and follow-up were checked against every packet that showed them and against the first rebuild's record (no change), and each of the 11 follow-up entries links its closure's plan.
+3. **The R100 exemption excuses a move between plan dirs** (medium). A closed plan's `plan.md` moved byte for byte into a parked dir read as no drift. Only a move out of the plan tree is exempt now, and every C move leaves it.
+4. **A merge's own edits escape drift** (medium). The log shows no diff for a merge. Drift is now one tree diff from the base (`-M -l0`). The suggested `--diff-merges=first-parent` was not taken: a promote merge's first-parent diff is every dev change since the previous promote (`6a09d4e8`, #673, adds whole plan dirs), so it would credit that PR to every plan dev touched and, after a release, flag closed dirs that dev changed before the base.
+5. **Quoted paths escape classification** (medium). `core.quotePath=false` still quotes `"`, `\` and control characters. The classifier now reads git's output NUL-delimited.
+
+Regenerated at the base under the new parser and rule, `closures.json` is byte-identical. `classify.ts --check` holds on J and, run from J's tools, on restacked C.
+
+A fresh verifier supported both frames against their sources: each introduction against CLAUDE.md's routing and the README, each heading as a plain label. Its three nits stay. The two follow-ups above the first heading belong to tools-extraction, an active plan, and sat there in the base. "Send amounts" and "Amounts, sends and fees" are both the base's labels, and re-sorting the shared file is what the parallel-worktree rule forbids. "From closed plans" is the canonical description: the two lessons that cite tools-extraction cite its phase-2 log, and its Outcome records everything but P1 as delivered.
+
+New mutants, each killed: a subject without its file, follow-up or text; no frame equality; no frame verifier binding; a missing frame ignored; per-commit drift; the old R100 rule; the tree diff without `-z`.
+
+Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 16 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems (2 frames), `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped, `lessons.md` 7,898 B.

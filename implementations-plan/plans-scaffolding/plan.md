@@ -746,6 +746,7 @@ In order. No `/code-review`: `code_review` is `off`.
   6. **Acceptance commands** (adopted): every arc measured against `$PARENT`; complete paginated API enumeration reconciled with the move map before D merges; split fallback.
   7. **Assumptions** (adopted): I3, I5 and O3 reconciliation each get a concrete check before the step they guard.
 - **Arc J codex loop (`/codex high`), round 1 (2026-09-30): changes needed** (high confidence, 8 findings). All 8 adopted after each was reproduced (J1-J8, ledger L26-L31). It found no wrong closure and no falsely resolved follow-up in the committed table.
+- **Arc J codex loop, round 2 (2026-10-01): changes needed** (high confidence, 5 findings). All 5 adopted (J9-J13, ledger L32-L36), J12 by one tree diff instead of the suggested first-parent merge diffs. It confirmed that an edited text or reordered candidates void a verdict and that nested hosts and carried slices are checked, and found no false positive on real data.
 
 ---
 
@@ -783,9 +784,14 @@ In order. No `/code-review`: `code_review` is `off`.
 | L26 | `closures.json` is exactly what `closuresBase` derives, the owner's answers included: `--check` compares every row field by field and refuses a row whose dir the base lacks | Arc J codex J3 | Comparing chosen fields (class, host): a field left out stays forgeable, and deriving the whole row costs one run | adopted |
 | L27 | Drift and a dir's date read each commit's content changes. A subject exempts only the import, #692 and the untrack squash, all before the base, and a byte-identical move changes only its destination | Arc J codex J5 | Pinning C's and D's squash SHAs as reviewed exemptions: neither exists until it merges, C's moves are all R100, and D measures drift up to its parent | adopted |
 | L28 | A line's currency and verifier verdicts carry `subject`, the hash of its text (archive links normalised) and its candidate ids, and `--verify` voids a verdict that judged another subject | Arc J codex J1 | Deleting a line's verdicts whenever `--decide` rewrites it: `--decide` never deletes, and a stale verdict then fails loudly instead of vanishing | adopted |
-| L29 | Outside its entries a curated file holds its title, an introduction as the first line after it, `## ` headings and blank lines | Arc J codex J2 | Recording the frame in `mining.jsonl`: a heading or the introduction makes no claim a verifier can check, and every change to them shows in the PR diff | adopted |
+| L29 | Outside its entries a curated file holds its title, an introduction as the first line after it, `## ` headings and blank lines | Arc J codex J2 | Recording the frame in `mining.jsonl`: a heading or the introduction makes no claim a verifier can check, and every change to them shows in the PR diff | superseded by L32 |
 | L30 | A candidate's evidence sits at `closuresBase`: a carried one is exactly an entry the curated files held there, any other cites an inventory source, and its bounds, line and id are rechecked | Arc J codex J4 | Trusting a candidate's own commit and path: its hash proves the slice matches, not where it came from | adopted |
 | L31 | C67 drops its clause on the three comments the plans gate reports, in J | Arc J codex loop | Leaving it for C: C repoints those comments, and editing the line there means re-mining it in C | adopted |
+| L32 | Each curated file's frame (title, introduction, headings) is a record in `mining.jsonl` with its own verifier verdict, bound to its lines; outside its entries a file holds only blank lines and that frame | Arc J codex J9 | Leaving it free text for review (L29): every line of these files reads as standing guidance, entry or not | adopted |
+| L33 | A line's subject also covers its file and its follow-up | Arc J codex J10 | Text and candidates alone: swapping two entries' follow-ups, or moving lines between the files, kept every verdict | adopted |
+| L34 | Only a byte-identical move out of the plan tree changes nothing but its destination; a move between plan dirs counts against both | Arc J codex J11 | Naming C's source and destination pairs: J sits below C and cannot know them, and every C move leaves the tree | adopted; narrows L27 |
+| L35 | Drift is one tree diff from `closuresBase` to `upto` (`-M -l0`), so a merge's own edits count. The derivation keeps per-commit history, where a merge contributes no diff | Arc J codex J12 | `--diff-merges=first-parent`: a promote merge's first-parent diff is every dev change since the last promote, so after a release drift would flag closed dirs that dev changed before the base, and the derivation would credit the promote's PR to every plan dev touched | adopted |
+| L36 | The classifier reads git's output NUL-delimited | Arc J codex J13 | `core.quotePath=false`: git still quotes a path holding `"`, `\` or a control character | adopted |
 
 **Findings**
 
@@ -829,6 +835,11 @@ In order. No `/code-review`: `code_review` is `off`.
 | J6 | L36 drops its source's ownership rule | adopted | Rewritten from its own candidates (L25), and a fresh verifier judged it |
 | J7 | L35 generalises one wrapper's behaviour | adopted | Rewritten to the `eval` left of `&&`, and reproduced |
 | J8 | Two helper comments restate their names | adopted | Deleted |
+| J9 | Headings and the introduction admit unverified instructions | adopted | L32 |
+| J10 | A line's subject omits its file and follow-up | adopted | L33 |
+| J11 | The R100 exemption excuses a move between plan dirs | adopted | L34 |
+| J12 | A merge's own edits escape drift | adopted, differently | L35: one tree diff, not first-parent merge diffs |
+| J13 | Quoted paths escape classification | adopted | L36 |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).

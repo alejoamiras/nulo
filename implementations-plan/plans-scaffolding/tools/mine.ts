@@ -6,11 +6,11 @@
  * `--inventory` rewrites the inventory for `closures.json`'s rows and nested plans, keeping recorded file
  * statuses and every other record. `--carry` adds a candidate for each entry the curated files held at
  * the base. `--add <file> [--dry-run]` checks a reader's quotes against the base's bytes, then records its
- * candidates, verdicts and file statuses. `--decide <file>` records lines and the driver's, currency and
+ * candidates, verdicts and file statuses. `--decide <file>` records lines, frames and the driver's, currency and
  * verifier verdicts. `--verify` fails unless every plan and source file is accounted for, every quote
  * re-derives from a mining source at the base, each curated entry equals a line whose candidates the driver
- * accepted and whose current text and evidence a held currency check and a verifier "supported" judged, and
- * the files hold nothing else but a title, the introduction after it, section headings and blank lines.
+ * accepted and which a held currency check and a verifier "supported" judged as it now stands, and outside its
+ * entries each file holds only blank lines and the frame (title, introduction, headings) a verifier supported.
  */
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -87,7 +87,9 @@ export type Verdict = {
 	subject?: string
 }
 export type Line = { kind: "line"; id: string; file: CuratedFile; text: string; candidates: string[]; followUp?: string }
-export type Rec = Inventory | Candidate | Verdict | Line
+/** A curated file's lines outside its entries, in order: its title, introduction and headings. */
+export type Frame = { kind: "frame"; file: CuratedFile; lines: string[] }
+export type Rec = Inventory | Candidate | Verdict | Line | Frame
 
 export type ReaderOutput = {
 	reader: string
@@ -95,14 +97,18 @@ export type ReaderOutput = {
 	candidates: (Proposal & { path: string; quote: string; cluster: Cluster; check: string; result: string })[]
 	carried: { id: string; verdict: string; check: string; result: string; note?: string }[]
 }
-export type Decisions = { verdicts: Omit<Verdict, "kind">[]; lines: Omit<Line, "kind">[] }
+export type Decisions = { verdicts: Omit<Verdict, "kind">[]; lines: Omit<Line, "kind">[]; frames?: Omit<Frame, "kind">[] }
 
 const sha256 = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex")
 export const scrub = (s: string) => s.replace(LOCAL_TOKEN_RE, "<local path>")
 /** An entry keeps its identity when the archive move re-points its links. */
 const norm = (text: string) => text.replaceAll("](archive/", "](")
-/** A line-stage verdict binds to this, so editing the text or swapping its evidence voids it. */
-export const subjectOf = (l: Pick<Line, "text" | "candidates">) => sha256([norm(l.text), ...l.candidates].join("\0"))
+/** A line-stage verdict binds to this, so moving the line, editing its text or follow-up, or swapping its evidence voids it. */
+export const subjectOf = (l: Pick<Line, "file" | "text" | "candidates" | "followUp">) =>
+	sha256([l.file, l.followUp ?? "", norm(l.text), ...l.candidates].join("\0"))
+export const frameOf = (src: string) => src.split("\n").filter((l) => l !== "" && !l.startsWith("- "))
+export const frameRef = (file: CuratedFile) => `frame:${file}`
+export const frameSubjectOf = (f: Pick<Frame, "file" | "lines">) => sha256([f.file, ...f.lines.map(norm)].join("\0"))
 
 export function readRecords(cwd: string): Rec[] {
 	const path = join(cwd, MINING)
@@ -113,9 +119,21 @@ export function readRecords(cwd: string): Rec[] {
 		.map((l) => JSON.parse(l) as Rec)
 }
 
-const ORDER: Record<Rec["kind"], number> = { inventory: 0, candidate: 1, verdict: 2, line: 3 }
-const keyOf = (r: Rec) =>
-	r.kind === "inventory" ? r.plan : r.kind === "candidate" ? r.id : r.kind === "verdict" ? `${r.stage}\0${r.ref}` : `${r.file}\0${r.id}`
+const ORDER: Record<Rec["kind"], number> = { inventory: 0, candidate: 1, verdict: 2, line: 3, frame: 4 }
+function keyOf(r: Rec): string {
+	switch (r.kind) {
+		case "inventory":
+			return r.plan
+		case "candidate":
+			return r.id
+		case "verdict":
+			return `${r.stage}\0${r.ref}`
+		case "line":
+			return `${r.file}\0${r.id}`
+		case "frame":
+			return r.file
+	}
+}
 
 /** One record per line in a fixed order, so a re-run diffs only what changed. */
 export function writeRecords(cwd: string, recs: readonly Rec[]): void {
@@ -375,30 +393,38 @@ function lineVerdictProblems(l: Line, verdictOf: VerdictOf, candidates: Readonly
 	const subject = subjectOf(l)
 	const currency = verdictOf("currency", l.id)
 	if (!["holds", "dated"].includes(currency?.verdict ?? "")) problems.push(`${l.id}: no currency check that held`)
-	else if (currency?.subject !== subject) problems.push(`${l.id}: its currency check judged another text or evidence`)
+	else if (currency?.subject !== subject) problems.push(`${l.id}: its currency check judged another version of the line`)
 	const verifier = verdictOf("verifier", l.id)
 	if (verifier?.verdict !== "supported") problems.push(`${l.id}: the verifier has not supported it`)
-	else if (verifier.subject !== subject) problems.push(`${l.id}: the verifier judged another text or evidence`)
+	else if (verifier.subject !== subject) problems.push(`${l.id}: the verifier judged another version of the line`)
 	return problems
 }
 
-/** Outside its entries a file holds its title, an introduction as the first line after it, section headings and blank lines. */
-function frameProblems(name: CuratedFile, src: string): string[] {
-	const lines = src.split("\n")
-	const intro = lines.findIndex((l, i) => i > 0 && l !== "")
-	return lines.flatMap((l, i) => {
-		if (i === 0) return l.startsWith("# ") ? [] : [`${name}:1: not a title`]
-		if (l === "" || l.startsWith("- ") || l.startsWith("## ") || i === intro) return []
-		return [`${name}:${i + 1}: text outside an entry, a heading or the introduction: ${JSON.stringify(l.slice(0, 60))}`]
-	})
+/** Outside its entries a file holds blank lines and, line for line, the frame a verifier supported. */
+function frameProblems(name: CuratedFile, src: string, frame: Frame | undefined, verdictOf: VerdictOf): string[] {
+	if (!frame) return [`${name}: no recorded frame`]
+	const [got, want] = [frameOf(src).map(norm), frame.lines.map(norm)]
+	const at = got.findIndex((l, i) => l !== want[i])
+	const same = at < 0 && got.length === want.length
+	const problems = same ? [] : [`${name}: ${JSON.stringify((got[at] ?? want[got.length] ?? "").slice(0, 60))} breaks its recorded frame`]
+	const verifier = verdictOf("verifier", frameRef(name))
+	if (verifier?.verdict !== "supported") problems.push(`${name}: the verifier has not supported its frame`)
+	else if (verifier.subject !== frameSubjectOf(frame)) problems.push(`${name}: the verifier judged another frame`)
+	return problems
 }
 
-function curatedProblems(cwd: string, name: CuratedFile, mine: readonly Line[], check: (l: Line) => string[]): string[] {
+function curatedProblems(
+	cwd: string,
+	name: CuratedFile,
+	mine: readonly Line[],
+	check: (l: Line) => string[],
+	frame: (src: string) => string[],
+): string[] {
 	const src = readFileSync(join(cwd, CURATED[name]), "utf8")
 	const entries = entriesOf(src).map(norm)
 	const texts = new Set(mine.map((l) => norm(l.text)))
 	return [
-		...frameProblems(name, src),
+		...frame(src),
 		...entries.filter((e) => !texts.has(e)).map((e) => `${name}: an entry no line records: ${JSON.stringify(e.slice(0, 80))}`),
 		...mine.flatMap((l) => [...(entries.includes(norm(l.text)) ? [] : [`${l.id}: its text is not an entry of ${name}`]), ...check(l)]),
 	]
@@ -409,6 +435,7 @@ function lineProblems(cwd: string, file: Closures, recs: readonly Rec[]): string
 	const verdictOf: VerdictOf = (stage, ref) => verdicts.get(`${stage}\0${ref}`)
 	const candidates = new Set(recs.filter((r) => r.kind === "candidate").map((r) => r.id))
 	const lines = recs.filter((r): r is Line => r.kind === "line")
+	const frames = new Map(recs.filter((r): r is Frame => r.kind === "frame").map((f) => [f.file, f]))
 	const check = (l: Line) => lineVerdictProblems(l, verdictOf, candidates)
 	const covered = new Set(lines.filter((l) => l.file === "follow-ups.md").map((l) => l.followUp))
 	return [
@@ -419,6 +446,7 @@ function lineProblems(cwd: string, file: Closures, recs: readonly Rec[]): string
 				name,
 				lines.filter((l) => l.file === name),
 				check,
+				(src) => frameProblems(name, src, frames.get(name), verdictOf),
 			),
 		),
 		...[...new Set(file.rows.flatMap((r) => r.followUps))]
@@ -469,9 +497,10 @@ function runDecide(cwd: string, _file: Closures, recs: readonly Rec[], argv: rea
 	const add: Rec[] = [
 		...d.verdicts.map((v) => ({ kind: "verdict", ...v, note: scrub(v.note) }) satisfies Verdict),
 		...d.lines.map((l) => ({ kind: "line", ...l }) satisfies Line),
+		...(d.frames ?? []).map((f) => ({ kind: "frame", ...f }) satisfies Frame),
 	]
 	writeRecords(cwd, merge(recs, add))
-	console.log(`recorded ${d.verdicts.length} verdict(s) and ${d.lines.length} line(s)`)
+	console.log(`recorded ${d.verdicts.length} verdict(s), ${d.lines.length} line(s) and ${d.frames?.length ?? 0} frame(s)`)
 	return 0
 }
 

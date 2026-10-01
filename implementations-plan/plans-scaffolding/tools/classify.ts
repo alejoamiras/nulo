@@ -112,37 +112,54 @@ function dirOf(path: string | undefined): string | null {
 	return parts.length > 2 && parts[0] === PLANS ? parts[1] : null
 }
 
-/** A file moved out of a dir byte for byte leaves that dir's plan as it was, so only its destination changed. */
-function applyChange(c: Commit, line: string): void {
-	const [status, from, to] = line.split("\t")
-	const [src, dst] = [dirOf(from), dirOf(to ?? from)]
+/** Only a file that left the plan tree byte for byte changed nothing but its destination; a move between dirs counts on both. */
+function applyChange(c: Pick<Commit, "dirs" | "changed">, status: string, from: string, to: string): void {
+	const [src, dst] = [dirOf(from), dirOf(to)]
 	for (const d of [src, dst]) if (d !== null) c.dirs.add(d)
 	if (dst !== null) c.changed.add(dst)
-	if (src !== null && !(status === "R100" && src !== dst)) c.changed.add(src)
+	if (src !== null && !(status === "R100" && !to.startsWith(`${PLANS}/`))) c.changed.add(src)
+}
+
+const STATUS_RE = /^[ACDMRTUX]\d*$/
+
+/** NUL-delimited `--name-status` output, so a path parses as itself however git would quote it; `\x01` opens a log header. */
+function walkNameStatus(
+	out: string,
+	onHeader: (header: string) => void,
+	onChange: (status: string, from: string, to: string) => void,
+): void {
+	const tokens = out.split("\0")
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i].replace(/^\n/, "")
+		if (token.startsWith("\x01")) onHeader(token.slice(1))
+		else if (STATUS_RE.test(token)) {
+			const from = tokens[++i]
+			onChange(token, from, /^[RC]/.test(token) ? tokens[++i] : from)
+		}
+	}
 }
 
 /**
- * Every commit in `range` touching the plan tree, newest first. The log takes no pathspec: one limited to
- * the plan tree pairs a move out of it with nothing and reads it as a deletion.
+ * Every commit in `range` touching the plan tree, newest first. The log takes no pathspec: one limited to the
+ * plan tree pairs a move out of it with nothing and reads it as a deletion. A merge brings no diff, since a
+ * promote merge's first-parent diff would credit its PR to every plan dev touched since the last promote.
  */
 function planCommits(cwd: string, range = "HEAD"): Commit[] {
-	const out = git(cwd, "-c", "core.quotePath=false", "log", "-M", "--name-status", "--format=%x00%H %cs %cI %s", range)
-	return out
-		.split("\0")
-		.filter(Boolean)
-		.map((block) => {
-			const [head, ...changes] = block.trim().split("\n")
-			const [sha, date, iso, ...subject] = head.split(" ")
-			const commit: Commit = { sha, date, time: Date.parse(iso), subject: subject.join(" "), dirs: new Set(), changed: new Set() }
-			for (const line of changes) if (line.includes("\t")) applyChange(commit, line)
-			return commit
-		})
-		.filter((c) => c.dirs.size > 0)
+	const commits: Commit[] = []
+	walkNameStatus(
+		git(cwd, "log", "-M", "-z", "--name-status", "--format=%x01%H %cs %cI %s", range),
+		(header) => {
+			const [sha, date, iso, ...subject] = header.split(" ")
+			commits.push({ sha, date, time: Date.parse(iso), subject: subject.join(" "), dirs: new Set(), changed: new Set() })
+		},
+		(status, from, to) => applyChange(commits[commits.length - 1], status, from, to),
+	)
+	return commits.filter((c) => c.dirs.size > 0)
 }
 
 export function topDirs(cwd: string, ref = "HEAD"): string[] {
-	return git(cwd, "ls-tree", "-d", "--name-only", ref, `${PLANS}/`)
-		.split("\n")
+	return git(cwd, "ls-tree", "-d", "-z", "--name-only", ref, `${PLANS}/`)
+		.split("\0")
 		.filter(Boolean)
 		.map((p) => p.slice(PLANS.length + 1))
 		.filter((d) => d !== "archive")
@@ -288,11 +305,18 @@ function snapshotProblems(cwd: string): string[] {
 }
 
 /**
- * A closed dir whose content a commit changed after `closuresBase` needs a fresh answer before anything
- * archives it. Judged per commit on content, never by subject, which any author controls.
+ * A closed dir whose content differs between `closuresBase` and `upto` needs a fresh answer before anything
+ * archives it. One tree diff, so a merge's own changes count and no subject, which any author controls, can
+ * excuse a commit; `-l0` keeps rename pairing exhaustive however large the range.
  */
 function driftProblems(cwd: string, file: Closures, upto: string): string[] {
-	const changed = new Set(planCommits(cwd, `${file.closuresBase}..${upto}`).flatMap((c) => [...c.changed]))
+	const seen = { dirs: new Set<string>(), changed: new Set<string>() }
+	walkNameStatus(
+		git(cwd, "diff", "-M", "-l0", "-z", "--name-status", file.closuresBase, upto),
+		() => {},
+		(status, from, to) => applyChange(seen, status, from, to),
+	)
+	const changed = seen.changed
 	return file.rows
 		.filter((r) => r.class === "closed" && changed.has(r.dir))
 		.map((r) => `${r.dir}: changed since ${file.closuresBase.slice(0, 8)}; re-answer it and regenerate`)

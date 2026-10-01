@@ -115,4 +115,31 @@ describe("classify", () => {
 			rowless: ["dup"],
 		})
 	})
+
+	test("drift reads one tree diff: a merge's own edit, a quoted name and a move between plan dirs all count", () => {
+		const { repo, imported, prs } = planTree()
+		const closuresBase = git(repo, "rev-parse", "HEAD")
+		const rows = deriveRows({ cwd: repo, prs, importSha: imported, ref: closuresBase })
+		git(repo, "mv", `${P}/status-only/STATUS.md`, `${P}/waiting/STATUS.md`)
+		writeFiles(repo, { [`${P}/check-names/a"b.md`]: "x\n" })
+		commitAll(repo, "docs: two edits")
+		git(repo, "checkout", "-q", "-b", "side")
+		commitAll(repo, "docs: side")
+		git(repo, "checkout", "-q", "dev")
+		git(repo, "merge", "--no-ff", "--no-commit", "-q", "side")
+		writeFiles(repo, { [`${P}/release-cut/plan.md`]: "# edited in the merge\n" })
+		commitAll(repo, "Merge branch 'side'")
+		const snapshot = (items: unknown[]) => JSON.stringify({ capturedAt: "2026-09-30", totalCount: items.length, items })
+		writeFiles(repo, {
+			[`${P}/plans-scaffolding/gh-prs.json`]: snapshot([...prs.values()]),
+			[`${P}/plans-scaffolding/gh-issues.json`]: snapshot([]),
+		})
+		const base = closuresBase.slice(0, 8)
+		expect(checkClosures(repo, { closuresBase, rows }, "HEAD", imported).problems).toEqual([
+			"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
+			`check-names: changed since ${base}; re-answer it and regenerate`,
+			`release-cut: changed since ${base}; re-answer it and regenerate`,
+			`status-only: changed since ${base}; re-answer it and regenerate`,
+		])
+	})
 })

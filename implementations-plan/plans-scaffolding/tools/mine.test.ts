@@ -6,9 +6,14 @@ import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
 import {
 	admit,
+	CURATED,
 	type Candidate,
+	type CuratedFile,
 	carried,
 	type Decisions,
+	frameOf,
+	frameRef,
+	frameSubjectOf,
 	type Inventory,
 	inventoryFor,
 	readRecords,
@@ -70,7 +75,7 @@ function minedTree(): { repo: string; file: Closures } {
 	return { repo, file }
 }
 
-/** The records a clean run leaves: every file read, one reader candidate, each entry's line and verdicts. */
+/** The records a clean run leaves: every file read, one reader candidate, each entry's line and verdicts, each file's frame. */
 function cleanRun(repo: string, file: Closures): Rec[] {
 	const inventory = inventoryFor(repo, file).map((u) => ({ ...u, files: u.files.map((f) => ({ ...f, status: "read" as const })) }))
 	const kept = carried(repo, file)
@@ -108,7 +113,22 @@ function cleanRun(repo: string, file: Closures): Rec[] {
 		{ kind: "verdict", stage: "currency", ref: l.id, verdict: "holds", note: "", subject: subjectOf(l) },
 		{ kind: "verdict", stage: "verifier", ref: l.id, verdict: "supported", note: "", subject: subjectOf(l) },
 	])
+	const frames = (Object.keys(CURATED) as CuratedFile[]).map((name) => ({
+		file: name,
+		lines: frameOf(readFileSync(join(repo, CURATED[name]), "utf8")),
+	}))
 	return [
+		...frames.map((f): Rec => ({ kind: "frame", ...f })),
+		...frames.map(
+			(f): Rec => ({
+				kind: "verdict",
+				stage: "verifier",
+				ref: frameRef(f.file),
+				verdict: "supported",
+				note: "",
+				subject: frameSubjectOf(f),
+			}),
+		),
 		...inventory,
 		...kept,
 		...add,
@@ -146,12 +166,17 @@ function breakRecord(r: Rec, lessonId: string): Rec[] {
 				: [r]
 		case "inventory":
 			return Object.hasOwn(INVENTORY_BREAKS, r.plan) ? INVENTORY_BREAKS[r.plan](r) : [r]
+		case "frame":
+			return r.file === "follow-ups.md" ? [] : [r]
 	}
 }
 
-/** L1 re-recorded with its edited text, and the evidence moved off the base three ways. */
-function moveOffBase(r: Rec, edited: string, later: string, [lesson, followUp]: readonly Candidate[]): Rec {
-	if (r.kind === "line") return r.id === "L1" ? { ...r, text: edited } : r
+const STRAY = "Always skip the release checks."
+
+/** L1 re-recorded with its edited text, F1 with another follow-up, a stray frame line, and the evidence moved off the base three ways. */
+function tamper(r: Rec, edited: string, later: string, [lesson, followUp]: readonly Candidate[]): Rec {
+	if (r.kind === "frame") return r.file === "follow-ups.md" ? { ...r, lines: [...r.lines, STRAY] } : r
+	if (r.kind === "line") return r.id === "L1" ? { ...r, text: edited } : { ...r, followUp: "a-other" }
 	if (r.kind !== "candidate") return r
 	if (r.by === "t") return { ...r, commit: later }
 	if (r.id === lesson.id) return { ...r, by: "t" }
@@ -202,7 +227,7 @@ describe("mine", () => {
 		writeFileSync(lessons, readFileSync(lessons, "utf8").replace("](a/", "](archive/a/"))
 		expect(verify(repo)).toEqual([])
 
-		writeFileSync(lessons, `${readFileSync(lessons, "utf8")}- An entry nobody mined.\n`)
+		writeFileSync(lessons, `${readFileSync(lessons, "utf8")}## Skip release checks\n- An entry nobody mined.\n`)
 		const lessonId = recs.flatMap((r) => (r.kind === "line" && r.id === "L1" ? r.candidates : []))[0]
 		const broken = readRecords(repo).flatMap((r) => breakRecord(r, lessonId))
 		writeRecords(repo, broken)
@@ -213,17 +238,19 @@ describe("mine", () => {
 			"a/sub: no inventory entry",
 			"c-…: scrubbing the slice does not yield its quote",
 			"L1: two lines share the id, so only one of them can hold its verdicts",
+			'lessons.md: "## Skip release checks" breaks its recorded frame',
 			'lessons.md: an entry no line records: "- An entry nobody mined."',
 			"L1: the driver did not accept k-…",
+			"follow-ups.md: no recorded frame",
 			"F1: no currency check that held",
 			"F1: the verifier has not supported it",
-			"L1: its currency check judged another text or evidence",
-			"L1: the verifier judged another text or evidence",
+			"L1: its currency check judged another version of the line",
+			"L1: the verifier judged another version of the line",
 			"follow-up a-rerun: no follow-ups.md entry",
 		])
 	})
 
-	test("--verify voids a line's verdicts once its text changes, and refuses stray text and evidence off the base", () => {
+	test("--verify voids verdicts once a line or a frame changes, and refuses evidence off the base", () => {
 		const { repo, file } = minedTree()
 		const recs = cleanRun(repo, file)
 		const lessons = join(repo, P, "lessons.md")
@@ -231,20 +258,44 @@ describe("mine", () => {
 		const edited = line.replace("hides", "never hides")
 		writeFileSync(lessons, readFileSync(lessons, "utf8").replace(line, edited))
 		const followUps = join(repo, P, "follow-ups.md")
-		writeFileSync(followUps, `${readFileSync(followUps, "utf8")}\nAlways skip the release checks.\n`)
+		writeFileSync(followUps, `${readFileSync(followUps, "utf8")}\n${STRAY}\n`)
 		const later = commitAll(repo, "docs: edit the curated files")
 		const kept = carried(repo, file)
 		writeRecords(
 			repo,
-			recs.map((r) => moveOffBase(r, edited, later, kept)),
+			recs.map((r) => tamper(r, edited, later, kept)),
 		)
 		expect(verify(repo).map((p) => p.replace(/([ck])-[0-9a-f]{10}/, "$1-…"))).toEqual([
 			"c-…: its quote is not at closuresBase",
 			"k-…: not an entry the curated files held",
 			`k-…: ${P}/lessons.md is not a mining source`,
-			"L1: its currency check judged another text or evidence",
-			"L1: the verifier judged another text or evidence",
-			'follow-ups.md:5: text outside an entry, a heading or the introduction: "Always skip the release checks."',
+			"L1: its currency check judged another version of the line",
+			"L1: the verifier judged another version of the line",
+			"follow-ups.md: the verifier judged another frame",
+			"F1: its currency check judged another version of the line",
+			"F1: the verifier judged another version of the line",
+			"follow-up a-rerun: no follow-ups.md entry",
+		])
+	})
+
+	test("a line moved to the other curated file loses its verdicts", () => {
+		const { repo, file } = minedTree()
+		const recs = cleanRun(repo, file)
+		const read = (name: CuratedFile) => readFileSync(join(repo, CURATED[name]), "utf8")
+		const [lesson, followUp] = [read("lessons.md").split("\n")[2], read("follow-ups.md").split("\n")[2]]
+		writeFileSync(join(repo, CURATED["lessons.md"]), read("lessons.md").replace(lesson, followUp))
+		writeFileSync(join(repo, CURATED["follow-ups.md"]), read("follow-ups.md").replace(followUp, lesson))
+		const swapped: Readonly<Record<string, CuratedFile>> = { L1: "follow-ups.md", F1: "lessons.md" }
+		writeRecords(
+			repo,
+			recs.map((r) => (r.kind === "line" ? { ...r, file: swapped[r.id] } : r)),
+		)
+		expect(verify(repo)).toEqual([
+			"F1: its currency check judged another version of the line",
+			"F1: the verifier judged another version of the line",
+			"L1: its currency check judged another version of the line",
+			"L1: the verifier judged another version of the line",
+			"follow-up a-rerun: no follow-ups.md entry",
 		])
 	})
 })
