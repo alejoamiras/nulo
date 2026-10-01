@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
+	ChainNotSupportedError,
 	DuplicateWalletError,
 	RecoveryModeError,
 	RestoreTornError,
@@ -231,9 +232,15 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 			name: "OperationNotRecordedError",
 			code: OperationNotRecordedError.CODE,
 		},
+		{
+			err: new ChainNotSupportedError(),
+			ctor: ChainNotSupportedError,
+			name: "ChainNotSupportedError",
+			code: ChainNotSupportedError.CODE,
+		},
 	]
 
-	test("all 17 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 18 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -242,7 +249,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 16 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 17 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())

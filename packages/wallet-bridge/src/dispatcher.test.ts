@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll } from "vitest"
 import {
 	CapabilityNotGrantedError,
+	ChainNotSupportedError,
 	ContractNotRegisteredError,
 	JobCancelledError,
 	PxeStaleAnchorError,
@@ -786,7 +787,7 @@ describe("dispatcher.requestCapabilities — field-aware accounts diff", () => {
 		}
 		const dispatcher = new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger)
 		const manifest = { capabilities: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] }
-		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
+		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toBeInstanceOf(ChainNotSupportedError)
 	})
 
 	test('projection alias falls back to "" when an account has neither alias nor name — Q11', async () => {
@@ -2747,10 +2748,12 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 				],
 				ctx,
 			)
-			.then(() => null)
-			.catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
-		expect(failure).not.toMatch(/approved accounts/)
-		expect(failure).toMatch(/No network configured/)
+			.then(
+				() => null,
+				(e: unknown) => e,
+			)
+		expect(failure).not.toBeInstanceOf(ScopeViolationError)
+		expect(failure).toBeInstanceOf(ChainNotSupportedError)
 	})
 
 	test("the reader receives the SESSION context's profileId and chainId verbatim (stickiness pin)", async () => {
@@ -3146,6 +3149,21 @@ describe("dispatcher session-lookup anchoring", () => {
 		// in-flight dispatch racing a profile switch must resolve its OWN
 		// profile's row, never the newly active one.
 		expect(seen).toEqual([["https://test.example", "0", "test-profile"]])
+	})
+
+	test("a session whose chain has no network gets the typed refusal, never a bare Error", async () => {
+		const { writer } = makeSessionWriter(makeSession())
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		const failure = await dispatcher.dispatch("getChainInfo", [], ctx).then(
+			() => null,
+			(e: unknown) => e,
+		)
+		expect(failure).toBeInstanceOf(ChainNotSupportedError)
+		expect((failure as ChainNotSupportedError).message).toBe(ChainNotSupportedError.MESSAGE)
 	})
 
 	test("resolveNetwork anchors the network read to ctx.profileId (silently revertible without this pin)", async () => {

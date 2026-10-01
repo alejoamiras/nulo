@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
+	ChainNotSupportedError,
 	TermsAcceptanceRequiredError,
 	JobCancelledError,
 	RpcDisconnectedError,
@@ -81,6 +82,16 @@ describe("toWalletResponseError", () => {
 		})
 		// The same words on a plain Error are not a session end: the fall-through stays constant.
 		expect(toWalletResponseError(new Error(SessionEndedError.MESSAGE))).toBe(UNCLASSIFIED_ERROR_MESSAGE)
+	})
+
+	test("ChainNotSupportedError → {code:4901, walletErrorCode CHAIN_NOT_SUPPORTED} with the constant message; only the class maps", () => {
+		expect(toWalletResponseError(new ChainNotSupportedError())).toEqual({
+			code: 4901,
+			message: ChainNotSupportedError.MESSAGE,
+			data: { walletErrorCode: ChainNotSupportedError.CODE },
+		})
+		// The untyped throw it replaced still flattens: a served chain list can never ride a message.
+		expect(toWalletResponseError(new Error("No network configured for chainId 1816023401"))).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 	})
 
 	test("envelope round-trips through new Error(JSON.stringify(env)) — dApp parse recipe works", () => {
