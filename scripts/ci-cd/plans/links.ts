@@ -281,11 +281,11 @@ export function expandBraces(token: string): string[] | null {
 	return done
 }
 
-const TOKEN_RE = /implementations-plan\/[A-Za-z0-9._/{},*<>-]*/g
+const TOKEN_RE = /implementations-plan\/(?:[A-Za-z0-9._/{},*-]|<[A-Za-z0-9._-]*>)*/g
 
 /**
- * Plan paths named in a line of text; templates (`<plan>`, globs) are not paths, but a `>` with no `<` before
- * it closes an autolink. `overflow` holds tokens past the brace cap.
+ * Plan paths named in a line of text; templates (`<plan>`, globs) are not paths. Only a `<name>` placeholder
+ * holds a `>`, so any other `>`, an autolink's, ends the path. `overflow` holds tokens past the brace cap.
  */
 export function pathTokens(text: string): { paths: string[]; overflow: string[] } {
 	const paths: string[] = []
@@ -294,7 +294,7 @@ export function pathTokens(text: string): { paths: string[]; overflow: string[] 
 		const expanded = expandBraces(raw)
 		if (expanded === null) overflow.push(raw)
 		for (const token of expanded ?? []) {
-			const clean = token.replace(token.includes("<") ? /[.,]+$/ : /[.,>]+$/, "").replace(/\/+$/, "")
+			const clean = token.replace(/[.,]+$/, "").replace(/\/+$/, "")
 			if (!/[*<>{}]/.test(clean) && !clean.endsWith("...")) paths.push(clean)
 		}
 	}
@@ -330,16 +330,25 @@ export const PATH_TOKEN_ALLOWLIST: readonly HeldMention[] = [
 	},
 ]
 
-const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[^\s"'`<>()[\]{}]*/g
+const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[^\s"'`<>]*/g
+const OPENER: Readonly<Record<string, string>> = { ")": "(", "]": "[", "}": "{" }
+
+/** A span less the sentence punctuation and unbalanced closing brackets after its URL, as GitHub's autolinker reads it. */
+function urlOf(span: string): string {
+	const url = span.replace(/[.,;:!?]+$/, "")
+	const close = url.at(-1) ?? ""
+	const open = OPENER[close]
+	return open !== undefined && url.split(open).length < url.split(close).length ? urlOf(url.slice(0, -1)) : url
+}
 
 /**
  * An allowlisted permalink pins the commit it names, so a plan path inside it says nothing about HEAD.
- * Each span runs to the URL's last character, so `isAllowedPermalink` judges it whole: a dot or encoded
- * segment, an unlisted SHA or `blob/dev` keeps its tokens.
+ * `isAllowedPermalink` judges the whole URL, brackets inside it included, so a dot or encoded segment,
+ * an unlisted SHA or `blob/dev` keeps its tokens.
  */
 function withoutPermalinks(text: string, bases: Bases): string {
 	return text.replace(PERMALINK_SPAN_RE, (span) => {
-		const url = span.replace(/[.,;:!?]+$/, "")
+		const url = urlOf(span)
 		return isAllowedPermalink(url, bases) ? ` ${span.slice(url.length)}` : span
 	})
 }

@@ -140,19 +140,28 @@ describe("resolveHref", () => {
 })
 
 describe("path tokens", () => {
-	test("brace tokens expand; templates and globs are not paths, an autolink's `>` is no template; trailing punctuation drops", () => {
+	test("brace tokens expand; templates and globs are not paths, a `>` outside a placeholder ends a path; trailing punctuation drops", () => {
 		expect(expandBraces("implementations-plan/{a,b}/x/{c,d}.md")).toEqual([
 			"implementations-plan/a/x/c.md",
 			"implementations-plan/a/x/d.md",
 			"implementations-plan/b/x/c.md",
 			"implementations-plan/b/x/d.md",
 		])
-		expect(
-			pathTokens(
-				"see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x, implementations-plan/** and <implementations-plan/c/>.",
-			),
-		).toEqual({
-			paths: ["implementations-plan/a/plan.md", "implementations-plan/b/plan.md", "implementations-plan/c"],
+		const line =
+			"see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x, implementations-plan/** and <implementations-plan/c/>."
+		expect(pathTokens(`${line} <implementations-plan/d.md><implementations-plan/e.md> implementations-plan/f.md>tail`)).toEqual({
+			paths: [
+				"implementations-plan/a/plan.md",
+				"implementations-plan/b/plan.md",
+				"implementations-plan/c",
+				"implementations-plan/d.md",
+				"implementations-plan/e.md",
+				"implementations-plan/f.md",
+			],
+			overflow: [],
+		})
+		expect(pathTokens("implementations-plan/<plan>/lessons/phase-<N>.md and implementations-plan/<plan>.")).toEqual({
+			paths: [],
 			overflow: [],
 		})
 	})
@@ -377,6 +386,9 @@ describe("path-token", () => {
 				`// ${url("dev")}`,
 				`// ${url(allowed)}/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
 				`// <${url("dev")}>`,
+				`// ${url(allowed)}(x)/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// ${url(allowed)}[x]/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// <${url("dev")}>tail`,
 				"",
 			].join("\n"),
 			"docs/notes.md": `See [the audit](${url(allowed)}).\n`,
@@ -386,6 +398,9 @@ describe("path-token", () => {
 			"src/a.ts:4",
 			"src/a.ts:5",
 			"src/a.ts:6",
+			"src/a.ts:7",
+			"src/a.ts:8",
+			"src/a.ts:9",
 		])
 	})
 
