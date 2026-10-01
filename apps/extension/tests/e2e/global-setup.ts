@@ -67,7 +67,9 @@ function isExecutable(p: string): boolean {
 	}
 }
 
-const AZTEC_HOME = path.resolve(process.env.HOME || "~", ".aztec")
+// The installer's own variable (`aztec-up` reads it too), so a run can use a toolchain installed
+// outside the shared `~/.aztec` that other agents' installs re-point.
+const AZTEC_HOME = process.env.AZTEC_HOME ? path.resolve(process.env.AZTEC_HOME) : path.resolve(process.env.HOME || "~", ".aztec")
 // The pinned root is usable only as a COMPLETE toolchain. A partial install
 // (CLI present, internal-bin/forge missing) would let the L1 deploy resolve
 // forge through mutable `current` again — the exact hole this closes.
@@ -460,7 +462,7 @@ async function ensureAztecNode(): Promise<"ready" | "skip"> {
 			throw new Error(
 				`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
 					`Aborting run to prevent silent pass-by-skip. Ensure the repo's pinned aztec version is ` +
-					`installed under ~/.aztec/versions (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
+					`installed under ${path.join(AZTEC_HOME, "versions")} (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
 					`CI: see .github/actions/setup-aztec/action.yml).`,
 			)
 		}
@@ -504,11 +506,11 @@ function requirePinnedToolchainOrWarn(): void {
 		: `repo aztec pin unreadable (${AZTEC_PIN_READ.error})`
 	if (process.env.E2E_REQUIRE_SETUP === "1") {
 		throw new Error(
-			`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ~/.aztec/current fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec-labs/aztec.js pin>"}`,
+			`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ${path.join(AZTEC_HOME, "current")} fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec-labs/aztec.js pin>"}`,
 		)
 	}
 	console.warn(
-		`[e2e-setup] ${reason} — falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
+		`[e2e-setup] ${reason} — falling back to ${path.join(AZTEC_HOME, "current")}, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
 	)
 }
 
