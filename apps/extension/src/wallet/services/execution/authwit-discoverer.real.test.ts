@@ -2,7 +2,7 @@
 /**
  * `AuthwitDiscoverer.discoverPrivateAuthwits` against a REAL `CallAuthorizationRequest`: real field
  * layout, real `fromFields` validation (poseidon2 args-hash + inner-hash), real
- * `collectOffchainEffects` walk, real outer message hash. Nothing under `@aztec/*` is mocked.
+ * `collectOffchainEffects` walk, real outer message hash. No Aztec package is mocked.
  *
  * Node environment on purpose: foundation's poseidon takes the sync `BarretenbergSync` branch when
  * `self` is defined (jsdom), and that branch fails with `BBApiException: std::bad_cast` under
@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from "vitest"
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { FunctionSelector } from "@aztec-labs/stdlib/abi"
+import { FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { computeVarArgsHash } from "@aztec-labs/stdlib/hash"
 import { CallAuthorizationRequest, computeAuthWitMessageHash, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
@@ -28,7 +28,7 @@ function fakeLogger(): LoggerStore {
 }
 
 /** Known answers recorded once with the same toolchain outside vitest (plain `bun`): a hashing
- *  change in an `@aztec/*` bump reds this test instead of silently re-deriving itself. */
+ *  change in an Aztec bump reds this test instead of silently re-deriving itself. */
 const KAT = {
 	selector: "0x52cf201f",
 	innerHash: "0x0742b125e369e6a165a1d22abf9fb2b128e3251030bc8e09e360a709d586a975",
@@ -138,5 +138,40 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits — a real CallAuthorization
 			CHAIN as never,
 		)
 		expect(viaIntent.toString()).toBe(expected.toString())
+	})
+
+	test("computeEncodedCallMessageHash overwrites every dApp-supplied execution field with the ABI's", async () => {
+		const fn = {
+			name: "transfer_in_public",
+			functionType: FunctionType.PUBLIC,
+			isStatic: false,
+			parameters: [],
+			returnType: { kind: "boolean" },
+		}
+		const to = AztecAddress.fromFieldUnsafe(new Fr(0x5555n)).toString()
+		const instances = new Map([[to, { currentContractClassId: { toString: () => "0xc1a55" } }]])
+		const artifacts = new Map([["0xc1a55", { functions: [fn], nonDispatchPublicFunctions: [] }]])
+		// The name matches; the type, isStatic, returnType and the stale `returnTypes` all lie.
+		const content = {
+			kind: "encoded_call",
+			caller: AztecAddress.fromFieldUnsafe(new Fr(0x1234n)).toString(),
+			to,
+			selector: (await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toString(),
+			args: ["0x07"],
+			name: fn.name,
+			type: FunctionType.PRIVATE,
+			isStatic: true,
+			returnType: { kind: "field" },
+			returnTypes: [{ kind: "field" }],
+		}
+
+		await new AuthwitDiscoverer(fakeLogger()).computeEncodedCallMessageHash(
+			content as never,
+			CHAIN as never,
+			instances as never,
+			artifacts as never,
+		)
+
+		expect(content).toMatchObject({ name: fn.name, type: fn.functionType, isStatic: fn.isStatic, returnType: fn.returnType })
 	})
 })

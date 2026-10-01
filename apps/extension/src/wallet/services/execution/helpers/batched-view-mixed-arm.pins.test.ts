@@ -26,13 +26,11 @@ vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
 vi.mock("@aztec-labs/wallet-sdk/base-wallet", () => ({
 	simulateViaNode: vi.fn(),
 }))
-vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@nulo/aztec-runtime/account")>()
-	return {
-		...actual,
-		completeFeeOptions: vi.fn(async () => ({ id: "stub-gas-settings" })),
-	}
-})
+// Only `completeFeeOptions` is consumed; spreading the real barrel would also evaluate the frozen
+// account artifact, which this helper never touches.
+vi.mock("@nulo/aztec-runtime/account", () => ({
+	completeFeeOptions: vi.fn(async () => ({ id: "stub-gas-settings" })),
+}))
 
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { type FunctionAbi, FunctionType } from "@aztec-labs/stdlib/abi"

@@ -13,6 +13,8 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import { ViewExecutor, type ViewExecutorDeps } from "./view-executor"
 
 const assertLiveChainIdentityMock = vi.hoisted(() => vi.fn())
@@ -302,7 +304,18 @@ describe("ViewExecutor.executeSimulateUtility / executeAztecExecuteUtility", () 
 			kind: "aztec_executeUtility",
 			networkId: "net-1",
 			accountAddress: VALID_ADDR,
-			call: { to: addr("0xtoken"), selector: addr("0xsel"), name, args: [], hideMsgSender: false },
+			// Every ABI-derived field lies, the stale `returnTypes` included: the bound call must ignore them all.
+			call: {
+				to: addr("0xtoken"),
+				selector: addr("0xsel"),
+				name,
+				args: [],
+				hideMsgSender: true,
+				type: FunctionType.PUBLIC,
+				isStatic: false,
+				returnType: { kind: "boolean" },
+				returnTypes: [{ kind: "field" }],
+			},
 			opts: { scopes: [] },
 		} as never
 	}
@@ -312,9 +325,8 @@ describe("ViewExecutor.executeSimulateUtility / executeAztecExecuteUtility", () 
 		// name "symbol". The bind must reject; the private read never happens.
 		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
 			name: "balance_of_private",
-			functionType: 1,
+			functionType: FunctionType.UTILITY,
 			isStatic: true,
-			returnTypes: [],
 		})
 		const { executor, pxe } = utilityHarness()
 		await expect(executor.executeAztecExecuteUtility(utilityOp("symbol"))).rejects.toThrow(/Scope violation/)
@@ -322,32 +334,59 @@ describe("ViewExecutor.executeSimulateUtility / executeAztecExecuteUtility", () 
 	})
 
 	test("(F-02) executes the SELECTOR's function rebuilt from ABI truth when the name matches", async () => {
+		const returnType = { kind: "integer", sign: "unsigned", width: 8 }
 		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
 			name: "symbol",
-			functionType: 1,
+			functionType: FunctionType.UTILITY,
 			isStatic: true,
-			returnTypes: [],
+			returnType,
 		})
 		const { executor, pxe } = utilityHarness()
 		await executor.executeAztecExecuteUtility(utilityOp("symbol"))
 		expect(pxe.executeUtility).toHaveBeenCalledTimes(1)
 		const boundCall = (pxe.executeUtility as ReturnType<typeof vi.fn>).mock.calls[0][0]
-		expect(boundCall.name).toBe("symbol")
-		expect(boundCall.isStatic).toBe(true)
+		expect(boundCall).toMatchObject({ name: "symbol", type: FunctionType.UTILITY, isStatic: true, hideMsgSender: false, returnType })
+		expect(boundCall).not.toHaveProperty("returnTypes")
 	})
 
 	test("(F-02) an empty call.name is REJECTED — NOT treated as absent (closes the {function:''} silent-authwit bypass)", async () => {
 		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
 			name: "transfer",
-			functionType: 1,
+			functionType: FunctionType.PRIVATE,
 			isStatic: false,
-			returnTypes: [],
 		})
 		const { executor, pxe } = utilityHarness()
 		// name "" !== "transfer" → reject. Treating "" as "no name" would let a dApp
 		// scope `{function:""}` and run any selector without a per-call popup.
 		await expect(executor.executeAztecExecuteUtility(utilityOp(""))).rejects.toThrow(/Scope violation/)
 		expect(pxe.executeUtility).not.toHaveBeenCalled()
+	})
+
+	test.each([
+		["a scalar", { kind: "integer", sign: "unsigned", width: 128 }, [new Fr(42n)], 42n],
+		["a tuple", { kind: "tuple", fields: [{ kind: "field" }, { kind: "boolean" }] }, [new Fr(5n), new Fr(1n)], [5n, true]],
+		["nothing", undefined, [], undefined],
+	])("simulate_utility decodes %s through the ABI's returnType", async (_label, returnType, result, decoded) => {
+		// bb.js's poseidon2 cannot run under jsdom (see vitest.config.ts); this is `view()`'s real selector.
+		vi.spyOn(FunctionSelector, "fromNameAndParameters").mockResolvedValue(FunctionSelector.fromString("0x0f8efe19"))
+		const fn = { name: "view", functionType: FunctionType.UTILITY, isStatic: true, parameters: [], returnType }
+		const { executor, pxe } = makeHarness({
+			resolver: {
+				resolveInstance: vi.fn(async () => [null, { currentContractClassId: { toString: () => "class-1" } }]),
+				resolveArtifact: vi.fn(async () => [null, { functions: [fn], nonDispatchPublicFunctions: [] }]),
+			} as never,
+		})
+		pxe.executeUtility.mockResolvedValueOnce({ result } as never)
+		const op = {
+			kind: "simulate_utility",
+			networkId: "net-1",
+			accountAddress: VALID_ADDR,
+			contract: VALID_ADDR,
+			method: "view",
+			args: [],
+		}
+
+		await expect(executor.executeSimulateUtility(op as never)).resolves.toEqual(decoded)
 	})
 })
 

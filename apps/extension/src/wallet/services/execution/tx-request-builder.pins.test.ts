@@ -8,7 +8,7 @@
  * order, and the result's provenance fields.
  */
 import { Fr } from "@aztec-labs/foundation/curves/bn254"
-import { encodeArguments, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { encodeArguments, type FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { HashedValues } from "@aztec-labs/stdlib/tx"
@@ -39,7 +39,7 @@ const FN = {
 	parameters: [],
 	functionType: FunctionType.PRIVATE,
 	isStatic: false,
-	returnTypes: [],
+	returnType: { kind: "boolean" },
 }
 
 type Harness = ReturnType<typeof makeHarness>
@@ -315,10 +315,12 @@ describe("buildStandard pins", () => {
 		await expect(build(h, [{ kind: "encoded_call", to: CONTRACT, selector, args: ["0x02"], name: "sneaky" }])).rejects.toThrowError(
 			/Scope violation/,
 		)
-		const result = await build(h, [{ kind: "encoded_call", to: CONTRACT, selector, args: ["0x02"], name: FN.name }])
+		// Every execution field the dApp supplies lies, a stale `returnTypes` included; the call carries the ABI's.
+		const lies = { type: FunctionType.PUBLIC, isStatic: true, returnType: { kind: "field" }, returnTypes: [{ kind: "field" }] }
+		const result = await build(h, [{ kind: "encoded_call", to: CONTRACT, selector, args: ["0x02"], name: FN.name, ...lies }])
 		expect(result.txCalls).toEqual([{ contract: CONTRACT, method: FN.name, args: ["0x02"] }])
-		const payload = (h.buildArgs[0] as unknown[])[2] as { calls: Array<{ name: string; args: Fr[] }> }
-		expect(payload.calls[0].name).toBe(FN.name)
+		const payload = (h.buildArgs[0] as unknown[])[2] as { calls: FunctionCall[] }
+		expect(payload.calls[0]).toMatchObject({ name: FN.name, type: FN.functionType, isStatic: FN.isStatic, returnType: FN.returnType })
 		expect(payload.calls[0].args.map((a) => a.toBigInt())).toEqual([2n])
 	})
 
