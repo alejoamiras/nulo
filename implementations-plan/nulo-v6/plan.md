@@ -849,7 +849,7 @@ The smoke recipe used below, per browser (`<b>` is `chrome` or `firefox`):
   runs; the KDF checkpoint's outcome is written in lessons.
 - Layers: lint, types, unit.
 
-### P3 · private-fee-juice 6.0.0-rc.1 and the protocol FPC pins
+### P3 · private-fee-juice 6.0.0-rc.1 and the protocol FPC pins ✓
 
 private-fee-juice rc.1 is published (Fact 6), so P1 pins it and runs its provenance check, and this
 phase installs nothing.
