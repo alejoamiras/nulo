@@ -197,3 +197,7 @@ Round 2 (on `8ea9fe02`): changes needed, 2 blocking and 1 non-blocking. All thre
 - **K8: CI.md** named both skipped smoke tests flakes; `sw-resilience.test.ts:120` records functional blockers. The line now names the navigation flake and the blocked strict-mode test.
 
 Each new test case fails against round 1's `links.ts` (3 missing findings in each). At `8318b9bb`, `lint`, `check:plans` and `test:ci-gating` (249 pass) exit 0.
+
+Round 3 (on `1519fb03`, the loop's cap): changes needed, 1 blocking. **K9:** keeping inner brackets in the span left `)**` after `**[a](URL)**.` and `)|` after a table cell's `|[a](URL)|`, so a valid allowlisted permalink failed. `urlOf` now also trims `*`, `_`, `~` and `|` after the URL, as GitHub's autolinker does. Both repros fail against round 2's `links.ts`. At `9b8e4455`, `lint`, `check:plans` and `test:ci-gating` (249 pass) exit 0.
+
+Verification pass (the owner's call at the cap, limited to `9b8e4455`): clean. A URL whose last character is a literal `_`, `*`, `~` or `|` reads as formatting; none of the tree's 177 permalinks ends with one.
