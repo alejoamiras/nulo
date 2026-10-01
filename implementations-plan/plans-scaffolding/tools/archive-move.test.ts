@@ -93,7 +93,9 @@ describe("archive-move", () => {
 		expect(probe(() => writeFiles(repo, { [`${P}/archive/stubbed/notes.md`]: "Rewritten past recognition.\n" }))).toContain(
 			`${P}/stubbed/notes.md: D, which the archive commits never make`,
 		)
-		expect(probe(append(`${P}/archive/stubbed/notes.md`))).toMatch(/stubbed\/notes\.md → .*: R\d+ with no planned edit/)
+		expect(probe(append(`${P}/archive/stubbed/notes.md`))).toMatch(/stubbed\/notes\.md → .*: changed \(R\d+\) with no planned edit/)
+		const reversed = () => writeFiles(repo, { [`${P}/archive/stubbed/notes.md`]: "See [done](../done/plan.md).\n\n# Notes\n" })
+		expect(probe(reversed)).toBe(`${P}/stubbed/notes.md → ${P}/archive/stubbed/notes.md: changed (R100) with no planned edit`)
 		expect(probe(() => writeFiles(repo, { [`${P}/archive/fm/extra.md`]: "x\n" }))).toContain("extra.md: added, but neither")
 		expect(probe(append("apps/x.ts"))).toContain("apps/x.ts: modified with no planned edit")
 		expect(probe(() => git(repo, "rm", "-q", `${P}/archive/seeds/indented.md`))).toContain(

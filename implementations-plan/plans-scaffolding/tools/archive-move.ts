@@ -5,8 +5,8 @@
  *
  * `--verify --parent <ref> [--date <YYYY-MM-DD>]` is the fidelity proof of the archive commits against
  * their actual parent. It re-derives, from `<ref>`, the Outcome edits, the move, the index split and the
- * link repairs, then reads `git diff -M <ref> HEAD` and requires: every path under a closed dir renamed to
- * its mapped path, R100 unless an edit is planned for it; every planned edit's file equal to its
+ * link repairs, then reads `git diff --raw -M <ref> HEAD` and requires: every path under a closed dir renamed
+ * to its mapped path, its blob unchanged unless an edit is planned for it; every planned edit's file equal to its
  * derivation; no addition but `archive/index.md` and the stubs; no modification outside
  * `plans-scaffolding/` without a planned edit; nothing deleted, copied or retyped; fewer than 3,000
  * changed files. A planned edit git cannot pair (under 50% similar) passes as the deletion of its old path
@@ -32,7 +32,7 @@ import {
 	unmapPath,
 	type View,
 } from "./closed"
-import { blobIds, git, PLANS } from "./common"
+import { blobIds, git, PLANS, rawMeta } from "./common"
 import { lib } from "./gate"
 import { followUpEntries, planOutcomes } from "./outcome"
 import { planRepairs } from "./repair-links"
@@ -97,17 +97,18 @@ export function derive(cwd: string, parent: string, stamp: string): Derivation {
 	return { renames, edits, added }
 }
 
-export type Change = { status: string; score: number; paths: string[] }
+export type Change = { status: string; score: number; same: boolean; paths: string[] }
 
-/** `git diff --name-status -M -z` between two commits. */
-export function nameStatus(cwd: string, from: string, to: string): Change[] {
-	const fields = git(cwd, "diff", "--name-status", "-M", "-z", from, to).split("\0")
+/** `git diff --raw --no-abbrev -M -z` between two commits. */
+export function rawChanges(cwd: string, from: string, to: string): Change[] {
+	const fields = git(cwd, "diff", "--raw", "--no-abbrev", "-M", "-z", from, to).split("\0")
 	const changes: Change[] = []
 	for (let i = 0; i + 1 < fields.length; ) {
-		const code = fields[i++]
-		const count = code.startsWith("R") || code.startsWith("C") ? 2 : 1
-		changes.push({ status: code[0], score: Number(code.slice(1)) || 0, paths: fields.slice(i, i + count) })
-		i += count
+		const meta = rawMeta(fields[i])
+		if (meta === null) throw new Error(`not a git diff --raw field: ${fields[i]}`)
+		const count = meta.status === "R" || meta.status === "C" ? 2 : 1
+		changes.push({ status: meta.status, score: meta.score, same: meta.same, paths: fields.slice(i + 1, i + 1 + count) })
+		i += 1 + count
 	}
 	return changes
 }
@@ -120,7 +121,7 @@ function renameProblems(c: Change, j: Judge): string[] {
 	const mapped = j.d.renames.get(from)
 	if (mapped === undefined) return [`${from} → ${to}: a rename outside the move`]
 	if (mapped !== to) j.swaps.push([from, to])
-	if (c.score < 100 && !j.d.edits.has(to)) return [`${from} → ${to}: R${c.score} with no planned edit`]
+	if (!c.same && !j.d.edits.has(to)) return [`${from} → ${to}: changed (R${c.score}) with no planned edit`]
 	return []
 }
 
@@ -148,7 +149,7 @@ export function swapProblems(cwd: string, parent: string, swaps: readonly [strin
 /**
  * Planned edits that leave a moved file under git's 50% rename similarity, so the diff shows its old path
  * deleted and its mapped path added. Only a planned edit qualifies: its text is still proved against the
- * derivation, while an unedited file must pair at R100.
+ * derivation, while an unedited file must keep its blob.
  */
 export function unpairedEdits(changes: readonly Change[], d: Derivation): Map<string, string> {
 	const added = new Set(changes.flatMap((c) => (c.status === "A" ? c.paths : [])))
@@ -167,7 +168,7 @@ function outsidePairs(changes: readonly Change[], unpaired: ReadonlyMap<string, 
 
 /** Every way HEAD departs from the derivation. */
 export function fidelityProblems(cwd: string, parent: string, d: Derivation, cap = MAX_CHANGED): string[] {
-	const changes = nameStatus(cwd, parent, "HEAD")
+	const changes = rawChanges(cwd, parent, "HEAD")
 	const unpaired = unpairedEdits(changes, d)
 	const j: Judge = { d, paired: new Set(unpaired.keys()), swaps: [] }
 	const problems = changes.length >= cap ? [`${changes.length} changed files, at or over the ${cap} cap`] : []
@@ -210,7 +211,7 @@ function verify(cwd: string, argv: readonly string[]): number {
 	const d = derive(cwd, parent, stamp)
 	const problems = fidelityProblems(cwd, parent, d)
 	for (const p of problems) console.log(p)
-	const changes = nameStatus(cwd, parent, "HEAD")
+	const changes = rawChanges(cwd, parent, "HEAD")
 	const unpaired = unpairedEdits(changes, d)
 	for (const [from, to] of unpaired)
 		console.log(
