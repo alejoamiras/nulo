@@ -35,6 +35,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { DappInteractionService } from "./service"
 import type { CapabilityPayload, DappInteraction, DiscoveryResult, ExecutionHooks, OperationRequest } from "./spec"
+import { TESTNET_TOKENS } from "@/wallet/services/token/default-tokens"
 
 const noopLogger: ILogger = { log: () => {} }
 
@@ -753,6 +754,10 @@ describe("DappInteractionService — the capability window's known contracts", (
 			{ address: SPONSORED, name: "Sponsored fee payer" },
 			{ address: PRIVATE, name: "Private fee payer" },
 			{ address: "0x1ec33912c9f14470513e0eb23db81ddb2aa1ae3395e6ab4d3cba383f68dec3c5", name: "Auth registry" },
+			{ address: TESTNET_TOKENS.USDC, name: "Test USDC" },
+			{ address: TESTNET_TOKENS.USDT, name: "Test USDT" },
+			{ address: TESTNET_TOKENS.EURC, name: "Test EURC" },
+			{ address: TESTNET_TOKENS.GBPC, name: "Test GBPC" },
 		])
 	})
 })
