@@ -4,13 +4,22 @@
  *
  * Usage: bun scripts/lockfile-exception-diff.ts <old-lock> <new-lock>
  * Output: JSON — { aztecScope: [...], exceptions: [...], removed: [...], added: [...] }.
- * "aztecScope" = @aztec/* and @alejoamiras/* moves (the intended bump). Everything else lands
- * in "exceptions"/"added"/"removed" and must be dispositioned in the bump's lessons file.
+ * "aztecScope" = moves of the Aztec line's own packages (@aztec/*, @aztec-labs/*,
+ * @aztec-foundation/*, @alejoamiras/*), judged by the resolved package, not the lock key, so a
+ * third-party package nested under an Aztec one is still an exception. Everything else lands in
+ * "exceptions"/"added"/"removed" and must be dispositioned in the bump's lessons file.
  */
 const [oldPath, newPath] = process.argv.slice(2)
 if (!oldPath || !newPath) throw new Error("usage: bun scripts/lockfile-exception-diff.ts <old-lock> <new-lock>")
 
-type Resolutions = Map<string, string>
+type Resolution = { name: string; version: string }
+type Resolutions = Map<string, Resolution>
+
+// The 6.x line moved every `@aztec/*` package but viem to these scopes. Mapping old keys onto them
+// pairs a move with its old entry, so nested third-party packages are compared, not dropped.
+const FOUNDATION = new Set(["bb.js", "l1-artifacts", "noir-acvm_js", "noir-noir_codegen", "noir-noirc_abi", "noir-types"])
+const toCurrentScope = (key: string) =>
+	key.replace(/@aztec\/(?!viem(?:\/|$))([^/]+)/g, (_, pkg: string) => `${FOUNDATION.has(pkg) ? "@aztec-foundation" : "@aztec-labs"}/${pkg}`)
 
 const parseLock = async (path: string): Promise<Resolutions> => {
 	const text = await Bun.file(path).text()
@@ -22,12 +31,12 @@ const parseLock = async (path: string): Promise<Resolutions> => {
 		const spec = Array.isArray(entry) ? String(entry[0]) : String(entry)
 		const at = spec.lastIndexOf("@")
 		if (at <= 0) continue
-		out.set(key, spec.slice(at + 1))
+		out.set(toCurrentScope(key), { name: toCurrentScope(spec.slice(0, at)), version: spec.slice(at + 1) })
 	}
 	return out
 }
 
-const isAztecScope = (name: string) => name.startsWith("@aztec/") || name.startsWith("@alejoamiras/")
+const isAztecScope = ({ name }: Resolution) => /^@(aztec|aztec-labs|aztec-foundation|alejoamiras)\//.test(name)
 
 const oldRes = await parseLock(oldPath)
 const newRes = await parseLock(newPath)
@@ -37,16 +46,16 @@ const exceptions: object[] = []
 const added: object[] = []
 const removed: object[] = []
 
-for (const [name, newVersion] of [...newRes.entries()].sort()) {
-	const oldVersion = oldRes.get(name)
-	if (oldVersion === undefined) {
-		;(isAztecScope(name) ? aztecScope : added).push({ name, new: newVersion })
-	} else if (oldVersion !== newVersion) {
-		;(isAztecScope(name) ? aztecScope : exceptions).push({ name, old: oldVersion, new: newVersion })
+for (const [key, next] of [...newRes.entries()].sort()) {
+	const prev = oldRes.get(key)
+	if (prev === undefined) {
+		;(isAztecScope(next) ? aztecScope : added).push({ name: key, new: next.version })
+	} else if (prev.version !== next.version) {
+		;(isAztecScope(next) ? aztecScope : exceptions).push({ name: key, old: prev.version, new: next.version })
 	}
 }
-for (const [name, oldVersion] of [...oldRes.entries()].sort()) {
-	if (!newRes.has(name)) (isAztecScope(name) ? aztecScope : removed).push({ name, old: oldVersion, gone: true })
+for (const [key, prev] of [...oldRes.entries()].sort()) {
+	if (!newRes.has(key)) (isAztecScope(prev) ? aztecScope : removed).push({ name: key, old: prev.version, gone: true })
 }
 
 console.log(JSON.stringify({ aztecScope, exceptions, added, removed }, null, "\t"))
