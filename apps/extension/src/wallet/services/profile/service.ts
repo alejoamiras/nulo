@@ -1,6 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"

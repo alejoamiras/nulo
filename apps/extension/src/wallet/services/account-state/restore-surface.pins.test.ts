@@ -4,7 +4,7 @@
  * the empty-item fast path (which must STAY synchronous under the length-
  * guarded loop extraction), and the deadline restoreError's exact string.
  */
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { IService } from "@/wallet/base"
 import { ServiceCollection } from "@/wallet/base"

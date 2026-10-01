@@ -9,19 +9,19 @@ import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { rmSync } from "node:fs"
 
-import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node"
-import { TxHash } from "@aztec/stdlib/tx"
-import { GasFees } from "@aztec/stdlib/gas"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { registerInitialLocalNetworkAccountsInWallet } from "@aztec/wallets/testing"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
-import { L1FeeJuicePortalManager } from "@aztec/aztec.js/ethereum"
-import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
-import { createExtendedL1Client } from "@aztec/ethereum/client"
-import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
+import { createAztecNodeClient, waitForNode } from "@aztec-labs/aztec.js/node"
+import { TxHash } from "@aztec-labs/stdlib/tx"
+import { GasFees } from "@aztec-labs/stdlib/gas"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/aztec.js/contracts"
+import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
+import { registerInitialLocalNetworkAccountsInWallet } from "@aztec-labs/wallets/testing"
+import { SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import { L1FeeJuicePortalManager } from "@aztec-labs/aztec.js/ethereum"
+import { ProtocolContractAddress } from "@aztec-labs/aztec.js/protocol"
+import { createExtendedL1Client } from "@aztec-labs/ethereum/client"
+import { SponsoredFPCContractArtifact } from "@aztec-labs/noir-contracts.js/SponsoredFPC"
 import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 
 /**
@@ -75,7 +75,7 @@ export async function waitForLocalNode(url = LOCAL_NODE_URL, timeoutMs = 60_000)
 /**
  * Serves Nulo's FROZEN Schnorr artifact wherever upstream would serve its own.
  *
- * Upstream rebuilds `@aztec/accounts` artifacts on toolchain changes (5.2.0 moved the
+ * Upstream rebuilds `@aztec-labs/accounts` artifacts on toolchain changes (5.2.0 moved the
  * SchnorrAccount class id, and with it every address derived from it), while Nulo's address
  * regime is pinned to a vendored copy. A script-side account built from the upstream artifact
  * would land on a different address than the one the extension derives and this fixture funds.
@@ -88,7 +88,7 @@ class FrozenArtifactWallet extends EmbeddedWallet {
 			...accountContracts,
 			getSchnorrAccountContract: async (signingKey) => {
 				const [{ SchnorrAccountContract }, { FrozenSchnorrAccountArtifact }] = await Promise.all([
-					import("@aztec/accounts/schnorr"),
+					import("@aztec-labs/accounts/schnorr"),
 					import("@nulo/aztec-runtime/account"),
 				])
 				return new (class extends SchnorrAccountContract {
@@ -470,8 +470,8 @@ export async function claimFeeJuice(
 	claim: { claimAmount: bigint; claimSecret: Fr; messageLeafIndex: bigint },
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 ): Promise<void> {
-	const { Contract } = await import("@aztec/aztec.js/contracts")
-	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
+	const { Contract } = await import("@aztec-labs/aztec.js/contracts")
+	const { FeeJuiceArtifact } = await import("@aztec-labs/protocol-contracts/fee-juice")
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	await feeJuice.methods
 		.claim(AztecAddress.fromStringUnsafe(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
@@ -539,7 +539,7 @@ export async function setupPreFundedAccount(
 	const { getMnemonic } = await import("@nulo/wallet-core/utils")
 	const { deriveAccountSeed, deriveMasterFromMnemonic, deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
-	const { createLogger } = await import("@aztec/foundation/log")
+	const { createLogger } = await import("@aztec-labs/foundation/log")
 	const logger = createLogger("setup-pre-funded-account")
 
 	// Step 1 — Derive identity via the SAME recovery-phrase path the extension imports through:
@@ -562,7 +562,7 @@ export async function setupPreFundedAccount(
 	// EmbeddedWallet.createSchnorrAccount(secretKey, salt, signingKey) returns an AccountManager —
 	// called WITHOUT a cast so the compiler checks the argument order against upstream. The
 	// wallet was built with the frozen-artifact provider (see createTestWallet), so this derives
-	// Nulo's pinned address rather than whatever `@aztec/accounts` currently ships.
+	// Nulo's pinned address rather than whatever `@aztec-labs/accounts` currently ships.
 	const accountManager = await wallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
 	if (accountManager.address.toString() !== expectedAddress.toString()) {
 		throw new Error(
@@ -572,12 +572,12 @@ export async function setupPreFundedAccount(
 	logger.info(`Script-side account created: ${accountManager.address.toString()}`)
 
 	// Step 3 — Deploy the derived account via SponsoredFPC (so it can sign/send mint later).
-	// Use `NO_FROM` sentinel per canonical pattern at @aztec/wallets/testing
+	// Use `NO_FROM` sentinel per canonical pattern at @aztec-labs/wallets/testing
 	// (deployFundedSchnorrAccounts) — bypasses entrypoint auth for the bootstrap tx
 	// since the account doesn't exist on-chain yet. Passing `from: account.address`
 	// fails with "Failed to get a note" because the schnorr entrypoint reads a
 	// signing-key note that the constructor hasn't created yet.
-	const { NO_FROM } = await import("@aztec/aztec.js/account")
+	const { NO_FROM } = await import("@aztec-labs/aztec.js/account")
 	const sponsoredFee = await createSponsoredFeeOptions(wallet)
 	const deployMethod = await accountManager.getDeployMethod()
 	await deployMethod.send({
@@ -640,8 +640,8 @@ export async function setupPreFundedAccount(
 	// (claim is recipient-bound via the embedded leaf hash). Use the script's main
 	// EmbeddedWallet (sandbox-funded sender) for fees.
 	{
-		const { Contract } = await import("@aztec/aztec.js/contracts")
-		const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
+		const { Contract } = await import("@aztec-labs/aztec.js/contracts")
+		const { FeeJuiceArtifact } = await import("@aztec-labs/protocol-contracts/fee-juice")
 		const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 		await feeJuice.methods.claim(fpc.address, privateAmount, bridgeSecret, leafIndex).send({
 			fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
@@ -746,8 +746,8 @@ export async function deployDelegatedPullRig(
 	donorAddress: string,
 	donorMint = 1_000_000n,
 ): Promise<{ pullTokenAddress: string; consumerAddress: string }> {
-	const { TokenContract: PullTokenContract } = await import("@aztec/noir-contracts.js/Token")
-	const { CrowdfundingContract } = await import("@aztec/noir-contracts.js/Crowdfunding")
+	const { TokenContract: PullTokenContract } = await import("@aztec-labs/noir-contracts.js/Token")
+	const { CrowdfundingContract } = await import("@aztec-labs/noir-contracts.js/Crowdfunding")
 	const { wallet, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
 	try {
 		const feeOptions = await createSponsoredFeeOptions(wallet)
@@ -837,8 +837,8 @@ export async function readPublicFeeJuice(
 	from: AztecAddress,
 	address: string,
 ): Promise<bigint> {
-	const { Contract } = await import("@aztec/aztec.js/contracts")
-	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
+	const { Contract } = await import("@aztec-labs/aztec.js/contracts")
+	const { FeeJuiceArtifact } = await import("@aztec-labs/protocol-contracts/fee-juice")
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	const answer: unknown = await feeJuice.methods.balance_of_public(AztecAddress.fromStringUnsafe(address)).simulate({ from })
 	return unwrapSimulated(answer)

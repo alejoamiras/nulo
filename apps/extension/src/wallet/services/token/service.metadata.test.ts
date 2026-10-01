@@ -5,8 +5,8 @@
  * by its own suite, `execution/helpers/batched-view-simulation.test.ts`.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { FunctionType } from "@aztec/stdlib/abi"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { FunctionType } from "@aztec-labs/stdlib/abi"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { EncodedCallAction } from "@nulo/wallet-bridge"
@@ -29,8 +29,8 @@ import type { TokenInterface } from "./spec"
 vi.mock("@/wallet/services/execution/helpers/batched-view-simulation", () => ({ batchedViewSimulation: vi.fn() }))
 
 // A real selector is a poseidon hash, i.e. Barretenberg — which the unit layer does not load.
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		FunctionSelector: {

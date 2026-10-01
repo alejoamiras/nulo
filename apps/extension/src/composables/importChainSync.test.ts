@@ -1,10 +1,10 @@
-import { ProtocolContractAddress } from "@aztec/protocol-contracts"
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import { ProtocolContractAddress } from "@aztec-labs/protocol-contracts"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
 import {
 	HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
 	STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-} from "@aztec/standard-contracts/handshake-registry/constants"
-import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec/standard-contracts/multi-call-entrypoint/constants"
+} from "@aztec-labs/standard-contracts/handshake-registry/constants"
+import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec-labs/standard-contracts/multi-call-entrypoint/constants"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import {
 	ACCOUNT_STATE_SKIP_DEADLINE,

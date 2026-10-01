@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { IService, ServiceCollection } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"

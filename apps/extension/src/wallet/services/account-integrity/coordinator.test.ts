@@ -4,7 +4,7 @@
  * report). The derivation itself is injected (jsdom cannot run bb.js poseidon); the REAL frozen
  * derivation is covered by the aztec-runtime KAT/freeze suites and the network canary.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { asMasterSecretBytes } from "@nulo/wallet-crypto"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"

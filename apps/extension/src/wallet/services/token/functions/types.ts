@@ -1,6 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact, FunctionAbi, FunctionType } from "@aztec/stdlib/abi"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact, FunctionAbi, FunctionType } from "@aztec-labs/stdlib/abi"
 
 /**
  * The 9 token-function kinds. Single source of truth — `TOKEN_FN_DESCRIPTORS` is

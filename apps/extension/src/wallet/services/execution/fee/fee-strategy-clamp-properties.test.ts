@@ -13,9 +13,9 @@
  *       shave PADDING, never below what the simulation actually used
  */
 
-import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec/constants"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec-labs/constants"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { describe, expect, test } from "vitest"
 import { finalizeGasLimits } from "./fee-strategy"
 

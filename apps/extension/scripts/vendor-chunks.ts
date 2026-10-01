@@ -9,10 +9,10 @@ const PACKAGE = /.*node_modules\/((?:@[^/]+\/)?[^/]+)\/(.+)$/
 const HEAVY_SCOPES = ["@aztec/", "@noir-lang/", "@aztec-foundation/", "@alejoamiras/"]
 
 /**
- * Whatever chunk holds `@aztec/wallet-sdk` is web-accessible to every page, because the content
+ * Whatever chunk holds `@aztec-labs/wallet-sdk` is web-accessible to every page, because the content
  * script imports it — regrouping it would change what any site can read.
  */
-const NEVER_GROUPED = new Set(["@aztec/wallet-sdk"])
+const NEVER_GROUPED = new Set(["@aztec-labs/wallet-sdk"])
 
 const slug = (name: string): string => name.replace(/^@/, "").replace(/[^A-Za-z0-9]+/g, "-")
 

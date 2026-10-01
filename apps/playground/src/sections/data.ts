@@ -1,8 +1,8 @@
 /**
  * Data capability methods. Wires `getPrivateEvents`.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"

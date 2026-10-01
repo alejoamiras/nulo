@@ -26,7 +26,7 @@ vi.mock("vue-router", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("vue-router")>()
 	return { ...actual, useRouter: () => ({ currentRoute: { value: { query: routeQuery } } }) }
 })
-vi.mock("@aztec/wallet-sdk/crypto", () => ({ hashToEmoji: (hash: string) => `grid(${hash})` }))
+vi.mock("@aztec-labs/wallet-sdk/crypto", () => ({ hashToEmoji: (hash: string) => `grid(${hash})` }))
 vi.mock("@/wallet/services/dapp-session/client", () => ({
 	DappSessionServiceClient: vi.fn(function () {
 		return {

@@ -641,7 +641,7 @@ worker that refused to die.
 - `[aztec-node] Address already in use (os error 98)` at boot is cosmetic (the wrapper's inner anvil
   loses a bind the setup already holds). The fatal boot signature is
   `deploy_aztec_l1_contracts … required arguments were not provided: --batch` — a `~/.aztec/current`
-  drift; the setup resolves the toolchain from the pinned `@aztec/aztec.js` and exports
+  drift; the setup resolves the toolchain from the pinned `@aztec-labs/aztec.js` and exports
   `FORGE_BIN`/`ANVIL_BIN` into the node's env.
 - A PR with ABSENT (not red) Actions is a CONFLICTING PR: GitHub builds no merge ref. Check
   `gh pr view --json mergeable,mergeStateStatus` before debugging CI.

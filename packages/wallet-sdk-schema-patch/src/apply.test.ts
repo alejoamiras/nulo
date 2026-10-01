@@ -1,4 +1,4 @@
-import { schemas } from "@aztec/stdlib/schemas"
+import { schemas } from "@aztec-labs/stdlib/schemas"
 import { z } from "zod"
 import { describe, expect, test } from "vitest"
 import { applyNuloSchemaPatch } from "./apply"

@@ -1,15 +1,15 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec/pxe/client/bundle"
-import type { ContractArtifact, EventSelector, FunctionCall } from "@aztec/stdlib/abi"
-import { ContractArtifactSchema } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec-labs/pxe/client/bundle"
+import type { ContractArtifact, EventSelector, FunctionCall } from "@aztec-labs/stdlib/abi"
+import { ContractArtifactSchema } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import {
 	CompleteAddress,
 	type ContractInstanceWithAddress,
 	type PartialAddress,
 	ContractInstanceWithAddressSchema,
-} from "@aztec/stdlib/contract"
-import type { NoteDao } from "@aztec/stdlib/note"
+} from "@aztec-labs/stdlib/contract"
+import type { NoteDao } from "@aztec-labs/stdlib/note"
 import {
 	BlockHeader,
 	type TxExecutionRequest,
@@ -17,9 +17,9 @@ import {
 	TxProvingResult,
 	TxSimulationResult,
 	UtilityExecutionResult,
-} from "@aztec/stdlib/tx"
-import type { PrivateEventFilter } from "@aztec/aztec.js/wallet"
-import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
+} from "@aztec-labs/stdlib/tx"
+import type { PrivateEventFilter } from "@aztec-labs/aztec.js/wallet"
+import type { PackedPrivateEvent } from "@aztec-labs/pxe/client/bundle"
 import z from "zod"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { ServiceSpec } from "@nulo/wallet-core/base"

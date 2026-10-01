@@ -1,5 +1,5 @@
 import "@nulo/wallet-sdk-schema-patch/register"
-import { WalletSchema } from "@aztec/aztec.js/wallet"
+import { WalletSchema } from "@aztec-labs/aztec.js/wallet"
 import { describe, test, expect } from "vitest"
 import {
 	METHOD_REGISTRY,

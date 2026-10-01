@@ -1,15 +1,15 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec/stdlib/abi"
-import type { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec-labs/stdlib/abi"
+import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import {
 	computeContractAddressFromInstance,
 	ContractInstanceWithAddressSchema,
 	getContractClassFromArtifact,
 	computePartialAddress,
-} from "@aztec/stdlib/contract"
+} from "@aztec-labs/stdlib/contract"
 import z from "zod"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"

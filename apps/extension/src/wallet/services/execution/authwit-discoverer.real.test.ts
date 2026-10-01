@@ -11,11 +11,11 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { FunctionSelector } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { computeVarArgsHash } from "@aztec/stdlib/hash"
-import { CallAuthorizationRequest, computeAuthWitMessageHash, computeInnerAuthWitHash } from "@aztec/aztec.js/authorization"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { FunctionSelector } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { computeVarArgsHash } from "@aztec-labs/stdlib/hash"
+import { CallAuthorizationRequest, computeAuthWitMessageHash, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"

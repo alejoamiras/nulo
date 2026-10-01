@@ -16,8 +16,8 @@
  *     concurrent arrivals all see a stale count and the cap is advisory
  *     rather than protective.
  */
-import type { WalletMessage } from "@aztec/wallet-sdk/types"
-import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import type { WalletMessage } from "@aztec-labs/wallet-sdk/types"
+import type { ActiveSession } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import { ScopeViolationError } from "@nulo/extension-messaging/errors"
@@ -47,7 +47,7 @@ export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
  * graph into unit tests). XORs chainId with rollup version per
  * NetworkService convention.
  */
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
 	const raw = obj.chainInfo
 	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())

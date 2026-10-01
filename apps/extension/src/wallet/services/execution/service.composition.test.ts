@@ -21,8 +21,8 @@
  * it must be absent).
  */
 import { describe, expect, test, vi } from "vitest"
-import { Gas } from "@aztec/stdlib/gas"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { Gas } from "@aztec-labs/stdlib/gas"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { JobCancelledError, JournaledRejection, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"

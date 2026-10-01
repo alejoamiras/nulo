@@ -16,9 +16,9 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"

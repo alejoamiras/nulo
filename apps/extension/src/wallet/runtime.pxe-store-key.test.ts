@@ -5,7 +5,7 @@
  * `HKDF(master ‖ dek)` key paired with the row's current generation, both secret copies wiped.
  */
 import { describe, expect, test } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { asImportedKeysDek, asMasterSecretBytes, derivePxeStoreKey } from "@nulo/wallet-crypto"
 import type { ProfileService } from "./services/profile/service"

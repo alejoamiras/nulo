@@ -17,9 +17,9 @@
  * controller registry. Do NOT harmonize with the dApp-send flow.
  */
 
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { TxExecutionRequest } from "@aztec/stdlib/tx"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { JournaledRejection, OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"

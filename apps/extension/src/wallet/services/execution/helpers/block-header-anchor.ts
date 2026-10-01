@@ -16,8 +16,8 @@
  * `pxe.simulateTx` to a specific block — it uses live PXE state. Inter-
  * arm chain-state skew is therefore best-effort, not atomic.
  */
-import type { BlockHeader } from "@aztec/stdlib/tx"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { BlockHeader } from "@aztec-labs/stdlib/tx"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 
 export async function getBlockHeaderAnchor(pxe: IPXE, node: AztecNode): Promise<BlockHeader | undefined> {

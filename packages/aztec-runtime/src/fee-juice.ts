@@ -1,4 +1,4 @@
-import { GasFees, ManaUsageEstimate } from "@aztec/stdlib/gas"
+import { GasFees, ManaUsageEstimate } from "@aztec-labs/stdlib/gas"
 
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
 export type MinFeeNode = {
@@ -8,7 +8,7 @@ export type MinFeeNode = {
 
 /**
  * The protocol's worst-case min fee across predicted future slots — the inclusion-safe basis for a
- * committed `maxFeesPerGas`. Like `@aztec/wallet-sdk` `BaseWallet.getMinFees` (Limit estimate,
+ * committed `maxFeesPerGas`. Like `@aztec-labs/wallet-sdk` `BaseWallet.getMinFees` (Limit estimate,
  * method-missing fallback), but takes the DA and L2 maxima independently across slots. Falls back
  * to `getCurrentMinFees()` when the node lacks the method or predicts no slots.
  *

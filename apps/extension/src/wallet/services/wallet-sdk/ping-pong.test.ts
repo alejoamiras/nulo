@@ -24,13 +24,13 @@
 
 import { readFileSync } from "node:fs"
 import { describe, expect, test, vi } from "vitest"
-import { BackgroundConnectionHandler, ContentScriptConnectionHandler } from "@aztec/wallet-sdk/extension/handlers"
-import { NOOP_LOGGER } from "@aztec/wallet-sdk/types"
+import { BackgroundConnectionHandler, ContentScriptConnectionHandler } from "@aztec-labs/wallet-sdk/extension/handlers"
+import { NOOP_LOGGER } from "@aztec-labs/wallet-sdk/types"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { validateContentScriptMessage } from "./content-script-validator"
 import { SESSION_DISCONNECTED } from "./stale-session"
 
-import type { MessageSender } from "@aztec/wallet-sdk/extension/handlers"
+import type { MessageSender } from "@aztec-labs/wallet-sdk/extension/handlers"
 
 type CapturedListener = (message: unknown, sender: MessageSender) => void
 
@@ -81,7 +81,7 @@ describe("ping→pong reachability (validator + vendored handler)", () => {
 describe("session-disconnected — the SDK's side of the wallet's reply", () => {
 	test("the wire literal is the installed SDK's own", () => {
 		const source = readFileSync(
-			resolvePackageAsset("@aztec/wallet-sdk", "src/extension/handlers/internal_message_types.ts", { from: import.meta.url }),
+			resolvePackageAsset("@aztec-labs/wallet-sdk", "src/extension/handlers/internal_message_types.ts", { from: import.meta.url }),
 			"utf8",
 		)
 		expect(source).toMatch(new RegExp(`SESSION_DISCONNECTED:\\s*'${SESSION_DISCONNECTED}'`))

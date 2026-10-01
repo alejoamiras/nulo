@@ -27,8 +27,8 @@ import { ContractResolver } from "../contract-resolver"
 // `FunctionSelector` hashes correctly or `encodeArguments` packs the right
 // bytes. Those are upstream concerns. Integration tests in the sibling
 // `.integration.test.ts` file exercise the real ones.
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		// Selector computation is a Wasm hash — too heavy for unit tests; return
@@ -55,7 +55,7 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 // sim path; we control its return shape per-test to validate unpack. The
 // `completeFeeOptions` shim mirrors what `runFastArm` calls — it's lazy on the
 // fast path only, so most non-fast tests don't need to invoke it.
-vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
+vi.mock("@aztec-labs/wallet-sdk/base-wallet", () => ({
 	simulateViaNode: vi.fn(),
 }))
 vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
@@ -66,12 +66,12 @@ vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
 	}
 })
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { FunctionType, type FunctionAbi } from "@aztec/stdlib/abi"
-import { SimulationError } from "@aztec/stdlib/errors"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { FunctionType, type FunctionAbi } from "@aztec-labs/stdlib/abi"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
-import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { batchedViewSimulation, type BatchedViewSimulationDeps } from "./batched-view-simulation"
 
@@ -517,7 +517,7 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		simulateViaNodeMock.mockReset()
 	})
 
-	function fastSimResult(publicReturnValues: Array<{ values: Fr[] }>): import("@aztec/stdlib/tx").TxSimulationResult {
+	function fastSimResult(publicReturnValues: Array<{ values: Fr[] }>): import("@aztec-labs/stdlib/tx").TxSimulationResult {
 		return {
 			publicOutput: {
 				publicReturnValues,

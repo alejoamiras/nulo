@@ -1,11 +1,11 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 
 /**
  * Construct an `AztecNode` RPC client from a URL.
  *
- * The production adapter wraps `@aztec/stdlib`'s `createAztecNodeClient`
+ * The production adapter wraps `@aztec-labs/stdlib`'s `createAztecNodeClient`
  * with a timeout-bounded fetch (`makeFetchWithTimeout`). Tests inject a
  * fake that returns a deterministic in-memory node, sidestepping real
  * RPC while still satisfying the `AztecNode` interface.

@@ -20,7 +20,7 @@ const discoveryTabs = new Map<string, number>()
 const droppedTabs = new Set<number>()
 let approveReturns = true
 
-vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
+vi.mock("@aztec-labs/wallet-sdk/extension/handlers", () => ({
 	BackgroundConnectionHandler: class {
 		constructor(_meta: unknown, _transport: unknown, callbacks: Callbacks) {
 			captured = callbacks

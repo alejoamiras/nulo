@@ -12,11 +12,11 @@
  * Values only, no algorithms: selector/hash computation and all crypto stay upstream
  * (KAT-tripwired by `derivation-vectors.test.ts`).
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { Point } from "@aztec/foundation/curves/grumpkin"
-import { FunctionCall, FunctionSelector, type ContractArtifact } from "@aztec/stdlib/abi"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { AztecAddress as AztecAddressClass } from "@aztec/stdlib/aztec-address"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { Point } from "@aztec-labs/foundation/curves/grumpkin"
+import { FunctionCall, FunctionSelector, type ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { AztecAddress as AztecAddressClass } from "@aztec-labs/stdlib/aztec-address"
 
 export const NULO_DESCRIPTOR_VERSION = 1
 

@@ -9,10 +9,10 @@
  * Tx validation is never skipped here: the node's setup allow-list is part of what is proven.
  * Results are projected through `summarizeSimulation` for the simulate; sends return the hash.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { decodeFromAbi } from "@aztec/stdlib/abi"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { decodeFromAbi } from "@aztec-labs/stdlib/abi"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/aztec.js/contracts"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { summarizeSimulation } from "../lib/simulation-summary"

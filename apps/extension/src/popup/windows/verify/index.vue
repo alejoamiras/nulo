@@ -5,7 +5,7 @@ import ConnectStepBar from "../ConnectStepBar.vue"
 
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
-import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
+import { hashToEmoji } from "@aztec-labs/wallet-sdk/crypto"
 
 /** Composables */
 import { vSnackFooter } from "@/composables/snackInset"

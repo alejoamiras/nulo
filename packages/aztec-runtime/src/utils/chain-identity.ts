@@ -12,8 +12,8 @@
  * every caller of that method asserts first.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
 import { assertCanonicalL1ChainId } from "@nulo/wallet-crypto"
 
 export interface LiveNodeChainInfo {

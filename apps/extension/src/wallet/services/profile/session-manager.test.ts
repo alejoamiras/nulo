@@ -23,7 +23,7 @@ import {
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { SessionSecretBox, type SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { ConfigProp, IConfig } from "@/wallet/config"

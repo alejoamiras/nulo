@@ -381,10 +381,10 @@ export async function makeRecoveryTriple(): Promise<{ words: string[]; masterBas
  *  account rows: the integrity coordinator re-derives every account before activating an imported
  *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
 export async function deriveNuloAccountAddress(masterBase64: string, l1ChainId: number, index = 0): Promise<string> {
-	const { Fr } = await import("@aztec/aztec.js/fields")
+	const { Fr } = await import("@aztec-labs/aztec.js/fields")
 	const { deriveAccountSeed } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
-	const { createLogger } = await import("@aztec/foundation/log")
+	const { createLogger } = await import("@aztec-labs/foundation/log")
 	const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
 	const seed = await deriveAccountSeed(master, l1ChainId, 0, index) // AccountType.Nulo_v1 = 0
 	const account = await NuloAccount.new(seed, createLogger("import-drivers"))

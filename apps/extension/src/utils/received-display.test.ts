@@ -1,5 +1,5 @@
 import { PRIVATE_ADDRESS_MAGIC_VALUE } from "@nulo/aztec-runtime/pxe/public-events"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { describe, expect, test, vi } from "vitest"
 import type { IncomingNoteRecord, IncomingPublicEventRecord } from "@/wallet/services/incoming-transfer/spec"
 import type { TokenInfo } from "@/wallet/services/token/spec"

@@ -1,4 +1,4 @@
-import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
+import type { PendingDiscovery } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test, vi } from "vitest"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"

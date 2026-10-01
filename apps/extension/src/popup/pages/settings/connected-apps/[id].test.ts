@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/composables/toast.js", () => ({ useToast: () => ({ openToast: mocks.openToast }) }))
 vi.mock("vue-router", () => ({ useRoute: () => ({ params: { id: "s1" } }), useRouter: () => ({ push: vi.fn(), go: vi.fn() }) }))
-vi.mock("@aztec/wallet-sdk/crypto", () => ({ hashToEmoji: () => "" }))
+vi.mock("@aztec-labs/wallet-sdk/crypto", () => ({ hashToEmoji: () => "" }))
 vi.mock("@/wallet/services/account/client", () => ({ AccountServiceClient: vi.fn() }))
 vi.mock("@/wallet/services/network/client", () => ({ NetworkServiceClient: vi.fn() }))
 vi.mock("@/wallet/services/dapp-session/client", () => ({

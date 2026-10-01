@@ -1,10 +1,10 @@
 // @vitest-environment node
 // Real poseidon2 (bb.js WASM), which crashes under jsdom.
-import { FEE_JUICE_ADDRESS } from "@aztec/constants"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { computeFeePayerBalanceStorageSlot } from "@aztec/protocol-contracts/fee-juice"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
+import { FEE_JUICE_ADDRESS } from "@aztec-labs/constants"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { computeFeePayerBalanceStorageSlot } from "@aztec-labs/protocol-contracts/fee-juice"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { describe, expect, test, vi } from "vitest"
 import type { Network } from "@/wallet/services/network/spec"
 import { type PublicStorageReader, readPublicFeeJuiceBalance } from "./fee-juice-balance"

@@ -26,12 +26,12 @@
  * currently has NO separate auth check; it relies on this one).
  */
 
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { FunctionCall } from "@aztec/stdlib/abi"
-import { Capsule, type ExecutionPayload, HashedValues } from "@aztec/stdlib/tx"
-import type { InteractionWaitOptions } from "@aztec/aztec.js/contracts"
-import type { ProfileOptions, SendOptions, SimulateOptions } from "@aztec/aztec.js/wallet"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { FunctionCall } from "@aztec-labs/stdlib/abi"
+import { Capsule, type ExecutionPayload, HashedValues } from "@aztec-labs/stdlib/tx"
+import type { InteractionWaitOptions } from "@aztec-labs/aztec.js/contracts"
+import type { ProfileOptions, SendOptions, SimulateOptions } from "@aztec-labs/aztec.js/wallet"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { createTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"

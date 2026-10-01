@@ -1,4 +1,4 @@
-import { TxHash } from "@aztec/stdlib/tx"
+import { TxHash } from "@aztec-labs/stdlib/tx"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -30,7 +30,7 @@ import {
 	TxConfirmationTimeoutError,
 } from "./spec"
 import { executionResultFromReceipt, txStatusFromReceipt } from "./receipt-status"
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 
 export * from "./spec"
 

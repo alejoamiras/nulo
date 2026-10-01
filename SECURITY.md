@@ -53,7 +53,7 @@ existing keys and profiles.
     is no migration path for WebAuthn credentials.
 - **The Schnorr account artifact** — vendored byte-exact at
   `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json` and pinned by digest +
-  class id, precisely so that bumping `@aztec/accounts` (which rebuilds its own copy on any
+  class id, precisely so that bumping `@aztec-labs/accounts` (which rebuilds its own copy on any
   toolchain change) cannot move a derived address. Editing those bytes rotates the address
   regime and ships only as a new extension major.
 
@@ -149,7 +149,7 @@ The extension injects a content script on `*://*/*` at `document_start`,
 required by the protocol**, not an expedient default — verified during
 M4.1:
 
-- The `@aztec/wallet-sdk` discovery flow is **page-initiated**: a dApp
+- The `@aztec-labs/wallet-sdk` discovery flow is **page-initiated**: a dApp
   calls `ExtensionProvider.discoverWallets(...)` which posts
   `WalletMessageType.DISCOVERY` via `window.postMessage(..., '*')`.
 - Without a content script already listening on `window.addEventListener('message', ...)`,

@@ -14,10 +14,10 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import { FpcType } from "@/wallet/services/fpc/service"
 import type { FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { FeeJuiceStrategy } from "./fee-juice-strategy"

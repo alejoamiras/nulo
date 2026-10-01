@@ -5,10 +5,10 @@ import { basename, relative } from "node:path"
 /** Specs whose ESM resolution is recorded per summary and compared across engines. */
 export const RESOLVE_SPECS = [
 	"zod",
-	"@aztec/foundation/curves/bn254",
-	"@aztec/stdlib/abi",
-	"@aztec/aztec.js/wallet",
-	"@aztec/bb.js",
+	"@aztec-labs/foundation/curves/bn254",
+	"@aztec-labs/stdlib/abi",
+	"@aztec-labs/aztec.js/wallet",
+	"@aztec-foundation/bb.js",
 	"vue",
 	"jsdom",
 	"isows",

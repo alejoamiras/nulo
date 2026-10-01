@@ -46,7 +46,7 @@ export interface StagedPackage {
 	manifest: Record<string, unknown>
 }
 
-/** `@scope/name` or `name` from a bare specifier (`@aztec/foundation/crypto/sha512` → `@aztec/foundation`). */
+/** `@scope/name` or `name` from a bare specifier (`@aztec-labs/foundation/crypto/sha512` → `@aztec-labs/foundation`). */
 export function packageNameOf(specifier: string): string {
 	const parts = specifier.split("/")
 	return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : (parts[0] ?? specifier)

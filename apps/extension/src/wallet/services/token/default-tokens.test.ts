@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Node, not jsdom: bb.js poseidon2 throws std::bad_cast under jsdom.
-import { loadContractArtifact } from "@aztec/stdlib/abi"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+import { loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
 import { getBundledTokenClassId } from "@nulo/aztec-runtime/pxe/public-events"
 // @ts-expect-error — raw JSON import via vite alias
 import WonderlandTokenJson from "@wonderland-token-artifact"

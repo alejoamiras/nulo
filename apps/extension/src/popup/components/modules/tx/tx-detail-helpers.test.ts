@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { OriginType } from "@/wallet/services/transaction/client"
 import { buildGasBreakdown, computeFeeSavings, describeFeePaymentMethod } from "./tx-detail-helpers"
 

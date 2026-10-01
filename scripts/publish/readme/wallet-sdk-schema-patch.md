@@ -1,6 +1,6 @@
 # @alejoamiras/nulo-wallet-sdk-schema-patch
 
-Adds the [Nulo wallet](https://github.com/alejoamiras/nulo)'s custom RPC methods to the `WalletSchema` of `@aztec/aztec.js`, so a dApp's wallet-sdk client can call them:
+Adds the [Nulo wallet](https://github.com/alejoamiras/nulo)'s custom RPC methods to the `WalletSchema` of `@aztec-labs/aztec.js`, so a dApp's wallet-sdk client can call them:
 
 | Method | Signature |
 |---|---|
@@ -19,12 +19,12 @@ Import the side-effect entry **first**, in the module that creates the wallet-sd
 import "@alejoamiras/nulo-wallet-sdk-schema-patch/register"
 ```
 
-`./apply` exports `applyNuloSchemaPatch(schema)`, the same patch as a function. Applying it twice is a no-op. It throws if `@aztec/aztec.js` already defines one of these methods with a different signature, instead of silently shadowing it.
+`./apply` exports `applyNuloSchemaPatch(schema)`, the same patch as a function. Applying it twice is a no-op. It throws if `@aztec-labs/aztec.js` already defines one of these methods with a different signature, instead of silently shadowing it.
 
 ## Requirements
 
 - ESM only.
-- `@aztec/aztec.js` and `@aztec/stdlib` are exact **peer dependencies**. The patch must mutate the same `WalletSchema` and compare against the same `schemas.AztecAddress` your app loads, so a duplicate copy of either package silently defeats it.
+- `@aztec-labs/aztec.js` and `@aztec-labs/stdlib` are exact **peer dependencies**. The patch must mutate the same `WalletSchema` and compare against the same `schemas.AztecAddress` your app loads, so a duplicate copy of either package silently defeats it.
 - `zod` is a dependency.
 
 ## Provenance

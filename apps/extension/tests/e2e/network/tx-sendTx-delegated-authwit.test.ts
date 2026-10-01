@@ -69,8 +69,8 @@ test.skipIf(!hasConfig || !hasStandardContracts)(
 		// Fetch both instances from the node — the dApp side registers them
 		// (instance + bundled artifact) like any real dApp introducing its own
 		// contracts.
-		const { createAztecNodeClient } = await import("@aztec/aztec.js/node")
-		const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+		const { createAztecNodeClient } = await import("@aztec-labs/aztec.js/node")
+		const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
 		const serialize = (v: unknown) =>
 			JSON.stringify(v, (_k, x) => {

@@ -21,8 +21,8 @@
  */
 import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey, zeroize } from "@nulo/wallet-crypto"
-import { Fq } from "@aztec/foundation/curves/bn254"
-import { sha256 } from "@aztec/foundation/crypto/sha256"
+import { Fq } from "@aztec-labs/foundation/curves/bn254"
+import { sha256 } from "@aztec-labs/foundation/crypto/sha256"
 import { NULO_KDF_DIGEST, V5_REGIME } from "./address-freeze"
 import { FROZEN_ACCOUNT_CLASS_ID, FROZEN_ARTIFACT_SHA256 } from "./frozen-artifact"
 import { FROZEN_DESCRIPTOR_DIGEST } from "./instantiation-descriptor"

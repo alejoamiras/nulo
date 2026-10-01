@@ -1,4 +1,4 @@
-import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
+import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { DISCOVERY_STALE_MS, DiscoveryQueue, isDiscoveryExpired } from "./discovery-queue"

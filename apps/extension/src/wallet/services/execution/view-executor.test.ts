@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { ContractInitializationStatus } from "@aztec/aztec.js/wallet"
+import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
 import { ViewExecutor, type ViewExecutorDeps } from "./view-executor"
 
 const assertLiveChainIdentityMock = vi.hoisted(() => vi.fn())

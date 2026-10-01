@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { GasFees } from "@aztec/stdlib/gas"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { type MinFeeNode, predictedWorstMinFees } from "./fee-juice"
 
 // An error from getPredictedMinFees falls back to the (possibly stale) current min fee only when

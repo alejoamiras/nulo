@@ -1,6 +1,6 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
-import { FunctionSelector } from "@aztec/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { ProtocolContractAddress } from "@aztec-labs/aztec.js/protocol"
+import { FunctionSelector } from "@aztec-labs/stdlib/abi"
 import { describe, expect, test } from "vitest"
 import {
 	CLAIM_AND_END_SETUP,

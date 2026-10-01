@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * The resync-and-retry against a REAL `@aztec/pxe` and a real local network. An L1 reorg deep
+ * The resync-and-retry against a REAL `@aztec-labs/pxe` and a real local network. An L1 reorg deep
  * enough to drop the L1 block that carried the PXE's anchor makes the node prune that L2 block and
  * reject queries by its hash; the helper must resync, retry once and land on a moved anchor. The
  * control case runs the same op WITHOUT the helper and is what proves the sandbox reproduces the
@@ -24,19 +24,19 @@ import { mkdirSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, test } from "vitest"
-import { getInitialTestAccountsData } from "@aztec/accounts/testing"
-import { SchnorrInitializerlessAccountContract, SchnorrInitializerlessAccountContractArtifact } from "@aztec/accounts/schnorr"
-import { computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { getPXEConfig } from "@aztec/pxe/config"
-import { createPXE, type PXE } from "@aztec/pxe/server"
-import { encodeArguments, FunctionCall, FunctionSelector, FunctionType, getFunctionArtifactByName } from "@aztec/stdlib/abi"
-import type { AuthWitness } from "@aztec/stdlib/auth-witness"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { computePartialAddress, getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { deriveKeys } from "@aztec/stdlib/keys"
+import { getInitialTestAccountsData } from "@aztec-labs/accounts/testing"
+import { SchnorrInitializerlessAccountContract, SchnorrInitializerlessAccountContractArtifact } from "@aztec-labs/accounts/schnorr"
+import { computeAuthWitMessageHash } from "@aztec-labs/aztec.js/authorization"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { getPXEConfig } from "@aztec-labs/pxe/config"
+import { createPXE, type PXE } from "@aztec-labs/pxe/server"
+import { encodeArguments, FunctionCall, FunctionSelector, FunctionType, getFunctionArtifactByName } from "@aztec-labs/stdlib/abi"
+import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { computePartialAddress, getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { deriveKeys } from "@aztec-labs/stdlib/keys"
 import { isStaleAnchorMessage, withStaleAnchorRetry } from "./stale-anchor"
 
 const ANVIL_URL = process.env.ANVIL_URL

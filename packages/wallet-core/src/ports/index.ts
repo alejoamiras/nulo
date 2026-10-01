@@ -7,7 +7,7 @@
  * fakes.
  *
  * `NodeFactory` lives in `@nulo/aztec-runtime/ports`, not here, because it
- * types `AztecNode` from `@aztec/stdlib` and `wallet-core` is Aztec-free.
+ * types `AztecNode` from `@aztec-labs/stdlib` and `wallet-core` is Aztec-free.
  */
 
 export type { Unsubscribe } from "./types"

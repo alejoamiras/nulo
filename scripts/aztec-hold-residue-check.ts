@@ -13,7 +13,7 @@
  * The Presto SDK is deliberately NOT held: a single `@aztec` generation in the
  * prover path is load-bearing, because upstream's `getVKIndex` discriminates with
  * `instanceof` and silently mis-resolves when two copies of
- * @aztec/noir-protocol-circuits-types coexist in one bundle.
+ * @aztec-labs/noir-protocol-circuits-types coexist in one bundle.
  *
  * Usage: bun scripts/aztec-hold-residue-check.ts   (exits 1 on any violation)
  */

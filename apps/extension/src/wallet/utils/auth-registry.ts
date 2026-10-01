@@ -1,14 +1,14 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type FunctionAbi, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 
 // Auth Registry storage slots, in the upstream contract's declaration order: the
 // AuthRegistry `#[storage]` struct declares `reject_all` FIRST (slot 1) then
-// `approved_actions` SECOND (slot 2) — see @aztec/noir-contracts.js
+// `approved_actions` SECOND (slot 2) — see @aztec-labs/noir-contracts.js
 // auth_registry_contract `main.nr`. These were previously swapped, so
 // `isAuthwitConsumable` + `isAuthRegistryEnabled` read the wrong public storage:
 // a granted/revoked authwit read as the reject_all map and vice-versa, so a revoke

@@ -6,14 +6,14 @@
  * partial-page `scannedThrough`; empty-page `null`; `fromBlock` honored; cursor zod round-trip;
  * class-id constant matches the bundled artifact; upgraded-class → gate-fails-closed (node-direct).
  */
-import { BlockNumber } from "@aztec/foundation/branded-types"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { BlockHash } from "@aztec/stdlib/block"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { LogResult } from "@aztec/stdlib/logs"
-import { TxHash } from "@aztec/stdlib/tx"
+import { BlockNumber } from "@aztec-labs/foundation/branded-types"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { BlockHash } from "@aztec-labs/stdlib/block"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { LogResult } from "@aztec-labs/stdlib/logs"
+import { TxHash } from "@aztec-labs/stdlib/tx"
 import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { describe, expect, test } from "vitest"
 import {

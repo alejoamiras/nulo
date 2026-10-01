@@ -24,17 +24,17 @@
  * requires the executor coordinator to own that flush point.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AbiTypeSchema, FunctionSelector, type FunctionType, FunctionCall, encodeArguments } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { computeAuthWitMessageHash, CallAuthorizationRequest, computeInnerAuthWitHash } from "@aztec/aztec.js/authorization"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { NodeInfo, ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { collectOffchainEffects, type TxExecutionRequest } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AbiTypeSchema, FunctionSelector, type FunctionType, FunctionCall, encodeArguments } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { computeAuthWitMessageHash, CallAuthorizationRequest, computeInnerAuthWitHash } from "@aztec-labs/aztec.js/authorization"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { NodeInfo, ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { collectOffchainEffects, type TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import z from "zod"
 import type { ILogger } from "@/wallet/logger"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
@@ -92,7 +92,7 @@ export class AuthwitDiscoverer {
 		// simulation inside SchnorrAccount.verify_private_authwit — the
 		// offchain effects never reach us and discovery can't produce any
 		// authwit actions. `SimulatedSchnorrAccountContractArtifact`
-		// (bundled by @aztec/noir-contracts.js) is the canonical stub;
+		// (bundled by @aztec-labs/noir-contracts.js) is the canonical stub;
 		// PxeService.simulateTx wraps it into a `SimulationOverrides` when
 		// `stubAccountAddresses` is passed. Mirrors the demo-wallet's
 		// kernelless-sim pattern.

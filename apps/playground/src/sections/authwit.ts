@@ -12,9 +12,9 @@
  * e2e's negative assertions (post-revoke consume would self-authorize).
  * Registry approvals are single-use — fresh nonce per grant/consume pair.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { FunctionCall, FunctionSelector, FunctionType } from "@aztec/aztec.js/abi"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { FunctionCall, FunctionSelector, FunctionType } from "@aztec-labs/aztec.js/abi"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"

@@ -8,7 +8,7 @@ import {
 	UserRejectedError,
 	ValidationError,
 } from "@nulo/extension-messaging/errors"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { dataFieldsCovered, ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, DataCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityParams, CapabilityResult } from "./dapp-interaction-protocol"
@@ -1264,7 +1264,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		// moved, or accidentally tree-shaken by a future bundler), this test
 		// fails.
 		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		const { WalletSchema } = await import("@aztec-labs/aztec.js/wallet")
 		expect("registerToken" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).registerToken
@@ -1686,7 +1686,7 @@ describe("dispatch() session lookup consolidation (TOCTOU defense)", () => {
 describe("dispatcher — getWalletFeatures", () => {
 	test("schema patch extends WalletSchema with a 0-arg string[] `getWalletFeatures` entry", async () => {
 		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		const { WalletSchema } = await import("@aztec-labs/aztec.js/wallet")
 		expect("getWalletFeatures" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).getWalletFeatures
@@ -1734,7 +1734,7 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 
 	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
 		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		const { WalletSchema } = await import("@aztec-labs/aztec.js/wallet")
 		expect("isTokenRegistered" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).isTokenRegistered
@@ -2804,7 +2804,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 
 	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
 		await import("@nulo/wallet-sdk-schema-patch/register")
-		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		const { WalletSchema } = await import("@aztec-labs/aztec.js/wallet")
 		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).grantPublicAuthwit
@@ -3611,7 +3611,7 @@ describe("dispatcher.requestCapabilities — a contracts permission that grants 
 		const h = harness(makeSession())
 		const answer = await h.request([cap])
 		expect(answer.granted).toEqual([cap])
-		const { WalletCapabilitiesSchema } = await import("@aztec/aztec.js/wallet")
+		const { WalletCapabilitiesSchema } = await import("@aztec-labs/aztec.js/wallet")
 		expect(WalletCapabilitiesSchema.safeParse(answer).success).toBe(true)
 		expect(h.popups).toEqual([])
 		expect(h.calls).toEqual({ setRejections: [], setGrants: [] })

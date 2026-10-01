@@ -5,13 +5,13 @@
  * content: the set is compiled in from upstream's constants.
  */
 
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
 import {
 	HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
 	STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-} from "@aztec/standard-contracts/handshake-registry/constants"
-import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec/standard-contracts/multi-call-entrypoint/constants"
+} from "@aztec-labs/standard-contracts/handshake-registry/constants"
+import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec-labs/standard-contracts/multi-call-entrypoint/constants"
 
 /** Protocol contracts sit at fixed low addresses, not preimage-derived ones, so a backup's copy
  *  would fail registration's address check anyway (1 to 3 today, inside the historic bound). */

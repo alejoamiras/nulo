@@ -1,7 +1,7 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"

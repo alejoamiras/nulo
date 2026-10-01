@@ -1,5 +1,5 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { type AbiType, encodeArguments, type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type AbiType, encodeArguments, type FunctionAbi, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 
 export class FnImpl {

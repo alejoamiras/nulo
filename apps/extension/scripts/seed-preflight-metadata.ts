@@ -5,7 +5,7 @@
  *
  * Uses the AZTEC-STANDARDS Token storage layout — the class every current
  * seed pins (0x0225da…). The first version of this script imported the
- * upstream `@aztec/noir-contracts.js/Token` sample artifact, whose layout
+ * upstream `@aztec-labs/noir-contracts.js/Token` sample artifact, whose layout
  * puts name/symbol/decimals at DIFFERENT slots, so it decoded garbage and
  * the cUSD `expectedSymbol` pin shipped from product intent instead of chain
  * truth ("cUSD" vs the real "cUSDC") — the seeder then hard-skipped the token
@@ -14,8 +14,8 @@
  * Run from apps/extension: bun run scripts/seed-preflight-metadata.ts [tokenAddress] [nodeUrl]
  * — defaults to cUSD on Alpha V5.
  */
-import { createAztecNodeClient } from "@aztec/stdlib/interfaces/client"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"

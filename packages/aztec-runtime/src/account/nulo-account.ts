@@ -1,36 +1,40 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
 /**
- * Thin adapter over upstream @aztec/accounts/schnorr.
+ * Thin adapter over upstream @aztec-labs/accounts/schnorr.
  * Keeps our IAccountContract surface (for DI + cross-process PXE) while delegating
  * payload encoding, signing, and entrypoint semantics to the canonical Aztec SDK.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AuthWitness } from "@aztec/stdlib/auth-witness"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
 import {
 	CompleteAddress,
 	computePartialAddress,
 	type ContractInstanceWithAddress,
 	getContractInstanceFromInstantiationParams,
-} from "@aztec/stdlib/contract"
-import type { GasSettings } from "@aztec/stdlib/gas"
-import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { deriveKeys } from "@aztec/stdlib/keys"
-import { ExecutionPayload, type TxExecutionRequest } from "@aztec/stdlib/tx"
+} from "@aztec-labs/stdlib/contract"
+import type { GasSettings } from "@aztec-labs/stdlib/gas"
+import { computeSiloedPrivateInitializationNullifier } from "@aztec-labs/stdlib/hash"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { deriveKeys } from "@aztec-labs/stdlib/keys"
+import { ExecutionPayload, type TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 // The lazy variant: same upstream signing/auth-witness provider, but the npm artifact sits behind
 // a dynamic import we never trigger — the vendored copy in `./frozen-artifact` is the only
 // artifact this account ever loads (the eager module would double-bundle ~1.4 MB).
-import { SchnorrAccountContract } from "@aztec/accounts/schnorr/lazy"
-import { deriveSecretKeyFromSigningKey } from "@aztec/accounts/utils"
+import { SchnorrAccountContract } from "@aztec-labs/accounts/schnorr/lazy"
+import { deriveSecretKeyFromSigningKey } from "@aztec-labs/accounts/utils"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
-import { AccountFeePaymentMethodOptions, DefaultAccountEntrypoint, type DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
-import { DefaultMultiCallEntrypoint } from "@aztec/entrypoints/multicall"
-import { APP_MAX_CALLS } from "@aztec/entrypoints/encoding"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import type { AuthWitnessProvider } from "@aztec/entrypoints/interfaces"
+import type { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
+import {
+	AccountFeePaymentMethodOptions,
+	DefaultAccountEntrypoint,
+	type DefaultAccountEntrypointOptions,
+} from "@aztec-labs/entrypoints/account"
+import { DefaultMultiCallEntrypoint } from "@aztec-labs/entrypoints/multicall"
+import { APP_MAX_CALLS } from "@aztec-labs/entrypoints/encoding"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import type { AuthWitnessProvider } from "@aztec-labs/entrypoints/interfaces"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 import type { IPXE } from "../pxe/ipxe"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "./fee-options"

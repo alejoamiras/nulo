@@ -11,7 +11,7 @@
  * WithClaim, sponsored-FPC with claim_and_end_setup).
  */
 
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { applyEmbeddedFpcGasCap } from "./embedded-fpc-cap"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"

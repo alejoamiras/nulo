@@ -1,4 +1,4 @@
-import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test } from "vitest"
 import {

@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
-import { GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { completeFeeOptions, MIN_FEE_PADDING } from "./fee-options"
 
 /** Minimal fake AztecNode covering only the methods completeFeeOptions calls. */

@@ -1,5 +1,5 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { deriveKeys } from "@aztec/stdlib/keys"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { deriveKeys } from "@aztec-labs/stdlib/keys"
 import { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test } from "vitest"

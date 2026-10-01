@@ -1,7 +1,7 @@
 /**
  * Extension-local test doubles.
  *
- * `FakeNodeFactory` lives here because it depends on `@aztec/stdlib`'s
+ * `FakeNodeFactory` lives here because it depends on `@aztec-labs/stdlib`'s
  * `AztecNode` type — `@nulo/wallet-core/testing` is Aztec-free.
  *
  * Other port fakes (`FakeBrowserApi`, `MockClock`, `FakeBackgroundTicker`)

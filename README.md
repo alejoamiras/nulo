@@ -14,7 +14,7 @@
 
 A self-custody wallet for the [Aztec network](https://aztec.network), packaged as a Chrome and Firefox extension. Nulo runs the Aztec [Private Execution Environment](https://docs.aztec.network/aztec/protocol/circuits/pxe) locally so transactions are simulated and signed on the user's machine; no node operator sees the contents.
 
-The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and uses the upstream `@aztec/accounts/schnorr` account contract — there is no custom Noir source in this repo.
+The extension exposes the canonical `@aztec-labs/wallet-sdk` surface to dApps and uses the upstream `@aztec-labs/accounts/schnorr` account contract — there is no custom Noir source in this repo.
 
 ## Status
 
@@ -42,7 +42,7 @@ For Firefox, `bun run build:firefox` → `apps/extension/dist/firefox/`.
 | Package | Purpose |
 |---|---|
 | [`@nulo/extension`](./apps/extension/) | The Chrome/Firefox MV3 extension — service worker, popup UI, content script, offscreen PXE host. |
-| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec/wallet-sdk` capability map, scope enforcement. |
+| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec-labs/wallet-sdk` capability map, scope enforcement. |
 | [`@nulo/aztec-runtime`](./packages/aztec-runtime/) | PXE lifecycle, `NuloAccount` adapter, class-id verification, payload chunking. |
 | [`@nulo/extension-messaging`](./packages/extension-messaging/) | Typed RPC plumbing across service worker, popup, and offscreen. |
 | [`@nulo/wallet-crypto`](./packages/wallet-crypto/) | Password + passkey KDF, `PasswordSecretBox`, derivation chain (vector-locked). |

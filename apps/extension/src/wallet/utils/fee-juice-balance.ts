@@ -1,12 +1,12 @@
 /**
  * The public Fee Juice balance read the sponsor probe makes. Not in the `@/wallet/utils` barrel:
- * `@aztec/protocol-contracts/fee-juice` loads the Fee Juice artifact at module init, and every page
+ * `@aztec-labs/protocol-contracts/fee-juice` loads the Fee Juice artifact at module init, and every page
  * that imports the barrel would load it.
  */
-import { FEE_JUICE_ADDRESS } from "@aztec/constants"
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { computeFeePayerBalanceStorageSlot } from "@aztec/protocol-contracts/fee-juice"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { FEE_JUICE_ADDRESS } from "@aztec-labs/constants"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { computeFeePayerBalanceStorageSlot } from "@aztec-labs/protocol-contracts/fee-juice"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { Network } from "@/wallet/services/network/spec"
 
 /** One public-storage read at `network`'s endpoint, bounded by `timeoutMs`. */

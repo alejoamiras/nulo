@@ -1,6 +1,6 @@
 # @nulo/aztec-runtime
 
-PXE lifecycle + Nulo's adapter over `@aztec/accounts/schnorr` (`NuloAccount`). Owns class-id verification and payload chunking. Runs inside the offscreen document; the service worker talks to it via `@nulo/extension-messaging`.
+PXE lifecycle + Nulo's adapter over `@aztec-labs/accounts/schnorr` (`NuloAccount`). Owns class-id verification and payload chunking. Runs inside the offscreen document; the service worker talks to it via `@nulo/extension-messaging`.
 
 ## Position in the stack
 
@@ -21,7 +21,7 @@ Depends on `wallet-core` and `extension-messaging`. Does **not** depend on `wall
 | `src/pxe/artifact-registry.ts` | Caches compiled contract artifacts and verifies their class-id before trusting them. |
 | `src/pxe/artifact-class-id.ts` | Class-id verification helper (Aztec spec invariant: the on-chain class id must equal the canonical hash of the artifact). |
 | `src/pxe/known-artifacts.ts`, `note-schemas.ts`, `schemas.ts` | Compiled-in artifacts the wallet trusts by default. |
-| `src/account/nulo-account.ts` | `NuloAccount` — thin adapter over `@aztec/accounts/schnorr`. Owns signing-key derivation, multicall wrapping, recursive payload chunking, deterministic salt. |
+| `src/account/nulo-account.ts` | `NuloAccount` — thin adapter over `@aztec-labs/accounts/schnorr`. Owns signing-key derivation, multicall wrapping, recursive payload chunking, deterministic salt. |
 | `src/account/fee-options.ts` | Helpers for fee-payment selection at tx-construction time. |
 | `src/fee-juice.ts` | `predictedWorstMinFees` — the inclusion-safe worst-case min fee across predicted slots; falls back to the current min fee when the node lacks the method or predicts no slots; other RPC errors propagate. |
 | `src/adapters/aztec-node-factory-adapter.ts` | The `AztecNodeFactory` adapter — single entry point for constructing `AztecNode` instances. |

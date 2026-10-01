@@ -13,7 +13,7 @@
  *      serially AFTER the tx-arm settles. JS-side launches early; actual
  *      execution serializes through upstream PXE's `SerialQueue`.
  *   2. PUBLIC+isStatic LEADING PREFIX: bypasses upstream PXE entirely and
- *      goes direct-to-node via `simulateViaNode` (`@aztec/wallet-sdk/base-
+ *      goes direct-to-node via `simulateViaNode` (`@aztec-labs/wallet-sdk/base-
  *      wallet`). This is the "fast arm" — the only path that escapes
  *      upstream's queue.
  *   3. Remaining tx-typed (everything after the fast prefix breaks):
@@ -33,7 +33,7 @@
  *
  * The prefix also breaks at the first call with `hideMsgSender === true`,
  * since `simulateViaNode` ignores that flag when building
- * `PublicCallRequest` (`@aztec/wallet-sdk/base-wallet/utils.ts:93`). We
+ * `PublicCallRequest` (`@aztec-labs/wallet-sdk/base-wallet/utils.ts:93`). We
  * route hideMsgSender calls through the slow arm to preserve the
  * caller-supplied flag honor.
  *
@@ -111,7 +111,7 @@
  * the fast-arm path only — no caller-side deps inflation.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import {
 	type AbiDecoded,
 	type AbiType,
@@ -121,15 +121,15 @@ import {
 	FunctionType,
 	decodeFromAbi,
 	encodeArguments,
-} from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import { SimulationError } from "@aztec/stdlib/errors"
-import { ExecutionPayload, type TxSimulationResult, type UtilityExecutionResult } from "@aztec/stdlib/tx"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+} from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
+import { ExecutionPayload, type TxSimulationResult, type UtilityExecutionResult } from "@aztec-labs/stdlib/tx"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"

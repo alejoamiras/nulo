@@ -12,7 +12,7 @@ Under Bun's isolated linker a workspace's `node_modules` holds only what that wo
 |---|---|
 | `resolvePackageRoot(pkg, { from })` | Absolute package root. Never consults exports maps, never ascends from a resolved file. Throws listing every searched location when `pkg` is not reachable from `from`. |
 | `resolvePackageAsset(pkg, assetPath, { from })` | Absolute path of a file inside `pkg`, exported or not. Throws if the path escapes the package root (lexical containment) or does not exist. |
-| `resolveExportedAsset(pkg, subpath, { from })` | Plain `require.resolve` of an exported subpath (condition-less asset exports such as `@aztec/sqlite3mc-wasm`'s `./vendor/jswasm/*`). Prefer it when the asset is in the exports map. |
+| `resolveExportedAsset(pkg, subpath, { from })` | Plain `require.resolve` of an exported subpath (condition-less asset exports such as `@aztec-labs/sqlite3mc-wasm`'s `./vendor/jswasm/*`). Prefer it when the asset is in the exports map. |
 | `assertPackageIdentity(pkg, { from, expectVersion?, mustContain?, lockstepVia? })` | Executable identity check: name, exact version, a required file containing a marker (patch pins), and a **lockstep** guard — re-resolves `pkg` anchored inside `lockstepVia`'s real directory and asserts both resolutions realpath to the same copy, so a pin/manifest skew that splits the copies fails a test instead of shipping the wrong bytes. Returns the evidence (`root`, `realRoot`, `version`, `lockstepRealRoot`). |
 | `isUnderNodeModules(path)` | Whether a resolved path lies inside some `node_modules`. |
 
@@ -23,13 +23,13 @@ Under Bun's isolated linker a workspace's `node_modules` holds only what that wo
 ```ts
 import { resolvePackageAsset, resolveExportedAsset, assertPackageIdentity } from "@nulo/resolve-asset"
 
-const bbWasm = resolvePackageAsset("@aztec/bb.js", "dest/browser/barretenberg.wasm.gz", { from: import.meta.url })
-const sqliteWasm = resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", { from: import.meta.url })
+const bbWasm = resolvePackageAsset("@aztec-foundation/bb.js", "dest/browser/barretenberg.wasm.gz", { from: import.meta.url })
+const sqliteWasm = resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", { from: import.meta.url })
 
-assertPackageIdentity("@aztec/sqlite3mc-wasm", {
+assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 	from: import.meta.url,
 	expectVersion: "5.0.1",
-	lockstepVia: "@aztec/kv-store", // the copy kv-store consumes must be the copy we ship
+	lockstepVia: "@aztec-labs/kv-store", // the copy kv-store consumes must be the copy we ship
 })
 ```
 

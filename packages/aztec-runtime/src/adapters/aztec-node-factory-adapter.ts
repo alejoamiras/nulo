@@ -21,11 +21,11 @@
  * - Everything else rejected.
  */
 
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { createSafeJsonRpcClient } from "@aztec/foundation/json-rpc/client"
-import type { Logger } from "@aztec/foundation/log"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { createSafeJsonRpcClient } from "@aztec-labs/foundation/json-rpc/client"
+import type { Logger } from "@aztec-labs/foundation/log"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { makeFetchWithTimeout, makeSingleAttemptFetch } from "../utils/fetch"
 

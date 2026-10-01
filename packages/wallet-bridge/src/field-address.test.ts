@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { fieldAddressKey, sameFieldAddress } from "./field-address"
 
 const A = `0x${"0a1b2c3d".repeat(8)}`

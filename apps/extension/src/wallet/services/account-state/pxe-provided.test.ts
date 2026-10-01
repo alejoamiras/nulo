@@ -1,5 +1,5 @@
-import { ProtocolContractAddress } from "@aztec/protocol-contracts"
-import { getDefaultStandardPreloadedContracts } from "@aztec/standard-contracts/preloaded"
+import { ProtocolContractAddress } from "@aztec-labs/protocol-contracts"
+import { getDefaultStandardPreloadedContracts } from "@aztec-labs/standard-contracts/preloaded"
 import { describe, expect, test } from "vitest"
 import { isPxeProvidedAddress, isPxeProvidedContract, PRELOADED_CONTRACT_ADDRESSES } from "./pxe-provided"
 

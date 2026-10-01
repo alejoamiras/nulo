@@ -157,7 +157,7 @@ describe.skipIf(isFirefox)(CHROME_ONLY.hangingRequest, () => {
 		"a stalled Alpha V5 costs only its own row while the local network restores, and a Retry keeps that one row",
 		{ timeout: 900_000 },
 		async ({ tokenReadyExtension }) => {
-			const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+			const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 			const sender = (await AztecAddress.random()).toString()
 			const funded = tokenReadyExtension.accountAddress
 			const tokenAddress = aztecConfig!.tokenAddress

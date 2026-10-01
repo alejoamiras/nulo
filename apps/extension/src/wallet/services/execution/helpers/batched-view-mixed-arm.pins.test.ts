@@ -7,8 +7,8 @@
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		// Selector computation is a Wasm hash — too heavy for unit tests.
@@ -23,7 +23,7 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 		decodeFromAbi: vi.fn((_types: unknown, values: unknown) => values),
 	}
 })
-vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
+vi.mock("@aztec-labs/wallet-sdk/base-wallet", () => ({
 	simulateViaNode: vi.fn(),
 }))
 vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
@@ -34,10 +34,10 @@ vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
 	}
 })
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type FunctionAbi, FunctionType } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type FunctionAbi, FunctionType } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import type { CallAction } from "@nulo/wallet-bridge"
 import { ContractResolver } from "../contract-resolver"
 import { batchedViewSimulation, type BatchedViewSimulationDeps } from "./batched-view-simulation"

@@ -12,7 +12,7 @@ const hasConfig = aztecConfig !== undefined
  *
  * Validates:
  *   - The runtime schema patch in `@nulo/wallet-sdk-schema-patch` makes the
- *     method reachable through `@aztec/wallet-sdk`'s ExtensionWallet proxy.
+ *     method reachable through `@aztec-labs/wallet-sdk`'s ExtensionWallet proxy.
  *   - The dispatcher routes `registerToken` through DappInteractionService.execute()
  *     (the BLOCKER fix from the opus/codex audits — previously it bypassed the
  *     popup gate).

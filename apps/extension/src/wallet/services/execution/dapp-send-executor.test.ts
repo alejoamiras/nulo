@@ -17,10 +17,10 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
@@ -31,14 +31,14 @@ import { AUTHWITS_CHANGED_MESSAGE, ESTIMATE_INCOMPLETE_MESSAGE, PREVIEW_FOREIGN_
 import { ExecutionService } from "./service"
 
 const collectOffchainEffectsMock = vi.hoisted(() => vi.fn(() => [] as Array<{ data: unknown[]; contractAddress: unknown }>))
-vi.mock("@aztec/stdlib/tx", async (importOriginal) => ({
+vi.mock("@aztec-labs/stdlib/tx", async (importOriginal) => ({
 	...(await importOriginal<object>()),
 	collectOffchainEffects: collectOffchainEffectsMock,
 }))
 
 // Real authwit decoding + hashing run Barretenberg WASM (e2e-only); the seam
 // decodes a request from its first field and hashes deterministically.
-vi.mock("@aztec/aztec.js/authorization", async (importOriginal) => ({
+vi.mock("@aztec-labs/aztec.js/authorization", async (importOriginal) => ({
 	...(await importOriginal<object>()),
 	CallAuthorizationRequest: {
 		fromFields: async (data: unknown[]) => {
@@ -66,8 +66,8 @@ vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async (
 
 // The balance slot's poseidon2 runs Barretenberg WASM, which crashes under jsdom; the slot itself is
 // pinned in fee-juice-balance.test.ts.
-vi.mock("@aztec/protocol-contracts/fee-juice", async (importOriginal) => {
-	const { Fr } = await import("@aztec/foundation/curves/bn254")
+vi.mock("@aztec-labs/protocol-contracts/fee-juice", async (importOriginal) => {
+	const { Fr } = await import("@aztec-labs/foundation/curves/bn254")
 	return { ...(await importOriginal<object>()), computeFeePayerBalanceStorageSlot: vi.fn(async () => new Fr(0x51n)) }
 })
 

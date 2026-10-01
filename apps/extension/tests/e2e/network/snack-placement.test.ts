@@ -147,7 +147,7 @@ async function hitsAfterScroll(page: Page, testids: string[]): Promise<Hit[]> {
 /** An address one past a random valid one, retried until it is off the curve: a shield to it fails
  *  the fee estimate. */
 async function offCurveAddress(): Promise<string> {
-	const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+	const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 	for (let i = 0; i < 64; i++) {
 		const probe = AztecAddress.fromBigIntUnsafe((await AztecAddress.random()).toBigInt() + 1n)
 		if (!(await probe.isValid())) return probe.toString()

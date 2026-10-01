@@ -274,7 +274,7 @@ which A9 covers.
   |---|---|---|
   | `@aztec-foundation/*` (bb.js, the noir pair, l1-artifacts, and any other the lockfile resolves) | `AztecProtocol/aztec-packages`, `.github/workflows/ci3.yml`, `refs/tags/v6.0.0-rc.1`, commit `d521f0d9` | SLSA provenance through `scripts/publish/verify-provenance.sh <tgz> <repo> <workflow> <ref>` |
   | `@aztec-foundation/aztec-standards` | `AztecProtocol/aztec-standards`, `.github/workflows/release.yml`, `refs/tags/v6.0.0-rc.1`, commit `cdfba943` | the same |
-  | `@alejoamiras/presto`, `@alejoamiras/presto-core` | `alejoamiras/presto` on `main`; presto from `.github/workflows/release-sdk.yml` at `bc3eeee0`; presto-core's workflow recorded in P1 | the same |
+  | `@alejoamiras/presto`, `@alejoamiras/presto-core` | `alejoamiras/presto` on `main`, both signed by the reusable `.github/workflows/_publish-npm.yml` (called from `release-sdk.yml`) at `bc3eeee0` | the same, with the signer's path |
   | `@alejoamiras/private-fee-juice` | `alejoamiras/ecosystem-tooling`, `.github/workflows/release.yml`, `main` (5.0.1 at `c678a948`, rc.1 at `76199c59`) | the same |
   | `@aztec-labs/*`, `@aztec/viem` | no attestation and no repository field; `@aztec-labs/*` published by `charlielye` (maintainers `nchamo`, `charlielye`), `@aztec/viem@2.38.3` by `spalladino` | registry signatures (`npm audit signatures`), plus the publisher and maintainer set recorded per locked name; any other set is a HOLD (A8) |
 

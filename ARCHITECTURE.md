@@ -27,7 +27,7 @@ A running extension lives in four browser contexts:
    │                                           ▼                     │
    └─────────────────────────────────────┐  ┌─────────────────────┐  │
                                          │  │   dApp web page     │  │
-                                         │  │  @aztec/wallet-sdk  │  │
+                                         │  │  @aztec-labs/wallet-sdk  │  │
                                          │  └─────────────────────┘  │
                                          └───────────────────────────┘
 ```
@@ -164,7 +164,7 @@ A **late-activation** pattern is used for full-backup restore: `ProfileService.r
 
 ## 8. dApp session + capability surface
 
-dApps interact via `@aztec/wallet-sdk` over a postMessage-bridged encrypted channel. Wiring lives in:
+dApps interact via `@aztec-labs/wallet-sdk` over a postMessage-bridged encrypted channel. Wiring lives in:
 
 - `apps/extension/src/wallet/services/wallet-sdk/background.ts` — sets up `BackgroundConnectionHandler` from the SDK. Owns discovery, key exchange, message routing.
 - `packages/wallet-bridge/src/dispatcher.ts` — the typed dispatcher. Receives wallet messages, narrows protocol shapes via Zod, enforces session scope, and delegates to typed service calls.
@@ -202,7 +202,7 @@ Buffer ownership is explicit. Secret material is allocated as `Uint8Array<ArrayB
 
 ## 11. Account contract
 
-The wallet uses the upstream `@aztec/accounts/schnorr` account contract — there is no custom Noir source in this repo. A thin adapter (`packages/aztec-runtime/src/account/nulo-account.ts`, class `NuloAccount`) wraps it:
+The wallet uses the upstream `@aztec-labs/accounts/schnorr` account contract — there is no custom Noir source in this repo. A thin adapter (`packages/aztec-runtime/src/account/nulo-account.ts`, class `NuloAccount`) wraps it:
 
 - Derives the Schnorr signing key via upstream `deriveSigningKey(secret)` (currently uses `DomainSeparator.IVSK_M`; upstream has an open TODO to replace this — see `AztecProtocol/aztec-packages#5837`).
 - Uses `DefaultAccountEntrypoint` for app-payload encoding and authwit signing.
@@ -210,7 +210,7 @@ The wallet uses the upstream `@aztec/accounts/schnorr` account contract — ther
 - Recursively chunks payloads with more than 5 calls: each chunk is wrapped through `entrypoint.wrapExecutionPayload()` so every nesting layer gets its own outer-authwit hash.
 - Pins the instantiation salt to `Fr.ZERO` for deterministic address recreation from seed + index.
 
-The on-chain class is whatever `SchnorrAccountContractArtifact` maps to in the pinned `@aztec/accounts` release.
+The on-chain class is whatever `SchnorrAccountContractArtifact` maps to in the pinned `@aztec-labs/accounts` release.
 
 ## 12. Fee-payment model
 

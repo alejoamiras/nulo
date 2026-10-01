@@ -3,7 +3,7 @@
  *
  * ## Purpose
  *
- * This module bridges the `@aztec/wallet-sdk` communication protocol with the
+ * This module bridges the `@aztec-labs/wallet-sdk` communication protocol with the
  * extension's existing service layer. When a dApp sends a wallet method call
  * (e.g. `sendTx`, `simulateTx`, `registerToken`) over the wallet-sdk encrypted
  * channel, the BackgroundConnectionHandler decrypts it and delivers a

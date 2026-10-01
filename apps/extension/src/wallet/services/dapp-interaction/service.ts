@@ -1,4 +1,4 @@
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"

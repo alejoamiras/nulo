@@ -14,11 +14,11 @@
  * `apps/extension/tests/COMPOSITION-TESTS.md`.
  */
 import { describe, expect, test, vi } from "vitest"
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import { TokenContractArtifact } from "@aztec-labs/noir-contracts.js/Token"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"

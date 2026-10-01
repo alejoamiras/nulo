@@ -11,9 +11,9 @@
  * The JSON→artifact interpretation (`loadContractArtifact`) and the class-id hash computation
  * remain upstream code: the class-id pin is a TRIPWIRE for that path, not a freeze of it.
  */
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { loadContractArtifact } from "@aztec/stdlib/abi"
-import type { NoirCompiledContract } from "@aztec/stdlib/noir"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { NoirCompiledContract } from "@aztec-labs/stdlib/noir"
 import SchnorrAccountJson from "./artifacts/SchnorrAccount.json"
 
 /** sha256 of the vendored `artifacts/SchnorrAccount.json` bytes. */

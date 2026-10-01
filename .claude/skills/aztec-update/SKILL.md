@@ -37,9 +37,9 @@ Do not start Phase 1 before the answer. Mid-run surprises that change the shape 
 
 **The pin surface** — miss one and you get a mixed old/new set:
 - `@aztec/*` exact pins across the workspace package.json files (`rg '"@aztec/' apps/*/package.json packages/*/package.json`). `@aztec/viem` is versioned independently — leave it.
-- **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line. Bump it WITH the `@aztec` line: the page-side client sends the workspace `@aztec/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
+- **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line. Bump it WITH the `@aztec` line: the page-side client sends the workspace `@aztec-labs/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
 - **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — HELD at 5.0.1 on a deliberate split line (`UPDATE.md`, `implementations-plan/aztec-5.2.0-js-line/`), enforced by `scripts/aztec-hold-residue-check.ts`. Moving them is its own decision: the PrivateFPC artifact the wallet derives from ships in `private-fee-juice`, and `aztec-standards` fixes the Token class every default seed and user-added standards token runs (`default-tokens.test.ts` pins the two together).
-- **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tag, the root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
+- **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tag, the root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec-labs/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus `@alejoamiras/presto` (and the held pair above whenever it moves too). They are needed whenever `bun install` RESOLVES the new line: once `bun.lock` is final, delete them again in the same PR and prove it with `bun install --frozen-lockfile --force` (a frozen install never re-gates). For the following 7 days, any `package.json` edit in a workspace that reaches the new line (`apps/extension`, `packages/aztec-runtime`, …) re-gates it and fails the install — so land the bump's dependency changes in the bump PR, and for a stray later edit re-add the excludes locally without committing them. Keep a dated exclude across PRs only when a later PR of the same bump must re-resolve.
 
@@ -103,7 +103,7 @@ re-pinned to match); `scripts/aztec-hold-residue-check.ts` (the lockfile ritual)
 **The two execution canaries (MANDATORY, every `@aztec/*` bump PR)**: run
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`
 **prover-ON** before merge, **on Chrome and again under `NULO_E2E_BROWSER=firefox`** (geckodriver on
-PATH; `apps/extension/tests/e2e/FIREFOX.md`). First `aztec-up install <new @aztec/aztec.js pin>`: the
+PATH; `apps/extension/tests/e2e/FIREFOX.md`). First `aztec-up install <new @aztec-labs/aztec.js pin>`: the
 sandbox boots only from the complete pinned toolchain under `~/.aztec/versions/<pin>` (CLI,
 `aztec-anvil`, `internal-bin/{forge,anvil}`), and `e2e:agent` fails closed without it. LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
@@ -162,7 +162,7 @@ Then Branch A's delivery gates.
   must move WITH the line; holding it is not an option. Packages that declare exact-version
   PEERS (private-fee-juice) or nothing at all (standards) re-bind to the workspace line and are
   safe to hold. Gate: `scripts/aztec-hold-residue-check.ts`.
-- **Upstream recompiles `@aztec/accounts` artifacts on toolchain changes** (5.2.0 moved
+- **Upstream recompiles `@aztec-labs/accounts` artifacts on toolchain changes** (5.2.0 moved
   SchnorrAccount's class id, −3,892 bytes). Production is immune — addresses come from the
   vendored frozen artifact — but any E2E fixture that builds accounts through
   `EmbeddedWallet.createSchnorrAccount` will fund one address and deploy another. Fix at the

@@ -1,5 +1,5 @@
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { Gas } from "@aztec/stdlib/gas"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { Gas } from "@aztec-labs/stdlib/gas"
 import type { Action } from "@/wallet/services/execution/spec"
 import type { FpcInfo } from "../spec"
 import type { IFpcHandler } from "."

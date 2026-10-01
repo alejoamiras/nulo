@@ -1,9 +1,9 @@
-import { getPXEConfig, type PXEConfig } from "@aztec/pxe/config"
-import { createPXE, type PXE } from "@aztec/pxe/client/bundle"
-import { createLogger } from "@aztec/foundation/log"
-import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
-import { WASMSimulator } from "@aztec/simulator/client"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { getPXEConfig, type PXEConfig } from "@aztec-labs/pxe/config"
+import { createPXE, type PXE } from "@aztec-labs/pxe/client/bundle"
+import { createLogger } from "@aztec-labs/foundation/log"
+import type { AztecSQLiteOPFSStore } from "@aztec-labs/kv-store/sqlite-opfs"
+import { WASMSimulator } from "@aztec-labs/simulator/client"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { PrestoProver, type PrestoPhase } from "@alejoamiras/presto"
 import type { ProveBackend } from "@nulo/wallet-core/jobs"
 import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
@@ -116,7 +116,7 @@ export class ChainRuntime {
 	/**
 	 * Shut down the PXE, then close the owned store. `pxe.stop()` drains the
 	 * job queue rather than aborting in-flight work (verified against
-	 * upstream @aztec/pxe); so correctness across profile switch comes from
+	 * upstream @aztec-labs/pxe); so correctness across profile switch comes from
 	 * the ReadWriteGuard's drain-on-write semantics, not teardown. Closing
 	 * the store releases the SAH-pool's exclusive directory lock — REQUIRED
 	 * before the same (profile, chain) can be reopened or its directory
@@ -213,10 +213,10 @@ export class ProductionPxeFactory implements PxeFactory {
 	): Promise<ChainRuntime> {
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
-		// `@aztec/simulator/client` at runtime. The dynamic-import fallback
+		// `@aztec-labs/simulator/client` at runtime. The dynamic-import fallback
 		// (via the SDK's `createLazySimulator`) fails under MV3
 		// offscreen-document conditions even though the chunk is bundled,
-		// throwing "No simulator provided and @aztec/simulator/client
+		// throwing "No simulator provided and @aztec-labs/simulator/client
 		// could not be loaded." during `proveTx`. Static import makes the
 		// simulator part of the main bundle graph and avoids that path.
 		const simulator = new WASMSimulator()

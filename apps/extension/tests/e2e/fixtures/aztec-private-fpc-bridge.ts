@@ -12,17 +12,17 @@
  *   secret = poseidon2_hash_with_separator([salt, claimer], DOM_SEP)
  *   secretHash = computeSecretHash(secret)
  */
-import { isL1ToL2MessageReady } from "@aztec/aztec.js/messaging"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { L1FeeJuicePortalManager } from "@aztec/aztec.js/ethereum"
-import { createExtendedL1Client } from "@aztec/ethereum/client"
-import { extractEvent } from "@aztec/ethereum/utils"
-import { FeeJuicePortalAbi } from "@aztec/l1-artifacts/FeeJuicePortalAbi"
-import { computeSecretHash } from "@aztec/stdlib/hash"
-import { poseidon2HashBytes, poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
-import { createLogger } from "@aztec/foundation/log"
+import { isL1ToL2MessageReady } from "@aztec-labs/aztec.js/messaging"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
+import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { L1FeeJuicePortalManager } from "@aztec-labs/aztec.js/ethereum"
+import { createExtendedL1Client } from "@aztec-labs/ethereum/client"
+import { extractEvent } from "@aztec-labs/ethereum/utils"
+import { FeeJuicePortalAbi } from "@aztec-foundation/l1-artifacts/FeeJuicePortalAbi"
+import { computeSecretHash } from "@aztec-labs/stdlib/hash"
+import { poseidon2HashBytes, poseidon2HashWithSeparator } from "@aztec-labs/foundation/crypto/sync"
+import { createLogger } from "@aztec-labs/foundation/log"
 import { getContract } from "@aztec/viem"
 
 /**

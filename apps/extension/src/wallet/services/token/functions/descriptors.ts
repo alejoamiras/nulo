@@ -1,6 +1,6 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type FunctionAbi, FunctionType, type StructType } from "@aztec/stdlib/abi"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type FunctionAbi, FunctionType, type StructType } from "@aztec-labs/stdlib/abi"
 import type { TokenFnDescriptor, TokenFnKind } from "./types"
 
 /**

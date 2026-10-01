@@ -1,7 +1,7 @@
 /**
  * Wallet-SDK Background Integration
  *
- * Sets up the `BackgroundConnectionHandler` from `@aztec/wallet-sdk` in the
+ * Sets up the `BackgroundConnectionHandler` from `@aztec-labs/wallet-sdk` in the
  * extension's service worker. This replaces the old `RpcService` + content
  * script proxy system with the standardized wallet-sdk discovery / key-exchange
  * / encrypted-channel protocol.
@@ -33,8 +33,8 @@ import {
 	type BackgroundTransport,
 	type PendingDiscovery,
 	type ActiveSession,
-} from "@aztec/wallet-sdk/extension/handlers"
-import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
+} from "@aztec-labs/wallet-sdk/extension/handlers"
+import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec-labs/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"
 import { type ContentScriptMessageEnvelope, isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { sessionDisconnectedMessage, sessionKnownTo, staleSessionVerdict } from "./stale-session"
@@ -1207,7 +1207,7 @@ export async function handleWalletMessage(
 	} catch (error) {
 		// Structured EIP-1193-aligned envelope for recognised WalletError subclasses
 		// (JobCancelledError → 4001, CapabilityNotGrantedError → 4100). Upstream
-		// `@aztec/wallet-sdk` collapses `response.error` to
+		// `@aztec-labs/wallet-sdk` collapses `response.error` to
 		// `new Error(JSON.stringify(error))` at `extension_wallet.ts:181`, so dApps
 		// that want to discriminate parse the message — see the wallet-bridge
 		// README for the recipe. Mapping lives in `error-envelope.ts` so it can be

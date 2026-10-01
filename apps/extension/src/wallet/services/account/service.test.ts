@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"

@@ -22,15 +22,15 @@ luxon
 comlink
 
 # hand-verified overrides
-@aztec/aztec.js
-@aztec/pxe
-@aztec/stdlib
-@aztec/foundation
-@aztec/wallet-sdk
-@aztec/bb.js
-@aztec/noir-acvm_js
-@aztec/noir-noirc_abi
-@aztec/sqlite3mc-wasm
+@aztec-labs/aztec.js
+@aztec-labs/pxe
+@aztec-labs/stdlib
+@aztec-labs/foundation
+@aztec-labs/wallet-sdk
+@aztec-foundation/bb.js
+@aztec-foundation/noir-acvm_js
+@aztec-foundation/noir-noirc_abi
+@aztec-labs/sqlite3mc-wasm
 hash.js
 
 # vendored inside another package

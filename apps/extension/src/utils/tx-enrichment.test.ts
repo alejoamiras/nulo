@@ -1,5 +1,5 @@
-import { FEE_JUICE_ADDRESS } from "@aztec/constants"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { FEE_JUICE_ADDRESS } from "@aztec-labs/constants"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { describe, expect, test } from "vitest"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import {

@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { type AbiType, type ContractArtifact, type FunctionAbi, FunctionType, encodeArguments } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { type AbiType, type ContractArtifact, type FunctionAbi, FunctionType, encodeArguments } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { decodeCallForDisplay } from "./call-decoder"
 
 const ADDRESS: AbiType = {

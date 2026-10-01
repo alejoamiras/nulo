@@ -12,8 +12,8 @@ import { describe, expect, test } from "vitest"
 const require = createRequire(import.meta.url)
 
 describe("stale-anchor message sources", () => {
-	test("@aztec/pxe still throws the not-yet-synchronized diagnostic from its anchor block store", () => {
-		const bundleEntry = require.resolve("@aztec/pxe/client/bundle")
+	test("@aztec-labs/pxe still throws the not-yet-synchronized diagnostic from its anchor block store", () => {
+		const bundleEntry = require.resolve("@aztec-labs/pxe/client/bundle")
 		const dest = join(dirname(bundleEntry), "..", "..", "..")
 		const source = readFileSync(join(dest, "storage", "anchor_block_store", "anchor_block_store.js"), "utf8")
 		expect(source).toContain("not-yet-synchronized PXE")
@@ -21,7 +21,7 @@ describe("stale-anchor message sources", () => {
 
 	test("the HandshakeRegistry artifact still carries the RewindableRegister assertion", () => {
 		// The package's `./artifacts/*` export appends `.json` itself.
-		const artifactPath = require.resolve("@aztec/noir-contracts.js/artifacts/handshake_registry_contract-HandshakeRegistry")
+		const artifactPath = require.resolve("@aztec-labs/noir-contracts.js/artifacts/handshake_registry_contract-HandshakeRegistry")
 		expect(readFileSync(artifactPath, "utf8")).toContain("RewindableRegister write originates behind")
 	})
 })

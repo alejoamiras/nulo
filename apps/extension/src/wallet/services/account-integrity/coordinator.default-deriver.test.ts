@@ -8,7 +8,7 @@
  * DEFAULT routes through `deriveAccountSeed` — the shared function whose values the node-env
  * KATs in aztec-runtime pin — with the ROW-CARRIED `l1ChainId`, never the composite chainId.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
 const deriveCalls: Array<{ l1ChainId: number; type: number; index: number }> = []

@@ -3,7 +3,7 @@
  * creation with cap + pre-auth gates.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import type { WalletMessage } from "@aztec/wallet-sdk/types"
+import type { WalletMessage } from "@aztec-labs/wallet-sdk/types"
 import { ScopeViolationError } from "@nulo/extension-messaging/errors"
 import { MAX_QUEUED_GLOBAL, MAX_QUEUED_PER_SESSION, failQueuedForError, tryCreateQueuedJournal } from "./queued-journal"
 import { makeAccountStub, makeDappSessionStub, makeDeps, makeSession } from "./queued-journal.fixtures"

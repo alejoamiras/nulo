@@ -3,7 +3,7 @@
  * the security-critical verify path is unit-testable without the whole SW service
  * graph. See `session-established.test.ts` for the B-06 / B-13 pins.
  */
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { WindowPort } from "@nulo/wallet-core/ports"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"

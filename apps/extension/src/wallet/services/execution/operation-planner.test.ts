@@ -10,10 +10,10 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import type { ExecutionPayload } from "@aztec/stdlib/tx"
+import type { ExecutionPayload } from "@aztec-labs/stdlib/tx"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { TokenService, Token } from "@/wallet/services/token/service"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { AztecSendTxOperation, Operation, SendTransactionOperation } from "./spec"
 

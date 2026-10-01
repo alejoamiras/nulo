@@ -1,7 +1,7 @@
 <script setup>
 /** Services */
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 
 /** Services (prices) */
 import { PriceServiceClient } from "@/wallet/services/price/client"

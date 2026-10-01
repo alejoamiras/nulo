@@ -17,7 +17,7 @@
  *     fee calls (fee mode is encoded in entrypoint args).
  *
  *   - `runFastPath`: orchestrates the optimized public sim against the
- *     node (`@aztec/wallet-sdk/base-wallet`'s `simulateViaNode`) in
+ *     node (`@aztec-labs/wallet-sdk/base-wallet`'s `simulateViaNode`) in
  *     parallel with the standard arm, then merges via upstream
  *     `buildMergedSimulationResult`.
  *
@@ -32,17 +32,17 @@
  * doubly-nested execution tree from `DefaultMultiCallEntrypoint` is not
  * expressible by upstream's flat `appCallOffset` model.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { FunctionCall, FunctionType, type FunctionAbi } from "@aztec/stdlib/abi"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
-import { SimulationError } from "@aztec/stdlib/errors"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import type { SimulateOptions } from "@aztec/aztec.js/wallet"
-import { TxSimulationResultWithAppOffset } from "@aztec/aztec.js/wallet"
-import type { ContractNameResolver } from "@aztec/pxe/client/lazy"
-import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { FunctionCall, FunctionType, type FunctionAbi } from "@aztec-labs/stdlib/abi"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import type { SimulateOptions } from "@aztec-labs/aztec.js/wallet"
+import { TxSimulationResultWithAppOffset } from "@aztec-labs/aztec.js/wallet"
+import type { ContractNameResolver } from "@aztec-labs/pxe/client/lazy"
+import { buildMergedSimulationResult, simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
@@ -91,7 +91,7 @@ export function rehydrateOptimizablePrefix(
 	if (!Array.isArray(calls) || calls.length === 0) return null
 
 	// Data-only scan — `FunctionType` is string-backed upstream
-	// (`@aztec/stdlib/abi/abi.ts:166-170`) so `=== FunctionType.PUBLIC`
+	// (`@aztec-labs/stdlib/abi/abi.ts:166-170`) so `=== FunctionType.PUBLIC`
 	// survives JSON round-trip without rehydrating the call.
 	let boundary = 0
 	for (const c of calls) {

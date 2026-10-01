@@ -38,7 +38,7 @@ export const PACKAGES: readonly PublishedPackage[] = [
 	{
 		dir: "wallet-sdk-schema-patch",
 		name: "@alejoamiras/nulo-wallet-sdk-schema-patch",
-		description: "Adds the Nulo wallet's custom RPC methods to @aztec/aztec.js's WalletSchema.",
+		description: "Adds the Nulo wallet's custom RPC methods to @aztec-labs/aztec.js's WalletSchema.",
 		target: "browser",
 		entries: [
 			{ subpath: "./apply", source: "src/apply.ts" },

@@ -16,9 +16,9 @@
  * fixture artifacts directly.
  */
 
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
 
 export type ClassIdVerifyLogger = (level: "warn" | "debug", msg: string, ...rest: unknown[]) => void
 

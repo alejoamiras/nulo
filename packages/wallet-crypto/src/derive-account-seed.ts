@@ -12,8 +12,8 @@
  * storage-scoping chainId — and never a silent default: a missing or non-canonical value must
  * fail account derivation, not collapse chain separation onto 0.
  */
-import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { poseidon2HashWithSeparator } from "@aztec-labs/foundation/crypto/poseidon"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { NULO_ACCOUNT_SEED_SEP } from "./nulo-separators"
 
 export function assertCanonicalL1ChainId(l1ChainId: number): void {

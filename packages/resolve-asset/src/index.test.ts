@@ -16,17 +16,17 @@ describe("resolvePackageRoot (search-path scan — exports maps deliberately ign
 	})
 
 	test("patched noir package whose exports map blocks ./package.json", () => {
-		const root = resolvePackageRoot("@aztec/noir-noirc_abi", { from: fromExtension })
+		const root = resolvePackageRoot("@aztec-foundation/noir-noirc_abi", { from: fromExtension })
 		expect(existsSync(`${root}/nodejs/noirc_abi_wasm.js`)).toBe(true)
 	})
 
-	test("package with NO '.' export needs no anchor hints (@aztec/pxe)", () => {
-		const root = resolvePackageRoot("@aztec/pxe", { from: fromAztecRuntime })
+	test("package with NO '.' export needs no anchor hints (@aztec-labs/pxe)", () => {
+		const root = resolvePackageRoot("@aztec-labs/pxe", { from: fromAztecRuntime })
 		expect(existsSync(`${root}/dest/storage/metadata.js`)).toBe(true)
 	})
 
-	test("import-condition-only '.' needs no anchor hints (@aztec/sqlite3mc-wasm)", () => {
-		const root = resolvePackageRoot("@aztec/sqlite3mc-wasm", { from: fromExtension })
+	test("import-condition-only '.' needs no anchor hints (@aztec-labs/sqlite3mc-wasm)", () => {
+		const root = resolvePackageRoot("@aztec-labs/sqlite3mc-wasm", { from: fromExtension })
 		expect(existsSync(`${root}/vendor/jswasm/sqlite3-opfs-async-proxy.js`)).toBe(true)
 	})
 
@@ -54,7 +54,7 @@ describe("resolvePackageAsset", () => {
 
 describe("resolveExportedAsset", () => {
 	test("condition-less exported subpath resolves directly (sqlite3mc wasm)", () => {
-		const wasm = resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
+		const wasm = resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
 			from: fromExtension,
 		})
 		expect(existsSync(wasm)).toBe(true)
@@ -64,19 +64,19 @@ describe("resolveExportedAsset", () => {
 
 describe("assertPackageIdentity", () => {
 	test("verifies name + exact version and returns realpath evidence", () => {
-		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", { from: fromExtension, expectVersion: "5.2.0" })
+		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", { from: fromExtension, expectVersion: "5.2.0" })
 		expect(report.realRoot).toBe(realpathSync(report.root))
 		expect(report.version).toBe("5.2.0")
 	})
 
 	test("wrong expectVersion throws with both versions in the message", () => {
-		expect(() => assertPackageIdentity("@aztec/sqlite3mc-wasm", { from: fromExtension, expectVersion: "9.9.9" })).toThrow(
+		expect(() => assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", { from: fromExtension, expectVersion: "9.9.9" })).toThrow(
 			/5\.2\.0.*9\.9\.9/,
 		)
 	})
 
 	test("mustContain verifies the patched noir exports marker (the patch's own content)", () => {
-		const report = assertPackageIdentity("@aztec/noir-noirc_abi", {
+		const report = assertPackageIdentity("@aztec-foundation/noir-noirc_abi", {
 			from: fromExtension,
 			mustContain: { file: "package.json", marker: '"node": "./nodejs/noirc_abi_wasm.js"' },
 		})
@@ -85,7 +85,7 @@ describe("assertPackageIdentity", () => {
 
 	test("mustContain with an absent marker throws", () => {
 		expect(() =>
-			assertPackageIdentity("@aztec/noir-noirc_abi", {
+			assertPackageIdentity("@aztec-foundation/noir-noirc_abi", {
 				from: fromExtension,
 				mustContain: { file: "package.json", marker: "THIS-MARKER-DOES-NOT-EXIST" },
 			}),
@@ -93,10 +93,10 @@ describe("assertPackageIdentity", () => {
 	})
 
 	test("lockstep: direct extension resolution and the kv-store two-hop realpath to the SAME copy", () => {
-		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", {
+		const report = assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 			from: fromExtension,
 			expectVersion: "5.2.0",
-			lockstepVia: "@aztec/kv-store",
+			lockstepVia: "@aztec-labs/kv-store",
 		})
 		expect(report.lockstepRealRoot).toBe(report.realRoot)
 	})

@@ -12,7 +12,7 @@
  * A session another tab holds is answered exactly like an absent one: a page that names ids it
  * never owned learns nothing about which are live, and the tab that owns one is never written to.
  */
-import { type BackgroundMessage, MessageOrigin } from "@aztec/wallet-sdk/extension/handlers"
+import { type BackgroundMessage, MessageOrigin } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { ContentScriptMessageEnvelope } from "./content-script-validator"
 
 /** `InternalMessageType.SESSION_DISCONNECTED`; the SDK's package entry does not export the enum. */

@@ -1,4 +1,4 @@
-import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
+import { hashToEmoji } from "@aztec-labs/wallet-sdk/crypto"
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"

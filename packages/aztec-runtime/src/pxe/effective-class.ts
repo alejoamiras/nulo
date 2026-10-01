@@ -13,7 +13,7 @@
  *    registers today (own accounts, tokens, FPCs — none upgradeable) and is the documented residual
  *    for a third-party contract upgraded AFTER registration; upgrade support is a filed follow-up.
  */
-import type { ContractInstancePreimageWithAddress, ContractInstanceWithAddress } from "@aztec/stdlib/contract"
+import type { ContractInstancePreimageWithAddress, ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
 
 /**
  * A DEFINITIVE node answer ("this contract is upgraded"), not a transient failure. Callers that

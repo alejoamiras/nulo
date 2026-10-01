@@ -311,7 +311,7 @@ describe("GasBalanceCard — null public balance (unknown wire slot)", () => {
 	test("optimistic deduction is skipped on a NULL balance — no silent BigInt throw", async () => {
 		// BigInt(null) throws; EventHandler swallows it, so pre-fix this was a
 		// silent no-op regression on an entirely untested path.
-		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		const { AccountFeePaymentMethodOptions } = await import("@aztec-labs/entrypoints/account")
 		mockQuotes = {}
 		mockGetGasBalances = async () => ({ publicFeeJuice: null, privateFeeJuice: null })
 		const w = await mountCard()
@@ -329,7 +329,7 @@ describe("GasBalanceCard — null public balance (unknown wire slot)", () => {
 
 describe("GasBalanceCard — identity switch", () => {
 	test("an account switch re-leases the store key, resets the overlay, and fetches the new identity", async () => {
-		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		const { AccountFeePaymentMethodOptions } = await import("@aztec-labs/entrypoints/account")
 		mockQuotes = {}
 		mockGetGasBalances = async () => ({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
 		const w = await mountCard()
@@ -355,7 +355,7 @@ describe("GasBalanceCard — optimistic-deduction overlay reset (D9)", () => {
 	const FJ = (n: bigint) => ({ publicFeeJuice: (n * 10n ** 18n).toString(), privateFeeJuice: null })
 
 	async function mountWithDeduction() {
-		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		const { AccountFeePaymentMethodOptions } = await import("@aztec-labs/entrypoints/account")
 		const { useBalancesStore } = await import("@/stores/balances.store")
 		mockQuotes = {}
 		mockGetGasBalances = async () => FJ(42n)

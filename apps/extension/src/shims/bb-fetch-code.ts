@@ -1,5 +1,5 @@
 /**
- * Replacement for @aztec/bb.js fetchCode browser module.
+ * Replacement for @aztec-foundation/bb.js fetchCode browser module.
  *
  * The original uses dynamic import() to load embedded WASM data URIs as a fallback
  * when wasmPath is not provided. Chrome MV3 service workers forbid import() at runtime.
@@ -7,7 +7,7 @@
  * This shim replaces the import() fallback with a fetch() to the known WASM asset path.
  * The WASM files are emitted by the `bb-wasm-emit` vite plugin (see
  * `scripts/extract-bb-wasm.ts`) into `dist/<browser>/assets/` from the installed
- * `@aztec/bb.js` package — so bumping the npm dep auto-updates them.
+ * `@aztec-foundation/bb.js` package — so bumping the npm dep auto-updates them.
  */
 // @ts-expect-error — pako has no types in this context
 import pako from "pako"

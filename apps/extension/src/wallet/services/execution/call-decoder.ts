@@ -6,7 +6,7 @@
  * decoded here reaches execution.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import {
 	type AbiDecoded,
 	type AbiType,
@@ -19,7 +19,7 @@ import {
 	isFunctionSelectorStruct,
 	isOptionStruct,
 	isWrappedFieldStruct,
-} from "@aztec/stdlib/abi"
+} from "@aztec-labs/stdlib/abi"
 import type { DecodedCall, DecodedValue, DisplayCallInput } from "@nulo/wallet-bridge"
 import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 

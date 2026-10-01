@@ -7,7 +7,7 @@ import { PACKAGES, type PublishedPackage } from "./packages"
 import { packageNameOf, REPO_ROOT, STAGING_MARKER, stagePackage } from "./stage"
 
 // Nothing that loads @aztec/* runs in this process. Under `bun test` every module sees a bare
-// `expect`, and @aztec/foundation calls `expect.addEqualityTesters` at load when it does; Bun's
+// `expect`, and @aztec-labs/foundation calls `expect.addEqualityTesters` at load when it does; Bun's
 // `expect` has no such method, and only a transpile cached by an earlier non-test run hides that.
 // Such checks run in `bun` or `node` child processes instead (CHECK_SCRIPT, CROSS_SCRIPT).
 
@@ -32,10 +32,10 @@ const ALLOWED_FILES: Record<string, string[]> = {
  * pass the vectors while handing consumers a second `Fr` class that no identity check can see.
  */
 const BUNDLE_IMPORTS: Record<string, string[]> = {
-	"dist/public.js": ["@aztec/accounts/utils", "@aztec/foundation/crypto/sha512"],
+	"dist/public.js": ["@aztec-labs/accounts/utils", "@aztec-labs/foundation/crypto/sha512"],
 	"dist/index.js": ["node:fs", "node:module", "node:path", "node:url"],
-	"dist/apply.js": ["@aztec/stdlib/schemas", "zod"],
-	"dist/register.js": ["./apply.js", "@aztec/aztec.js/wallet"],
+	"dist/apply.js": ["@aztec-labs/stdlib/schemas", "zod"],
+	"dist/register.js": ["./apply.js", "@aztec-labs/aztec.js/wallet"],
 }
 
 /** A few times today's sizes, far below what an inlined `@aztec/*` module would add. */
@@ -137,8 +137,8 @@ function buildFixture(packed: Packed[]): string {
 }
 
 /** Imports every export by package name and prints what it computed, under whichever runtime runs it. */
-const CHECK_SCRIPT = `import { Fr } from "@aztec/foundation/curves/bn254"
-import { WalletSchema } from "@aztec/aztec.js/wallet"
+const CHECK_SCRIPT = `import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { WalletSchema } from "@aztec-labs/aztec.js/wallet"
 import { EncryptionKey, deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "@alejoamiras/nulo-wallet-crypto"
 import * as resolveAsset from "@alejoamiras/nulo-resolve-asset"
 import { applyNuloSchemaPatch } from "@alejoamiras/nulo-wallet-sdk-schema-patch/apply"
@@ -208,8 +208,8 @@ process.exit(0)
 `
 
 /** Every export used at its declared type. `IsAny` catches an export typed `any`; the lib-check run catches an unresolved import in a declaration. */
-const CONSUMER_TS = `import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+const CONSUMER_TS = `import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import { EncryptionKey, deriveNuloAccountKeys, deriveSigningKeyFromSeed, type Passhash } from "@alejoamiras/nulo-wallet-crypto"
 import {
 	assertPackageIdentity,
@@ -354,8 +354,8 @@ describe("staged packages", () => {
 				expect(files).toContain(target.replace(/^\.\//, ""))
 			}
 		}
-		expect(byDir("wallet-crypto").manifest.peerDependencies).toEqual({ "@aztec/accounts": "5.2.0", "@aztec/foundation": "5.2.0" })
-		expect(byDir("wallet-sdk-schema-patch").manifest.peerDependencies).toEqual({ "@aztec/aztec.js": "5.2.0", "@aztec/stdlib": "5.2.0" })
+		expect(byDir("wallet-crypto").manifest.peerDependencies).toEqual({ "@aztec-labs/accounts": "5.2.0", "@aztec-labs/foundation": "5.2.0" })
+		expect(byDir("wallet-sdk-schema-patch").manifest.peerDependencies).toEqual({ "@aztec-labs/aztec.js": "5.2.0", "@aztec-labs/stdlib": "5.2.0" })
 		expect(byDir("wallet-sdk-schema-patch").manifest.dependencies).toEqual({
 			zod: workspaceManifest("wallet-sdk-schema-patch").dependencies?.zod,
 		})

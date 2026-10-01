@@ -7,11 +7,11 @@
  * slot layout, the drift-assert-before-resolution ordering, cap-gate hash
  * order, and the result's provenance fields.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { encodeArguments, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { HashedValues } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { encodeArguments, FunctionSelector, FunctionType } from "@aztec-labs/stdlib/abi"
+import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { HashedValues } from "@aztec-labs/stdlib/tx"
 import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { getAuthRegistryAddress, getSetAuthorizedFn } from "@/wallet/utils/auth-registry"

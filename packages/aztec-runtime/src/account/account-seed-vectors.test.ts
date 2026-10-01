@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { deriveAccountSeed, deriveMasterFromMnemonic } from "@nulo/wallet-crypto"
 import { describe, expect, test } from "vitest"
