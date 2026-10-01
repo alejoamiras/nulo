@@ -8,8 +8,8 @@ import { NuloAccount } from "./nulo-account"
 
 /**
  * KATs for the two NULO-ACCOUNT-KDF v2 stages the v1 test suite never pinned:
- * the account-seed fan-out (`deriveAccountSeed` — the formula whose silent duplication/drift
- * the R1 audits flagged as the bricking class) and the FULL words→address chain. Vectors are
+ * the account-seed fan-out (`deriveAccountSeed`, the formula whose silent duplication or drift
+ * bricks accounts) and the FULL words→address chain. Vectors are
  * REFERENCE-GENERATED (`implementations-plan/key-model-v2/reference/derive-vectors.ts`,
  * published 5.0.1 tarballs + node:crypto PBKDF2); the address is the nulo-v6 regime's, from the
  * same script on the published 6.0.0-rc.1 packages (`reference/nulo-v6/`). Never re-pin from the

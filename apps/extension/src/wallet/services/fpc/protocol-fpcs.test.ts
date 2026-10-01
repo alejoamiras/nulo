@@ -6,9 +6,10 @@ import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { describe, expect, test } from "vitest"
 import { derivePrivateFpc, deriveSponsoredFpc } from "./protocol-fpcs"
 
-/** The PrivateFPC's canonical deployment; nothing in it is network-specific. A red run means the
- *  artifact, the salt or upstream's derivation moved: fix it against the deployed contract, never
- *  by re-pinning these literals alone. */
+/** The PrivateFPC's canonical address, the same on every network: the reviewed artifact under this
+ *  salt and deployer. The contract is initializerless and private-only, so no deployment exists to
+ *  check against, and unleashed's manifest names this address. A red run means the artifact, the
+ *  salt or upstream's derivation moved: review the new artifact, never re-pin these literals alone. */
 const CANONICAL_PRIVATE_FPC = {
 	salt: "0x0000000000000000000000000000000000000000000000000000000000000001",
 	deployer: "0x0000000000000000000000000000000000000000000000000000000000000000",
