@@ -9,7 +9,7 @@
 
 Remediate all 14 findings from the `/harden security max` run (`audit/security/2026-07-06-max/`) on the integration branch **`fix/harden-findings`**, as a sequence of independently-reviewable per-unit PRs, driven autonomously with Codex as the advisory tie-breaker.
 
-- **Source of truth for findings:** [`audit/security/2026-07-06-max/findings/verified.md`](../../audit/security/2026-07-06-max/findings/verified.md).
+- **Source of truth for findings:** [`audit/security/2026-07-06-max/findings/verified.md`](../../../audit/security/2026-07-06-max/findings/verified.md).
 - **Blueprint tier (campaign):** `mid`. Dual audit complete (codex + fable), both **conditional approve**; all conditions folded in below (see Decision ledger). Risky units A and L each get a **deep per-unit design pass** during execution.
 - **Autonomy:** fully autonomous to a finished set of PRs. Codex advisory; hard limits hold (no merge to `dev`/`main`/release, no publish/deploy, no scope-expansion).
 

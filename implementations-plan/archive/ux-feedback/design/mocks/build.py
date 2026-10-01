@@ -6,7 +6,7 @@ import re
 import pathlib
 
 HERE = pathlib.Path(__file__).parent
-REPO = HERE.resolve().parents[3]
+REPO = HERE.resolve().parents[4]
 FONTS = REPO / "packages/design/src/fonts"
 ICONS = REPO / "packages/design/src/internal/icons.json"
 

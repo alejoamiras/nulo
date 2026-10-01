@@ -13,7 +13,7 @@ repos: alejoamiras/nulo (this repo) · alejoamiras/unleashed (empty, public, pro
 
 ## Outcome
 
-- **Date**: 2026-09-28. **Status**: **delivered except P1**, which is the next ordinary `release: promote dev → main`, moved to [`follow-ups.md`](../follow-ups.md) with its gate. Nothing in it waits on unleashed or Cloudflare.
+- **Date**: 2026-09-28. **Status**: **delivered except P1**, which is the next ordinary `release: promote dev → main`, moved to [`follow-ups.md`](../../follow-ups.md) with its gate. Nothing in it waits on unleashed or Cloudflare.
 - **nulo**:
   - Stage 1 removal: #690, #691, #692.
   - N2 staged packages and the recipe: #697, #706; `@alejoamiras/nulo-*` 0.1.0 published with provenance.

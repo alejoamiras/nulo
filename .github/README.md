@@ -1,10 +1,10 @@
 # `.github/` — CI configuration
 
-This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan lives in [`../implementations-plan/ci-cd/`](../implementations-plan/ci-cd/) and links its audits by permalink.
+This directory holds the GitHub Actions wiring. The contributor-facing guide lives at [`../CI.md`](../CI.md); the original plan lives in [`../implementations-plan/archive/ci-cd/`](../implementations-plan/archive/ci-cd/) and links its audits by permalink.
 
 ## Status check matrix
 
-These `status` aggregators are what branch protection on `main` / `dev` requires. Branch protection matches the **produced check-run name**, which for a normal GitHub Actions job is its bare `name:` — there is no `Workflow / Status` form (that only exists for reusable `uses:` jobs). The old required contexts `Quality / Status` etc. were hand-typed phantoms that never matched a produced check, hanging every required gate `Expected` and forcing `--admin` on every merge; the aggregators were renamed to unique bare names and the required contexts re-pointed (2026-06-24 — see [`CI.md`](../CI.md#branch-protection) + [`../implementations-plan/required-check-mismatch/`](../implementations-plan/required-check-mismatch/)).
+These `status` aggregators are what branch protection on `main` / `dev` requires. Branch protection matches the **produced check-run name**, which for a normal GitHub Actions job is its bare `name:` — there is no `Workflow / Status` form (that only exists for reusable `uses:` jobs). The old required contexts `Quality / Status` etc. were hand-typed phantoms that never matched a produced check, hanging every required gate `Expected` and forcing `--admin` on every merge; the aggregators were renamed to unique bare names and the required contexts re-pointed (2026-06-24 — see [`CI.md`](../CI.md#branch-protection) + [`../implementations-plan/archive/required-check-mismatch/`](../implementations-plan/archive/required-check-mismatch/)).
 
 | Workflow | Required check-run | Required on | Runs when | What it checks |
 |---|---|---|---|---|

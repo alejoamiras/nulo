@@ -16,7 +16,7 @@ budget: recon 2 agents · foreign reviewer /codex high · fable leg on Fable 5.1
 
 # legal-terms — publish the Terms, record acceptance, ship the notices
 
-Closes release blockers 1–3 of [`legal/README.md`](../../legal/README.md) and the missing
+Closes release blockers 1–3 of [`legal/README.md`](../../../legal/README.md) and the missing
 third-party attribution found while answering blocker 4. Read [`recon.md`](recon.md) first; the
 design below is a consequence of its first section. The alternative shape is in
 [`competing-outline.md`](competing-outline.md); round-1 audits and their adjudication are in

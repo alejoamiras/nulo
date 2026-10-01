@@ -26,7 +26,7 @@ Tier: **B** (medium / contained feature work — one main plan + dual audit). Si
 
 ## Context
 
-The onboarding tab is a Vue app at `chrome-extension://<id>/src/onboarding/index.html`, mounted from [`packages/extension/src/onboarding/`](../../packages/extension/src/onboarding/). It is the first surface a new user sees. Six pages share an outer shell (`app.vue`) that renders the brand header + teleport anchors + `<RouterView>`. Each page owns its own `.page` CSS module class with a per-page `max-width`.
+The onboarding tab is a Vue app at `chrome-extension://<id>/src/onboarding/index.html`, mounted from [`packages/extension/src/onboarding/`](../../../packages/extension/src/onboarding/). It is the first surface a new user sees. Six pages share an outer shell (`app.vue`) that renders the brand header + teleport anchors + `<RouterView>`. Each page owns its own `.page` CSS module class with a per-page `max-width`.
 
 ### Current `.page` max-width map
 
@@ -68,7 +68,7 @@ Trade-off — `learn.vue`'s 3-card grid is narrower than today (inside the 640 p
 
 **Location** — `packages/extension/src/onboarding/components/OnboardingPage.vue`.
 
-Not under `src/components/` because it is onboarding-shell-specific (knows about the brand header padding in `app.vue` and the per-page top margin); not reused by the popup. The L0–L6 layer model in [`CLAUDE.md`](../../CLAUDE.md) governs `src/components/`, not `src/onboarding/components/` (the onboarding tab is a separate Vue mount).
+Not under `src/components/` because it is onboarding-shell-specific (knows about the brand header padding in `app.vue` and the per-page top margin); not reused by the popup. The L0–L6 layer model in [`CLAUDE.md`](../../../CLAUDE.md) governs `src/components/`, not `src/onboarding/components/` (the onboarding tab is a separate Vue mount).
 
 **API:**
 
@@ -216,9 +216,9 @@ Why `540 px` — inside the 640 px container the 3-card grid renders three ~213 
 | EDIT | `packages/extension/src/onboarding/pages/learn.vue` | Same + grid breakpoint → container query at 540 px |
 | EDIT | `packages/extension/src/onboarding/pages/accelerator.vue` | Same |
 | EDIT | `packages/extension/src/onboarding/pages/done.vue` | Same + `padding-top: 24px` on `.hero` to compensate for tighter page top margin |
-| EDIT | [`.github/workflows/pr-smoke-e2e.yml`](../../.github/workflows/pr-smoke-e2e.yml) | Add `packages/extension/src/onboarding/**` to the `smoke-surface` filter (so this PR + future onboarding work triggers smoke e2e automatically) |
+| EDIT | [`.github/workflows/pr-smoke-e2e.yml`](../../../.github/workflows/pr-smoke-e2e.yml) | Add `packages/extension/src/onboarding/**` to the `smoke-surface` filter (so this PR + future onboarding work triggers smoke e2e automatically) |
 
-Auto-import is wired: `packages/extension/vite.config.ts:174-177` registers `useComponents({ dirs: ["src/components", "src/onboarding/components"], dts: "src/types/components.d.ts" })`. `<OnboardingPage>` will be auto-imported in all 6 page templates without explicit imports. **Caveat for tests** — `packages/extension/vitest.config.ts` does NOT register `useComponents`; the `OnboardingPage.test.ts` file must `import OnboardingPage from "./OnboardingPage.vue"` explicitly and stub any auto-imported children via `global.stubs` per the [`CLAUDE.md`](../../CLAUDE.md) "Vue component test conventions" section.
+Auto-import is wired: `packages/extension/vite.config.ts:174-177` registers `useComponents({ dirs: ["src/components", "src/onboarding/components"], dts: "src/types/components.d.ts" })`. `<OnboardingPage>` will be auto-imported in all 6 page templates without explicit imports. **Caveat for tests** — `packages/extension/vitest.config.ts` does NOT register `useComponents`; the `OnboardingPage.test.ts` file must `import OnboardingPage from "./OnboardingPage.vue"` explicitly and stub any auto-imported children via `global.stubs` per the [`CLAUDE.md`](../../../CLAUDE.md) "Vue component test conventions" section.
 
 ## `<OnboardingPage>` test plan
 
@@ -231,7 +231,7 @@ Component coverage in `OnboardingPage.test.ts` — six cases, each load-bearing 
 5. **Default slot renders** — passed slot content (a dummy `<span data-testid="child">payload</span>`) appears inside the root.
 6. **Root element `tagName === 'DIV'`** — locks the a11y decision. If a future refactor swaps in `<main>` / `<section>` / `<article>`, this test fails immediately and forces the refactorer to revisit the landmark hierarchy.
 
-Six cases is below the "≥10 for composites" guideline in [`CLAUDE.md`](../../CLAUDE.md), but `OnboardingPage` is a slot-only layout shell with a 2-prop surface — there is no behavior to exercise beyond what's listed. Adding bulk cases would dilute, not strengthen, the suite. Document the rationale at the top of the test file.
+Six cases is below the "≥10 for composites" guideline in [`CLAUDE.md`](../../../CLAUDE.md), but `OnboardingPage` is a slot-only layout shell with a 2-prop surface — there is no behavior to exercise beyond what's listed. Adding bulk cases would dilute, not strengthen, the suite. Document the rationale at the top of the test file.
 
 **Test-file imports** — vitest does NOT register `useComponents`, so the file uses an explicit `import OnboardingPage from "./OnboardingPage.vue"` at the top. No child components are used in test (only a dummy slot payload), so no `global.stubs` needed.
 
@@ -266,7 +266,7 @@ This is a CSS / layout refactor with no surface that handles secrets, no new net
 | **CSS injection** | None. No user-input interpolation into styles. Width values are static literals. |
 | **Clickjacking** | The onboarding tab is at `chrome-extension://<id>/...`; X-Frame-Options is moot for extension URLs (they can't be framed by web content under MV3). Width change doesn't alter the surface. |
 | **Phishing** | The tab URL is unforgeable. Width change doesn't reduce user trust signals (brand header + lock icon remain unchanged). |
-| **E2E selector breakage** | Existing `data-testid`s are inside inputs / buttons / status cards that aren't restructured. Per [`CLAUDE.md`](../../CLAUDE.md), testid preservation is verbatim. The plan does NOT introduce a new testid on `<OnboardingPage>` — there is no reason to query the layout shell, and adding one would invite tests that lock the layout shape. |
+| **E2E selector breakage** | Existing `data-testid`s are inside inputs / buttons / status cards that aren't restructured. Per [`CLAUDE.md`](../../../CLAUDE.md), testid preservation is verbatim. The plan does NOT introduce a new testid on `<OnboardingPage>` — there is no reason to query the layout shell, and adding one would invite tests that lock the layout shape. |
 | **A11y regression** | `<main>`-nesting check (above). `StepIndicator`'s `aria-current="step"` is unchanged. Keyboard tab order is unchanged (no DOM re-ordering, just style-class swap). `prefers-reduced-motion` is not affected (no animations added). |
 | **Supply chain** | No new deps. |
 | **Visual regression for users mid-onboarding** | A user who has the onboarding tab open during update would see the layout shift. The onboarding tab is short-lived (single session, dismissed on `Open wallet`), so this is "next time you open the tab" — acceptable. The `<OnboardingPage>` change does NOT touch `appStore.onboardingCompleted` or any persistence; the route → component mapping is unchanged. |
@@ -277,7 +277,7 @@ This is a CSS / layout refactor with no surface that handles secrets, no new net
 
 - **`window.close()` exploits via the `done` page changes** — `done.vue`'s `openWallet` flow (SW message → `window.close()`) is untouched by this plan. Confirm in code review that the diff only edits the `.page` style block + outer wrapper, not the script.
 - **Layout-driven CSS reflow timing as an oracle for "user is on step X"** — the onboarding pages don't gate on layout-derived timing. The accelerator status detection is on its own polling loop in `useAcceleratorStatus`. N/A.
-- **Bypassing the onboarding gate by deep-linking to `/onboarding/done`** — already possible today; not introduced or worsened by this plan. The actual routing logic at [`packages/extension/src/onboarding/app.vue:51-71`](../../packages/extension/src/onboarding/app.vue) is: (a) if onboarding is already completed, open the popup window and close the tab; (b) else if `hydrateKnownProfile` finds an active profile, redirect to `/onboarding/learn`; (c) else if there are zero profiles, *do not redirect* (the user stays on whatever route they entered on); (d) else open the popup window and close. The catch-all redirect at [`packages/extension/src/onboarding/index.ts:40-43`](../../packages/extension/src/onboarding/index.ts) only handles bare `/` → `/onboarding/welcome`. So a deep link to `/onboarding/done` for a brand-new user (zero profiles) WOULD land on `done.vue` without a profile, and clicking "Open wallet" there would call `appStore.setOnboardingCompleted(true)` and open the popup against an empty profile set. That is a pre-existing gap in the routing gate, not a width-change concern; out of scope for this plan. If it's deemed worth fixing, a separate PR adds a `beforeEnter` route guard to the done route.
+- **Bypassing the onboarding gate by deep-linking to `/onboarding/done`** — already possible today; not introduced or worsened by this plan. The actual routing logic at [`packages/extension/src/onboarding/app.vue:51-71`](../../../packages/extension/src/onboarding/app.vue) is: (a) if onboarding is already completed, open the popup window and close the tab; (b) else if `hydrateKnownProfile` finds an active profile, redirect to `/onboarding/learn`; (c) else if there are zero profiles, *do not redirect* (the user stays on whatever route they entered on); (d) else open the popup window and close. The catch-all redirect at [`packages/extension/src/onboarding/index.ts:40-43`](../../../packages/extension/src/onboarding/index.ts) only handles bare `/` → `/onboarding/welcome`. So a deep link to `/onboarding/done` for a brand-new user (zero profiles) WOULD land on `done.vue` without a profile, and clicking "Open wallet" there would call `appStore.setOnboardingCompleted(true)` and open the popup against an empty profile set. That is a pre-existing gap in the routing gate, not a width-change concern; out of scope for this plan. If it's deemed worth fixing, a separate PR adds a `beforeEnter` route guard to the done route.
 - **A `<main>`-inside-`<main>` nesting accidentally caused by switching `<OnboardingPage>`'s root to `<main>`** — explicit decision: `<OnboardingPage>` renders `<div>` (not `<main>`), because `app.vue#main.shell` is already the page's `<main>`. Pinned by the component test (`tagName === 'DIV'`) AND a post-implementation e2e assertion that the rendered document has exactly one `<main>` (see Validation section).
 - **`gap=0` silently regressing to 32 px default** — a future implementer simplifying the `gapVar` computed to a truthy check (`props.gap ? ... :`) would silently make `gap=0` render as 32 px. Test case #4 (`gap=0` → `--onboarding-page-gap: 0px` on the root) blocks this regression.
 
@@ -291,7 +291,7 @@ This is a CSS / layout refactor with no surface that handles secrets, no new net
 
 ## Rollback
 
-Pure additive + style change. Rollback = revert the PR. No storage migration, no persistence bump, no API surface. Users mid-onboarding when the rollback ships re-see the old per-page widths; nothing else regresses. **Note** — if the smoke-surface filter is updated in this PR ([`pr-smoke-e2e.yml`](../../.github/workflows/pr-smoke-e2e.yml)), the rollback also reverts that change. The expanded filter is harmless on its own (smoke runs more often, no false-negative risk), so a partial-revert that keeps the filter expansion is also acceptable.
+Pure additive + style change. Rollback = revert the PR. No storage migration, no persistence bump, no API surface. Users mid-onboarding when the rollback ships re-see the old per-page widths; nothing else regresses. **Note** — if the smoke-surface filter is updated in this PR ([`pr-smoke-e2e.yml`](../../../.github/workflows/pr-smoke-e2e.yml)), the rollback also reverts that change. The expanded filter is harmless on its own (smoke runs more often, no false-negative risk), so a partial-revert that keeps the filter expansion is also acceptable.
 
 ## Audit reconciliation
 
@@ -303,7 +303,7 @@ Both audit transcripts ([`audit-codex.md`](https://github.com/alejoamiras/nulo/b
 | 2 | opus C5 + codex #1 | `welcome.vue`'s `.page { flex: 1 }` is load-bearing for the legal footer's `margin-top: auto`. Plan silently dropped it. | `OnboardingPage`'s `.page` style now sets `flex: 1` universally. Benign for the other 5 pages (no footer-pinning expectation); fixes welcome's footer. |
 | 3 | opus M2 + codex #3 | Template referenced `gapVar` but `<script setup>` never defined it. | Spec now declares `const gapVar = computed(() => props.gap !== undefined ? { ... } : undefined)`. Test case #4 (`gap=0` doesn't regress to default) locks the `!== undefined` check against a future truthy-shortcut refactor. |
 | 4 | codex #2 + opus T1 | Grid breakpoint `@media (max-width: 560px)` is viewport-based and ignores `app.vue#shell`'s `24+24 px` horizontal padding. Plan's "~205 px usable per card" math also forgot the card's own `padding: 24px`. | Switched to a CSS **container query** (`@container onboarding-page (max-width: 540px)`) with `container-type: inline-size` on `<OnboardingPage>`. The threshold is container-relative, not viewport-relative. Per-card padding math now explicit (212 outer − 48 padding = 164 usable). Pre-merge visual verification gate added with `padding: 16px` fallback if 164 px proves too cramped. |
-| 5 | opus M1 | Plan claimed `Smoke e2e / Status` would auto-run; smoke-surface filter at [`pr-smoke-e2e.yml`](../../.github/workflows/pr-smoke-e2e.yml) does NOT include `packages/extension/src/onboarding/**`. | This PR adds `packages/extension/src/onboarding/**` to the filter. The plan's CI section is corrected accordingly. |
+| 5 | opus M1 | Plan claimed `Smoke e2e / Status` would auto-run; smoke-surface filter at [`pr-smoke-e2e.yml`](../../../.github/workflows/pr-smoke-e2e.yml) does NOT include `packages/extension/src/onboarding/**`. | This PR adds `packages/extension/src/onboarding/**` to the filter. The plan's CI section is corrected accordingly. |
 | 6 | opus T2 | `import.vue`'s outer `<Flex>` uses `gap="24"` today; standardizing to 32 grows the page height by ~40–50 px and can push the submit button below the fold at 1080 × 720. | `import.vue` migration passes `:gap="24"` explicitly. The plan's `.vue` diff is updated. |
 | 7 | opus T3 | `done.vue`'s top margin was `48px auto 0`; unifying to OnboardingPage's `24px auto 0` default loses 24 px of breathing room. Plan punted with conditional `pt-32` (a non-existent class in this CSS-module setup). | Concrete decision: `done.vue` adds `padding-top: 24px` to its `.hero` block. No conditional. |
 | 8 | opus C6 | 6 test cases included 3 near-duplicate snapshot variants. | Cases revised — `align="start"`-is-default and `max-width`-on-root collapsed into the default-render case, replaced with `tagName === 'DIV'` (#6) and `gap=0` regression (#4). |
@@ -320,10 +320,10 @@ Audit-flagged points **NOT adopted**, with rationale:
 
 ## References
 
-- [`packages/extension/src/onboarding/`](../../packages/extension/src/onboarding/) — the affected tree.
-- [`packages/extension/tests/e2e/onboarding-tab.test.ts`](../../packages/extension/tests/e2e/onboarding-tab.test.ts) — selectors that must continue to resolve.
-- [`.github/workflows/pr-smoke-e2e.yml`](../../.github/workflows/pr-smoke-e2e.yml) — the `smoke-surface` filter to expand.
-- [`packages/extension/vite.config.ts`](../../packages/extension/vite.config.ts) — `useComponents` auto-import configuration (lines 174–177 cover `src/onboarding/components/`).
-- [`CLAUDE.md`](../../CLAUDE.md) — testid preservation rule, code-comment style, validation gates.
+- [`packages/extension/src/onboarding/`](../../../packages/extension/src/onboarding/) — the affected tree.
+- [`packages/extension/tests/e2e/onboarding-tab.test.ts`](../../../packages/extension/tests/e2e/onboarding-tab.test.ts) — selectors that must continue to resolve.
+- [`.github/workflows/pr-smoke-e2e.yml`](../../../.github/workflows/pr-smoke-e2e.yml) — the `smoke-surface` filter to expand.
+- [`packages/extension/vite.config.ts`](../../../packages/extension/vite.config.ts) — `useComponents` auto-import configuration (lines 174–177 cover `src/onboarding/components/`).
+- [`CLAUDE.md`](../../../CLAUDE.md) — testid preservation rule, code-comment style, validation gates.
 - Earlier related plan: [`implementations-plan/onboarding-extraction/`](../onboarding-extraction/) — when the onboarding tab was carved out of the popup.
 - Audit transcripts: [`audit-codex.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-codex.md), [`audit-opus.md`](https://github.com/alejoamiras/nulo/blob/9f11de70b13933be2d54c3eb79622b1ff2719aba/implementations-plan/onboarding-width-unification/audit-opus.md).

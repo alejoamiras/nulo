@@ -7,7 +7,7 @@
 
 # Remediation follow-ups — 2026-08-16-extension-mid (meta-orchestration)
 
-The residue of the [2026-08-16 dual-audit remediation](../../audit/bugs/2026-08-16-extension-mid/remediation.md) (30 bugs + 12 quality, shipped as 9 codex-converged PRs #384–#396 + closure #397). Every item below was a **codex-agreed documented deferral** at the time — recorded in the two `remediation.md` files' "owned follow-ups" sections. This plan is their execution spec.
+The residue of the [2026-08-16 dual-audit remediation](../../../audit/bugs/2026-08-16-extension-mid/remediation.md) (30 bugs + 12 quality, shipped as 9 codex-converged PRs #384–#396 + closure #397). Every item below was a **codex-agreed documented deferral** at the time — recorded in the two `remediation.md` files' "owned follow-ups" sections. This plan is their execution spec.
 
 **This is a meta-plan.** Each arc gets its own `/blueprint` at its tier, its own worktree, its own plan, its own PR.
 
@@ -45,7 +45,7 @@ Smallest safe change. No NEW abstraction unless ≥3 call sites benefit **AND** 
 ### 2 · `fix-profile-deletion-status` [mid] — correctness
 **F-B24.** A failed compensating `deleteProfile` during full-backup-import rollback leaves an orphaned, still-selectable, never-finalized profile. Arc 6 shipped a bounded retry + a distinct "Import incomplete / cleanup pending" error (no false success); the durable half is missing: a **deletion-status field on the profile row** so a later unlock can resume the compensating delete.
 
-⚠️ Persisted-shape change → re-read [`CLAUDE.md` § Persisted-storage shape changes](../../CLAUDE.md) and confirm the **pre-production no-migration rule still holds** before writing a migration.
+⚠️ Persisted-shape change → re-read [`CLAUDE.md` § Persisted-storage shape changes](../../../CLAUDE.md) and confirm the **pre-production no-migration rule still holds** before writing a migration.
 
 ### 3 · `fix-storage-row-repair` [light] — correctness
 **F-B23.** `EntityStorage.decodeRow` now RETAINS malformed rows — correct, B-23 removed a racy read-path delete that could destroy a concurrent valid write — but **nothing ever repairs them**, so a malformed row is immortal. Add a serialized repair path.

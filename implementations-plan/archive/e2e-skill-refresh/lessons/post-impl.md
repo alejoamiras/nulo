@@ -19,7 +19,7 @@ Confidence: **high**. Findings concern documentation; no High finding.
 - **Low — [Skill:223](.claude/skills/e2e-testing/SKILL.md:223):** Scope name avoidance to imported accounts. `open()` updates reactive state; an unchanged open boolean prevents remounting, not permanent file-wide death.
 - **Low — [Skill:240](.claude/skills/e2e-testing/SKILL.md:240):** Worker evaluation uses its main context. Retain page-based probes as a lifecycle precaution. Scope console interception to sniffed extension methods; original-console calls remain observable.
 - **Low — [Skill:274](.claude/skills/e2e-testing/SKILL.md:274):** Both canaries explicitly await mining. Describe `sendTx` result semantics without claiming transfers is unique.
-- **Low — [Lessons:63](implementations-plan/e2e-skill-refresh/lessons/phase-1.md:63):** An open port alone provides no keepalive. Cite actual heartbeat/RPC traffic; remove the unsupported crash/update restriction. [Chrome lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
+- **Low — [Lessons:63](implementations-plan/archive/e2e-skill-refresh/lessons/phase-1.md:63):** An open port alone provides no keepalive. Cite actual heartbeat/RPC traffic; remove the unsupported crash/update restriction. [Chrome lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
 
 The consolidation preserves caller checks. The passkey lock sequence is sound (`route-guard.ts:30`, `app.vue:214`); its event-loss diagnosis is correct. README replacements are acceptable.
 

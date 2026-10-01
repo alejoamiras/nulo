@@ -28,7 +28,7 @@ This consolidated `plan.md` is what goes through the final codex audit + approva
 
 ## 1. Goal
 
-Wire `@alejoamiras/aztec-accelerator` v1.0.1's headless `accelerator-server` binary into the `network-e2e` GitHub workflow so wallet proving uses native `bb` on the runner instead of in-browser WASM. The wallet already constructs `AcceleratorProver` unconditionally at [`packages/aztec-runtime/src/pxe/chain-runtime.ts:91`](../../packages/aztec-runtime/src/pxe/chain-runtime.ts) — it auto-detects `127.0.0.1:59833/health` and silently falls back to WASM when none is present. Installing the server on the runner + enforcing native-required at runtime turns this into a tight contract.
+Wire `@alejoamiras/aztec-accelerator` v1.0.1's headless `accelerator-server` binary into the `network-e2e` GitHub workflow so wallet proving uses native `bb` on the runner instead of in-browser WASM. The wallet already constructs `AcceleratorProver` unconditionally at [`packages/aztec-runtime/src/pxe/chain-runtime.ts:91`](../../../packages/aztec-runtime/src/pxe/chain-runtime.ts) — it auto-detects `127.0.0.1:59833/health` and silently falls back to WASM when none is present. Installing the server on the runner + enforcing native-required at runtime turns this into a tight contract.
 
 ## 2. Locked-in scoping decisions
 

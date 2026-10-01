@@ -53,7 +53,7 @@ These came out of the two-round review and are **not** fixed by editing the docu
    broadcasting and dApp requests is gated, and the sheet cannot cover an export page
    (`apps/extension/tests/e2e/legal-acceptance.test.ts`, scenarios S5, S6, S8).
 
-   Blockers 1–3 shipped as one arc: `implementations-plan/legal-terms/`.
+   Blockers 1–3 shipped as one arc: `implementations-plan/archive/legal-terms/`.
 4. ~~**Verify the Presto MIT relicense reached the bundled artifacts.**~~ — done. The lockfile
    resolves MIT versions (first `@alejoamiras/presto@5.2.0-revision.3`, `presto-core@1.1.0` and
    `presto-banners@1.1.0`, whose tarballs differ from the AGPL ones only in the licence files and

@@ -1,6 +1,6 @@
 // Renders the decided mocks of the proposal page to PNG and writes their visible text next to them.
-// Usage (from the repo root): python3 implementations-plan/ux-feedback/design/mocks/build.py
-//   then node implementations-plan/ux-feedback/design/shots.mjs [out-dir] [--inventory]
+// Usage (from the repo root): python3 implementations-plan/archive/ux-feedback/design/mocks/build.py
+//   then node implementations-plan/archive/ux-feedback/design/shots.mjs [out-dir] [--inventory]
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { TARGETS } from "./targets.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "../../..");
+const repo = path.resolve(here, "../../../..");
 const require = createRequire(path.join(repo, "apps/extension/package.json"));
 const puppeteer = require("puppeteer");
 
@@ -16,7 +16,7 @@ const args = process.argv.slice(2);
 const inventory = args.includes("--inventory");
 const out = path.resolve(args.find((a) => !a.startsWith("--")) ?? path.join(here, "mocks/dist/shots"));
 const page_ = path.join(here, "mocks/dist/nulo-feedback.html");
-if (!fs.existsSync(page_)) throw new Error("build the page first: python3 implementations-plan/ux-feedback/design/mocks/build.py");
+if (!fs.existsSync(page_)) throw new Error("build the page first: python3 implementations-plan/archive/ux-feedback/design/mocks/build.py");
 
 const browser = await puppeteer.launch({
 	headless: true,
