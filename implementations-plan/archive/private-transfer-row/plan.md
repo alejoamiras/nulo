@@ -33,6 +33,8 @@ base: origin/dev @ 3452ac3b
   gains no line: its entry on classifying a dApp call by address, selector and arguments already
   states this plan's gotcha, and the file sits at 8,185 of its 8,192 bytes.
 - **Open items**: I4, the playground's multicall nonces, in `follow-ups.md` (inferred, not run).
+  Also there, owner-requested on 2026-10-01: a node test running the real hash, decoder and
+  `callSurface` together, a discovered-authorization e2e and a private-transfer e2e.
 - **Seeds retired**: the `/goal` and `/loop` seeds in § Seeds are history. This plan is a record
   of what was decided and why, never a task list.
 
