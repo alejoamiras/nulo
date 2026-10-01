@@ -18,7 +18,7 @@ Nothing else from the wallet's crypto layer is published.
 ## Requirements
 
 - ESM only.
-- The `@aztec/*` packages are exact **peer dependencies**. Install the same versions, and make sure a single copy of each is installed: `Fr` and `GrumpkinScalar` values are only interchangeable within one copy.
+- The `@aztec-labs/*` packages are exact **peer dependencies**. Install the same versions, and make sure a single copy of each is installed: `Fr` and `GrumpkinScalar` values are only interchangeable within one copy.
 - WebCrypto (`globalThis.crypto.subtle`): current browsers, Node 20 or later, and Bun.
 - TypeScript 5.7 or later for the declarations.
 

@@ -323,7 +323,7 @@ The repository publishes three npm packages, `@alejoamiras/nulo-*`, staged from 
 - **Where the bytes come from.** The `pack` job builds them from a frozen install that restores no shared Actions cache (any dev- or main-scoped job can write one) and runs no lifecycle script or test code; the tests run in a separate job. The first version is bound to the exact bytes a rehearsal proved against its consumer (`scripts/publish/approved-digests.json`), and no other version can be published before it.
 - **Who can publish.** Only the `publish` job holds `id-token: write`, and it runs no repository code. Its gate is the `npm-publish` environment (owner as required reviewer, deployment branches `dev` and `main`), which is repository configuration the owner creates, not something the workflow file enforces: GitHub creates a missing environment with no protection. Each package's trusted-publisher record names that workflow and environment. `publishConfig.provenance` in the staged manifests is only a default, which a command-line flag overrides. The boundary is each package's "require 2FA and disallow tokens" setting: no token can publish, which leaves the trusted publisher and the owner's own interactive 2FA session, and a version published that way carries no provenance, which the `verify` job rejects whenever the workflow meets that version.
 - **What is checked afterwards.** The `verify` job fetches each version's SLSA bundle from the registry and has `gh attestation verify` require that it was signed, through Sigstore, by this workflow on `dev` or `main` (the certificate identity, not the statement's own claims) and names the packed bytes (`scripts/publish/verify-provenance.sh`); then it runs `npm audit signatures`. `publish` and `verify` take `pack`'s artifact by ID and check every tarball against the digests `pack` output, so the parallel `test` job cannot swap the bytes.
-- **Consumers.** The `@aztec/*` packages are exact peer dependencies, never bundled, so a consumer *can* share a single `Fr` and `WalletSchema`; installing one copy is theirs to check (`assertPackageIdentity` with `lockstepVia` from `@alejoamiras/nulo-resolve-asset`).
+- **Consumers.** The `@aztec-labs/*` packages are exact peer dependencies, never bundled, so a consumer *can* share a single `Fr` and `WalletSchema`; installing one copy is theirs to check (`assertPackageIdentity` with `lockstepVia` from `@alejoamiras/nulo-resolve-asset`).
 
 See [`scripts/publish/README.md`](./scripts/publish/README.md).
 
@@ -569,7 +569,7 @@ deliberate lockfile regeneration.
 Snyk, etc.), not a built-in tool. Not configured today; revisit if/when
 we pick a scanner.
 
-**`@aztec/*` outside this policy.** Exact-pinned, bumped manually with
+**`@aztec-labs/*` and `@aztec-foundation/*` outside this policy.** Exact-pinned, bumped manually with
 the class-id + address invariant fixture (deferred to a future Aztec
 milestone). Renovate disables these packages so no automated PRs land
 for them — see `renovate.json` `packageRules`.
@@ -583,10 +583,10 @@ for them — see `renovate.json` `packageRules`.
   Pair with the CVE-on-Friday runbook above.
 - `prConcurrentLimit: 3`, `prHourlyLimit: 2`, weekly Monday schedule
   (Buenos Aires TZ), no auto-merge anywhere.
-- `@aztec/*`, `@alejoamiras/presto`,
-  `@alejoamiras/aztec-standards`, `@alejoamiras/private-fee-juice` —
-  all disabled (rule at the bottom of `packageRules`; later rules win
-  per Renovate semantics).
+- `@aztec-labs/*`, `@aztec-foundation/*` (`aztec-standards` included),
+  `@aztec/*` (`@aztec/viem`), `@alejoamiras/presto`,
+  `@alejoamiras/private-fee-juice` — all disabled (rule at the bottom of
+  `packageRules`; later rules win per Renovate semantics).
 - `@types/node` capped via `allowedVersions: "<25"` — patch/minor on
   24.x still flow.
 - `baseBranchPatterns: ["dev"]` — PRs target `dev`, but Renovate

@@ -28,7 +28,7 @@ const sqliteWasm = resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", "./vendor/
 
 assertPackageIdentity("@aztec-labs/sqlite3mc-wasm", {
 	from: import.meta.url,
-	expectVersion: "5.0.1",
+	expectVersion: "6.0.0-rc.1",
 	lockstepVia: "@aztec-labs/kv-store", // the copy kv-store consumes must be the copy we ship
 })
 ```
