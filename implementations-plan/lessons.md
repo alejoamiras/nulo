@@ -48,8 +48,8 @@ Gotchas from closed plans, read before every task. One line each, linking its ev
 
 ## Agent tooling
 
-- The agent shell is zsh behind a wrapper: `set -e` stops nothing, a pipe returns its last stage's status, `$FILES` stays one word. Redirect, then test each exit code (5.9, 2026-09). [Evidence](stable-release-0.27.0/lessons/phase-3.md)
-- `pgrep -f` and `pkill -f` match the agent's own `zsh -c` wrapper, so a teardown can kill itself: match by name (`pgrep -x`) and exclude `$$`. [Evidence](harden-findings-remediation/lessons/phase-F.md)
+- The agent's Bash tool evals each command left of an `&&`, where zsh ignores `set -e`; a pipe returns its last stage's status, `$FILES` stays one word. Redirect, then test each exit code (5.9, 2026-09). [Evidence](stable-release-0.27.0/lessons/phase-3.md)
+- `pgrep -f` matches the agent's `zsh -c` wrapper, so a teardown can kill itself: signal your launcher's pgid or an orphan in your worktree, not `$$`/`$PPID`. [Evidence](harden-findings-remediation/lessons/phase-F.md)
 - Agents sharing a worktree share one index: one's reset or checkout wipes the others' edits, and `git add -A` commits them: one worktree per editor. [Evidence](dedup-bridge-conductors/lessons/phase-2.md)
 - A scripted edit whose anchor is gone does nothing and says nothing (`str.replace`): check it applied before claiming it. [Evidence](deflake-round-2/lessons/phase-4-5.md)
 - Take a red/green proof's old copy from the base SHA, never `HEAD`, and rerun a red that looks environmental on the base commit before blaming the box. [Evidence](firefox-first-class-spike/lessons/phase-10.md), [more](aztec-5.0.1-line/lessons/phase-p2.md)

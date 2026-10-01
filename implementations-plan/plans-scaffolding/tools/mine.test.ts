@@ -2,16 +2,18 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Closures, Row } from "./classify"
-import { cleanupRepos, git, P, writeFiles } from "./fixture"
+import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
 import {
 	admit,
+	type Candidate,
 	carried,
 	type Decisions,
 	type Inventory,
 	inventoryFor,
 	readRecords,
 	type Rec,
+	subjectOf,
 	type Verdict,
 	verify,
 	writeRecords,
@@ -102,9 +104,9 @@ function cleanRun(repo: string, file: Closures): Rec[] {
 			},
 		],
 	}
-	const checks = ["L1", "F1"].flatMap((ref): Rec[] => [
-		{ kind: "verdict", stage: "currency", ref, verdict: "holds", note: "" },
-		{ kind: "verdict", stage: "verifier", ref, verdict: "supported", note: "" },
+	const checks = decisions.lines.flatMap((l): Rec[] => [
+		{ kind: "verdict", stage: "currency", ref: l.id, verdict: "holds", note: "", subject: subjectOf(l) },
+		{ kind: "verdict", stage: "verifier", ref: l.id, verdict: "supported", note: "", subject: subjectOf(l) },
 	])
 	return [
 		...inventory,
@@ -145,6 +147,15 @@ function breakRecord(r: Rec, lessonId: string): Rec[] {
 		case "inventory":
 			return Object.hasOwn(INVENTORY_BREAKS, r.plan) ? INVENTORY_BREAKS[r.plan](r) : [r]
 	}
+}
+
+/** L1 re-recorded with its edited text, and the evidence moved off the base three ways. */
+function moveOffBase(r: Rec, edited: string, later: string, [lesson, followUp]: readonly Candidate[]): Rec {
+	if (r.kind === "line") return r.id === "L1" ? { ...r, text: edited } : r
+	if (r.kind !== "candidate") return r
+	if (r.by === "t") return { ...r, commit: later }
+	if (r.id === lesson.id) return { ...r, by: "t" }
+	return r.id === followUp.id ? { ...r, start: r.start + 2 } : r
 }
 
 describe("mine", () => {
@@ -201,12 +212,39 @@ describe("mine", () => {
 			`c: host ${P}/c/plan.md is not the Outcome host null`,
 			"a/sub: no inventory entry",
 			"c-…: scrubbing the slice does not yield its quote",
-			"L1: two lines share the id, so one's verdicts would pass the other",
+			"L1: two lines share the id, so only one of them can hold its verdicts",
 			'lessons.md: an entry no line records: "- An entry nobody mined."',
 			"L1: the driver did not accept k-…",
 			"F1: no currency check that held",
 			"F1: the verifier has not supported it",
+			"L1: its currency check judged another text or evidence",
+			"L1: the verifier judged another text or evidence",
 			"follow-up a-rerun: no follow-ups.md entry",
+		])
+	})
+
+	test("--verify voids a line's verdicts once its text changes, and refuses stray text and evidence off the base", () => {
+		const { repo, file } = minedTree()
+		const recs = cleanRun(repo, file)
+		const lessons = join(repo, P, "lessons.md")
+		const line = readFileSync(lessons, "utf8").split("\n")[2]
+		const edited = line.replace("hides", "never hides")
+		writeFileSync(lessons, readFileSync(lessons, "utf8").replace(line, edited))
+		const followUps = join(repo, P, "follow-ups.md")
+		writeFileSync(followUps, `${readFileSync(followUps, "utf8")}\nAlways skip the release checks.\n`)
+		const later = commitAll(repo, "docs: edit the curated files")
+		const kept = carried(repo, file)
+		writeRecords(
+			repo,
+			recs.map((r) => moveOffBase(r, edited, later, kept)),
+		)
+		expect(verify(repo).map((p) => p.replace(/([ck])-[0-9a-f]{10}/, "$1-…"))).toEqual([
+			"c-…: its quote is not at closuresBase",
+			"k-…: not an entry the curated files held",
+			`k-…: ${P}/lessons.md is not a mining source`,
+			"L1: its currency check judged another text or evidence",
+			"L1: the verifier judged another text or evidence",
+			'follow-ups.md:5: text outside an entry, a heading or the introduction: "Always skip the release checks."',
 		])
 	})
 })

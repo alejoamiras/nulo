@@ -3,10 +3,11 @@
  * The closure table: one row per top-level plan dir, derived from git, the frozen gh snapshots beside
  * this tool, and the owner's answers to Asks S1–S17.
  *
- * With no flag it writes `closures.json` for HEAD. `--snapshot` refreshes `gh-prs.json` and
- * `gh-issues.json`, the tool's only network use. `--check [file] [upto]` fails unless both snapshots hold
- * their full counts, every row names a live dir once, no row is ambiguous, and no closed dir changed between
- * the file's base and `upto`; a dir with no row is reported as active, never guessed.
+ * With no flag it writes `closures.json` for HEAD, or for the commit named. `--snapshot` refreshes
+ * `gh-prs.json` and `gh-issues.json`, the tool's only network use. `--check [file] [upto]` fails unless both
+ * snapshots hold their full counts, every row equals its derivation at the file's base, names a live dir
+ * once and is not ambiguous, and no closed dir's content changed between the base and `upto`; a dir with no
+ * row is reported as active, never guessed.
  */
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
@@ -39,11 +40,11 @@ const IMPORT_DATE = "2026-05-19"
 export const HISTORICAL = `historical — pre-open-source import (${IMPORT_DATE})`
 /** A closed dir whose files all moved out of the plan tree; it has nothing left to archive. */
 export const RELOCATED = "relocated"
-/** Commits that edited many plans at once without changing any; a dir's date skips them. */
+/** Commits before the base that edited many plans at once without changing any; a dir's date skips them. */
 const MECHANICAL_SUBJECTS = [
 	/^chore: open-source initial import$/,
 	/^docs: point the wallet repo's docs, plans and skills at unleashed \(#692\)$/,
-	/^chore\(plans\): (?:untrack plan transcripts|relocate plan-dir assets|archive closed plans)/,
+	/^chore\(plans\): untrack plan transcripts/,
 ]
 /** Live plans whose index line is not a closing one: P1 keeps tools-extraction open (follow-ups.md). */
 const ACTIVE_DIRS: ReadonlySet<string> = new Set(["plans-scaffolding", "tools-extraction"])
@@ -100,32 +101,47 @@ export const ANSWERS: Readonly<Record<string, Answer>> = {
 	"transport-ready-handshake": { class: "parked", status: "PARKED", ask: "S16" },
 }
 
-type Commit = { sha: string; date: string; time: number; subject: string; dirs: Set<string> }
+/** `dirs`: the top-level plan dirs a commit touched; `changed`: those whose content it changed. */
+type Commit = { sha: string; date: string; time: number; subject: string; dirs: Set<string>; changed: Set<string> }
 type Evidence = { dir: string; lines: ReturnType<typeof lib.parseIndex>["entries"]; host: string | null; src: string; commits: Commit[] }
-export type Options = { cwd: string; prs: ReadonlyMap<number, Pr>; importSha?: string }
+export type Options = { cwd: string; prs: ReadonlyMap<number, Pr>; importSha?: string; ref?: string }
 type Resolved = Options & { byMergeCommit: ReadonlyMap<string, number> }
 
-/** Every commit in `range` touching the plan tree, newest first, with the top-level dirs it touched. */
+function dirOf(path: string | undefined): string | null {
+	const parts = path?.split("/") ?? []
+	return parts.length > 2 && parts[0] === PLANS ? parts[1] : null
+}
+
+/** A file moved out of a dir byte for byte leaves that dir's plan as it was, so only its destination changed. */
+function applyChange(c: Commit, line: string): void {
+	const [status, from, to] = line.split("\t")
+	const [src, dst] = [dirOf(from), dirOf(to ?? from)]
+	for (const d of [src, dst]) if (d !== null) c.dirs.add(d)
+	if (dst !== null) c.changed.add(dst)
+	if (src !== null && !(status === "R100" && src !== dst)) c.changed.add(src)
+}
+
+/**
+ * Every commit in `range` touching the plan tree, newest first. The log takes no pathspec: one limited to
+ * the plan tree pairs a move out of it with nothing and reads it as a deletion.
+ */
 function planCommits(cwd: string, range = "HEAD"): Commit[] {
-	const out = git(cwd, "log", "--format=%x00%H %cs %cI %s", "--name-only", range, "--", PLANS)
+	const out = git(cwd, "-c", "core.quotePath=false", "log", "-M", "--name-status", "--format=%x00%H %cs %cI %s", range)
 	return out
 		.split("\0")
 		.filter(Boolean)
 		.map((block) => {
-			const [head, ...files] = block.trim().split("\n")
+			const [head, ...changes] = block.trim().split("\n")
 			const [sha, date, iso, ...subject] = head.split(" ")
-			const dirs = new Set(
-				files
-					.map((f) => f.split("/"))
-					.filter((p) => p.length > 2 && p[0] === PLANS)
-					.map((p) => p[1]),
-			)
-			return { sha, date, time: Date.parse(iso), subject: subject.join(" "), dirs }
+			const commit: Commit = { sha, date, time: Date.parse(iso), subject: subject.join(" "), dirs: new Set(), changed: new Set() }
+			for (const line of changes) if (line.includes("\t")) applyChange(commit, line)
+			return commit
 		})
+		.filter((c) => c.dirs.size > 0)
 }
 
-export function topDirs(cwd: string): string[] {
-	return git(cwd, "ls-tree", "-d", "--name-only", "HEAD", `${PLANS}/`)
+export function topDirs(cwd: string, ref = "HEAD"): string[] {
+	return git(cwd, "ls-tree", "-d", "--name-only", ref, `${PLANS}/`)
 		.split("\n")
 		.filter(Boolean)
 		.map((p) => p.slice(PLANS.length + 1))
@@ -177,9 +193,9 @@ function hookOf(ev: Evidence): string {
 	return ev.src.match(/^# (.+)$/m)?.[1].trim() ?? ev.dir
 }
 
-function statusOutcome(cwd: string, tracked: ReadonlySet<string>, dir: string): boolean {
+function statusOutcome(read: (path: string) => string, tracked: ReadonlySet<string>, dir: string): boolean {
 	const path = `${PLANS}/${dir}/STATUS.md`
-	return tracked.has(path) && links.extract(path, readFileSync(join(cwd, path), "utf8")).h2.includes("Outcome")
+	return tracked.has(path) && links.extract(path, read(path)).h2.includes("Outcome")
 }
 
 type Verdict = Pick<Row, "class" | "status" | "followUps" | "evidence">
@@ -196,26 +212,29 @@ function verdictOf(ev: Evidence, legacy: boolean, merged: readonly number[], sta
 	return { class: "ambiguous", status: "AMBIGUOUS — no merged PR, no answer", followUps: [], evidence: "none" }
 }
 
+/** The rows `ref` implies, read from its tree and history alone, so a later checkout cannot change them. */
 export function deriveRows(options: Options): Row[] {
 	const importSha = options.importSha ?? IMPORT
+	const ref = options.ref ?? "HEAD"
 	const byMergeCommit = new Map([...options.prs.values()].flatMap((p) => (p.mergeCommit ? [[p.mergeCommit, p.number] as const] : [])))
 	const opts: Resolved = { ...options, byMergeCommit }
-	const tracked = new Set(git(opts.cwd, "ls-files", "-z", "--", PLANS).split("\0").filter(Boolean))
-	const commits = planCommits(opts.cwd)
-	const { entries } = lib.parseIndex(readFileSync(join(opts.cwd, lib.ACTIVE_INDEX), "utf8"))
-	return topDirs(opts.cwd).map((dir) => {
+	const read = (path: string) => git(opts.cwd, "show", `${ref}:${path}`)
+	const tracked = new Set(git(opts.cwd, "ls-tree", "-r", "-z", "--name-only", ref, "--", `${PLANS}/`).split("\0").filter(Boolean))
+	const commits = planCommits(opts.cwd, ref)
+	const { entries } = lib.parseIndex(read(lib.ACTIVE_INDEX))
+	return topDirs(opts.cwd, ref).map((dir) => {
 		const lines = entries.filter((e) => e.target.split("/")[0] === dir)
 		const host = hostOf(
 			tracked,
 			dir,
 			lines.map((l) => l.target),
 		)
-		const src = host ? readFileSync(join(opts.cwd, host), "utf8") : ""
+		const src = host ? read(host) : ""
 		const ev: Evidence = { dir, lines, host, src, commits: commits.filter((c) => c.dirs.has(dir)) }
-		const substantive = ev.commits.filter((c) => !isMechanical(c, importSha))
+		const substantive = ev.commits.filter((c) => c.changed.has(dir) && !isMechanical(c, importSha))
 		const legacy = substantive.length === 0 && ev.commits.some((c) => c.sha === importSha)
 		const merged = legacy ? [] : prsOf(ev, substantive, opts)
-		const verdict = verdictOf(ev, legacy, merged, statusOutcome(opts.cwd, tracked, dir))
+		const verdict = verdictOf(ev, legacy, merged, statusOutcome(read, tracked, dir))
 		const date = legacy ? IMPORT_DATE : (substantive[0]?.date ?? null)
 		return { dir, ...verdict, date, prs: merged, outcomeFile: host, hook: hookOf(ev) }
 	})
@@ -269,25 +288,38 @@ function snapshotProblems(cwd: string): string[] {
 }
 
 /**
- * A closed dir that a substantive commit touched after `closuresBase` needs a fresh answer before anything
- * archives it. Commits, not a diff, so this plan's own relocation and archive squashes never count.
+ * A closed dir whose content a commit changed after `closuresBase` needs a fresh answer before anything
+ * archives it. Judged per commit on content, never by subject, which any author controls.
  */
 function driftProblems(cwd: string, file: Closures, upto: string): string[] {
-	const later = planCommits(cwd, `${file.closuresBase}..${upto}`).filter((c) => !isMechanical(c, IMPORT))
-	const touched = new Set(later.flatMap((c) => [...c.dirs]))
+	const changed = new Set(planCommits(cwd, `${file.closuresBase}..${upto}`).flatMap((c) => [...c.changed]))
 	return file.rows
-		.filter((r) => r.class === "closed" && touched.has(r.dir))
+		.filter((r) => r.class === "closed" && changed.has(r.dir))
 		.map((r) => `${r.dir}: changed since ${file.closuresBase.slice(0, 8)}; re-answer it and regenerate`)
 }
 
+/** Each row must equal its derivation at the table's base: the archive tools trust every field. */
+function rowProblems(rows: readonly Row[], derived: readonly Row[]): string[] {
+	const want = new Map(derived.map((r) => [r.dir, r]))
+	return rows.flatMap((row) => {
+		const d = want.get(row.dir)
+		if (!d) return [`${row.dir}: no such dir at closuresBase`]
+		const keys = [...new Set([...Object.keys(row), ...Object.keys(d)])] as (keyof Row)[]
+		return keys
+			.filter((k) => JSON.stringify(row[k]) !== JSON.stringify(d[k]))
+			.map((k) => `${row.dir}: its ${k} is not what closuresBase derives`)
+	})
+}
+
 /** `upto` is the base being archived onto: HEAD for this arc, the refreshed `dev` for a later one. */
-export function checkClosures(cwd: string, file: Closures, upto = "HEAD"): { problems: string[]; rowless: string[] } {
+export function checkClosures(cwd: string, file: Closures, upto = "HEAD", importSha = IMPORT): { problems: string[]; rowless: string[] } {
 	const live = new Set([
 		...topDirs(cwd),
 		...(existsSync(join(cwd, lib.ARCHIVE)) ? lib.childDirs(lib.createCtx({ cwd }), lib.ARCHIVE) : []),
 	])
 	const seen = new Set<string>()
 	const problems = snapshotProblems(cwd)
+	problems.push(...rowProblems(file.rows, deriveRows({ cwd, prs: prMap(cwd), importSha, ref: file.closuresBase })))
 	for (const row of file.rows) {
 		if (seen.has(row.dir)) problems.push(`${row.dir}: two rows`)
 		seen.add(row.dir)
@@ -321,8 +353,9 @@ if (import.meta.main) {
 		console.log(`closures: ${file.rows.length} rows, ${problems.length} problems — ${summary(file.rows)}`)
 		process.exit(problems.length === 0 ? 0 : 1)
 	} else {
-		const rows = deriveRows({ cwd, prs: prMap(cwd) })
-		const closures: Closures = { closuresBase: git(cwd, "rev-parse", "HEAD").trim(), rows }
+		const ref = flag ?? "HEAD"
+		const rows = deriveRows({ cwd, prs: prMap(cwd), ref })
+		const closures: Closures = { closuresBase: git(cwd, "rev-parse", ref).trim(), rows }
 		writeFileSync(join(cwd, CLOSURES), `${JSON.stringify(closures, null, "\t")}\n`)
 		console.log(`wrote ${CLOSURES}: ${rows.length} rows — ${summary(rows)}`)
 	}

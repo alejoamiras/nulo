@@ -8,8 +8,9 @@
  * the base. `--add <file> [--dry-run]` checks a reader's quotes against the base's bytes, then records its
  * candidates, verdicts and file statuses. `--decide <file>` records lines and the driver's, currency and
  * verifier verdicts. `--verify` fails unless every plan and source file is accounted for, every quote
- * re-derives, and each curated entry equals a line whose candidates the driver accepted, whose currency
- * check held and which the verifier supported.
+ * re-derives from a mining source at the base, each curated entry equals a line whose candidates the driver
+ * accepted and whose current text and evidence a held currency check and a verifier "supported" judged, and
+ * the files hold nothing else but a title, the introduction after it, section headings and blank lines.
  */
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -76,7 +77,15 @@ export type Candidate = {
 	by: string
 	proposal: Proposal
 }
-export type Verdict = { kind: "verdict"; stage: "reader" | "driver" | "currency" | "verifier"; ref: string; verdict: string; note: string }
+/** `subject` is set on a line's currency and verifier verdicts: `subjectOf` the line they judged. */
+export type Verdict = {
+	kind: "verdict"
+	stage: "reader" | "driver" | "currency" | "verifier"
+	ref: string
+	verdict: string
+	note: string
+	subject?: string
+}
 export type Line = { kind: "line"; id: string; file: CuratedFile; text: string; candidates: string[]; followUp?: string }
 export type Rec = Inventory | Candidate | Verdict | Line
 
@@ -92,6 +101,8 @@ const sha256 = (b: Uint8Array | string) => createHash("sha256").update(b).digest
 export const scrub = (s: string) => s.replace(LOCAL_TOKEN_RE, "<local path>")
 /** An entry keeps its identity when the archive move re-points its links. */
 const norm = (text: string) => text.replaceAll("](archive/", "](")
+/** A line-stage verdict binds to this, so editing the text or swapping its evidence voids it. */
+export const subjectOf = (l: Pick<Line, "text" | "candidates">) => sha256([norm(l.text), ...l.candidates].join("\0"))
 
 export function readRecords(cwd: string): Rec[] {
 	const path = join(cwd, MINING)
@@ -259,7 +270,6 @@ const carriedVerdict = (k: ReaderOutput["carried"][number]): Verdict => ({
 	note: scrub(`${k.check} → ${k.result}${k.note ? `; ${k.note}` : ""}`),
 })
 
-/** The inventory entries holding a file this reader reports, with its statuses applied. */
 function statusUpdates(inventory: readonly Inventory[], out: ReaderOutput): Inventory[] {
 	const statuses = new Map(out.files.map((f) => [f.path, f]))
 	const apply = (f: FileEntry): FileEntry => {
@@ -308,58 +318,94 @@ function planProblems(want: Inventory, got: Inventory | undefined): string[] {
 	]
 }
 
-function inventoryProblems(cwd: string, file: Closures, recs: readonly Rec[]): string[] {
+function inventoryProblems(want: readonly Inventory[], recs: readonly Rec[]): string[] {
 	const recorded = new Map(recs.filter((r): r is Inventory => r.kind === "inventory").map((r) => [r.plan, r]))
-	return inventoryFor(cwd, file).flatMap((want) => planProblems(want, recorded.get(want.plan)))
+	return want.flatMap((w) => planProblems(w, recorded.get(w.plan)))
 }
 
-function candidateProblems(cwd: string, recs: readonly Rec[]): string[] {
+/** A carried candidate is exactly an entry the curated files held at the base; any other cites a source there. */
+function provenanceProblems(c: Candidate, file: Closures, sources: ReadonlySet<string>, kept: ReadonlyMap<string, Candidate>): string[] {
+	if (c.commit !== file.closuresBase) return [`${c.id}: its quote is not at closuresBase`]
+	if (c.by !== "carried") return sources.has(c.path) ? [] : [`${c.id}: ${c.path} is not a mining source`]
+	const k = kept.get(c.id)
+	return k && k.path === c.path && k.start === c.start && k.end === c.end ? [] : [`${c.id}: not an entry the curated files held`]
+}
+
+function sliceProblems(cwd: string, c: Candidate): string[] {
+	const bytes = blob(cwd, c.commit, c.path)
+	if (!bytes) return [`${c.id}: ${c.path} is not at ${c.commit.slice(0, 8)}`]
+	const slice = bytes.subarray(c.start, c.end)
+	if (sha256(slice) !== c.quoteSha256) return [`${c.id}: the slice at ${c.path}:${c.line} does not hash to quoteSha256`]
+	const original = slice.toString("utf8")
+	if (scrub(original) !== c.quote) return [`${c.id}: scrubbing the slice does not yield its quote`]
+	if (c.by !== "carried" && c.id !== idOf("c", c.path, original)) return [`${c.id}: its id is not its quote's`]
+	const n = [...original].length
+	if (n < MIN_QUOTE || n > MAX_QUOTE || /[\r\n]/.test(original))
+		return [`${c.id}: the quote is not one line of ${MIN_QUOTE}-${MAX_QUOTE} chars`]
+	return lineAt(bytes, c.start) === c.line ? [] : [`${c.id}: the quote is not on line ${c.line}`]
+}
+
+function candidateProblems(cwd: string, file: Closures, recs: readonly Rec[], sources: ReadonlySet<string>): string[] {
+	const kept = new Map(carried(cwd, file).map((k) => [k.id, k]))
 	return recs
 		.filter((r): r is Candidate => r.kind === "candidate")
 		.flatMap((c) => {
-			const bytes = blob(cwd, c.commit, c.path)
-			if (!bytes) return [`${c.id}: ${c.path} is not at ${c.commit.slice(0, 8)}`]
-			const slice = bytes.subarray(c.start, c.end)
-			if (sha256(slice) !== c.quoteSha256) return [`${c.id}: the slice at ${c.path}:${c.line} does not hash to quoteSha256`]
-			if (scrub(slice.toString("utf8")) !== c.quote) return [`${c.id}: scrubbing the slice does not yield its quote`]
-			return lineAt(bytes, c.start) === c.line ? [] : [`${c.id}: the quote is not on line ${c.line}`]
+			const provenance = provenanceProblems(c, file, sources, kept)
+			return provenance.length > 0 ? provenance : sliceProblems(cwd, c)
 		})
 }
 
-type VerdictOf = (stage: Verdict["stage"], ref: string) => string | undefined
+type VerdictOf = (stage: Verdict["stage"], ref: string) => Verdict | undefined
 
 function duplicateIds(lines: readonly Line[]): string[] {
 	const seen = new Set<string>()
 	return lines.flatMap((l) => {
 		const dup = seen.has(l.id)
 		seen.add(l.id)
-		return dup ? [`${l.id}: two lines share the id, so one's verdicts would pass the other`] : []
+		return dup ? [`${l.id}: two lines share the id, so only one of them can hold its verdicts`] : []
 	})
 }
 
-/** Why a line's candidates, currency check or verifier verdict do not carry it. */
 function lineVerdictProblems(l: Line, verdictOf: VerdictOf, candidates: ReadonlySet<string>): string[] {
 	const problems = l.candidates.length === 0 ? [`${l.id}: no candidate`] : []
 	for (const c of l.candidates) {
 		if (!candidates.has(c)) problems.push(`${l.id}: no candidate ${c}`)
-		else if (verdictOf("driver", c) !== "accept") problems.push(`${l.id}: the driver did not accept ${c}`)
+		else if (verdictOf("driver", c)?.verdict !== "accept") problems.push(`${l.id}: the driver did not accept ${c}`)
 	}
-	if (!["holds", "dated"].includes(verdictOf("currency", l.id) ?? "")) problems.push(`${l.id}: no currency check that held`)
-	if (verdictOf("verifier", l.id) !== "supported") problems.push(`${l.id}: the verifier has not supported it`)
+	const subject = subjectOf(l)
+	const currency = verdictOf("currency", l.id)
+	if (!["holds", "dated"].includes(currency?.verdict ?? "")) problems.push(`${l.id}: no currency check that held`)
+	else if (currency?.subject !== subject) problems.push(`${l.id}: its currency check judged another text or evidence`)
+	const verifier = verdictOf("verifier", l.id)
+	if (verifier?.verdict !== "supported") problems.push(`${l.id}: the verifier has not supported it`)
+	else if (verifier.subject !== subject) problems.push(`${l.id}: the verifier judged another text or evidence`)
 	return problems
 }
 
+/** Outside its entries a file holds its title, an introduction as the first line after it, section headings and blank lines. */
+function frameProblems(name: CuratedFile, src: string): string[] {
+	const lines = src.split("\n")
+	const intro = lines.findIndex((l, i) => i > 0 && l !== "")
+	return lines.flatMap((l, i) => {
+		if (i === 0) return l.startsWith("# ") ? [] : [`${name}:1: not a title`]
+		if (l === "" || l.startsWith("- ") || l.startsWith("## ") || i === intro) return []
+		return [`${name}:${i + 1}: text outside an entry, a heading or the introduction: ${JSON.stringify(l.slice(0, 60))}`]
+	})
+}
+
 function curatedProblems(cwd: string, name: CuratedFile, mine: readonly Line[], check: (l: Line) => string[]): string[] {
-	const entries = entriesOf(readFileSync(join(cwd, CURATED[name]), "utf8")).map(norm)
+	const src = readFileSync(join(cwd, CURATED[name]), "utf8")
+	const entries = entriesOf(src).map(norm)
 	const texts = new Set(mine.map((l) => norm(l.text)))
 	return [
+		...frameProblems(name, src),
 		...entries.filter((e) => !texts.has(e)).map((e) => `${name}: an entry no line records: ${JSON.stringify(e.slice(0, 80))}`),
 		...mine.flatMap((l) => [...(entries.includes(norm(l.text)) ? [] : [`${l.id}: its text is not an entry of ${name}`]), ...check(l)]),
 	]
 }
 
 function lineProblems(cwd: string, file: Closures, recs: readonly Rec[]): string[] {
-	const verdicts = new Map(recs.filter((r): r is Verdict => r.kind === "verdict").map((v) => [`${v.stage}\0${v.ref}`, v.verdict]))
+	const verdicts = new Map(recs.filter((r): r is Verdict => r.kind === "verdict").map((v) => [`${v.stage}\0${v.ref}`, v]))
 	const verdictOf: VerdictOf = (stage, ref) => verdicts.get(`${stage}\0${ref}`)
 	const candidates = new Set(recs.filter((r) => r.kind === "candidate").map((r) => r.id))
 	const lines = recs.filter((r): r is Line => r.kind === "line")
@@ -384,7 +430,9 @@ function lineProblems(cwd: string, file: Closures, recs: readonly Rec[]): string
 export function verify(cwd: string): string[] {
 	const file = readClosures(cwd)
 	const recs = readRecords(cwd)
-	return [...inventoryProblems(cwd, file, recs), ...candidateProblems(cwd, recs), ...lineProblems(cwd, file, recs)]
+	const want = inventoryFor(cwd, file)
+	const sources = new Set(want.flatMap((u) => u.files.map((f) => f.path)))
+	return [...inventoryProblems(want, recs), ...candidateProblems(cwd, file, recs, sources), ...lineProblems(cwd, file, recs)]
 }
 
 function refreshInventory(cwd: string, file: Closures, recs: readonly Rec[]): Rec[] {

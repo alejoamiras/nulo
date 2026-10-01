@@ -83,3 +83,23 @@ On the staged tree, before the commit:
 - `bun test implementations-plan/plans-scaffolding/tools/`: 13 pass. `classify.ts --check`: 270 rows, 0 problems. `mine.ts --verify`: 0 problems.
 - `bun run lint`: 0 errors. `bun run test:ci-gating`: 246 pass.
 - `lessons.md`: 7,862 B, 34 entries, each linking its evidence.
+
+## Codex loop
+
+Round 1 (`/codex high`, 2026-09-30): changes needed, high confidence, 8 findings. It found no wrong closure and no falsely resolved follow-up in the committed table. Each finding was reproduced before its fix, and all 8 are adopted (ledger J1-J8):
+1. **Verdicts outlive their text** (high). `--decide` re-recorded a line under its id and kept its currency and verifier verdicts. Both now carry `subject`, the hash of the line's text (archive links normalised) and its candidate ids; `--verify` voids a verdict that judged another subject.
+2. **Text outside an entry escapes the record** (high). An appended paragraph passed. Outside its entries a file now holds only its title, an introduction as the first line after it, `## ` headings and blank lines.
+3. **`--check` compares no row's fields** (high). A row could turn closed, take an outside host or a stray PR unseen. The table is now exactly what `closuresBase` derives, the owner's answers included, and `--check` compares every field and refuses a row whose dir the base lacks.
+4. **Evidence need not sit at the base** (medium). A candidate retargeted to new text at HEAD passed on its own hash. A quote's commit must now be `closuresBase`: a carried candidate is exactly an entry the curated files held there, any other cites an inventory source, and bounds, line and id are rechecked.
+5. **A subject switches the drift guard off** (medium). A content edit under a `chore(plans): relocate plan-dir assets` subject read as mechanical. Drift now reads each commit's content changes, and a subject exempts only commits before the base, where it decides a dir's date. A byte-identical move out of a dir changes only its destination: C's relocations are all R100 and touch no closed dir, and D measures drift up to its parent, so its own Outcomes never count.
+6. **L36 drops its source's ownership rule** (medium). Rewritten twice, below.
+7. **L35 generalises one wrapper's behaviour** (low). It now names the condition, an `eval` left of `&&`, and a fresh verifier reproduced it.
+8. **Two comments narrate their helpers** (low). Deleted.
+
+Regenerated at the base, `closures.json` changed two lines: plans-scaffolding's date (2026-09-25, its first content commit) and transport-ready-handshake's hook (the base's text).
+
+A fresh verifier supported F605, C67 and L35, and failed L36's first rewrite: "never a pattern match" overreaches, since phase-F.md:59 matches by `comm` or cwd and :61 signals the tracked launcher's group after a cwd check. The second names the launcher's pgid, an orphan in this worktree and the `$$`/`$PPID` exclusion, and a fresh verifier supported it after reproducing the self-match (`pgrep -af` listed its own wrapper, pid = `$$`). C67 dropped its clause on the three comments the plans gate reports: C repoints them, and the line would then be false. Every other line's verifier verdict now carries the subject it judged, after checking that its text and candidates equal the packet its verifier last saw (180 of 181 lines; L36 was the exception).
+
+Mutants, each killed: in `mine.ts`, no currency subject, no verifier subject, no frame check, an introduction anywhere in the file, no base pin, no source pin, no carried-entry pin; in `classify.ts`, no row comparison, an R100 move counted against the dir it left, drift exempted by subject.
+
+`lessons.md` is 7,898 B, 8,186 B once D adds `archive/` to 36 of its 38 links. Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 14 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems, `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped (`decide-gate.test.ts`'s draft case, for the two gates that run on drafts).

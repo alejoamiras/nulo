@@ -2488,7 +2488,7 @@
 			"status": "ACTIVE",
 			"followUps": [],
 			"evidence": "live plan",
-			"date": "2026-09-30",
+			"date": "2026-09-25",
 			"prs": [
 				696
 			],
@@ -3475,7 +3475,7 @@
 				409
 			],
 			"outcomeFile": "implementations-plan/transport-ready-handshake/plan.md",
-			"hook": "the ledgered Ready-handshake transport rework + SW-death debt (canary real-kill, tombstone supersede); 4-scout recon preserved in recon.md; the spec (fix-plan rows 1 and 6, recon-fixes § B, two open flake-ledger entries) is copied verbatim into `spec-rows.md`"
+			"hook": "the ledgered Ready-handshake transport rework + SW-death debt (canary real-kill, tombstone supersede); 4-scout recon preserved in recon.md; the flake-ledger entries + fix-plan row 1 stay OPEN as the spec"
 		},
 		{
 			"dir": "typecheck-cleanup",

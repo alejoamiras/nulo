@@ -745,6 +745,7 @@ In order. No `/code-review`: `code_review` is `off`.
   5. **Pre-merge concurrency** (adopted): per-arc pre-merge gates in a clean clone at the PR head, A0's included; D regenerated rather than rebased, with a drift report.
   6. **Acceptance commands** (adopted): every arc measured against `$PARENT`; complete paginated API enumeration reconciled with the move map before D merges; split fallback.
   7. **Assumptions** (adopted): I3, I5 and O3 reconciliation each get a concrete check before the step they guard.
+- **Arc J codex loop (`/codex high`), round 1 (2026-09-30): changes needed** (high confidence, 8 findings). All 8 adopted after each was reproduced (J1-J8, ledger L26-L31). It found no wrong closure and no falsely resolved follow-up in the committed table.
 
 ---
 
@@ -768,17 +769,23 @@ In order. No `/code-review`: `code_review` is `off`.
 | L12 | Per-arc pre-merge gates in a clean clone at the PR head; D regenerated on a refreshed base | final pass 5 | One shared re-run of `check.ts` and `untrack.ts --verify` | adopted |
 | L13 | Arc sizes and diffs against `$PARENT`; complete API enumeration for D | final pass 6 | `origin/dev...HEAD`, which counts unmerged lower arcs | adopted |
 | L14 | gh-stack squash rehearsal: local `--onto` rehearsal, GitHub sandbox only with owner consent | final pass 7 | Trusting the docs alone | adopted: local rehearsal only (A16, § Approval) |
-| L15 | A dir's date and its drift skip mechanical commits: the import, #692, and this plan's own A, C and D squashes (by subject); drift counts commits, not a diff | Phase 3 | `git diff --quiet` from `closuresBase`: C's relocations would read as drift in every dir they touch | adopted |
-| L16 | A PR delivered a plan when its squash touched the dir (the snapshot's `mergeCommit`, else a trailing `(#N)`), or when the dir's line (else its host) names it and it merged after the dir's first commit. A PR merged into a stack branch, or up to 2 minutes before that commit in one stack merge, still counts | Phase 3 | Every merged `#N` in the text: 15 of 25 audited rows credited context PRs (`pre-#186`, `#718 left`) | adopted |
+| L15 | A dir's date and its drift skip mechanical commits: the import, #692, and this plan's own A, C and D squashes (by subject); drift counts commits, not a diff | Phase 3 | `git diff --quiet` from `closuresBase`: C's relocations would read as drift in every dir they touch | superseded by L27 |
+| L16 | A PR delivered a plan when its squash changed the dir's content (the snapshot's `mergeCommit`, else a trailing `(#N)`), or when the dir's line (else its host) names it and it merged after the dir's first commit. A PR merged into a stack branch, or up to 2 minutes before that commit in one stack merge, still counts | Phase 3 | Every merged `#N` in the text: 15 of 25 audited rows credited context PRs (`pre-#186`, `#718 left`) | adopted |
 | L17 | Ranges (`#400-#405`) are not expanded; the archive line keeps the range in its hook | Phase 3 | Expanding them: numbers inside a range can belong to other work | adopted |
 | L18 | A closure's follow-up id is covered by the entry whose line record names it (`followUp`), one entry per id; harden-findings-remediation carries two (the F-11 scope and the findings it surfaced), so the table has 11 | Phase 4 | Matching ids against entry text: wording drifts, and text cannot tell two entries of one plan apart | adopted |
 | L19 | passkey-e2e is `closed` with a `relocated` status: C moves its one file to `apps/extension/tests/e2e/`, so D neither archives nor stubs the dir, and `--check` accepts its absence | Phase 4 | A closed row with no host: D would stub a dir C empties, and `--check` would then report it missing | adopted |
 | L20 | transport-ready-handshake keeps a verbatim copy of its spec rows in `spec-rows.md`, each source linked by permalink at `9f11de70` | Phase 4 | Relative links into the closed sources: the parked plan's spec would live under `archive/`, which is evidence, never instructions | adopted |
 | L21 | A quote is one line's text, 20 to 200 characters, found byte for byte at `closuresBase`; line ids are unique across both files | Phase 4 | Multi-line quotes: readers' copies carried line numbers and rewrapping, and missed the bytes | adopted |
 | L22 | Sections: Bun & deps · CI & gates · Git & GitHub · Extension runtime · Aztec · Agent tooling. Release is dropped, Aztec added | Phase 4 | The planned Release section: its gotchas belong to the CLAUDE.md runbook (routed by F508), and the node and block-production lines had no home | adopted |
-| L23 | `lessons.md` leaves room for D's move: 7,862 B now, 8,150 B once 36 of its 38 links gain `archive/` (the other two point at tools-extraction, still active) | Phase 4 | Filling it to 8,192 B now: D's rewrite would break the budget it has to keep | adopted |
+| L23 | `lessons.md` leaves room for D's move: 7,898 B now, 8,186 B once 36 of its 38 links gain `archive/` (the other two point at tools-extraction, still active) | Phase 4 | Filling it to 8,192 B now: D's rewrite would break the budget it has to keep | adopted |
 | L24 | A gotcha a skill or doc already owns becomes a follow-up to write it there: F506 (e2e-testing), F508 (the release runbook, aztec-update, COMPOSITION-TESTS.md) | Phase 4 | Keeping them in `lessons.md`: CLAUDE.md routes a domain technique to its owning skill, and the budget cannot hold them. Editing the skills here: J's scope is the curated layer | adopted |
 | L25 | An unsupported line is rewritten from its own candidates when the verifier's evidence shows a true item or gotcha under a wrong detail, and a fresh verifier must then support the new text; a line with no supported rewrite is dropped | Phase 4 | Dropping every unsupported line: six of the eight were a wrong detail on a real open item or gotcha, and dropping them would lose the item | adopted |
+| L26 | `closures.json` is exactly what `closuresBase` derives, the owner's answers included: `--check` compares every row field by field and refuses a row whose dir the base lacks | Arc J codex J3 | Comparing chosen fields (class, host): a field left out stays forgeable, and deriving the whole row costs one run | adopted |
+| L27 | Drift and a dir's date read each commit's content changes. A subject exempts only the import, #692 and the untrack squash, all before the base, and a byte-identical move changes only its destination | Arc J codex J5 | Pinning C's and D's squash SHAs as reviewed exemptions: neither exists until it merges, C's moves are all R100, and D measures drift up to its parent | adopted |
+| L28 | A line's currency and verifier verdicts carry `subject`, the hash of its text (archive links normalised) and its candidate ids, and `--verify` voids a verdict that judged another subject | Arc J codex J1 | Deleting a line's verdicts whenever `--decide` rewrites it: `--decide` never deletes, and a stale verdict then fails loudly instead of vanishing | adopted |
+| L29 | Outside its entries a curated file holds its title, an introduction as the first line after it, `## ` headings and blank lines | Arc J codex J2 | Recording the frame in `mining.jsonl`: a heading or the introduction makes no claim a verifier can check, and every change to them shows in the PR diff | adopted |
+| L30 | A candidate's evidence sits at `closuresBase`: a carried one is exactly an entry the curated files held there, any other cites an inventory source, and its bounds, line and id are rechecked | Arc J codex J4 | Trusting a candidate's own commit and path: its hash proves the slice matches, not where it came from | adopted |
+| L31 | C67 drops its clause on the three comments the plans gate reports, in J | Arc J codex loop | Leaving it for C: C repoints those comments, and editing the line there means re-mining it in C | adopted |
 
 **Findings**
 
@@ -814,6 +821,14 @@ In order. No `/code-review`: `code_review` is `off`.
 | X5 | Pre-merge drift, generated vs upstream edits, the arc actually merged; A0's gate | adopted | L12, Mechanics § Concurrency, Delivery table |
 | X6 | 300-file render and 3,000-file API limits; `origin/dev...HEAD` includes lower arcs | adopted | L13, `$PARENT`, D's API reconciliation |
 | X7 | I5, O3 and F17/I3 need checks before damage | adopted | Phase 1 rehearsal, Phase 4 `--verify`, D's pre-merge gate |
+| J1 | `--decide` keeps a line's verdicts when its text changes | adopted | L28 |
+| J2 | Text outside an entry escapes verification | adopted | L29 |
+| J3 | `--check` never compares a row's class, host, PRs or follow-ups with their derivation | adopted | L26 |
+| J4 | Evidence need not sit at the frozen base | adopted | L30 |
+| J5 | A commit subject can disable the drift guard | adopted | L27 |
+| J6 | L36 drops its source's ownership rule | adopted | Rewritten from its own candidates (L25), and a fresh verifier judged it |
+| J7 | L35 generalises one wrapper's behaviour | adopted | Rewritten to the `eval` left of `&&`, and reproduced |
+| J8 | Two helper comments restate their names | adopted | Deleted |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).

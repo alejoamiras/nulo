@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { checkClosures, deriveRows, HISTORICAL, type Pr, RELOCATED } from "./classify"
 import { cleanupRepos, commitAll, git, P, writeFiles } from "./fixture"
@@ -25,7 +25,7 @@ function planTree(): { repo: string; imported: string; prs: Map<number, Pr> } {
 		writeFiles(repo, { [`${P}/${dir}/plan.md`]: `# ${dir}\n`, ...files })
 		return commitAll(repo, subject)
 	}
-	add("check-names", "feat: check names (#11)")
+	add("check-names", "feat: check names (#11)", { [`${P}/check-names/vectors.json`]: "{}\n" })
 	const unnumbered = add("release-cut", "fix: a squash whose subject lost its number")
 	add("waiting", "docs: waiting")
 	add("dup", "docs: dup")
@@ -58,8 +58,12 @@ function planTree(): { repo: string; imported: string; prs: Map<number, Pr> } {
 }
 
 describe("classify", () => {
-	test("a PR counts when its squash touched the dir or the dir's line names it after the plan began", () => {
+	test("a PR counts when its squash changed the dir's content or the dir's line names it after the plan began", () => {
 		const { repo, imported, prs } = planTree()
+		mkdirSync(join(repo, "reference"))
+		git(repo, "mv", `${P}/check-names/vectors.json`, "reference/vectors.json")
+		commitAll(repo, "chore: move the vectors beside their test (#30)")
+		prs.set(30, { number: 30, state: "MERGED", base: "dev", mergedAt: "2099-01-01T00:00:00Z", mergeCommit: null })
 		const rows = deriveRows({ cwd: repo, prs, importSha: imported })
 		expect(rows.map((r) => [r.dir, r.class, r.evidence, r.prs])).toEqual([
 			["check-names", "closed", "S1: merged #11", [11]],
@@ -75,11 +79,20 @@ describe("classify", () => {
 		expect([byDir.get("old")?.status, byDir.get("old")?.date]).toEqual([HISTORICAL, "2026-05-19"])
 	})
 
-	test("--check stops on an ambiguous row, a short snapshot or substantive drift, and a row-less dir stays active", () => {
+	test("--check holds each row to its base derivation and counts any content change as drift, whatever the subject", () => {
 		const { repo, imported, prs } = planTree()
-		const derived = deriveRows({ cwd: repo, prs, importSha: imported }).filter((r) => r.dir !== "dup")
-		const rows = [...derived, { ...derived[0], dir: "gone" }, { ...derived[0], dir: "moved", status: `${RELOCATED} — to x` }]
+		writeFiles(repo, { [`${P}/passkey-e2e/PRF.md`]: "prf\n" })
+		commitAll(repo, "docs: passkey notes")
 		const closuresBase = git(repo, "rev-parse", "HEAD")
+		const derived = deriveRows({ cwd: repo, prs, importSha: imported, ref: closuresBase })
+		expect(derived.find((r) => r.dir === "passkey-e2e")?.status.startsWith(RELOCATED)).toBe(true)
+		const rows = derived
+			.filter((r) => r.dir !== "dup")
+			.map((r) => (r.dir === "context" ? { ...r, class: "active" as const, outcomeFile: "../../outside.md" } : r))
+		rows.push({ ...derived[0], dir: "gone" })
+		mkdirSync(join(repo, "apps"))
+		git(repo, "mv", `${P}/passkey-e2e/PRF.md`, "apps/PRF.md")
+		commitAll(repo, "docs(e2e): keep PRF.md beside the suite")
 		writeFiles(repo, { [`${P}/check-names/assets/moved.md`]: "x\n" })
 		commitAll(repo, "chore(plans): relocate plan-dir assets that code and ci read")
 		writeFiles(repo, { [`${P}/release-cut/plan.md`]: "# reopened\n" })
@@ -88,11 +101,15 @@ describe("classify", () => {
 		writeFiles(repo, { [`${P}/plans-scaffolding/gh-prs.json`]: snapshot([...prs.values()], prs.size) })
 		writeFileSync(join(repo, P, "plans-scaffolding/gh-issues.json"), snapshot([{ number: 20 }], 2))
 		const base = closuresBase.slice(0, 8)
-		expect(checkClosures(repo, { closuresBase, rows })).toEqual({
+		expect(checkClosures(repo, { closuresBase, rows }, "HEAD", imported)).toEqual({
 			problems: [
 				`${P}/plans-scaffolding/gh-issues.json: 1 items of 2`,
+				"context: its class is not what closuresBase derives",
+				"context: its outcomeFile is not what closuresBase derives",
+				"gone: no such dir at closuresBase",
 				"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
 				"gone: no such dir",
+				`check-names: changed since ${base}; re-answer it and regenerate`,
 				`release-cut: changed since ${base}; re-answer it and regenerate`,
 			],
 			rowless: ["dup"],
