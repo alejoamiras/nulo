@@ -88,6 +88,10 @@ Changes needed, high confidence. All four findings reproduced and adopted (D6-D9
 
 Each new test fails on round 1's code.
 
+## Before round 3: a plain target
+
+Probing the spellings round 3 would try found one more. Markdown renders a backslash escape, so `d/\.\./a/plan.md` opens as `d/../a/plan.md` while the gate read the literal path, where a decoy with an Outcome passed. Decoding cannot reach that, so an index target must now be a plain `<dir>/<file>` path, the documented format, and anything else is a finding (L50). All 270 real targets already are; `./x/plan.md` now asks for `x/plan.md` instead of being read as `x`.
+
 ## For E
 
 - `mine.ts --verify` stays at the reworded lesson until E rewrites `lessons.md`; from then on the mining record is evidence of J's curation, not a gate.
