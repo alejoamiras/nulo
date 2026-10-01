@@ -94,6 +94,36 @@ describe("OperationCard — aztec_createAuthWit", () => {
 		expect(w.find('[data-testid="execute-authwit-opaque-warning"]').exists()).toBe(false)
 	})
 
+	test("a random 254-bit nonce reads as a trimmed field, whole on hover", () => {
+		const nonce = "0x0f3c7a91e24b6d08c5f1a39e7b2d40c86e9a1f53b7d20c4e8a6f91b3d5c07e2a"
+		const w = mountCard(
+			createAuthWit({
+				caller: DELEGATE,
+				call: { to: TOKEN, name: "transfer_in_private", selector: "0xd73354bc", args: [OWNER, DELEGATE, field(5n), nonce] },
+			}),
+			{
+				tokens: [USDC],
+				decodedCalls: [
+					{
+						kind: "decoded",
+						contract: "Token",
+						fn: "transfer_in_private",
+						params: [
+							{ name: "from", value: { kind: "address", value: OWNER } },
+							{ name: "to", value: { kind: "address", value: DELEGATE } },
+							{ name: "amount", value: { kind: "integer", value: "5" } },
+							{ name: "authwit_nonce", value: { kind: "field", value: nonce } },
+						],
+					},
+				],
+			},
+		)
+		const row = w.find('[data-testid="execute-authwit-transfer-nonce"]')
+		expect(row.text()).toContain("0x0f3c7a91..c07e2a")
+		expect(row.text()).not.toContain(nonce)
+		expect(row.find("[title]").attributes("title")).toBe(nonce)
+	})
+
 	test("the Function row names the function the selector runs when the intent's label lies or is missing", () => {
 		const decoded = {
 			kind: "decoded",

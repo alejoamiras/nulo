@@ -695,7 +695,7 @@ that exist today (the sample Token's transfers and both mints).
   src/wallet/services/token/functions`, `bun run typecheck:all`, `bun run lint`: all exit 0.
   Layers: typecheck · lint · unit · component.
 
-### P2 · The nonce reads like the card's other fields
+### P2 · The nonce reads like the card's other fields ✓
 
 Build the O2 answer the approval records, and only that one.
 

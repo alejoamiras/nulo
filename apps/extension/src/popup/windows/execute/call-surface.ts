@@ -180,6 +180,14 @@ export const valueText = (v: DecodedValue, full = false): string => {
 	}
 }
 
+/** An authwit nonce as the raw rows read a field: its decimal below 2^64, else the 32-byte hex. */
+export const nonceValue = (nonce: string): DecodedValue => {
+	const decimal = smallFieldDecimal(nonce)
+	return decimal !== undefined
+		? { kind: "integer", value: decimal }
+		: { kind: "field", value: `0x${BigInt(nonce).toString(16).padStart(64, "0")}` }
+}
+
 /** What the row reveals on hover: the whole field, or the whole list when the line summarized it. */
 export const valueTitle = (v: DecodedValue): string | undefined => {
 	if (v.kind === "field") return v.value

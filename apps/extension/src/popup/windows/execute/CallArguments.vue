@@ -5,7 +5,7 @@
  */
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { safeWire } from "./humanize"
-import { type CallSurface, RAW_NOTICE, amountLabel, rawToggleLabel, valueText, valueTitle } from "./call-surface"
+import { type CallSurface, RAW_NOTICE, amountLabel, nonceValue, rawToggleLabel, valueText, valueTitle } from "./call-surface"
 
 const props = defineProps<{
 	surface: CallSurface
@@ -24,6 +24,9 @@ const amount = computed(() =>
 	props.surface.kind === "transfer" || props.surface.kind === "mint"
 		? amountLabel(props.tokens, props.chainId, props.contract, props.surface.amount)
 		: undefined,
+)
+const nonce = computed(() =>
+	props.surface.kind === "transfer" && props.surface.nonce !== undefined ? nonceValue(props.surface.nonce) : undefined,
 )
 </script>
 
@@ -64,9 +67,9 @@ const amount = computed(() =>
 				<Text v-else color="tertiary">base units</Text>
 			</Text>
 		</Flex>
-		<Flex v-if="surface.kind === 'transfer' && surface.nonce !== undefined" :data-testid="`${prefix}-transfer-nonce`" justify="between" :class="$style.row">
+		<Flex v-if="nonce" :data-testid="`${prefix}-transfer-nonce`" justify="between" :class="$style.row">
 			<Text size="11" color="secondary">Authwit nonce:</Text>
-			<Text size="11" color="primary">{{ surface.nonce }}</Text>
+			<Text size="11" color="primary" :mono="nonce.kind === 'field'" :title="valueTitle(nonce)">{{ valueText(nonce) }}</Text>
 		</Flex>
 	</Flex>
 

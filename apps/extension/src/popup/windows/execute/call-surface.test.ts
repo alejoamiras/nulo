@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { trimAddress } from "@/utils/string"
 import { vocabularySelector } from "@/utils/token-transfer-vocabulary"
 import type { DecodedValue } from "@/wallet/services/execution/client"
 import type { TokenInfo } from "@/wallet/services/token/client"
-import { amountLabel, callName, callSurface, rawRows, tokenAt, valueText, valueTitle } from "./call-surface"
+import { amountLabel, callName, callSurface, nonceValue, rawRows, tokenAt, valueText, valueTitle } from "./call-surface"
 
 const OWNER = `0x${"a".repeat(64)}`
 const TO = `0x${"b".repeat(64)}`
@@ -236,5 +237,25 @@ describe("a wire alias cannot outrank the decoded name; hover text is complete",
 		const long = "x".repeat(100)
 		expect(valueText({ kind: "string", value: long }).length).toBeLessThan(100)
 		expect(valueTitle({ kind: "string", value: long })).toBe(long)
+	})
+})
+
+describe("nonceValue", () => {
+	test("a nonce below 2^64 reads as its decimal, anything larger as the field's whole hex, trimmed in the row", () => {
+		const two64 = 1n << 64n
+		expect(nonceValue("9")).toEqual({ kind: "integer", value: "9" })
+		expect(nonceValue((two64 - 1n).toString())).toEqual({ kind: "integer", value: (two64 - 1n).toString() })
+		expect(nonceValue(two64.toString())).toEqual({ kind: "field", value: field(two64) })
+		const largest = nonceValue((Fr.MODULUS - 1n).toString())
+		expect(valueText(largest)).toBe(trimAddress(field(Fr.MODULUS - 1n), 10, 6))
+		expect(valueTitle(largest)).toBe(field(Fr.MODULUS - 1n))
+	})
+
+	test("two nonces that trim alike read the same in the row and differ on hover", () => {
+		const a = nonceValue(BigInt(`0x0f3c7a91${"1".repeat(50)}c07e2a`).toString())
+		const b = nonceValue(BigInt(`0x0f3c7a91${"2".repeat(50)}c07e2a`).toString())
+		expect(valueText(a)).toBe("0x0f3c7a91..c07e2a")
+		expect(valueText(b)).toBe(valueText(a))
+		expect(valueTitle(b)).not.toBe(valueTitle(a))
 	})
 })
