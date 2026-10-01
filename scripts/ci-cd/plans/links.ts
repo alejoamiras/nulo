@@ -283,7 +283,10 @@ export function expandBraces(token: string): string[] | null {
 
 const TOKEN_RE = /implementations-plan\/[A-Za-z0-9._/{},*<>-]*/g
 
-/** Plan paths named in a line of text; templates (`<plan>`, globs) are not paths. `overflow` holds tokens past the brace cap. */
+/**
+ * Plan paths named in a line of text; templates (`<plan>`, globs) are not paths, but a `>` with no `<` before
+ * it closes an autolink. `overflow` holds tokens past the brace cap.
+ */
 export function pathTokens(text: string): { paths: string[]; overflow: string[] } {
 	const paths: string[] = []
 	const overflow: string[] = []
@@ -291,7 +294,7 @@ export function pathTokens(text: string): { paths: string[]; overflow: string[] 
 		const expanded = expandBraces(raw)
 		if (expanded === null) overflow.push(raw)
 		for (const token of expanded ?? []) {
-			const clean = token.replace(/[.,]+$/, "").replace(/\/+$/, "")
+			const clean = token.replace(token.includes("<") ? /[.,]+$/ : /[.,>]+$/, "").replace(/\/+$/, "")
 			if (!/[*<>{}]/.test(clean) && !clean.endsWith("...")) paths.push(clean)
 		}
 	}
@@ -327,15 +330,18 @@ export const PATH_TOKEN_ALLOWLIST: readonly HeldMention[] = [
 	},
 ]
 
-const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[0-9a-f]{40}(?:\/[A-Za-z0-9._-]+)*(?:#L\d+)?/g
+const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[^\s"'`<>()[\]{}]*/g
 
 /**
  * An allowlisted permalink pins the commit it names, so a plan path inside it says nothing about HEAD.
- * `isAllowedPermalink` judges each URL-shaped span whole, so a dot segment or an unlisted SHA keeps
- * its tokens.
+ * Each span runs to the URL's last character, so `isAllowedPermalink` judges it whole: a dot or encoded
+ * segment, an unlisted SHA or `blob/dev` keeps its tokens.
  */
 function withoutPermalinks(text: string, bases: Bases): string {
-	return text.replace(PERMALINK_SPAN_RE, (url) => (isAllowedPermalink(url, bases) ? " " : url))
+	return text.replace(PERMALINK_SPAN_RE, (span) => {
+		const url = span.replace(/[.,;:!?]+$/, "")
+		return isAllowedPermalink(url, bases) ? ` ${span.slice(url.length)}` : span
+	})
 }
 
 type Hit = { file: string; line: number; text: string }

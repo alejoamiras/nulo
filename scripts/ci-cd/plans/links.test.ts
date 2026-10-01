@@ -140,15 +140,19 @@ describe("resolveHref", () => {
 })
 
 describe("path tokens", () => {
-	test("brace tokens expand; templates and globs are not paths; trailing punctuation drops", () => {
+	test("brace tokens expand; templates and globs are not paths, an autolink's `>` is no template; trailing punctuation drops", () => {
 		expect(expandBraces("implementations-plan/{a,b}/x/{c,d}.md")).toEqual([
 			"implementations-plan/a/x/c.md",
 			"implementations-plan/a/x/d.md",
 			"implementations-plan/b/x/c.md",
 			"implementations-plan/b/x/d.md",
 		])
-		expect(pathTokens("see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x and implementations-plan/**.")).toEqual({
-			paths: ["implementations-plan/a/plan.md", "implementations-plan/b/plan.md"],
+		expect(
+			pathTokens(
+				"see implementations-plan/{a,b}/plan.md, implementations-plan/<plan>/x, implementations-plan/** and <implementations-plan/c/>.",
+			),
+		).toEqual({
+			paths: ["implementations-plan/a/plan.md", "implementations-plan/b/plan.md", "implementations-plan/c"],
 			overflow: [],
 		})
 	})
@@ -361,15 +365,28 @@ describe("path-token", () => {
 		expect(findings(repo, "path-token").map((f) => f.detail)).toEqual(["implementations-plan/b/plan.md does not resolve at HEAD"])
 	})
 
-	test("an allowlisted permalink pins its file and names no plan path; any other URL's path still does", () => {
+	test("an allowlisted permalink pins its file and names no plan path; any other URL's path still does, its tail included", () => {
 		const [allowed, other] = ["a".repeat(40), "b".repeat(40)]
 		const url = (ref: string) => `https://github.com/alejoamiras/nulo/blob/${ref}/implementations-plan/gone/audit-x.md`
 		const repo = makeRepo({
 			"scripts/ci-cd/plans/permalink-bases.json": JSON.stringify({ [allowed]: "a dev commit" }),
-			"src/a.ts": [`// ${url(allowed)}`, `// (${url(allowed)}#L3).`, `// ${url(other)}`, `// ${url("dev")}`, ""].join("\n"),
+			"src/a.ts": [
+				`// ${url(allowed)}`,
+				`// (${url(allowed)}#L3).`,
+				`// ${url(other)}`,
+				`// ${url("dev")}`,
+				`// ${url(allowed)}/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
+				`// <${url("dev")}>`,
+				"",
+			].join("\n"),
 			"docs/notes.md": `See [the audit](${url(allowed)}).\n`,
 		})
-		expect(findings(repo, "path-token").map((f) => `${f.file}:${f.line}`)).toEqual(["src/a.ts:3", "src/a.ts:4"])
+		expect(findings(repo, "path-token").map((f) => `${f.file}:${f.line}`)).toEqual([
+			"src/a.ts:3",
+			"src/a.ts:4",
+			"src/a.ts:5",
+			"src/a.ts:6",
+		])
 	})
 
 	test("the reference projects and the soak baselines record their paths and are not scanned", () => {
