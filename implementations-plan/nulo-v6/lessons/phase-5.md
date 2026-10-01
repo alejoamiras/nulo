@@ -202,6 +202,26 @@ while the Chrome suite ran, agreed):
   CLI's pieces from GitHub releases, and one 500 fails its job. The run saves
   `Linux-aztec-6.0.0-rc.1-v2` (09:01Z), and the re-runs restored from it.
 
+## The owner's sign-off and the re-gate (2026-10-01)
+
+- The owner answered on the decision page between 09:37Z and 09:39Z; the answers are quoted under
+  P5 step 10 in the plan. Three differed from the build, and each became its own commit. U5
+  restored the Testnet Aztecscan mapping by reverting `85df2eda` (`c712d5c2`). U6 changed About's
+  stage label to "Testnet" (`d5311f31`). U7's note, "Keep the copies as we'd be on Alpha.", put
+  card 01 back to dev's text (`222870b3`). Captures of both changed screens from the final build
+  are on the decision page.
+- The whole gate ran again on `12cf1fac`, and every step matched the `10aa5acc` counts, smoke
+  included: Chrome 166 passed and 7 skipped, Firefox 162 and 11. Two steps first failed on the
+  host, not the code, and passed when re-run:
+  - `test:all` hit a 10 s hook timeout in `content-message-relay.test.ts`, whose `beforeEach`
+    cold-imports the module after `vi.resetModules()`. The host's load average was 284 on 192
+    cores. The file alone passed 7 of 7, and `test:all` re-run at load 164 exited 0: the class of
+    flake `lessons.md` already names.
+  - The landing's prebuild (`fetch-latest-release.ts`) reads the latest release through the
+    anonymous GitHub API, and the host's budget stood at 0 of 60 until 09:57:41Z. Re-run after
+    the reset: exit 0.
+- CI on `12cf1fac` went green on every check at the first attempt, the toolchain cache holding.
+
 ## Arc A codex loop
 
 ### Round 1 (2026-10-01, `/codex high`, read-only, at `e1f00915`)
@@ -266,6 +286,14 @@ Verdict: two preflight issues, and no wallet-runtime blocker found by static ins
   and in a malformed one, at debug: the previous client printed the fake key 2 and 3 times, both
   preflights 0. The live preflight still passes, and the metadata script reads block and storage
   through the new client.
-- The loop stops here: three rounds, one medium and five low findings accepted and one low
-  rejected, all in the dev preflights or comments, nothing in the wallet runtime. The last fix was
-  verified locally rather than in a fourth round, per the plan's three-round cap.
+- The fix loop stops here: three rounds, one medium and five low findings accepted and one low
+  rejected, all in the dev preflights or comments, nothing in the wallet runtime.
+
+### Round 4 (resumed, on `12cf1fac`): a verification pass, no findings
+
+After the owner's sign-off changed the branch, a resumed pass reviewed every code change since
+round 3: the round-3 fix (`2e6afbe6`), the mint guard (`10aa5acc`) and the three sign-off commits.
+Codex: "No material findings." The silent client keeps the `aztec_` namespace, schema validation
+and the 60 s timeout, and errors still surface to the scrubbed prints. No fixture compares a
+`simulate()` wrapper any more. The restored explorer mapping and its tests agree, with no stale
+copy-hash claim left.

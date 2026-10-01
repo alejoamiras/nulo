@@ -936,7 +936,7 @@ phase installs nothing.
   `2914217885`, and the preflight exits 0.
 - Layers: lint, types, unit, component, smoke e2e on both browsers, live read-only.
 
-### P5 · Harness, CI and the network suite on V6 (arc A's gate)
+### P5 · Harness, CI and the network suite on V6 (arc A's gate) ✓
 
 1. `global-setup.ts` honours `AZTEC_HOME` (D12). `docker-ci-like.sh` and `setup-aztec` read the new
    key.
