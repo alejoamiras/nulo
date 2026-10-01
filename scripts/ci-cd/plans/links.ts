@@ -333,9 +333,9 @@ export const PATH_TOKEN_ALLOWLIST: readonly HeldMention[] = [
 const PERMALINK_SPAN_RE = /https:\/\/github\.com\/alejoamiras\/nulo\/(?:blob|tree)\/[^\s"'`<>]*/g
 const OPENER: Readonly<Record<string, string>> = { ")": "(", "]": "[", "}": "{" }
 
-/** A span less the sentence punctuation and unbalanced closing brackets after its URL, as GitHub's autolinker reads it. */
+/** A span less the punctuation, emphasis, table pipes and unbalanced closing brackets after its URL, as GitHub's autolinker reads it. */
 function urlOf(span: string): string {
-	const url = span.replace(/[.,;:!?]+$/, "")
+	const url = span.replace(/[.,;:!?*_~|]+$/, "")
 	const close = url.at(-1) ?? ""
 	const open = OPENER[close]
 	return open !== undefined && url.split(open).length < url.split(close).length ? urlOf(url.slice(0, -1)) : url

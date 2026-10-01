@@ -389,6 +389,8 @@ describe("path-token", () => {
 				`// ${url(allowed)}(x)/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
 				`// ${url(allowed)}[x]/%2e%2e/%2e%2e/%2e%2e/%2e%2e/dev/README.md`,
 				`// <${url("dev")}>tail`,
+				`// See **[audit](${url(allowed)}#L27)**.`,
+				`// |[audit](${url(allowed)})|`,
 				"",
 			].join("\n"),
 			"docs/notes.md": `See [the audit](${url(allowed)}).\n`,
