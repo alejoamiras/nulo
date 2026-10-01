@@ -77,6 +77,17 @@ Changes needed, high confidence. All five findings reproduced and adopted (D1-D5
 
 Each new test fails on the code before its fix.
 
+## Codex round 2
+
+Changes needed, high confidence. All four findings reproduced and adopted (D6-D9; L50 and L52 restated).
+
+1. **Blocking: an encoded traversal split the checked host from the clicked link.** `entryDir` normalized without decoding, while link resolution decodes, and a browser reads `%2e%2e` as `..`. So `tools-extraction/%2e%2e/send-publish-ledger/plan.md`, with a decoy file at that literal path, passed: the structure check read the decoy and the link reached send-publish-ledger. `entryDir` now decodes as `resolveHref` does, and the host comes from `resolveHref` and must lie inside the named dir.
+2. **Blocking: the mode check trusted git's pairing.** Two identical blobs, one 100644 and one 100755, can trade modes while every pair git reports still matches. Modes are now read from both trees through the move map (`git ls-tree`): a moved or edited file keeps its source's mode, an addition is 100644. `rawMeta` drops the modes round 1 gave it.
+3. **A generated addition could be executable.** Covered by the same check.
+4. **The plan contradicted the code.** It allowed a planned edit's mode change, still kept tools-extraction's index line, and left "nears the cap" unquantified; the split fallback now fires at 2,900 files.
+
+Each new test fails on round 1's code.
+
 ## For E
 
 - `mine.ts --verify` stays at the reworded lesson until E rewrites `lessons.md`; from then on the mining record is evidence of J's curation, not a gate.

@@ -241,12 +241,13 @@ export function checkTree(): Finding[]
 
 `archive-move.ts --verify --parent <tools tip>` checks the real diff of the generated commits against their actual parent, the last commit of D's hand-written tools stage:
 - every path under a closed dir is `R<score>` to its mapped path, except that a planned edit git cannot pair (under 50% similar) shows as its old path deleted and its mapped path added, with a note (L46);
-- the blob and the mode unchanged unless the path is in the planned-edit set (L39, L46);
+- the blob unchanged unless the path is in the planned-edit set (L39, L46);
+- every moved or edited file's mode equal to its source's, and every addition's 100644, read from the two trees through the move map, never from git's pairs (L52);
 - every edited file satisfies `generate(oldBlob) == newBlob`;
 - the only additions are `archive/index.md` and the stubs;
 - fewer than 3,000 files. PR D's own count is measured against `$PARENT` (the lower arc's branch, or `dev` once the lower arcs merged), never `origin/dev...HEAD`, which counts unmerged lower arcs.
 
-GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on the PR-files API ("List pull requests files"). D (~1,720) is reviewed locally, and once PR D is open its pre-merge gate enumerates the API's file list completely (`gh api --paginate`) and reconciles it with `git diff -M --name-status $PARENT HEAD`: the same count; every `renamed` row in the move map; every `modified` row a planned edit or a tools-stage file (`git diff --name-status $PARENT <tools tip>`); the only `added` rows `archive/index.md`, the stubs, the tools stage's new files and the mapped path of each planned edit `--verify` notes as unpaired; the only `removed` rows those edits' old paths. **Split fallback:** if the API pairs any other file differently from the local diff, or nears the cap, the Outcome commit becomes its own PR before D. An unpaired planned edit is no trigger: `--verify` still proves its text, and D's one (`execution-decomposition/drafts/contradiction-codex.md`, R027) is a link repair, which a split would not pair (L46).
+GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on the PR-files API ("List pull requests files"). D (~1,720) is reviewed locally, and once PR D is open its pre-merge gate enumerates the API's file list completely (`gh api --paginate`) and reconciles it with `git diff -M --name-status $PARENT HEAD`: the same count; every `renamed` row in the move map; every `modified` row a planned edit or a tools-stage file (`git diff --name-status $PARENT <tools tip>`); the only `added` rows `archive/index.md`, the stubs, the tools stage's new files and the mapped path of each planned edit `--verify` notes as unpaired; the only `removed` rows those edits' old paths. **Split fallback:** if the API pairs any other file differently from the local diff, or lists 2,900 files or more, the Outcome commit becomes its own PR before D. An unpaired planned edit is no trigger: `--verify` still proves its text, and D's one (`execution-decomposition/drafts/contradiction-codex.md`, R027) is a link repair, which a split would not pair (L46).
 
 **Link repair via an explicit old→new map** built from `closures.json`.
 - Each kept file, moved or not, resolves every relative link from its old location, maps the target, and re-relativizes from its new location.
@@ -672,7 +673,7 @@ The owner merges only on a green re-run. Merging is always the owner's call.
 
 - **ux-feedback** (fee6b4a2). Ideally A lands first. The byte-identical hygiene files merge cleanly, and the README conflict resolves to dev's version. That session re-adds its index line after D. If it lands first instead, A's hygiene step is a no-op and A's README replaces the "older plans keep their transcripts" line.
 - **#669** (owner-parked). No arc depends on it. If it lands before A, its transcripts become new manifest rows, and C verifies its baseline move (files and consumer). If it lands after A, `tracked-artifact` reds it until it runs `git rm --cached`; PR A's body says so.
-- **tools-extraction.** A deletes its nested `.gitignore`, and `nested-ignore` catches a re-add. D keeps its L190 line verbatim. Whichever of C and tools-extraction lands second repoints `stage.test.ts` (F7). C edits no staged source (F15), so the digest needs no re-approval.
+- **tools-extraction.** A deletes its nested `.gitignore`, and `nested-ignore` catches a re-add. D archives it with the split, so its L190 line moves to `archive/index.md` (L43). Whichever of C and tools-extraction lands second repoints `stage.test.ts` (F7). C edits no staged source (F15), so the digest needs no re-approval.
 - **Unleashed B4** mirrors § Portable rules. `live-intent.ts` (6611f861, L171-174) reads `intent.json` under four plans' `lessons/`, so in unleashed those plans stay active or the reader is repointed first (the asset rule).
 - **Parallel `/blueprint` sessions** get the rebase note after A merges (A11).
 
@@ -754,6 +755,7 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc C codex loop, round 3 (2026-10-01): changes needed** (high confidence, 1 blocking finding). Adopted (K9; L40 restated): round 2's span left `)**` after a bold link and `)|` after a table cell, so a valid permalink failed. It confirmed K6-K8 closed and no false positive on the tree. Round 3 is the loop's cap, so the fix went to the owner before another pass.
 - **Arc C verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to `9b8e4455`. A URL whose last character is a literal `_`, `*`, `~` or `|` still reads as formatting; none of the tree's 177 permalinks ends with one.
 - **Arc D codex loop (`/codex high`), round 1 (2026-10-01): changes needed** (high confidence, 2 blocking and 3 non-blocking findings). All 5 adopted (D1-D5, ledger L50-L53). It reproduced the archive, Outcome, plan-tree, closure-table and untrack verifications, found no closed dir left behind and the three active and parked dirs unchanged, no content-fidelity bypass, and no new dependency, crypto or permission surface, and judged accepting the R027 repair sound.
+- **Arc D codex loop, round 2 (2026-10-01): changes needed** (high confidence, 2 blocking and 2 non-blocking findings). All 4 adopted (D6-D9; L50 and L52 restated). It confirmed every round-1 repro failing, all 270 index targets passing, no false positive from the second grep now or after a simulated archive of this plan, and the revised inventory rules accepting all 1,724 local PR records.
 
 ---
 
@@ -812,9 +814,9 @@ In order. No `/code-review`: `code_review` is `off`.
 | L47 | `untrack.ts --verify` reads an archive-path addition paired with its source's deletion as a non-exact rename into the archive | Arc D, Phase 7 | A removal (a false finding), or an exact move (it would exempt a transcript) | adopted |
 | L48 | `mine.ts` reads `implementations-plan/archive/` as `implementations-plan/` when it matches an entry to its mined line | Arc D, Phase 7 | Re-verifying each entry the split re-points | adopted |
 | L49 | Phase 7 step 4's enforcement is a tools-stage commit, before generation; after generation only `plans-scaffolding/` changes | Arc D, Phase 7 | Committing it after generation: `--verify --parent <tools tip>` refuses any later edit outside `plans-scaffolding/` | adopted |
-| L50 | An index line names its plan dir by its normalized target: a target that names no file inside one plan dir fails, and so does a second archive line for a dir | Arc D codex D1 | The first raw path segment: `x/../y/plan.md` lent `y`'s Outcome to `x`, `./x/plan.md` left `x` unlisted | adopted |
+| L50 | An index line names its plan dir as its link resolves (decoded, normalized), and its host must lie inside that dir: a target that names no file inside one plan dir fails, and so does a second archive line for a dir | Arc D codex D1, D6 | The first raw path segment: `x/../y/plan.md` lent `y`'s Outcome to `x`, `./x/plan.md` left `x` unlisted; normalizing without decoding: `x/%2e%2e/y/plan.md` checked a decoy while the link reached `y` | adopted |
 | L51 | `path-token` also scans the indexes and the curated files, code spans included; other plan prose stays history | Arc D codex D3 | Leaving them to `link-missing`, which reads only links | adopted |
-| L52 | Archive verify compares each move's modes as well as its blob, an unpaired planned edit's included | Arc D codex D4 | Blob identity alone, which a mode flip passes | adopted |
+| L52 | Archive verify reads modes from both trees through the move map: a moved or edited file keeps its source's mode, an addition is 100644 | Arc D codex D4, D7, D8 | Blob identity alone, which a mode flip passes; the modes git reports per pair, which two identical blobs can trade unseen | adopted |
 | L53 | PR D's API inventory is reconciled with `$PARENT`'s diff, which includes the tools stage; an unpaired planned edit is no split trigger | Arc D codex D2 | The move map alone, which rejects the tools stage's files and the R027 repair | adopted; restates L46's fallback |
 
 **Findings**
@@ -881,6 +883,10 @@ In order. No `/code-review`: `code_review` is `off`.
 | D3 | A plan path in an index hook or a curated file evades `path-token` | adopted | L51 |
 | D4 | Archive verify passes a mode change | adopted | L52 |
 | D5 | `outcome.ts`'s comments cite A15 and misstate where missing fields go | adopted | They state the rule |
+| D6 | An encoded `%2e%2e` target lets the structure check read a decoy while the link lands elsewhere | adopted | L50 |
+| D7 | Mode checks follow git's pairing, so two identical blobs can trade modes unseen | adopted | L52 |
+| D8 | A generated addition may be executable | adopted | L52 |
+| D9 | The plan allows a planned edit's mode change, keeps tools-extraction's index line, and leaves "nears the cap" unquantified | adopted | Mechanics § Archive-move fidelity, § Merge order |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).
