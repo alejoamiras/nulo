@@ -118,3 +118,13 @@ A fresh verifier supported both frames against their sources: each introduction 
 New mutants, each killed: a subject without its file, follow-up or text; no frame equality; no frame verifier binding; a missing frame ignored; per-commit drift; the old R100 rule; the tree diff without `-z`.
 
 Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 16 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems (2 frames), `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped, `lessons.md` 7,898 B.
+
+Round 3 (`/codex high`, 2026-10-01, same session, the loop's last): changes needed, high confidence, 2 medium findings, both blocking, both adopted (ledger J14-J15):
+1. **A subject's fields are NUL-joined** (medium). Moving C69's first candidate id into its text behind a NUL kept the subject, so its verdicts survived a changed text and thinner evidence. A frame's lines had the same seam. Both subjects now hash one JSON array. Only the 364 subject hashes in `mining.jsonl` changed (the files are identical with subjects masked), and `--verify` recomputes each one from the record.
+2. **A host can leave unnoticed** (medium). An R100 move of `M2/README.md` to `reference/` drifted nothing: M2 kept its other files, and the move left the tree. `--check` now requires each closed row's host at `upto`. D's `outcome.ts` also throws on a missing host, but only at D, after J and C have merged.
+
+It also tried CRLF, a bare `-`, indented or tabbed entries and whitespace-only lines, each of which fails verification. Moves between dirs, quoted names, deletions, mode and type changes all drift, and an out-and-back round trip leaves no drift.
+
+Mutants, each killed: a NUL-joined line subject, a NUL-joined frame subject, no host check. The host check takes no archived path, since `upto` is always a tree before the archive move.
+
+Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 17 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems, `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped.

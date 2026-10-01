@@ -322,6 +322,16 @@ function driftProblems(cwd: string, file: Closures, upto: string): string[] {
 		.map((r) => `${r.dir}: changed since ${file.closuresBase.slice(0, 8)}; re-answer it and regenerate`)
 }
 
+/** The archive tools write each closed plan's Outcome into its host, so a byte-identical move out is still a loss. */
+function hostProblems(cwd: string, rows: readonly Row[], upto: string): string[] {
+	const tracked = new Set(git(cwd, "ls-tree", "-r", "-z", "--name-only", upto, `${PLANS}/`).split("\0"))
+	return rows.flatMap(({ dir, class: c, outcomeFile: host }) =>
+		c === "closed" && host !== null && !tracked.has(host)
+			? [`${dir}: its host ${host} is gone at ${upto}; re-answer it and regenerate`]
+			: [],
+	)
+}
+
 /** Each row must equal its derivation at the table's base: the archive tools trust every field. */
 function rowProblems(rows: readonly Row[], derived: readonly Row[]): string[] {
 	const want = new Map(derived.map((r) => [r.dir, r]))
@@ -350,7 +360,7 @@ export function checkClosures(cwd: string, file: Closures, upto = "HEAD", import
 		if (!live.has(row.dir) && !row.status.startsWith(RELOCATED)) problems.push(`${row.dir}: no such dir`)
 		if (row.class === "ambiguous") problems.push(`${row.dir}: ambiguous (${row.status})`)
 	}
-	problems.push(...driftProblems(cwd, file, upto))
+	problems.push(...hostProblems(cwd, file.rows, upto), ...driftProblems(cwd, file, upto))
 	return { problems, rowless: [...live].filter((d) => !seen.has(d)).sort() }
 }
 

@@ -747,6 +747,7 @@ In order. No `/code-review`: `code_review` is `off`.
   7. **Assumptions** (adopted): I3, I5 and O3 reconciliation each get a concrete check before the step they guard.
 - **Arc J codex loop (`/codex high`), round 1 (2026-09-30): changes needed** (high confidence, 8 findings). All 8 adopted after each was reproduced (J1-J8, ledger L26-L31). It found no wrong closure and no falsely resolved follow-up in the committed table.
 - **Arc J codex loop, round 2 (2026-10-01): changes needed** (high confidence, 5 findings). All 5 adopted (J9-J13, ledger L32-L36), J12 by one tree diff instead of the suggested first-parent merge diffs. It confirmed that an edited text or reordered candidates void a verdict and that nested hosts and carried slices are checked, and found no false positive on real data.
+- **Arc J codex loop, round 3 (2026-10-01): changes needed** (high confidence, 2 medium findings, both blocking). Both adopted (J14-J15, ledger L37-L38). It found that every line shape `entriesOf` and `frameOf` could disagree on fails verification, that drift catches moves between plan dirs, quoted names, deletions, mode and type changes, and that a move out and back leaves no drift. Round 3 is the loop's cap, so the fixes went to the owner before another pass.
 
 ---
 
@@ -792,6 +793,8 @@ In order. No `/code-review`: `code_review` is `off`.
 | L34 | Only a byte-identical move out of the plan tree changes nothing but its destination; a move between plan dirs counts against both | Arc J codex J11 | Naming C's source and destination pairs: J sits below C and cannot know them, and every C move leaves the tree | adopted; narrows L27 |
 | L35 | Drift is one tree diff from `closuresBase` to `upto` (`-M -l0`), so a merge's own edits count. The derivation keeps per-commit history, where a merge contributes no diff | Arc J codex J12 | `--diff-merges=first-parent`: a promote merge's first-parent diff is every dev change since the last promote, so after a release drift would flag closed dirs that dev changed before the base, and the derivation would credit the promote's PR to every plan dev touched | adopted |
 | L36 | The classifier reads git's output NUL-delimited | Arc J codex J13 | `core.quotePath=false`: git still quotes a path holding `"`, `\` or a control character | adopted |
+| L37 | A subject hashes its fields as one JSON array | Arc J codex J14 | NUL-joined fields: a NUL inside a line's text reads as a field boundary, so moving a candidate id into the text kept the subject | adopted |
+| L38 | Each closed plan's host must exist at `upto`, so a byte-identical move of the host out of the tree is a loss, not a move | Arc J codex J15 | Leaving it to D's `outcome.ts`, which throws on a missing host, but only at D, after J and C have merged | adopted; narrows L34 |
 
 **Findings**
 
@@ -840,6 +843,8 @@ In order. No `/code-review`: `code_review` is `off`.
 | J11 | The R100 exemption excuses a move between plan dirs | adopted | L34 |
 | J12 | A merge's own edits escape drift | adopted, differently | L35: one tree diff, not first-parent merge diffs |
 | J13 | Quoted paths escape classification | adopted | L36 |
+| J14 | A subject's NUL-joined fields are ambiguous | adopted | L37 |
+| J15 | A closed plan's host can leave the tree unnoticed | adopted | L38 |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).

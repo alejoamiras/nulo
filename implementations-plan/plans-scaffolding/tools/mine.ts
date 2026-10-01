@@ -103,12 +103,15 @@ const sha256 = (b: Uint8Array | string) => createHash("sha256").update(b).digest
 export const scrub = (s: string) => s.replace(LOCAL_TOKEN_RE, "<local path>")
 /** An entry keeps its identity when the archive move re-points its links. */
 const norm = (text: string) => text.replaceAll("](archive/", "](")
-/** A line-stage verdict binds to this, so moving the line, editing its text or follow-up, or swapping its evidence voids it. */
+/**
+ * A line-stage verdict binds to this, so moving the line, editing its text or follow-up, or swapping its evidence
+ * voids it. JSON keeps each field's bounds, whatever it holds.
+ */
 export const subjectOf = (l: Pick<Line, "file" | "text" | "candidates" | "followUp">) =>
-	sha256([l.file, l.followUp ?? "", norm(l.text), ...l.candidates].join("\0"))
+	sha256(JSON.stringify([l.file, l.followUp ?? "", norm(l.text), l.candidates]))
 export const frameOf = (src: string) => src.split("\n").filter((l) => l !== "" && !l.startsWith("- "))
 export const frameRef = (file: CuratedFile) => `frame:${file}`
-export const frameSubjectOf = (f: Pick<Frame, "file" | "lines">) => sha256([f.file, ...f.lines.map(norm)].join("\0"))
+export const frameSubjectOf = (f: Pick<Frame, "file" | "lines">) => sha256(JSON.stringify([f.file, f.lines.map(norm)]))
 
 export function readRecords(cwd: string): Rec[] {
 	const path = join(cwd, MINING)

@@ -116,12 +116,14 @@ describe("classify", () => {
 		})
 	})
 
-	test("drift reads one tree diff: a merge's own edit, a quoted name and a move between plan dirs all count", () => {
+	test("drift reads one tree diff (a merge's own edit, a quoted name, a move between plan dirs), and a host must outlive it", () => {
 		const { repo, imported, prs } = planTree()
 		const closuresBase = git(repo, "rev-parse", "HEAD")
 		const rows = deriveRows({ cwd: repo, prs, importSha: imported, ref: closuresBase })
 		git(repo, "mv", `${P}/status-only/STATUS.md`, `${P}/waiting/STATUS.md`)
-		writeFiles(repo, { [`${P}/check-names/a"b.md`]: "x\n" })
+		mkdirSync(join(repo, "reference"))
+		git(repo, "mv", `${P}/check-names/plan.md`, "reference/check-names.md")
+		writeFiles(repo, { [`${P}/context/a"b.md`]: "x\n" })
 		commitAll(repo, "docs: two edits")
 		git(repo, "checkout", "-q", "-b", "side")
 		commitAll(repo, "docs: side")
@@ -137,7 +139,8 @@ describe("classify", () => {
 		const base = closuresBase.slice(0, 8)
 		expect(checkClosures(repo, { closuresBase, rows }, "HEAD", imported).problems).toEqual([
 			"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
-			`check-names: changed since ${base}; re-answer it and regenerate`,
+			`check-names: its host ${P}/check-names/plan.md is gone at HEAD; re-answer it and regenerate`,
+			`context: changed since ${base}; re-answer it and regenerate`,
 			`release-cut: changed since ${base}; re-answer it and regenerate`,
 			`status-only: changed since ${base}; re-answer it and regenerate`,
 		])

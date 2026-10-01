@@ -298,4 +298,11 @@ describe("mine", () => {
 			"follow-up a-rerun: no follow-ups.md entry",
 		])
 	})
+
+	test("a subject keeps each field's bounds, whatever a field holds", () => {
+		const line = { file: "lessons.md" as const, text: "- a", candidates: ["k-1", "k-2"] }
+		expect(subjectOf({ ...line, text: "- a\0k-1", candidates: ["k-2"] })).not.toBe(subjectOf(line))
+		const frame = (lines: string[]) => frameSubjectOf({ file: "lessons.md", lines })
+		expect(frame(["# A\0# B"])).not.toBe(frame(["# A", "# B"]))
+	})
 })
