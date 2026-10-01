@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Verifies the npm provenance of a published tarball:
 #
-#   scripts/publish/verify-provenance.sh <tarball> [<owner/repo> <workflow path>]
+#   scripts/publish/verify-provenance.sh <tarball> [<owner/repo> <workflow path> [<ref regex>]]
 #
 # The registry's SLSA bundle for the tarball's name@version must be signed through Sigstore by that
-# workflow on refs/heads/dev or refs/heads/main (the certificate's identity, not the statement's own
-# claims) and must name the tarball's exact sha512. Prints the attested source commit.
+# workflow on a ref matching <ref regex>, by default refs/heads/(dev|main) (the certificate's
+# identity, not the statement's own claims), and must name the tarball's exact sha512. A tag publish
+# passes its tag, e.g. 'refs/tags/v6\.0\.0-rc\.1'. Prints the attested source commit.
 # Needs curl, jq and an authenticated gh.
 set -euo pipefail
 
 tgz=$1
 repo=${2:-alejoamiras/nulo}
 workflow=${3:-.github/workflows/publish-packages.yml}
+ref=${4:-refs/heads/(dev|main)}
 
 manifest=$(tar -xOzf "$tgz" package/package.json)
 name=$(jq -r .name <<< "$manifest")
@@ -29,7 +31,7 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   sleep 15
 done
 
-identity="^https://github\\.com/${repo//./\\.}/${workflow//./\\.}@refs/heads/(dev|main)\$"
+identity="^https://github\\.com/${repo//./\\.}/${workflow//./\\.}@${ref}\$"
 gh attestation verify "$tgz" --bundle "$bundle" --digest-alg sha512 \
   --repo "$repo" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com \

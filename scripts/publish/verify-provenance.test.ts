@@ -21,8 +21,8 @@ describe.skipIf(!process.env.NULO_PROVENANCE_PROBE)(`verify-provenance.sh agains
 		tarball = join(dir, info?.filename ?? "")
 	}, 60_000)
 
-	const verify = (file: string, workflow: string) =>
-		Bun.spawnSync([SCRIPT, file, PROBE.repo, workflow], { stdout: "pipe", stderr: "pipe", env: process.env })
+	const verify = (file: string, workflow: string, ...ref: string[]) =>
+		Bun.spawnSync([SCRIPT, file, PROBE.repo, workflow, ...ref], { stdout: "pipe", stderr: "pipe", env: process.env })
 
 	test("accepts the bundle its own workflow signed and prints the attested commit", () => {
 		const run = verify(tarball, PROBE.workflow)
@@ -33,6 +33,12 @@ describe.skipIf(!process.env.NULO_PROVENANCE_PROBE)(`verify-provenance.sh agains
 	// The statement's own claims are untouched here: only the certificate identity can refuse it.
 	test("refuses the same bundle for another signer workflow", () => {
 		const run = verify(tarball, ".github/workflows/other.yml")
+		expect(run.exitCode).not.toBe(0)
+		expect(run.stderr.toString()).toMatch(/verifying/i)
+	}, 120_000)
+
+	test("refuses the same bundle for a ref pattern its certificate does not carry", () => {
+		const run = verify(tarball, PROBE.workflow, "refs/tags/v.*")
 		expect(run.exitCode).not.toBe(0)
 		expect(run.stderr.toString()).toMatch(/verifying/i)
 	}, 120_000)
