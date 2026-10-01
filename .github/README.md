@@ -41,7 +41,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 | Composite | Purpose |
 |---|---|
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
-| `setup-aztec` | Foundry + Aztec CLI matching the `@aztec-labs/aztec.js` version |
+| `setup-aztec` | Foundry + Aztec CLI matching the `@aztec-labs/aztec.js` version; the installer, its `versions` manifest and the noir tarball are SHA-256-pinned in the action (`installer-pins.sha256`), and its npm resolve is held to a 7-day release age outside the Aztec scopes |
 | `setup-puppeteer` | warm `~/.cache/puppeteer` (Chrome); with `browser: firefox`, install + cache the Firefox revision the locked Puppeteer pins, under a key that shares no prefix with Chrome's |
 | `setup-geckodriver` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install `geckodriver` for the Firefox lanes; the pins live in the action. See [SECURITY.md](../SECURITY.md#binary-dependencies). |
 | `setup-presto-server` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install the headless `presto-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#presto-in-ci). |

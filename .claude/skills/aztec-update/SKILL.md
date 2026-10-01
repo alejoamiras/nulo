@@ -43,6 +43,7 @@ Do not start Phase 1 before the answer. Mid-run surprises that change the shape 
 - **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec-labs` transitives; skipping it silently reintroduces the old line. Bump it WITH the Aztec line: the page-side client sends the workspace `@aztec-labs/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
 - **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — they move with the line. The PrivateFPC artifact the wallet derives from ships in `private-fee-juice` (the drift detector below), and `aztec-standards` fixes the Token class every default seed and user-added standards token runs (`default-tokens.test.ts` pins the two together). Holding either is its own decision: list it in `HELD_ROOTS` in `scripts/aztec-hold-residue-check.ts`, which otherwise enforces one generation.
 - **Four version readers keyed by package name**: `.github/actions/setup-aztec/action.yml`, `apps/extension/scripts/e2e/docker-ci-like.sh` and `apps/extension/tests/e2e/global-setup.ts` read the `@aztec-labs/aztec.js` pin to pick the toolchain, and `apps/extension/vite.shared.ts` reads `@aztec-labs/pxe` into `__AZTEC_VERSION__` (Presto's version handshake, the About page, the backup envelope's `aztec-version`), throwing on a missing key. A package or scope rename moves all four.
+- **CI's installer pins** (`.github/actions/setup-aztec/installer-pins.sha256`): SHA-256 of the per-version installer (`https://install.aztec-labs.com/<pin>/install`), of the `versions` manifest beside it, and of the noir release tarball (`noir-x86_64-unknown-linux-gnu.tar.gz`) that manifest's `noir:` line names. `setup-aztec` hashes each before use and refuses a version with no pin, so a bump that skips them fails every cold network-e2e job at setup. A pin certifies the bytes you read: diff the new installer against the pinned one, and confirm it still reads `INSTALL_URI`, `NARGO` and npm's environment config (the action feeds the verified manifest, the verified noir binaries and the release-age gate through them) and fetches nothing new. Then `sha256sum` both files, check the noir tarball's hash against its release asset's `digest` (`gh api repos/noir-lang/noir/releases/tags/v<noir>`), and replace the old lines in the bump commit.
 - **Name-keyed sites tsc cannot see** — a rename misses them silently (the full list with line numbers: `implementations-plan/nulo-v6/recon.md` §7): the bb.js fetch-code shim's importer match in `apps/extension/vite.config.ts`, `HEAVY_SCOPES` and `NEVER_GROUPED` in `apps/extension/scripts/vendor-chunks.ts` (the web-accessible wallet-sdk chunk), the scope prefixes in `store-listing.test.ts`, `presto-core-deps.test.ts`, `scripts/lockfile-exception-diff.ts`, `scripts/publish/stage.ts` and `renovate.json`, the `@nulo/resolve-asset` and `require.resolve` strings (`layout-identity.test.ts`, `packages/resolve-asset/src/index.test.ts`, `scripts/ci-cd/test-soak/lib.ts`), and the Vite `dedupe`, `optimizeDeps` and noir alias keys.
 - **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec-labs/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tags, `aztec-node`'s root LICENSE, `aztec-packages`' root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec-labs/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
 - The two noir patches: rename `patches/@aztec-foundation%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json (Bun drops an unmatched key silently; the `"node":` marker checks in `layout-identity.test.ts` and `resolve-asset/src/index.test.ts` are the proof a patch applied).
@@ -204,19 +205,21 @@ Then Branch A's delivery gates.
 - `FeeJuice.claim_and_end_setup` is ONLY valid as the fee payload (setup phase — where `FeeJuicePaymentMethodWithClaim` places it). An app-phase claim under a sponsored fee must use plain `claim`, or it asserts on EVERY attempt — which looks exactly like a slow L1→L2 message sync if the retry loop swallows errors. Print the caught error on the retry cadence, and when a claim "never syncs", independently check the message witness (`node_getL1ToL2MessageMembershipWitness` with the key from the portal's deposit event) before blaming the network.
 - Blanket `biome check --write` on test trees converts `vi.fn(function () {…})` mocks to arrows and breaks `new`-constructed service-client mocks (~95 failures) — format only the files you touched.
 
-- **CI's aztec toolchain install has NO min-age gate — un-pinned transitives walk in on publish
-  day.** The repo's `bunfig.toml` 7-day gate covers OUR deps only; `.github/actions/setup-aztec`
-  runs the upstream installer, whose npm resolve is live. 2026-08-12: `snappy@7.4.0` (broken Node
-  entry chain — unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi`
-  fallback) killed every fresh CI sandbox boot the day it published, while local runs stayed green
-  on pre-publish `~/.aztec` trees. The action carried a snappy 7.3.3 pin step until an
-  Aztec line whose install resolved a fixed snappy; it is gone. The class recurs through any un-pinned
-  transitive: diagnose via publish-time correlation + a bare local `npm install` repro (fresh install
-  in a scratch HOME, then `node -e "require('<pkg>')"` against the version dir) before rerunning CI.
+- **CI's toolchain npm resolve has no lockfile, only a 7-day gate.** `.github/actions/setup-aztec`
+  holds the installer's `npm install` to npm's `min-release-age=7`, with `@aztec-labs/*` and
+  `@aztec-foundation/*` exempt, so an un-pinned transitive arrives a week after it publishes, not on
+  publish day, and an exact third-party pin younger than that fails the cold install with
+  `ETARGET` (wait it out). Before the gate, 2026-08-12: `snappy@7.4.0` (broken Node entry chain —
+  unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi` fallback)
+  killed every fresh CI sandbox boot the day it published, while local runs stayed green on
+  pre-publish `~/.aztec` trees. A broken release still lands once it is a week old: diagnose via
+  publish-time correlation + a bare local `npm install` repro under the same two `npm_config_*`
+  settings (fresh install in a scratch HOME, then `node -e "require('<pkg>')"` against the version
+  dir) before rerunning CI.
 - **The first CI run on a new line has no toolchain cache.** Every job downloads the Aztec CLI's
   pieces from GitHub releases, so one HTTP 500 fails a job before any test (6.0.0-rc.1: Foundry's
-  attestation file, the noir tarball). Once the run has saved `Linux-aztec-<pin>-v2`,
-  `gh run rerun <id> --failed`.
+  attestation file, the noir tarball). Once a run has saved `Linux-aztec-<pin>-<pins hash>-v3`
+  (any re-pin changes the key too), `gh run rerun <id> --failed`.
 - **Two steps call the GitHub API with no token**: presto-server's bb fetch, which checks bb's
   digest through the API, and the landing prebuild's `fetch-latest-release.ts`. On a host whose
   60-an-hour anonymous budget other agents share, either returns 403 for up to an hour, so read

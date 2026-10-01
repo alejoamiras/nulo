@@ -1,5 +1,18 @@
 name: Setup Aztec
-description: Install the Aztec CLI matching the @aztec-labs/aztec.js version declared in apps/extension. Cached by version. The CLI installer provisions its own version-pinned Foundry (forge/anvil) into internal-bin with built-in retry.
+description: |
+  Install the Aztec CLI matching the @aztec-labs/aztec.js version declared in apps/extension,
+  cached by version and pin set. The CLI installer provisions its own version-pinned Foundry
+  (forge/anvil) into internal-bin with built-in retry.
+
+  Trust posture: the per-version installer, its `versions` manifest and the noir release tarball
+  that manifest names are SHA-256-pinned in `installer-pins.sha256` and checked before use; the
+  installer runs from the verified file, never from a pipe, and takes the verified manifest and
+  noir binaries through its `INSTALL_URI` and `NARGO` inputs. A version with no pin, or bytes that
+  differ from one, fails the install step. Two download chains stay unpinned, because the
+  installer has no input for them: Foundry (`curl https://foundry.paradigm.xyz | bash`, then
+  foundryup, then Foundry's binaries) and the lockfile-less npm tree of `@aztec-labs/aztec` and
+  `@aztec-labs/cli-wallet`, whose release-age gate delays a compromised third-party publisher but
+  trusts the registry and exempts the Aztec scopes.
 
 inputs:
   skip_cli:
@@ -35,25 +48,88 @@ runs:
     # The preflight step below makes any installer regression fail loudly here
     # instead of mid-L1-deploy.
 
-    # Cache key suffix v2: bumped when the foundry-toolchain step was removed so
-    # one cold install certified the fresh path under the toolchain preflight.
+    # A changed install path needs one cold install to certify it, so the key's suffix is bumped
+    # whenever the install step changes (v3: the pinned installer), and the pin file's hash is in
+    # the key so a re-pin certifies itself the same way instead of riding an older cache.
     - name: Cache Aztec CLI
       if: inputs.skip_cli != 'true'
       id: cache-aztec
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.aztec/versions/${{ steps.detect.outputs.version }}
-        key: ${{ runner.os }}-aztec-${{ steps.detect.outputs.version }}-v2
+        key: ${{ runner.os }}-aztec-${{ steps.detect.outputs.version }}-${{ hashFiles('.github/actions/setup-aztec/installer-pins.sha256') }}-v3
 
+    # Each of the three downloads below is hashed against installer-pins.sha256 before it is used,
+    # and the installer runs from the file that was hashed. The npm settings reach the installer's `npm install`,
+    # whose tree has no lockfile; min-release-age-exclude needs npm 11.17.0, and an npm without
+    # these settings only warns and resolves ungated.
     - name: Install Aztec CLI
       if: inputs.skip_cli != 'true' && steps.cache-aztec.outputs.cache-hit != 'true'
       shell: bash
       env:
         AZTEC_VERSION: ${{ steps.detect.outputs.version }}
       run: |
+        set -euo pipefail
         export CI=1
-        curl -fsSL "https://install.aztec.network/${AZTEC_VERSION}/install" \
-          | VERSION="$AZTEC_VERSION" bash
+        PINS="$GITHUB_ACTION_PATH/installer-pins.sha256"
+        WORK=$(mktemp -d "$RUNNER_TEMP/aztec-install.XXXXXX")
+
+        pin_for() {
+          PIN=$(awk -v path="$1" '$2 == path { print $1 }' "$PINS")
+          if ! [[ "$PIN" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::setup-aztec has no single SHA-256 pin for '$1' in .github/actions/setup-aztec/installer-pins.sha256. Re-pin for Aztec $AZTEC_VERSION (aztec-update skill, the pin surface)."
+            exit 1
+          fi
+        }
+
+        fetch() {
+          local path="$1" url="$2" actual
+          pin_for "$path"
+          mkdir -p "$(dirname "$WORK/$path")"
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$WORK/$path" "$url"
+          actual=$(sha256sum "$WORK/$path" | cut -d' ' -f1)
+          if [ "$actual" != "$PIN" ]; then
+            echo "::error::$url hashes to $actual, not its pin $PIN ('$path'). Upstream changed a pinned file: read the new bytes before re-pinning."
+            exit 1
+          fi
+          echo "Verified $path: $actual"
+        }
+
+        at_least() {
+          [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+        }
+
+        fetch "$AZTEC_VERSION/install" "https://install.aztec-labs.com/$AZTEC_VERSION/install"
+        fetch "$AZTEC_VERSION/versions" "https://install.aztec-labs.com/$AZTEC_VERSION/versions"
+        NOIR_VERSION=$(awk '$1 == "noir:" { print $2 }' "$WORK/$AZTEC_VERSION/versions")
+        NODE_MIN=$(awk '$1 == "node:" { print $2 }' "$WORK/$AZTEC_VERSION/versions")
+        if [ -z "$NOIR_VERSION" ] || [ -z "$NODE_MIN" ]; then
+          echo "::error::the pinned versions manifest of Aztec $AZTEC_VERSION names no noir or no node version."
+          exit 1
+        fi
+
+        # Below its Node minimum the installer would install one through nvm, unpinned.
+        NODE_HAVE=$(node --version | sed 's/^v//')
+        if ! at_least "$NODE_HAVE" "$NODE_MIN"; then
+          echo "::error::Node $NODE_HAVE is below the $NODE_MIN that Aztec $AZTEC_VERSION's installer requires: raise setup-node's version."
+          exit 1
+        fi
+        NPM_HAVE=$(npm --version)
+        if ! at_least "$NPM_HAVE" 11.17.0; then
+          echo "::error::npm $NPM_HAVE predates min-release-age-exclude (11.17.0), which the installer's gated npm resolve needs."
+          exit 1
+        fi
+
+        NOIR_ASSET=noir-x86_64-unknown-linux-gnu.tar.gz
+        fetch "noir/$NOIR_VERSION/$NOIR_ASSET" \
+          "https://github.com/noir-lang/noir/releases/download/v$NOIR_VERSION/$NOIR_ASSET"
+        mkdir "$WORK/noir-bin"
+        tar -xzf "$WORK/noir/$NOIR_VERSION/$NOIR_ASSET" -C "$WORK/noir-bin" ./nargo ./noir-profiler
+
+        VERSION="$AZTEC_VERSION" INSTALL_URI="file://$WORK" NARGO="$WORK/noir-bin/nargo" \
+          npm_config_min_release_age=7 \
+          npm_config_min_release_age_exclude=$'@aztec-labs/*\n\n@aztec-foundation/*' \
+          bash "$WORK/$AZTEC_VERSION/install"
         ls -la ~/.aztec/versions/"$AZTEC_VERSION"/bin/
 
 
