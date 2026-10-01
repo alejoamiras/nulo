@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { appendFileSync, chmodSync } from "node:fs"
 import { join } from "node:path"
-import { derive, fidelityProblems, swapProblems } from "./archive-move"
+import { derive, fidelityProblems, modeProblems, swapProblems } from "./archive-move"
 import { stampOf } from "./closed"
 import { cleanupRepos, closuresRepo, commitAll, git, P, planTree, read, tool, writeFiles } from "./fixture"
 import { fixtures } from "./gate"
@@ -107,13 +107,12 @@ describe("archive-move", () => {
 		const executable = (paths: readonly string[]) => () => {
 			for (const path of paths) chmodSync(join(repo, path), 0o755)
 		}
-		const flipped = [`${P}/archive/stubbed/notes.md`, `${P}/archive/fm/plan.md`, `${P}/archive/done/cites.md`, "CLAUDE.md"]
-		expect(probe(executable(flipped)).split("\n").sort()).toEqual([
-			"CLAUDE.md: mode 100644 → 100755",
-			`${P}/done/cites.md → ${P}/archive/done/cites.md: mode 100644 → 100755`,
-			`${P}/fm/plan.md → ${P}/archive/fm/plan.md: mode 100644 → 100755`,
-			`${P}/stubbed/notes.md → ${P}/archive/stubbed/notes.md: mode 100644 → 100755`,
-		])
+		const flipped = ["stubbed/notes.md", "fm/plan.md", "done/cites.md", "index.md", "stubbed/plan.md"].map((f) => `${P}/archive/${f}`)
+		expect(
+			probe(executable([...flipped, "CLAUDE.md"]))
+				.split("\n")
+				.sort(),
+		).toEqual(["CLAUDE.md", ...flipped].map((path) => `${path}: mode 100644 → 100755`).sort())
 		expect(probe(() => ["plan", "notes"].map((f) => append(`${P}/plans-scaffolding/${f}.md`)()))).toBe("")
 		expect(probe(() => git(repo, "rm", "-q", `${P}/archive/stubbed/plan.md`))).toBe(
 			`${P}/archive/stubbed/plan.md: a planned edit is missing from HEAD`,
@@ -128,6 +127,24 @@ describe("archive-move", () => {
 		expect(swapProblems(repo, head, [[`${P}/dup/plan.md`, `${P}/archive/dup/plan.md`]], d.renames)).toEqual([])
 		expect(swapProblems(repo, head, [[`${P}/dup/plan.md`, `${P}/archive/nest/plan.md`]], d.renames)).toEqual([
 			`${P}/dup/plan.md → ${P}/archive/nest/plan.md: paired off its mapped path`,
+		])
+	})
+
+	test("modes are read through the move map, so identical blobs that trade modes still fail", () => {
+		const repo = fixtures.makeRepo({ "a/x.md": "same\n", "a/y.md": "same\n" })
+		chmodSync(join(repo, "a/y.md"), 0o755)
+		const parent = commitAll(repo, "modes")
+		git(repo, "mv", "a", "b")
+		chmodSync(join(repo, "b/x.md"), 0o755)
+		chmodSync(join(repo, "b/y.md"), 0o644)
+		commitAll(repo, "trade")
+		const renames = new Map([
+			["a/x.md", "b/x.md"],
+			["a/y.md", "b/y.md"],
+		])
+		expect(modeProblems(repo, parent, { renames, edits: new Map(), added: new Set() })).toEqual([
+			"b/x.md: mode 100644 → 100755",
+			"b/y.md: mode 100755 → 100644",
 		])
 	})
 })
