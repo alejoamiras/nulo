@@ -315,12 +315,12 @@ export type HeldMention = { file: string; blob: string; token: string }
 export const PATH_TOKEN_ALLOWLIST: readonly HeldMention[] = [
 	{
 		file: "packages/wallet-crypto/src/account-derivation.ts",
-		blob: "a82c53635c0b12b989bc08367c20eab3a4eba582",
+		blob: "df6328ebea3c81eb447dba7d62d82b0edb3cb9e5",
 		token: "implementations-plan/key-model-v2/reference",
 	},
 	{
 		file: "packages/wallet-crypto/src/mnemonic-master.ts",
-		blob: "a55c4fb314d3cf124b5f239d9049d598c6ed6eab",
+		blob: "42c667c9743bb7feb1b52917b5e216e211e08b6d",
 		token: "implementations-plan/key-model-v2/reference/vectors.json",
 	},
 	{
