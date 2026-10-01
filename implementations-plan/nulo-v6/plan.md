@@ -47,7 +47,8 @@ base: origin/dev at 910a4def
   (`walletChainId 1816023401`); P9, because the owner did not call the store upload. Each keeps
   its steps here as the spec, in `follow-ups.md` § Aztec V6, with the plan's other follow-ups.
   The e2e mint guard among them was fixed in arc A (`10aa5acc`). The V5 dRPC key's retirement
-  (P7 step 6) was not confirmed by close-out, so it is there too.
+  (P7 step 6) was not confirmed by close-out, and the owner dropped it from the follow-ups:
+  "Remove the retiring v5 drpc key as follow-up please" (2026-10-01).
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
@@ -1135,6 +1136,8 @@ P6 and P7 may run in either order. Neither waits for unleashed (Fact 27, A7).
    - `curl -s https://nulo.sh` links `releases/tag/v0.29.0`, and `curl -sI https://nulo.sh` returns
      every header in `apps/landing/public/_headers`. This closes follow-up P1.
 6. The owner retires the V5 dRPC key (A5).
+   **Not tracked, 2026-10-01:** unconfirmed at close-out, and the owner dropped it from the
+   follow-ups, quoted in `lessons/phase-7.md`.
 
 **Validation gate.**
 - Commands: step 1's checks, `gh release view v0.29.0 --json assets -q '[.assets[].name]'`,

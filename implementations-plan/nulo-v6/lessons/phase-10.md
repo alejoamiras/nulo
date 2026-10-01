@@ -31,7 +31,9 @@
   the spec, together with the plan's other follow-ups.
 - Two of the plan's follow-ups did not move: the e2e mint guard, fixed in arc A (`10aa5acc`), and
   the stores' review outcomes, which exist only if P9 runs.
-- The V5 dRPC key's retirement (P7 step 6) was not confirmed by close-out, so it moved as well.
+- The V5 dRPC key's retirement (P7 step 6) was not confirmed by close-out, so it moved as well,
+  until the owner dropped it from the follow-ups before the close-out merged (`lessons/phase-7.md`,
+  step 6).
 - The tools extraction's P1 entry is deleted: P7's landing checks passed.
 - "The gas link and USDC on mainnet" became "The gas link": the mainnet USDC seed left with Alpha.
 

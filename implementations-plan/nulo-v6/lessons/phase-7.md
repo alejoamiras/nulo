@@ -84,7 +84,9 @@
 
 ## Step 6 · The V5 dRPC key
 
-- Not confirmed by close-out, so it moved to `follow-ups.md` § Aztec V6.
+- Not confirmed by close-out, so it moved to `follow-ups.md` § Aztec V6. Before the close-out
+  merged, the owner dropped it from the follow-ups: "Remove the retiring v5 drpc key as follow-up
+  please" (2026-10-01). The plan does not record whether the key is retired.
 
 ## Validation gate (2026-10-01)
 
