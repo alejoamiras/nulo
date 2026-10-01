@@ -83,7 +83,8 @@ export async function completeFeeOptions(config: CompleteFeeOptionsConfig): Prom
 	// Sending for real: 5.0's `GasSettings.fallback` requires explicit `gasLimits`. When the
 	// dApp declared none, fill in the network's per-tx admission limit (node-advertised
 	// `txsLimits.gas`) so the proposer does not skip the tx for over-declaring. Mirrors 5.0
-	// `base_wallet.completeFeeOptions`; the node's GasLimitsValidator is the over-declaration backstop.
+	// `base_wallet.completeFeeOptions`; the node's inbound gas-limit validation is the
+	// over-declaration backstop.
 	const { txsLimits } = await node.getNodeInfo()
 	const maxTxGasLimits = new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas)
 	return GasSettings.fallback({ ...overrides, gasLimits: overrides.gasLimits ?? maxTxGasLimits })

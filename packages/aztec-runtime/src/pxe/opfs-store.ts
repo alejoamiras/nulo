@@ -39,7 +39,7 @@ export class WrongStoreKeyError extends Error {
 }
 
 /** Mirror of upstream `@aztec-labs/pxe`'s non-exported `PXE_DATA_SCHEMA_VERSION` (drift-tested). */
-export const PXE_DATA_SCHEMA_VERSION_PIN = 13
+export const PXE_DATA_SCHEMA_VERSION_PIN = 16
 
 /** The database name inside each per-chain pool directory (mirrors upstream's default). */
 const DB_NAME = "pxe_data"

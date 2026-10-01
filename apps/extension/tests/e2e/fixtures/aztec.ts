@@ -19,6 +19,7 @@ import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { registerInitialLocalNetworkAccountsInWallet } from "@aztec-labs/wallets/testing"
 import { SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import { L1FeeJuicePortalManager } from "@aztec-labs/aztec.js/ethereum"
+import { isL1ToL2MessageReady } from "@aztec-labs/aztec.js/messaging"
 import { ProtocolContractAddress } from "@aztec-labs/aztec.js/protocol"
 import { createExtendedL1Client } from "@aztec-labs/ethereum/client"
 import { SponsoredFPCContractArtifact } from "@aztec-labs/noir-contracts.js/SponsoredFPC"
@@ -415,13 +416,12 @@ export async function bridgeFeeJuice(node: ReturnType<typeof createAztecNodeClie
 
 /** Wait until a bridged L1→L2 message is CLAIMABLE.
  *
- *  5.0 readiness is NOT "the message is in a checkpoint" — it's "the node/PXE anchor block sits in
- *  a checkpoint >= the message's checkpoint" (the claim builds a membership witness against the
- *  anchor; otherwise `getL1ToL2MessageMembershipWitness` returns nothing and the claim throws
- *  "No L1 to L2 message found"). 5.0 only mints an L2 block when txs are pending (no empty blocks,
- *  and `SEQ_MIN_TX_PER_BLOCK=0` does not change that), so after the bridge the anchor stalls below
- *  the message's checkpoint forever. `forceBlock` submits one cheap tx to advance the chain past
- *  it. Callers without a handy tx fall back to best-effort. See lessons/phase-6.md. */
+ *  Claimable is not "the node knows the message" but "a block at the anchor tip has inserted it"
+ *  (`isL1ToL2MessageReady`): the claim builds a membership witness against the anchor, and without
+ *  one it throws "No L1 to L2 message found". The sequencer mints an L2 block only when txs are
+ *  pending (`SEQ_MIN_TX_PER_BLOCK=0` does not change that), so after the bridge the anchor can stall
+ *  below the message forever. `forceBlock` submits one cheap tx to advance the chain past it;
+ *  callers without a handy tx fall back to best-effort. */
 export async function waitForL1ToL2Message(
 	node: ReturnType<typeof createAztecNodeClient>,
 	messageHash: string,
@@ -430,35 +430,28 @@ export async function waitForL1ToL2Message(
 ): Promise<void> {
 	const hash = Fr.fromString(messageHash)
 	const start = Date.now()
-	let msgCheckpoint: bigint | undefined
+	let messageIndex: bigint | undefined
 	while (Date.now() - start < timeoutMs) {
-		const cp = await node.getL1ToL2MessageCheckpoint(hash)
-		if (cp !== undefined) {
-			msgCheckpoint = BigInt(cp)
-			console.log(`[waitForL1ToL2Message] message in checkpoint ${msgCheckpoint} after ${Date.now() - start}ms`)
+		messageIndex = await node.getL1ToL2MessageIndex(hash)
+		if (messageIndex !== undefined) {
+			console.log(`[waitForL1ToL2Message] message at leaf ${messageIndex} after ${Date.now() - start}ms`)
 			break
 		}
 		await new Promise((r) => setTimeout(r, 2_000))
 	}
-	if (msgCheckpoint === undefined) throw new Error(`[waitForL1ToL2Message] ${messageHash} not checkpointed within ${timeoutMs}ms`)
+	if (messageIndex === undefined) throw new Error(`[waitForL1ToL2Message] ${messageHash} not seen by the node within ${timeoutMs}ms`)
 
-	// 5.0 mints no empty L2 blocks (SEQ_MIN_TX_PER_BLOCK=0 does not change that), so after the
-	// bridge the node/PXE anchor stalls below the message's checkpoint and the claim's membership
-	// witness can't be built ("No L1 to L2 message found"). The node-admin `mineBlock` is not
-	// RPC-exposed, so callers pass `forceBlock` — a cheap sponsored tx — which we run until the
-	// anchor's checkpoint covers the message (the real claimability condition).
+	// The node-admin `mineBlock` is not RPC-exposed, so callers pass `forceBlock` (a cheap sponsored
+	// tx), which runs until the latest block's message tree covers the message.
 	while (Date.now() - start < timeoutMs) {
-		const latest = await node.getBlockData("latest")
-		if (latest && BigInt(latest.checkpointNumber) >= msgCheckpoint) {
-			console.log(
-				`[waitForL1ToL2Message] claimable after ${Date.now() - start}ms: anchor checkpoint ${latest.checkpointNumber} >= ${msgCheckpoint}`,
-			)
+		if (await isL1ToL2MessageReady(node, hash)) {
+			console.log(`[waitForL1ToL2Message] claimable after ${Date.now() - start}ms`)
 			return
 		}
 		if (forceBlock) await forceBlock().catch((err) => console.warn(`[waitForL1ToL2Message] forceBlock failed: ${err}`))
 		await new Promise((r) => setTimeout(r, 1_500))
 	}
-	console.warn(`[waitForL1ToL2Message] anchor did not reach checkpoint ${msgCheckpoint} within ${timeoutMs}ms — proceeding best-effort`)
+	console.warn(`[waitForL1ToL2Message] no block inserted leaf ${messageIndex} within ${timeoutMs}ms — proceeding best-effort`)
 }
 
 /** Claim bridged FeeJuice on L2. Uses SponsoredFPC to pay for the claim tx itself.

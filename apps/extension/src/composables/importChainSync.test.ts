@@ -1,9 +1,6 @@
 import { ProtocolContractAddress } from "@aztec-labs/protocol-contracts"
 import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
-import {
-	HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
-	STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-} from "@aztec-labs/standard-contracts/handshake-registry/constants"
+import { STANDARD_HANDSHAKE_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/handshake-registry/constants"
 import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec-labs/standard-contracts/multi-call-entrypoint/constants"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import {
@@ -102,7 +99,6 @@ describe("runImportChainSync", () => {
 			STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS,
 			STANDARD_AUTH_REGISTRY_ADDRESS,
 			STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-			...HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
 		].map((a) => contract(a.toString()))
 		const { deps, harness } = makeDeps({ slice: [{ networkId: "n1", senders: [], contracts: rebuilt }] })
 		await run(runImportChainSync(deps))

@@ -24,7 +24,7 @@
  * If a future upstream `@aztec-labs/wallet-sdk` ships its own `registerToken` (etc.),
  * we throw rather than silently no-op. The guard checks arg types + output type
  * (not just arity), so a same-arity-but-different-shape upstream method is caught.
- * Pinned upstream version: `@aztec-labs/wallet-sdk == 5.2.0`; revisit on bump.
+ * Pinned upstream version: `@aztec-labs/wallet-sdk == 6.0.0-rc.1`; revisit on bump.
  */
 
 import { schemas } from "@aztec-labs/stdlib/schemas"

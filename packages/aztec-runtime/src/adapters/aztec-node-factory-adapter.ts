@@ -78,7 +78,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		if (!check.ok) {
 			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
 		}
-		return createAztecNodeClient(rpcUrl, {}, makeFetchWithTimeout())
+		return createAztecNodeClient(rpcUrl, { fetch: makeFetchWithTimeout() })
 	}
 
 	public createSingleAttemptNode(rpcUrl: string, timeoutMs: number): AztecNode {
@@ -86,7 +86,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		if (!check.ok) {
 			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
 		}
-		return createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+		return createAztecNodeClient(rpcUrl, { fetch: makeSingleAttemptFetch(timeoutMs) })
 	}
 
 	public async probeChainId(rpcUrl: string, timeoutMs: number): Promise<number> {
@@ -96,7 +96,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		}
 		// Single attempt, no retry chain: the probe's whole point is that its
 		// socket dies WITH its budget (see NodeFactory.probeChainId).
-		const node = createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+		const node = createAztecNodeClient(rpcUrl, { fetch: makeSingleAttemptFetch(timeoutMs) })
 		const info = await node.getNodeInfo()
 		return (info.l1ChainId ^ info.rollupVersion) >>> 0
 	}

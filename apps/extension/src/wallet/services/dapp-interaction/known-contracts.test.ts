@@ -4,7 +4,7 @@ import { knownContracts } from "./known-contracts"
 
 const FPCS = { sponsored: `0x${"AB".repeat(32)}`, private: `0x${"CD".repeat(32)}` }
 const FEE_JUICE = `0x${"0".repeat(63)}3`
-const AUTH_REGISTRY = "0x1e8e7e73c592a1b1c9199b4b655ddc7a16fa8a8488df595610b71d3dc1cc666c"
+const AUTH_REGISTRY = "0x1ec33912c9f14470513e0eb23db81ddb2aa1ae3395e6ab4d3cba383f68dec3c5"
 
 describe("knownContracts", () => {
 	test("the protocol contracts carry the drawn role names, in the drawn order, lower-cased", () => {
