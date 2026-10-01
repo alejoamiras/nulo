@@ -5,7 +5,7 @@
 //
 // Usage (from apps/extension): `bun scripts/store-art.ts`
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import puppeteer from "puppeteer"
 
@@ -86,4 +86,3 @@ for (const [index, { capture, title, caption }] of FRAMES.entries()) {
 	const html = fill(frame, { font, mono, title, caption, capture: dataUri(png, "image/png") })
 	await render(html, 1280, 800, resolve(STORE, `screenshot-${index + 1}-1280x800.png`))
 }
-writeFileSync(resolve(STORE, "captures/.gitkeep"), "")

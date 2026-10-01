@@ -4,6 +4,8 @@ What each dashboard field is filled with. `scripts/store-listing.test.ts` holds 
 built manifests (every permission has a justification heading), to `legal/privacy.md` § 6 (the policy
 and the listing name the same permissions), to the stores' length caps, and to the Firefox build's
 data-collection declaration. Edit here, then copy into the dashboards; never the other way round.
+The long description keeps one line per paragraph and per bullet, because both dashboards keep
+newlines.
 
 ## Shared
 
@@ -17,37 +19,22 @@ user approves interact with those accounts. (The full statement: `legal/privacy.
 
 Nothing to see. Everything to own.
 
-Nulo is a wallet for Aztec, a blockchain where your balance and your payments are private unless
-you decide otherwise. Everything is recorded. What can be read is up to you.
+Nulo is a self-custody wallet for Aztec, where your balance and payments are private unless you decide otherwise.
 
-PRIVATE BY DEFAULT, PUBLIC WHEN YOU SAY SO
-Payments are private unless you choose to make one public. Before you send, Nulo shows exactly what
-stays hidden and what the network will see. Your history marks each payment as private or public,
-so you always know which is which.
+PRIVATE BY DEFAULT
+• Send privately or publicly. Before you confirm, Nulo shows what stays hidden.
+• History labels every payment private or public.
+• Proofs are made on your machine: in the browser, or faster with the optional Presto prover.
 
-YOUR MONEY STAYS WITH YOU
-Nulo is self-custody: nobody holds your funds for you. Your keys live on your device, protected by
-your password or your passkey. There is no Nulo server, no account to create and no telemetry.
-Export a backup whenever you want.
+YOURS ALONE
+• Your keys stay on your device, behind your password or passkey.
+• No Nulo server, no account, no telemetry.
+• Back up your profile whenever you want.
 
 APPS HAVE TO ASK
-When a website wants to connect, or to do something with your wallet, Nulo shows you exactly what it
-wants, in plain words, before anything happens. You say yes or no. Settings → Connected Apps lists
-every permission and lets you take it back.
-
-PROOFS MADE ON YOUR MACHINE
-Aztec proves private transactions before they are sent. Nulo makes those proofs right in your
-browser, or faster with Presto, an optional prover you can install on your own computer. Nothing
-about a private transaction is sent to anyone except the node that includes it, in the form the
-protocol defines.
-
-WHAT NULO TALKS TO
-The Aztec node you choose, a price service you can turn off, the public hosts that serve proving
-parameters, the optional local prover, and the apps you approve. Nothing else.
-
-A PREVIEW ON THE AZTEC TESTNET
-Nulo V6 runs on the Aztec testnet with test funds. It is a preview and hasn't been audited yet, so
-tell us what breaks.
+• An app gets no account until you connect it and pick one.
+• Every transaction it proposes waits for your yes.
+• Settings → Connected Apps lists every permission and lets you take it back.
 
 Open source, Apache-2.0: https://github.com/alejoamiras/nulo
 
@@ -177,7 +164,7 @@ match them.
 | Field | Value |
 |---|---|
 | Name | Nulo V6 |
-| Summary | Nothing to see. Everything to own. A wallet for Aztec, where your balance and payments stay private unless you decide otherwise. Your keys stay on your device, and apps have to ask before they do anything with your wallet. |
+| Summary | A wallet for Aztec: your balance and payments stay private unless you decide otherwise. Your keys stay on your device. |
 | Categories | Privacy & Security (AMO's "Other" is "My add-on doesn't fit into any of the categories", exclusive of the rest) |
 | License | Apache-2.0 |
 | Support email | hello@nulo.sh |

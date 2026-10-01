@@ -72,6 +72,18 @@
 				color: #999187;
 				max-width: 500px;
 			}
+			.note {
+				display: inline-block;
+				margin-top: 30px;
+				padding: 8px 12px;
+				border: 1px solid #4a463f;
+				border-radius: 6px;
+				font-family: "JetBrains Mono", monospace;
+				font-size: 13px;
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+				color: #999187;
+			}
 			.shot {
 				width: 432px;
 				height: 720px;
@@ -94,6 +106,8 @@
 		<div class="copy">
 			<h1>{{title}}</h1>
 			<p>{{caption}}</p>
+			<!-- The captures are staged on a local Aztec network with test tokens; every frame says so. -->
+			<span class="note">Local test network · test tokens</span>
 		</div>
 		<div class="shot"><img src="{{capture}}" alt="" /></div>
 	</body>
