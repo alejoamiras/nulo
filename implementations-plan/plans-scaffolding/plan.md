@@ -5,10 +5,24 @@ driver: claude-code
 code_review: off
 eli5_mode: artifact
 budget: ultracode
-status: approved 2026-09-25 (rev 3; the owner delegated the gate, see § Approval) — implementing
+status: completed 2026-10-01 (approved 2026-09-25, rev 3; stack 744)
 base: dev @ 910a4def (2026-09-30, #735); A0 and A merged as #696 and #698
 harden: not scheduled (Ask A12)
 ---
+
+## Outcome
+
+- **Date**: 2026-10-01. **Status**: completed. Six PRs: A0 and A merged on their own, then J, C, D and this close-out landed together by `gh stack merge` (stack 744).
+- **Shipped**:
+  - #696 (A0): the plan-tree gate, `scripts/ci-cd/plans/`, report-only.
+  - #698 (A): transcripts and drafts untracked behind the hygiene files, each recorded in `untrack-manifest.json` (679 rows) and every link to one a permalink at an allowlisted base; the gate enforcing.
+  - #741 (J): the closure table, `closures.json` (270 rows), and `lessons.md` and `follow-ups.md` rewritten from the mined record.
+  - #742 (C): the files code and CI read moved out of the plan tree (`reference/`, `scripts/phantom-sweep.ts`, the soak baselines, `PRF-NON-PORTABLE.md`), their mentions repointed, `check:plans`, and `path-token` enforced for code and config.
+  - #743 (D): Outcome blocks for the 267 closed plans with their seeds retired, the move under `archive/` in a renames-only commit, the index split, the link repairs, and the archive rules enforced.
+  - #746 (E): this Outcome, `lessons.md` pruned and `follow-ups.md` updated, the local-path guard narrowed to `archive/`, the migration tools deleted, and this plan's own move.
+- **Dropped**: F, a separate move PR after E merged, folded into E by the owner on 2026-10-01 (L58). The mining check as a merge gate, once #740 rewrote `follow-ups.md` entries J keeps (L60). The migration tools, deleted rather than archived (L61): their data files stay here, and the code is in D's squash commit on `dev`. A4, the scrub of the kept files' home paths and the guard's `/mnt/` paths, waits on counsel.
+- **Open items**: all in `follow-ups.md`: the A4 scrub; the five files whose stale paths no arc could edit; nulo-v6's archive move; the transcript-shaped files the ignore patterns miss (A3); the code comments that cite a plan path (A6); linting and type-checking the root `scripts/` tree.
+- **Seeds retired**: the `/goal` and `/loop` seeds in § Seeds are history. This plan is a record of what was decided and why, never a task list.
 
 # plans-scaffolding — migrate `implementations-plan/` to the blueprint scaffolding standard
 
@@ -106,7 +120,7 @@ The owner delegated the approval gate and every Ask: "Keep working, only leave t
 
 **One-shot tools: `implementations-plan/plans-scaffolding/tools/`.**
 - The set: untracker and manifest, promoter, rewriter, scrubber, classifier, miner, Outcome generator, archive mover, index splitter, link repairer.
-- They import the lib and are idempotent. They are archived with this plan, and CI never runs them (precedent: `isolated-linker-store/tools`).
+- They import the lib and are idempotent. CI never runs them, and E deletes them when the plan closes (L61).
 
 **Reuse** (`recon.md`):
 - Markdown goes through `Bun.markdown.html`, then the built-in `HTMLRewriter` (`a[href]`, `img[src]`, `h2`). `.html` goes straight to `HTMLRewriter`. The `Bun.markdown.render` callbacks the draft used miss raw `<a href>` (F16). Precedent: `apps/landing/scripts/legal-pages.ts:119`.
@@ -302,7 +316,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 
 **Legal evidence.**
 - No purge, `filter-repo`, force-push to `dev` or history rewrite, and none is proposed. Untracking is `git rm --cached` only.
-- `untrack.ts --verify` proves every removed path at a byte-identical blob on a `dev` ancestor. It runs at Phases 2 and 7, and before every merge.
+- `untrack.ts --verify` proves every removed path at a byte-identical blob on a `dev` ancestor. It runs at Phases 2 and 7, and before every merge; E runs it on its last commit before the tools leave (L61).
 - **Before A merges, the owner stores an offline bundle (A13):** `git fetch origin && git bundle create <offline>/nulo-dev-<date>.bundle origin/dev && git bundle verify <file>`. It is read-only for the repo. A bare SHA is refused (F19); `origin/dev`'s history contains 9f11de70.
 - The A4 scrub edits kept copies only, and waits for counsel.
 
@@ -549,6 +563,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
 7. **Index moves.** Write `transport-ready-handshake/spec-rows.md` and repoint its index line. Drop the `incoming-tip-first-scan` line.
 
 **Validation gate.**
+- As it ran: L60 retired `mine.ts --verify` as a merge gate at J's restack onto `3452ac3b`.
 - Commands: `bun implementations-plan/plans-scaffolding/tools/mine.ts --verify`, `bun scripts/ci-cd/plans/check.ts`, `wc -c implementations-plan/lessons.md`, `bun run test:ci-gating`, `bun run lint`.
 - `mine.ts --verify` requires all of:
   - every `closures.json` row and nested plan has an inventory entry whose host matches the Outcome host order (the O3 reconciliation: plan coverage, not filename coverage);
@@ -560,7 +575,7 @@ Pass: all exit 0, the count is 0, and every manifest row verifies. Layers: unit,
 
 **Arc J boundary:** codex loop (plus: injected or gate-weakening lines, wrong closures, unsupported follow-ups) → `gh stack add plans-scaffolding-repoints`.
 
-### Phase 5: relocate assets, repair broken mentions (Arc C; fires both e2e suites)
+### Phase 5: relocate assets, repair broken mentions (Arc C; fires both e2e suites) ✓
 
 1. Re-count the importers: `git grep -n 'key-model-v2/reference' -- ':!implementations-plan'` should show 4, or 5 if tools-extraction has landed.
 2. `git mv` the assets:
@@ -588,7 +603,7 @@ The network e2e runs as the PR's required check. Pass: all exit 0, and `git diff
 
 **Arc C boundary:** codex loop (freeze-surface review) → `gh stack add plans-scaffolding-archive`.
 
-### Phase 6: Outcome blocks and seed retirement, in place (Arc D, first commit)
+### Phase 6: Outcome blocks and seed retirement, in place (Arc D, first commit) ✓
 
 1. Refresh the base: `gh stack rebase`, then the lower arcs' gates, then `gh stack push` (Delivery § Stack operations).
 2. Re-run `untrack.ts --dry-run` (and `--record` if anything new landed), then `classify.ts --check` with the concurrency re-check.
@@ -602,7 +617,7 @@ The network e2e runs as the PR's required check. Pass: all exit 0, and `git diff
 
 Pass: all exit 0. Layers: unit, repo-integrity.
 
-### Phase 7: archive move, index split, repairs (Arc D)
+### Phase 7: archive move, index split, repairs (Arc D) ✓
 
 1. `tools/archive-move.ts`: `git mv` every closed dir, in its own commit with no content edits.
 2. `tools/split-index.ts`: `index.md` keeps its header, format line and active lines verbatim (transport-ready-handshake PARKED, plans-scaffolding, anything newer); tools-extraction closes with the split (L43). `archive/index.md` is generated.
