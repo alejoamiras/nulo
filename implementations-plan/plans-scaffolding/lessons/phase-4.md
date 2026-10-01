@@ -128,3 +128,7 @@ It also tried CRLF, a bare `-`, indented or tabbed entries and whitespace-only l
 Mutants, each killed: a NUL-joined line subject, a NUL-joined frame subject, no host check. The host check takes no archived path, since `upto` is always a tree before the archive move.
 
 Gate on the tree before the commit: `check.ts` 0 enforced (the same 3 reports), `bun test` on the tools 17 pass, `classify.ts --check` 0 problems, `mine.ts --verify` 0 problems, `bun run lint` 0 errors, `bun run test:ci-gating` 244 pass and 2 skipped.
+
+Round 4, a verification pass the owner asked for at the cap (same session): clean. Both bypasses are closed, `mining.jsonl` changed only its 364 subject hashes, and the 17 tool tests, `classify.ts --check`, `mine.ts --verify` and `check.ts` pass.
+
+Arc C's first codex round then found that git scores a rename by its lines, so a file moved with its lines reordered still pairs at R100. J's drift rule took R100 for byte identity. The classifier now reads `--raw --no-abbrev` and exempts a move out of the tree only when both blob ids match (ledger L39). `rawMeta` sits in `common.ts`, so C's and D's tools read the same field. Regenerated at the base, `closures.json` is byte-identical. Test 3 now also moves a closed dir's file out with its lines reordered, and the R100-only mutant fails it.

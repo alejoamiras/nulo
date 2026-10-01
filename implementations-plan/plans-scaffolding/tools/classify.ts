@@ -12,7 +12,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { git, PLANS } from "./common"
+import { git, PLANS, rawMeta } from "./common"
 import { lib, links, structure } from "./gate"
 
 export type Pr = { number: number; state: "MERGED" | "OPEN" | "CLOSED"; base: string; mergedAt: string | null; mergeCommit: string | null }
@@ -112,29 +112,27 @@ function dirOf(path: string | undefined): string | null {
 	return parts.length > 2 && parts[0] === PLANS ? parts[1] : null
 }
 
+type Change = { exact: boolean; from: string; to: string }
+
 /** Only a file that left the plan tree byte for byte changed nothing but its destination; a move between dirs counts on both. */
-function applyChange(c: Pick<Commit, "dirs" | "changed">, status: string, from: string, to: string): void {
+function applyChange(c: Pick<Commit, "dirs" | "changed">, { exact, from, to }: Change): void {
 	const [src, dst] = [dirOf(from), dirOf(to)]
 	for (const d of [src, dst]) if (d !== null) c.dirs.add(d)
 	if (dst !== null) c.changed.add(dst)
-	if (src !== null && !(status === "R100" && !to.startsWith(`${PLANS}/`))) c.changed.add(src)
+	if (src !== null && !(exact && !to.startsWith(`${PLANS}/`))) c.changed.add(src)
 }
 
-const STATUS_RE = /^[ACDMRTUX]\d*$/
-
-/** NUL-delimited `--name-status` output, so a path parses as itself however git would quote it; `\x01` opens a log header. */
-function walkNameStatus(
-	out: string,
-	onHeader: (header: string) => void,
-	onChange: (status: string, from: string, to: string) => void,
-): void {
+/** NUL-delimited `--raw --no-abbrev` output, so a path parses as itself however git would quote it; `\x01` opens a log header. */
+function walkRaw(out: string, onHeader: (header: string) => void, onChange: (change: Change) => void): void {
 	const tokens = out.split("\0")
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i].replace(/^\n/, "")
+		const meta = rawMeta(token)
 		if (token.startsWith("\x01")) onHeader(token.slice(1))
-		else if (STATUS_RE.test(token)) {
+		else if (meta) {
 			const from = tokens[++i]
-			onChange(token, from, /^[RC]/.test(token) ? tokens[++i] : from)
+			const to = meta.status === "R" || meta.status === "C" ? tokens[++i] : from
+			onChange({ exact: meta.status === "R" && meta.same, from, to })
 		}
 	}
 }
@@ -146,13 +144,13 @@ function walkNameStatus(
  */
 function planCommits(cwd: string, range = "HEAD"): Commit[] {
 	const commits: Commit[] = []
-	walkNameStatus(
-		git(cwd, "log", "-M", "-z", "--name-status", "--format=%x01%H %cs %cI %s", range),
+	walkRaw(
+		git(cwd, "log", "-M", "-z", "--raw", "--no-abbrev", "--format=%x01%H %cs %cI %s", range),
 		(header) => {
 			const [sha, date, iso, ...subject] = header.split(" ")
 			commits.push({ sha, date, time: Date.parse(iso), subject: subject.join(" "), dirs: new Set(), changed: new Set() })
 		},
-		(status, from, to) => applyChange(commits[commits.length - 1], status, from, to),
+		(change) => applyChange(commits[commits.length - 1], change),
 	)
 	return commits.filter((c) => c.dirs.size > 0)
 }
@@ -311,10 +309,10 @@ function snapshotProblems(cwd: string): string[] {
  */
 function driftProblems(cwd: string, file: Closures, upto: string): string[] {
 	const seen = { dirs: new Set<string>(), changed: new Set<string>() }
-	walkNameStatus(
-		git(cwd, "diff", "-M", "-l0", "-z", "--name-status", file.closuresBase, upto),
+	walkRaw(
+		git(cwd, "diff", "-M", "-l0", "-z", "--raw", "--no-abbrev", file.closuresBase, upto),
 		() => {},
-		(status, from, to) => applyChange(seen, status, from, to),
+		(change) => applyChange(seen, change),
 	)
 	const changed = seen.changed
 	return file.rows

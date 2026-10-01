@@ -116,14 +116,16 @@ describe("classify", () => {
 		})
 	})
 
-	test("drift reads one tree diff (a merge's own edit, a quoted name, a move between plan dirs), and a host must outlive it", () => {
+	test("drift reads one tree diff (a merge's own edit, a quoted name, a move between plan dirs, a reordered move out), and a host must outlive it", () => {
 		const { repo, imported, prs } = planTree()
-		const closuresBase = git(repo, "rev-parse", "HEAD")
+		writeFiles(repo, { [`${P}/dup/notes.md`]: "a\nb\nc\n" })
+		const closuresBase = commitAll(repo, "docs: dup notes")
 		const rows = deriveRows({ cwd: repo, prs, importSha: imported, ref: closuresBase })
 		git(repo, "mv", `${P}/status-only/STATUS.md`, `${P}/waiting/STATUS.md`)
 		mkdirSync(join(repo, "reference"))
 		git(repo, "mv", `${P}/check-names/plan.md`, "reference/check-names.md")
-		writeFiles(repo, { [`${P}/context/a"b.md`]: "x\n" })
+		git(repo, "mv", `${P}/dup/notes.md`, "reference/notes.md")
+		writeFiles(repo, { [`${P}/context/a"b.md`]: "x\n", "reference/notes.md": "c\nb\na\n" })
 		commitAll(repo, "docs: two edits")
 		git(repo, "checkout", "-q", "-b", "side")
 		commitAll(repo, "docs: side")
@@ -141,6 +143,7 @@ describe("classify", () => {
 			"waiting: ambiguous (AMBIGUOUS — no merged PR, no answer)",
 			`check-names: its host ${P}/check-names/plan.md is gone at HEAD; re-answer it and regenerate`,
 			`context: changed since ${base}; re-answer it and regenerate`,
+			`dup: changed since ${base}; re-answer it and regenerate`,
 			`release-cut: changed since ${base}; re-answer it and regenerate`,
 			`status-only: changed since ${base}; re-answer it and regenerate`,
 		])

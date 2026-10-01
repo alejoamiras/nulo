@@ -97,6 +97,17 @@ export function permalink(row: Pick<Row, "path" | "sha">): string {
 	return `${PERMALINK_PREFIX}${row.sha}/${row.path}`
 }
 
+const RAW_META_RE = /^:\d{6} \d{6} ([0-9a-f]{40}) ([0-9a-f]{40}) ([ACDMRTUX])(\d*)$/
+
+/**
+ * One meta field of `git diff --raw --no-abbrev -z`. `same` is byte identity, which R100 is not: git scores
+ * a rename by its lines, so a file moved with its lines reordered still pairs at 100.
+ */
+export function rawMeta(field: string): { status: string; score: number; same: boolean } | null {
+	const m = field.match(RAW_META_RE)
+	return m ? { status: m[3], score: Number(m[4]) || 0, same: m[1] === m[2] } : null
+}
+
 /** Blob ids for `<rev>:<path>` specs, one `git cat-file --batch-check` for all of them; null where absent. */
 export function blobIds(cwd: string, specs: readonly string[]): (string | null)[] {
 	if (specs.length === 0) return []
