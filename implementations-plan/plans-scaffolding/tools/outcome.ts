@@ -31,8 +31,12 @@ import { git, PLANS } from "./common"
 import { lib, links, structure } from "./gate"
 import { nodes } from "./rewrite-links"
 
-/** Complete blocks written below their H1 before this generator existed; only they are exempt from A15. */
-export const GRANDFATHERED: ReadonlySet<string> = new Set(["send-publish-ledger/plan.md", "grant-check-address-case/plan.md"])
+/** Blocks written below their H1 before this generator existed; only they are exempt from A15. */
+export const GRANDFATHERED: ReadonlySet<string> = new Set([
+	"send-publish-ledger/plan.md",
+	"grant-check-address-case/plan.md",
+	"tools-extraction/plan.md",
+])
 export const BLOCK_BUDGET = 1024
 const OUTCOME = "Outcome"
 const REQUIRED = ["Date", "Status", "Shipped", "Seeds retired"] as const
@@ -226,13 +230,29 @@ function missingFields(section: string, v: Values): Field[] {
 	})
 }
 
-/** Appends `fields` after the last text line of the block, before the heading that ends it. */
+const LIST_LINE_RE = /^(?:- |\s{2,}\S)/
+
+/** The last line of the list that opens the block at `head`, or null when it opens with anything else. */
+function leadingListEnd(lines: readonly string[], head: number, last: number): number | null {
+	let i = head + 1
+	while (i <= last && lines[i].trim() === "") i++
+	if (i > last || !lines[i].startsWith("- ")) return null
+	let end = i
+	for (; i <= last; i++) {
+		if (LIST_LINE_RE.test(lines[i])) end = i
+		else if (lines[i].trim() !== "") break
+	}
+	return end
+}
+
+/** Appends `fields` to the list the block opens with, else after its last text line, before the heading that ends it. */
 function appendFields(file: string, src: string, fields: readonly string[]): string {
 	const lines = src.split("\n")
 	const head = outcomeLine(file, src)
 	let last = blockEnd(src, head) - 1
 	while (last > head && lines[last].trim() === "") last--
-	lines.splice(last + 1, 0, ...(last === head ? ["", ...fields] : fields))
+	const at = leadingListEnd(lines, head, last) ?? last
+	lines.splice(at + 1, 0, ...(at === head ? ["", ...fields] : fields))
 	return lines.join("\n")
 }
 

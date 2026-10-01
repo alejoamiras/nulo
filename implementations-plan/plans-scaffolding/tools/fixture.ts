@@ -115,7 +115,7 @@ export function planTree(): { files: Record<string, string>; rows: Row[] } {
 		[`${P}/done/cites.md`]: `# Cites\n\n${CITES}`,
 		[`${P}/fm/plan.md`]: `---\nplan: fm\ntier: light\n---\n\n# FM\n${PAD}`,
 		[`${P}/partial/plan.md`]:
-			"---\nplan: partial\n---\n\n## Outcome\n\n- **Date:** 2026-09-02. **Status:** closed.\n- **Shipped** on a branch.\n- **Seeds retired:** spent.\n\n# Partial\n",
+			"---\nplan: partial\n---\n\n## Outcome\n\n- **Date:** 2026-09-02. **Status:** closed.\n- **Shipped** on a branch.\n- **Seeds retired:** spent.\n\nWhat it left behind.\n\n# Partial\n",
 		[`${P}/whole/plan.md`]:
 			"## Outcome\n\n- **Date**: 2026-09-03. **Status**: completed.\n- **Shipped**: #3.\n- **Seeds retired**: spent.\n\n# Whole\n",
 		[`${P}/nest/plan.md`]: `# Nest\n${PAD}`,

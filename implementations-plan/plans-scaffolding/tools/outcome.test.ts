@@ -52,7 +52,7 @@ describe("outcome", () => {
 		expect(placedPerA15("x.md", "Outcome\n---\n\n- **Date**: d.\n")).toBe(true)
 	})
 
-	test("writes every closed block where A15 puts it, completes a partial one inside it, retires seeds, and leaves live dirs alone", () => {
+	test("writes every closed block where A15 puts it, completes a partial one inside its field list, retires seeds, and leaves live dirs alone", () => {
 		const { files, rows } = planTree()
 		const { repo, head } = closuresRepo(files, rows)
 		const run = tool(repo, "outcome", "--date", "2026-09-30")
@@ -187,7 +187,7 @@ describe("outcome", () => {
 
 	test("refuses what it cannot write faithfully: a completion that changes the page or misses the block, an unescaped stub link, a lost host", () => {
 		const opts = { stamp: "2026-09-30", followUps: [] }
-		const partial = "## Outcome\n\n- **Date**: d. **Status**: s.\n- **Seeds retired**: r.\n\n"
+		const partial = "## Outcome\n\nDate: d. Status: s. Seeds retired: r.\n\n"
 		const plan =
 			(dir: string, files: Record<string, string>, over = {}) =>
 			() =>
