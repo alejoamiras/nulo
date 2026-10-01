@@ -91,6 +91,11 @@ Open follow-ups lifted out of closing plans, one entry each, or a pointer to the
 
 - **Add token shows the PXE store's developer errors verbatim.** A retry after a stalled store open, or a store reopened after a network reset, shows the store's own refusal under Submit (`packages/aztec-runtime/src/pxe/opfs-store.ts:58`, `:222`, through `apps/extension/src/popup/components/popups/NewTokenPopup.vue:334`), split at the dash and otherwise in developer wording. Mapping them to user copy is an owner copy decision. From [copy-polish](copy-polish/plan.md), E45 and E46.
 
+## Releases
+
+- **Attest the release zips** (the owner, 2026-10-01: "let's add attestations as follow-ups not now"). `release.yml` ships both zips with an unsigned `SHASUMS256.txt` and no attestation, so nothing proves which commit and workflow run built them. GitHub artifact attestations (`actions/attest-build-provenance`, recorded in Sigstore's public log) would let anyone run `gh attestation verify nulo-chrome-<version>.zip -R alejoamiras/nulo`. Neither store offers build provenance: the Chrome Web Store re-signs what it serves, and its opt-in verified CRX uploads prove who uploaded, not which commit; Mozilla signs the XPI, and only its reviewers see the source archive.
+- **A store-match check**, once the zips are attested. Download what each store serves, drop what the store adds (its signatures and metadata; exactly which files is unverified), and compare every other file with the attested zip, so a store copy is provably that build.
+
 ## ux-feedback: taken by a follow-up plan
 
 The full records are in the closed plan's [Follow-ups](ux-feedback/plan.md). Delete an entry when the plan it names merges.
