@@ -9,7 +9,7 @@ const cards = [
 	{
 		number: "01",
 		title: "Fee juice",
-		body: "Every Aztec transaction pays a fee in fee juice, the L2 gas asset. On this testnet, fee juice comes from a free test token on Sepolia, Ethereum's test network, bridged over to Aztec. Fee juice is not transferable.",
+		body: "Every Aztec transaction pays a fee in fee juice, the L2 gas asset. The only way to get fee juice today is to burn $AZTEC on L1, which transforms into L2 fee juice on bridging. Fee juice is not transferable.",
 	},
 	{
 		number: "02",
