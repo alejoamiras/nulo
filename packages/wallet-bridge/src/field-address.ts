@@ -2,7 +2,7 @@
  * A contract address as a grant lists it and a call names it, and the one comparison between the
  * two. Leaf module: its only import is the field modulus.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 
 const FIELD_ADDRESS = /^0x[0-9a-fA-F]{64}$/
 

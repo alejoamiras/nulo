@@ -12,7 +12,6 @@ export type SavedRecord = { type: "fj" | "private_fpc" | "fpc"; fpc?: { id: stri
 export type FeeKnowledge = {
 	fpcs: RegisteredFpc[]
 	balances: GasBalances | undefined
-	allowSponsored: boolean
 	shortSponsorIds?: ReadonlySet<string>
 	setAsideSponsorIds?: ReadonlySet<string>
 }
@@ -102,20 +101,15 @@ export function rowForPick(pick: SavedRecord | undefined, methods: FeeMethodOpti
 
 /** What the trigger shows before the first snapshot. FPC rows do not exist until the FPC list has
  *  loaded, so a sponsor pick is drawn from its saved label — display only, it carries no `fpc` to pay with. */
-export function previewForPick(
-	pick: SavedRecord | undefined,
-	methods: FeeMethodOption[],
-	allowSponsored: boolean,
-): FeeMethodOption | undefined {
+export function previewForPick(pick: SavedRecord | undefined, methods: FeeMethodOption[]): FeeMethodOption | undefined {
 	const row = rowForPick(pick, methods)
-	if (row || pick?.type !== "fpc" || !pick.fpc?.id || !allowSponsored) return row
+	if (row || pick?.type !== "fpc" || !pick.fpc?.id) return row
 	return { type: "fpc", title: pick.fpc.name || "Sponsored", subtitle: "sponsored" }
 }
 
 /** A saved pick wins when its row still exists and is eligible; otherwise the default walk. */
 export function resolveSendSelection(origin: TransferSide, know: FeeKnowledge, pick: SavedRecord | undefined): SendSelection {
 	const methods = buildFeeMethods(know.fpcs, know.balances, {
-		allowSponsored: know.allowSponsored,
 		shortSponsorIds: know.shortSponsorIds,
 		setAsideSponsorIds: know.setAsideSponsorIds,
 	})

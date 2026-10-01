@@ -1,4 +1,4 @@
-import { TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
+import { TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec-labs/stdlib/tx"
 import { TxExecutionResult, TxStatus } from "./spec"
 
 export function txStatusFromReceipt(status: AztecTxStatus): TxStatus {

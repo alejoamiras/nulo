@@ -168,7 +168,7 @@ describe("copyFor", () => {
 
 	test("version-mismatch names both versions when the native one is known", () => {
 		expect(copyFor({ kind: "version-mismatch", info: { nativeAztecVersion: "5.1.0" } }).detail).toBe(
-			"Presto runs Aztec 5.1.0; Nulo needs 5.2.0. Open Presto from your menu bar and let it update.",
+			`Presto runs Aztec 5.1.0; Nulo needs ${__AZTEC_VERSION__}. Open Presto from your menu bar and let it update.`,
 		)
 		expect(copyFor({ kind: "version-mismatch", info: {} }).detail).toBe("Open Presto from your menu bar and let it update.")
 	})

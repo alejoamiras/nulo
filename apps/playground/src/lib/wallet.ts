@@ -14,10 +14,10 @@
 // Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
 import "@nulo/wallet-sdk-schema-patch/register"
 
-import { WalletManager, type WalletProvider } from "@aztec/wallet-sdk/manager"
-import type { Wallet } from "@aztec/aztec.js/wallet"
-import type { ChainInfo } from "@aztec/aztec.js/account"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { WalletManager, type WalletProvider } from "@aztec-labs/wallet-sdk/manager"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import type { ChainInfo } from "@aztec-labs/aztec.js/account"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { setState, getState } from "../state"
 import type { AppCapabilitiesManifest } from "./bundles"
 

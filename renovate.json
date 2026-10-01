@@ -65,7 +65,7 @@
 			"allowedVersions": "<25"
 		},
 		{
-			"description": "Follows the @aztec line, which depends on pako ^2: the extension's only use is a shim standing in for a bb.js module, and a v3 here would ship a second copy of the library for nothing.",
+			"description": "Follows the Aztec line (bb.js), which depends on pako ^2: the extension's only use is a shim standing in for a bb.js module, and a v3 here would ship a second copy of the library for nothing.",
 			"matchPackageNames": ["pako"],
 			"allowedVersions": "<3"
 		},
@@ -73,8 +73,9 @@
 			"description": "Aztec line: class-id stability per SECURITY.md. Manual via Aztec milestone. LAST so no later rule re-enables.",
 			"matchPackageNames": [
 				"/^@aztec\\//",
+				"/^@aztec-labs\\//",
+				"/^@aztec-foundation\\//",
 				"@alejoamiras/presto",
-				"@aztec-foundation/aztec-standards",
 				"@alejoamiras/private-fee-juice"
 			],
 			"enabled": false

@@ -1,1 +1,1 @@
-export { AztecNodeFactoryAdapter } from "./aztec-node-factory-adapter"
+export { AztecNodeFactoryAdapter, SILENT_RPC_LOG } from "./aztec-node-factory-adapter"

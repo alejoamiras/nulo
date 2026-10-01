@@ -1,10 +1,10 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { type ContractArtifact, loadContractArtifact } from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { type ContractInstanceWithAddress, getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
-// @ts-expect-error — raw JSON import via vite alias, bypasses @aztec/aztec.js (which references document/window)
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { SponsoredFPCContractArtifact } from "@aztec-labs/noir-contracts.js/SponsoredFPC"
+import { type ContractArtifact, loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { type ContractInstanceWithAddress, getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
+// @ts-expect-error — raw JSON import via vite alias, bypasses @aztec-labs/aztec.js (which references document/window)
 import PrivateFPCJson from "@private-fpc-artifact"
 
 const PrivateFPCContractArtifact = loadContractArtifact(PrivateFPCJson)

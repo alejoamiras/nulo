@@ -21,10 +21,10 @@
  *  - The signing key never leaves the extension's derivation path: the PXE seam carries only
  *    `secretKey` (privacy root), from which the signing key is NOT recoverable.
  */
-import { deriveSecretKeyFromSigningKey } from "@aztec/accounts/utils"
-import { sha512ToGrumpkinScalar } from "@aztec/foundation/crypto/sha512"
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { deriveSecretKeyFromSigningKey } from "@aztec-labs/accounts/utils"
+import { sha512ToGrumpkinScalar } from "@aztec-labs/foundation/crypto/sha512"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import { NULO_SIGNING_ROOT_SEP } from "./nulo-separators"
 
 /** The account's Schnorr signing key (the ownership root), derived from the Nulo account seed. */

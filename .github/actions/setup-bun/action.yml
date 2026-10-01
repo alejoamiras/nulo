@@ -9,6 +9,17 @@ description: |
   Bun version is pinned (matches `packageManager` in root package.json).
   Cache key includes the Bun version so a Bun bump invalidates stale state.
 
+inputs:
+  cache:
+    description: |
+      "true" restores and saves the Bun install cache. A build that produces release bytes, and a
+      job that holds a write token, pass "false" and install from the registry against bun.lock:
+      Bun never re-checks cached files against the lockfile, and the install runs trusted
+      packages' lifecycle scripts, so a poisoned cache would ship in the zips or run beside the
+      token.
+    required: false
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -17,6 +28,7 @@ runs:
         bun-version: 1.4.2
 
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: inputs.cache == 'true'
       with:
         path: ~/.bun/install/cache
         key: ${{ runner.os }}-bun-1.4.2-${{ hashFiles('bun.lock') }}

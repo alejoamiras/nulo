@@ -1,9 +1,9 @@
 import { memoizeAsyncBy } from "./async-memo"
-import type { PackedPrivateEvent, PXE } from "@aztec/pxe/client/bundle"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { type ContractArtifact, ContractArtifactSchema, EventSelector, FunctionCall } from "@aztec/stdlib/abi"
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import type { PackedPrivateEvent, PXE } from "@aztec-labs/pxe/client/bundle"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { type ContractArtifact, ContractArtifactSchema, EventSelector, FunctionCall } from "@aztec-labs/stdlib/abi"
+import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import {
 	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
@@ -11,11 +11,11 @@ import {
 	type CompleteAddress,
 	type PartialAddress,
 	computeContractAddressFromInstance,
-} from "@aztec/stdlib/contract"
-import { BlockParameterSchema } from "@aztec/stdlib/block"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { NoteDao } from "@aztec/stdlib/note"
-import { deriveKeys } from "@aztec/stdlib/keys"
+} from "@aztec-labs/stdlib/contract"
+import { BlockParameterSchema } from "@aztec-labs/stdlib/block"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { NoteDao } from "@aztec-labs/stdlib/note"
+import { deriveKeys } from "@aztec-labs/stdlib/keys"
 import type { NotesFilter } from "./spec"
 import { ContractUpgradedError, assertNotUpgraded, hydratePreimage } from "./effective-class"
 import {
@@ -26,8 +26,8 @@ import {
 	type TxSimulationResult,
 	type UtilityExecutionResult,
 	type TxProfileResult,
-} from "@aztec/stdlib/tx"
-import type { SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec/pxe/client/bundle"
+} from "@aztec-labs/stdlib/tx"
+import type { SimulateTxOpts, ExecuteUtilityOpts, ProfileTxOpts } from "@aztec-labs/pxe/client/bundle"
 import z from "zod"
 
 const AccessScopesSchema = z.array(AztecAddress.schema)
@@ -45,7 +45,7 @@ import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
 import { type Methods, PXE_SERVICE_NAME, type PxeEvents } from "./spec"
 import type { ProvePhaseSink } from "./prove-phase-sink"
-import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec/aztec.js/wallet"
+import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec-labs/aztec.js/wallet"
 import { NotesFilterSchema } from "./schemas"
 import { withStaleAnchorRetry } from "./stale-anchor"
 import {
@@ -526,15 +526,15 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 		return this.withPxeWrite("simulateTx", network, async (pxe) => {
 			let overrides = await SimulationOverrides.schema.optional().parseAsync(opts.overrides)
 
-			// Source the stub artifact from `@aztec/accounts/stub/schnorr`
+			// Source the stub artifact from `@aztec-labs/accounts/stub/schnorr`
 			// (the canonical Aztec accounts package) instead of
-			// `@aztec/noir-contracts.js/SimulatedSchnorrAccount`. Both
+			// `@aztec-labs/noir-contracts.js/SimulatedSchnorrAccount`. Both
 			// packages load the same `SimulatedSchnorrAccount.json`
 			// underneath (verified against upstream source —
-			// `@aztec/accounts/src/stub/schnorr/index.ts:7-12` does
+			// `@aztec-labs/accounts/src/stub/schnorr/index.ts:7-12` does
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
-			// `@aztec/accounts/ecdsa/stub`).
+			// `@aztec-labs/accounts/ecdsa/stub`).
 			//
 			// Override mechanics mirror upstream `EmbeddedWallet.buildAccountOverrides`:
 			// the stub CLASS is registered with the PXE (function artifacts are
@@ -594,7 +594,7 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	 *  chain-runtime teardown/recreate naturally re-registers against the
 	 *  fresh store — and the dead PXE is never pinned by its promise. */
 	private readonly stubClassRegistrations = memoizeAsyncBy<PXE, Fr>(async (pxe) => {
-		const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
+		const { StubSchnorrAccountContractArtifact } = await import("@aztec-labs/accounts/schnorr/stub")
 		await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
 		const { id } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
 		return id

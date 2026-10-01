@@ -16,7 +16,7 @@ import DottedTerm from "@/components/composite/DottedTerm.vue"
 import { getChainName } from "@/components/ui/utils.js"
 
 /** Vendor */
-import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
+import { hashToEmoji } from "@aztec-labs/wallet-sdk/crypto"
 
 /** Services */
 import { AccountServiceClient } from "@/wallet/services/account/client"

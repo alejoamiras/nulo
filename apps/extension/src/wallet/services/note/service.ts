@@ -1,5 +1,5 @@
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { NoteStatus, type NoteDao } from "@aztec/stdlib/note"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { NoteStatus, type NoteDao } from "@aztec-labs/stdlib/note"
 import { canonicalSlotHex, type NoteFieldType, type NoteSchema } from "@nulo/aztec-runtime/pxe"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"

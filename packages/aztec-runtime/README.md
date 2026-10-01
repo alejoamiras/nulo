@@ -1,6 +1,6 @@
 # @nulo/aztec-runtime
 
-PXE lifecycle + Nulo's adapter over `@aztec/accounts/schnorr` (`NuloAccount`). Owns class-id verification and payload chunking. Runs inside the offscreen document; the service worker talks to it via `@nulo/extension-messaging`.
+PXE lifecycle + Nulo's adapter over `@aztec-labs/accounts/schnorr` (`NuloAccount`). Owns class-id verification and payload chunking. Runs inside the offscreen document; the service worker talks to it via `@nulo/extension-messaging`.
 
 ## Position in the stack
 
@@ -21,7 +21,7 @@ Depends on `wallet-core` and `extension-messaging`. Does **not** depend on `wall
 | `src/pxe/artifact-registry.ts` | Caches compiled contract artifacts and verifies their class-id before trusting them. |
 | `src/pxe/artifact-class-id.ts` | Class-id verification helper (Aztec spec invariant: the on-chain class id must equal the canonical hash of the artifact). |
 | `src/pxe/known-artifacts.ts`, `note-schemas.ts`, `schemas.ts` | Compiled-in artifacts the wallet trusts by default. |
-| `src/account/nulo-account.ts` | `NuloAccount` — thin adapter over `@aztec/accounts/schnorr`. Owns signing-key derivation, multicall wrapping, recursive payload chunking, deterministic salt. |
+| `src/account/nulo-account.ts` | `NuloAccount` — thin adapter over `@aztec-labs/accounts/schnorr`. Owns signing-key derivation, multicall wrapping, recursive payload chunking, deterministic salt. |
 | `src/account/fee-options.ts` | Helpers for fee-payment selection at tx-construction time. |
 | `src/fee-juice.ts` | `predictedWorstMinFees` — the inclusion-safe worst-case min fee across predicted slots; falls back to the current min fee when the node lacks the method or predicts no slots; other RPC errors propagate. |
 | `src/adapters/aztec-node-factory-adapter.ts` | The `AztecNodeFactory` adapter — single entry point for constructing `AztecNode` instances. |
@@ -61,4 +61,4 @@ Colocated `*.test.ts`. The end-to-end account behavior is exercised by the exten
 - **Class-id verification is required.** `artifact-registry.ts` refuses to trust an artifact whose class-id doesn't equal the canonical hash. Treat that as a security gate, not a debuggability aid.
 - **Payload chunking is recursive.** Payloads with more than 5 calls are split: each chunk is wrapped via `entrypoint.wrapExecutionPayload()` so every nesting layer gets its own outer-authwit hash. Chunk-size changes ripple through authwit signing — don't tune without re-testing.
 - **PXE state is per-chain.** Adding a chain spins up a new chain-runtime; removing a chain tears down its PXE and wipes its IndexedDB. `chain-coordinator` events propagate this across the SW.
-- **Pinned aztec versions.** Every `@aztec/*` dep is at the same version (currently `5.0.0-rc.2`). Mismatched versions cause hard-to-debug failures inside `bb.js` proof generation.
+- **Pinned aztec versions.** Every `@aztec-labs/*` and `@aztec-foundation/*` dep is at the same version (currently `6.0.0-rc.1`). Mismatched versions cause hard-to-debug failures inside `bb.js` proof generation.

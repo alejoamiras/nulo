@@ -6,7 +6,7 @@
  * write, the fail-closed Imported signing branch, and purge — the crypto itself is covered by the
  * node-env KATs in aztec-runtime + wallet-crypto.
  */
-import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -61,7 +61,8 @@ async function build(withBalances = false) {
 			getDeletionState: () => new ProfileDeletionState(),
 			// getProfileSecret → session-gated master Fr (32 bytes of 9).
 			getActiveProfile: async () => ({ id: "p1", name: "P", type: "password" }),
-			getProfileSecret: async () => (await import("@aztec/foundation/curves/bn254")).Fr.fromBuffer(Buffer.from(MASTER_B64, "base64")),
+			getProfileSecret: async () =>
+				(await import("@aztec-labs/foundation/curves/bn254")).Fr.fromBuffer(Buffer.from(MASTER_B64, "base64")),
 			// getProfileDek → session-gated imported-keys DEK COPY (the v2 root; never the master).
 			getProfileDek: async () => dekOf(currentDekFill),
 			// exportPlain(id, password) → base64 master iff the password is right (service-side auth).

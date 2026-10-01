@@ -12,20 +12,20 @@
  *   Pre-launch carve-out: the launch-baseline entry of a major that has never shipped a build,
  *   backup, or exported artifact MAY be redefined in place, in one reviewed commit that updates
  *   this record, its paired test, and this rules text together. The carve-out is a WINDOW, not a
- *   counter: it closes permanently at the major's first shipped build. Exercised twice inside the
- *   V5 pre-launch window, owner-ratified both times: the KDF v1→v2 baseline redefinition
- *   (`implementations-plan/key-model-v2/`) and the passkey-branch spec extension + 512-bit reduce
- *   (`implementations-plan/key-model-v2-hardening/` — this also rotated every digest-embedding
- *   account-export file; none existed outside e2e).
- * - Each extension major binds at compile time to exactly one regime constant (`V5_REGIME`).
- *   Re-binding a shipped major to a different regime is the forbidden act.
+ *   counter: it closes permanently at the major's first shipped build, which is its first
+ *   store-published one. Exercised twice inside the V5 pre-launch window, owner-ratified both
+ *   times: the KDF v1→v2 baseline redefinition (`implementations-plan/key-model-v2/`) and the
+ *   passkey-branch spec extension + 512-bit reduce (`implementations-plan/key-model-v2-hardening/`
+ *   — this also rotated every digest-embedding account-export file; none existed outside e2e).
+ * - Each extension major binds at compile time to exactly one regime constant (`V6_REGIME` in
+ *   Nulo V6). Re-binding a shipped major to a different regime is the forbidden act.
  * - Rotation = append a new entry AND ship a new extension major that binds to it (the
- *   "Nulo V6 is a new extension" policy — see CLAUDE.md "Account-address freeze").
+ *   "protocol break = new extension" policy — see CLAUDE.md "Account-address freeze"). Nulo V6
+ *   is the one exception to the new-extension half: it reuses V5's store items, renamed, because
+ *   V5 never had users.
  * - The `ack` string must embed the entry's own digests; it exists to force INTENT into any diff
  *   that touches the freeze. Review + immutable history are the anti-tamper controls, not the ack.
  */
-import { FROZEN_ACCOUNT_CLASS_ID, FROZEN_ARTIFACT_SHA256 } from "./frozen-artifact"
-import { FROZEN_DESCRIPTOR_DIGEST, NULO_DESCRIPTOR_VERSION } from "./instantiation-descriptor"
 
 export type AddressRegime = {
 	/** Unique, stable regime id; also the record key. */
@@ -67,26 +67,46 @@ export const NULO_KDF_SPEC =
 /** sha256(NULO_KDF_SPEC) — recomputed and asserted by the paired test. */
 export const NULO_KDF_DIGEST = "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d"
 
+// A shipped entry holds literals, never the live freeze constants, which move with the next regime.
 export const REGIMES = {
 	"nulo-v5": {
 		id: "nulo-v5",
-		artifactSha256: FROZEN_ARTIFACT_SHA256,
-		classId: FROZEN_ACCOUNT_CLASS_ID,
-		descriptorVersion: NULO_DESCRIPTOR_VERSION,
-		descriptorDigest: FROZEN_DESCRIPTOR_DIGEST,
+		artifactSha256: "36562cde36667a43cc9c6d8cbfc18bcf0ac13cdc9f816720273350ee59a92a63",
+		classId: "0x0db539838feacc4420c8e33b01ffe733a8bae58bba2c403653691b1ed8d3d0c5",
+		descriptorVersion: 1,
+		descriptorDigest: "3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605",
 		kdf: "nulo-account-kdf-v2",
-		kdfDigest: NULO_KDF_DIGEST,
+		kdfDigest: "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d",
 		ack:
-			`I acknowledge that regime nulo-v5 (artifact sha256 ${FROZEN_ARTIFACT_SHA256}, ` +
-			`class id ${FROZEN_ACCOUNT_CLASS_ID}, descriptor v${NULO_DESCRIPTOR_VERSION} ` +
-			`digest ${FROZEN_DESCRIPTOR_DIGEST}, kdf nulo-account-kdf-v2 digest ${NULO_KDF_DIGEST}) ` +
-			`fixes every Nulo V5 account address; changing any of these inputs rotates all derived ` +
-			`addresses and ships ONLY as a new extension major with a new appended regime entry.`,
+			"I acknowledge that regime nulo-v5 (artifact sha256 " +
+			"36562cde36667a43cc9c6d8cbfc18bcf0ac13cdc9f816720273350ee59a92a63, class id " +
+			"0x0db539838feacc4420c8e33b01ffe733a8bae58bba2c403653691b1ed8d3d0c5, descriptor v1 " +
+			"digest 3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605, kdf " +
+			"nulo-account-kdf-v2 digest 29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d) " +
+			"fixes every Nulo V5 account address; changing any of these inputs rotates all derived " +
+			"addresses and ships ONLY as a new extension major with a new appended regime entry.",
+	},
+	"nulo-v6": {
+		id: "nulo-v6",
+		artifactSha256: "4b4933a146a80872b184f47af22cd8ba3faa00f810d7a26217490c9d13507f94",
+		classId: "0x010cc0891c8748de2009734bf117485efbaf3aad0be125f151b4e6744f8f1842",
+		descriptorVersion: 1,
+		descriptorDigest: "3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605",
+		kdf: "nulo-account-kdf-v2",
+		kdfDigest: "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d",
+		ack:
+			"I acknowledge that regime nulo-v6 (artifact sha256 " +
+			"4b4933a146a80872b184f47af22cd8ba3faa00f810d7a26217490c9d13507f94, class id " +
+			"0x010cc0891c8748de2009734bf117485efbaf3aad0be125f151b4e6744f8f1842, descriptor v1 " +
+			"digest 3883065f0d6603d1be25db42348ec25b7a9dc29746d85b925b09efbd2a460605, kdf " +
+			"nulo-account-kdf-v2 digest 29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d) " +
+			"fixes every Nulo V6 account address; changing any of these inputs rotates all derived " +
+			"addresses and ships ONLY as a new extension major with a new appended regime entry.",
 	},
 } as const satisfies Record<string, AddressRegime>
 
 /**
- * The one regime this extension major (Nulo V5) derives accounts under — a compile-time binding,
+ * The one regime this extension major (Nulo V6) derives accounts under — a compile-time binding,
  * not a runtime pointer. Rotation appends a regime and ships a new major bound to it.
  */
-export const V5_REGIME: AddressRegime = REGIMES["nulo-v5"]
+export const V6_REGIME: AddressRegime = REGIMES["nulo-v6"]

@@ -24,6 +24,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { flushPromises } from "@vue/test-utils"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { LoggerStore } from "@/wallet/logger"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -3645,17 +3646,17 @@ describe("IncomingTransferService — balance-refresh drain (D4 causal ack)", ()
 
 // ── D8 USD-value dust filter in getIncomingTransfers ───────────────────────
 
-// The one (chainId, contract) the price map recognizes: CHAIN_IDS.MAINNET + the cUSD proxy → USDC.
-const MAINNET_CHAIN = 4248422646
+// The one (chainId, contract) the price map recognizes: CHAIN_IDS.TESTNET + the cUSD proxy → USDC.
+const MAPPED_CHAIN = CHAIN_IDS.TESTNET
 const MAPPED_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-const mappedToken = { id: 9, profileId: "p1", chainId: MAINNET_CHAIN, contract: MAPPED_CONTRACT, symbol: "cUSD", decimals: 6 }
+const mappedToken = { id: 9, profileId: "p1", chainId: MAPPED_CHAIN, contract: MAPPED_CONTRACT, symbol: "cUSD", decimals: 6 }
 
 async function bootDust(overrides: { threshold?: number; quotes?: Record<string, { usd: number }>; visibility?: boolean } = {}) {
 	const config = makeConfigStub(overrides.visibility ?? true)
 	const price = makePriceStub()
 	const booted = await bootService({
-		network: makeNetworkStub([{ id: "nMain", chainId: MAINNET_CHAIN }]),
-		account: makeAccountStub([{ profileId: "p1", chainId: MAINNET_CHAIN, address: "0xa" }]),
+		network: makeNetworkStub([{ id: "nMain", chainId: MAPPED_CHAIN }]),
+		account: makeAccountStub([{ profileId: "p1", chainId: MAPPED_CHAIN, address: "0xa" }]),
 		token: makeTokenStub([mappedToken]),
 		config,
 		price,

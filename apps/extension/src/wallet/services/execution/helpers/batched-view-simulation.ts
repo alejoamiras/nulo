@@ -13,7 +13,7 @@
  *      serially AFTER the tx-arm settles. JS-side launches early; actual
  *      execution serializes through upstream PXE's `SerialQueue`.
  *   2. PUBLIC+isStatic LEADING PREFIX: bypasses upstream PXE entirely and
- *      goes direct-to-node via `simulateViaNode` (`@aztec/wallet-sdk/base-
+ *      goes direct-to-node via `simulateViaNode` (`@aztec-labs/wallet-sdk/base-
  *      wallet`). This is the "fast arm" — the only path that escapes
  *      upstream's queue.
  *   3. Remaining tx-typed (everything after the fast prefix breaks):
@@ -33,7 +33,7 @@
  *
  * The prefix also breaks at the first call with `hideMsgSender === true`,
  * since `simulateViaNode` ignores that flag when building
- * `PublicCallRequest` (`@aztec/wallet-sdk/base-wallet/utils.ts:93`). We
+ * `PublicCallRequest` (`@aztec-labs/wallet-sdk/base-wallet/utils.ts:93`). We
  * route hideMsgSender calls through the slow arm to preserve the
  * caller-supplied flag honor.
  *
@@ -111,7 +111,7 @@
  * the fast-arm path only — no caller-side deps inflation.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import {
 	type AbiDecoded,
 	type AbiType,
@@ -121,15 +121,16 @@ import {
 	FunctionType,
 	decodeFromAbi,
 	encodeArguments,
-} from "@aztec/stdlib/abi"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import { SimulationError } from "@aztec/stdlib/errors"
-import { ExecutionPayload, type TxSimulationResult, type UtilityExecutionResult } from "@aztec/stdlib/tx"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+	getFunctionReturnType,
+} from "@aztec-labs/stdlib/abi"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
+import { ExecutionPayload, type TxSimulationResult, type UtilityExecutionResult } from "@aztec-labs/stdlib/tx"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
@@ -158,11 +159,11 @@ export interface BatchedViewSimulationResult {
 	readonly decoded: AbiDecoded[]
 }
 
-/** Tuple: [FunctionCall, originalIndex, slowArmSlotIndex (re-numbered per arm), returnTypes]. */
-type TxTuple = [FunctionCall, number, number, AbiType[]]
+/** Tuple: [FunctionCall, originalIndex, slowArmSlotIndex (re-numbered per arm), returnType]. */
+type TxTuple = [FunctionCall, number, number, AbiType | undefined]
 
-type ClassifiedUtility = { kind: "utility"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
-type ClassifiedTx = { kind: "tx"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
+type ClassifiedUtility = { kind: "utility"; functionCall: FunctionCall; returnType: AbiType | undefined; originalIndex: number }
+type ClassifiedTx = { kind: "tx"; functionCall: FunctionCall; returnType: AbiType | undefined; originalIndex: number }
 
 export async function batchedViewSimulation(
 	calls: ReadonlyArray<CallAction | EncodedCallAction>,
@@ -207,10 +208,10 @@ export async function batchedViewSimulation(
 	// Launch utility eagerly NOW (anchor read complete). One promise per utility
 	// call; the array is constructed exactly once and is NEVER re-launched on
 	// fast-arm rerun (pinned by unit test).
-	const utilityLaunched: Array<[Promise<UtilityExecutionResult>, number, AbiType[]]> = allUtility.map((u) => [
+	const utilityLaunched: Array<[Promise<UtilityExecutionResult>, number, AbiType | undefined]> = allUtility.map((u) => [
 		pxe.executeUtility(u.functionCall, { scopes: [account.address] }),
 		u.originalIndex,
-		u.returnTypes,
+		u.returnType,
 	])
 
 	// Tx arm dispatch. Use Promise.allSettled so the slow arm result is
@@ -383,7 +384,7 @@ function renumberSlotIndices(txCalls: ClassifiedTx[]): TxTuple[] {
 	let privateIdx = 0
 	for (const t of txCalls) {
 		const slotIndex = t.functionCall.type === FunctionType.PUBLIC ? publicIdx++ : privateIdx++
-		tuples.push([t.functionCall, t.originalIndex, slotIndex, t.returnTypes])
+		tuples.push([t.functionCall, t.originalIndex, slotIndex, t.returnType])
 	}
 	return tuples
 }
@@ -430,15 +431,15 @@ function settleSlowArm<T>(slowSettled: PromiseSettledResult<T>): T {
 function decodeInto(
 	decoded: AbiDecoded[],
 	index: number,
-	types: Parameters<typeof decodeFromAbi>[0],
+	type: Parameters<typeof decodeFromAbi>[0],
 	values: Parameters<typeof decodeFromAbi>[1],
 	logger: ILogger | undefined,
 	label: string,
 ): void {
 	try {
-		decoded[index] = decodeFromAbi(types, values)
+		decoded[index] = decodeFromAbi(type, values)
 	} catch (error) {
-		logger?.log(LOG_SOURCE, LogLevel.Error, label, types, { returnValueCount: Array.isArray(values) ? values.length : 0 }, error)
+		logger?.log(LOG_SOURCE, LogLevel.Error, label, type, { returnValueCount: Array.isArray(values) ? values.length : 0 }, error)
 	}
 }
 
@@ -460,7 +461,7 @@ function unpackFastArm(
 		const tuple = leadingFast[k]
 		const values = fastReturns[k]?.values ?? []
 		encoded[tuple.originalIndex] = values
-		decodeInto(decoded, tuple.originalIndex, tuple.returnTypes, values, logger, "Failed to decode fast-arm simulation results")
+		decodeInto(decoded, tuple.originalIndex, tuple.returnType, values, logger, "Failed to decode fast-arm simulation results")
 	}
 }
 
@@ -484,10 +485,10 @@ function unpackSlowArm(
 			? simulatedTx.getPrivateReturnValues().nested
 			: simulatedTx.getPrivateReturnValues().nested[1].nested
 
-	for (const [call, i, j, types] of slowTuples) {
+	for (const [call, i, j, type] of slowTuples) {
 		const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
 		encoded[i] = values
-		decodeInto(decoded, i, types, values, logger, "Failed to decode simulation results")
+		decodeInto(decoded, i, type, values, logger, "Failed to decode simulation results")
 	}
 }
 
@@ -496,14 +497,14 @@ function unpackSlowArm(
  *  throughput — only the final per-index assignment ordering. Entered only
  *  when at least one utility launched (caller-side guard). */
 async function awaitUtilityResults(
-	utilityLaunched: Array<[Promise<UtilityExecutionResult>, number, AbiType[]]>,
+	utilityLaunched: Array<[Promise<UtilityExecutionResult>, number, AbiType | undefined]>,
 	encoded: Fr[][],
 	decoded: AbiDecoded[],
 	logger: ILogger | undefined,
 ): Promise<void> {
-	for (const [promise, i, types] of utilityLaunched) {
+	for (const [promise, i, type] of utilityLaunched) {
 		const { result: values } = await promise
-		decodeInto(decoded, i, types, values, logger, "Failed to decode utility simulation results")
+		decodeInto(decoded, i, type, values, logger, "Failed to decode utility simulation results")
 		encoded[i] = values
 	}
 }
@@ -573,8 +574,8 @@ async function runFastArm(
 }
 
 type ClassifiedCall =
-	| { kind: "utility"; functionCall: FunctionCall; returnTypes: AbiType[] }
-	| { kind: "tx"; functionCall: FunctionCall; returnTypes: AbiType[] }
+	| { kind: "utility"; functionCall: FunctionCall; returnType: AbiType | undefined }
+	| { kind: "tx"; functionCall: FunctionCall; returnType: AbiType | undefined }
 
 /** Build the `FunctionCall` for a single user-supplied call. Splits into
  *  utility (built but NOT launched — caller decides launch timing) vs tx
@@ -590,6 +591,7 @@ async function classifyCall(
 		if (!fn) throw new Error("Method not found")
 		const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
 		const encodedArgs = encodeArguments(fn, call.args)
+		const returnType = getFunctionReturnType(fn)
 
 		if (fn.functionType === FunctionType.UTILITY) {
 			const functionCall = new FunctionCall(
@@ -600,9 +602,9 @@ async function classifyCall(
 				false, // hideMsgSender hardcoded false for utility calls (parity)
 				fn.isStatic,
 				encodedArgs,
-				fn.returnTypes,
+				returnType,
 			)
-			return { kind: "utility", functionCall, returnTypes: fn.returnTypes }
+			return { kind: "utility", functionCall, returnType }
 		}
 
 		return {
@@ -615,9 +617,9 @@ async function classifyCall(
 				call.hideSender === true, // 'call' kind uses hideSender (parity)
 				fn.isStatic,
 				encodedArgs,
-				fn.returnTypes,
+				returnType,
 			),
-			returnTypes: fn.returnTypes,
+			returnType,
 		}
 	}
 
@@ -625,6 +627,7 @@ async function classifyCall(
 	const artifact = requireArtifact(instances, artifacts, call.to)
 	const fn = await findFunctionBySelector(artifact, call.selector)
 	if (!fn) throw new Error("Method not found")
+	const returnType = getFunctionReturnType(fn)
 
 	if (fn.functionType === FunctionType.UTILITY) {
 		const functionCall = new FunctionCall(
@@ -635,9 +638,9 @@ async function classifyCall(
 			false, // hideMsgSender hardcoded false for utility calls (parity)
 			fn.isStatic,
 			call.args.map((x) => Fr.fromString(x)),
-			fn.returnTypes,
+			returnType,
 		)
-		return { kind: "utility", functionCall, returnTypes: fn.returnTypes }
+		return { kind: "utility", functionCall, returnType }
 	}
 
 	return {
@@ -650,8 +653,8 @@ async function classifyCall(
 			call.hideMsgSender === true, // 'encoded_call' kind uses hideMsgSender (parity)
 			fn.isStatic,
 			call.args.map((x) => Fr.fromString(x)),
-			fn.returnTypes,
+			returnType,
 		),
-		returnTypes: fn.returnTypes,
+		returnType,
 	}
 }

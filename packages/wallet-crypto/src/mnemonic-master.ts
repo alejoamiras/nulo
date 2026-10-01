@@ -16,7 +16,7 @@
  * `globalThis` names the Web Crypto object in all three.
  */
 import { canonicalizeMnemonic } from "@nulo/wallet-core/utils"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { asMasterSecretBytes, type MasterSecretBytes } from "./secret-types"
 import { zeroize } from "./zeroize"
 

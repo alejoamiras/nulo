@@ -4,9 +4,9 @@
  * read also may not outlive its deadline or write the SDK's own log lines (which carry the body and
  * the endpoint URL) to `console.*`, where the wallet's log buffer would keep them.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { TxHash } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { TxHash } from "@aztec-labs/stdlib/tx"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { AztecNodeFactoryAdapter, SILENT_RPC_LOG } from "./aztec-node-factory-adapter"
 

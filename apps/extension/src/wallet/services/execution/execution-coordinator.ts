@@ -33,10 +33,10 @@
  * via ctor, called by facade methods, no `Service<Methods>` base.
  */
 
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { SimulateTxOpts } from "@aztec/pxe/client/bundle"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import type { Tx, TxExecutionRequest, TxHash, TxProvingResult, TxSimulationResult } from "@aztec/stdlib/tx"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { SimulateTxOpts } from "@aztec-labs/pxe/client/bundle"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import type { Tx, TxExecutionRequest, TxHash, TxProvingResult, TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import z from "zod"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"

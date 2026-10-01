@@ -1,6 +1,6 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
 // `deriveStorageSlotInMap` uses poseidon2 (Barretenberg WASM), which isn't
@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 const { deriveMock } = vi.hoisted(() => ({
 	deriveMock: vi.fn(async (_mapSlot: Fr, _key: unknown): Promise<Fr> => new Fr(0x999n)),
 }))
-vi.mock("@aztec/stdlib/hash", () => ({ deriveStorageSlotInMap: deriveMock }))
+vi.mock("@aztec-labs/stdlib/hash", () => ({ deriveStorageSlotInMap: deriveMock }))
 
 import { isAuthRegistryEnabled, isAuthwitConsumable } from "./auth-registry"
 

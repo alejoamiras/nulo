@@ -13,7 +13,7 @@ Stages three workspace packages as public npm packages and binds their first pub
 | Path | Purpose |
 |---|---|
 | `packages.ts` | The table above: names, entries, targets, which entries are side effects. |
-| `stage.ts` | `bun scripts/publish/stage.ts <dir>...\|--all --version X.Y.Z [--out <root>]` → `dist-publish/<dir>/`: a Bun ESM bundle per entry (`@aztec/*` and `zod` kept as bare imports; only `packages/*/src` code may be inlined, each file into one bundle, so `wallet-core` code is and nothing third-party is), declarations from each package's `tsconfig.publish.json` with `.js` specifiers and unreferenced files pruned, a generated `package.json` (exact `@aztec/*` peers from the workspace pins, `zod` a dependency, `sideEffects` from `packages.ts`), README, LICENSE and NOTICE, all at mode 644. Must run from the repo root. It replaces only a directory holding its `.nulo-staged` marker, and inside the repository only under `dist-publish/`. |
+| `stage.ts` | `bun scripts/publish/stage.ts <dir>...\|--all --version X.Y.Z [--out <root>]` → `dist-publish/<dir>/`: a Bun ESM bundle per entry (`@aztec-labs/*`, `@aztec-foundation/*` and `zod` kept as bare imports; only `packages/*/src` code may be inlined, each file into one bundle, so `wallet-core` code is and nothing third-party is), declarations from each package's `tsconfig.publish.json` with `.js` specifiers and unreferenced files pruned, a generated `package.json` (exact Aztec-line peers from the workspace pins, `zod` a dependency, `sideEffects` from `packages.ts`), README, LICENSE and NOTICE, all at mode 644. Must run from the repo root. It replaces only a directory holding its `.nulo-staged` marker, and inside the repository only under `dist-publish/`. |
 | `readme/<dir>.md` | The README each npm package ships. |
 | `check-digests.ts` | `bun scripts/publish/check-digests.ts <version> <tgz-dir>`: the version must be canonical `X.Y.Z`; a version listed in `approved-digests.json` must pack exactly those tarballs; `0.1.0` must be listed. |
 | `approved-digests.json` | `{ "<version>": { "<tarball>": "<sha256>" } }`, recorded by the rehearsal before the first publication. |
@@ -42,7 +42,7 @@ It then unpacks the tarballs into a consumer outside the workspace, linking only
 
 Finally it checks that `EncryptionKey` ciphertexts are interchangeable between the bundle and the wallet's source, and that both reject a wrong AAD or a tampered byte.
 
-Nothing that loads `@aztec/*` runs inside the test process. Under `bun test`, every module sees a bare `expect`, and `@aztec/foundation` calls `expect.addEqualityTesters` at load when it sees one, which Bun's `expect` lacks. A transpile cached by an earlier non-test run hides the crash, so the checks that need `@aztec/*` run in `bun`/`node` child processes, and `test:release` disables the transpiler cache (`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`) so every run sees what a fresh runner sees.
+Nothing that loads `@aztec-labs/*` runs inside the test process. Under `bun test`, every module sees a bare `expect`, and `@aztec-labs/foundation` calls `expect.addEqualityTesters` at load when it sees one, which Bun's `expect` lacks. A transpile cached by an earlier non-test run hides the crash, so the checks that need `@aztec-labs/*` run in `bun`/`node` child processes, and `test:release` disables the transpiler cache (`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`) so every run sees what a fresh runner sees.
 
 Ordinary comment-only edits (`//` and `/** */`) to a published source file leave the staged bytes unchanged: Bun drops them and the declarations are emitted without them. Legal comments (`/*! … */`, kept by the bundler), `@__PURE__` / `#__NO_SIDE_EFFECTS__` annotations (they change what the bundle keeps), code, an Azguard header line and a file's path all change them.
 
@@ -50,7 +50,7 @@ Ordinary comment-only edits (`//` and `/** */`) to a published source file leave
 
 `.github/workflows/publish-packages.yml` runs on `workflow_dispatch` from `dev` or `main`, and is a dry run by default. It has four jobs:
 
-1. **Test.** `test:release`. It runs `@aztec/*` code, so it makes no bytes.
+1. **Test.** `test:release`. It runs `@aztec-labs/*` code, so it makes no bytes.
 2. **Pack.** A frozen install with no shared cache and no lifecycle scripts, then stage, pack and check the digests. It runs no test code.
 3. **Publish.** The only job with `id-token: write`. It runs in the `npm-publish` environment, which needs the owner's approval, refuses any version but `0.1.0` until `0.1.0` is on npm, and publishes each tarball with `npm publish --provenance` through npm trusted publishing. No npm token exists anywhere.
 4. **Verify.** Runs `verify-provenance.sh` on each tarball, which requires the registry's provenance to be signed by this workflow on `dev` or `main` and to name these bytes, then runs `npm audit signatures`. A re-run that found a version already published is verified the same way.

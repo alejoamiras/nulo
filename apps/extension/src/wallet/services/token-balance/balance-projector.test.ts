@@ -28,8 +28,8 @@ vi.mock("@/wallet/services/execution/helpers/get-view-simulation-deps", () => ({
 // The projector's `enqueueCall` computes selectors + encoded args for PUBLIC
 // fns — both go through real Aztec stdlib bytecode hashing. Stub both so unit
 // tests focus on the projector's grouping/batching logic, not the encoding.
-vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+vi.mock("@aztec-labs/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec-labs/stdlib/abi")>()
 	return {
 		...actual,
 		FunctionSelector: {
@@ -41,7 +41,7 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 	}
 })
 
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { PxeStaleAnchorError } from "@nulo/extension-messaging/errors"
 import { BalanceProjector } from "./balance-projector"
 import type { TokenBalanceRaw } from "./spec"

@@ -10,16 +10,23 @@
  * there is no seam to swap.
  */
 
-import { type Aliased, ContractInitializationStatus } from "@aztec/aztec.js/wallet"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
-import { type AbiDecoded, decodeFromAbi, encodeArguments, FunctionCall, FunctionSelector } from "@aztec/stdlib/abi"
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
-import type { TxProfileResult, TxSimulationResult, UtilityExecutionResult } from "@aztec/stdlib/tx"
+import { type Aliased, ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
+import type { ChainInfo } from "@aztec-labs/entrypoints/interfaces"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { PackedPrivateEvent } from "@aztec-labs/pxe/client/bundle"
+import {
+	type AbiDecoded,
+	decodeFromAbi,
+	encodeArguments,
+	FunctionCall,
+	FunctionSelector,
+	getFunctionReturnType,
+} from "@aztec-labs/stdlib/abi"
+import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { ContractInstanceWithAddress } from "@aztec-labs/stdlib/contract"
+import type { TxProfileResult, TxSimulationResult, UtilityExecutionResult } from "@aztec-labs/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import z from "zod"
 import type { AccountService } from "@/wallet/services/account/service"
@@ -111,7 +118,7 @@ export class ViewExecutor {
 			false,
 			fn.isStatic,
 			encodedArgs,
-			fn.returnTypes,
+			getFunctionReturnType(fn),
 		)
 
 		await account.ensureRegistered(pxe)
@@ -120,14 +127,14 @@ export class ViewExecutor {
 		})
 
 		try {
-			return decodeFromAbi(fn.returnTypes, result)
+			return decodeFromAbi(getFunctionReturnType(fn), result)
 		} catch (error) {
 			// `result` is the decoded return of a call executed under the user's own account scope —
 			// live private contract state. The expected types and the arity are what diagnose a
 			// decode mismatch; the values are the leak.
 			this.deps.logError(
 				"Failed to decode simulation results",
-				fn.returnTypes,
+				getFunctionReturnType(fn),
 				{ returnValueCount: Array.isArray(result) ? result.length : 0 },
 				error,
 			)
@@ -350,7 +357,7 @@ export class ViewExecutor {
 		// `{name:"symbol", selector:<balance_of_private>}` — scope passes on the
 		// name, PXE runs the selector and returns the user's PRIVATE state. Resolve
 		// the ABI, reject a name/selector mismatch, and rebuild the call from ABI
-		// truth (isStatic/type/returnTypes), mirroring the four tx/authwit sinks.
+		// truth (isStatic/type/returnType), mirroring the four tx/authwit sinks.
 		// A present-but-mismatched name is rejected; an EMPTY name ("") is also
 		// rejected (it is NOT treated as "absent" — doing so let a dApp scope
 		// `{function:""}` and sign a different selector silently). Only a genuinely
@@ -382,7 +389,7 @@ export class ViewExecutor {
 			false,
 			fn.isStatic,
 			op.call.args,
-			fn.returnTypes ?? [],
+			getFunctionReturnType(fn),
 		)
 		return pxe.executeUtility(boundCall, {
 			authwits: await z.array(AuthWitness.schema).optional().parseAsync(op.opts.authWitnesses),

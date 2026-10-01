@@ -4,9 +4,9 @@
  * deployed or funded: the playground registers it and Settings adds it by hand, the kernel names it
  * as the fee payer, and the node would refuse its send for want of a balance.
  */
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { Fr } from "@aztec/aztec.js/fields"
-import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/aztec.js/contracts"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { SponsoredFPCContractArtifact } from "@aztec-labs/noir-contracts.js/SponsoredFPC"
 import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"

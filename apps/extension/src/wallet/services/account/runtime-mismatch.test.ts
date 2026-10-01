@@ -65,7 +65,7 @@ describe("AccountService runtime mismatch (raiseRuntimeMismatch)", () => {
 		expect(record?.derivedAddress).toBe("0xderived")
 		expect(record?.chainId).toBe(3)
 		expect(record?.accountIndex).toBe(2)
-		expect(record?.regimeId).toBe("nulo-v5")
+		expect(record?.regimeId).toBe("nulo-v6")
 		// Closed exactly the mismatching profile.
 		expect(locked).toEqual(["p1"])
 	})

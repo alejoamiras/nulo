@@ -2,6 +2,7 @@
 
 Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 
+- [nulo-v6](nulo-v6/plan.md) — approved 2026-10-01, arc A green in #736 (P1–P5 ✓), awaiting merge — the wallet on Aztec 6.0.0-rc.1 as 0.29.0: the `@aztec-labs` and `@aztec-foundation` scopes, the V6 account regime, the V6 testnet as the one public network, "Nulo V6"; unleashed's V6 token and the store upload follow
 - [ux-feedback](ux-feedback/plan.md) — closed, awaiting archive — the user-testing proposal (items 1–12 and the tooltip map) in five batches, merged 2026-09-28 as #699 to #704; its open items are in follow-ups.md
 - [grant-check-address-case](grant-check-address-case/plan.md) — closed, awaiting archive — one field-address key for every contract comparison in the grant check and the Details table
 - [send-amount-exact](send-amount-exact/plan.md) — closed, awaiting archive — the Send page sends a million or more, and a typed or Max amount stays exact once the field is left; the balance beside Max is cut at 8 places, never rounded up; a paste keeps only digits and the point; the field at rest and the review sheet show every digit, on #718's fit; the unit switch sits on the amount's baseline and Max leaves the amount at rest, as delegated; its open items are in follow-ups.md

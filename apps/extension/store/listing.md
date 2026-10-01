@@ -119,7 +119,7 @@ unrelated to the wallet: no. Used for creditworthiness or lending: no.
 
 | Field | Value |
 |---|---|
-| Title | Nulo V5 |
+| Title | Nulo V6 |
 | Summary | User-friendly self-custody wallet for Aztec network, preserving your privacy and revealing the power of account abstraction. |
 | Category | Tools |
 | Language | English |
@@ -155,7 +155,7 @@ match them.
 
 | Field | Value |
 |---|---|
-| Name | Nulo V5 |
+| Name | Nulo V6 |
 | Summary | Self-custody wallet for the Aztec network. Keys stay on your device; private transactions are proven in your browser. |
 | Categories | Privacy & Security (AMO's "Other" is "My add-on doesn't fit into any of the categories", exclusive of the rest) |
 | License | Apache-2.0 |
@@ -198,15 +198,15 @@ tagged commit. `apps/extension/store/SOURCE-BUILD.md` inside it names the exact 
 one script to run; the output must match `dist/firefox` byte for byte.
 
 Modifications to third-party code, stated exactly:
-- `@aztec/noir-noirc_abi` and `@aztec/noir-acvm_js` (two versions each, `patches/`): the
+- `@aztec-foundation/noir-noirc_abi` and `@aztec-foundation/noir-acvm_js` (two versions each, `patches/`): the
   `package.json` `module` entry is replaced with an `exports` map so bundlers pick the web build.
   Only package resolution metadata changes; no JavaScript or WASM is altered.
 - `detect-node` is aliased to a module that exports `false` (`apps/extension/vite.config.ts:54-58`)
-  so `@aztec/foundation`'s logger uses its browser transport.
+  so `@aztec-labs/foundation`'s logger uses its browser transport.
 - `function-bind` is aliased to a stub that delegates to the native `Function.prototype.bind`
   (`vite.config.ts:61-76`); the upstream package builds a function from a string, which the
   extension's CSP forbids.
-- `@aztec/bb.js`'s browser `fetch_code` module is replaced by a shim that `fetch()`es the bundled
+- `@aztec-foundation/bb.js`'s browser `fetch_code` module is replaced by a shim that `fetch()`es the bundled
   WASM asset (`vite.config.ts:96-111`); upstream uses a dynamic `import()` that MV3 service
   workers forbid.
 - The bundled contract artifacts (`apps/extension/vite.shared.ts:43-46`) have their `debug_symbols` blanked

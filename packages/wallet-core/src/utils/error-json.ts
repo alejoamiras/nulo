@@ -6,7 +6,7 @@
  *
  * This owns ONLY the genuinely-common subset shared by the two replacers that
  * coax Errors through `JSON.stringify`: `utils/serialization.ts` (the wire
- * format, vendored from `@aztec/foundation/json-rpc`) and `jobs/error.ts` (the
+ * format, vendored from `@aztec-labs/foundation/json-rpc`) and `jobs/error.ts` (the
  * job-failure envelope). Each caller layers its own divergent extras on top —
  * `serialization` adds `WalletError`'s `code`/`details`; `jobs/error` adds the
  * `__error` discriminant — so those deliberate differences stay at the call

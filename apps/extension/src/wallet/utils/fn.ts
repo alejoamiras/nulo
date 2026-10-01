@@ -1,5 +1,12 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { type AbiType, encodeArguments, type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import {
+	type AbiType,
+	encodeArguments,
+	type FunctionAbi,
+	FunctionSelector,
+	FunctionType,
+	getFunctionReturnType,
+} from "@aztec-labs/stdlib/abi"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 
 export class FnImpl {
@@ -34,8 +41,8 @@ export abstract class Fn extends FnImpl {
 		return encodeArguments(this.abi(), args)
 	}
 
-	public getReturnTypes(): AbiType[] {
-		return this.abi().returnTypes
+	public getReturnType(): AbiType | undefined {
+		return getFunctionReturnType(this.abi())
 	}
 
 	public getImpl(): FnImpl {
@@ -61,6 +68,6 @@ export async function buildViewCall(contract: string, viewFn: ViewFn, args: unkn
 		name: viewFn.name,
 		type: viewFn.type,
 		isStatic: viewFn.isStatic,
-		returnTypes: viewFn.getReturnTypes(),
+		returnType: viewFn.getReturnType(),
 	}
 }

@@ -1,11 +1,11 @@
 ---
 name: aztec-update
-description: Runbook for bumping the @aztec/* version line (rc bumps, protocol forks, testnet resets). Use when the user asks to update/bump Aztec, aztec.js, the @aztec packages, or to move to a new rc/release — or runs /aztec-update. Covers the full pin surface, drift detection, the execution canaries, and the wallet side of a testnet reset (the bridge's generation redeploy belongs to alejoamiras/unleashed).
+description: Runbook for bumping the Aztec version line, @aztec-labs/* and @aztec-foundation/* (rc bumps, protocol forks, testnet resets). Use when the user asks to update/bump Aztec, aztec.js, the Aztec packages, or to move to a new rc/release — or runs /aztec-update. Covers the full pin surface, drift detection, the execution canaries, and the wallet side of a testnet reset (the bridge's generation redeploy belongs to alejoamiras/unleashed).
 ---
 
 # Aztec version update
 
-Operational runbook distilled from the shipped bumps (4.2→5.0 hard fork: `implementations-plan/aztec-5.0-upgrade/`; rc.1→rc.2 + testnet redeploy: `implementations-plan/aztec-5.0-rc2/`; rc.2→5.0.0 stable + reset under intent tooling: `implementations-plan/aztec-5.0.0-stable/` — read those plans + their `lessons/` for complete worked examples). Non-trivial bumps still go through `/blueprint` — this skill is the domain checklist the plan draws from, not a substitute for planning.
+Operational runbook distilled from the shipped bumps (4.2→5.0 hard fork: `implementations-plan/aztec-5.0-upgrade/`; rc.1→rc.2 + testnet redeploy: `implementations-plan/aztec-5.0-rc2/`; rc.2→5.0.0 stable + reset under intent tooling: `implementations-plan/aztec-5.0.0-stable/`; 5.2.0→6.0.0-rc.1, a scope move with a network reset and a new address regime: `implementations-plan/nulo-v6/` — read those plans + their `lessons/` for complete worked examples). Non-trivial bumps still go through `/blueprint` — this skill is the domain checklist the plan draws from, not a substitute for planning.
 
 The bridge's half of a bump — the generation runbook (formerly Branch B here), the Noir contract surface and the bridge drift detectors — moved with the bridge to [`alejoamiras/unleashed`](https://github.com/alejoamiras/unleashed). Until that repo is populated, read them in [this skill at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/.claude/skills/aztec-update/SKILL.md).
 
@@ -15,33 +15,38 @@ The bridge's half of a bump — the generation runbook (formerly Branch B here),
 
 Two independent questions:
 
-1. **Did the target network reset?** Probe the live node and compare against our pin:
+1. **Did the target network reset?** Probe the live node and compare against our pin. The Testnet
+   seed's endpoint (`TESTNET_RPC_URL`) carries the provider key in its path, so read it from the
+   file rather than printing it (or probe the target network's announced endpoint instead):
    ```bash
-   curl -s -X POST https://v5.testnet.rpc.aztec-labs.com -H 'content-type: application/json' \
-     -d '{"jsonrpc":"2.0","id":1,"method":"node_getNodeInfo","params":[]}' | jq '.result.rollupVersion'
+   url=$(rg -o 'https://[^"]+' apps/extension/src/wallet/constants/network-endpoints.ts)
+   curl -s -X POST "$url" -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"node_getNodeInfo","params":[]}' | jq '.result | {nodeVersion, rollupVersion}'
    rg -n 'TESTNET_ROLLUP_VERSION' apps/extension/src/utils/chain-ids.ts
    ```
    Different rollupVersion ⇒ **NETWORK RESET** ⇒ Branch B below (the wallet's side of the reset) is mandatory. The bridge's new generation on that network belongs to `alejoamiras/unleashed`.
-2. **What changed upstream?** `gh api repos/AztecProtocol/aztec-packages/compare/v<old>...v<new>` — scan `!:` commits, then grep OUR surface for the broken symbols before assuming they bite. Expect class-id shifts from ANY toolchain/bytecode change even when no API we call moved.
+2. **What changed upstream?** `@aztec-labs/*` is built from `aztec-labs-eng/aztec-node` (`gh api repos/aztec-labs-eng/aztec-node/compare/v<old>...v<new>`); `@aztec-foundation/bb.js`, the noir wasm pair and `l1-artifacts` still come from `AztecProtocol/aztec-packages` (the same compare there). Scan `!:` commits, then grep OUR surface for the broken symbols before assuming they bite. Expect class-id shifts from ANY toolchain/bytecode change even when no API we call moved.
 
 **Then gate on the user via the `AskUserQuestion` tool** — present what the probes FOUND (rollupVersions, `!:` commit count, our-surface hits), never ask blind. **No implementation starts while ANY clarifying question is open**: Q1 below is the mandatory minimum, and anything else the probes left ambiguous — the exact target version, validation depth (network-e2e on both browsers?), whether the extension release timing matters — gets batched into the same `AskUserQuestion` call(s) up front. Silent assumptions are how a bump strands funds (Fee Juice paid to a wrong PrivateFPC address is unrecoverable). The fixed question:
 
 - **Q1 "Bump class"** (single-select) — options grounded in the probe result, e.g.:
   - `Version-only bump` — rollupVersion unchanged; pins + detectors + canaries, the wallet's chain identity untouched (Branch A).
   - `Network reset — wallet-side cascade` — rollupVersion moved; the bump carries the wallet's chain-identity cascade and client-side reset (Branch B). Recommend whichever the probe supports and mark it "(Recommended)".
-  - Note the third state: **rollupVersion unchanged but the Phase-1 drift detector fires anyway** (an upstream toolchain/derivation change moved the wallet's derived PrivateFPC address without a reset). It cannot be classified up front; when the detector goes red on a "version-only" run, STOP and re-gate through `AskUserQuestion` (hold the bump vs a conscious re-pin, which owes a PrivateFPC deployed at the new address and a live re-canary). *(This second re-gate is load-bearing: Q1 is answered BEFORE the Phase-1 detectors run, so the Phase-0 gate is sufficient only in combination with it — do not remove it.)*
+  - Note the third state: **rollupVersion unchanged but the Phase-1 drift detector fires anyway** (an upstream toolchain/derivation change moved the wallet's derived PrivateFPC address without a reset). It cannot be classified up front; when the detector goes red on a "version-only" run, STOP and re-gate through `AskUserQuestion` (hold the bump vs a conscious re-pin, which owes a review of the new artifact and unleashed's manifest naming the new address; see the drift detector below). *(This second re-gate is load-bearing: Q1 is answered BEFORE the Phase-1 detectors run, so the Phase-0 gate is sufficient only in combination with it — do not remove it.)*
 
 Do not start Phase 1 before the answer. Mid-run surprises that change the shape of what was authorized (a forced storage migration, an unexpected re-pin) go back through `AskUserQuestion` — authorization for one scope doesn't extend to the next.
 
 ## Phase 1 — the bump (always)
 
 **The pin surface** — miss one and you get a mixed old/new set:
-- `@aztec/*` exact pins across the workspace package.json files (`rg '"@aztec/' apps/*/package.json packages/*/package.json`). `@aztec/viem` is versioned independently — leave it.
-- **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line. Bump it WITH the `@aztec` line: the page-side client sends the workspace `@aztec/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
-- **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — HELD at 5.0.1 on a deliberate split line (`UPDATE.md`, `implementations-plan/aztec-5.2.0-js-line/`), enforced by `scripts/aztec-hold-residue-check.ts`. Moving them is its own decision: the PrivateFPC artifact the wallet derives from ships in `private-fee-juice`, and `aztec-standards` fixes the Token class every default seed and user-added standards token runs (`default-tokens.test.ts` pins the two together).
-- **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tag, the root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
-- The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
-- `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus `@alejoamiras/presto` (and the held pair above whenever it moves too). They are needed whenever `bun install` RESOLVES the new line: once `bun.lock` is final, delete them again in the same PR and prove it with `bun install --frozen-lockfile --force` (a frozen install never re-gates). For the following 7 days, any `package.json` edit in a workspace that reaches the new line (`apps/extension`, `packages/aztec-runtime`, …) re-gates it and fails the install — so land the bump's dependency changes in the bump PR, and for a stray later edit re-add the excludes locally without committing them. Keep a dated exclude across PRs only when a later PR of the same bump must re-resolve.
+- `@aztec-labs/*` and `@aztec-foundation/*` exact pins across the workspace package.json files (`rg '"@aztec-(labs|foundation)/' apps/*/package.json packages/*/package.json`). `@aztec/viem` is versioned independently — leave it.
+- **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec-labs` transitives; skipping it silently reintroduces the old line. Bump it WITH the Aztec line: the page-side client sends the workspace `@aztec-labs/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
+- **`@aztec-foundation/aztec-standards` + `@alejoamiras/private-fee-juice`** (6 pins across `apps/extension`, `apps/playground`, `packages/aztec-runtime`) — they move with the line. The PrivateFPC artifact the wallet derives from ships in `private-fee-juice` (the drift detector below), and `aztec-standards` fixes the Token class every default seed and user-added standards token runs (`default-tokens.test.ts` pins the two together). Holding either is its own decision: list it in `HELD_ROOTS` in `scripts/aztec-hold-residue-check.ts`, which otherwise enforces one generation.
+- **Four version readers keyed by package name**: `.github/actions/setup-aztec/action.yml`, `apps/extension/scripts/e2e/docker-ci-like.sh` and `apps/extension/tests/e2e/global-setup.ts` read the `@aztec-labs/aztec.js` pin to pick the toolchain, and `apps/extension/vite.shared.ts` reads `@aztec-labs/pxe` into `__AZTEC_VERSION__` (Presto's version handshake, the About page, the backup envelope's `aztec-version`), throwing on a missing key. A package or scope rename moves all four.
+- **Name-keyed sites tsc cannot see** — a rename misses them silently (the full list with line numbers: `implementations-plan/nulo-v6/recon.md` §7): the bb.js fetch-code shim's importer match in `apps/extension/vite.config.ts`, `HEAVY_SCOPES` and `NEVER_GROUPED` in `apps/extension/scripts/vendor-chunks.ts` (the web-accessible wallet-sdk chunk), the scope prefixes in `store-listing.test.ts`, `presto-core-deps.test.ts`, `scripts/lockfile-exception-diff.ts`, `scripts/publish/stage.ts` and `renovate.json`, the `@nulo/resolve-asset` and `require.resolve` strings (`layout-identity.test.ts`, `packages/resolve-asset/src/index.test.ts`, `scripts/ci-cd/test-soak/lib.ts`), and the Vite `dedupe`, `optimizeDeps` and noir alias keys.
+- **The third-party notices overrides** (`packages/third-party-notices/src/policy.ts`): the `@aztec-labs/*` packages ship neither a licence field nor a licence file, so each override is bound to a `reviewedVersion` and the extension build REFUSES the new line until it is re-verified. Re-check, at the new tags, `aztec-node`'s root LICENSE, `aztec-packages`' root and `barretenberg/` LICENSE files, the noir submodule commit (`gh api 'repos/AztecProtocol/aztec-packages/contents/noir/noir-repo?ref=v<new>'`) and the sqlite3mc pin in `@aztec-labs/sqlite3mc-wasm`'s README (the wasm must stay byte-identical to the upstream release zip it names); refresh `texts/` only from those tagged sources, then bump `reviewedVersion` and the URLs. Procedure: that package's README, § When a build is refused.
+- The two noir patches: rename `patches/@aztec-foundation%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json (Bun drops an unmatched key silently; the `"node":` marker checks in `layout-identity.test.ts` and `resolve-asset/src/index.test.ts` are the proof a patch applied).
+- `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec-labs/*` and `@aztec-foundation/*` name from `bun.lock` (~30), plus `@alejoamiras/presto`, `@alejoamiras/private-fee-juice` and `@aztec-foundation/aztec-standards` when they move too. They are needed whenever `bun install` RESOLVES the new line: once `bun.lock` is final, delete them again in the same PR and prove it with `bun install --frozen-lockfile --force` (a frozen install never re-gates). For the following 7 days, any `package.json` edit in a workspace that reaches the new line (`apps/extension`, `packages/aztec-runtime`, …) re-gates it and fails the install — so land the bump's dependency changes in the bump PR, and for a stray later edit re-add the excludes locally without committing them. Keep a dated exclude across PRs only when a later PR of the same bump must re-resolve.
 
 **The lockfile ritual** — `bun install` after editing the pins. Targeted re-resolution holds
 transitives to the min-age gate (Bun ≥ 1.4), so a plain install is the default; `rm bun.lock` is
@@ -87,25 +92,27 @@ yet the wallet copies them into the calls it builds) and that the package's runt
 (`dist/target/`, what fixtures and dApps register) equals the one the wallet derives from — so any
 `private-fee-juice` move reds it: review the new artifact, then re-pin the digest. Red means
 the artifact, the salt or upstream's derivation moved, and the wallet would pay Fee Juice to an
-address no PrivateFPC lives at — an UNRECOVERABLE loss. Default response: HOLD the bump. Re-pinning
-the literals is a CONSCIOUS act, valid only once a PrivateFPC is deployed at the new address on
-every network the wallet ships and a live re-canary is green; never silence the test. The deploy and
-the live settle canary run in `alejoamiras/unleashed` (until it is populated: bridge-core's
-`deploy-private-fpc-testnet.ts` and `fuel-testnet.ts` with `PRIVATE_RUNS=1`, at the freeze commit). The
-wallet-side precondition for editing the literals: from `apps/extension`,
-`bun run scripts/seed-preflight.ts <new address>` finds the instance on every shipped network, never `NOT FOUND`. The other
-tripwires: the account KAT and freeze tests (above); `apps/extension/src/wallet/services/token/default-tokens.test.ts`
+address the bridge does not fund — an UNRECOVERABLE loss. Default response: HOLD the bump. Re-pinning
+the literals is a CONSCIOUS act: review the new artifact, re-pin, and hand the address to
+`alejoamiras/unleashed`, whose bridge credits Fee Juice to it; a release may ship only once
+unleashed's manifest names the address the wallet pins. The canonical PrivateFPC is
+initializerless and private-only, so nothing is ever deployed at it: the seed preflight answers
+`NOT FOUND` for it on every network, and that is its normal state, not a missing deploy. Never
+silence the test. The other tripwires: the account KAT and freeze tests (above); `apps/extension/src/wallet/services/token/default-tokens.test.ts`
 (the bundled aztec-standards Token class equals every seed's live class — red means a standards move
-would strand every deployed token, so HOLD the pair; the seeds are what the chain serves and are never
-re-pinned to match); `scripts/aztec-hold-residue-check.ts` (the lockfile ritual) and
+would strand every deployed token, so HOLD aztec-standards; the seeds are what the chain serves and
+are never re-pinned to match); `scripts/aztec-hold-residue-check.ts` (the lockfile ritual) and
 `descriptors-real-artifact.test.ts` (Gotchas).
 
-**The two execution canaries (MANDATORY, every `@aztec/*` bump PR)**: run
+**The two execution canaries (MANDATORY, every Aztec bump PR)**: run
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts tests/e2e/network/passkey-execution-canary.test.ts`
 **prover-ON** before merge, **on Chrome and again under `NULO_E2E_BROWSER=firefox`** (geckodriver on
-PATH; `apps/extension/tests/e2e/FIREFOX.md`). First `aztec-up install <new @aztec/aztec.js pin>`: the
-sandbox boots only from the complete pinned toolchain under `~/.aztec/versions/<pin>` (CLI,
-`aztec-anvil`, `internal-bin/{forge,anvil}`), and `e2e:agent` fails closed without it. LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
+PATH; `apps/extension/tests/e2e/FIREFOX.md`). First `aztec-up install <new @aztec-labs/aztec.js pin>`: the
+sandbox boots only from the complete pinned toolchain under `$AZTEC_HOME/versions/<pin>` (CLI,
+`aztec-anvil`, `internal-bin/{forge,anvil}`; `AZTEC_HOME` defaults to `~/.aztec`), and `e2e:agent`
+fails closed without it. On a machine other agents share, install into a private home
+(`AZTEC_HOME=<dir> aztec-up install <pin>`) and run with the same `AZTEC_HOME`: the installer
+re-points the shared `~/.aztec/current`, and foundryup refuses to install beside a running anvil. LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
 actually run it prover-ON locally: start `PRESTO_ALLOW_ALL=1 presto-server` on `127.0.0.1:59833` (the
 SHA-pinned binary from `_extension-network-e2e.yml`; the variable is scoped to that one process and
@@ -117,14 +124,14 @@ lanes — `pr-extension-network-e2e.yml`, enforced by the required `extension-ne
 `pr-extension-network-e2e-firefox.yml`, advisory as a check — and each lane's `Assert canary results` step
 reads the run's json report back against `scripts/ci-cd/canary-expectations.json`, so a canary that
 skipped, vanished or never ran reds the job. That is the authoritative gate; the local run is a
-pre-flight. The frozen canary proves the frozen 5.0.1 account bytecode still simulates, proves natively,
+pre-flight. The frozen canary proves the regime's frozen account bytecode still simulates, proves natively,
 and is accepted by the bumped node/toolchain across the full arc (frozen-ctor multicall deploy →
 init-nullifier flip → authwit consume → background-restart re-derive + tx); the passkey canary proves
 the same for a PRF-derived account (in-page ceremony → frozen ctor → authwit consume →
 background-restart ceremony re-unlock + tx). The address KAT cannot see execution breakage — these
 canaries are the only gate that does. **A red canary on either browser BLOCKS the bump** (read the
 Firefox lane's canary job on the bump PR by hand — advisory means it cannot block a merge, not that it
-may be ignored): default response is HOLD the `@aztec` line; shipping a new extension major
+may be ignored): default response is HOLD the Aztec line; shipping a new extension major
 (address-regime rotation) is the deliberate alternative — never a casual fix.
 
 ## Branch A — bump-only (no reset, detectors green)
@@ -133,19 +140,19 @@ Normal delivery: `test:all` + `lint` + the builds (`bun run build:chrome`, `bun 
 
 ## Branch B — network reset (the wallet side)
 
-A reset moves the wallet's chain identity and wipes everything deployed on the old rollup. The bridge-side work it forces — a new bridge generation, the PrivateFPC redeploy on the new network, the live bridge canaries — belongs to `alejoamiras/unleashed` (the runbook as it stood is Branch B of [this skill at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/.claude/skills/aztec-update/SKILL.md)). The wallet's share:
+A reset moves the wallet's chain identity and wipes everything deployed on the old rollup. The bridge-side work it forces — a new bridge generation, whose manifest must name the wallet's PrivateFPC, and the live bridge canaries — belongs to `alejoamiras/unleashed` (the runbook as it stood is Branch B of [this skill at the freeze commit](https://github.com/alejoamiras/nulo/blob/6611f8611100931fe266f6fd1dfff27e331e2897/.claude/skills/aztec-update/SKILL.md)). The wallet's share:
 
 1. **ChainId cascade** — the wallet chainId is `walletChainId(l1ChainId, rollupVersion) = (l1 ^ rollupVersion) >>> 0` (`apps/extension/src/utils/chain-ids.ts`: bump `TESTNET_ROLLUP_VERSION`; `CHAIN_IDS`/`DEFAULT_SEEDS` derive from it) + `chain-ids.test.ts`. `rg` the old rollupVersion AND the old wallet chainId repo-wide — comments, test fixtures and `apps/extension/scripts/seed-preflight.ts` carry the literal — and classify every hit.
 2. **Client-side reset**: the storage baseline is `BASELINE_VERSION` in `apps/extension/src/wallet/storage/migrations/index.ts` — pre-production, a fresh reinstall stamps it and runs nothing, and a shape change just redefines the baseline (no client migration UX). Chain-coupled rows (tokens, txs, balances, and other per-deployment state) are purged per-chain by `NetworkService.purgeChain` → each service's `clearChainState` (the `registerChainPurgeSubscriber` cascade + `PxeServiceClient.clearChainState`), fired when the stale network is removed. User-authored roots (contacts) are NOT chain-coupled and persist.
-3. **Default-token seeds** — `apps/extension/src/wallet/services/token/default-tokens.ts` and `apps/extension/src/wallet/services/price/price-map.ts` key their testnet entries by `CHAIN_IDS.TESTNET`, so the cascade re-keys them onto the new chain while their contracts stayed on the old one. Their TOFU pins are live-captured: re-run the preflight (from `apps/extension`: `bun run scripts/seed-preflight.ts <address>`, + `seed-preflight-metadata.ts`) against the new node for every testnet seed. The mainnet USDC entry is the RETIRED single-token bridge's L2 token. The testnet USDC entry mirrors the L2 token unleashed's testnet generation pre-creates (`bridge.tokens[].l2Token` in unleashed's `apps/tools/public/testnet-bridge.json`): when a reset or a new generation moves it, re-point both `default-tokens.ts` and `price-map.ts` to the new address and re-run both preflights against it. Dropping, re-pinning or replacing a seed changes what a fresh wallet shows — an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off), never a runbook default.
-4. **PrivateFPC** — its canonical address is network-independent, so nothing here moves unless the drift detector fires. The reset did wipe its deployment, though: the wallet's PrivateFPC fee methods work on the new network only once unleashed redeploys it there. Before a release that targets the new network, run the same preflight on the canonical address (pinned in `protocol-fpcs.test.ts`); `NOT FOUND` on the testnet line means that deploy has not landed.
+3. **Default-token seeds** — `apps/extension/src/wallet/services/token/default-tokens.ts` and `apps/extension/src/wallet/services/price/price-map.ts` key their testnet entries by `CHAIN_IDS.TESTNET`, so the cascade re-keys them onto the new chain while their contracts stayed on the old one. Their TOFU pins are live-captured: re-run the preflight (from `apps/extension`: `bun run scripts/seed-preflight.ts <address>`, + `seed-preflight-metadata.ts`) against the new node for every testnet seed. The testnet USDC entry mirrors the L2 token unleashed's testnet generation pre-creates (`bridge.tokens[].l2Token` in unleashed's `apps/tools/public/testnet-bridge.json`): when a reset or a new generation moves it, re-point both `default-tokens.ts` and `price-map.ts` to the new address and re-run both preflights against it. Dropping, re-pinning or replacing a seed changes what a fresh wallet shows — an owner UI decision (CLAUDE.md § UI changes need explicit owner sign-off), never a runbook default.
+4. **PrivateFPC** — its canonical address is network-independent, so nothing here moves unless the drift detector fires, and nothing is redeployed: the contract is initializerless and private-only, so the preflight answers `NOT FOUND` for it on every network, which is its normal state. What a release that targets the new network checks is that unleashed's manifest for its new generation names the address `protocol-fpcs.test.ts` pins; a different address means the bridge credits Fee Juice the wallet never spends.
 
 Then Branch A's delivery gates.
 
 ## Gotchas (hard-won)
 
 - **Sweep version literals across the WHOLE workspace, not just the app.** Test fixtures pin the
-  expected `@aztec` version in places a per-app grep misses — `apps/extension/scripts/
+  expected Aztec version in places a per-app grep misses — `apps/extension/scripts/
   layout-identity.test.ts` AND `packages/resolve-asset/src/index.test.ts` both hardcode it, and
   the second one only surfaced in CI. Run `rg -l '<old-version>' --glob '!node_modules'
   --glob '!bun.lock'` from the repo root and classify every hit.
@@ -153,16 +160,16 @@ Then Branch A's delivery gates.
   a pass signal — failing packages hide behind passing ones. Check `rc=$?` and grep for
   `Exited with code [1-9]`/`FAIL ` explicitly.
 
-- **One `@aztec` generation in the bundle, always.** Upstream's `getVKIndex`
+- **One Aztec generation in the bundle, always.** Upstream's `getVKIndex`
   (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`, so two
   copies of that module make it treat the VK object as its own hash and abort with
   `VK index for [object Object] not found in VK tree` — thrown in-wallet BEFORE any `/prove`
   request, so the presto log is silent and it looks like a proving failure that never
-  reached the prover. Any package that exact-pins its own `@aztec` deps (the Presto SDK)
+  reached the prover. Any package that exact-pins its own Aztec deps (the Presto SDK)
   must move WITH the line; holding it is not an option. Packages that declare exact-version
   PEERS (private-fee-juice) or nothing at all (standards) re-bind to the workspace line and are
   safe to hold. Gate: `scripts/aztec-hold-residue-check.ts`.
-- **Upstream recompiles `@aztec/accounts` artifacts on toolchain changes** (5.2.0 moved
+- **Upstream recompiles `@aztec-labs/accounts` artifacts on toolchain changes** (5.2.0 moved
   SchnorrAccount's class id, −3,892 bytes). Production is immune — addresses come from the
   vendored frozen artifact — but any E2E fixture that builds accounts through
   `EmbeddedWallet.createSchnorrAccount` will fund one address and deploy another. Fix at the
@@ -201,7 +208,7 @@ Then Branch A's delivery gates.
   entry chain — unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi`
   fallback) killed every fresh CI sandbox boot the day it published, while local runs stayed green
   on pre-publish `~/.aztec` trees. The action carried a snappy 7.3.3 pin step until an
-  @aztec line whose install resolved a fixed snappy; it is gone. The class recurs through any un-pinned
+  Aztec line whose install resolved a fixed snappy; it is gone. The class recurs through any un-pinned
   transitive: diagnose via publish-time correlation + a bare local `npm install` repro (fresh install
   in a scratch HOME, then `node -e "require('<pkg>')"` against the version dir) before rerunning CI.
 

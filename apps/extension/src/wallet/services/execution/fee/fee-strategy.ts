@@ -38,14 +38,14 @@
  * to `baseFees` BEFORE computing maxFee for the fee-payload actions.
  */
 
-import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec/constants"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec-labs/constants"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
-import type { TxExecutionRequest, TxSimulationResult } from "@aztec/stdlib/tx"
+import type { TxExecutionRequest, TxSimulationResult } from "@aztec-labs/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { FpcService } from "@/wallet/services/fpc/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"

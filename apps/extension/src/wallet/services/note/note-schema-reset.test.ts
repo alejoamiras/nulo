@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
 const hashState = vi.hoisted(() => ({ count: 0 }))
-vi.mock("@aztec/stdlib/contract", async (importOriginal) => {
+vi.mock("@aztec-labs/stdlib/contract", async (importOriginal) => {
 	const actual = await importOriginal<Record<string, unknown>>()
 	return {
 		...actual,

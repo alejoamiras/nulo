@@ -90,8 +90,8 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 }
 
-const MAINNET = CHAIN_IDS.MAINNET
-// Mainnet cUSD is a price-mapped contract; with a `usd-coin` quote seeded it is the one priced row.
+const CHAIN = CHAIN_IDS.TESTNET
+// cUSD is price-mapped on the testnet; with a `usd-coin` quote seeded it is the one priced row.
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 const ACCOUNT = `0x${"a".repeat(64)}`
 const OTHER_ACCOUNT = `0x${"b".repeat(64)}`
@@ -106,7 +106,7 @@ const row = (
 	account: over.account ?? ACCOUNT,
 	token: {
 		id,
-		chainId: over.chainId ?? MAINNET,
+		chainId: over.chainId ?? CHAIN,
 		contract: over.contract ?? `0x${symbol.toLowerCase()}`,
 		name: `${symbol} Token`,
 		symbol,
@@ -140,7 +140,7 @@ describe("SelectTokenPopup", () => {
 		H.cache.activeTokenIdx = undefined
 		H.store.current = createAppStoreHarness()
 		H.store.current.account = { address: ACCOUNT }
-		H.store.current.network = { id: "net-main", chainId: MAINNET }
+		H.store.current.network = { id: "net-main", chainId: CHAIN }
 	})
 
 	test("rows follow the shared order: the priced token first, then held tokens by name, an empty row last", async () => {
@@ -156,7 +156,7 @@ describe("SelectTokenPopup", () => {
 	})
 
 	test("a row on another chain is not listed", async () => {
-		const wrapper = await mountOpen([row(1, "HERE"), row(2, "ELSEWHERE", { chainId: MAINNET + 1 })])
+		const wrapper = await mountOpen([row(1, "HERE"), row(2, "ELSEWHERE", { chainId: CHAIN + 1 })])
 		expect(rowSymbols(wrapper)).toEqual(["HERE"])
 	})
 
@@ -300,7 +300,7 @@ describe("SelectTokenPopup", () => {
 
 	test("a balance added or updated while open counts only when it belongs to the active scope", async () => {
 		const wrapper = await mountOpen([row(1, "A")])
-		H.balanceAdded.emit(row(2, "OTHER_CHAIN", { chainId: MAINNET + 1 }))
+		H.balanceAdded.emit(row(2, "OTHER_CHAIN", { chainId: CHAIN + 1 }))
 		H.balanceAdded.emit(row(3, "OTHER_ACCOUNT", { account: OTHER_ACCOUNT }))
 		H.balanceAdded.emit(row(4, "MINE"))
 		H.balanceUpdated.emit({ ...row(1, "A"), token: { ...row(1, "A").token, symbol: "A2" }, account: OTHER_ACCOUNT })

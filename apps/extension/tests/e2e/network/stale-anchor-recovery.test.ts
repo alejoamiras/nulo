@@ -26,8 +26,8 @@
  * failure, which is not what this spec is about).
  */
 import { expect, inject } from "vitest"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { type AztecTestConfig, mintPublicTokensForAccount } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
 import { setDebugMode, setDeveloperMode } from "../fixtures/helpers"

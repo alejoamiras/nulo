@@ -11,7 +11,7 @@
  *   - `buildNoFrom` — the 100-LOC DefaultEntrypoint variant
  *     (`buildNoFromTxRequest`). Handles the `aztec_sendTx` with
  *     `executionMode: "default_entrypoint"` path — inlined
- *     DefaultEntrypoint logic (we cannot import from `@aztec/entrypoints`
+ *     DefaultEntrypoint logic (we cannot import from `@aztec-labs/entrypoints`
  *     in the service worker since upstream references `window`).
  *
  * ## Error contract (frozen by call site)
@@ -41,17 +41,17 @@
  * doesn't use one). These feed the fee-strategy branches.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { Capsule, ExecutionPayload, HashedValues, TxContext, TxExecutionRequest } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { encodeArguments, FunctionCall, FunctionSelector, FunctionType, getFunctionReturnType } from "@aztec-labs/stdlib/abi"
+import { AuthWitness } from "@aztec-labs/stdlib/auth-witness"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { Capsule, ExecutionPayload, HashedValues, TxContext, TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
@@ -378,7 +378,7 @@ export class TxRequestBuilder {
 	/** DefaultEntrypoint variant: Aztec.js `aztec_sendTx` with
 	 *  `executionMode: "default_entrypoint"`. Single-call, no account
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
-	 *  `@aztec/entrypoints/default` in the service worker (upstream
+	 *  `@aztec-labs/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
 	public async buildNoFrom(op: AztecSendTxOperation, fence: ExecutionFence, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
@@ -418,7 +418,7 @@ export class TxRequestBuilder {
 			})
 
 			// Inline DefaultEntrypoint logic — calls the function directly, msg_sender = None.
-			// Cannot import @aztec/entrypoints/default in service worker (references `window`).
+			// Cannot import @aztec-labs/entrypoints/default in service worker (references `window`).
 			const call = await this.resolveNoFromCall(op, instances, artifacts)
 			const { parsedAuthWits, parsedCapsules, parsedExtraArgs } = await this.parseNoFromExtras(op)
 
@@ -544,7 +544,7 @@ async function buildSetAuthorizedCall(messageHash: Fr): Promise<{ functionCall: 
 		false,
 		fn.isStatic,
 		encodeArguments(fn, [messageHash, true]),
-		fn.returnTypes,
+		getFunctionReturnType(fn),
 	)
 	return {
 		functionCall,
@@ -574,7 +574,7 @@ function newCallFunctionCall(
 		action.hideSender === true,
 		fn.isStatic,
 		encodeArguments(fn, action.args),
-		fn.returnTypes,
+		getFunctionReturnType(fn),
 	)
 }
 
@@ -583,7 +583,7 @@ function newCallFunctionCall(
  *  were absent let a dApp supply them to skip the lookup and execute a
  *  selector that did not match the authorized `name` — scope authorizes the
  *  name, execution ran the selector. Build the call from ABI truth; never
- *  trust dApp-supplied type/isStatic/returnTypes for execution metadata. */
+ *  trust dApp-supplied type/isStatic/returnType for execution metadata. */
 function validateEncodedCallFn(
 	action: Extract<Action, { kind: "encoded_call" }>,
 	fn: Awaited<ReturnType<typeof findFunctionBySelector>>,
@@ -611,6 +611,6 @@ function newEncodedCallFunctionCall(
 		action.hideMsgSender === true,
 		fn.isStatic,
 		action.args.map((x) => Fr.fromString(x)),
-		fn.returnTypes ?? [],
+		getFunctionReturnType(fn),
 	)
 }

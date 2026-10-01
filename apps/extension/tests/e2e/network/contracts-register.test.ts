@@ -34,8 +34,8 @@ test.skipIf(!hasConfig)(
 		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
 
 		// Fetch the deployed token's instance directly from the node
-		const { createAztecNodeClient } = await import("@aztec/aztec.js/node")
-		const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+		const { createAztecNodeClient } = await import("@aztec-labs/aztec.js/node")
+		const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
 		const instance = await node.getContract(AztecAddress.fromStringUnsafe(aztecConfig!.tokenAddress))
 		if (!instance) throw new Error("Could not fetch token instance from node")

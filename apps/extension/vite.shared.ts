@@ -24,10 +24,18 @@ export function resolvePackageFile(pkg: string, file: string): string {
 /** Absolute path to `apps/extension/src`. */
 export const srcDir = fileURLToPath(new URL("./src", import.meta.url))
 
+/** The Aztec line the wallet is built against. Presto compares it by exact string equality, so a
+ *  missing pin fails the build instead of shipping a version that silently disables native proving. */
+function aztecVersion(): string {
+	const version: string | undefined = (packageJson.dependencies as Record<string, string | undefined>)["@aztec-labs/pxe"]
+	if (!version) throw new Error('apps/extension/package.json declares no "@aztec-labs/pxe", so __AZTEC_VERSION__ has no value')
+	return version
+}
+
 /** Compile-time `define` constants shared by the build + unit configs. */
 export const sharedDefine: Record<string, string> = {
 	__VERSION__: JSON.stringify(packageJson.version),
-	__AZTEC_VERSION__: JSON.stringify(packageJson.dependencies["@aztec/pxe"] ?? "unknown"),
+	__AZTEC_VERSION__: JSON.stringify(aztecVersion()),
 	__NAME__: JSON.stringify(packageJson.name),
 	__DISPLAY_NAME__: JSON.stringify(packageJson.displayName),
 }
@@ -42,7 +50,7 @@ export const artifactAliases: Record<string, string> = {
 /** The artifacts the build ships without debug info — see `scripts/strip-artifact-debug-info.ts`. */
 export const debugStrippedArtifacts: readonly string[] = [
 	...Object.values(artifactAliases),
-	resolvePackageFile("@aztec/noir-contracts.js", "artifacts/token_contract-Token.json"),
+	resolvePackageFile("@aztec-labs/noir-contracts.js", "artifacts/token_contract-Token.json"),
 ]
 
 /**
@@ -58,8 +66,8 @@ export const debugStrippedArtifacts: readonly string[] = [
  * `vitest.e2e.all`); the build config keeps these in `dedupe` instead.
  */
 export const noirAliases: Record<string, string> = {
-	"@aztec/noir-acvm_js": resolvePackageFile("@aztec/noir-acvm_js", "nodejs/acvm_js.js"),
-	"@aztec/noir-noirc_abi": resolvePackageFile("@aztec/noir-noirc_abi", "nodejs/noirc_abi_wasm.js"),
+	"@aztec-foundation/noir-acvm_js": resolvePackageFile("@aztec-foundation/noir-acvm_js", "nodejs/acvm_js.js"),
+	"@aztec-foundation/noir-noirc_abi": resolvePackageFile("@aztec-foundation/noir-noirc_abi", "nodejs/noirc_abi_wasm.js"),
 }
 
 /**

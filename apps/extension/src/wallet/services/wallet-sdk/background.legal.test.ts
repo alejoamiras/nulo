@@ -6,7 +6,7 @@ import { describe, expect, test, vi } from "vitest"
 import { TermsAcceptanceRequiredError } from "@nulo/extension-messaging/errors"
 import { LogLevel } from "@/wallet/logger"
 
-vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({ BackgroundConnectionHandler: class {} }))
+vi.mock("@aztec-labs/wallet-sdk/extension/handlers", () => ({ BackgroundConnectionHandler: class {} }))
 vi.mock("./content-message-relay", () => ({ attachContentListener: () => {} }))
 vi.mock("./tab-lifecycle", () => ({ wireTabLifecycle: () => {} }))
 vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))

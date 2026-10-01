@@ -117,9 +117,8 @@ jobs:
           fi
 
   # PR smoke builds IN-JOB (no artifact): the in-job build arms the migration fixture (artifact
-  # runs skip those e2es by the arming contract - they were silently skipped on PRs before) and
-  # carries the VITE_NULO_E2E_DEFAULT_NET=testnet pin (CI cannot reach the Alpha mainnet RPC, and
-  # the seeded-ACTIVE default is baked at build time). Prod-shaped build coverage on PRs stays with
+  # runs skip those e2es by the arming contract - they were silently skipped on PRs before).
+  # Prod-shaped build coverage on PRs stays with
   # the quality lane's `Build / vite build (chrome)`; the RELEASE chain still smokes the real
   # artifact (prod-shaped by design - its chain-adjacent legs are the known queued follow-up).
   smoke:

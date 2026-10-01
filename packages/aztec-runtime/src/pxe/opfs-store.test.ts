@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { EthAddress } from "@aztec/foundation/eth-address"
-import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
-import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
+import { EthAddress } from "@aztec-labs/foundation/eth-address"
+import { DatabaseVersion } from "@aztec-labs/stdlib/database-version/version"
+import type { AztecSQLiteOPFSStore } from "@aztec-labs/kv-store/sqlite-opfs"
 import { initStoreVersionStamp, listChainStoreDirs, PxeStoreVersionMismatch, PXE_DATA_SCHEMA_VERSION_PIN } from "./opfs-store"
 
 const nullLog = { warn: () => {}, info: () => {}, debug: () => {}, error: () => {}, verbose: () => {}, fatal: () => {} } as never
@@ -32,13 +32,13 @@ function resolvePackageFile(pkg: string, file: string): string {
 }
 
 describe("opfs-store upstream pins", () => {
-	it("PXE_DATA_SCHEMA_VERSION_PIN matches the installed @aztec/pxe (drift tripwire)", () => {
+	it("PXE_DATA_SCHEMA_VERSION_PIN matches the installed @aztec-labs/pxe (drift tripwire)", () => {
 		// Upstream does not export the constant; the injected-store path must stamp the SAME
 		// schema version the PXE writes with, or a future upstream bump would strand every
 		// store on a stale stamp (or wipe on every open). A pin mismatch here means: bump the
 		// PIN consciously alongside the @aztec upgrade — the wipe-on-mismatch is upstream's
 		// designed reset semantics, scoped per-chain by our injection.
-		const source = readFileSync(resolvePackageFile("@aztec/pxe", "dest/storage/metadata.js"), "utf8")
+		const source = readFileSync(resolvePackageFile("@aztec-labs/pxe", "dest/storage/metadata.js"), "utf8")
 		const match = source.match(/PXE_DATA_SCHEMA_VERSION\s*=\s*(\d+)/)
 		expect(match).not.toBeNull()
 		expect(Number(match?.[1])).toBe(PXE_DATA_SCHEMA_VERSION_PIN)

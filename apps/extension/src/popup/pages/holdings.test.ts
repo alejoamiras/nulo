@@ -85,7 +85,7 @@ async function mountPage() {
 	const appStore = useAppStore(pinia)
 	appStore.isLogined = true
 	appStore.profile = { id: "p1" } as never
-	appStore.network = { id: "n1", chainId: CHAIN_IDS.MAINNET } as never
+	appStore.network = { id: "n1", chainId: CHAIN_IDS.TESTNET } as never
 	appStore.account = { address: "0xacct" } as never
 	const wrapper = mount(Holdings, { global: { plugins: [pinia], stubs: STUBS } })
 	await flushPromises()
@@ -105,9 +105,9 @@ describe("holdings page", () => {
 		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		seedRows = [
-			row("b1", "AAA", CHAIN_IDS.MAINNET, CUSD),
-			row("b2", "BBB", CHAIN_IDS.MAINNET),
-			row("b-foreign", "FOR", CHAIN_IDS.TESTNET),
+			row("b1", "AAA", CHAIN_IDS.TESTNET, CUSD),
+			row("b2", "BBB", CHAIN_IDS.TESTNET),
+			row("b-foreign", "FOR", CHAIN_IDS.SANDBOX),
 		]
 		const w = await mountPage()
 
@@ -121,11 +121,11 @@ describe("holdings page", () => {
 
 	test("a live add for another chain is ignored; one for this chain lands", async () => {
 		installChromeStorage()
-		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET)]
+		seedRows = [row("b1", "AAA", CHAIN_IDS.TESTNET)]
 		const w = await mountPage()
 
-		balanceEvents.added.invoke(row("b9", "FOR", CHAIN_IDS.TESTNET))
-		balanceEvents.added.invoke(row("b2", "BBB", CHAIN_IDS.MAINNET))
+		balanceEvents.added.invoke(row("b9", "FOR", CHAIN_IDS.SANDBOX))
+		balanceEvents.added.invoke(row("b2", "BBB", CHAIN_IDS.TESTNET))
 		await flushPromises()
 
 		const symbols = w.findAll('[data-testid="token-symbol"]').map((s) => s.attributes("data-symbol"))
@@ -135,7 +135,7 @@ describe("holdings page", () => {
 	test("a reconnect rereads the config: a fiat switch flipped while detached takes effect", async () => {
 		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET, CUSD)]
+		seedRows = [row("b1", "AAA", CHAIN_IDS.TESTNET, CUSD)]
 		const w = await mountPage()
 		expect(w.find('[data-testid="holdings-summary"]').text()).toContain("$")
 
@@ -147,7 +147,7 @@ describe("holdings page", () => {
 
 	test("rejected config reads keep the defaults and never surface as an error", async () => {
 		installChromeStorage()
-		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET)]
+		seedRows = [row("b1", "AAA", CHAIN_IDS.TESTNET)]
 		configValues = new Proxy({}, { get: () => Promise.reject(new Error("port closed")) })
 		const w = await mountPage()
 

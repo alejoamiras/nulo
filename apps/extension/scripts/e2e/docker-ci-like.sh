@@ -85,7 +85,7 @@ bun install --frozen-lockfile
 echo "::endgroup::"
 
 echo "::group::aztec cli"
-AZTEC_VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
+AZTEC_VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec-labs/aztec.js'])")
 echo "Aztec version: $AZTEC_VERSION"
 echo "node: $(command -v node) ($(node --version))"
 echo "anvil: $(command -v anvil) ($(anvil --version 2>&1 | head -1))"

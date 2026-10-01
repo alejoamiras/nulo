@@ -11,6 +11,7 @@ import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { bbFetchCodeShim } from "./scripts/bb-fetch-code-shim"
 import { chunkCycleGuard } from "./scripts/chunk-cycle-guard"
 import { PAGES_OPTIONS } from "./scripts/pages-options"
 import { parseLimitGuard } from "./scripts/parse-limit-guard"
@@ -51,7 +52,7 @@ export default defineConfig({
 				find: "vite-plugin-node-polyfills/shims/buffer",
 				replacement: resolvePackageFile("vite-plugin-node-polyfills", "shims/buffer/dist/index.js"),
 			},
-			// Force detect-node to return false so @aztec/foundation's pino logger
+			// Force detect-node to return false so @aztec-labs/foundation's pino logger
 			// uses the browser transport instead of Node.js worker-thread transport.
 			// Without this, the node-polyfills process shim makes detect-node think
 			// we're in Node.js, causing pino.transport() to fail with "window is not defined".
@@ -79,7 +80,7 @@ export default defineConfig({
 		// Multiple nested versions exist in node_modules (rc.2 in simulator/pxe,
 		// rc.4 hoisted). Without dedup, initAbi() and abiEncode() end up in
 		// different module scopes, so the WASM instance variable is never shared.
-		dedupe: ["@aztec/noir-noirc_abi", "@aztec/noir-acvm_js"],
+		dedupe: ["@aztec-foundation/noir-noirc_abi", "@aztec-foundation/noir-acvm_js"],
 	},
 	css: {
 		preprocessorOptions: {
@@ -92,23 +93,7 @@ export default defineConfig({
 		stripArtifactDebugInfo(debugStrippedArtifacts),
 		parseLimitGuard(),
 		chunkCycleGuard(),
-		// Replace bb.js fetchCode module to eliminate dynamic import() of embedded WASM.
-		// Chrome MV3 service workers forbid import() at runtime. Our shim uses fetch()
-		// against the WASM files in /assets/ instead. Predicate scopes to the *browser*
-		// graph only — node and node-cjs trees keep their stock fetcher.
-		{
-			name: "bb-fetch-code-shim",
-			enforce: "pre",
-			resolveId(source, importer) {
-				if (
-					importer?.includes("@aztec/bb.js/dest/browser/") &&
-					source.includes("fetch_code/browser") &&
-					source.endsWith("index.js")
-				) {
-					return fileURLToPath(new URL("./src/shims/bb-fetch-code.ts", import.meta.url))
-				}
-			},
-		},
+		bbFetchCodeShim(),
 		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
 		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
@@ -163,7 +148,7 @@ export default defineConfig({
 			},
 		},
 
-		// Source the bb.js WASM directly from `node_modules/@aztec/bb.js` so a
+		// Source the bb.js WASM directly from `node_modules/@aztec-foundation/bb.js` so a
 		// dependency bump auto-updates both variants. See
 		// `scripts/extract-bb-wasm.ts` for the why + the threads/single
 		// extraction strategy + the hash-divergence assertion.
@@ -224,14 +209,14 @@ export default defineConfig({
 			apply: "build",
 			generateBundle() {
 				// Both files are condition-less exported subpaths, so they resolve directly —
-				// layout-agnostically — through this workspace's DECLARED @aztec/sqlite3mc-wasm
+				// layout-agnostically — through this workspace's DECLARED @aztec-labs/sqlite3mc-wasm
 				// dependency (the identity test pins that declaration in lockstep with the copy
-				// @aztec/kv-store consumes).
+				// @aztec-labs/kv-store consumes).
 				this.emitFile({
 					type: "asset",
 					fileName: "assets/sqlite3.wasm",
 					source: readFileSync(
-						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
+						resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
 							from: import.meta.url,
 						}),
 					),
@@ -240,7 +225,7 @@ export default defineConfig({
 					type: "asset",
 					fileName: "assets/sqlite3-opfs-async-proxy.js",
 					source: readFileSync(
-						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3-opfs-async-proxy.js", {
+						resolveExportedAsset("@aztec-labs/sqlite3mc-wasm", "./vendor/jswasm/sqlite3-opfs-async-proxy.js", {
 							from: import.meta.url,
 						}),
 					),
@@ -311,7 +296,7 @@ export default defineConfig({
 	},
 	optimizeDeps: {
 		include: ["pino", "vue", "webextension-polyfill"],
-		exclude: ["@aztec/bb.js", "@aztec/noir-acvm_js", "@aztec/noir-noirc_abi", "vue-demi"],
+		exclude: ["@aztec-foundation/bb.js", "@aztec-foundation/noir-acvm_js", "@aztec-foundation/noir-noirc_abi", "vue-demi"],
 		esbuildOptions: {
 			target: "esnext",
 		},

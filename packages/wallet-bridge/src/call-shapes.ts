@@ -23,5 +23,5 @@ export type EncodedCallPayload = {
 	name?: string
 	type?: string
 	isStatic?: boolean
-	returnTypes?: unknown[]
+	returnType?: unknown
 }

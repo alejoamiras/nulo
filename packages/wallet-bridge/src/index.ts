@@ -1,7 +1,7 @@
 /**
  * @nulo/wallet-bridge — wallet-sdk protocol layer.
  *
- * Hosts the dispatch-adjacent pieces that adapt the `@aztec/wallet-sdk`
+ * Hosts the dispatch-adjacent pieces that adapt the `@aztec-labs/wallet-sdk`
  * encrypted-channel protocol onto Nulo's internal service graph. The
  * dispatcher itself + `initWalletSdkHandler` wiring stay in
  * `@nulo/extension` because they reference concrete service classes

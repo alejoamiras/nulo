@@ -78,71 +78,80 @@ export const FONT_ASSET = /\.(woff2?|ttf|otf|eot)$/i
 
 export const FONT_ALLOWED: ReadonlySet<string> = new Set(["OFL-1.1", "Apache-2.0"])
 
-const AZTEC_TAG = "https://github.com/AztecProtocol/aztec-packages/blob/v5.2.0"
-const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/75061fab15986eedee4e7d9104ff87dd9fa4ca10"
+const AZTEC_NODE_TAG = "https://github.com/aztec-labs-eng/aztec-node/blob/v6.0.0-rc.1"
+const AZTEC_PACKAGES_TAG = "https://github.com/AztecProtocol/aztec-packages/blob/v6.0.0-rc.1"
+const NOIR_COMMIT = "https://github.com/noir-lang/noir/blob/5a7ee9bf5ed8973076df7bb0d2b723024db09ae7"
 const SQLITE3MC_TAG = "https://github.com/utelle/SQLite3MultipleCiphers/blob/v2.3.5"
 
 const SQLITE3MC_NOTE =
-	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms. Upstream builds it from the sqlite3mc amalgamation with the default cipher set and none of the optional extensions (no miniz). Of the code that amalgamation compiles in, what is neither sqlite3mc's own MIT code nor public domain or CC0 has its own entry: sha2, libaegis and Argon2. The Emscripten runtime links musl libc, whose notice follows Emscripten's."
+	"SQLite3 Multiple Ciphers 2.3.5 over SQLite 3.53.2, compiled with Emscripten 6.0.0. The shipped sqlite3.wasm and sqlite3-opfs-async-proxy.js are byte-identical to the upstream release archive sqlite3mc-2.3.5-sqlite-3.53.2-wasm.zip (sha256 3d0d5ebe4c54a9a22012410726ecef711e4e3e15ec11dffddf09488c72a10670), which @aztec-labs/sqlite3mc-wasm repackages unmodified. SQLite itself is in the public domain; the bundle header reproduced below is upstream's own statement of that and of the Emscripten runtime's terms. Upstream builds it from the sqlite3mc amalgamation with the default cipher set and none of the optional extensions (no miniz). Of the code that amalgamation compiles in, what is neither sqlite3mc's own MIT code nor public domain or CC0 has its own entry: sha2, libaegis and Argon2. The Emscripten runtime links musl libc, whose notice follows Emscripten's."
 
 const SQLITE3MC_TEXTS = ["sqlite3mc.MIT.txt", "sqlite-wasm-bundle-header.txt", "emscripten.MIT.txt", "musl.MIT.txt"] as const
 
 export const OVERRIDES: readonly Override[] = [
 	{
 		names: [
-			"@aztec/accounts",
-			"@aztec/aztec.js",
-			"@aztec/bb-prover",
-			"@aztec/blob-lib",
-			"@aztec/constants",
-			"@aztec/entrypoints",
-			"@aztec/ethereum",
-			"@aztec/foundation",
-			"@aztec/key-store",
-			"@aztec/kv-store",
-			"@aztec/noir-contracts.js",
-			"@aztec/noir-protocol-circuits-types",
-			"@aztec/protocol-contracts",
-			"@aztec/pxe",
-			"@aztec/simulator",
-			"@aztec/standard-contracts",
-			"@aztec/stdlib",
-			"@aztec/wallet-sdk",
+			"@aztec-labs/accounts",
+			"@aztec-labs/aztec.js",
+			"@aztec-labs/bb-prover",
+			"@aztec-labs/blob-lib",
+			"@aztec-labs/constants",
+			"@aztec-labs/entrypoints",
+			"@aztec-labs/ethereum",
+			"@aztec-labs/foundation",
+			"@aztec-labs/key-store",
+			"@aztec-labs/kv-store",
+			"@aztec-labs/noir-contracts.js",
+			"@aztec-labs/noir-protocol-circuits-types",
+			"@aztec-labs/protocol-contracts",
+			"@aztec-labs/pxe",
+			"@aztec-labs/simulator",
+			"@aztec-labs/standard-contracts",
+			"@aztec-labs/stdlib",
+			"@aztec-labs/wallet-sdk",
 		],
-		reviewedVersion: "5.2.0",
+		reviewedVersion: "6.0.0-rc.1",
 		license: "Apache-2.0",
-		source: `${AZTEC_TAG}/LICENSE`,
-		texts: ["aztec-packages.Apache-2.0.txt"],
-		note: "Published from the aztec-packages monorepo with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree these packages are built from.",
+		source: `${AZTEC_NODE_TAG}/LICENSE`,
+		texts: ["aztec-node.Apache-2.0.txt"],
+		note: "Published from the aztec-node repository with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree these packages are built from.",
 	},
 	{
-		names: ["@aztec/bb.js"],
-		reviewedVersion: "5.2.0",
+		names: ["@aztec-foundation/bb.js"],
+		reviewedVersion: "6.0.0-rc.1",
 		license: "Apache-2.0",
 		declared: "MIT",
-		source: `${AZTEC_TAG}/barretenberg/LICENSE`,
+		source: `${AZTEC_PACKAGES_TAG}/barretenberg/LICENSE`,
 		texts: ["barretenberg.Apache-2.0.txt"],
 		note: "The package manifest declares MIT but ships no licence file; the barretenberg tree it and its wasm are built from carries the Apache-2.0 text reproduced here. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
-		names: ["@aztec/noir-acvm_js"],
-		reviewedVersion: "5.2.0",
+		names: ["@aztec-foundation/l1-artifacts"],
+		reviewedVersion: "6.0.0-rc.1",
+		license: "Apache-2.0",
+		source: `${AZTEC_PACKAGES_TAG}/LICENSE`,
+		texts: ["aztec-packages.Apache-2.0.txt"],
+		note: "Published from the aztec-packages monorepo with no licence field and no licence file; the repository root LICENSE at the release tag governs the tree it is built from.",
+	},
+	{
+		names: ["@aztec-foundation/noir-acvm_js"],
+		reviewedVersion: "6.0.0-rc.1",
 		license: "MIT",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
+		note: "Built from the noir submodule commit aztec-packages v6.0.0-rc.1 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
-		names: ["@aztec/noir-noirc_abi"],
-		reviewedVersion: "5.2.0",
+		names: ["@aztec-foundation/noir-noirc_abi"],
+		reviewedVersion: "6.0.0-rc.1",
 		license: "(MIT OR Apache-2.0)",
 		source: `${NOIR_COMMIT}/LICENSE-MIT`,
 		texts: ["noir.MIT.txt", "noir.Apache-2.0.txt"],
-		note: "Built from the noir submodule commit aztec-packages v5.2.0 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
+		note: "Built from the noir submodule commit aztec-packages v6.0.0-rc.1 pins; the package ships no licence file. The wasm binary is attributed to this project as a whole: the third-party components compiled into it are not itemised here, because upstream publishes no inventory of them.",
 	},
 	{
-		names: ["@aztec/sqlite3mc-wasm"],
-		reviewedVersion: "5.2.0",
+		names: ["@aztec-labs/sqlite3mc-wasm"],
+		reviewedVersion: "6.0.0-rc.1",
 		license: "MIT",
 		source: `${SQLITE3MC_TAG}/LICENSE`,
 		texts: SQLITE3MC_TEXTS,
@@ -187,8 +196,21 @@ export const VENDORED: readonly Vendored[] = [
 		],
 	},
 	{
+		trigger: { package: "@aztec-foundation/l1-artifacts", reviewedVersion: "6.0.0-rc.1" },
+		components: [
+			{
+				name: "@aztec/l1-contracts",
+				version: "0.1.0",
+				license: "Apache-2.0",
+				source: `${AZTEC_PACKAGES_TAG}/LICENSE`,
+				texts: ["aztec-packages.Apache-2.0.txt"],
+				note: "The aztec-packages l1-contracts tree, carried inside @aztec-foundation/l1-artifacts under its own manifest, which declares Apache-2.0. @aztec-labs/ethereum reads its L1 network defaults from it (scripts/network-defaults.json, byte-identical to the file at the release tag). The tree has no licence file of its own; the repository root LICENSE carries the text.",
+			},
+		],
+	},
+	{
 		trigger: { asset: /^assets\/sqlite3(-[\w-]+)?\.wasm$/ },
-		coveredBy: ["@aztec/sqlite3mc-wasm"],
+		coveredBy: ["@aztec-labs/sqlite3mc-wasm"],
 		components: [
 			{
 				name: "sha2 by Olivier Gay",
@@ -216,7 +238,7 @@ export const VENDORED: readonly Vendored[] = [
 	{
 		trigger: { asset: /^assets\/sqlite3-opfs-async-proxy\.js$/ },
 		components: [],
-		coveredBy: ["@aztec/sqlite3mc-wasm"],
+		coveredBy: ["@aztec-labs/sqlite3mc-wasm"],
 	},
 	{
 		trigger: { asset: /^service-worker-loader\.js$/ },
@@ -238,17 +260,17 @@ export const VENDORED: readonly Vendored[] = [
 	{
 		trigger: { asset: /^assets\/barretenberg(-threads)?\.wasm\.gz$/ },
 		components: [],
-		coveredBy: ["@aztec/bb.js"],
+		coveredBy: ["@aztec-foundation/bb.js"],
 	},
 	{
 		trigger: { asset: /^assets\/acvm_js_bg-[\w-]+\.wasm$/ },
 		components: [],
-		coveredBy: ["@aztec/noir-acvm_js"],
+		coveredBy: ["@aztec-foundation/noir-acvm_js"],
 	},
 	{
 		trigger: { asset: /^assets\/noirc_abi_wasm_bg-[\w-]+\.wasm$/ },
 		components: [],
-		coveredBy: ["@aztec/noir-noirc_abi"],
+		coveredBy: ["@aztec-foundation/noir-noirc_abi"],
 	},
 	{
 		trigger: { asset: /^assets\/InterVariable-[\w-]+\.woff2$/ },

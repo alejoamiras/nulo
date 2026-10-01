@@ -1,4 +1,4 @@
-import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
+import type { PendingDiscovery } from "@aztec-labs/wallet-sdk/extension/handlers"
 import type { PendingVerificationEntry } from "./pending-verification"
 import { describeExternalId, isDiscoveryExpired } from "@nulo/wallet-bridge"
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"

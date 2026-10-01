@@ -5,27 +5,21 @@
  * content: the set is compiled in from upstream's constants.
  */
 
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
-import {
-	HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
-	STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-} from "@aztec/standard-contracts/handshake-registry/constants"
-import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec/standard-contracts/multi-call-entrypoint/constants"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
+import { STANDARD_HANDSHAKE_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/handshake-registry/constants"
+import { STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS } from "@aztec-labs/standard-contracts/multi-call-entrypoint/constants"
 
 /** Protocol contracts sit at fixed low addresses, not preimage-derived ones, so a backup's copy
  *  would fail registration's address check anyway (1 to 3 today, inside the historic bound). */
 const MAX_PROTOCOL_ADDRESS = 6n
 
-/** The addresses `getDefaultStandardPreloadedContracts()` registers, read from the address-only
- *  leaves because the function itself loads every artifact; `pxe-provided.test.ts` pins the two. */
+/** The addresses `createPXE`'s default `preloadedContractsProvider` registers, read from the
+ *  address-only leaves because its getters load every artifact; `pxe-provided.test.ts` pins the two. */
 export const PRELOADED_CONTRACT_ADDRESSES: ReadonlySet<bigint> = new Set(
-	[
-		STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS,
-		STANDARD_AUTH_REGISTRY_ADDRESS,
-		STANDARD_HANDSHAKE_REGISTRY_ADDRESS,
-		...HISTORICAL_STANDARD_HANDSHAKE_REGISTRY_ADDRESSES,
-	].map((address) => address.toBigInt()),
+	[STANDARD_MULTI_CALL_ENTRYPOINT_ADDRESS, STANDARD_AUTH_REGISTRY_ADDRESS, STANDARD_HANDSHAKE_REGISTRY_ADDRESS].map((address) =>
+		address.toBigInt(),
+	),
 )
 
 export function isPxeProvidedAddress(value: bigint): boolean {

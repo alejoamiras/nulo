@@ -7,7 +7,7 @@
  * against the live sandbox node — proving the node serves `getPublicLogsByTags` (Inference 3) and
  * that the tips + class-gate helpers behave BEFORE the deep service integration is trusted.
  */
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { fetchPublicTokenTransferEvents, getPublicScanTips, resolveTokenClassStatus } from "@nulo/aztec-runtime/pxe/public-events"
 import { expect, inject, test } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"

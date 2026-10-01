@@ -6,14 +6,14 @@
  * be SENT AS the account (the mint, the credit's `PrivateFPC.mint`) is driven through
  * the playground; the script side only deploys, bridges, claims and reads.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/aztec.js/contracts"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
+import { ProtocolContractAddress } from "@aztec-labs/aztec.js/protocol"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { GasFees } from "@aztec/stdlib/gas"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { type AztecTestConfig, createSponsoredFeeOptions, createTestWallet, mintPublicTokens } from "./aztec"
 import { bridgeForMint } from "./aztec-private-fpc-bridge"
 
@@ -128,8 +128,8 @@ export async function bridgePrivateFuel(
  *  recipient-bound through the leaf, so the sender does not matter). After this the
  *  extension must send `PrivateFPC.mint(amount, salt, leafIndex)` AS the claimer. */
 export async function claimPrivateFuel(wallet: ScriptWallet, fuel: PrivateFuel): Promise<void> {
-	const { Contract } = await import("@aztec/aztec.js/contracts")
-	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
+	const { Contract } = await import("@aztec-labs/aztec.js/contracts")
+	const { FeeJuiceArtifact } = await import("@aztec-labs/protocol-contracts/fee-juice")
 	const fpc = await privateFpcInstance()
 	// biome-ignore lint/suspicious/noExplicitAny: see privateFpcInstance
 	await (wallet as any).registerContract(fpc.instance, fpc.artifact).catch(() => {})

@@ -1,9 +1,9 @@
 // @vitest-environment node
 // Real poseidon2 (bb.js WASM) in the slot derivation, which crashes under jsdom.
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { computeFeePayerBalanceStorageSlot } from "@aztec/protocol-contracts/fee-juice"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { computeFeePayerBalanceStorageSlot } from "@aztec-labs/protocol-contracts/fee-juice"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import { describe, expect, test, vi } from "vitest"
 import { trim } from "@/wallet/logger/utils"
 import type { PublicStorageReader } from "@/wallet/utils/fee-juice-balance"

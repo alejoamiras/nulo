@@ -10,7 +10,7 @@ import type { AddressInfo, Socket } from "node:net"
 const ZERO_ETH = `0x${"00".repeat(20)}`
 const ZERO_AZTEC = `0x${"00".repeat(32)}`
 
-/** Schema-valid `getNodeInfo` result (NodeInfoSchema: @aztec/stdlib contract/interfaces/node-info)
+/** Schema-valid `getNodeInfo` result (NodeInfoSchema: @aztec-labs/stdlib contract/interfaces/node-info)
  *  for the chain the pair names: the wallet's identity check composes the two into its chain id
  *  (`walletChainId`), except for the local seed, which it pins by `l1ChainId` alone. */
 export function nodeInfoResult(l1ChainId: number, rollupVersion: number): Record<string, unknown> {

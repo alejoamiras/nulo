@@ -4,7 +4,7 @@ import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined

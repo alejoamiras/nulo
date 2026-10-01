@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
@@ -20,10 +20,10 @@ import {
 	NuloAccount,
 	parseAccountExport,
 	serializeAccountExport,
-	V5_REGIME,
+	V6_REGIME,
 	type IAccountContract,
 } from "@nulo/aztec-runtime/account"
-import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { GrumpkinScalar } from "@aztec-labs/foundation/curves/grumpkin"
 import { type ImportedKeysDek, sealImportedSigningKeyV2, unsealImportedSigningKeyV2, zeroize } from "@nulo/wallet-crypto"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { ImportedKeysRepository } from "./imported-keys-repository"
@@ -548,7 +548,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			accountIndex,
 			storedAddress,
 			derivedAddress,
-			regimeId: V5_REGIME.id,
+			regimeId: V6_REGIME.id,
 			walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 			detectedAt: Date.now(),
 		}

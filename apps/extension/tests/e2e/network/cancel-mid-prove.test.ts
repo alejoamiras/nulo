@@ -15,7 +15,7 @@ const hasConfig = aztecConfig !== undefined
  *      the user cancels.
  *   2. wallet-bridge dispatcher converts to a structured `JobCancelledError`.
  *   3. wallet-sdk handler writes `response.error = { code: 4001, ... }`.
- *   4. Upstream `@aztec/wallet-sdk` (`extension_wallet.ts:181`) collapses
+ *   4. Upstream `@aztec-labs/wallet-sdk` (`extension_wallet.ts:181`) collapses
  *      to `new Error(JSON.stringify(response.error))` — the dApp receives
  *      a plain `Error` whose `.message` is the JSON payload.
  *
@@ -139,7 +139,7 @@ test.skipIf(!hasConfig)(
 		// reality) AND the parsed shape (forward-compat). Either passing
 		// alone would miss a real regression in one of the two.
 		// `errorJson` is what the playground stringifies; it's the
-		// `err.message` JSON envelope per @aztec/wallet-sdk's
+		// `err.message` JSON envelope per @aztec-labs/wallet-sdk's
 		// `extension_wallet.ts:181` collapse.
 		const errorPayload = result.errorJson as string | { message?: string } | undefined
 		const errMessage = typeof errorPayload === "string" ? errorPayload : errorPayload?.message

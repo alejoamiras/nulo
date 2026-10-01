@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { describe, expect, it } from "vitest"
 import { zeroize } from "./zeroize"
 

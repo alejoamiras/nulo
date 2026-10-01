@@ -1,4 +1,4 @@
-import { TxHash, type TxReceipt } from "@aztec/stdlib/tx"
+import { TxHash, type TxReceipt } from "@aztec-labs/stdlib/tx"
 import type { SendCheckOutcome } from "@nulo/wallet-core/jobs"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ClockPort, TimerHandle } from "@nulo/wallet-core/ports"

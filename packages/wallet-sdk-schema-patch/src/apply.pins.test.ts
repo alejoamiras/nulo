@@ -5,7 +5,7 @@
  * the three blocks are about to fold into one helper, and the messages are the
  * operator-facing contract.
  */
-import { schemas } from "@aztec/stdlib/schemas"
+import { schemas } from "@aztec-labs/stdlib/schemas"
 import { z } from "zod"
 import { describe, expect, test } from "vitest"
 import { applyNuloSchemaPatch } from "./apply"

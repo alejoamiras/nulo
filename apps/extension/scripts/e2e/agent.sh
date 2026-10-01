@@ -69,9 +69,6 @@ DIST_DIR="dist/$BROWSER"
 export EXTENSION_PATH="$PWD/$DIST_DIR"
 
 echo "[e2e:agent] building $BROWSER wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
-# VITE_NULO_E2E_DEFAULT_NET=testnet pins the SEEDED-ACTIVE network: fresh-extension import flows
-# bootstrap on the default before any fixture can switch, and CI cannot reliably reach the Alpha
-# mainnet RPC (each blocked call eats the node client's 60s-abort x retry envelope).
 # NULO_E2E_PROVERLESS=1 builds a proverless wallet (skips BB-SNARK generation;
 # kernel simulation + on-chain submission stay real). Arms the double-opt-in
 # flags so apps/extension/src/e2e/config.ts enables the proverless PXE +
@@ -89,7 +86,6 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   fi
   echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
-  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_PRICE_MAP=1 \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_TOKEN_SEEDS=1 \
@@ -103,7 +99,6 @@ else
   # env: the double opt-in would otherwise arm if both vars are already set.
   unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
-  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_PRICE_MAP=1 \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_TOKEN_SEEDS=1 \

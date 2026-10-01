@@ -18,7 +18,7 @@ import { describe, expect, test, vi } from "vitest"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 
-vi.mock("@aztec/stdlib/contract", async (importOriginal) => {
+vi.mock("@aztec-labs/stdlib/contract", async (importOriginal) => {
 	const original = await importOriginal<Record<string, unknown>>()
 	return {
 		...original,

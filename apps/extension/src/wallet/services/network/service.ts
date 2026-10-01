@@ -1,7 +1,7 @@
 // Modified from Azguard Wallet (https://github.com/AzguardWallet/azguard-wallet), Copyright 2026 BB Strategy Pte. Ltd., Apache-2.0.
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -22,6 +22,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID } from "@/utils/chain-ids"
+import { TESTNET_RPC_URL } from "@/wallet/constants/network-endpoints"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -90,31 +91,14 @@ interface DefaultSeed {
  */
 export const LOCAL_NETWORK_RPC_URL: string = (import.meta.env.VITE_LOCAL_NETWORK_RPC_URL as string | undefined) ?? "http://localhost:8080"
 
-// E2E-ONLY default-active override: CI smoke has NO local chain and its runners cannot reliably
-// reach the public Alpha mainnet RPC (requests blackhole → every chain-adjacent flow eats the node
-// client's full 60s-abort×retry envelope, blowing any test budget). Smoke builds pin the seeded
-// ACTIVE network to Testnet (reachable from CI, the pre-Alpha test envelope); prod builds omit the
-// env, so real installs keep Alpha. Same never-ships pattern as the migration-fixture stamp
-// (_build-extension.yml greps release bundles).
-const E2E_DEFAULT_ACTIVE_TESTNET: boolean = (import.meta.env.VITE_NULO_E2E_DEFAULT_NET as string | undefined) === "testnet"
-
 const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
-		name: "Alpha V5",
-		rpcUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
-		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
-		l1ChainId: MAINNET_L1_CHAIN_ID,
-		kind: "mainnet",
-		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
-		endpointLabel: "dRPC",
-	},
-	{
 		name: "Testnet",
-		rpcUrl: "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
-		chainId: CHAIN_IDS.TESTNET,
+		rpcUrl: TESTNET_RPC_URL,
+		chainId: CHAIN_IDS.TESTNET, // (TESTNET_L1_CHAIN_ID ^ TESTNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		l1ChainId: TESTNET_L1_CHAIN_ID,
 		kind: "testnet",
-		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,
+		isPrimaryActive: true,
 		endpointLabel: "dRPC",
 	},
 	{
@@ -127,7 +111,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	},
 ]
 
-/** The one seed marked `isPrimaryActive` (Alpha in prod, Testnet under the e2e flag). Single source
+/** The one seed marked `isPrimaryActive` (Testnet). Single source
  *  for the primary/default network — consumed by `getOrInitNetworks` (fresh seed) AND
  *  `getPrimaryNetwork` (the import/bootstrap fallback), so the two can't disagree. */
 const PRIMARY_SEED = DEFAULT_SEEDS.find((s) => s.isPrimaryActive)

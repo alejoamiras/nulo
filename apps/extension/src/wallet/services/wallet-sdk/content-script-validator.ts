@@ -3,7 +3,7 @@
  *
  * Defense-in-depth at the SW seam where `chrome.runtime.onMessage`
  * delivers content-script-originated messages to the upstream
- * `@aztec/wallet-sdk` `BackgroundConnectionHandler`. The upstream
+ * `@aztec-labs/wallet-sdk` `BackgroundConnectionHandler`. The upstream
  * handler does its own type-switching, but adding a zod boundary
  * here drops adversarial / malformed envelopes early with a
  * structured debug log.
@@ -30,7 +30,7 @@ import { z } from "zod"
 /**
  * Content-script-originated message shapes the SW expects to receive.
  *
- * Mirrors `@aztec/wallet-sdk/extension/handlers.InternalMessageType`'s
+ * Mirrors `@aztec-labs/wallet-sdk/extension/handlers.InternalMessageType`'s
  * content-script-to-background subset (DISCOVERY_REQUEST,
  * KEY_EXCHANGE_REQUEST, SECURE_MESSAGE, DISCONNECT_REQUEST, PING). If
  * the upstream enum gains a new content-script→background message

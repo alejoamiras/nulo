@@ -15,7 +15,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { TxHash } from "@aztec/stdlib/tx"
+import { TxHash } from "@aztec-labs/stdlib/tx"
 import type { Page } from "puppeteer"
 import { beforeAll, expect, inject } from "vitest"
 import { categoricalLabel, sendOutcome } from "@/utils/journal-state"

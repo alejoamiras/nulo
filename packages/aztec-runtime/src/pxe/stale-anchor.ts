@@ -1,4 +1,4 @@
-import type { PXE } from "@aztec/pxe/client/bundle"
+import type { PXE } from "@aztec-labs/pxe/client/bundle"
 import { PxeStaleAnchorError } from "@nulo/extension-messaging/errors"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 

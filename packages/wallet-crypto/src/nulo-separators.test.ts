@@ -1,4 +1,4 @@
-import { DomainSeparator } from "@aztec/constants"
+import { DomainSeparator } from "@aztec-labs/constants"
 import { describe, expect, test } from "vitest"
 import { NULO_ACCOUNT_SEED_SEP, NULO_SEPARATOR_LABELS, NULO_SIGNING_ROOT_SEP } from "./nulo-separators"
 

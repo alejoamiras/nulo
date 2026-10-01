@@ -1,6 +1,6 @@
 # @nulo/wallet-bridge
 
-The dApp-facing dispatcher. Implements the `@aztec/wallet-sdk` capability map,
+The dApp-facing dispatcher. Implements the `@aztec-labs/wallet-sdk` capability map,
 narrows protocol messages into typed service calls, and enforces session scope.
 Does not depend on the Aztec runtime — the bridge is transport-shaped, not
 chain-shaped.
@@ -57,7 +57,7 @@ is the expected behavior. Added in 0.2.0.
 When a user cancels an in-flight tx (or other cancellable operation) from the
 wallet UI, the wallet-sdk delivers an error to the dApp's awaiting promise.
 
-**The current upstream `@aztec/wallet-sdk` collapses our structured envelope
+**The current upstream `@aztec-labs/wallet-sdk` collapses our structured envelope
 to a plain `Error` whose `.message` is the JSON-serialized payload.** The
 following recipe handles both that shape and a forward-compatible structured
 shape, so dApps stay correct if the SDK ever preserves structure:
@@ -252,7 +252,7 @@ new case added to their switches.
 
 ## Custom RPC methods (Nulo extensions)
 
-The wallet exposes three Nulo-custom RPCs on top of the canonical `@aztec/wallet-sdk`
+The wallet exposes three Nulo-custom RPCs on top of the canonical `@aztec-labs/wallet-sdk`
 `WalletSchema` (all three are runtime-patched onto `WalletSchema`; see the
 schema-patch contract below):
 
@@ -315,7 +315,7 @@ patch does NOT restore them):
 
 If a future Aztec.js version ships its own `registerToken`, the patch's
 signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the
-`@aztec/wallet-sdk` version exactly (`5.0.0-rc.2` today) so the patch's
+`@aztec-labs/wallet-sdk` version exactly (`6.0.0-rc.1` today) so the patch's
 assumptions are stable across upgrades.
 
 ### Not in `batch`

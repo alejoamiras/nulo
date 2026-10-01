@@ -196,10 +196,9 @@ test("seeded dRPC endpoint row is titled 'dRPC', never the raw provider URL", as
 	await waitForHash(page, "#/popup/general")
 
 	await navigateToSettings(page, "networks")
-	// Both dRPC-backed seeds carry the label; Alpha V5 is deterministic across smoke's
-	// default-active variants (the seed set is fixed even when Testnet is active).
-	await page.waitForSelector('[data-testid="network-row"][data-network-name="Alpha V5"]', { visible: true, timeout: 5_000 })
-	await openNetworkDetail(page, "Alpha V5")
+	// Testnet is the one dRPC-backed seed.
+	await page.waitForSelector('[data-testid="network-row"][data-network-name="Testnet"]', { visible: true, timeout: 5_000 })
+	await openNetworkDetail(page, "Testnet")
 
 	await page.waitForSelector('[data-testid="endpoint-row"]', { visible: true, timeout: 5_000 })
 	const rowText = await page.evaluate(() => document.querySelector('[data-testid="endpoint-row"]')?.textContent ?? "")

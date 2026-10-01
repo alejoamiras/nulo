@@ -1,7 +1,7 @@
 /** A real journal over a fake browser, and the service stubs the arrival check reads. Test-only. */
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { vi } from "vitest"
-import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import type { ActiveSession } from "@aztec-labs/wallet-sdk/extension/handlers"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"

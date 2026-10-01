@@ -24,11 +24,11 @@
  * A wrong store key surfaces as `SqliteEncryptionError` from upstream — mapped to a typed
  * `WrongStoreKeyError` (never confused with corruption or absence).
  */
-import type { Logger } from "@aztec/foundation/log"
-import { EthAddress } from "@aztec/foundation/eth-address"
-import { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
-import { SqliteEncryptionError } from "@aztec/kv-store/sqlite-opfs"
-import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
+import type { Logger } from "@aztec-labs/foundation/log"
+import { EthAddress } from "@aztec-labs/foundation/eth-address"
+import { AztecSQLiteOPFSStore } from "@aztec-labs/kv-store/sqlite-opfs"
+import { SqliteEncryptionError } from "@aztec-labs/kv-store/sqlite-opfs"
+import { DatabaseVersion } from "@aztec-labs/stdlib/database-version/version"
 import { chainDataDir, PXE_DATA_DIR_ROOT, type ChainCoordinates } from "./chain-coordinates"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
@@ -38,8 +38,8 @@ export class WrongStoreKeyError extends Error {
 	public readonly isWrongStoreKey = true as const
 }
 
-/** Mirror of upstream `@aztec/pxe`'s non-exported `PXE_DATA_SCHEMA_VERSION` (drift-tested). */
-export const PXE_DATA_SCHEMA_VERSION_PIN = 13
+/** Mirror of upstream `@aztec-labs/pxe`'s non-exported `PXE_DATA_SCHEMA_VERSION` (drift-tested). */
+export const PXE_DATA_SCHEMA_VERSION_PIN = 16
 
 /** The database name inside each per-chain pool directory (mirrors upstream's default). */
 const DB_NAME = "pxe_data"

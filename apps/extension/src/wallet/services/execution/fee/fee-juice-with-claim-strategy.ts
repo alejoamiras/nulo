@@ -7,7 +7,7 @@
  * before dispatch (the facade does this).
  */
 
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { getFeeJuiceClaimPayload } from "@/wallet/utils/fee-juice"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"

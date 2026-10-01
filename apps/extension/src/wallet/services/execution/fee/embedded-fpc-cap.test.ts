@@ -6,10 +6,10 @@
  * e2e tests accept ok/error so don't catch budget regressions.
  */
 import { describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { TxContext, type TxExecutionRequest } from "@aztec/stdlib/tx"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { TxContext, type TxExecutionRequest } from "@aztec-labs/stdlib/tx"
 import { applyEmbeddedFpcGasCap } from "./embedded-fpc-cap"
 import type { FeeOptions } from "@/wallet/services/execution/client"
 

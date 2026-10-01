@@ -15,9 +15,9 @@
  * the production adapter for those paths.
  */
 
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import { walletChainId } from "@/utils/chain-ids"
 

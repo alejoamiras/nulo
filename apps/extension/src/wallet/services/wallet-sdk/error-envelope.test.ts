@@ -85,7 +85,7 @@ describe("toWalletResponseError", () => {
 
 	test("envelope round-trips through new Error(JSON.stringify(env)) — dApp parse recipe works", () => {
 		// Load-bearing contract test for the wallet-bridge README recipe. The
-		// `@aztec/wallet-sdk` wrapper wraps `response.error` in
+		// `@aztec-labs/wallet-sdk` wrapper wraps `response.error` in
 		// `new Error(JSON.stringify(error))`, so dApps that want to discriminate
 		// need to `JSON.parse(err.message).code`. If this test fails, the
 		// documented recipe stops working and downstream dApps break silently.

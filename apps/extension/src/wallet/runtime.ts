@@ -13,7 +13,7 @@
  * side effect the runtime has on the outside world goes through a port.
  */
 
-import { BarretenbergSync } from "@aztec/bb.js"
+import { BarretenbergSync } from "@aztec-foundation/bb.js"
 import type { BrowserApi, ClockPort, TimerHandle } from "@nulo/wallet-core/ports"
 import { ServiceCollection } from "./base"
 import { createSingleFlightStart } from "./single-flight-start"

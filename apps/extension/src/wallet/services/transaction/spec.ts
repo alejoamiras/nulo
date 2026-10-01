@@ -1,6 +1,6 @@
 import type { LocalTxOrigin } from "@nulo/wallet-bridge"
 import { z } from "zod"
-import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import type { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 
 /** `OriginType`, `TxOrigin`, and `LocalTxOrigin` live in
  *  `@nulo/wallet-bridge`. Re-exported here so extension call sites can
@@ -169,7 +169,7 @@ const tolerantObject = (v: unknown) => typeof v === "object" && v !== null
 
 /** Storage codec row schema — exact on the flat/branched fields; tolerant
  *  (object-shaped, passed through verbatim) on the deep display payloads
- *  (`feePaymentMethod` is an `@aztec/entrypoints` union — see UPDATE.md;
+ *  (`feePaymentMethod` is an `@aztec-labs/entrypoints` union — see UPDATE.md;
  *  `origin` is a wallet-bridge union; results/gas are render-only). */
 export const TxSchema: z.ZodType<Tx> = z.object({
 	chainId: z.number(),
@@ -178,7 +178,7 @@ export const TxSchema: z.ZodType<Tx> = z.object({
 	ambiguous: z.boolean().optional(),
 	account: z.string(),
 	nonce: z.string(),
-	// AccountFeePaymentMethodOptions is a NUMERIC enum in @aztec/entrypoints —
+	// AccountFeePaymentMethodOptions is a NUMERIC enum in @aztec-labs/entrypoints —
 	// rows store 0|1|2. Number-shaped (not nativeEnum) so an upstream member
 	// addition cannot false-reject stored rows. @aztec-coupled: see UPDATE.md.
 	feePaymentMethod: z.custom<AccountFeePaymentMethodOptions>((v) => typeof v === "number"),

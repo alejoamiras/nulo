@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { Gas, GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
 import { JobCancelledError, JournaledRejection, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
@@ -21,8 +21,8 @@ import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor
 
 // The balance slot's poseidon2 runs Barretenberg WASM, which crashes under jsdom; the slot itself is
 // pinned in fee-juice-balance.test.ts.
-vi.mock("@aztec/protocol-contracts/fee-juice", async (importOriginal) => {
-	const { Fr } = await import("@aztec/foundation/curves/bn254")
+vi.mock("@aztec-labs/protocol-contracts/fee-juice", async (importOriginal) => {
+	const { Fr } = await import("@aztec-labs/foundation/curves/bn254")
 	return { ...(await importOriginal<object>()), computeFeePayerBalanceStorageSlot: vi.fn(async () => new Fr(0x51n)) }
 })
 

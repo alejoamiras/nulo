@@ -24,7 +24,7 @@ const CONTACTS_HASH = "#/popup/settings/contacts"
 
 /** Valid (on-curve) random address + a name tied to it, fresh per call. */
 async function freshIdentity(prefix: string): Promise<{ name: string; address: string }> {
-	const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+	const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 	const address = (await AztecAddress.random()).toString()
 	return { name: `${prefix}${address.slice(4, 10)}`, address }
 }

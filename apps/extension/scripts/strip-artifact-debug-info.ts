@@ -10,7 +10,7 @@ interface CompiledFunction {
  * locations (`debug_symbols`), which only put source snippets into simulation error traces. A JSON
  * import is one module, so the bundler cannot split it, and with them a token artifact alone
  * exceeds the size above which Firefox's add-on linter refuses to parse a file. The result is the
- * shape `@aztec/stdlib` itself uses for "no debug info": it skips the trace, it does not throw.
+ * shape `@aztec-labs/stdlib` itself uses for "no debug info": it skips the trace, it does not throw.
  * The class id depends on neither field.
  */
 export function withoutDebugInfo(artifactJson: string): string {

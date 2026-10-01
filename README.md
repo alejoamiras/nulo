@@ -5,7 +5,7 @@
 > **Nulo is a demo for evaluation and feedback. It is not a production wallet.**
 >
 > - **No security audit.** The code has not been reviewed by an external security firm.
-> - **Aztec mainnet is the default network, and assets on it have real value.** Use only what you can afford to lose entirely. Treat any key material you import as compromised.
+> - **The Aztec testnet is the default network.** Its assets are for testing; a mainnet network you add may carry real value. Use only what you can afford to lose entirely. Treat any key material you import as compromised.
 > - **Storage format is unstable.** Profiles, sessions, and on-disk schemas may change between builds. Expect data wipes and full reseeds.
 > - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
 > - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.
@@ -14,7 +14,7 @@
 
 A self-custody wallet for the [Aztec network](https://aztec.network), packaged as a Chrome and Firefox extension. Nulo runs the Aztec [Private Execution Environment](https://docs.aztec.network/aztec/protocol/circuits/pxe) locally so transactions are simulated and signed on the user's machine; no node operator sees the contents.
 
-The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and uses the upstream `@aztec/accounts/schnorr` account contract — there is no custom Noir source in this repo.
+The extension exposes the canonical `@aztec-labs/wallet-sdk` surface to dApps and uses the upstream `@aztec-labs/accounts/schnorr` account contract — there is no custom Noir source in this repo.
 
 ## Status
 
@@ -42,7 +42,7 @@ For Firefox, `bun run build:firefox` → `apps/extension/dist/firefox/`.
 | Package | Purpose |
 |---|---|
 | [`@nulo/extension`](./apps/extension/) | The Chrome/Firefox MV3 extension — service worker, popup UI, content script, offscreen PXE host. |
-| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec/wallet-sdk` capability map, scope enforcement. |
+| [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec-labs/wallet-sdk` capability map, scope enforcement. |
 | [`@nulo/aztec-runtime`](./packages/aztec-runtime/) | PXE lifecycle, `NuloAccount` adapter, class-id verification, payload chunking. |
 | [`@nulo/extension-messaging`](./packages/extension-messaging/) | Typed RPC plumbing across service worker, popup, and offscreen. |
 | [`@nulo/wallet-crypto`](./packages/wallet-crypto/) | Password + passkey KDF, `PasswordSecretBox`, derivation chain (vector-locked). |

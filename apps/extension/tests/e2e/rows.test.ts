@@ -36,7 +36,7 @@ type Probe = {
 	__linkClick?: { modified: boolean; href: string | null; prevented: boolean } | null
 }
 
-/** A priced 1.5 USDC transfer: the chain's seeded USDC carries the quote to its row. */
+/** A priced 1.5 cUSD transfer: the price map quotes it as USDC. */
 async function openHomeWithRow(ctx: ExtensionContext): Promise<Page> {
 	const page = await openPopup(ctx)
 	await waitForHash(page, "#/popup/general")

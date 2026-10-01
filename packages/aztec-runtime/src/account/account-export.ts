@@ -21,9 +21,9 @@
  */
 import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey, zeroize } from "@nulo/wallet-crypto"
-import { Fq } from "@aztec/foundation/curves/bn254"
-import { sha256 } from "@aztec/foundation/crypto/sha256"
-import { NULO_KDF_DIGEST, V5_REGIME } from "./address-freeze"
+import { Fq } from "@aztec-labs/foundation/curves/bn254"
+import { sha256 } from "@aztec-labs/foundation/crypto/sha256"
+import { NULO_KDF_DIGEST, V6_REGIME } from "./address-freeze"
 import { FROZEN_ACCOUNT_CLASS_ID, FROZEN_ARTIFACT_SHA256 } from "./frozen-artifact"
 import { FROZEN_DESCRIPTOR_DIGEST } from "./instantiation-descriptor"
 
@@ -37,7 +37,7 @@ const ACCOUNT_EXPORT_AAD = new TextEncoder().encode("nulo:account-export:v1") as
 /** The frozen digests THIS build derives accounts under — an imported file must match all four,
  *  or it belongs to a different contract shape / KDF and is rejected before any address work. */
 export const EXPORT_REGIME_DIGESTS = {
-	regime: V5_REGIME.id,
+	regime: V6_REGIME.id,
 	artifactSha256: FROZEN_ARTIFACT_SHA256,
 	classId: FROZEN_ACCOUNT_CLASS_ID,
 	descriptorDigest: FROZEN_DESCRIPTOR_DIGEST,

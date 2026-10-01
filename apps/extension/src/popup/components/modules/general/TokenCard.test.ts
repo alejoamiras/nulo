@@ -166,7 +166,7 @@ describe("TokenCard", () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		const fiat = w.find('[data-testid="token-fiat"]')
@@ -186,7 +186,7 @@ describe("TokenCard", () => {
 		mockQuotes = {}
 		const w = factory(
 			{ updatedAt: 1, publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6 },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6 },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
@@ -248,7 +248,7 @@ describe("TokenCard — hostile rows", () => {
 
 	test("an absurd decimals value is treated the same way (no exponent is ever computed)", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 500 })
+		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 500 })
 		await flushPromises()
 		expect(w.find('[data-malformed="true"]').text()).toBe("—")
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
@@ -275,7 +275,7 @@ describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () =
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
-			{ chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
+			{ chainId: CHAIN_IDS.TESTNET, contract: CUSD, decimals: 6, symbol: "cUSD" },
 		)
 		await flushPromises()
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(true)

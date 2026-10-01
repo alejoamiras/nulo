@@ -3,7 +3,7 @@ run-name: "publish-packages → ${{ inputs.version }}${{ inputs.dry_run && ' (dr
 
 # Publishes @alejoamiras/nulo-{wallet-crypto,resolve-asset,wallet-sdk-schema-patch} at one lockstep
 # version through npm trusted publishing: no npm token exists anywhere.
-# - `test` runs the release and publish tests. They execute @aztec/* code, so it makes no bytes.
+# - `test` runs the release and publish tests. They execute Aztec code, so it makes no bytes.
 # - `pack` makes the bytes and runs no test code: a cache-free frozen install without lifecycle
 #   scripts, then stage, pack, and refuse tarballs that differ from
 #   scripts/publish/approved-digests.json (the first publication must be listed there). A shared

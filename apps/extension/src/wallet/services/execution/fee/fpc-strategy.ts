@@ -70,10 +70,10 @@
  * the original pipeline.
  */
 
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { GasSettings } from "@aztec/stdlib/gas"
-import type { TxSimulationResult } from "@aztec/stdlib/tx"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { GasSettings } from "@aztec-labs/stdlib/gas"
+import type { TxSimulationResult } from "@aztec-labs/stdlib/tx"
+import { AccountFeePaymentMethodOptions } from "@aztec-labs/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { predictedWorstMinFees } from "@nulo/aztec-runtime/fee-juice"
 import { sameFieldAddress } from "@nulo/wallet-bridge"

@@ -193,7 +193,7 @@ import { readLiveness } from "@/utils/background-liveness"
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		// Epoch-4 password blobs REQUIRE the entropy field. The composable checks only

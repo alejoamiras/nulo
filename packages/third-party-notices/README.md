@@ -78,7 +78,7 @@ no syntax that needs transformation (parameter properties, enums) is allowed.
 
 ## When a build is refused
 
-- **An `@aztec/*` bump** trips every Aztec override's `reviewedVersion`. Re-check that the upstream
+- **An Aztec bump** (`@aztec-labs/*`, `@aztec-foundation/*`) trips every Aztec override's `reviewedVersion`. Re-check that the upstream
   LICENSE files at the new tag are unchanged (`texts/` must stay byte-identical to the tagged
   source, or be refreshed from it), that the noir submodule commit and the sqlite3mc pin
   (`scripts/vendor.pin` upstream; the package README states it) still match the recorded notes, then

@@ -8,7 +8,7 @@ import {
 	type HexUserHandle,
 	type MasterSecretBytes,
 } from "./secret-types"
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { fromBase64 } from "@nulo/wallet-core/utils"
 import { zeroize } from "./zeroize"
 

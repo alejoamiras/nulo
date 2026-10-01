@@ -1,5 +1,5 @@
 /**
- * Extract barretenberg WASM bytes from the installed `@aztec/bb.js` package
+ * Extract barretenberg WASM bytes from the installed `@aztec-foundation/bb.js` package
  * for build-time copy into `dist/<browser>/assets/`.
  *
  * Why: bb.js@4.2.0 ships its WASM in two forms — a standalone `.wasm.gz`
@@ -31,10 +31,10 @@ import { resolvePackageAsset } from "@nulo/resolve-asset"
 
 const DATA_URI_RE = /"data:application\/gzip;base64,([A-Za-z0-9+/=]+)"/
 
-/** Locate a file inside `@aztec/bb.js` (a declared dependency of this
+/** Locate a file inside `@aztec-foundation/bb.js` (a declared dependency of this
  *  workspace), layout-agnostically — see @nulo/resolve-asset. */
 export function resolveBbFile(file: string): string {
-	return resolvePackageAsset("@aztec/bb.js", file, { from: import.meta.url })
+	return resolvePackageAsset("@aztec-foundation/bb.js", file, { from: import.meta.url })
 }
 
 /** Read the threads variant from npm's `dest/node/...` tree. Already a
@@ -55,7 +55,7 @@ export function extractWasmGzFromInlinedJs(jsPath: string): Uint8Array {
 	if (!match) {
 		throw new Error(
 			`Could not find data:application/gzip;base64,... in ${jsPath}. ` +
-				"@aztec/bb.js may have changed its inlined-WASM format; update extract-bb-wasm.ts.",
+				"@aztec-foundation/bb.js may have changed its inlined-WASM format; update extract-bb-wasm.ts.",
 		)
 	}
 	return Uint8Array.from(Buffer.from(match[1]!, "base64"))
@@ -83,7 +83,7 @@ export function extractBbWasm(): { single: Uint8Array; threads: Uint8Array } {
 
 	if (threads.length !== threadsFromInlined.length || !threads.every((b, i) => b === threadsFromInlined[i])) {
 		throw new Error(
-			"Hash divergence: @aztec/bb.js's threaded WASM differs between " +
+			"Hash divergence: @aztec-foundation/bb.js's threaded WASM differs between " +
 				"`dest/node/barretenberg_wasm/barretenberg-threads.wasm.gz` and the " +
 				"data-URI payload in `dest/browser/.../fetch_code/browser/barretenberg-threads.js`. " +
 				"This was identical at the time of writing — divergence means upstream split " +

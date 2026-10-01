@@ -4,9 +4,9 @@
  *
  *   bun scripts/publish/stage.ts <dir>... --version X.Y.Z [--out <root>]
  *
- * writes `<root>/<dir>/` (default root `dist-publish/`): an ESM bundle per entry with `@aztec/*` and
- * `zod` left as bare imports, declarations rewritten for Node ESM resolution, a generated manifest
- * (exact `@aztec/*` peers taken from the workspace pins), README, LICENSE and NOTICE. Run it from
+ * writes `<root>/<dir>/` (default root `dist-publish/`): an ESM bundle per entry with the Aztec
+ * packages and `zod` left as bare imports, declarations rewritten for Node ESM resolution, a generated
+ * manifest (exact Aztec peers taken from the workspace pins), README, LICENSE and NOTICE. Run it from
  * the repository root: the bundler names each module by its cwd-relative path, so any other cwd
  * would change the bytes the approved digests bind and could leak a local path into a tarball.
  */
@@ -32,7 +32,7 @@ export const REPO_ROOT = resolve(import.meta.dir, "../..")
 /** Present in every directory this script created; nothing without it is ever deleted. */
 export const STAGING_MARKER = ".nulo-staged"
 const REPOSITORY = "alejoamiras/nulo"
-const EXACT_PIN_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
+export const EXACT_PIN_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
 const RANGE_RE = /^\^?\d+\.\d+\.\d+$/
 const AZGUARD_NOTICE = /^\/\/ Modified from Azguard Wallet \(/
 /** Metafile input keys are cwd-relative, and the cwd is the repository root. */
@@ -46,14 +46,17 @@ export interface StagedPackage {
 	manifest: Record<string, unknown>
 }
 
-/** `@scope/name` or `name` from a bare specifier (`@aztec/foundation/crypto/sha512` → `@aztec/foundation`). */
+/** `@scope/name` or `name` from a bare specifier (`@aztec-labs/foundation/crypto/sha512` → `@aztec-labs/foundation`). */
 export function packageNameOf(specifier: string): string {
 	const parts = specifier.split("/")
 	return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : (parts[0] ?? specifier)
 }
 
+/** The Aztec line's scopes; `@aztec/viem` is not part of the line and is never a peer. */
+const AZTEC_SCOPES = ["@aztec-labs/", "@aztec-foundation/"]
+
 function isBundledExternal(name: string): boolean {
-	return name.startsWith("@aztec/") || name === "zod"
+	return AZTEC_SCOPES.some((scope) => name.startsWith(scope)) || name === "zod"
 }
 
 const emittedName = (source: string) => `${basename(source, ".ts")}.js`
@@ -146,7 +149,7 @@ async function bundle(pkg: PublishedPackage, pkgRoot: string, distDir: string): 
 		outdir: distDir,
 		format: "esm",
 		target: pkg.target,
-		external: ["@aztec/*", "zod"],
+		external: [...AZTEC_SCOPES.map((scope) => `${scope}*`), "zod"],
 		naming: "[name].[ext]",
 		plugins: [siblingEntriesExternal(entryFiles)],
 		metafile: true,
@@ -175,7 +178,7 @@ function importedPackage(pkg: PublishedPackage, siblings: Set<string>, path: str
 	}
 	const name = packageNameOf(path)
 	if (!isBundledExternal(name)) {
-		throw new Error(`${pkg.dir}: bundle imports ${path}, which is neither @aztec/*, zod nor a sibling entry`)
+		throw new Error(`${pkg.dir}: bundle imports ${path}, which is neither an Aztec package, zod nor a sibling entry`)
 	}
 	return name
 }
@@ -287,7 +290,7 @@ function sortedRecord(entries: [string, string][]): Record<string, string> {
 }
 
 /**
- * `@aztec/*` become exact peers (the consumer must share one instance of each: `Fr`, `WalletSchema`
+ * The Aztec packages become exact peers (the consumer must share one instance of each: `Fr`, `WalletSchema`
  * and the zod schemas are compared by identity); zod stays a dependency at the workspace's range.
  */
 function dependencyFields(pkg: PublishedPackage, pkgRoot: string, names: Set<string>) {

@@ -211,11 +211,11 @@ describe("backup-migration-registry", () => {
 
 	test("version metadata: epoch gate is fail-closed; baseline shares the live schema number space", () => {
 		expect(isSupportedCompatEpoch(CURRENT_COMPAT_EPOCH)).toBe(true)
-		// Epochs 2 (rc-era secret-root) and 3 (KDF-v1 signing-key-root) are HARD rejects: their
-		// backups carry addresses from superseded derivations, which NULO-ACCOUNT-KDF v2 can no
-		// longer reproduce — importing them would create accounts that explode at first load
-		// instead of failing cleanly here at the designed gate.
-		for (const bad of [undefined, null, 1, 2, 3, 5, "4", Number.NaN]) expect(isSupportedCompatEpoch(bad)).toBe(false)
+		// Epochs 2 (rc-era secret-root), 3 (KDF-v1 signing-key-root) and 4 (the nulo-v5 account
+		// artifact) are HARD rejects: their backups carry addresses from superseded derivations,
+		// which this build can no longer reproduce — importing them would create accounts that
+		// explode at first load instead of failing cleanly here at the designed gate.
+		for (const bad of [undefined, null, 1, 2, 3, 4, 6, "5", Number.NaN]) expect(isSupportedCompatEpoch(bad)).toBe(false)
 		expect(BACKUP_SCHEMA_BASELINE).toBe(BASELINE_VERSION)
 	})
 })

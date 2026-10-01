@@ -4,7 +4,7 @@
  * report). The derivation itself is injected (jsdom cannot run bb.js poseidon); the REAL frozen
  * derivation is covered by the aztec-runtime KAT/freeze suites and the network canary.
  */
-import { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { asMasterSecretBytes } from "@nulo/wallet-crypto"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
@@ -83,7 +83,7 @@ describe("AccountIntegrityCoordinator", () => {
 			accountIndex: 0,
 			storedAddress: "0xaaaa",
 			derivedAddress: "0xstale",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -103,7 +103,7 @@ describe("AccountIntegrityCoordinator", () => {
 		expect(record?.derivedAddress).toBe("0xreal")
 		expect(record?.chainId).toBe(3)
 		expect(record?.accountIndex).toBe(2)
-		expect(record?.regimeId).toBe("nulo-v5")
+		expect(record?.regimeId).toBe("nulo-v6")
 	})
 
 	test("checks every stored account across chains; first mismatch wins", async () => {

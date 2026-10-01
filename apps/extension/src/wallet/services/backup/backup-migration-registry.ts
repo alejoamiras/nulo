@@ -64,6 +64,9 @@ export const COMPAT_EPOCH_FIELD = "compat-epoch"
 export const BACKUP_SCHEMA_VERSION_FIELD = "backup-schema-version"
 
 /** The account-contract generation this build produces and accepts.
+ *  Epoch 5 = the nulo-v6 account regime: the same KDF and the same blob shape as epoch 4 (the
+ *  "epoch-4 shape" elsewhere), but the V6 account artifact moved every derived address, so an
+ *  epoch-4 backup carries V5 addresses this build cannot reproduce.
  *  Epoch 4 = NULO-ACCOUNT-KDF v2 (the recovery-phrase-centric key model): real BIP-39 PBKDF2
  *  mnemonic→master, l1ChainId-keyed account seeds under dedicated Nulo domain separators, and
  *  the store-both (entropy + master) profile row — every derived address changed AND password
@@ -71,7 +74,7 @@ export const BACKUP_SCHEMA_VERSION_FIELD = "backup-schema-version"
  *  epoch gate is the designed NON-migratable hard reject for exactly this class of change
  *  (crypto/derivation rotations are never storage-migratable). Epoch 3 was the KDF-v1
  *  signing-key-root generation; epoch 2 the rc-era secret-root generation. */
-export const CURRENT_COMPAT_EPOCH = 4
+export const CURRENT_COMPAT_EPOCH = 5
 
 const SUPPORTED_COMPAT_EPOCHS: ReadonlySet<number> = new Set([CURRENT_COMPAT_EPOCH])
 

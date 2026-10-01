@@ -1,6 +1,6 @@
 /**
  * Convert an internal exception into the `WalletResponse.error` shape expected
- * by `@aztec/wallet-sdk`. Structured errors get EIP-1193 codes plus a
+ * by `@aztec-labs/wallet-sdk`. Structured errors get EIP-1193 codes plus a
  * `walletErrorCode` discriminator; everything else collapses to a plain string
  * so the existing wire contract (string error for unrecognised throws) is
  * preserved.
@@ -10,7 +10,7 @@
  * concern, not a wallet-bridge domain concern. Unit-testable via the
  * sibling `error-envelope.test.ts`.
  *
- * Wire reality: the dApp-side `@aztec/wallet-sdk` wrapper at
+ * Wire reality: the dApp-side `@aztec-labs/wallet-sdk` wrapper at
  * `extension_wallet.ts:181` wraps `response.error` in
  * `new Error(JSON.stringify(error))`. dApps that want to discriminate must
  * `JSON.parse(err.message).code` (see wallet-bridge README for the recipe).
@@ -32,7 +32,7 @@ import {
 	UnsupportedMethodError,
 	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
-import type { WalletResponse } from "@aztec/wallet-sdk/types"
+import type { WalletResponse } from "@aztec-labs/wallet-sdk/types"
 
 export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 	if (error instanceof JobCancelledError) {

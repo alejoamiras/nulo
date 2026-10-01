@@ -14,7 +14,7 @@
  * Function-call construction uses @aztec-foundation/aztec-standards Token
  * artifact + Contract.at() pattern, mirroring real dApps.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { summarizeSimulation } from "../lib/simulation-summary"

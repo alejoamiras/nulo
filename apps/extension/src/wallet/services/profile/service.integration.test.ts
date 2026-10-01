@@ -163,7 +163,7 @@ class FakePasskeyService extends Service<Record<string, never>> {
 			id,
 			userHandle,
 			deriveMasterSecret: async () => {
-				const { Fr } = await import("@aztec/foundation/curves/bn254")
+				const { Fr } = await import("@aztec-labs/foundation/curves/bn254")
 				return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 			},
 			// Deterministic per credential id — mirrors production's same-credential ⇒ same wrap
@@ -972,7 +972,7 @@ describe("ProfileService integration", () => {
 						id: `cred-${userHandle}`,
 						userHandle,
 						deriveMasterSecret: async () => {
-							const { Fr } = await import("@aztec/foundation/curves/bn254")
+							const { Fr } = await import("@aztec-labs/foundation/curves/bn254")
 							return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 						},
 						deriveDekWrapKey: async () => fakeWrapKey(`cred-${userHandle}`),
@@ -2150,7 +2150,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2202,7 +2202,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2231,7 +2231,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		})
@@ -2251,7 +2251,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			accountIndex: 0,
 			storedAddress: "0xstored",
 			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
+			regimeId: "nulo-v6",
 			walletVersion: "0.0.0",
 			detectedAt: 1,
 		}

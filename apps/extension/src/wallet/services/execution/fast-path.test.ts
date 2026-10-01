@@ -7,27 +7,27 @@
  * Two layers:
  *   - `rehydrateOptimizablePrefix` — pure data, no mocks (tests 1-13).
  *   - `runFastPath` — orchestration; mocks `simulateViaNode` +
- *     `buildMergedSimulationResult` from `@aztec/wallet-sdk/base-wallet`
+ *     `buildMergedSimulationResult` from `@aztec-labs/wallet-sdk/base-wallet`
  *     and a minimal `AztecNode` / `IPXE` stub (tests 14-23).
  *
  * `vi.mock` runs before the imports so the mocks replace the real symbols
  * across both the test file and the module under test.
  */
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { FunctionCall, FunctionSelector, FunctionType, type AbiType } from "@aztec/stdlib/abi"
-import { GasFees, GasSettings } from "@aztec/stdlib/gas"
-import { SimulationError } from "@aztec/stdlib/errors"
-import type { BlockHeader, TxSimulationResult } from "@aztec/stdlib/tx"
-import { TxSimulationResultWithAppOffset } from "@aztec/aztec.js/wallet"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { FunctionCall, FunctionSelector, FunctionType, type AbiType } from "@aztec-labs/stdlib/abi"
+import { GasFees, GasSettings } from "@aztec-labs/stdlib/gas"
+import { SimulationError } from "@aztec-labs/stdlib/errors"
+import type { BlockHeader, TxSimulationResult } from "@aztec-labs/stdlib/tx"
+import { TxSimulationResultWithAppOffset } from "@aztec-labs/aztec.js/wallet"
 
-vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
+vi.mock("@aztec-labs/wallet-sdk/base-wallet", () => ({
 	simulateViaNode: vi.fn(),
 	buildMergedSimulationResult: vi.fn(),
 }))
 
-import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { buildMergedSimulationResult, simulateViaNode } from "@aztec-labs/wallet-sdk/base-wallet"
 import { bindOptimizableCalls, rehydrateOptimizablePrefix, runFastPath, wrapStandardArmForMixedMerge } from "./fast-path"
 import { ContractResolver } from "./contract-resolver"
 import { TxRequestBuilder } from "./tx-request-builder"
@@ -211,7 +211,6 @@ describe("rehydrateOptimizablePrefix", () => {
 			isStatic: true,
 			hideMsgSender: false,
 			args: [new Fr(7n)],
-			returnTypes: [],
 		})
 		const overWire = JSON.parse(JSON.stringify(real))
 		const result = rehydrateOptimizablePrefix([overWire])

@@ -9,8 +9,8 @@
  * `sessionKnownTo`, pinned in its own table test — `initWalletSdkHandler` binds the handler before
  * it attaches the listener, so the wrapper itself never runs without one.)
  */
-import { exportPublicKey, generateKeyPair } from "@aztec/wallet-sdk/crypto"
-import { BackgroundConnectionHandler, type BackgroundTransport, type MessageSender } from "@aztec/wallet-sdk/extension/handlers"
+import { exportPublicKey, generateKeyPair } from "@aztec-labs/wallet-sdk/crypto"
+import { BackgroundConnectionHandler, type BackgroundTransport, type MessageSender } from "@aztec-labs/wallet-sdk/extension/handlers"
 import { RECEIVER_GONE_MESSAGE } from "@nulo/extension-messaging/errors"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 

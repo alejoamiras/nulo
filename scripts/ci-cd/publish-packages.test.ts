@@ -135,7 +135,8 @@ describe(FILE, () => {
 		const script = readFileSync(join(ROOT, "scripts/publish/verify-provenance.sh"), "utf8")
 		expect(script).toContain("repo=${2:-alejoamiras/nulo}")
 		expect(script).toContain(`workflow=\${3:-${FILE}}`)
-		expect(script).toContain('@refs/heads/(dev|main)\\$"')
+		expect(script).toContain("ref=${4:-refs/heads/(dev|main)}")
+		expect(script).toContain('@${ref}\\$"')
 		for (const flag of [
 			"--digest-alg sha512",
 			"--cert-oidc-issuer https://token.actions.githubusercontent.com",

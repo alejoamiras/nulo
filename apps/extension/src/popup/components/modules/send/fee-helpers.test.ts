@@ -219,18 +219,6 @@ describe("fee-helpers/buildFeeMethods", () => {
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBeUndefined()
 	})
-
-	test("allowSponsored:false omits the Sponsored FPC row (Alpha/mainnet)", () => {
-		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
-		const m = buildFeeMethods(fpcs, undefined, { allowSponsored: false })
-		expect(m.map((x) => x.type)).toEqual(["fj", "private_fpc"])
-		expect(m.find((x) => x.fpc?.id === "s1")).toBeUndefined()
-	})
-
-	test("allowSponsored defaults true (Sponsored FPC retained)", () => {
-		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
-		expect(buildFeeMethods(fpcs).find((x) => x.fpc?.id === "s1")?.subtitle).toBe("sponsored")
-	})
 })
 
 describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
@@ -287,7 +275,6 @@ describe("fee-helpers/buildFeeMethods — what each row can spend", () => {
 		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, NULO_SPONSOR, second]))?.fpc?.id).toBe("s1")
 		expect(defaultSponsor(buildFeeMethods([HAND_ADDED, second]))).toBeUndefined()
 		expect(defaultSponsor(buildFeeMethods([PRIVATE]))).toBeUndefined()
-		expect(defaultSponsor(buildFeeMethods([NULO_SPONSOR], undefined, { allowSponsored: false }))).toBeUndefined()
 	})
 })
 

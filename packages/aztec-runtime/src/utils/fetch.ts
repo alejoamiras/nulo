@@ -11,8 +11,8 @@
  * It then wraps with the SDK's own `retry` + `makeBackoff` for retries.
  */
 
-import { jsonStringify } from "@aztec/foundation/json-rpc"
-import { NoRetryError, makeBackoff, retry } from "@aztec/foundation/retry"
+import { jsonStringify } from "@aztec-labs/foundation/json-rpc"
+import { NoRetryError, makeBackoff, retry } from "@aztec-labs/foundation/retry"
 
 /** Default timeout per individual HTTP request (ms). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000

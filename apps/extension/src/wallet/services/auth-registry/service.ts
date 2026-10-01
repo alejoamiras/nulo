@@ -36,8 +36,8 @@ import {
 	AuthwitStatusSchema,
 	parseAuthwitStatusRowId,
 } from "./spec"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { TxHash } from "@aztec/stdlib/tx"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { TxHash } from "@aztec-labs/stdlib/tx"
 
 export * from "./spec"
 

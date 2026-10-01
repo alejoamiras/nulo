@@ -21,11 +21,11 @@
  * - Everything else rejected.
  */
 
-import type { Fr } from "@aztec/foundation/curves/bn254"
-import { createSafeJsonRpcClient } from "@aztec/foundation/json-rpc/client"
-import type { Logger } from "@aztec/foundation/log"
-import type { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec/stdlib/interfaces/client"
+import type { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { createSafeJsonRpcClient } from "@aztec-labs/foundation/json-rpc/client"
+import type { Logger } from "@aztec-labs/foundation/log"
+import type { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
+import { type AztecNode, AztecNodeApiSchema, createAztecNodeClient } from "@aztec-labs/stdlib/interfaces/client"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { makeFetchWithTimeout, makeSingleAttemptFetch } from "../utils/fetch"
 
@@ -78,7 +78,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		if (!check.ok) {
 			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
 		}
-		return createAztecNodeClient(rpcUrl, {}, makeFetchWithTimeout())
+		return createAztecNodeClient(rpcUrl, { fetch: makeFetchWithTimeout() })
 	}
 
 	public createSingleAttemptNode(rpcUrl: string, timeoutMs: number): AztecNode {
@@ -86,7 +86,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		if (!check.ok) {
 			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
 		}
-		return createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+		return createAztecNodeClient(rpcUrl, { fetch: makeSingleAttemptFetch(timeoutMs) })
 	}
 
 	public async probeChainId(rpcUrl: string, timeoutMs: number): Promise<number> {
@@ -96,7 +96,7 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 		}
 		// Single attempt, no retry chain: the probe's whole point is that its
 		// socket dies WITH its budget (see NodeFactory.probeChainId).
-		const node = createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+		const node = createAztecNodeClient(rpcUrl, { fetch: makeSingleAttemptFetch(timeoutMs) })
 		const info = await node.getNodeInfo()
 		return (info.l1ChainId ^ info.rollupVersion) >>> 0
 	}

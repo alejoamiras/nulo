@@ -11,7 +11,7 @@
  * byte-identically after any change here.
  *
  * No Chrome APIs, no Vue, no Node-specific I/O — only Web Crypto
- * (available in both browsers and jsdom), `@aztec/foundation` math
+ * (available in both browsers and jsdom), `@aztec-labs/foundation` math
  * helpers, and pure bytes.
  */
 

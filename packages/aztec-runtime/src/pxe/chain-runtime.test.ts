@@ -10,11 +10,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { PrestoConfig, PrestoPhase, PrestoStatus } from "@alejoamiras/presto"
 
-vi.mock("@aztec/pxe/client/bundle", () => ({
+vi.mock("@aztec-labs/pxe/client/bundle", () => ({
 	createPXE: vi.fn(async () => ({}) as unknown),
 }))
-vi.mock("@aztec/pxe/config", () => ({ getPXEConfig: () => ({}) }))
-vi.mock("@aztec/simulator/client", () => ({ WASMSimulator: class {} }))
+vi.mock("@aztec-labs/pxe/config", () => ({ getPXEConfig: () => ({}) }))
+vi.mock("@aztec-labs/simulator/client", () => ({ WASMSimulator: class {} }))
 
 const checkPrestoStatusMock = vi.fn()
 const proverInstances: Array<{
@@ -33,7 +33,7 @@ vi.mock("@alejoamiras/presto", () => ({
 	},
 }))
 
-import { createPXE } from "@aztec/pxe/client/bundle"
+import { createPXE } from "@aztec-labs/pxe/client/bundle"
 import {
 	advanceProve,
 	ChainRuntime,

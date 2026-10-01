@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { readFileSync, realpathSync } from "node:fs"
-import { extractCallStack } from "@aztec/simulator/client"
-import { type ContractArtifact, getFunctionDebugMetadata, loadContractArtifact } from "@aztec/stdlib/abi"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+import { extractCallStack } from "@aztec-labs/simulator/client"
+import { type ContractArtifact, getFunctionDebugMetadata, loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
 import { describe, expect, test } from "vitest"
 import { debugStrippedArtifacts } from "../vite.shared"
 import { stripArtifactDebugInfo, withoutDebugInfo } from "./strip-artifact-debug-info"
