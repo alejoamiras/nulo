@@ -214,11 +214,25 @@ function isRemoval({ status, exact, source, target }: Change): boolean {
 }
 
 /**
+ * A file the archive split moved and edited under git's 50% rename similarity shows as its deletion plus
+ * the addition of its archive path: read that pair as the rename it is, never exact.
+ */
+function pairArchived(diff: readonly Change[]): Change[] {
+	const added = new Set(diff.flatMap((c) => (c.status === "A" ? [c.target] : [])))
+	const archived = (p: string) => `${lib.ARCHIVE}/${p.slice(PLANS.length + 1)}`
+	return diff.map((c) =>
+		c.status === "D" && !c.source.startsWith(`${lib.ARCHIVE}/`) && added.has(archived(c.source))
+			? { status: "R", exact: false, source: c.source, target: archived(c.source) }
+			: c,
+	)
+}
+
+/**
  * Paths the branch deletes, renames away as `isRemoval` says, or replaces by promotion. The diff takes no
  * pathspec: one limited to the plan tree pairs a move out of it with nothing and reads it as a deletion.
  */
 export function removedOnBranch(cwd: string, promotions: readonly Promotion[] = PROMOTIONS): string[] {
-	const diff = changes(lines0(git(cwd, "diff", "--raw", "--no-abbrev", "-M", "-z", `${DEV_REF}...HEAD`)))
+	const diff = pairArchived(changes(lines0(git(cwd, "diff", "--raw", "--no-abbrev", "-M", "-z", `${DEV_REF}...HEAD`))))
 	const removed = diff.filter((c) => c.source.startsWith(`${PLANS}/`) && isRemoval(c)).map((c) => c.source)
 	const base = mergeBase(cwd)
 	for (const p of promotions) {

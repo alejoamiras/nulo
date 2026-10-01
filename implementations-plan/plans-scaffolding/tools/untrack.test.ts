@@ -81,6 +81,19 @@ describe("untrack", () => {
 		expect(verify({ cwd: repo, promotions })).toEqual([`${MANIFEST} is missing, so no row can be verified`])
 	})
 
+	test("a file archived with an edit git cannot pair stays in the tree; a transcript archived that way still needs a row", () => {
+		const link = (name: string, target: string) => `[${name}](${target})\n`
+		const { repo } = planRepo({ [`${P}/a/notes.md`]: link("notes", "x/plan.md"), [`${P}/a/audit-y.md`]: link("audit", "x/plan.md") })
+		git(repo, "rm", "-q", `${P}/a/notes.md`, `${P}/a/audit-y.md`)
+		writeFiles(repo, {
+			[`${P}/archive/a/notes.md`]: link("notes", "archive/x/plan.md"),
+			[`${P}/archive/a/audit-y.md`]: link("audit", "archive/x/plan.md"),
+		})
+		commitAll(repo, "archive a with a link repair")
+		expect(git(repo, "diff", "--name-status", "-M", "origin/dev...HEAD")).toContain(`D\t${P}/a/notes.md`)
+		expect(verify({ cwd: repo, promotions: [] })).toEqual([`${P}/a/audit-y.md leaves the tree without a row`])
+	})
+
 	test("a kept file moved out of the plan tree byte for byte needs no row; one edited on the way, even at R100, or a transcript, does", () => {
 		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`)
 		const { repo } = planRepo({
