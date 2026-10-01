@@ -52,6 +52,15 @@ prover-ON, before the round-1 audit fixes:
   log's `JavaScript error: resource://gre/...` lines are Firefox's own chrome code, not the
   wallet's.
 
+After the round-2 fixes, the same two files again, both browsers 4/4 green:
+- Chrome: the notice tests took 12 s each, the locked-queue tests 28 s and 19 s.
+- Firefox: the notice tests took 17 s and 20 s, the locked-queue tests 33 s and 27 s.
+
+Between the two runs, `test:all` failed `scripts/e2e/browser-seam.test.ts`: its shrink-only count of
+direct `page.reload()` calls grew by the two playground reloads. The dApp page now reloads through
+the seam's `reloadExtensionPage`, which on Firefox refreshes the window over WebDriver classic;
+that works for a web page as well.
+
 ## Screenshot harness (local, not committed)
 
 The playground was served under a realistic https origin through puppeteer request interception.

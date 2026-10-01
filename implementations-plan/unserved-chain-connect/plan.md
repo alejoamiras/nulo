@@ -48,8 +48,8 @@ chain (1816023401; the wallet serves 2904119610).
 The lock only decides when the window appears. Track A proves it on a served chain:
 `apps/extension/tests/e2e/network/connect-locked-queue.test.ts` connects while locked and
 unlocks with a password and with a passkey. It then runs requestCapabilities, getAccounts,
-registerContract, a utility read and simulateTx, refreshes, and runs them again: green on Chrome
-(lessons/phase-1.md).
+registerContract, a utility read and simulateTx, refreshes, and runs them again: green on Chrome and on
+Firefox (lessons/phase-1.md).
 
 ## Owner decisions (relayed by the coordinator, 2026-10-01)
 
