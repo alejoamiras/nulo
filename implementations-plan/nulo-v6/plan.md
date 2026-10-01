@@ -670,6 +670,10 @@ it stood. Two answers changed what several of them guard: the PrivateFPC needs n
 - The V5 dRPC key's retirement, if not done by close-out (P7 step 6).
 - Arc C (P8) and the store upload (P9), if they have not run by close-out, each with its steps here
   as the spec.
+- Three findings that predate the bump (lessons/phase-1.md): the e2e `mintPublicTokens` guard
+  compares `simulate()`'s result object with `0n` and never fires; `call-decoder.test.ts`'s "a
+  selector is the truth" passes vacuously under jsdom; the standard Token's `_nonce` keeps
+  `transfer_private_to_private` on decoded rows instead of the transfer row (an owner UI call).
 
 ## Approval
 
@@ -699,7 +703,7 @@ The smoke recipe used below, per browser (`<b>` is `chrome` or `firefox`):
 1. Build: `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:<b>`.
 2. Run: `NULO_E2E_MIGRATION_FIXTURE=1 NULO_E2E_BROWSER=<b> bun run --cwd apps/extension test:e2e --retry=0`.
 
-### P1 · The V6 line compiles
+### P1 · The V6 line compiles ✓
 
 1. **Freeze `nulo-v5` first (D3).** Before any dependency change, rewrite `REGIMES["nulo-v5"]` as
    literals equal to `EXPECTED_REGIMES["nulo-v5"]`, in its own commit. `bun run --cwd
