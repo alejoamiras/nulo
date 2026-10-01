@@ -102,7 +102,7 @@ describe("archive-move", () => {
 		expect(probe(() => git(repo, "mv", `${P}/archive/whole`, `${P}/whole`))).toContain(`${P}/whole/plan.md: no rename pairs it`)
 		expect(probe(() => git(repo, "mv", "apps/x.ts", "apps/y.ts"))).toContain("apps/x.ts → apps/y.ts: a rename outside the move")
 		expect(fidelityProblems(repo, head, d, 5).join("\n")).toContain("at or over the 5 cap")
-		expect(probe(() => ["plan", "notes"].forEach((f) => append(`${P}/plans-scaffolding/${f}.md`)()))).toBe("")
+		expect(probe(() => ["plan", "notes"].map((f) => append(`${P}/plans-scaffolding/${f}.md`)()))).toBe("")
 		expect(probe(() => git(repo, "rm", "-q", `${P}/archive/stubbed/plan.md`))).toBe(
 			`${P}/archive/stubbed/plan.md: a planned edit is missing from HEAD`,
 		)
