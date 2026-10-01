@@ -43,7 +43,7 @@ Gotchas from closed plans, read before every task. One line each, linking its ev
 ## Aztec
 
 - Aztec 5 mints a block only when a tx is pending, so a helper that waits N blocks or makes one with `.simulate()` hangs on a quiet sandbox: send a real tx. [Evidence](aztec-5.0-upgrade/lessons/phase-6.md)
-- Blocks above the proven tip can be pruned, and a symbolic tag can name a different fork on each call: pin reads to one block hash, and reconcile what was recorded above the tip. [Evidence](incoming-public-transfers/lessons/phase-5.md)
+- Blocks above the proven tip can be pruned and a symbolic tag can name another fork per call: pin reads to one block hash; reconcile what was recorded above the tip. [Evidence](incoming-public-transfers/lessons/phase-5.md)
 - The node client retries a failed POST but not a refusal, so a refused retry can hide a send that landed; it also resolves `null` as `undefined` (5.2.0, 2026-09). [Evidence](failed-send-check/lessons/phase-7.md)
 
 ## Agent tooling
