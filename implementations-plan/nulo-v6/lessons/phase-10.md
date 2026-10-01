@@ -31,9 +31,17 @@
   the spec, together with the plan's other follow-ups.
 - Two of the plan's follow-ups did not move: the e2e mint guard, fixed in arc A (`10aa5acc`), and
   the stores' review outcomes, which exist only if P9 runs.
+- The V5 dRPC key's retirement (P7 step 6) was not confirmed by close-out, so it moved as well.
 - The tools extraction's P1 entry is deleted: P7's landing checks passed.
 - "The gas link and USDC on mainnet" became "The gas link": the mainnet USDC seed left with Alpha.
 
-## Validation gate
+## Validation gate (2026-10-01)
 
-<!-- FILL: test:ci-gating, lint, lessons.md bytes. -->
+On the close-out branch, with every edit staged:
+- `bun run test:ci-gating`: exit 0, 247 passed, 2 skipped, 0 failed; the plan-tree gate reports
+  only three older `path-token` findings in code files, none enforced, and none from this plan.
+- `bun run lint`: exit 0.
+- `implementations-plan/lessons.md`: 8,151 bytes, within the 8,192.
+- Also `bun run test:all`: exit 0, every workspace green.
+
+Pass, as written.

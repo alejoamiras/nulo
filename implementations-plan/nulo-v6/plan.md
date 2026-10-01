@@ -33,7 +33,9 @@ base: origin/dev at 910a4def
     with signatures and provenance verified and the published bytes equal to the dry run's. The V6
     facts went to unleashed's session, which pinned 0.2.0 and the same PrivateFPC.
   - **0.29.0** (P7): promote #737, release PR #738, tag `v0.29.0` with both zips and
-    `SHASUMS256.txt` (publish run `36875297262`), sync #739. <!-- FILL: landing. -->
+    `SHASUMS256.txt` (publish run `36875297262`), sync #739. After the landing's production
+    build was re-run, nulo.sh links `v0.29.0` and serves every `_headers` header, which closed
+    the tools extraction's P1 follow-up.
 - **Owner calls during delivery:** the hands-on run on both browsers was waived ("I trust the vast
   amount of tests we have"); the driver dispatched the npm real run, compared its digests and
   merged #737, #738 and #739 on the owner's word, and the owner approved `npm-publish`. Each is
@@ -44,7 +46,8 @@ base: origin/dev at 910a4def
 - **Moved to follow-ups:** P8, because unleashed's testnet manifest still names the V5 generation
   (`walletChainId 1816023401`); P9, because the owner did not call the store upload. Each keeps
   its steps here as the spec, in `follow-ups.md` § Aztec V6, with the plan's other follow-ups.
-  The e2e mint guard among them was fixed in arc A (`10aa5acc`). <!-- FILL: the V5 key. -->
+  The e2e mint guard among them was fixed in arc A (`10aa5acc`). The V5 dRPC key's retirement
+  (P7 step 6) was not confirmed by close-out, so it is there too.
 - **Lessons:** the two `lessons.md` entries tagged 5.2.0 (the node client's retries, the fee-juice
   import's weight) hold on 6.0.0-rc.1 and are re-dated, and the `bun test` entry's scope is
   renamed after reproducing it on `@aztec-labs/foundation` 6.0.0-rc.1. The new gotchas went to
@@ -1098,7 +1101,7 @@ phase installs nothing.
   published digests equal the dry run's.
 - Layers: supply chain.
 
-### P7 · Release 0.29.0 (after arc A merges)
+### P7 · Release 0.29.0 (after arc A merges) ✓
 
 P6 and P7 may run in either order. Neither waits for unleashed (Fact 27, A7).
 
@@ -1231,7 +1234,7 @@ phase moves to follow-ups with these steps as its spec. A6's dashboard steps sta
   - The owner's sign-off is quoted here.
 - Layers: lint, unit, smoke e2e on both browsers (captures included), landing build, live, release.
 
-### P10 · Close-out
+### P10 · Close-out ✓
 
 A docs-only PR off `dev`, after 0.29.0's sync, and after P8 and P9 if they ran (D19):
 1. The `## Outcome` block, after the front matter.

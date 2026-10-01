@@ -74,12 +74,26 @@
   plus the bot's prerelease-manifest re-baseline to 0.29.0. Every check green, both Firefox
   lanes included; merged by the driver at 15:06:46Z, `gh pr merge 739 --merge`: `d7da8e62`,
   signature valid, parents `80663b61` and `42205ab0`, so `main`'s release commit is in `dev`'s
-  ancestry. <!-- FILL: landing re-run, curl checks. -->
+  ancestry.
+- The `nulo-landing` production build was re-run from the Cloudflare dashboard after
+  `attach-assets` (`main` stayed at `2bfce1d3`, so no push built it), and nulo.sh linked
+  `releases/tag/v0.29.0` from 15:17:20Z. `curl -sI` returned every header in
+  `apps/landing/public/_headers` with its exact value: the six `/*` headers on `/`, the `/*.html`
+  `Cache-Control` on `/index.html` and the `/assets/*` one on a hashed asset. That closes the
+  tools extraction's P1 follow-up, whose entry is deleted.
 
 ## Step 6 · The V5 dRPC key
 
-<!-- FILL: the owner's word, or the follow-up. -->
+- Not confirmed by close-out, so it moved to `follow-ups.md` § Aztec V6.
 
-## Validation gate
+## Validation gate (2026-10-01)
 
-<!-- FILL -->
+- Step 1's checks: node, sponsor preflight and floor as stated, at 13:50Z.
+- `gh release view v0.29.0 --json assets -q '[.assets[].name]'`:
+  `["nulo-chrome-0.29.0.zip","nulo-firefox-0.29.0.zip","SHASUMS256.txt"]`.
+- `gh run view 36875297262`: every job green; `network-e2e` and both store jobs skipped by
+  design.
+- The landing checks: nulo.sh links `v0.29.0` and serves every `_headers` header.
+- The hands-on run: waived by the owner (step 2).
+
+Pass, as written, with the owner's waiver for the hands-on run.
