@@ -427,7 +427,7 @@ export function buildSyntheticBackup({
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		// Epoch-4 password blobs REQUIRE entropy (restore verifies words(entropy) derives master).

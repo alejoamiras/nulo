@@ -134,7 +134,7 @@ function buildSyntheticPasskeyBackup(credentialId: string, dekSealed: string, ac
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		// Passkey blobs carry the credentialId as master-key and NEVER an entropy field
 		// (the master re-derives from the passkey PRF at restore).

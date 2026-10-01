@@ -192,7 +192,7 @@ import { ACCOUNT_STATE_SKIP_DEADLINE } from "@/wallet/services/account-state/nor
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 4,
+		"compat-epoch": 5,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		// Epoch-4 password blobs REQUIRE the entropy field. The composable checks only
@@ -684,10 +684,11 @@ describe("useFullBackupImport — guards before any writes", () => {
 		expect(profileClient.restore).not.toHaveBeenCalled()
 	}
 
-	it("rejects an unsupported compat-epoch (incl. epoch 3 — the superseded KDF-v1 generation)", async () => {
+	it("rejects an unsupported compat-epoch (incl. epoch 4 — a V5 backup, the nulo-v5 account regime)", async () => {
 		await expectRejected(await buildBackup({ "compat-epoch": 2 }), "Incompatible backup")
 		await expectRejected(await buildBackup({ "compat-epoch": 3 }), "Incompatible backup")
-		await expectRejected(await buildBackup({ "compat-epoch": 5 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 4 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 6 }), "Incompatible backup")
 	})
 
 	it("rejects a pre-baseline blob (legacy schema-version only, no new fields) with the re-export copy", async () => {
