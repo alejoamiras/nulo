@@ -596,6 +596,19 @@ its decode request made of it (a one-element array holding the canonical string 
 card case now includes it); Architecture and Data flow say `nonceValue` is O2 (b)'s; P1's
 unchanged-reading claim is about honest calls, since a lying label's title changes by design.
 
+**codex, post-implementation round 1** (a fresh session, `high`, read-only, on the net diff from the
+plan commit): *"approve with fixes"*. No runtime defect within the approved scope.
+
+| # | Finding (severity) | Disposition |
+|---|---|---|
+| 1 | Minor: the e2e spec read the nonce's hover text off any titled descendant of its row (`[title]`), a structural query | **Accepted:** the value carries `${prefix}-transfer-nonce-value`, and the e2e spec and the component test read its text and title there. A testid changes nothing a person sees. |
+| 2 | Nit: the descriptors header kept a finished migration note with a plan tag, and a pointer to module headers that no longer exist | **Accepted:** both gone. |
+| 3 | Nit: comments that narrate (the gate's six lines, `abiNameFitsRole`'s doc, the e2e helper's doc) | **Partly accepted:** the gate's comment keeps its reasons in three lines, the selector table's doc stops repeating them, the e2e doc is gone. `abiNameFitsRole` keeps one line: the parity with the descriptors' predicate, which a unit test pins. |
+
+**codex, post-implementation round 2** (the same session, resumed on the fix commit and the whole
+diff): *"approve"*, no new material findings. The loop converged in two rounds
+(`lessons/post-impl.md`).
+
 ### Decision ledger
 
 | # | Decision | Alternatives rejected and why |
