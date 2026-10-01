@@ -19,7 +19,7 @@ import { flushPromises } from "@vue/test-utils"
 // TransactionCard only reads `network.chainId` + `defaultExplorer` for the
 // explorer URL computed; nothing in the chip-render path needs the store.
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ network: { chainId: CHAIN_IDS.MAINNET }, defaultExplorer: "aztecscan" }),
+	useAppStore: () => ({ network: { chainId: CHAIN_IDS.TESTNET }, defaultExplorer: "aztecscan" }),
 }))
 
 // Controllable price feed for the D2 fiat case.
@@ -110,7 +110,7 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		const TOKEN = `0x${"0a".repeat(32)}`
 		const RECIPIENT = `0x${"0c".repeat(32)}`
 		const tokens = [
-			{ id: 1, chainId: CHAIN_IDS.MAINNET, contract: TOKEN, name: "Test", symbol: "TST", decimals: 18, hasDecimals: true },
+			{ id: 1, chainId: CHAIN_IDS.TESTNET, contract: TOKEN, name: "Test", symbol: "TST", decimals: 18, hasDecimals: true },
 		]
 		const mintTx = (...amounts: bigint[]) => ({
 			hash: "0xmint1",

@@ -6,21 +6,17 @@ export { CHAIN_IDS }
 
 export function getChainPosition(chainId: number): number {
 	switch (chainId) {
-		case CHAIN_IDS.MAINNET:
-			return 0
 		case CHAIN_IDS.TESTNET:
-			return 1
+			return 0
 		case CHAIN_IDS.SANDBOX:
-			return 2
+			return 1
 		default:
-			return 3
+			return 2
 	}
 }
 
 export function getChainColor(chainId: number): string {
 	switch (chainId) {
-		case CHAIN_IDS.MAINNET:
-			return "green"
 		case CHAIN_IDS.TESTNET:
 			return "neutral-mint"
 		case CHAIN_IDS.SANDBOX:
@@ -32,8 +28,6 @@ export function getChainColor(chainId: number): string {
 
 export function getChainName(chainId: number): string {
 	switch (chainId) {
-		case CHAIN_IDS.MAINNET:
-			return "Alpha V5"
 		case CHAIN_IDS.TESTNET:
 			return "Testnet"
 		case CHAIN_IDS.SANDBOX:

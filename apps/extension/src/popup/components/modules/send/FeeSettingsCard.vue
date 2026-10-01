@@ -13,7 +13,6 @@ import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 
 /** Utils */
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
-import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Services */
 import { FpcServiceClient } from "@/wallet/services/fpc/client"
@@ -124,10 +123,8 @@ const droppedForVerdictId = ref(null)
  * completes, so the loading-state items don't briefly flash "no balance"
  * before the first fetch returns.
  */
-const allowSponsored = computed(() => props.network?.chainId !== CHAIN_IDS.MAINNET)
 const methods = computed(() =>
 	buildFeeMethods(knownFpcs.value, isInitComplete.value ? gasBalances.value : undefined, {
-		allowSponsored: allowSponsored.value,
 		shortSponsorIds,
 		setAsideSponsorIds,
 	}),
@@ -198,9 +195,9 @@ const sendSelection = computed(() => {
 	if (props.originPrivacy === null) return null
 	const pick = sendPicks[props.account?.address]?.[props.originPrivacy]
 	if (!isInitComplete.value || !scopeIsLiveIdentity(committedScope.value)) {
-		return { kind: "pending", preview: previewForPick(pick, methods.value, allowSponsored.value) }
+		return { kind: "pending", preview: previewForPick(pick, methods.value) }
 	}
-	const know = { fpcs: knownFpcs.value, balances: gasBalances.value, allowSponsored: allowSponsored.value }
+	const know = { fpcs: knownFpcs.value, balances: gasBalances.value }
 	return resolveSendSelection(props.originPrivacy, { ...know, shortSponsorIds, setAsideSponsorIds }, pick)
 })
 
@@ -210,7 +207,7 @@ const sponsorShort = computed(() => {
 	if (props.originPrivacy === null) return droppedForVerdictId.value !== null
 	if (shortSponsorIds.size === 0 || !isInitComplete.value || !scopeIsLiveIdentity(committedScope.value)) return false
 	const pick = sendPicks[props.account?.address]?.[props.originPrivacy]
-	const know = { fpcs: knownFpcs.value, balances: gasBalances.value, allowSponsored: allowSponsored.value }
+	const know = { fpcs: knownFpcs.value, balances: gasBalances.value }
 	const unset = resolveSendSelection(props.originPrivacy, know, pick)
 	return unset.kind === "selected" && unset.method.type === "fpc" && shortSponsorIds.has(unset.method.fpc?.id)
 })
@@ -487,15 +484,13 @@ const releaseSubscription = () => {
  */
 /** The selection a settled init lands on when the user picked nothing meanwhile: the saved one,
  *  resolved against fresh `methods` by semantic key (never the stored `fpc.name`), else the
- *  network's default. A dangling saved record (a deleted FPC) simply re-resolves to nothing every
- *  time — it is deliberately NOT pruned here, since a whole-map write would race
+ *  default: Nulo's sponsor, else nothing. A dangling saved record (a deleted FPC) simply re-resolves
+ *  to nothing every time — it is deliberately NOT pruned here, since a whole-map write would race
  *  `persistSelection` / another mounted card and could clobber a newer selection. */
 const settledSelection = (savedRecord) => {
 	const resolved = resolveSavedSelection(savedRecord, methods.value)
 	if (resolved) return resolved
-	// Alpha (mainnet) → Private Fee Juice; every other network → Nulo's sponsor, else nothing.
-	const preferred =
-		props.network?.chainId === CHAIN_IDS.MAINNET ? methods.value.find((m) => m.type === "private_fpc") : defaultSponsor(methods.value)
+	const preferred = defaultSponsor(methods.value)
 	return preferred ? { ...preferred } : undefined
 }
 

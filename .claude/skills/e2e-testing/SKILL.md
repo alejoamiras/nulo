@@ -84,8 +84,8 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
 2. Claims a fresh port pack (`resolve-ports.ts`: bind-and-release in a static window below the
    kernel's ephemeral floor, written to the worktree-local `.e2e-state/ports.json`). There is no
    host-wide registry file; safety is probabilistic plus the bind test.
-3. Builds the wallet armed: `VITE_LOCAL_NETWORK_RPC_URL` (this sandbox), `VITE_NULO_E2E_DEFAULT_NET=
-   testnet`, `VITE_NULO_E2E_PRICE_MAP=1`, `VITE_NULO_E2E_MIGRATION_FIXTURE=1`,
+3. Builds the wallet armed: `VITE_LOCAL_NETWORK_RPC_URL` (this sandbox),
+   `VITE_NULO_E2E_PRICE_MAP=1`, `VITE_NULO_E2E_MIGRATION_FIXTURE=1`,
    `VITE_NULO_E2E_TOKEN_SEEDS=1` + `_CONFIRM=1`, plus the proverless pair when asked. Then asserts
    the bundle before spending a sandbox (exit 2 on a miss): the sandbox URL literal, the
    migration-fixture stamp, the token-seed stamp and key, the presto stamp when armed, the
@@ -118,7 +118,7 @@ runtime env var can never arm a build-time flag.
   (or the stamp of the feature in question). A later plain `bun run build` — including the one at
   the end of `bun run audit:vue` — silently disarms the dist.
 - Smoke needs its fixtures armed AND the migration one declared: build with
-  `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1
+  `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_TOKEN_SEEDS=1
   VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run build:chrome` (the seed pair keeps the fresh wallet off
   the live seed RPC — `_extension-smoke-e2e.yml` says why), run with `NULO_E2E_MIGRATION_FIXTURE=1`.
   `migration.test.ts` skips without the declaration; `backup-migration.test.ts` throws with the

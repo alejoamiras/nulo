@@ -17,19 +17,19 @@ let configHandler: ((prop: { key: string; value: unknown }) => void) | undefined
 let connectedHandler: (() => void) | undefined
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-// tok-1 is price-mapped (mainnet cUSD); tok-2 is deliberately unmapped.
+// tok-1 is price-mapped (the testnet cUSD row); tok-2 is deliberately unmapped.
 const SEED = [
 	{
 		id: "b1",
 		account: "0xacct",
-		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.MAINNET, contract: CUSD },
+		token: { id: "tok-1", symbol: "AAA", decimals: 6, chainId: CHAIN_IDS.TESTNET, contract: CUSD },
 		publicBalance: (250n * 10n ** 6n).toString(),
 		privateBalance: (1_000n * 10n ** 6n).toString(),
 	},
 	{
 		id: "b2",
 		account: "0xacct",
-		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped" },
+		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: CHAIN_IDS.TESTNET, contract: "0xunmapped" },
 		publicBalance: (5n * 10n ** 18n).toString(),
 		privateBalance: "0",
 	},
@@ -138,7 +138,7 @@ async function mountView(props: Record<string, unknown> = {}) {
 	const pinia = createTestingPinia({ stubActions: false })
 	const appStore = useAppStore(pinia)
 	appStore.profile = { id: "p1" } as never
-	appStore.network = { id: "n1", chainId: CHAIN_IDS.MAINNET } as never
+	appStore.network = { id: "n1", chainId: CHAIN_IDS.TESTNET } as never
 	appStore.account = { address: "0xacct" } as never
 
 	const wrapper = mount(BalanceView, {
@@ -257,7 +257,7 @@ describe("BalanceView — Home aggregate", () => {
 			{
 				id: "b9",
 				account: "0xacct",
-				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped9" },
+				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: CHAIN_IDS.TESTNET, contract: "0xunmapped9" },
 				publicBalance: "0",
 				privateBalance: "0",
 			},
@@ -277,7 +277,7 @@ describe("BalanceView — Home aggregate", () => {
 
 	test("a same-address row from ANOTHER chain is not counted", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
-		seedRows = [SEED[0], { ...SEED[0], id: "b-foreign", token: { ...SEED[0].token, id: "tok-f", chainId: CHAIN_IDS.TESTNET } }]
+		seedRows = [SEED[0], { ...SEED[0], id: "b-foreign", token: { ...SEED[0].token, id: "tok-f", chainId: CHAIN_IDS.SANDBOX } }]
 		const { wrapper } = await mountView()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
@@ -383,7 +383,7 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 	const amount = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-amount"]')
 	const isSkeleton = (w: Awaited<ReturnType<typeof mountView>>["wrapper"]) => w.find('[data-testid="balance-hero-loading"]').exists()
 	const seedEntry = (status: string) => ({
-		chainId: CHAIN_IDS.MAINNET,
+		chainId: CHAIN_IDS.TESTNET,
 		contract: "0xseed",
 		symbol: "cUSDC",
 		displayName: "Clean USDC",

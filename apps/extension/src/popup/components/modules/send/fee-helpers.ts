@@ -168,7 +168,6 @@ export function resolveSavedSelection(
 }
 
 export interface FeeMethodsOptions {
-	allowSponsored?: boolean
 	/** Sponsors a verdict found short on the current transaction: their rows are disabled. */
 	shortSponsorIds?: ReadonlySet<string>
 	/** Sponsors a verdict found short on this card: their rows are set aside. */
@@ -182,17 +181,12 @@ export interface FeeMethodsOptions {
  * select a method whose simulation would fail. `gasBalances` is optional so callers can keep
  * building the list before balances arrive (everything stays enabled
  * during load; balances flip the disabled state once fetched).
- *
- * `options.allowSponsored` (default true) gates whether Sponsored FPC
- * rows are offered — set false on networks that have no funded sponsor
- * (Alpha/mainnet), where offering it would be a trap that fails at send.
  */
 export function buildFeeMethods(
 	registeredFpcs: RegisteredFpc[],
 	gasBalances?: GasBalances,
 	options?: FeeMethodsOptions,
 ): FeeMethodOption[] {
-	const allowSponsored = options?.allowSponsored ?? true
 	// Only the protocol-derived PrivateFPC may pay privately; a same-typed row at any other
 	// address (a restored or hand-added one) is never offered, even when it sorts first.
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc && f.isProtocol === true)
@@ -204,8 +198,6 @@ export function buildFeeMethods(
 			continue
 		}
 		if (fpc.type === FpcType.DefaultSponsoredFpc) {
-			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
-			if (!allowSponsored) continue
 			base.push(sponsorOption(fpc, options))
 		}
 	}

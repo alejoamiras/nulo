@@ -7,7 +7,7 @@ const row = (chainId: number, name: string): Network =>
 	({ id: `n-${chainId}`, profileId: "p1", chainId, l1ChainId: 1, name, primaryEndpointId: "e", endpoints: [] }) as Network
 
 /** The seeded networks, as a fresh profile has them. */
-const NETWORKS = [row(CHAIN_IDS.MAINNET, "Alpha V5"), row(CHAIN_IDS.TESTNET, "Testnet"), row(0, "Local Network")]
+const NETWORKS = [row(CHAIN_IDS.TESTNET, "Testnet"), row(0, "Local Network")]
 
 /** Addresses as the wire carries them: `0x` + 64 hex, below the BN254 modulus. */
 const ADDRESS_A = `0x${"0a".repeat(32)}`

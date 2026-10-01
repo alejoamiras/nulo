@@ -33,13 +33,10 @@ export const FEE_JUICE_ENTRY: PriceMapEntry = {
 	sanity: { min: 0.000_1, max: 100 },
 }
 
+/** Alpha V5's cUSD address, which no V6 token is expected to occupy. Its testnet row only keeps the
+ *  USDC id in the batched query and its sanity band (the e2e sandbox rule prices as USDC) until a
+ *  V6 token is mapped here. */
 const CUSD_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
-/** Nulo's bridged Circle USDC on Alpha (1:1 against L1 USDC 0xA0b8…eB48): the retired single-token
- *  bridge's L2 token, absent from unleashed's bridge manifests (github.com/alejoamiras/unleashed). */
-const NULO_BRIDGED_USDC_MAINNET = "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4"
-/** Testnet "Test USDC" (priced as USDC): unleashed's testnet generation's pre-created L2 token, the
- *  same address as the testnet seed in `default-tokens.ts`. */
-const UNLEASHED_USDC_TESTNET = "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8c60299b03b790e6502"
 
 /**
  * E2E-ONLY sandbox rule: with `VITE_NULO_E2E_PRICE_MAP=1` (set exclusively by
@@ -52,12 +49,7 @@ const UNLEASHED_USDC_TESTNET = "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8
 const E2E_SANDBOX_PRICE_MAP = (import.meta.env.VITE_NULO_E2E_PRICE_MAP ?? "") === "1"
 
 /** (chainId, lowercase contract address) → price-map entry. */
-const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([
-	[`${CHAIN_IDS.MAINNET}:${CUSD_CONTRACT}`, USDC],
-	[`${CHAIN_IDS.TESTNET}:${CUSD_CONTRACT}`, USDC],
-	[`${CHAIN_IDS.MAINNET}:${NULO_BRIDGED_USDC_MAINNET}`, USDC],
-	[`${CHAIN_IDS.TESTNET}:${UNLEASHED_USDC_TESTNET}`, USDC],
-])
+const TOKEN_ENTRIES: ReadonlyMap<string, PriceMapEntry> = new Map([[`${CHAIN_IDS.TESTNET}:${CUSD_CONTRACT}`, USDC]])
 
 export function getPriceMapEntry(chainId: number, contract: string): PriceMapEntry | undefined {
 	if (E2E_SANDBOX_PRICE_MAP && chainId === 0) {

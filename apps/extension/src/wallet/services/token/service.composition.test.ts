@@ -32,11 +32,28 @@ import { makeShallowPxeFake, type ShallowPxeFakeConfig } from "@/wallet/services
 import { svc } from "@/wallet/services/composition-harness"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { fakeBrowser } from "@webext-core/fake-browser"
-import { CHAIN_IDS } from "@/utils/chain-ids"
 import { TokenService } from "./service"
 import { PinMismatchError, TokenSeeder, type TokenSeederDeps } from "./seeder"
 import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
 import type { Token, TokenInterface } from "./spec"
+
+/** The shipped seed list can be empty, so the default-token paths run against a fixture seed. */
+const FIXTURE_SEED = vi.hoisted(() => ({
+	chainId: 2,
+	contract: `0x${"0c".repeat(32)}`,
+	expectedClassId: "0xc1a55",
+	expectedSymbol: "cUSD",
+	displayName: "Compressed USD",
+}))
+vi.mock("./default-tokens", () => {
+	const seeds = [FIXTURE_SEED]
+	return {
+		DEFAULT_TOKEN_SEEDS: seeds,
+		seedsForChain: (chainId: number) => seeds.filter((s) => s.chainId === chainId),
+		findSeed: (chainId: number, contract: string) =>
+			seeds.find((s) => s.chainId === chainId && s.contract.toLowerCase() === contract.toLowerCase()),
+	}
+})
 
 const NETWORK = { id: "net1", chainId: 1, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "http://fake" }] }
 const CONTRACT = AztecAddress.fromNumberUnsafe(0x1234).toString()
@@ -320,7 +337,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			profileId: "p1",
 			networkId: NETWORK.id,
 			accountAddress: "0xacc1",
-			tokenInterface: seedIface(CHAIN_IDS.MAINNET, CUSD),
+			tokenInterface: seedIface(FIXTURE_SEED.chainId, CUSD),
 			name: "Compressed USD",
 			symbol: "cUSD",
 			decimals: 6,
@@ -329,7 +346,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 
 		const res = await fakeBrowser.storage.local.get("nulo:core:token-seeded@p1")
 		const marker = JSON.parse(res["nulo:core:token-seeded@p1"] as string)
-		expect(marker[`${CHAIN_IDS.MAINNET}:${CUSD.toLowerCase()}`].outcome).toBe("deleted")
+		expect(marker[`${FIXTURE_SEED.chainId}:${CUSD.toLowerCase()}`].outcome).toBe("deleted")
 	})
 
 	test("deleting a NON-default token writes no marker", async () => {

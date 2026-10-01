@@ -6,11 +6,11 @@ import { resolveDappChain } from "./chain-mismatch"
 const row = (chainId: number, name: string): Network =>
 	({ id: `n-${chainId}`, profileId: "p1", chainId, l1ChainId: 1, name, primaryEndpointId: "e", endpoints: [] }) as Network
 
-const networks = [row(CHAIN_IDS.MAINNET, "Alpha V5"), row(CHAIN_IDS.TESTNET, "Testnet"), row(0, "Local Network")]
+const networks = [row(CHAIN_IDS.TESTNET, "Testnet"), row(0, "Local Network")]
 
 describe("windows/capabilities/chain-mismatch", () => {
 	test("a known chain resolves to its row, its name, and mismatch against another active chain", () => {
-		const view = resolveDappChain(String(CHAIN_IDS.TESTNET), networks, CHAIN_IDS.MAINNET)
+		const view = resolveDappChain(String(CHAIN_IDS.TESTNET), networks, CHAIN_IDS.SANDBOX)
 		expect(view).toMatchObject({ chainId: CHAIN_IDS.TESTNET, name: "Testnet", mismatch: true })
 		expect(view.network?.id).toBe(`n-${CHAIN_IDS.TESTNET}`)
 	})
@@ -25,14 +25,14 @@ describe("windows/capabilities/chain-mismatch", () => {
 	})
 
 	test("an id with no row falls back to the built-in label and has no switch target", () => {
-		const view = resolveDappChain(String(CHAIN_IDS.TESTNET), [], CHAIN_IDS.MAINNET)
+		const view = resolveDappChain(String(CHAIN_IDS.TESTNET), [], CHAIN_IDS.SANDBOX)
 		expect(view.name).toBe("Testnet")
 		expect(view.network).toBeUndefined()
 		expect(view.mismatch).toBe(true)
 	})
 
 	test("an unknown id gets the generic label", () => {
-		expect(resolveDappChain("424242", networks, CHAIN_IDS.MAINNET).name).toBe("Aztec:424242")
+		expect(resolveDappChain("424242", networks, CHAIN_IDS.TESTNET).name).toBe("Aztec:424242")
 	})
 
 	test("no active network yet → no mismatch", () => {

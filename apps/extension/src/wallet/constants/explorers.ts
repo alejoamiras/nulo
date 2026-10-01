@@ -32,7 +32,6 @@ export const BLOCK_EXPLORERS: BlockExplorer[] = [
  */
 const EXPLORER_BASE_URLS: Record<BlockExplorerType, Record<number, string>> = {
 	aztecscan: {
-		[CHAIN_IDS.MAINNET]: "https://aztecscan.xyz",
 		[CHAIN_IDS.TESTNET]: "https://testnet.aztecscan.xyz",
 	},
 }

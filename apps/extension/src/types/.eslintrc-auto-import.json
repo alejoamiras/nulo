@@ -101,7 +101,6 @@
     "LegalSheetContext": true,
     "LegalViewStatus": true,
     "MAINNET_L1_CHAIN_ID": true,
-    "MAINNET_ROLLUP_VERSION": true,
     "MAX_BACKUP_FILE_BYTES": true,
     "MAX_CONTACT_IMPORT_BYTES": true,
     "MAX_CONTACT_IMPORT_ROWS": true,

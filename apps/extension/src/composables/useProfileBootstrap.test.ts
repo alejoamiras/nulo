@@ -129,17 +129,17 @@ describe("useProfileBootstrap", () => {
 		// An imported profile has no active-network pointer yet (item 1b restores it later).
 		netMock.getActiveNetwork.mockResolvedValue(undefined)
 		netMock.getOrInitNetworks.mockResolvedValue([
-			{ id: "alpha", chainId: CHAIN_IDS.MAINNET, kind: "mainnet" },
 			{ id: "tn", chainId: CHAIN_IDS.TESTNET, kind: "testnet" },
+			{ id: "local", chainId: CHAIN_IDS.SANDBOX, kind: "local" },
 		])
-		netMock.getPrimaryNetwork.mockResolvedValue({ id: "alpha", chainId: CHAIN_IDS.MAINNET, kind: "mainnet" })
+		netMock.getPrimaryNetwork.mockResolvedValue({ id: "local", chainId: CHAIN_IDS.SANDBOX, kind: "local" })
 		const { initNetworks } = useProfileBootstrap()
 		const appStore = useAppStore()
 		await initNetworks()
-		expect(appStore.network?.id).toBe("alpha")
+		expect(appStore.network?.id).toBe("local")
 		expect(appStore.network?.kind).not.toBe("testnet")
 		expect(netMock.getPrimaryNetwork).toHaveBeenCalled()
-		expect(netMock.setActiveNetwork).toHaveBeenCalledWith("alpha")
+		expect(netMock.setActiveNetwork).toHaveBeenCalledWith("local")
 	})
 
 	test("initNetworks: no active pointer AND no primary present → falls back to networks[0]", async () => {
