@@ -7,11 +7,34 @@ code_review: off
 foreign_reviewer: /codex high (GPT-6 Astra)
 eli5_mode: artifact
 harden: not scheduled
+status: completed 2026-10-01 (#748)
 budget: "recon: 1 agent; code-review: off; codex at high"
 branch: fix/private-transfer-row (planned on worktree-private-transfer-row; P0 renames it)
 worktree: a harness-created agent worktree (lessons/phase-0.md records it)
 base: origin/dev @ 3452ac3b
 ---
+
+## Outcome
+
+- **Date**: 2026-10-01. **Status**: completed as #748, one PR into `dev`; the owner's merge lands
+  it and closes this plan.
+- **Shipped**: in #748, the standard Token's four transfers read as the approval card's transfer
+  row (From, To, Amount in the token's units) in a transaction's payload, an authorization request
+  and a discovered authorization. The row first checks the call's selector against the one its own
+  signature hashes to (`VOCABULARY_SELECTORS`, static, recomputed by a node test with the real
+  hash) and takes its title from the function that selector runs. A random authwit nonce of 2^64
+  or more reads as trimmed hex, whole on hover. `AUTHWIT_NONCE_NAMES` serves the wallet's own
+  transfer matching and the card. One network e2e, `tx-transfer-row`, drives both dApp windows.
+- **Sign-off**: the plan was approved on 2026-10-01 (O1 yes, O2 (b), the title from the function)
+  and the as-built pictures were signed off the same day, verbatim: "regarding the questions of
+  private row: A2: drop. Playground: follow-up. And the artfiact looks great. singed-off".
+- **Dropped**: A2, the decoded rows' relabel vector, declined by the owner and not filed (D10);
+  the more-than-32-fields test of a discovered authorization, dropped by the owner. `lessons.md`
+  gains no line: its entry on classifying a dApp call by address, selector and arguments already
+  states this plan's gotcha, and the file sits at 8,185 of its 8,192 bytes.
+- **Open items**: I4, the playground's multicall nonces, in `follow-ups.md` (inferred, not run).
+- **Seeds retired**: the `/goal` and `/loop` seeds in § Seeds are history. This plan is a record
+  of what was decided and why, never a task list.
 
 # The standard Token's transfers read as the transfer row
 
@@ -834,7 +857,7 @@ reason.
   quoted in `lessons/phase-4.md`; the owner's sign-off quoted here. Layers: e2e ·
   e2e-live-network (local sandbox).
 
-### P5 · Close-out (the PR's final commits, after `gh pr create`)
+### P5 · Close-out (the PR's final commits, after `gh pr create`) ✓
 
 1. An `## Outcome` block directly after the front matter: the date, the status, what shipped with
    the PR number, what was dropped and why, the owner's quoted sign-off, and a line retiring the
