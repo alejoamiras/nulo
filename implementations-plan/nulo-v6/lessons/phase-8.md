@@ -139,3 +139,5 @@ release everytime we add a token, but obviously that's a follow-up".
     skipped, 166 tests; Firefox 41 passed, 2 skipped, 162 tests;
   - release-artifact mode: `rows.test.ts` on Chrome, 6 of 6 (the first run's failure, fixed),
     and the whole suite on Firefox, 40 files passed, 3 skipped, 156 tests.
+- Network, `e2e:agent tests/e2e/network/default-token-seeding.test.ts` on Chrome: passed. The
+  sandbox TST token seeds under the reader's new decimals pin (18).
