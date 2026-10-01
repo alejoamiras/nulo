@@ -92,8 +92,27 @@ Each new test fails on round 1's code.
 
 Probing the spellings round 3 would try found one more. Markdown renders a backslash escape, so `d/\.\./a/plan.md` opens as `d/../a/plan.md` while the gate read the literal path, where a decoy with an Outcome passed. Decoding cannot reach that, so an index target must now be a plain `<dir>/<file>` path, the documented format, and anything else is a finding (L50). All 270 real targets already are; `./x/plan.md` now asks for `x/plan.md` instead of being read as `x`.
 
+## Codex round 3
+
+Approve, high confidence, no findings: the plain-target rule held against literal, encoded, double-encoded and escaped decoys, all 270 real targets passed, and 512 accepted probes rendered and opened as written. The move-map mode check passed identical blobs' cross-pairings and caught six injected changes. D's loop converged here, at its cap.
+
+## Cross-arc pass, round 1
+
+A fresh session over `80663b61..3551372e`, asked for seams, duplication and plan drift: changes needed, 6 findings, each reproduced before it was fixed.
+
+- **Y1** (J): `rowProblems` compared each row with its derivation but never the reverse, so a deleted row made a closed plan rowless, which reads as active. It now reports a derived dir without a row.
+- **Y2** (J): `readManifest` returns `[]` on ENOENT, and the data paths were fixed to the live dir, so after E's move `untrack.ts --verify` would pass with 0 rows. `gate.ts` exports `OWN`, read from its own location; `MANIFEST`, `CLOSURES`, the snapshots and `MINING` use it; `verify` refuses a missing manifest. Two fixtures, one in C and one in D, had relied on a missing manifest reading as empty: each now writes an empty one.
+- **Y3** (D): L30's reword voided its verdicts. A fresh Opus verifier supported the new text against `incoming-public-transfers/lessons/phase-5.md` and the code; the currency check holds at the V6 base (`orphanedByReconciliation`, `public-events.ts:152`). `mine.ts --decide` recorded both, and the verify passes on D.
+- **Y4** (D, E): the narrowed guard finds 18 files on D's tools stage, every one in a closed plan not yet moved, and none on D's generated tree. The hook scans the whole index, so D's tools and Outcome commits could not pass it: the narrowing ships in E (L57), and the plan text now describes E as one PR on top of D (L58).
+- **Y5** (D): `closed.ts`'s `catBlobs` and `ancestorDirs` were copies of `lib.ts`'s, the first without its 120 s timeout. `lib.ts` exports both and the tools use them.
+- **Y6**: `classify.ts`'s answers comment and an `archive-move.test.ts` fixture comment no longer cite the plan.
+
+J moved to `df2de6ad`, C to `fc2492a6` (its fixture fix on J's), and D's tools stage onto it; D was then regenerated.
+
 ## For E
 
-- `mine.ts --verify` stays at the reworded lesson until E rewrites `lessons.md`; from then on the mining record is evidence of J's curation, not a gate.
+- `mine.ts --verify` passes on D (L56). E's rewrite of `lessons.md` ends it as a gate: from then on the mining record is evidence of J's curation.
+- E narrows `check-no-local-paths.sh`'s exemption to `archive/` (L57): on D's generated tree the narrowed guard finds nothing, on its tools stage 18 unmoved plan files.
+- The tools now read their data through `OWN` (L55), so `untrack.ts --verify` runs from the archived path, and refuses to run without a manifest.
 - The R100-frozen texts C left (`reference/aztec-5.0.0-stable/regime-a-vectors.ts:5`, `PRF-NON-PORTABLE.md`'s `packages/extension/` paths) and the three held crypto-source mentions are E's follow-ups.
 - `follow-ups.md`'s plans-scaffolding/ux-feedback entry is resolved by this arc: the move archived ux-feedback and fixed both design scripts' depth.

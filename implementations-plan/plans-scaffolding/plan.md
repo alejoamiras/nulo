@@ -28,7 +28,7 @@ Five stacked PRs do the work:
 - **C**: the assets that code reads.
 - **D**: the archive move.
 
-Two small PRs then close this plan itself. Each PR reverts on its own. The large ones are mechanical, and the one that needs a line-by-line read is small. Nothing is purged from history.
+A small close-out PR on top of the stack then closes this plan and archives it (L58). Each PR reverts on its own. The large ones are mechanical, and the one that needs a line-by-line read is small. Nothing is purged from history.
 
 Companion files: `recon.md` (the Phase 0.4 reuse map), `lessons/phase-N.md`, `untrack-manifest.json` (A), `closures.json` and `mining.jsonl` (J).
 
@@ -50,7 +50,7 @@ The owner delegated the approval gate and every Ask: "Keep working, only leave t
 
 - **S1–S17**: as recommended. S6 and S12 are closed, each with a remaining-phases follow-up. The follow-up keeps the owner's option open, where "abandoned" would close it.
 - **A1–A3, A5–A12, A14, A15**: defaults.
-- **A4 deferred.** The scrub waits for counsel, who has cleared only the npm publication of the Azguard-derived `EncryptionKey`. So the guard's exemption narrows only in D (§ Mechanics), and the scrub becomes a follow-up.
+- **A4 deferred.** The scrub waits for counsel, who has cleared only the npm publication of the Azguard-derived `EncryptionKey`. So the guard's exemption narrows only in E, the first tree with every closed plan under `archive/` (L57), and the scrub becomes a follow-up.
 - **A13**: the agent creates and verifies the `origin/dev` bundle off GitHub, under `~/.cache/nulo-handoff/`, before A merges.
 - **A16**: local `--onto` rehearsal only. A sandbox repository would be an outward-facing step nobody asked for.
 - **Merging.** tools-extraction decision 22 applies to this plan's PRs. A PR merges with a plain `gh pr merge --squash` once its codex loop has converged and every required check is green; never with `--admin`, never on a red or pending check. A still waits for the A14 soak and the A13 bundle.
@@ -170,8 +170,7 @@ export function checkTree(): Finding[]
 | J | `closures.json`, `mining.jsonl`, `gh-{prs,issues}.json`; `tools/{classify,mine}.ts` + tests; `transport-ready-handshake/spec-rows.md` | `lessons.md`; `follow-ups.md`; `index.md` (2 lines); this `plan.md` (answers) | — |
 | C | — | 4-5 KAT imports; `test-soak/cli.ts:39`; the 6 broken mentions; stale texts and asset cites (Phase 5 steps 4-5); `package.json` | `git mv`: 3 `reference/` projects (15 files), `phantom-sweep.ts`, `PRF-NON-PORTABLE.md`, 25 baselines (unless #669 did) |
 | D | `archive/index.md` (never stubbed in A: its existence switches the gate's archive-split scope on); ~23 stub `plan.md`; `tools/{outcome,archive-move,split-index,repair-links}.ts` + tests | ~330 moved files (Outcomes, seed lines, links); `index.md`; curated-file links; live docs (Phase 7 step 3); `audit/bugs/2026-08-22-production-ready/adjudication-2026-08-24.md:64-65` | `git mv` ~250 closed dirs (~1,400 files) → `archive/` |
-| E | — | `plans-scaffolding/plan.md` (its Outcome); `lessons.md`; `follow-ups.md` | — |
-| F | — | `index.md` → `archive/index.md` (1 line) | `git mv plans-scaffolding archive/` |
+| E | — | `plans-scaffolding/plan.md` (its Outcome); `lessons.md`; `follow-ups.md`; `index.md` → `archive/index.md` (1 line); `check-no-local-paths.sh` (L57); the links into this dir | `git mv plans-scaffolding archive/` |
 
 ### Non-obvious mechanics
 
@@ -183,7 +182,7 @@ export function checkTree(): Finding[]
 
 **Link-check scope (A8).**
 - `link-missing` covers root `*.md` (except `CHANGELOG.md` and `AUDIT.md`), `legal/**`, `apps/**/README.md`, `packages/*/README.md`, `.claude/skills/**`, `.github/README.md`, the index files, the curated files and active plan dirs.
-- In `archive/**` it checks only targets under `implementations-plan/`; the 210 already-broken archived links are frozen history. Until D splits the index there is no active set, so every plan dir gets this archive rule in A-C. The full check for active dirs switches on with `index-structure` in Phase 7. The same pre-D limit applies to `local-path`, which until then covers only the curated files, the indexes and this plan's dir. If A4 is declined, the guard's exemption narrows only in D.
+- In `archive/**` it checks only targets under `implementations-plan/`; the 210 already-broken archived links are frozen history. Until D splits the index there is no active set, so every plan dir gets this archive rule in A-C. The full check for active dirs switches on with `index-structure` in Phase 7. The same pre-D limit applies to `local-path`, which until then covers only the curated files, the indexes and this plan's dir. If A4 is declined, the guard's exemption narrows only in E (L57).
 - `audit/`, `architecture/` and `wallets-architecture-research/` are out of scope, but their 3 links and 1 mention into moving plans are repaired once.
 - `link-untracked` applies everywhere.
 - Resolution is index-only. `git rm --cached` leaves files on disk, so a filesystem check would pass locally and fail on CI. Phase 2 proves this in a fresh clone.
@@ -262,7 +261,7 @@ GitHub documents a 300-file limit on rendered PR diffs and a 3,000-file cap on t
 
 **"Closed, awaiting archive" (final pass 2).** The owner's closing standard writes the Outcome in the delivery PR and moves the dir only after it merges, because a running `/loop` still reads the live path. The gate models that state:
 - An `index.md` line whose status field is exactly `closed, awaiting archive` must target a host with a complete Outcome; every other active line must target a host without one.
-- Only this plan passes through that state (PR E → PR F). D's ~250 dirs get their Outcome and their move in one PR, so none of them ever sits in it.
+- No plan sits in that state on `dev`: D's ~250 dirs get their Outcome and their move in one PR, and so does this plan in E (L58).
 
 **Mentions are not links (A6).**
 - Code comments naming a plan path stay: they resolve at HEAD or under `archive/`, which `path-token` accepts for code.
@@ -628,7 +627,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 
 ## Delivery
 
-**Topology: 5 stacked squash PRs via `gh stack`, in two waves, plus 2 close-out PRs.**
+**Topology: 5 stacked squash PRs via `gh stack`, in two waves, closed by close-out PR E on top of D (L58).**
 - Setup: `gh stack init --base dev worktree-plans-scaffolding` (it adopts the existing branch; F20), then `gh stack add <branch>` at each arc boundary.
 - `code_review` is **off** on every arc.
 
@@ -639,8 +638,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 | J judgement | 3-4 | `plans-scaffolding-closures` | wave 2 | `docs(plans): record plan closures and seed lessons.md and follow-ups.md` | 14 (owner reads 5) | none: `quality-status` only |
 | C repoints | 5 | `plans-scaffolding-repoints` | wave 2 | `chore(plans): relocate plan-dir assets that code and ci read` | 65 (≈40 if #669 moved the baselines) | core-foundation, aztec-runtime, extension, landing (`legal/**`), root-config → builds + **smoke and network e2e** (≈25 min) + advisory Firefox |
 | D archive | 6-7 | `plans-scaffolding-archive` | wave 2 | `chore(plans): archive closed plans with outcome blocks and split the index` | 1,460 (≈1,400 R, ≈330 edited) | none: `quality-status` only |
-| E close | — | `plans-scaffolding-close` | after D merges | `docs(plans): close plans-scaffolding` | 4 | none |
-| F self-archive | — | `plans-scaffolding-archive-self` | after E merges | `chore(plans): archive plans-scaffolding` | 25 | none |
+| E close | — | `plans-scaffolding-close` | wave 2, on top of D; merges with the stack | `docs(plans): close plans-scaffolding and move it into the archive` | ≈45 (37 R) | none: `quality-status`, and actionlint for the guard script |
 
 **Why two waves (A9).**
 - A0 needs to soak before A enforces.
@@ -664,8 +662,7 @@ Pass: all exit 0. Layers: unit, lint, repo-integrity. This proves criteria 1, 2 
 | J | `check.ts`, `untrack.ts --verify`, `classify.ts --check` with the drift check against the refreshed base (owner adjudication for any drifted dir), `mine.ts --verify` |
 | C | Phase 5's gate against `$PARENT`, then `check.ts` and `untrack.ts --verify` |
 | D | D regenerated on the refreshed parent (Mechanics § Concurrency); the drift check and any owner adjudication; `mine.ts --verify`; `outcome.ts --verify`; `archive-move.ts --verify` against the tools tip; the complete API enumeration reconciled with `$PARENT`'s diff (Mechanics § Archive-move fidelity); `check.ts`; `untrack.ts --verify` |
-| E | `check.ts` (the "closed, awaiting archive" line included), `bun run lint` |
-| F | `repair-links.ts` for the moved dir, then `check.ts`, `untrack.ts --verify` from its archived path, `bun run test:ci-gating` |
+| E | `repair-links.ts`'s repairs for the moved dir, then `check.ts`, `untrack.ts --verify` from its archived path, `./scripts/check-no-local-paths.sh`, `bun run lint`, `bun run test:ci-gating`; E rewrites `lessons.md`, so `mine.ts --verify` gates nothing from here |
 
 The owner merges only on a green re-run. Merging is always the owner's call.
 
@@ -704,18 +701,14 @@ In order. No `/code-review`: `code_review` is `off`.
    - Then `gh pr checks --watch`.
    - Owner review points: J (`closures.json`, `lessons.md`, `follow-ups.md`) and C (the imports).
    - The pre-merge re-run precedes every merge.
-6. **Close-out after D merges** (outside the `/goal` and `/loop` scope).
-   - **PR E** (closing steps 1-3):
-     - this plan's `## Outcome`, directly after its front matter, listing the merged PRs;
-     - its `index.md` line's status becomes exactly `closed, awaiting archive`, which `index-structure` requires once the Outcome exists;
-     - its generalizable gotchas → `lessons.md` (deduplicated, within budget);
-     - its open items → `follow-ups.md`.
-   - **PR F**, after E merges:
-     - `git mv implementations-plan/plans-scaffolding implementations-plan/archive/plans-scaffolding`, and its index line → `archive/index.md` in the generated format;
-     - `repair-links.ts` with a one-row map: the dir's own relative links gain a level, and the links into it (curated files, indexes, live docs) are re-pointed;
-     - F's pre-merge gate (the table above).
+6. **Close-out: PR E on top of D**, one PR (the owner, 2026-10-01; L58), outside the `/goal` and `/loop` scope:
+   - this plan's `## Outcome`, directly after its front matter, listing the stack's PRs;
+   - its generalizable gotchas → `lessons.md` (deduplicated, within budget), its open items → `follow-ups.md`;
+   - `check-no-local-paths.sh`'s exemption narrowed to `archive/` (L57);
+   - in its own commit, `git mv implementations-plan/plans-scaffolding implementations-plan/archive/plans-scaffolding`;
+   - then `repair-links.ts`'s repairs with a one-row map (the dir's own relative links gain a level, and the links into it from the curated files, indexes and live docs are re-pointed), and its index line → `archive/index.md` in the generated format;
+   - E's pre-merge gate (the table above). `gh stack merge` on E lands the stack and E together, so the merge that lands the work closes the plan.
    - Then suggest `agent-worktree done plans-scaffolding`.
-   - The Outcome comes only after every authorized step, so the `/loop`'s Outcome check can never stop unfinished work.
 
 **No-over-engineering rule** (verbatim in every post-impl codex prompt): *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
 
@@ -756,6 +749,8 @@ In order. No `/code-review`: `code_review` is `off`.
 - **Arc C verification pass (2026-10-01, the owner's call at the cap): clean.** Limited to `9b8e4455`. A URL whose last character is a literal `_`, `*`, `~` or `|` still reads as formatting; none of the tree's 177 permalinks ends with one.
 - **Arc D codex loop (`/codex high`), round 1 (2026-10-01): changes needed** (high confidence, 2 blocking and 3 non-blocking findings). All 5 adopted (D1-D5, ledger L50-L53). It reproduced the archive, Outcome, plan-tree, closure-table and untrack verifications, found no closed dir left behind and the three active and parked dirs unchanged, no content-fidelity bypass, and no new dependency, crypto or permission surface, and judged accepting the R027 repair sound.
 - **Arc D codex loop, round 2 (2026-10-01): changes needed** (high confidence, 2 blocking and 2 non-blocking findings). All 4 adopted (D6-D9; L50 and L52 restated). It confirmed every round-1 repro failing, all 270 index targets passing, no false positive from the second grep now or after a simulated archive of this plan, and the revised inventory rules accepting all 1,724 local PR records.
+- **Arc D codex loop, round 3 (2026-10-01): approve** (high confidence, no findings). It reproduced the plain-target rule (literal, encoded, double-encoded and escaped decoys refused; all 270 real targets pass; across 512 accepted probes the rendered href and opened path equal the text) and the move-map mode check (identical blobs' cross-pairings pass, traded modes fail, six injected changes caught), and an in-memory archive of this plan raised no finding.
+- **Cross-arc pass (`/codex high`, a fresh session over `80663b61..3551372e`), round 1 (2026-10-01): changes needed** (high confidence, 3 P2 and 3 P3 findings). All 6 adopted (Y1-Y6, ledger L54-L59), Y4's narrowing in E (L57). It found the 42 relocated assets' blobs, the wallet-crypto non-test source, the dependencies and the workflow permissions unchanged, parked and new plans active, and E's one-directory repair working in memory.
 
 ---
 
@@ -773,7 +768,7 @@ In order. No `/code-review`: `code_review` is `off`.
 | L6 | Outcomes ride with the move in D | fable Fa, checked (F17) | The draft's B: a 350-file PR mixing judgement and mechanics | adopted; fallback if `--verify` finds unpaired files |
 | L7 | Wave-1 early delivery of A0 and A, each after its own loop, soak and bundle; a later finding on a merged arc blocks further delivery | codex C6, fable Fc, alt, final pass | The blueprint's "no PR before all loops" | adopted (A9 default) |
 | L8 | Outcome after front matter (or at byte 0), before the H1; the exemplar grandfathered by path | codex C5, final pass 2 | Reposition the exemplar; "first h2, only an H1 between" | adopted (A15 default) |
-| L9 | "Closed, awaiting archive" as a gate-checked index state between E and F | final pass 2 | Outcome and move in one PR: breaks the owner's two-step closure while a `/loop` reads the live path | adopted |
+| L9 | "Closed, awaiting archive" as a gate-checked index state between E and F | final pass 2 | Outcome and move in one PR: breaks the owner's two-step closure while a `/loop` reads the live path | adopted; the gate keeps the state, which E no longer passes through (L58) |
 | L10 | Every allowlist entry checked against `dev`, fetched by name, on every PR run | final pass 3 | Additions only, against `base.sha`: accepts parent-arc SHAs and needs the old allowlist in a depth-1 checkout | adopted |
 | L11 | `gh stack rebase` → gates → `gh stack push`; recorded-SHA `--onto` fallback | final pass 1, F20 | `gh stack sync` (pushes before validation); `init --adopt` (does not exist) | adopted |
 | L12 | Per-arc pre-merge gates in a clean clone at the PR head; D regenerated on a refreshed base | final pass 5 | One shared re-run of `check.ts` and `untrack.ts --verify` | adopted |
@@ -809,7 +804,7 @@ In order. No `/code-review`: `code_review` is `off`.
 | L42 | A wallet-crypto path-token hold that a `dev` change ended re-pins, on restack, to the file's blob at the new base | Restack onto `80663b61` (#736 rescoped two files' imports) | Repointing the comments: F15 keeps `packages/wallet-crypto/src` free of non-test edits | adopted |
 | L43 | tools-extraction is archived with the split: its row closes on its 15 merged PRs (S1), and P1 stays in `follow-ups.md` | Owner, 2026-10-01 | Holding it active: blob-pinned `local-path` exemptions for its scrubber's own regexes, and `index-structure` in report mode until its own close-out | adopted; reverses J's `ACTIVE_DIRS` entry |
 | L44 | A grandfathered host keeps its Outcome under its title (send-publish-ledger, grant-check-address-case, tools-extraction); an incomplete block gains its missing fields inside the list it opens with | Arc D, Phase 6 | Moving tools-extraction's block above its title: an edit to a closed dir after the closure base, which `classify.ts --check` refuses, and the generator only inserts | adopted |
-| L45 | `lessons.md` absorbs the split's +304 B by rewording one lesson (−13 B, 8,189 B), and `mine.ts --verify` reports that entry from D on | Arc D, Phase 7 | Dropping a lesson; raising the 8 KiB budget, an owner rule | adopted |
+| L45 | `lessons.md` absorbs the split's +304 B by rewording one lesson (−13 B, 8,189 B), and `mine.ts --verify` reports that entry from D on | Arc D, Phase 7 | Dropping a lesson; raising the 8 KiB budget, an owner rule | adopted; L56 records the reworded entry, so the verify passes on D |
 | L46 | Archive verify accepts an unedited moved file only at an unchanged blob, and a planned edit git cannot pair as its pair, its text still proven, with a note | Arc D, Phase 7 (L39 applied to D) | R100 alone; refusing the one unpairable repair (`contradiction-codex.md`, R027), which the split fallback would not pair either | adopted |
 | L47 | `untrack.ts --verify` reads an archive-path addition paired with its source's deletion as a non-exact rename into the archive | Arc D, Phase 7 | A removal (a false finding), or an exact move (it would exempt a transcript) | adopted |
 | L48 | `mine.ts` reads `implementations-plan/archive/` as `implementations-plan/` when it matches an entry to its mined line | Arc D, Phase 7 | Re-verifying each entry the split re-points | adopted |
@@ -818,6 +813,12 @@ In order. No `/code-review`: `code_review` is `off`.
 | L51 | `path-token` also scans the indexes and the curated files, code spans included; other plan prose stays history | Arc D codex D3 | Leaving them to `link-missing`, which reads only links | adopted |
 | L52 | Archive verify reads modes from both trees through the move map: a moved or edited file keeps its source's mode, an addition is 100644 | Arc D codex D4, D7, D8 | Blob identity alone, which a mode flip passes; the modes git reports per pair, which two identical blobs can trade unseen | adopted |
 | L53 | PR D's API inventory is reconciled with `$PARENT`'s diff, which includes the tools stage; an unpaired planned edit is no split trigger | Arc D codex D2 | The move map alone, which rejects the tools stage's files and the R027 repair | adopted; restates L46's fallback |
+| L54 | Every dir `closuresBase` derives keeps its row; a dir without one reads as active only when it is newer than the base | Cross-arc codex Y1 | Reporting rowless dirs only, which let a deleted row keep a closed plan out of the archive | adopted |
+| L55 | The tools read their data from this plan's directory wherever it sits (`OWN`, from `gate.ts`'s location), and `untrack.ts --verify` refuses a missing manifest | Cross-arc codex Y2 | Fixed live paths, under which the archived verify found no manifest and passed with 0 rows | adopted |
+| L56 | D records L45's reworded lesson as L30's new line, with a currency check at the 6.0.0-rc.1 base and a fresh verifier's support | Cross-arc codex Y3 | Leaving D's own `mine.ts --verify` red by design | adopted |
+| L57 | E, not D, narrows `check-no-local-paths.sh`'s exemption to `archive/` | Cross-arc codex Y4 | Narrowing it in D's tools stage: the hook scans the whole index, and D's tools and Outcome commits still hold 18 unmoved plan files with home paths | adopted |
+| L58 | E is one close-out PR on top of D: Outcome, curated files, the guard, then the move in its own commit and its repairs | The owner, 2026-10-01: "then do the archive move + clean up / prune also the lessons on that PR, make the docs PR + merge please" | E then F after E merges (L9's two-step closure) | adopted |
+| L59 | The archive tools read blobs and ancestor dirs through `lib.ts`'s exports | Cross-arc codex Y5 | Copies in `closed.ts`, one already without the reader's 120 s timeout | adopted |
 
 **Findings**
 
@@ -887,6 +888,12 @@ In order. No `/code-review`: `code_review` is `off`.
 | D7 | Mode checks follow git's pairing, so two identical blobs can trade modes unseen | adopted | L52 |
 | D8 | A generated addition may be executable | adopted | L52 |
 | D9 | The plan allows a planned edit's mode change, keeps tools-extraction's index line, and leaves "nears the cap" unquantified | adopted | Mechanics § Archive-move fidelity, § Merge order |
+| Y1 | A deleted closure row turns a closed plan active, unseen | adopted | L54 |
+| Y2 | After E's move the tools read nothing: the verify passes with 0 manifest rows, the other readers fail | adopted | L55 |
+| Y3 | D's pre-merge gate needs a `mine.ts --verify` that L45 leaves failing | adopted | L56 |
+| Y4 | The guard's exemption never narrowed, and the plan still splits E and F | adopted, the narrowing in E | L57, L58 |
+| Y5 | `closed.ts` duplicates the gate's blob reader, already without its timeout | adopted | L59 |
+| Y6 | Two comments cite the plan | adopted | They state the rule |
 
 **Still disputed** (the final pass's sides recorded; the owner decides)
 - **Outcome placement.** Final pass: follow the after-front-matter rule, byte 0 before the H1 without front matter, and resolve the exemplar explicitly. Rev 3's default grandfathers it (A15).
