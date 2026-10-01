@@ -58,7 +58,7 @@ import { DappInteractionService } from "@/wallet/services/dapp-interaction/servi
 import { TokenService } from "@/wallet/services/token/service"
 import { LegalAcceptanceService, type LegalAdmission } from "@/wallet/services/legal/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
-import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
+import { DappSessionService, AccessLevel, type DappMetadata, type DappSession } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import {
@@ -72,7 +72,12 @@ import {
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
 import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
-import { ScopeViolationError, TermsAcceptanceRequiredError, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
+import {
+	ChainNotSupportedError,
+	ScopeViolationError,
+	TermsAcceptanceRequiredError,
+	isReceiverGoneRejection,
+} from "@nulo/extension-messaging/errors"
 import { KeyedLock, deferred } from "@nulo/wallet-core/utils"
 import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
@@ -683,6 +688,7 @@ async function drainQueuedDiscovery(discovery: PendingDiscovery, deps: SdkDeps, 
 type DiscoveryDeps = {
 	handler: BackgroundConnectionHandler
 	profileService: ProfileService
+	networkService: Pick<NetworkService, "servesChain">
 	dappInteractionService: DappInteractionService
 	dappSessionService: DappSessionService
 	pendingVerification: Map<string, PendingVerificationEntry>
@@ -693,6 +699,7 @@ type DiscoveryDeps = {
 	dedupeWaiters: Map<string, number>
 	handedOver: SdkHandlerState["handedOver"]
 	closeWindow: (windowId: number) => void
+	switchEpoch: ProfileSwitchEpoch
 	logger: ILogger
 }
 
@@ -700,6 +707,7 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 	return {
 		handler: state.late.handler!,
 		profileService: deps.profileService,
+		networkService: deps.networkService,
 		dappInteractionService: deps.dappInteractionService,
 		dappSessionService: deps.dappSessionService,
 		pendingVerification: state.pendingVerification,
@@ -710,6 +718,7 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 		dedupeWaiters: state.dedupeWaiters,
 		handedOver: state.handedOver,
 		closeWindow: state.closeWindow,
+		switchEpoch: state.late.switchEpoch!,
 		logger: deps.logger,
 	}
 }
@@ -751,6 +760,9 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 		// auto-approve lookup and new-session creation.
 		const chainId = String(chainInfoToChainId(discovery))
 
+		// Captured BEFORE the profile read, as `handleWalletMessage` does: a switch landing inside any
+		// read below registers as a bump after this baseline.
+		const entryEpoch = deps.switchEpoch.current()
 		const profile = await deps.profileService.getActiveProfile()
 		if (!profile) {
 			// F-04: `enqueue` returns false when it coalesces a duplicate or hits a
@@ -766,17 +778,31 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 			return
 		}
 
-		// Read BEFORE the session lookup, never after it: the lookup must stay the last yield ahead
-		// of the popup-promise registration below.
+		// Both read BEFORE the session lookup, never after it: the lookup must stay the last yield
+		// ahead of the popup-promise registration below.
 		const legalCurrent = await isLegalCurrent(deps.legal)
+		const served = await deps.networkService.servesChain(profile.id, Number(chainId))
 
 		// Check for existing valid session (returning user on this chain → auto-approve).
 		// Lookup is by `(origin, chainId)` so a session remembered on testnet does
 		// NOT silently auto-approve on mainnet (AUDIT plan A12). The lookup is awaited
 		// HERE: from its resolution to the popup-promise registration below there is
 		// no yield, so two same-key discoveries can never both miss the dedupe map.
+		// A row for a chain the profile has no network for reopens nothing: every call on it would
+		// be refused, so it takes the new-connection path to the notice, which drops it.
 		const existingSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
-		if (existingSession) {
+		// `served` is the captured profile's answer and the lookup reads the active profile's rows: after
+		// a switch, one profile's networks would decide over another's session (and could drop it).
+		if (deps.switchEpoch.current() !== entryEpoch) {
+			handler.rejectDiscovery(discovery.requestId)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Info,
+				`Discovery rejected (profile switched): request ${describeExternalId(discovery.requestId)}`,
+			)
+			return
+		}
+		if (existingSession && served) {
 			autoApproveExistingSession(discovery, chainId, deps, existingSession.trustedVerification === true)
 			return
 		}
@@ -802,13 +828,15 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 		const dedupeKey = `${discovery.origin}|${chainId}`
 		const pendingPopup = deps.pendingDiscoveryPromises.get(dedupeKey)
 		if (pendingPopup) {
-			await awaitPendingPopupDedupe(pendingPopup, discovery, chainId, dedupeKey, deps)
+			if (served) await awaitPendingPopupDedupe(pendingPopup, discovery, chainId, dedupeKey, deps)
+			else rejectBehindNotice(discovery, chainId, deps)
 			return
 		}
 
 		if (checkDiscoveryPopupCaps(discovery, deps)) return
 
-		await runDiscoveryPopup(discovery, chainId, dedupeKey, profile.id, deps)
+		if (served) await runDiscoveryPopup(discovery, chainId, dedupeKey, profile.id, deps)
+		else await runNetworkUnavailableNotice(discovery, chainId, dedupeKey, { staleSession: existingSession, entryEpoch }, deps)
 	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
@@ -982,15 +1010,7 @@ async function runDiscoveryPopup(
 	deps: DiscoveryDeps,
 ): Promise<void> {
 	const { handler, pendingDiscoveryPromises, logger } = deps
-	// Sanitize dApp-controlled strings at the persistence boundary so downstream
-	// render sites never see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
-	const rawAppName = discovery.appName ?? discovery.appId
-	const params: DiscoveryParams = {
-		dappMetadata: {
-			name: sanitizeWireString(rawAppName, 64),
-			url: discovery.origin,
-		},
-	}
+	const params: DiscoveryParams = { dappMetadata: discoveryDappMetadata(discovery) }
 
 	// Store a promise that resolves when the popup completes so duplicate
 	// discoveries can await it.
@@ -1046,6 +1066,74 @@ async function runDiscoveryPopup(
 	}
 }
 
+/** The dApp as a window shows it. Its dApp-controlled name is sanitized here, at the persistence
+ *  boundary, so no render site sees raw bidi, zero-width or mixed-direction payloads (F-009 A-03);
+ *  the url is the content script's origin, which the dApp cannot set. */
+function discoveryDappMetadata(discovery: PendingDiscovery): DappMetadata {
+	return { name: sanitizeWireString(discovery.appName ?? discovery.appId, 64), url: discovery.origin }
+}
+
+/** A duplicate for a chain with no network while a window for its pair is open (the notice, or a
+ *  connect window whose network went away): silence, and no second window. Debug: a dApp retrying
+ *  its discovery would otherwise fill every user's log. */
+function rejectBehindNotice(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps): void {
+	deps.handler.rejectDiscovery(discovery.requestId)
+	deps.logger.log(
+		"wallet-sdk",
+		LogLevel.Debug,
+		`Discovery rejected (no network for this chain, a window for it is open): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+	)
+}
+
+/** A discovery for a chain the profile has no network for: the dApp gets silence and the user a
+ *  notice. The dedupe promise is registered before the first await, as in `runDiscoveryPopup`, and
+ *  the discovery is refused before anything opens, so no answer from the window can approve it and
+ *  no session is written. A row remembered for the pair is dropped: it could only serve refusals. */
+async function runNetworkUnavailableNotice(
+	discovery: PendingDiscovery,
+	chainId: string,
+	dedupeKey: string,
+	stale: { staleSession: DappSession | undefined; entryEpoch: number },
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const { promise: noticePromise, resolve: resolveNotice } = deferred()
+	deps.pendingDiscoveryPromises.set(dedupeKey, noticePromise)
+	try {
+		deps.handler.rejectDiscovery(discovery.requestId)
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Info,
+			`Discovery for a chain with no network, showing the notice: request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+		)
+		if (stale.staleSession) await dropStaleSession(stale.staleSession, stale.entryEpoch, deps)
+		await deps.dappInteractionService.notifyNetworkUnavailable({
+			dappMetadata: discoveryDappMetadata(discovery),
+			chainId: Number(chainId),
+		})
+	} finally {
+		resolveNotice()
+		deps.pendingDiscoveryPromises.delete(dedupeKey)
+	}
+}
+
+/** Kept when its own profile serves its chain again, or after a profile switch: the deletion's
+ *  teardown matches live channels by `(origin, chain)` alone, so it could reach the new profile's. */
+async function dropStaleSession(session: DappSession, entryEpoch: number, deps: DiscoveryDeps): Promise<void> {
+	if (await deps.networkService.servesChain(session.profileId, Number(session.chainId))) return
+	if (deps.switchEpoch.current() !== entryEpoch) return
+	try {
+		await deps.dappSessionService.deleteDappSession(session.id)
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Info,
+			`Dropped a remembered dApp session on a chain with no network: chain=${session.chainId}`,
+		)
+	} catch {
+		// Already gone (expired or revoked meanwhile): nothing is left to reopen, which is the point.
+		deps.logger.log("wallet-sdk", LogLevel.Debug, `Remembered dApp session already gone: chain=${session.chainId}`)
+	}
+}
+
 /** Write the approved session and approve the discovery. The window reservation is owned by the
  *  session only once the approval lands; every other exit gives it back. */
 async function persistAndApprove(
@@ -1059,6 +1147,13 @@ async function persistAndApprove(
 	const { handler, dappSessionService, logger } = deps
 	let approved = false
 	try {
+		// The connect window opened on a served chain, and its network can be removed while it is up:
+		// a row written then could only serve refusals. Removal after the write is the 4901 case.
+		// Read before the profile check, which must stay the last await ahead of the write.
+		if (!(await deps.networkService.servesChain(profileId, Number(chainId)))) {
+			rejectThrottled(discovery, deps, "its chain lost its network while the connect window was open")
+			return
+		}
 		// The Allow was given under `profileId`; a switch during the admission wait must not bind
 		// that approval to a session row written under another profile.
 		const active = await deps.profileService.getActiveProfile()
@@ -1258,5 +1353,5 @@ export async function handleWalletMessage(
 /** A refusal a connected dApp can repeat on every poll, so it logs at `debug`: an `error` line lands
  *  in every user's log buffer. */
 function isExpectedRefusal(error: unknown): boolean {
-	return error instanceof TermsAcceptanceRequiredError || error instanceof ScopeViolationError
+	return error instanceof TermsAcceptanceRequiredError || error instanceof ScopeViolationError || error instanceof ChainNotSupportedError
 }

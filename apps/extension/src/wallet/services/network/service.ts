@@ -232,14 +232,19 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 			const seeded: Network[] = []
 			let activeId: string | undefined
-			for (const seed of DEFAULT_SEEDS) {
-				try {
-					const network = await this.seedOneNetworkLocked(profile.id, seed, fence, deletion)
-					seeded.push(network)
-					if (seed.isPrimaryActive) activeId = network.id
-				} catch (error) {
-					this.logError(`Failed to seed default '${seed.name}'`, error)
+			this.seedingProfiles.add(profile.id)
+			try {
+				for (const seed of DEFAULT_SEEDS) {
+					try {
+						const network = await this.seedOneNetworkLocked(profile.id, seed, fence, deletion)
+						seeded.push(network)
+						if (seed.isPrimaryActive) activeId = network.id
+					} catch (error) {
+						this.logError(`Failed to seed default '${seed.name}'`, error)
+					}
 				}
+			} finally {
+				this.seedingProfiles.delete(profile.id)
 			}
 			// The per-seed catch above (soft-fail is right for one bad seed) also
 			// swallows the deletion compensate's throw — without this re-assert the
@@ -249,6 +254,9 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			return seeded
 		})
 	}
+
+	/** Profiles whose first activation is writing their default networks — see `servesChain`. */
+	private readonly seedingProfiles = new Set<string>()
 
 	/**
 	 * Full-backup import restores into a profile before activating it, so the fresh session
@@ -552,6 +560,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async isChainLive(profileId: string, chainId: number): Promise<boolean> {
 		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
+		return network !== undefined && !this.deletingNetworks.has(network.id)
+	}
+
+	/** {@link isChainLive} for a dApp asking to connect, where a profile with no network rows, or one
+	 *  whose defaults are being written, counts as having the defaults: a new profile's rows are
+	 *  seeded by the shell's first bootstrap, which the activation's drain of queued discoveries can
+	 *  outrun, and the active network can never be deleted, so an empty profile is always one about
+	 *  to be seeded. Lock-free, like `isChainLive`. */
+	public async servesChain(profileId: string, chainId: number): Promise<boolean> {
+		await this.ensureInitialized()
+		const rows = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
+		const seeding = rows.length === 0 || this.seedingProfiles.has(profileId)
+		if (seeding && DEFAULT_SEEDS.some((seed) => seed.chainId === chainId)) return true
+		const network = rows.find((n) => n.chainId === chainId)
 		return network !== undefined && !this.deletingNetworks.has(network.id)
 	}
 

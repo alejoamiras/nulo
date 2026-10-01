@@ -63,7 +63,7 @@ export type ExecutionHooks = IExecutionHooks
 
 export type DappInteraction = {
 	id: string
-	payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload
+	payload: InteractionPayload
 	handleId: string
 	cancellationToken: string
 	/** Set when the dApp cancelled the request. Durable on the record (not just
@@ -106,8 +106,23 @@ export type DiscoveryResult = {
  *  connection flow now owns. `windowId` is set by the service from its handle, never by the page. */
 export type DiscoveryOutcome = DiscoveryResult & { windowId?: number }
 
+/** A discovery for a chain the profile has no network for. Its window only informs: it can be
+ *  dismissed, never resolved, so nothing it answers approves a connection. */
+export type NetworkUnavailablePayload = {
+	notice: "network-unavailable"
+	params: NetworkUnavailableParams
+}
+
+export type NetworkUnavailableParams = {
+	dappMetadata: DappMetadata
+	/** The chain the dApp asked for, as the wallet derives it from the dApp's chain info. */
+	chainId: number
+}
+
+export type InteractionPayload = ExecutionPayload | CapabilityPayload | DiscoveryPayload | NetworkUnavailablePayload
+
 export type Methods = {
-	getInteractionPayload(id: string): ExecutionPayload | CapabilityPayload | DiscoveryPayload
+	getInteractionPayload(id: string): InteractionPayload
 	/**
 	 * Execute the stored request of a live execution interaction. The SW
 	 * materializes every operation from the dApp's own payload; `deltas` is
